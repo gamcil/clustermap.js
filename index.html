@@ -1,99 +1,50 @@
 <!DOCTYPE html>
-
 <html>
+	<head>
+		<meta charset="utf-8">
+		<title>cmap</title>
+		<script src="https://d3js.org/d3.v5.min.js"></script>
+		<style>
+			body { margin: 0; padding: 0; }
+			div {
+				width: 100vw;
+				height: 100vh;
+				margin: 0;
+				padding: 0;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<div id="plot"></div>
+		</main>
+	</body>
+	<script type="module">
+		import clusterMap from "./src/clusterMap.js"
 
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GeneLinker</title>
-  <link rel="stylesheet" href="css/style.css">
+		const margin = {
+			top: 50,
+			bottom: 100,
+			right: 0,
+			left: 30,
+		}
+		const width = 600 - margin.left - margin.right
+		const height = 400 - margin.top - margin.bottom
 
-  <script src="http://d3js.org/d3.v5.min.js" charset="utf-8"></script>
-  <script type="text/javascript" src="js/genelinker.js"></script>
-</head>
+		const div = d3.select("#plot")
+			.attr("width", "100vw")
+			.attr("height", "100vh")
 
-<body>
-  <div class='files'>
-    <label for="clusters">Select your files:</label>
-    <input type="file"
-           id="clusters"
-           name="clusters"
-           accept=".gb, .gbk, .js, .json"
-           multiple>
-  </div>
+		const chart = clusterMap()
 
-  <button type='button' id='drawlink'>Draw gene links</button>
-  <br>
-  <input type='range' min="1" max="100" step="1" value="50" id='clusterspacing'>Cluster spacing</input>
-  <br>
-  <input type='range' min="1" max="20" value="10" id='scalingfactor'>Shrinkage factor</input>
-  <br>
-  <input type='range' min="0" max="10" value="5" id='tipheight'>Tip height</input>
-  <br>
-  <input type='range' min="0" max="20" value="12" id='tiplength'>Tip length</input>
-  <br>
-  <input type='range' min="0" max="20" value="10" id='bodyheight'>Body height</input>
-  <br>
-  <input type='range' min="1" max="10" value="2" id='legendcolumns'>Legend columns</input>
-  <br>
-  <input type='checkbox' checked='unchecked' id='legendborder'>Legend border</input>
+		d3.json("testing.json")
+			.then(data => {
+				console.log("Got data", data)
+				div.selectAll("div")
+					.data([data])
+					.join("div")
+					.call(chart)
+			})
 
-  <div class="menu">
-    <button class="menu-button">Menu</button>
-    <div class="menu-content">
-      <div class="menu-category">
-        <h3>Input options</h3>
-      </div>
-      <hr class="menu-divider"></hr>
-      <div class="menu-category">
-        <h3>Figure</h3>
-        Export to .svg<br>
-        Width <input type="text"><br>
-
-        <!-- Slider for choosing scaling factor -->
-        <label for="scaleFactor"
-               style="width: 240px; text-align: right">
-          Scale factor = <span id="scaleFactor-value">...</span>
-        </label>
-        <input style="width:100px;" id="scaleFactor" type="range" min="1" max="300" value="120">
-
-      </div>
-      <hr class="menu-divider"></hr>
-      <div class="menu-category">
-        <h3>Gene arrow settings</h3>
-        Body height
-        <input type="range" min="1" max="20" value="12">
-        Arrow tip height
-        <input type="range" min="1" max="20" value="12">
-        Arrow tip length
-        <input type="range" min="1" max="20" value="12">
-      </div>
-      <hr class="menu-divider"></hr>
-      <div class="menu-category">
-        <h3>Show/hide</h3>
-        Gene labels <input type="checkbox"><br>
-        Cluster labels <input type="checkbox"><br>
-        Legend <input type="checkbox"><br>
-      </div>
-      <hr class="menu-divider"></hr>
-      <div class="menu-category">
-        <h3>Export</h3>
-        Current settings <input type="button"><br>
-        Current figure <input type="button"><br>
-      </div>
-      <hr class="menu-divider"></hr>
-      <div class="menu-category">
-        <h3>Import</h3>
-        GenBank files <input type="button"><br>
-      </div>
-
-    </div>
-  </div>
-
-  <div class='chart' id='testpoly'>
-  </div>
-  <script type="text/javascript" src="js/genelinker.js"></script>
-
-</body>
-
+	</script>
 </html>
