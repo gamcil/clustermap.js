@@ -6,7 +6,7 @@ The clustermap chart expects data in the following format:
 ```json
 {
   "clusters": [
-    "uid"": 1234,
+    "uid": 1234,
     "name": "Cluster 1",
     "loci": [
       {
