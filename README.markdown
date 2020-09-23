@@ -5,22 +5,22 @@ A D3 chart for generating gene cluster comparison figures
 The clustermap chart expects data in the following format:
 ```json
 {
-  clusters: [
-    uid: 1234,
-    name: "Cluster 1",
-    loci: [
+  "clusters": [
+    "uid"": 1234,
+    "name": "Cluster 1",
+    "loci": [
       {
-        uid: 2345,
-        name: "Locus 1",
-        start: 1,
-        end: 20000,
-        genes: [
+        "uid": 2345,
+        "name": "Locus 1",
+        "start": 1,
+        "end": 20000,
+        "genes": [
           {
-            uid: 3456,
-            name: "Gene 1",
-            start: 2300,
-            end: 5000,
-            strand: 1,
+            "uid": 3456,
+            "name": "Gene 1",
+            "start": 2300,
+            "end": 5000,
+            "strand": 1,
           },
           ...
         ]
@@ -28,17 +28,17 @@ The clustermap chart expects data in the following format:
       ...
     ]
   ],
-  links: [
+  "links": [
     {
-      query: {
-        uid: 3456,
-        name: "Gene 1"
+      "query": {
+        "uid": 3456,
+        "name": "Gene 1"
       },
-      target: {
-        uid: 4567,
-        name: "Gene 2"
+      "target": {
+        "uid": 4567,
+        "name": "Gene 2"
       },
-      identity: 0.5
+      "identity": 0.5
     }
   ],
 }
