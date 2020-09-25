@@ -5,8 +5,6 @@ export default function gene() {
 	/* Draw genes in loci */
 
 	let config = {
-		scaleFactor: 15,
-		transitionDuration: 500,
 		shape: {
 			bodyHeight: 12,
 			tipHeight: 5,
@@ -21,16 +19,20 @@ export default function gene() {
 			rotation: 12,
 			show: true,
 			start: 0.5,
-		}
+		},
+		plot: {
+			transitionDuration: 250,
+			scaleFactor: 15,
+		},
 	}
 
 	let t = d3.transition()
-		.duration(config.transitionDuration)
+		.duration(config.plot.transitionDuration)
 
 	let scales = {
 		x: d3.scaleLinear()
 			.domain([0, 1000])
-			.range([0, config.scaleFactor]),
+			.range([0, config.plot.scaleFactor]),
 		colour: null,
 		group: null,
 	}
@@ -51,12 +53,12 @@ export default function gene() {
 						enter = enter.append("g")
 							.attr("id", getId)
 							.attr("class", "gene")
+							.attr("display", "inline")
 							.each(gene => {
 								gene._locus = data.uid
 								gene._cluster = data._cluster
 							})
 						enter.append("polygon")
-							.attr("class", "genePolygon")
 							.on("click", config.shape.onClick)
 						enter.append("text")
 							.text(g => g.name)
@@ -70,8 +72,11 @@ export default function gene() {
 	}
 
 	function updateGenes(selection) {
-		selection.selectAll("polygon.genePolygon")
-			.attr("class", g => `genePolygon group-${g.group}`)
+		selection.selectAll("polygon")
+			.attr("class", g => {
+				let group = scales.group(g.uid)
+				return (group !== null) ? `genePolygon group-${group}` : "genePolygon"
+			})
 			.attr("points", getPoints)
 			.attr("fill", getFill)
 			.style("stroke", config.shape.stroke)

@@ -7,6 +7,7 @@ export default function legend(colourScale) {
 
 	let entryHeight = 15
 	let fontSize = 12
+	let hidden = []
 	let onClickRect = null
 	let onClickText = renameText
 	let y = d3.scaleBand().paddingInner(0.5)
@@ -16,8 +17,10 @@ export default function legend(colourScale) {
 		selection.each(function(data) {
 			// Grab new domain from colourScale and update the y-scale
 			let domain = colourScale.domain()
-			y.domain(domain)
-				.range([0, entryHeight * domain.length])
+			let visible = domain.filter(g => !hidden.includes(g))
+			console.log("visible", visible)
+			y.domain(visible)
+				.range([0, entryHeight * visible.length])
 
 			// Grab the <g> element, if it exists
 			let g = d3.select(this)
@@ -29,7 +32,7 @@ export default function legend(colourScale) {
 			// Render each legend element <g>
 			let translate = d => `translate(0, ${y(d)})`
 			g.selectAll("g.element")
-				.data(domain)
+				.data(visible)
 				.join(
 					enter => {
 						enter = enter.append("g")
@@ -73,37 +76,32 @@ export default function legend(colourScale) {
 		colourScale = _
 		return my
 	}
-
 	my.transition = function(_) {
-		// Setter for transition used in legend updates
 		if (!arguments.length) return t
 		t = _
 		return t
 	}
-
+	my.hidden = function(_) {
+		if (!arguments.length) return hidden
+		hidden = _
+		return my
+	}
 	my.entryHeight = function(_) {
-		// Setter for height of legend elements (def. 15)
 		if (!arguments.length) return entryHeight
 		entryHeight = parseInt(_)
 		return my
 	}
-
 	my.fontSize = function(_) {
-		// Setter for legend element text font size
 		if (!arguments.length) return fontSize
 		fontSize = parseInt(_)
 		return my
 	}
-
 	my.onClickRect = function(_) {
-		// Setter for <rect> element click callback
 		if (!arguments.length) return onClickRect
 		onClickRect = _
 		return my
 	}
-
 	my.onClickText = function(_) {
-		// Setter for <text> element click callback
 		if (!arguments.length) return onClickText
 		onClickText = _
 		return my

@@ -1,10 +1,11 @@
-export default function colourBar(colourScale, t) {
+export default function colourBar(colourScale) {
 	/* Creates the colour bar component.
 	*/
 
 	let height = 25
 	let width = 150
 	let fontSize = 12
+	let t = d3.transition()
 
 	function my(selection) {
 		selection.each(function(data) {

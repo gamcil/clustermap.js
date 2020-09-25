@@ -3,11 +3,13 @@ import { updateConfig } from "../utils.js"
 export default function geneLinks() {
 
 	const config = {
-		transitionDuration: 500,
-		scaleFactor: 15,
-		nameFontSize: 12,
-		lociFontSize: 10,
-		spacing: 60,
+		link: {
+			threshold: 0,
+		},
+		plot: {
+			transitionDuration: 500,
+			scaleFactor: 15,
+		},
 		locus: {
 			trackBar: {
 				colour: "#111",
@@ -35,6 +37,7 @@ export default function geneLinks() {
 		y: null,
 		locus: null,
 		offset: null,
+		score: null,
 	}
 	let t = d3.transition()
 	let container
@@ -44,19 +47,17 @@ export default function geneLinks() {
 		selection.each(function(data) {
 			container = d3.select(this)
 
-			// Get filtering function based on current data
-			let filterGeneLinks = getLinkFilterFn(data)
-
 			// Cross-cluster gene links
 			// Establish <g> before clusters, but must populate after clusters drawn
 			container.selectAll("path.geneLink")
-				.data(data.links.filter(filterGeneLinks), getLinkKey)
+				.data(data.links, getLinkKey)
 				.join(
 					enter => enter.append("path")
 						.attr("class", "geneLink")
 						.attr("d", getLinkPath)
-						.style("fill", "black")
-						.style("fill-opacity", link => link.identity)
+						.style("fill", d => scales.score(d.identity))
+						.style("stroke", "black")
+						.style("stroke-width", "0.5px")
 						.on("click", function() {
 							let link = d3.select(this)
 							let fill = link.style("fill-opacity")
@@ -90,16 +91,11 @@ export default function geneLinks() {
 		return `${a}-${b}`
 	}
 
-	function getLinkFilterFn(data) {
-		// Generates function which filters links to those between immediately adjacent clusters
-		return function(d) {
-			let a = getGeneData(d.query.uid)
-			let b = getGeneData(d.target.uid)
-			// if (a.style("display") !== "inline" || b.style("display") !== "inline") return false
-			a = data.clusters.findIndex(el => el.uid === a._cluster)
-			b = data.clusters.findIndex(el => el.uid === b._cluster)
-			return Math.abs(a - b) === 1
-		}
+	function clustersAreAdjacent(one, two) {
+		let domain = scales.y.domain()
+		let a = domain.indexOf(one)
+		let b = domain.indexOf(two)
+		return Math.abs(a - b) === 1
 	}
 
 	function getLinkPath(d) {
@@ -108,14 +104,13 @@ export default function geneLinks() {
 		let a = getGeneData(d.query.uid)
 		let b = getGeneData(d.target.uid)
 
+		if (!clustersAreAdjacent(a._cluster, b._cluster)) return null
+
 		// Calculate vertical midpoint based on shape config
 		let mid = config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2
 
 		// Locus offset in each cluster, mostly 0
-		let getOffset = g => (
-			scales.offset(g._cluster)
-			+ scales.locus(g._locus)
-		)
+		let getOffset = g => scales.offset(g._cluster) + scales.locus(g._locus)
 		let aOffset = getOffset(a)
 		let bOffset = getOffset(b)
 
@@ -129,7 +124,7 @@ export default function geneLinks() {
 		let [bx1, bx2, by] = getAnchors(b, bOffset)
 
 		// Generate the path d attribute
-		return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by}`
+		return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`
 	}
 
 	my.config = function(_) {
