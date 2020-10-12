@@ -18,7 +18,6 @@ export default function legend(colourScale) {
 			// Grab new domain from colourScale and update the y-scale
 			let domain = colourScale.domain()
 			let visible = domain.filter(g => !hidden.includes(g))
-			console.log("visible", visible)
 			y.domain(visible)
 				.range([0, entryHeight * visible.length])
 
