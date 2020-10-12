@@ -3,7 +3,7 @@
 	<head>
 		<meta charset="utf-8">
 		<title>cmap</title>
-		<script src="https://d3js.org/d3.v5.min.js"></script>
+		<script src="https://d3js.org/d3.v6.min.js"></script>
 		<style>
 			body { margin: 0; padding: 0; }
 			div {
@@ -16,34 +16,86 @@
 	</head>
 	<body>
 		<main>
+			<button id="btn-save-svg">Save</button>
 			<div id="plot"></div>
 		</main>
 	</body>
 	<script type="module">
 		import clusterMap from "./src/clusterMap.js"
 
-		const margin = {
-			top: 50,
-			bottom: 100,
-			right: 0,
-			left: 30,
+		function serialise(svg) {
+			/* Saves the figure to SVG in its current state.
+			 * Clones the provided SVG and sets the width/height of the clone to the
+			 * bounding box of the original SVG. Thus, downloaded figures will be sized
+			 * correctly.
+			 * This function returns a new Blob, which can then be downloaded.
+			*/
+			let node = svg.node();
+			const xmlns = "http://www.w3.org/2000/xmlns/";
+			const xlinkns = "http://www.w3.org/1999/xlink";
+			const svgns = "http://www.w3.org/2000/node";
+			const bbox = svg.select("g").node().getBBox()
+
+			node = node.cloneNode(true);
+			node.setAttribute("width", bbox.width);
+			node.setAttribute("height", bbox.height);
+			node.setAttributeNS(xmlns, "xmlns", svgns);
+			node.setAttributeNS(xmlns, "xmlns:xlink", xlinkns);
+
+			// Adjust x/y of <g> to account for axis/title position.
+			// Replaces the transform attribute, so drag/zoom is ignored.
+			d3.select(node)
+				.select("g")
+				.attr("transform", `translate(${Math.abs(bbox.x)}, ${Math.abs(bbox.y)})`)
+
+			const serializer = new window.XMLSerializer;
+			const string = serializer.serializeToString(node);
+			return new Blob([string], {type: "image/node+xml"});
 		}
-		const width = 600 - margin.left - margin.right
-		const height = 400 - margin.top - margin.bottom
+
+		function download(blob, filename) {
+			/* Downloads a given blob to filename.
+			 * This function appends a new anchor to the document, which points to the
+			 * supplied blob. The anchor.click() method is called to trigger the download,
+			 * then the anchor is removed.
+			*/
+			const link = document.createElement("a");
+			link.href = URL.createObjectURL(blob);
+			link.download = filename;
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+		}
 
 		const div = d3.select("#plot")
 			.attr("width", "100vw")
 			.attr("height", "100vh")
 
 		const chart = clusterMap()
+			.config({
+				gene: {
+					label: {
+						show: false
+					}
+				},
+				link: {
+					threshold: 0.3,
+				}
+			})
 
-		d3.json("testing.json")
+		d3.json("testing2.json")
 			.then(data => {
-				console.log("Got data", data)
 				div.selectAll("div")
 					.data([data])
 					.join("div")
 					.call(chart)
+
+				let svg = div.select("svg")
+				d3.select("#btn-save-svg")
+					.on("click", () => {
+						const blob = serialise(svg)
+						download(blob, "clinker.svg")
+					})
 			})
 
 	</script>
