@@ -1,107 +1,33 @@
-import cluster from "./cluster/cluster.js"
 import legend from "./legend.js"
 import colourBar from "./colourBar.js"
 import scaleBar from "./scaleBar.js"
-import { renameText, updateConfig } from "./utils.js"
 
+import { renameText } from "./utils.js"
+
+import * as api from "./api.js"
 
 export default function clusterMap() {
   /* A ClusterMap plot. */
 
-	const config = {
-		plot: {
-			transitionDuration: 250,
-			scaleFactor: 15,
-		},
-		legend: {
-			entryHeight: 18,
-			fontSize: 14,
-			onClickRect: changeGeneColour,
-			onClickText: renameText,
-			show: true,
-		},
-		colourBar: {
-			fontSize: 12,
-			height: 15,
-			show: true,
-			width: 150,
-		},
-		scaleBar: {
-			colour: "black",
-			fontSize: 12,
-			height: 15,
-			basePair: 2500,
-			show: true,
-			stroke: 1,
-		},
-		link: {
-			threshold: 0,
-		},
-		cluster: {
-			nameFontSize: 12,
-			lociFontSize: 10,
-			spacing: 50,
-			alignLabels: true,
-		},
-		locus: {
-			trackBar: {
-				colour: "#111",
-				stroke: 1,
-			},
-			spacing: 50,
-		},
-		gene: {
-			shape: {
-				bodyHeight: 12,
-				tipHeight: 5,
-				tipLength: 12,
-				onClick: anchorGenes,
-			},
-			label: {
-				anchor: "start",
-				fontSize: 10,
-				rotation: 25,
-				show: true,
-				start: 0.5,
-			},
-		},
-	}
-
-  const scales = {
-    x: d3.scaleLinear().domain([1, 1001]),
-    y: d3.scaleBand().padding(0.05),
-    offset: null,
-    score: d3.scaleSequential(d3.interpolateGreys).domain([0, 1]),
-    group: d3.scaleOrdinal().unknown(null),
-    colour: d3.scaleOrdinal().unknown("#bbb"),
-    locus: d3.scaleOrdinal(),
-  }
-
-  let t = d3.transition().duration(config.plot.transitionDuration)
   let container = null
-	let update = () => container.call(my)
+  let transition = d3.transition()
+
+  api.plot.update = () => container.call(my)
 
   function my(selection) {
     selection.each(function(data) {
-      console.log("Start building", config)
 
-      // Update scales and transition
-      console.log("Updating scales")
-      updateScales(data)
-
-      console.log("Updating colour scales")
-      updateLinkGroups(data)
-
-      console.log("Updating transition")
-      t = d3.transition().duration(config.plot.transitionDuration)
-
+      // Save the container for later updates
       container = d3.select(this)
         .attr("width", "100%")
         .attr("height", "100%")
 
+      // Set up the shared transition
+      transition = d3.transition()
+        .duration(api.config.plot.transitionDuration)
+
       // Build the figure
-      console.log("Building cluster map")
-      container.selectAll("svg.clusterMap")
+      let plot = container.selectAll("svg.clusterMap")
         .data([data])
         .join(
           enter => {
@@ -121,7 +47,9 @@ export default function clusterMap() {
               .attr("height", "100%")
               .attr("xmlns", "http://www.w3.org/2000/svg")
               .attr("xmlns:xhtml", "http://www.w3.org/1999/xhtml")
+
             let g = svg.append("g")
+              .attr("class", "clusterMapG")
 
             // Attach pan/zoom behaviour
             let zoom = d3.zoom()
@@ -134,15 +62,179 @@ export default function clusterMap() {
               .scale(1.2)
             svg.call(zoom)
               .call(zoom.transform, transform)
+              .on("dblclick.zoom", null)
 
-            // Build the map
-            return g.call(buildClusterMap)
+            return g
           },
           update => update.call(
-            update => update.transition(t).call(buildClusterMap)
+            update => {
+              update
+                .transition(transition)
+                .call(api.plot.arrange)
+            })
+        )
+
+      api.scale.update(data)
+      api.link.updateGroups(data.links)
+
+      container = d3.select(this)
+
+      let linkGroup = plot.selectAll("g.links")
+        .data([data])
+        .join("g")
+        .attr("class", "links")
+
+      let clusterGroup = plot.selectAll("g.clusters")
+        .data([data.clusters])
+        .join("g")
+        .attr("class", "clusters")
+
+      let clusters = clusterGroup
+        .selectAll("g.cluster")
+        .data(data.clusters, d => d.uid)
+        .join(
+          enter => {
+            enter = enter.append("g")
+              .attr("id", api.cluster.getId)
+              .attr("class", "cluster")
+              .each(initialiseData)
+            let info = enter.append("g")
+              .attr("id", c => `cinfo_${c.uid}`)
+              .attr("class", "clusterInfo")
+              .attr("transform", `translate(-10, 0)`)
+              .call(api.cluster.drag)
+            info.append("text")
+              .text(c => c.name)
+              .attr("class", "clusterText")
+              .on("click", renameText)
+            info.append("text")
+              .attr("class", "locusText")
+            enter.append("g")
+              .attr("class", "loci")
+            return enter
+              .call(api.style.cluster)
+              .call(api.cluster.update)
+          },
+          update => update.call(
+            update => update
+              .transition(transition)
+              .call(api.cluster.update)
           )
         )
-      console.log("Finished")
+
+      let loci = clusters.selectAll("g.loci")
+        .selectAll("g.locus")
+        .data(d => d.loci, d => d.uid)
+        .join(
+          enter => {
+            enter = enter.append("g")
+              .attr("id", api.locus.getId)
+              .attr("class", "locus")
+            enter.append("line")
+              .attr("class", "trackBar")
+            let hover = enter.append("g")
+              .attr("class", "hover")
+            enter.append("g")
+              .attr("class", "genes")
+            hover.append("rect")
+              .attr("class", "hover")
+              .call(api.locus.dragPosition)
+            hover.append("rect")
+              .attr("class", "leftHandle")
+              .call(api.locus.dragResize)
+            hover.append("rect")
+              .attr("class", "rightHandle")
+              .call(api.locus.dragResize)
+            enter
+              .on("mouseenter", event => {
+                if (api.flags.isDragging) return
+                d3.select(event.target)
+                  .select("g.hover")
+                  .transition()
+                  .attr("opacity", 1)
+              })
+              .on("mouseleave", event => {
+                if (api.flags.isDragging) return
+                d3.select(event.target)
+                  .select("g.hover")
+                  .transition()
+                  .attr("opacity", 0)
+              })
+              .on("dblclick", (_, d) => {
+                api.locus.flip(d)
+                api.plot.update()
+              })
+            return enter
+              .call(api.style.locus)
+              .call(api.locus.update)
+          },
+          update => update.call(
+            update => update.transition(transition)
+              .call(api.locus.update)
+          )
+        )
+
+      loci.selectAll("g.genes")
+        .selectAll("g.gene")
+        .data(d => d.genes, d => d.uid)
+        .join(
+          enter => {
+            enter = enter.append("g")
+              .attr("id", api.gene.getId)
+              .attr("class", "gene")
+            enter.append("polygon")
+              .on("click", api.config.gene.shape.onClick)
+              .attr("class", "genePolygon")
+            enter.append("text")
+              .text(g => g.name)
+              .attr("class", "geneLabel")
+            return enter
+              .call(api.style.gene)
+              .call(api.gene.update)
+          },
+          update => update.call(update => update.transition(transition)
+            .call(api.gene.update))
+        )
+
+      linkGroup.selectAll("path.geneLink")
+        .data(data.links, api.link.getId)
+        .join(
+          enter => enter.append("path")
+            .attr("id", api.link.getId)
+            .attr("class", "geneLink")
+            .style("fill", d => api.scales.score(d.identity))
+            .call(api.style.link)
+            .call(api.link.setPath),
+          update => update.call(
+            update => update
+              .transition(transition)
+              .call(api.link.setPath, true)
+          )
+        )
+
+      let legendFn = getLegendFn()
+      let scaleBarFn = getScaleBarFn()
+      let colourBarFn = getColourBarFn()
+
+      plot
+        .call(legendFn)
+        .call(colourBarFn)
+        .call(scaleBarFn)
+        .call(api.plot.arrange)
+    })
+  }
+
+  function initialiseData(cluster) {
+    cluster.loci.forEach(locus => {
+      locus._start = locus.start
+      locus._end = locus.end
+      locus._offset = 0
+      locus._cluster = cluster.uid
+      locus._flipped = false
+      locus.genes.forEach(gene => {
+        gene._locus = locus.uid
+        gene._cluster = cluster.uid
+      })
     })
   }
 
@@ -150,104 +242,52 @@ export default function clusterMap() {
     let picker = d3.select("input.colourPicker")
     picker.on("change", () => {
       let value = picker.node().value
-      let range = scales.colour.range()
+      let range = api.scales.colour.range()
       range[d] = value
-      scales.colour.range(range)
+      api.scales.colour.range(range)
       d3.selectAll(`.group-${d}`)
         .attr("fill", value)
     })
     picker.node().click()
   }
 
-  function updateScales(data) {
-    if (!scales.offset)
-      scales.offset = d3.scaleOrdinal()
-        .domain(data.clusters.map(d => d.uid))
-        .range(data.clusters.map(() => 0))
-		if (scales.y.domain().length === 0)
-			scales.y.domain(data.clusters.map(c => c.uid))
-    scales.x.range([0, config.plot.scaleFactor])
-    scales.y
-      .range([
-        0,
-        data.clusters.length
-        * (config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight)
-        + (data.clusters.length - 1) * config.cluster.spacing
-      ])
-  }
-
-  function updateLinkGroups(data) {
-    let oldRange = scales.group.range()
-    let oldGroups = Array.from(
-      d3.group(scales.group.domain(), (_, i) => oldRange[i]).values()
-    )
-    let newGroups = getGeneLinkGroups(data.links)
-    let merged = mergeLinkGroups(oldGroups, newGroups)
-    let match = compareLinkGroups(oldGroups, merged)
-    if (!match) {
-      scales.colour
-        .domain(merged.map((_, i) => i))
-        .range(d3.quantize(d3.interpolateRainbow, merged.length + 1))
-      let {domain, range} = getLinkGroupDomainAndRange(merged)
-      scales.group
-        .domain(domain)
-        .range(range)
-    }
-  }
-
   function resizeScaleBar() {
-    let result = prompt("Enter new length (bp):", config.scaleBar.basePair)
+    let result = prompt("Enter new length (bp):", api.config.scaleBar.basePair)
     if (result) {
-      config.scaleBar.basePair = result
-      update()
+      api.config.scaleBar.basePair = result
+      api.plot.update()
     }
   }
 
   function getScaleBarFn() {
-    return scaleBar(scales.x)
-      .stroke(config.scaleBar.stroke)
-      .height(config.scaleBar.height)
-      .colour(config.scaleBar.colour)
-      .basePair(config.scaleBar.basePair)
-      .fontSize(config.scaleBar.fontSize)
+    return scaleBar(api.scales.x)
+      .stroke(api.config.scaleBar.stroke)
+      .height(api.config.scaleBar.height)
+      .colour(api.config.scaleBar.colour)
+      .basePair(api.config.scaleBar.basePair)
+      .fontSize(api.config.scaleBar.fontSize)
       .onClickText(resizeScaleBar)
-      .transition(t)
+      .transition(transition)
   }
 
   function getColourBarFn() {
-    return colourBar(scales.score)
-      .width(config.colourBar.width)
-      .height(config.colourBar.height)
-      .fontSize(config.colourBar.fontSize)
-      .transition(t)
+    return colourBar(api.scales.score)
+      .width(api.config.colourBar.width)
+      .height(api.config.colourBar.height)
+      .fontSize(api.config.colourBar.fontSize)
+      .transition(transition)
   }
 
-  function getClusterFn() {
-    return cluster()
-      .config({
-        ...config.cluster,
-        plot: config.plot,
-        locus: config.locus,
-        gene: config.gene,
-				link: config.link,
-      })
-      .scales(scales)
-      .update(update)
-      .transition(t)
-  }
-
-  /* Retrieves all gene groups in the colour scale that are currently hidden.
-  */
   function getHiddenGeneGroups() {
     let hidden
     let genes = d3.selectAll("g.gene")
     if (genes.empty()) {
       hidden = []
     } else {
-      hidden = scales.colour.domain()
+      hidden = api.scales.colour.domain()
       genes.each((d, i, n) => {
         let display = d3.select(n[i]).attr("display")
-        let group = scales.group(d.uid)
+        let group = api.scales.group(d.uid)
         if (display === "inline" && group !== null && hidden.includes(group))
           hidden = hidden.filter(g => g !== group)
       })
@@ -257,227 +297,17 @@ export default function clusterMap() {
 
   function getLegendFn() {
     let hidden = getHiddenGeneGroups()
-    return legend(scales.colour)
+    return legend(api.scales.colour)
       .hidden(hidden)
-      .fontSize(config.legend.fontSize)
-      .entryHeight(config.legend.entryHeight)
-      .onClickRect(config.legend.onClickRect)
-      .onClickText(config.legend.onClickText)
-  }
-
-  function buildClusterMap(selection) {
-    let clusterFn = getClusterFn()
-    let legendFn = getLegendFn()
-    let scaleBarFn = getScaleBarFn()
-    let colourBarFn = getColourBarFn()
-    return selection
-      .call(clusterFn)
-      .call(legendFn)
-      .call(colourBarFn)
-      .call(scaleBarFn)
-      .call(arrangeMap)
-  }
-
-	/**
-	 * Gets all groups of gene links from an array of link objects.
-	 * Any link with identity score below the config threshold is ignored.
-	 *
-	 * @param {Array} links - Link objects
-	 */
-  function getGeneLinkGroups(links) {
-    let groups = []
-		for (const link of links) {
-			if (link.identity < config.link.threshold) continue
-      let found = false
-      for (let i = 0; i < groups.length; i++) {
-        let group = groups[i]
-        if (group.includes(link.query.uid) || group.includes(link.target.uid))
-          found = true
-        if (found) {
-          if (!group.includes(link.query.uid)) group.push(link.query.uid);
-          if (!group.includes(link.target.uid)) group.push(link.target.uid);
-          break;
-        }
-      }
-      if (!found) groups.push([link.query.uid, link.target.uid])
-		}
-    return groups
-  }
-
-  /**
-	 * TODO: collapse this function into getGeneLinkGroups
-	 *
-   * Merges two arrays of gene link groups and returns new array.
-   *
-   * @param {Array} one - An array of link group arrays
-   * @param {Array} two - Another array of link group arrays
-   * @return {Array} A new array consisting of merged groups
-   */
-  function mergeLinkGroups(one, two) {
-    if (one.length === 0 || one === two) return [...two]
-    let setA, intersect
-    let merged = [...one]
-    merged.forEach(a => {
-      setA = new Set(a)
-      two.forEach(b => {
-        intersect = new Set([...b].filter(x => setA.has(x)))
-        if (intersect)
-          a.push(...b.filter(e => !a.includes(e)))
-      })
-    })
-    return merged
-  }
-
-  /**
-   * Tests two arrays of gene link groups for equality.
-   *
-   * @param {Array} one - An array of link group arrays
-   * @param {Array} two - Another array of link group arrays
-   * @return {boolean}
-    * */
-  function compareLinkGroups(one, two) {
-    let setA, found, intersect
-    one.forEach(a => {
-      setA = new Set(a)
-      found = false
-      two.forEach(b => {
-        intersect = new Set([...b].filter(x => setA.has(x)))
-        if (intersect.size > 0) found = true
-      })
-      if (!found) return false
-    })
-    return (found) ? true : false
-  }
-
-  /**
-   * Creates flat link group domain and range for creating d3 scales.
-   *
-   * @param {Array} groups - An array of link group arrays
-   * @return {Object} An object with flattened domain and range arrays
-    * */
-  function getLinkGroupDomainAndRange(groups) {
-    let scale = {domain: [], range: []}
-    groups.forEach((group, i) => {
-      scale.domain.push(...group)
-      scale.range.push(...group.map(() => i))
-    })
-    return scale
-  }
-
-  /**
-   * Finds the max x position of any cluster in the plot.
-   *
-   * This takes into account locus scale (i.e. offset in multi-locus clusters
-   * and the _start property), the cluster offset scale and the x position of
-   * the final locus in each cluster.
-   *
-   * @param {Array} clusters - Gene cluster data objects
-   * @return {number} The maximum x value
-    * */
-  function getClusterEnd(clusters) {
-    let max = 0
-    for (let cluster of clusters) {
-      let last = cluster.loci[cluster.loci.length - 1]
-      let end = scales.locus(last.uid) + scales.offset(cluster.uid) + scales.x(last._end)
-      if (end > max) max = end
-    }
-    return max
-  }
-
-  const legendTransform = (d) => {
-    let max = getClusterEnd(d.clusters)
-    return `translate(${max + 20}, ${0})`
-  }
-
-  const colourBarTransform = () => {
-    let x = scales.x(config.scaleBar.basePair) + 20
-    let y = scales.y.range()[1]
-    return `translate(${x}, ${y})`
-  }
-
-  const scaleBarTransform = () => {
-    let y = scales.y.range()[1]
-    return `translate(0, ${y})`
-  }
-
-  /**
-   * Arranges various plot elements around the cluster map.
-   */
-  function arrangeMap(selection) {
-    selection.select("g.scaleBar")
-      .attr("transform", scaleBarTransform)
-    selection.select("g.colourBar")
-      .attr("transform", colourBarTransform)
-    selection.select("g.legend")
-      .attr("transform", legendTransform)
-  }
-
-  function anchorGenes(_, anchor) {
-    // Get original domain and range of cluster offset scale
-    let domain = scales.offset.domain()
-    let range = scales.offset.range()
-
-    // Anchor map on given uid
-    // Finds anchor genes in clusters given some initial anchor gene
-    // Find gene links, then filter out any not containing the anchor
-    let anchors = new Map()
-		scales.group
-			.domain()
-      .filter(uid => {
-				// Filter for matching groups
-        let g1 = scales.group(uid)
-        let g2 = scales.group(anchor.uid)
-				return g1 !== null && g1 === g2
-      })
-			.forEach(uid => {
-				// Group remaining anchors by cluster
-				let cluster = d3.select(`#gene_${uid}`).data()[0]._cluster
-				if (anchors.has(cluster)) {
-					anchors.get(cluster).push(uid)
-				} else {
-					anchors.set(cluster, [uid])
-				}
-			})
-    if (anchors.length === 0) return
-
-    // Get the midpoint of the clicked anchor gene
-    let getMidPoint = data => {
-      let length = data.end - data.start
-      return (
-        scales.x(data.start + length / 2)
-        + scales.locus(data._locus)
-      )
-    }
-    let midPoint = getMidPoint(anchor)
-
-		// Calculate offset value of a link anchor from clicked anchor
-		let getOffset = link => {
-			let data = d3.select(`#gene_${link}`).data()[0]
-			return midPoint - getMidPoint(data)
-		}
-
-		// Get smallest offset value from anchors on the same cluster
-		let getGroupOffset = (group) => {
-			if (group.includes(anchor.uid)) return 0
-			let offsets = group.map(l => getOffset(l))
-			let index = d3.minIndex(offsets, l => Math.abs(l))
-			return offsets[index]
-		}
-
-		// Iterate all anchor groups and update offset scale range values
-		for (const [cluster, group] of anchors.entries()) {
-			let index = domain.findIndex(el => el === cluster)
-			range[index] = getGroupOffset(group)
-		}
-
-		// Update range, then update ClusterMap
-    scales.offset.range(range)
-    update()
+      .fontSize(api.config.legend.fontSize)
+      .entryHeight(api.config.legend.entryHeight)
+      .onClickRect(api.config.legend.onClickRect || changeGeneColour)
+      .onClickText(api.config.legend.onClickText)
   }
 
   my.config = function(_) {
     if (!arguments.length) return config
-    updateConfig(config, _)
+    api.plot.updateConfig(_)
     return my
   }
 
