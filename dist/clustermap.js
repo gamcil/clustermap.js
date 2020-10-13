@@ -919,7 +919,7 @@
 
 	    // Get anchoring points for each gene polygon
 	    let getAnchors = (g, offset) => {
-	      let inverse = get.locusData(g._locus)._flipped;
+	      let inverse = g.strand === -1; //get.locusData(g._locus)._flipped
 	      let cluster = get.cluster(g._cluster);
 	      let matrix = get.matrix(cluster);
 	      let left = scales.x(g.start) + offset;
