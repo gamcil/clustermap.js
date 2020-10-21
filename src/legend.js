@@ -8,7 +8,7 @@ export default function legend(colourScale) {
 	let entryHeight = 15
 	let fontSize = 12
 	let hidden = []
-	let onClickRect = null
+	let onClickCircle = null
 	let onClickText = renameText
 	let y = d3.scaleBand().paddingInner(0.5)
 	let t = d3.transition().duration(500)
@@ -29,7 +29,7 @@ export default function legend(colourScale) {
 				.attr("class", "legend")
 
 			// Render each legend element <g>
-			let translate = d => `translate(0, ${y(d)})`
+      let translate = d => `translate(0, ${y(d)})`
 			g.selectAll("g.element")
 				.data(visible)
 				.join(
@@ -37,31 +37,29 @@ export default function legend(colourScale) {
 						enter = enter.append("g")
 							.attr("class", "element")
 							.attr("transform", translate)
-						enter.append("rect")
-							.attr("fill", d => colourScale(d))
+						enter.append("circle")
 							.attr("class", d => `group-${d}`)
-							.attr("width", 12)
-							.attr("height", y.bandwidth())
+							// .attr("width", 6)
 						enter.append("text")
 							.text(d => `Group ${d}`)
 							.attr("x", 16)
-							.attr("y", y.bandwidth())
 							.attr("text-anchor", "start")
 							.style("font-family", "sans")
-							.style("font-size", fontSize)
-						return enter
+              .style("dominant-baseline", "middle")
+						return enter.call(updateLegend)
 					},
 					update => update.call(
 						update => update.transition(t)
-							.attr("transform", translate)
+              .attr("transform", translate)
+              .call(updateLegend)
 					)
 				)
 
 			// If click callbacks are specified, bind them
-			if (onClickRect)
-				g.selectAll("rect")
+			if (onClickCircle)
+				g.selectAll("circle")
 					.attr("cursor", "pointer")
-					.on("click", onClickRect)
+					.on("click", onClickCircle)
 			if (onClickText)
 				g.selectAll("text")
 					.attr("cursor", "pointer")
@@ -69,42 +67,26 @@ export default function legend(colourScale) {
 		})
 	}
 
-	my.colourScale = function(_) {
-		// Setter for the colour scale used as the basis of the legend
-		if (!arguments.length) return colourScale
-		colourScale = _
-		return my
-	}
-	my.transition = function(_) {
-		if (!arguments.length) return t
-		t = _
-		return t
-	}
-	my.hidden = function(_) {
-		if (!arguments.length) return hidden
-		hidden = _
-		return my
-	}
-	my.entryHeight = function(_) {
-		if (!arguments.length) return entryHeight
-		entryHeight = parseInt(_)
-		return my
-	}
-	my.fontSize = function(_) {
-		if (!arguments.length) return fontSize
-		fontSize = parseInt(_)
-		return my
-	}
-	my.onClickRect = function(_) {
-		if (!arguments.length) return onClickRect
-		onClickRect = _
-		return my
-	}
-	my.onClickText = function(_) {
-		if (!arguments.length) return onClickText
-		onClickText = _
-		return my
-	}
+  function updateLegend(selection) {
+    selection.attr("transform", d => `translate(0, ${y(d)})`)
+    let half = y.bandwidth() / 2
+    selection.selectAll("text")
+      .attr("x", half + 6)
+      .attr("y", half + 1)
+      .style("font-size", `${fontSize}px`)
+    selection.selectAll("circle")
+      .attr("cy", half)
+      .attr("r", half)
+      .attr("fill", d => colourScale(d))
+  }
+
+	my.colourScale = _ => arguments.length ? (colourScale = _, my) : colourScale
+	my.transition = _ => arguments.length ? (t = _, my) : t
+	my.hidden = _ => arguments.length ? (hidden = _, my) : hidden
+	my.entryHeight = _ => arguments.length ? (entryHeight = parseInt(_), my) : entryHeight
+	my.fontSize = _ => arguments.length ? (fontSize = parseInt(_), my) : fontSize
+	my.onClickCircle = _ => arguments.length ? (onClickCircle = _, my) : onClickCircle
+	my.onClickText = _ => arguments.length ? (onClickText = _, my) : onClickText
 
 	return my
 }
