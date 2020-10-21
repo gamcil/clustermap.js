@@ -6,20 +6,20 @@ export default {
 	legend: {
 		entryHeight: 18,
 		fontSize: 14,
-		onClickRect: null,
+		onClickCircle: null,
 		onClickText: null,
 		show: true,
 	},
 	colourBar: {
 		fontSize: 12,
-		height: 15,
+		height: 12,
 		show: true,
 		width: 150,
 	},
 	scaleBar: {
 		colour: "black",
 		fontSize: 12,
-		height: 15,
+		height: 12,
 		basePair: 2500,
 		show: true,
 		stroke: 1,

@@ -34,7 +34,7 @@
 		let entryHeight = 15;
 		let fontSize = 12;
 		let hidden = [];
-		let onClickRect = null;
+		let onClickCircle = null;
 		let onClickText = renameText;
 		let y = d3.scaleBand().paddingInner(0.5);
 		let t = d3.transition().duration(500);
@@ -55,7 +55,7 @@
 					.attr("class", "legend");
 
 				// Render each legend element <g>
-				let translate = d => `translate(0, ${y(d)})`;
+	      let translate = d => `translate(0, ${y(d)})`;
 				g.selectAll("g.element")
 					.data(visible)
 					.join(
@@ -63,31 +63,29 @@
 							enter = enter.append("g")
 								.attr("class", "element")
 								.attr("transform", translate);
-							enter.append("rect")
-								.attr("fill", d => colourScale(d))
-								.attr("class", d => `group-${d}`)
-								.attr("width", 12)
-								.attr("height", y.bandwidth());
+							enter.append("circle")
+								.attr("class", d => `group-${d}`);
+								// .attr("width", 6)
 							enter.append("text")
 								.text(d => `Group ${d}`)
 								.attr("x", 16)
-								.attr("y", y.bandwidth())
 								.attr("text-anchor", "start")
 								.style("font-family", "sans")
-								.style("font-size", fontSize);
-							return enter
+	              .style("dominant-baseline", "middle");
+							return enter.call(updateLegend)
 						},
 						update => update.call(
 							update => update.transition(t)
-								.attr("transform", translate)
+	              .attr("transform", translate)
+	              .call(updateLegend)
 						)
 					);
 
 				// If click callbacks are specified, bind them
-				if (onClickRect)
-					g.selectAll("rect")
+				if (onClickCircle)
+					g.selectAll("circle")
 						.attr("cursor", "pointer")
-						.on("click", onClickRect);
+						.on("click", onClickCircle);
 				if (onClickText)
 					g.selectAll("text")
 						.attr("cursor", "pointer")
@@ -95,42 +93,26 @@
 			});
 		}
 
-		my.colourScale = function(_) {
-			// Setter for the colour scale used as the basis of the legend
-			if (!arguments.length) return colourScale
-			colourScale = _;
-			return my
-		};
-		my.transition = function(_) {
-			if (!arguments.length) return t
-			t = _;
-			return t
-		};
-		my.hidden = function(_) {
-			if (!arguments.length) return hidden
-			hidden = _;
-			return my
-		};
-		my.entryHeight = function(_) {
-			if (!arguments.length) return entryHeight
-			entryHeight = parseInt(_);
-			return my
-		};
-		my.fontSize = function(_) {
-			if (!arguments.length) return fontSize
-			fontSize = parseInt(_);
-			return my
-		};
-		my.onClickRect = function(_) {
-			if (!arguments.length) return onClickRect
-			onClickRect = _;
-			return my
-		};
-		my.onClickText = function(_) {
-			if (!arguments.length) return onClickText
-			onClickText = _;
-			return my
-		};
+	  function updateLegend(selection) {
+	    selection.attr("transform", d => `translate(0, ${y(d)})`);
+	    let half = y.bandwidth() / 2;
+	    selection.selectAll("text")
+	      .attr("x", half + 6)
+	      .attr("y", half + 1)
+	      .style("font-size", `${fontSize}px`);
+	    selection.selectAll("circle")
+	      .attr("cy", half)
+	      .attr("r", half)
+	      .attr("fill", d => colourScale(d));
+	  }
+
+		my.colourScale = _ => arguments.length ? (colourScale = _, my) : colourScale;
+		my.transition = _ => arguments.length ? (t = _, my) : t;
+		my.hidden = _ => arguments.length ? (hidden = _, my) : hidden;
+		my.entryHeight = _ => arguments.length ? (entryHeight = parseInt(_), my) : entryHeight;
+		my.fontSize = _ => arguments.length ? (fontSize = parseInt(_), my) : fontSize;
+		my.onClickCircle = _ => arguments.length ? (onClickCircle = _, my) : onClickCircle;
+		my.onClickText = _ => arguments.length ? (onClickText = _, my) : onClickText;
 
 		return my
 	}
@@ -191,7 +173,8 @@
 								.attr("class", "endText")
 								.attr("text-anchor", "end");
 							cbar.selectAll("text")
-								.style("font-family", "sans-serif");
+								.style("font-family", "sans-serif")
+	              .style("dominant-baseline", "hanging");
 
 							enter.call(updateColourBar);
 							return enter
@@ -213,13 +196,13 @@
 				.attr("width", width)
 				.attr("height", height);
 			selection.selectAll(".startText, .endText, .labelText")
-				.attr("y", height + 20);
+				.attr("y", height + 5);
 			selection.select(".labelText")
 				.attr("x", width / 2);
 			selection.select(".endText")
 				.attr("x", width);
 			selection.selectAll("text")
-				.style("font-size", fontSize);					
+				.style("font-size", `${fontSize}pt`);					
 		}
 
 		// Setters/getters
@@ -292,8 +275,9 @@
 			selection.select("text.barText")
 				.text(getLabel)
 				.attr("x", end / 2)
-				.attr("y", height + 20)
-				.style("font-size", fontSize);				
+				.attr("y", height + 5)
+	      .style("dominant-baseline", "hanging")
+				.style("font-size", `${fontSize}pt`);				
 			selection.selectAll("line")
 				.style("stroke", colour)
 				.style("stroke-width", stroke);
@@ -304,53 +288,15 @@
 			if (result) my.basePair(result);
 		}
 
-		my.basePair = function(_) {
-			// Setter for scale bar length
-			if (!arguments.length) return basePair
-			basePair = parseInt(_);
-			return my
-		};
-
-		my.stroke = function(_) {
-			// Setter for scale bar length
-			if (!arguments.length) return stroke
-			stroke = parseInt(_);
-			return my
-		};
-
-		my.height = function(_) {
-			// Setter for scale bar height
-			if (!arguments.length) return height
-			height = parseInt(_);
-			return my
-		};
-
-		my.colour = function(_) {
-			// Setter for scale bar colour
-			if (!arguments.length) return colour
-			colour = _;
-			return my
-		};
-
-		my.fontSize = function(_) {
-			// Setter for scale bar text font size
-			if (!arguments.length) return fontSize
-			fontSize = parseInt(_);
-			return my
-		};
-
-		my.onClickText = function(_) {
-			if (!arguments.length) return onClickText
-			onClickText = _;
-			return my
-		};
-
-		my.transition = function(_) {
-			// Setter for scale bar d3.transition element
-			if (!arguments.length) return t
-			t = _;
-			return my
-		};
+		my.basePair = _ => arguments.length ? (basePair = parseInt(_), my) : basePair;
+		my.colour = _ => arguments.length ? (colour = _, my) : colour;
+		my.colourScale = _ => arguments.length ? (colourScale = _, my) : colourScale;
+		my.fontSize = _ => arguments.length ? (fontSize = parseInt(_), my) : fontSize;
+		my.height = _ => arguments.length ? (height = parseInt(_), my) : height;
+		my.onClickText = _ => arguments.length ? (onClickText = _, my): onClickText;
+		my.stroke = _ => arguments.length ? (stroke = parseInt(_), my) : stroke;
+		my.transition = _ => arguments.length ? (t = _, my) : t;
+		my.width = _ => arguments.length ? (width = parseInt(_), my) : width;
 
 		return my
 	}
@@ -363,30 +309,32 @@
 		legend: {
 			entryHeight: 18,
 			fontSize: 14,
-			onClickRect: null,
+			onClickCircle: null,
 			onClickText: null,
 			show: true,
 		},
 		colourBar: {
 			fontSize: 12,
-			height: 15,
+			height: 12,
 			show: true,
 			width: 150,
 		},
 		scaleBar: {
 			colour: "black",
 			fontSize: 12,
-			height: 15,
+			height: 12,
 			basePair: 2500,
 			show: true,
 			stroke: 1,
 		},
 		link: {
 			threshold: 0,
+	    bestOnly: false,
 		},
 		cluster: {
 			nameFontSize: 12,
 			lociFontSize: 10,
+	    hideLocusCoordinates: false,
 			spacing: 50,
 			alignLabels: true,
 		},
@@ -410,7 +358,7 @@
 				anchor: "start",
 				fontSize: 10,
 				rotation: 25,
-				show: true,
+				show: false,
 				start: 0.5,
 			},
 		},
@@ -467,14 +415,6 @@
 	    updateConfig(config$1, target);  
 	  },
 	  update: null,
-	  arrange: selection => {
-	    selection.select("g.scaleBar")
-	      .attr("transform", plot.scaleBarTransform);
-	    selection.select("g.colourBar")
-	      .attr("transform", plot.colourBarTransform);
-	    selection.select("g.legend")
-	      .attr("transform", plot.legendTransform);
-	  }
 	};
 
 	const scales = {
@@ -487,48 +427,6 @@
 	  score: d3.scaleSequential(d3.interpolateGreys).domain([0, 1]),
 	  offset: d3.scaleOrdinal(),
 	  locus: d3.scaleOrdinal(),
-	};
-
-	const style = {
-	  cluster: selection => {
-	    let info = selection.selectAll(".clusterInfo");
-	    info.selectAll("text")
-	      .attr("text-anchor", "end")
-	      .style("font-family", "sans");
-	    info.selectAll(".locusText")
-	      .attr("y", 22);
-	    info.selectAll(".clusterText")
-	      .attr("y", 8)
-	      .attr("cursor", "pointer")
-	      .style("font-weight", "bold");
-	    return selection
-	  },
-	  locus: selection => {
-	    selection.selectAll("line.trackBar")
-	      .style("fill", "#111");
-	    let hover = selection.selectAll("g.hover")
-	      .attr("opacity", 0);
-	    hover.selectAll("rect.hover")
-	      .attr("fill", "rgba(0, 0, 0, 0.4)");
-	    hover.selectAll(".leftHandle")
-	      .attr("x", -8);
-	    hover.selectAll(".leftHandle, .rightHandle")
-	      .attr("width", 8)
-	      .attr("cursor", "pointer");
-	    return selection
-	  },
-	  gene: selection => {
-	    selection.attr("display", "inline");
-	    selection.selectAll("text")
-	      .attr("dy", "-0.3em");
-	    return selection
-	  },
-	  link: selection => {
-	    selection
-	      .style("stroke", "black")
-	      .style("stroke-width", "0.5px");
-	    return selection
-	  },
 	};
 
 	const _gene = {
@@ -685,7 +583,11 @@
 	  locusText: cluster => (
 	    cluster.loci.map(locus => {
 	      let flipped = locus._flipped ? " (reversed)" : "";
-	      if (locus._start == null || locus._end == null)
+	      if (
+	        config$1.cluster.hideLocusCoordinates
+	        || locus._start == null
+	        || locus._end == null
+	      )
 	        return `${locus.name}${flipped}`
 	      return (
 	        `${locus.name}${flipped}:`
@@ -796,7 +698,11 @@
 	    } else {
 	      selection
 	        .selectAll(".clusterInfo")
-	        .attr("transform", `translate(-10, 0)`);
+	        .attr("transform", d => {
+	          let [min, _] = _cluster.extentOne(d);
+	          let value = min - 10 - scales.offset(d.uid);
+	          return `translate(${value}, 0)`
+	        });
 	    }
 	    selection
 	      .selectAll("text.clusterText")
@@ -892,6 +798,73 @@
 	  setPath: (selection, snap) => {
 	    return selection.attr("d", d => _link.path(d, snap))
 	  },
+	  /**
+	   * Filters links for only the best between each cluster.
+	   * For every link, tracks clusters of query and target.
+	   * If this cluster pair has not been seen before, saves the current
+	   * link in a Map keyed on the pair.
+	   * If it has, tests if the current link shares a gene with other 
+	   * saved links. The link is added if a) it has no common genes, or
+	   * b) it has common genes, but higher identity score.
+	   * @param {Array} links - All link data objects
+	   */
+	  filter: links => {
+	    if (!config$1.link.bestOnly) return links
+
+	    const setsEqual = (a, b) => (
+	      a.size === b.size && [...a].every(value => b.has(value))
+	    );
+
+	    // Have to extend Map object to support set key comparisons
+	    // i.e. sets are tested for equality of their values, not just
+	    // being the exact same object in memory
+	    class MyMap extends Map {
+	      has(...args) {
+	        if (this.size === 0) return false
+	        for (let key of this.keys()) {
+	          if (setsEqual(args[0], key)) return true
+	        }
+	        return false
+	      }
+	      get(...args) {
+	        for (const [key, value] of this) {
+	          if (setsEqual(args[0], key)) return value
+	        }
+	      }
+	      set(...args) {
+	        let key = this.get(args[0]) || args[0];
+	        return super.set(key, args[1])
+	      }
+	      reduce() {
+	        let flat = [];
+	        for (const values of this.values()) flat = flat.concat(values);
+	        return flat
+	      }
+	    }
+	    let groups = new MyMap();
+
+	    // Descending sort by identity so best links come first
+	    links.sort((a, b) => a.identity < b.identity);
+
+	    for (const link of links) {
+	      let clusterA = get.geneData(link.query.uid)._cluster;
+	      let clusterB = get.geneData(link.target.uid)._cluster;
+	      let pair = new Set([clusterA, clusterB]);
+
+	      // Check if link has common query/target with another link
+	      // Only add if a) doesn't or b) does but is higher scoring
+	      if (groups.has(pair)) {
+	        if (!groups.get(pair).some(l => {
+	          let genes = new Set([l.query.uid, l.target.uid]);
+	          let share = (genes.has(link.query.uid) || genes.has(link.target.uid));
+	          return (share && link.identity < l.identity)
+	        })) groups.get(pair).push(link);
+	      } else {
+	        groups.set(pair, [link]);
+	      }
+	    }
+	    return groups.reduce().filter(link => link.identity > config$1.link.threshold)
+	  },
 	  path: (d, snap) => {
 	    snap = snap || false;
 
@@ -919,14 +892,13 @@
 
 	    // Get anchoring points for each gene polygon
 	    let getAnchors = (g, offset) => {
-	      let inverse = g.strand === -1; //get.locusData(g._locus)._flipped
 	      let cluster = get.cluster(g._cluster);
 	      let matrix = get.matrix(cluster);
 	      let left = scales.x(g.start) + offset;
 	      let right = scales.x(g.end) + offset;
 	      return [
-	        inverse ? right : left,
-	        inverse ? left : right,
+	        g.strand === -1 ? right : left,
+	        g.strand === -1 ? left : right,
 	        snap ? scales.y(g._cluster) + mid : matrix.f + mid
 	      ]
 	    };
@@ -1169,11 +1141,6 @@
 	      d3.select(`#locus_${d.uid} .hover`)
 	        .transition()
 	        .attr("opacity", 0);
-	      // if (side === "left") {
-	      //   let diff = value - initial
-	        // updateScaleRange("locus", d.uid, scales.locus(d.uid) + diff) //scales.locus(d.uid) + diff)
-	        // updateScaleRange("offset", d._cluster, scales.offset(d._cluster) - diff)
-	      // }
 	      plot.update();
 	    };
 
@@ -1211,10 +1178,15 @@
 	      // Adjust clusterInfo groups
 	      let locData = locus.datum();
 	      let locStart = scales.x(locData._start);
-	      let newMin = Math.min(value + scales.offset(d._cluster) + locStart, minPos) - 10;
-	      let translate = c => `translate(${newMin - scales.offset(c.uid)}, 0)`;
-	      d3.selectAll("g.clusterInfo")
-	        .attr("transform", translate);
+	      if (config$1.cluster.alignLabels) {
+	        let locMin = value + scales.offset(d._cluster) + locStart;
+	        let newMin = Math.min(locMin, minPos) - 10;
+	        d3.selectAll("g.clusterInfo")
+	          .attr("transform", c => `translate(${newMin - scales.offset(c.uid)}, 0)`);
+	      } else {
+	        d3.select(`#cinfo_${d._cluster}`)
+	          .attr("transform", `translate(${value + locStart - 10}, 0)`);
+	      }
 
 	      // Adjust legend group
 	      let locEnd = scales.x(locData._end);
@@ -1283,8 +1255,28 @@
 	    let [domain, range] = _cluster.getLocusScaleValues(clusters);
 	    scales.locus.domain(domain).range(range);
 	  },
+	  /**
+	   * Rescales offset and locus scales with an updated x scale.
+	   * @param {d3.scale} old - The old x scale
+	   */
+	  rescaleRanges: old => {
+	    [scales.offset, scales.locus].forEach(scale => {
+	      let range = scale.range();
+	      for (let i = 0; i < range.length; i++) {
+	        let input = old.invert(range[i]);
+	        range[i] = scales.x(input);
+	      }
+	      scale.range(range);
+	    });
+	  },
+	  /**
+	   * Updates all scales based on new data.
+	   * @param {Object} data - New data object
+	   */
 	  update: data => {
+	    let oldX = scales.x.copy();
 	    _scale.updateX();
+	    _scale.rescaleRanges(oldX);
 
 	    if (!_scale.check("y"))
 	      scales.y.domain(data.clusters.map(c => c.uid));
@@ -1364,8 +1356,8 @@
 	          update => update.call(
 	            update => {
 	              update
-	                .transition(transition)
-	                .call(plot.arrange);
+	                // .transition(transition)
+	                .call(arrangePlot);
 	            })
 	        );
 
@@ -1401,13 +1393,20 @@
 	            info.append("text")
 	              .text(c => c.name)
 	              .attr("class", "clusterText")
+	              .attr("y", 8)
+	              .attr("cursor", "pointer")
+	              .style("font-weight", "bold")
 	              .on("click", renameText);
 	            info.append("text")
-	              .attr("class", "locusText");
+	              .attr("class", "locusText")
+	              .attr("y", 10)
+	              .style("dominant-baseline", "hanging");
 	            enter.append("g")
 	              .attr("class", "loci");
+	            info.selectAll("text")
+	              .attr("text-anchor", "end")
+	              .style("font-family", "sans");
 	            return enter
-	              .call(style.cluster)
 	              .call(_cluster.update)
 	          },
 	          update => update.call(
@@ -1426,20 +1425,27 @@
 	              .attr("id", _locus.getId)
 	              .attr("class", "locus");
 	            enter.append("line")
-	              .attr("class", "trackBar");
+	              .attr("class", "trackBar")
+	              .style("fill", "#111");
 	            let hover = enter.append("g")
-	              .attr("class", "hover");
+	              .attr("class", "hover")
+	              .attr("opacity", 0);
 	            enter.append("g")
 	              .attr("class", "genes");
 	            hover.append("rect")
 	              .attr("class", "hover")
+	              .attr("fill", "rgba(0, 0, 0, 0.4)")
 	              .call(_locus.dragPosition);
 	            hover.append("rect")
 	              .attr("class", "leftHandle")
+	              .attr("x", -8)
 	              .call(_locus.dragResize);
 	            hover.append("rect")
 	              .attr("class", "rightHandle")
 	              .call(_locus.dragResize);
+	            hover.selectAll(".leftHandle, .rightHandle")
+	              .attr("width", 8)
+	              .attr("cursor", "pointer");
 	            enter
 	              .on("mouseenter", event => {
 	                if (flags.isDragging) return
@@ -1460,7 +1466,6 @@
 	                plot.update();
 	              });
 	            return enter
-	              .call(style.locus)
 	              .call(_locus.update)
 	          },
 	          update => update.call(
@@ -1476,29 +1481,33 @@
 	          enter => {
 	            enter = enter.append("g")
 	              .attr("id", _gene.getId)
-	              .attr("class", "gene");
+	              .attr("class", "gene")
+	              .attr("display", "inline");
 	            enter.append("polygon")
 	              .on("click", config$1.gene.shape.onClick)
 	              .attr("class", "genePolygon");
 	            enter.append("text")
 	              .text(g => g.name)
-	              .attr("class", "geneLabel");
+	              .attr("class", "geneLabel")
+	              .attr("dy", "-0.3em");
 	            return enter
-	              .call(style.gene)
 	              .call(_gene.update)
 	          },
-	          update => update.call(update => update.transition(transition)
-	            .call(_gene.update))
+	          update => update.call(
+	            update => update.transition(transition)
+	              .call(_gene.update)
+	          )
 	        );
 
 	      linkGroup.selectAll("path.geneLink")
-	        .data(data.links, _link.getId)
+	        .data(_link.filter(data.links), _link.getId)
 	        .join(
 	          enter => enter.append("path")
 	            .attr("id", _link.getId)
 	            .attr("class", "geneLink")
 	            .style("fill", d => scales.score(d.identity))
-	            .call(style.link)
+	            .style("stroke", "black")
+	            .style("stroke-width", "0.5px")
 	            .call(_link.setPath),
 	          update => update.call(
 	            update => update
@@ -1515,8 +1524,20 @@
 	        .call(legendFn)
 	        .call(colourBarFn)
 	        .call(scaleBarFn)
-	        .call(plot.arrange);
+	        .call(arrangePlot);
 	    });
+	  }
+
+	  function arrangePlot(selection) {
+	    selection.select("g.scaleBar")
+	      .transition(transition)
+	      .attr("transform", plot.scaleBarTransform);
+	    selection.select("g.colourBar")
+	      .transition(transition)
+	      .attr("transform", plot.colourBarTransform);
+	    selection.select("g.legend")
+	      .transition(transition)
+	      .attr("transform", plot.legendTransform);
 	  }
 
 	  function initialiseData(cluster) {
@@ -1596,7 +1617,7 @@
 	      .hidden(hidden)
 	      .fontSize(config$1.legend.fontSize)
 	      .entryHeight(config$1.legend.entryHeight)
-	      .onClickRect(config$1.legend.onClickRect || changeGeneColour)
+	      .onClickCircle(config$1.legend.onClickCircle || changeGeneColour)
 	      .onClickText(config$1.legend.onClickText)
 	  }
 
