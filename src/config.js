@@ -26,10 +26,12 @@ export default {
 	},
 	link: {
 		threshold: 0,
+    bestOnly: false,
 	},
 	cluster: {
 		nameFontSize: 12,
 		lociFontSize: 10,
+    hideLocusCoordinates: false,
 		spacing: 50,
 		alignLabels: true,
 	},
@@ -53,7 +55,7 @@ export default {
 			anchor: "start",
 			fontSize: 10,
 			rotation: 25,
-			show: true,
+			show: false,
 			start: 0.5,
 		},
 	},
