@@ -106,13 +106,20 @@ export default function clusterMap() {
             info.append("text")
               .text(c => c.name)
               .attr("class", "clusterText")
+              .attr("y", 8)
+              .attr("cursor", "pointer")
+              .style("font-weight", "bold")
               .on("click", renameText)
             info.append("text")
               .attr("class", "locusText")
+              .attr("y", 10)
+              .style("dominant-baseline", "hanging")
             enter.append("g")
               .attr("class", "loci")
+            info.selectAll("text")
+              .attr("text-anchor", "end")
+              .style("font-family", "sans")
             return enter
-              .call(api.style.cluster)
               .call(api.cluster.update)
           },
           update => update.call(
@@ -132,19 +139,26 @@ export default function clusterMap() {
               .attr("class", "locus")
             enter.append("line")
               .attr("class", "trackBar")
+              .style("fill", "#111")
             let hover = enter.append("g")
               .attr("class", "hover")
+              .attr("opacity", 0)
             enter.append("g")
               .attr("class", "genes")
             hover.append("rect")
               .attr("class", "hover")
+              .attr("fill", "rgba(0, 0, 0, 0.4)")
               .call(api.locus.dragPosition)
             hover.append("rect")
               .attr("class", "leftHandle")
+              .attr("x", -8)
               .call(api.locus.dragResize)
             hover.append("rect")
               .attr("class", "rightHandle")
               .call(api.locus.dragResize)
+            hover.selectAll(".leftHandle, .rightHandle")
+              .attr("width", 8)
+              .attr("cursor", "pointer")
             enter
               .on("mouseenter", event => {
                 if (api.flags.isDragging) return
@@ -165,7 +179,6 @@ export default function clusterMap() {
                 api.plot.update()
               })
             return enter
-              .call(api.style.locus)
               .call(api.locus.update)
           },
           update => update.call(
@@ -182,14 +195,15 @@ export default function clusterMap() {
             enter = enter.append("g")
               .attr("id", api.gene.getId)
               .attr("class", "gene")
+              .attr("display", "inline")
             enter.append("polygon")
               .on("click", api.config.gene.shape.onClick)
               .attr("class", "genePolygon")
             enter.append("text")
               .text(g => g.name)
               .attr("class", "geneLabel")
+              .attr("dy", "-0.3em")
             return enter
-              .call(api.style.gene)
               .call(api.gene.update)
           },
           update => update.call(
@@ -205,7 +219,8 @@ export default function clusterMap() {
             .attr("id", api.link.getId)
             .attr("class", "geneLink")
             .style("fill", d => api.scales.score(d.identity))
-            .call(api.style.link)
+            .style("stroke", "black")
+            .style("stroke-width", "0.5px")
             .call(api.link.setPath),
           update => update.call(
             update => update

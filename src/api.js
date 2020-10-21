@@ -66,49 +66,6 @@ const scales = {
   locus: d3.scaleOrdinal(),
 }
 
-const style = {
-  cluster: selection => {
-    let info = selection.selectAll(".clusterInfo")
-    info.selectAll("text")
-      .attr("text-anchor", "end")
-      .style("font-family", "sans")
-    info.selectAll(".locusText")
-      .attr("y", 10)
-      .style("dominant-baseline", "hanging")
-    info.selectAll(".clusterText")
-      .attr("y", 8)
-      .attr("cursor", "pointer")
-      .style("font-weight", "bold")
-    return selection
-  },
-  locus: selection => {
-    selection.selectAll("line.trackBar")
-      .style("fill", "#111")
-    let hover = selection.selectAll("g.hover")
-      .attr("opacity", 0)
-    hover.selectAll("rect.hover")
-      .attr("fill", "rgba(0, 0, 0, 0.4)")
-    hover.selectAll(".leftHandle")
-      .attr("x", -8)
-    hover.selectAll(".leftHandle, .rightHandle")
-      .attr("width", 8)
-      .attr("cursor", "pointer")
-    return selection
-  },
-  gene: selection => {
-    selection.attr("display", "inline")
-    selection.selectAll("text")
-      .attr("dy", "-0.3em")
-    return selection
-  },
-  link: selection => {
-    selection
-      .style("stroke", "black")
-      .style("stroke-width", "0.5px")
-    return selection
-  },
-}
-
 const _gene = {
   getId: d => `gene_${d.uid}`,
   fill: g => {
@@ -911,7 +868,6 @@ export {
   get,
   plot,
   scales,
-  style,
   _cluster as cluster,
   _gene as gene,
   _link as link,
