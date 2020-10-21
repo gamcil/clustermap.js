@@ -69,8 +69,8 @@ export default function clusterMap() {
           update => update.call(
             update => {
               update
-                .transition(transition)
-                .call(api.plot.arrange)
+                // .transition(transition)
+                .call(arrangePlot)
             })
         )
 
@@ -192,8 +192,10 @@ export default function clusterMap() {
               .call(api.style.gene)
               .call(api.gene.update)
           },
-          update => update.call(update => update.transition(transition)
-            .call(api.gene.update))
+          update => update.call(
+            update => update.transition(transition)
+              .call(api.gene.update)
+          )
         )
 
       linkGroup.selectAll("path.geneLink")
@@ -220,8 +222,20 @@ export default function clusterMap() {
         .call(legendFn)
         .call(colourBarFn)
         .call(scaleBarFn)
-        .call(api.plot.arrange)
+        .call(arrangePlot)
     })
+  }
+
+  function arrangePlot(selection) {
+    selection.select("g.scaleBar")
+      .transition(transition)
+      .attr("transform", api.plot.scaleBarTransform)
+    selection.select("g.colourBar")
+      .transition(transition)
+      .attr("transform", api.plot.colourBarTransform)
+    selection.select("g.legend")
+      .transition(transition)
+      .attr("transform", api.plot.legendTransform)
   }
 
   function initialiseData(cluster) {

@@ -52,14 +52,6 @@ const plot = {
     updateConfig(config, target)  
   },
   update: null,
-  arrange: selection => {
-    selection.select("g.scaleBar")
-      .attr("transform", plot.scaleBarTransform)
-    selection.select("g.colourBar")
-      .attr("transform", plot.colourBarTransform)
-    selection.select("g.legend")
-      .attr("transform", plot.legendTransform)
-  }
 }
 
 const scales = {
@@ -81,7 +73,8 @@ const style = {
       .attr("text-anchor", "end")
       .style("font-family", "sans")
     info.selectAll(".locusText")
-      .attr("y", 22)
+      .attr("y", 10)
+      .style("dominant-baseline", "hanging")
     info.selectAll(".clusterText")
       .attr("y", 8)
       .attr("cursor", "pointer")
@@ -381,7 +374,11 @@ const _cluster = {
     } else {
       selection
         .selectAll(".clusterInfo")
-        .attr("transform", `translate(-10, 0)`)
+        .attr("transform", d => {
+          let [min, _] = _cluster.extentOne(d)
+          let value = min - 10 - scales.offset(d.uid)
+          return `translate(${value}, 0)`
+        })
     }
     selection
       .selectAll("text.clusterText")
@@ -756,11 +753,6 @@ const _locus = {
       d3.select(`#locus_${d.uid} .hover`)
         .transition()
         .attr("opacity", 0)
-      // if (side === "left") {
-      //   let diff = value - initial
-        // updateScaleRange("locus", d.uid, scales.locus(d.uid) + diff) //scales.locus(d.uid) + diff)
-        // updateScaleRange("offset", d._cluster, scales.offset(d._cluster) - diff)
-      // }
       plot.update()
     }
 
@@ -798,10 +790,17 @@ const _locus = {
       // Adjust clusterInfo groups
       let locData = locus.datum()
       let locStart = scales.x(locData._start)
-      let newMin = Math.min(value + scales.offset(d._cluster) + locStart, minPos) - 10
-      let translate = c => `translate(${newMin - scales.offset(c.uid)}, 0)`
-      d3.selectAll("g.clusterInfo")
-        .attr("transform", translate)
+      if (config.cluster.alignLabels) {
+        // Add offset/locus scale values to make equivalent to minPos from
+        // cluster.extent(), then remove from per-cluster transforms
+        let offs = scales.offset(d._cluster) + scales.locus(d.uid)
+        let newMin = Math.min(value + offs, minPos) - 10
+        d3.selectAll("g.clusterInfo")
+          .attr("transform", c => `translate(${newMin - scales.offset(c.uid)}, 0)`)
+      } else {
+        d3.select(`#cinfo_${d._cluster}`)
+          .attr("transform", `translate(${value + locStart - 10}, 0)`)
+      }
 
       // Adjust legend group
       let locEnd = scales.x(locData._end)
@@ -870,8 +869,28 @@ const _scale = {
     let [domain, range] = _cluster.getLocusScaleValues(clusters)
     scales.locus.domain(domain).range(range)
   },
+  /**
+   * Rescales offset and locus scales with an updated x scale.
+   * @param {d3.scale} old - The old x scale
+   */
+  rescaleRanges: old => {
+    [scales.offset, scales.locus].forEach(scale => {
+      let range = scale.range()
+      for (let i = 0; i < range.length; i++) {
+        let input = old.invert(range[i])
+        range[i] = scales.x(input)
+      }
+      scale.range(range)
+    })
+  },
+  /**
+   * Updates all scales based on new data.
+   * @param {Object} data - New data object
+   */
   update: data => {
+    let oldX = scales.x.copy()
     _scale.updateX()
+    _scale.rescaleRanges(oldX)
 
     if (!_scale.check("y"))
       scales.y.domain(data.clusters.map(c => c.uid))
