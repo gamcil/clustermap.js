@@ -71,53 +71,15 @@ export default function scaleBar(x) {
 		if (result) my.basePair(result)
 	}
 
-	my.basePair = function(_) {
-		// Setter for scale bar length
-		if (!arguments.length) return basePair
-		basePair = parseInt(_)
-		return my
-	}
-
-	my.stroke = function(_) {
-		// Setter for scale bar length
-		if (!arguments.length) return stroke
-		stroke = parseInt(_)
-		return my
-	}
-
-	my.height = function(_) {
-		// Setter for scale bar height
-		if (!arguments.length) return height
-		height = parseInt(_)
-		return my
-	}
-
-	my.colour = function(_) {
-		// Setter for scale bar colour
-		if (!arguments.length) return colour
-		colour = _
-		return my
-	}
-
-	my.fontSize = function(_) {
-		// Setter for scale bar text font size
-		if (!arguments.length) return fontSize
-		fontSize = parseInt(_)
-		return my
-	}
-
-	my.onClickText = function(_) {
-		if (!arguments.length) return onClickText
-		onClickText = _
-		return my
-	}
-
-	my.transition = function(_) {
-		// Setter for scale bar d3.transition element
-		if (!arguments.length) return t
-		t = _
-		return my
-	}
+	my.basePair = _ => arguments.length ? (basePair = parseInt(_), my) : basePair
+	my.colour = _ => arguments.length ? (colour = _, my) : colour
+	my.colourScale = _ => arguments.length ? (colourScale = _, my) : colourScale
+	my.fontSize = _ => arguments.length ? (fontSize = parseInt(_), my) : fontSize
+	my.height = _ => arguments.length ? (height = parseInt(_), my) : height
+	my.onClickText = _ => arguments.length ? (onClickText = _, my): onClickText
+	my.stroke = _ => arguments.length ? (stroke = parseInt(_), my) : stroke
+	my.transition = _ => arguments.length ? (t = _, my) : t
+	my.width = _ => arguments.length ? (width = parseInt(_), my) : width
 
 	return my
 }
