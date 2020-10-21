@@ -791,10 +791,8 @@ const _locus = {
       let locData = locus.datum()
       let locStart = scales.x(locData._start)
       if (config.cluster.alignLabels) {
-        // Add offset/locus scale values to make equivalent to minPos from
-        // cluster.extent(), then remove from per-cluster transforms
-        let offs = scales.offset(d._cluster) + scales.locus(d.uid)
-        let newMin = Math.min(value + offs, minPos) - 10
+        let locMin = value + scales.offset(d._cluster) + locStart
+        let newMin = Math.min(locMin, minPos) - 10
         d3.selectAll("g.clusterInfo")
           .attr("transform", c => `translate(${newMin - scales.offset(c.uid)}, 0)`)
       } else {
