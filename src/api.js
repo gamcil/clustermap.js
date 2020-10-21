@@ -220,7 +220,11 @@ const _cluster = {
   locusText: cluster => (
     cluster.loci.map(locus => {
       let flipped = locus._flipped ? " (reversed)" : ""
-      if (config.cluster.hideLocusCoordinates || locus._start == null || locus._end == null)
+      if (
+        config.cluster.hideLocusCoordinates
+        || locus._start == null
+        || locus._end == null
+      )
         return `${locus.name}${flipped}`
       return (
         `${locus.name}${flipped}:`

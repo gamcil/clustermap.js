@@ -330,7 +330,7 @@ export default function clusterMap() {
       .hidden(hidden)
       .fontSize(api.config.legend.fontSize)
       .entryHeight(api.config.legend.entryHeight)
-      .onClickRect(api.config.legend.onClickRect || changeGeneColour)
+      .onClickCircle(api.config.legend.onClickCircle || changeGeneColour)
       .onClickText(api.config.legend.onClickText)
   }
 
