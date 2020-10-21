@@ -55,6 +55,7 @@ export default function colourBar(colourScale) {
 							.attr("text-anchor", "end")
 						cbar.selectAll("text")
 							.style("font-family", "sans-serif")
+              .style("dominant-baseline", "hanging")
 
 						enter.call(updateColourBar)
 						return enter
@@ -76,13 +77,13 @@ export default function colourBar(colourScale) {
 			.attr("width", width)
 			.attr("height", height)
 		selection.selectAll(".startText, .endText, .labelText")
-			.attr("y", height + 20)
+			.attr("y", height + 5)
 		selection.select(".labelText")
 			.attr("x", width / 2)
 		selection.select(".endText")
 			.attr("x", width)
 		selection.selectAll("text")
-			.style("font-size", fontSize)					
+			.style("font-size", `${fontSize}pt`)					
 	}
 
 	// Setters/getters
