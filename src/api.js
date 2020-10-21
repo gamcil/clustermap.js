@@ -431,6 +431,73 @@ const _link = {
   setPath: (selection, snap) => {
     return selection.attr("d", d => _link.path(d, snap))
   },
+  /**
+   * Filters links for only the best between each cluster.
+   * For every link, tracks clusters of query and target.
+   * If this cluster pair has not been seen before, saves the current
+   * link in a Map keyed on the pair.
+   * If it has, tests if the current link shares a gene with other 
+   * saved links. The link is added if a) it has no common genes, or
+   * b) it has common genes, but higher identity score.
+   * @param {Array} links - All link data objects
+   */
+  filter: links => {
+    if (!config.link.bestOnly) return links
+
+    const setsEqual = (a, b) => (
+      a.size === b.size && [...a].every(value => b.has(value))
+    )
+
+    // Have to extend Map object to support set key comparisons
+    // i.e. sets are tested for equality of their values, not just
+    // being the exact same object in memory
+    class MyMap extends Map {
+      has(...args) {
+        if (this.size === 0) return false
+        for (let key of this.keys()) {
+          if (setsEqual(args[0], key)) return true
+        }
+        return false
+      }
+      get(...args) {
+        for (const [key, value] of this) {
+          if (setsEqual(args[0], key)) return value
+        }
+      }
+      set(...args) {
+        let key = this.get(args[0]) || args[0]
+        return super.set(key, args[1])
+      }
+      reduce() {
+        let flat = []
+        for (const values of this.values()) flat = flat.concat(values)
+        return flat
+      }
+    }
+    let groups = new MyMap()
+
+    // Descending sort by identity so best links come first
+    links.sort((a, b) => a.identity < b.identity)
+
+    for (const link of links) {
+      let clusterA = get.geneData(link.query.uid)._cluster
+      let clusterB = get.geneData(link.target.uid)._cluster
+      let pair = new Set([clusterA, clusterB])
+
+      // Check if link has common query/target with another link
+      // Only add if a) doesn't or b) does but is higher scoring
+      if (groups.has(pair)) {
+        if (!groups.get(pair).some(l => {
+          let genes = new Set([l.query.uid, l.target.uid])
+          let share = (genes.has(link.query.uid) || genes.has(link.target.uid))
+          return (share && link.identity < l.identity)
+        })) groups.get(pair).push(link)
+      } else {
+        groups.set(pair, [link])
+      }
+    }
+    return groups.reduce().filter(link => link.identity > config.link.threshold)
+  },
   path: (d, snap) => {
     snap = snap || false
 

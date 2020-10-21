@@ -213,7 +213,7 @@ export default function clusterMap() {
         )
 
       linkGroup.selectAll("path.geneLink")
-        .data(data.links, api.link.getId)
+        .data(api.link.filter(data.links), api.link.getId)
         .join(
           enter => enter.append("path")
             .attr("id", api.link.getId)
