@@ -73,6 +73,9 @@
 
 		const chart = clusterMap()
 			.config({
+        cluster: {
+          alignLabels: false
+        },
 				gene: {
 					label: {
 						show: false
@@ -80,10 +83,11 @@
 				},
 				link: {
 					threshold: 0.3,
+          bestOnly: true,
 				}
 			})
 
-		d3.json("testing2.json")
+		d3.json("testing.json")
 			.then(data => {
 				div.selectAll("div")
 					.data([data])
