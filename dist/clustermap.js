@@ -843,7 +843,7 @@
 	    let groups = new MyMap();
 
 	    // Descending sort by identity so best links come first
-	    links.sort((a, b) => a.identity < b.identity);
+	    links.sort((a, b) => a.identity < b.identity ? 1 : -1);
 
 	    for (const link of links) {
 	      let clusterA = get.geneData(link.query.uid)._cluster;
