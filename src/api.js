@@ -353,12 +353,12 @@ const _cluster = {
   drag: selection => {
     let free
     let height = scales.y.range()[1]
-    selection.each((d, i) => { d.slot = i; })
+    selection.each((d, i) => { d.slot = i })
 
     const getDomain = () => {
       let clusters = []
       selection.each(c => { clusters.push(c) })
-      clusters = clusters.sort((a, b) => a.slot > b.slot)
+      clusters = clusters.sort((a, b) => a.slot > b.slot ? 1 : -1)
       return clusters.map(c => c.uid)
     }
 
@@ -395,11 +395,10 @@ const _cluster = {
           e.slot = free
           d.slot = free = p
           let uid = scales.y.domain()[e.slot]
+          let translate = c => `translate(${scales.offset(c.uid)}, ${scales.y(uid)})`
           get.cluster(e.uid)
             .transition()
-            .attr("transform", c =>
-              `translate(${scales.offset(c.uid)}, ${scales.y(uid)})`
-            )
+            .attr("transform", translate)
         }
       })
     }
@@ -481,7 +480,7 @@ const _link = {
     let groups = new MyMap()
 
     // Descending sort by identity so best links come first
-    links.sort((a, b) => a.identity < b.identity)
+    links.sort((a, b) => a.identity < b.identity ? 1 : -1)
 
     for (const link of links) {
       let clusterA = get.geneData(link.query.uid)._cluster
@@ -708,7 +707,7 @@ const _locus = {
       let geneStarts = d.genes
         .filter(gene => gene.end <= d._end)
         .map(gene => gene.start)
-      let starts = [d.start, ...geneStarts].sort((a, b) => a > b)
+      let starts = [d.start, ...geneStarts].sort((a, b) => a > b ? 1 : -1)
       let coords = starts.map(value => scales.x(value))
       let position = getClosestValue(coords, event.x)
       value = coords[position]
@@ -751,7 +750,7 @@ const _locus = {
       let ends = d.genes
         .filter(gene => gene.start >= d._start)
         .map(gene => gene.end)
-        .sort((a, b) => a > b)
+        .sort((a, b) => a > b ? 1 : -1)
       let range = ends.map(value => scales.x(value))
       let position = getClosestValue(range, event.x)
       d._end = ends[position]
