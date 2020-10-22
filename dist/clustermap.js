@@ -721,7 +721,7 @@
 	    const getDomain = () => {
 	      let clusters = [];
 	      selection.each(c => { clusters.push(c); });
-	      clusters = clusters.sort((a, b) => a.slot > b.slot);
+	      clusters = clusters.sort((a, b) => a.slot > b.slot ? 1 : -1);
 	      return clusters.map(c => c.uid)
 	    };
 
@@ -758,11 +758,10 @@
 	          e.slot = free;
 	          d.slot = free = p;
 	          let uid = scales.y.domain()[e.slot];
+	          let translate = c => `translate(${scales.offset(c.uid)}, ${scales.y(uid)})`;
 	          get.cluster(e.uid)
 	            .transition()
-	            .attr("transform", c =>
-	              `translate(${scales.offset(c.uid)}, ${scales.y(uid)})`
-	            );
+	            .attr("transform", translate);
 	        }
 	      });
 	    };
@@ -1068,7 +1067,7 @@
 	      let geneStarts = d.genes
 	        .filter(gene => gene.end <= d._end)
 	        .map(gene => gene.start);
-	      let starts = [d.start, ...geneStarts].sort((a, b) => a > b);
+	      let starts = [d.start, ...geneStarts].sort((a, b) => a > b ? 1 : -1);
 	      let coords = starts.map(value => scales.x(value));
 	      let position = getClosestValue(coords, event.x);
 	      value = coords[position];
@@ -1111,7 +1110,7 @@
 	      let ends = d.genes
 	        .filter(gene => gene.start >= d._start)
 	        .map(gene => gene.end)
-	        .sort((a, b) => a > b);
+	        .sort((a, b) => a > b ? 1 : -1);
 	      let range = ends.map(value => scales.x(value));
 	      let position = getClosestValue(range, event.x);
 	      d._end = ends[position];
