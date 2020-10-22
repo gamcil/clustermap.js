@@ -9,12 +9,14 @@ export default {
 		onClickCircle: null,
 		onClickText: null,
 		show: true,
+    marginLeft: 20,
 	},
 	colourBar: {
 		fontSize: 12,
 		height: 12,
 		show: true,
 		width: 150,
+    marginTop: 20,
 	},
 	scaleBar: {
 		colour: "black",
@@ -23,6 +25,7 @@ export default {
 		basePair: 2500,
 		show: true,
 		stroke: 1,
+    marginTop: 20,
 	},
 	link: {
 		threshold: 0,

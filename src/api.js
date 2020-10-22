@@ -37,15 +37,20 @@ const get = {
 const plot = {
   legendTransform: d => {
     let [_, max] = _cluster.extent(d.clusters)
-    return `translate(${max + 20}, ${0})`
+    return `translate(${max + config.legend.marginLeft}, ${0})`
+  },
+  bottomY: () => {
+    let range = scales.y.range()
+    let body = config.gene.shape.bodyHeight + 2 * config.gene.shape.tipHeight
+    return range[range.length - 1] + body
   },
   colourBarTransform: () => {
     let x = scales.x(config.scaleBar.basePair) + 20
-    let y = scales.y.range()[1]
+    let y = plot.bottomY() + config.colourBar.marginTop
     return `translate(${x}, ${y})`
   },
   scaleBarTransform: () => {
-    let y = scales.y.range()[1]
+    let y = plot.bottomY() + config.scaleBar.marginTop
     return `translate(0, ${y})`
   },
   updateConfig: function(target) {
@@ -58,7 +63,7 @@ const scales = {
   x: d3.scaleLinear()
     .domain([1, 1001])
     .range([0, config.plot.scaleFactor]),
-  y: d3.scaleBand().padding(0.05),
+  y: d3.scaleOrdinal(),
   group: d3.scaleOrdinal().unknown(null),
   colour: d3.scaleOrdinal().unknown("#bbb"),
   score: d3.scaleSequential(d3.interpolateGreys).domain([0, 1]),
@@ -877,13 +882,24 @@ const _scale = {
   checkRange: s => scales[s].range().length > 0,
   updateX: () => {scales.x.range([0, config.plot.scaleFactor])},
   updateY: data => {
-    scales.y
-      .range([
-        0,
-        data.clusters.length
-        * (config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight)
-        + (data.clusters.length - 1) * config.cluster.spacing
-      ])
+    let body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight
+    // let genes = body * data.clusters.length
+    // let gaps = config.cluster.spacing * (data.clusters.length - 1)
+    // scales.y.range([0, genes + gaps])
+    // console.log(genes, gaps, scales.y.range())
+    let rng = data.clusters.map((_, i) => {
+      return i * (config.cluster.spacing + body)
+    })
+    console.log("before", scales.y.domain(), scales.y.range(), rng)
+    scales.y.range(rng)
+    console.log("after", scales.y.domain(), scales.y.range(), rng)
+    // scales.y
+    //   .range([
+    //     0,
+    //     data.clusters.length * body
+    //     + (data.clusters.length - 1)
+    //     * config.cluster.spacing
+    //   ])
   },
   updateOffset: clusters => {
     scales.offset
