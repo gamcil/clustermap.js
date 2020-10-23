@@ -356,9 +356,11 @@ const _cluster = {
     return selection
   },
   drag: selection => {
-    let free
-    let height = scales.y.range()[1]
-    selection.each((d, i) => { d.slot = i })
+    let free, y
+    let body = config.gene.shape.bodyHeight + config.gene.shape.tipHeight * 2
+    let range = scales.y.range()
+    let height = range[range.length - 1]
+    selection.each((d, i) => {d.slot = i})
 
     const getDomain = () => {
       let clusters = []
@@ -367,27 +369,28 @@ const _cluster = {
       return clusters.map(c => c.uid)
     }
 
-    const started = (_, d) => {
+    const started = (event, d) => {
       flags.isDragging = true
       get.cluster(d.uid)
-        .raise()
         .classed("active", true)
         .attr("cursor", "grabbing")
       free = d.slot
+      let cluster = get.cluster(d.uid)
+      y = get.matrix(cluster).f - event.y
     }
 
     const dragged = (event, d) => {
+      // Select cluster and raise here to not consume click event in cluster label
       let me = get.cluster(d.uid)
-      let matrix = get.matrix(me)
-      const yy = Math.min(height, Math.max(0, matrix.f + event.y))
+      me.raise()
+
+      // Get current y value with mouse event
+      let yy = Math.min(height, Math.max(0, y + event.y))
       me.attr("transform", d => `translate(${scales.offset(d.uid)}, ${yy})`)
 
       // Get closest index based on new y-position
       let domain = scales.y.domain()
-      let p = domain.length - Math.min(
-        Math.round(height / yy),
-        domain.length
-      )
+      let p = Math.round(yy / (height / domain.length))
 
       d3.selectAll("path.geneLink")
         .call(_link.setPath)
@@ -416,6 +419,7 @@ const _cluster = {
     }
 
     return d3.drag()
+      .container(function() {return this.parentNode.parentNode})
       .on("start", started)
       .on("drag", dragged)
       .on("end", ended)
@@ -828,6 +832,8 @@ const _locus = {
         d3.selectAll("g.clusterInfo")
           .attr("transform", c => `translate(${newMin - scales.offset(c.uid)}, 0)`)
       } else {
+        // TODO: should take into consideration all loci in the cluster
+        // use extentOne?
         d3.select(`#cinfo_${d._cluster}`)
           .attr("transform", `translate(${value + locStart - 10}, 0)`)
       }
@@ -883,23 +889,10 @@ const _scale = {
   updateX: () => {scales.x.range([0, config.plot.scaleFactor])},
   updateY: data => {
     let body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight
-    // let genes = body * data.clusters.length
-    // let gaps = config.cluster.spacing * (data.clusters.length - 1)
-    // scales.y.range([0, genes + gaps])
-    // console.log(genes, gaps, scales.y.range())
     let rng = data.clusters.map((_, i) => {
       return i * (config.cluster.spacing + body)
     })
-    console.log("before", scales.y.domain(), scales.y.range(), rng)
     scales.y.range(rng)
-    console.log("after", scales.y.domain(), scales.y.range(), rng)
-    // scales.y
-    //   .range([
-    //     0,
-    //     data.clusters.length * body
-    //     + (data.clusters.length - 1)
-    //     * config.cluster.spacing
-    //   ])
   },
   updateOffset: clusters => {
     scales.offset
