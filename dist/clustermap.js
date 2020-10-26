@@ -4,9 +4,10 @@
 	(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ClusterMap = {}));
 }(this, (function (exports) { 'use strict';
 
-	function renameText() {
+	function renameText(event) {
 		// Changes value of a text node to a prompted value
-		let text = d3.select(this);
+	  if (event.defaultPrevented) return
+		let text = d3.select(event.target);
 		let result = prompt("Enter new value:", text.text());
 		if (result) text.text(result);
 	}
@@ -34,8 +35,9 @@
 		let entryHeight = 15;
 		let fontSize = 12;
 		let hidden = [];
-		let onClickCircle = null;
+		let onClickCircle = () => {};
 		let onClickText = renameText;
+	  let onAltClickText = () => {};
 		let y = d3.scaleBand().paddingInner(0.5);
 		let t = d3.transition().duration(500);
 
@@ -57,7 +59,7 @@
 				// Render each legend element <g>
 	      let translate = d => `translate(0, ${y(d)})`;
 				g.selectAll("g.element")
-					.data(visible)
+					.data(visible, d => d)
 					.join(
 						enter => {
 							enter = enter.append("g")
@@ -65,7 +67,6 @@
 								.attr("transform", translate);
 							enter.append("circle")
 								.attr("class", d => `group-${d}`);
-								// .attr("width", 6)
 							enter.append("text")
 								.text(d => `Group ${d}`)
 								.attr("x", 16)
@@ -86,10 +87,10 @@
 					g.selectAll("circle")
 						.attr("cursor", "pointer")
 						.on("click", onClickCircle);
-				if (onClickText)
-					g.selectAll("text")
-						.attr("cursor", "pointer")
-						.on("click", onClickText);
+	      g.selectAll("text")
+	        .attr("cursor", "pointer")
+	        .on("click", onClickText)
+	        .on("contextmenu", onAltClickText);
 			});
 		}
 
@@ -113,6 +114,7 @@
 		my.fontSize = _ => arguments.length ? (fontSize = parseInt(_), my) : fontSize;
 		my.onClickCircle = _ => arguments.length ? (onClickCircle = _, my) : onClickCircle;
 		my.onClickText = _ => arguments.length ? (onClickText = _, my) : onClickText;
+		my.onAltClickText = _ => arguments.length ? (onAltClickText = _, my) : onAltClickText;
 
 		return my
 	}
@@ -312,22 +314,26 @@
 			onClickCircle: null,
 			onClickText: null,
 			show: true,
+	    marginLeft: 20,
 		},
 		colourBar: {
-			fontSize: 12,
+			fontSize: 10,
 			height: 12,
 			show: true,
 			width: 150,
+	    marginTop: 20,
 		},
 		scaleBar: {
 			colour: "black",
-			fontSize: 12,
+			fontSize: 10,
 			height: 12,
 			basePair: 2500,
 			show: true,
 			stroke: 1,
+	    marginTop: 20,
 		},
 		link: {
+	    show: true,
 			threshold: 0,
 	    bestOnly: false,
 		},
@@ -335,7 +341,7 @@
 			nameFontSize: 12,
 			lociFontSize: 10,
 	    hideLocusCoordinates: false,
-			spacing: 50,
+			spacing: 40,
 			alignLabels: true,
 		},
 		locus: {
@@ -400,15 +406,20 @@
 	const plot = {
 	  legendTransform: d => {
 	    let [_, max] = _cluster.extent(d.clusters);
-	    return `translate(${max + 20}, ${0})`
+	    return `translate(${max + config$1.legend.marginLeft}, ${0})`
+	  },
+	  bottomY: () => {
+	    let range = scales.y.range();
+	    let body = config$1.gene.shape.bodyHeight + 2 * config$1.gene.shape.tipHeight;
+	    return range[range.length - 1] + body
 	  },
 	  colourBarTransform: () => {
 	    let x = scales.x(config$1.scaleBar.basePair) + 20;
-	    let y = scales.y.range()[1];
+	    let y = plot.bottomY() + config$1.colourBar.marginTop;
 	    return `translate(${x}, ${y})`
 	  },
 	  scaleBarTransform: () => {
-	    let y = scales.y.range()[1];
+	    let y = plot.bottomY() + config$1.scaleBar.marginTop;
 	    return `translate(0, ${y})`
 	  },
 	  updateConfig: function(target) {
@@ -421,7 +432,7 @@
 	  x: d3.scaleLinear()
 	    .domain([1, 1001])
 	    .range([0, config$1.plot.scaleFactor]),
-	  y: d3.scaleBand().padding(0.05),
+	  y: d3.scaleOrdinal(),
 	  group: d3.scaleOrdinal().unknown(null),
 	  colour: d3.scaleOrdinal().unknown("#bbb"),
 	  score: d3.scaleSequential(d3.interpolateGreys).domain([0, 1]),
@@ -714,9 +725,11 @@
 	    return selection
 	  },
 	  drag: selection => {
-	    let free;
-	    let height = scales.y.range()[1];
-	    selection.each((d, i) => { d.slot = i; });
+	    let free, y;
+	    let body = config$1.gene.shape.bodyHeight + config$1.gene.shape.tipHeight * 2;
+	    let range = scales.y.range();
+	    let height = range[range.length - 1];
+	    selection.each((d, i) => {d.slot = i;});
 
 	    const getDomain = () => {
 	      let clusters = [];
@@ -725,27 +738,28 @@
 	      return clusters.map(c => c.uid)
 	    };
 
-	    const started = (_, d) => {
+	    const started = (event, d) => {
 	      flags.isDragging = true;
 	      get.cluster(d.uid)
-	        .raise()
 	        .classed("active", true)
 	        .attr("cursor", "grabbing");
 	      free = d.slot;
+	      let cluster = get.cluster(d.uid);
+	      y = get.matrix(cluster).f - event.y;
 	    };
 
 	    const dragged = (event, d) => {
+	      // Select cluster and raise here to not consume click event in cluster label
 	      let me = get.cluster(d.uid);
-	      let matrix = get.matrix(me);
-	      const yy = Math.min(height, Math.max(0, matrix.f + event.y));
+	      me.raise();
+
+	      // Get current y value with mouse event
+	      let yy = Math.min(height, Math.max(0, y + event.y));
 	      me.attr("transform", d => `translate(${scales.offset(d.uid)}, ${yy})`);
 
 	      // Get closest index based on new y-position
 	      let domain = scales.y.domain();
-	      let p = domain.length - Math.min(
-	        Math.round(height / yy),
-	        domain.length
-	      );
+	      let p = Math.round(yy / (height / domain.length));
 
 	      d3.selectAll("path.geneLink")
 	        .call(_link.setPath);
@@ -774,6 +788,7 @@
 	    };
 
 	    return d3.drag()
+	      .container(function() {return this.parentNode.parentNode})
 	      .on("start", started)
 	      .on("drag", dragged)
 	      .on("end", ended)
@@ -786,13 +801,20 @@
 	    let [a, b] = [l.query.uid, l.target.uid].sort();
 	    return `${a}-${b}`
 	  },
-	  display: l => {
+	  /**
+	   * Determines the opacity of a given link.
+	   * A link is hidden (opacity set to 0) if a) the query or target genes are
+	   * hidden, or b) if config.link.show is false.
+	   */
+	  opacity: l => {
 	    let a = get.gene(l.query.uid).attr("display");
 	    let b = get.gene(l.target.uid).attr("display");
-	    return (a === "none" || b === "none") ? "none" : "inline"
+	    let hide = ["none", null];  // Set to none or still undefined
+	    return (!config$1.link.show || (hide.includes(a) || hide.includes(b))) ? 0 : 1
 	  },
 	  /**
 	   * Sets the d attribute on a selection of link lines.
+	   * @param {bool} snap - calculate path to axis, not including transform matrix
 	   */
 	  setPath: (selection, snap) => {
 	    return selection.attr("d", d => _link.path(d, snap))
@@ -808,6 +830,13 @@
 	   * @param {Array} links - All link data objects
 	   */
 	  filter: links => {
+	    // Filter out any links with no group -- have been hidden
+	    links = links.filter(link => {
+	      let query = scales.group(link.query.uid) !== null;
+	      let target = scales.group(link.target.uid) !== null;
+	      return query && target
+	    });
+
 	    if (!config$1.link.bestOnly) return links
 
 	    const setsEqual = (a, b) => (
@@ -1003,6 +1032,34 @@
 	        .range(range);
 	    }
 	  },
+	  /**
+	   * Hides a homology group, removing gene fills and legend entry.
+	   */
+	  hideGroup: group => {
+	    let oldDomain = scales.group.domain();
+	    let oldRange = scales.group.range();
+	    let newDomain = []; 
+	    let newRange = []; 
+
+	    // Filter domain/range for entries matching given group
+	    for (let [i, d] of oldRange.entries()) {
+	      if (d === group) continue
+	      newRange.push(d);
+	      newDomain.push(oldDomain[i]);
+	    }
+	    scales.group.domain(newDomain);
+	    scales.group.range(newRange);
+
+	    // Remove the group from the colour scale
+	    let colourDomain = scales.colour.domain();
+	    let colourRange = scales.colour.range();
+	    let index = colourDomain.indexOf(group);
+	    colourDomain.splice(index, 1);
+	    colourRange.splice(index, 1);
+	    scales.colour
+	      .domain(colourDomain)
+	      .range(colourRange);
+	  }
 	};
 
 	const _locus = {
@@ -1041,9 +1098,7 @@
 	      .call(_locus.updateHoverBox)
 	  },
 	  dragResize: selection => {
-	    let minPos,
-	      value,
-	      initial;
+	    let minPos, value, initial;
 
 	    const started = (_, d) => {
 	      [minPos, _] = _cluster.extent([d.uid]);
@@ -1053,13 +1108,11 @@
 
 	    function dragged(event, d) {
 	      let handle = d3.select(this);
-	      let func;
 	      if (handle.attr("class") === "leftHandle") {
-	        func = _left;
+	        _left(event, d, handle);
 	      } else {
-	        func = _right;
+	        _right(event, d, handle);
 	      }
-	      func(event, d, handle);
 	    }
 
 	    const _left = (event, d, handle) => {
@@ -1087,7 +1140,7 @@
 
 	      // Hide any gene links connected to hidden genes
 	      d3.selectAll("path.geneLink")
-	        .attr("display", _link.display);
+	        .attr("opacity", _link.opacity);
 
 	      if (config$1.cluster.alignLabels) {
 	        // Add offset/locus scale values to make equivalent to minPos from
@@ -1128,7 +1181,7 @@
 
 	      // Hide any gene links attached to hidden genes
 	      d3.selectAll("path.geneLink")
-	        .attr("display", _link.display);
+	        .attr("opacity", _link.opacity);
 
 	      // Adjust position of legend when final locus _end property changes
 	      d3.select("g.legend")
@@ -1183,6 +1236,8 @@
 	        d3.selectAll("g.clusterInfo")
 	          .attr("transform", c => `translate(${newMin - scales.offset(c.uid)}, 0)`);
 	      } else {
+	        // TODO: should take into consideration all loci in the cluster
+	        // use extentOne?
 	        d3.select(`#cinfo_${d._cluster}`)
 	          .attr("transform", `translate(${value + locStart - 10}, 0)`);
 	      }
@@ -1237,13 +1292,11 @@
 	  checkRange: s => scales[s].range().length > 0,
 	  updateX: () => {scales.x.range([0, config$1.plot.scaleFactor]);},
 	  updateY: data => {
-	    scales.y
-	      .range([
-	        0,
-	        data.clusters.length
-	        * (config$1.gene.shape.tipHeight * 2 + config$1.gene.shape.bodyHeight)
-	        + (data.clusters.length - 1) * config$1.cluster.spacing
-	      ]);
+	    let body = config$1.gene.shape.tipHeight * 2 + config$1.gene.shape.bodyHeight;
+	    let rng = data.clusters.map((_, i) => {
+	      return i * (config$1.cluster.spacing + body)
+	    });
+	    scales.y.range(rng);
 	  },
 	  updateOffset: clusters => {
 	    scales.offset
@@ -1291,6 +1344,12 @@
 
 	config$1.gene.shape.onClick = _gene.anchor;
 	config$1.legend.onClickText = renameText;
+	config$1.legend.onAltClickText = (event) => {
+	  event.preventDefault();
+	  let group = d3.select(event.target).datum();
+	  _link.hideGroup(group);
+	  plot.update();
+	};
 
 	function clusterMap() {
 	  /* A ClusterMap plot. */
@@ -1354,9 +1413,7 @@
 	          },
 	          update => update.call(
 	            update => {
-	              update
-	                // .transition(transition)
-	                .call(arrangePlot);
+	              update.call(arrangePlot);
 	            })
 	        );
 
@@ -1398,15 +1455,14 @@
 	              .on("click", renameText);
 	            info.append("text")
 	              .attr("class", "locusText")
-	              .attr("y", 10)
+	              .attr("y", 12)
 	              .style("dominant-baseline", "hanging");
 	            enter.append("g")
 	              .attr("class", "loci");
 	            info.selectAll("text")
 	              .attr("text-anchor", "end")
 	              .style("font-family", "sans");
-	            return enter
-	              .call(_cluster.update)
+	            return enter.call(_cluster.update)
 	          },
 	          update => update.call(
 	            update => update
@@ -1445,8 +1501,7 @@
 	            hover.selectAll(".leftHandle, .rightHandle")
 	              .attr("width", 8)
 	              .attr("cursor", "pointer");
-	            enter
-	              .on("mouseenter", event => {
+	            enter.on("mouseenter", event => {
 	                if (flags.isDragging) return
 	                d3.select(event.target)
 	                  .select("g.hover")
@@ -1507,12 +1562,21 @@
 	            .style("fill", d => scales.score(d.identity))
 	            .style("stroke", "black")
 	            .style("stroke-width", "0.5px")
+	            .attr("opacity", _link.opacity)
 	            .call(_link.setPath),
 	          update => update.call(
-	            update => update
-	              .transition(transition)
+	            update => update.transition(transition)
+	              .attr("opacity", _link.opacity)
 	              .call(_link.setPath, true)
+	          ),
+	          exit => exit.call(
+	            exit => {
+	              exit.transition(transition)
+	                .attr("opacity", 0)
+	                .remove();
+	            }
 	          )
+
 	        );
 
 	      let legendFn = getLegendFn();
@@ -1618,6 +1682,7 @@
 	      .entryHeight(config$1.legend.entryHeight)
 	      .onClickCircle(config$1.legend.onClickCircle || changeGeneColour)
 	      .onClickText(config$1.legend.onClickText)
+	      .onAltClickText(config$1.legend.onAltClickText)
 	  }
 
 	  my.config = function(_) {
