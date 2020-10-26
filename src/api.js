@@ -432,13 +432,20 @@ const _link = {
     let [a, b] = [l.query.uid, l.target.uid].sort()
     return `${a}-${b}`
   },
-  display: l => {
+  /**
+   * Determines the opacity of a given link.
+   * A link is hidden (opacity set to 0) if a) the query or target genes are
+   * hidden, or b) if config.link.show is false.
+   */
+  opacity: l => {
     let a = get.gene(l.query.uid).attr("display")
     let b = get.gene(l.target.uid).attr("display")
-    return (a === "none" || b === "none") ? "none" : "inline"
+    let hide = ["none", null]  // Set to none or still undefined
+    return (!config.link.show || (hide.includes(a) || hide.includes(b))) ? 0 : 1
   },
   /**
    * Sets the d attribute on a selection of link lines.
+   * @param {bool} snap - calculate path to axis, not including transform matrix
    */
   setPath: (selection, snap) => {
     return selection.attr("d", d => _link.path(d, snap))
@@ -454,6 +461,13 @@ const _link = {
    * @param {Array} links - All link data objects
    */
   filter: links => {
+    // Filter out any links with no group -- have been hidden
+    links = links.filter(link => {
+      let query = scales.group(link.query.uid) !== null
+      let target = scales.group(link.target.uid) !== null
+      return query && target
+    })
+
     if (!config.link.bestOnly) return links
 
     const setsEqual = (a, b) => (
@@ -649,6 +663,34 @@ const _link = {
         .range(range)
     }
   },
+  /**
+   * Hides a homology group, removing gene fills and legend entry.
+   */
+  hideGroup: group => {
+    let oldDomain = scales.group.domain()
+    let oldRange = scales.group.range()
+    let newDomain = [] 
+    let newRange = [] 
+
+    // Filter domain/range for entries matching given group
+    for (let [i, d] of oldRange.entries()) {
+      if (d === group) continue
+      newRange.push(d)
+      newDomain.push(oldDomain[i])
+    }
+    scales.group.domain(newDomain)
+    scales.group.range(newRange)
+
+    // Remove the group from the colour scale
+    let colourDomain = scales.colour.domain()
+    let colourRange = scales.colour.range()
+    let index = colourDomain.indexOf(group)
+    colourDomain.splice(index, 1)
+    colourRange.splice(index, 1)
+    scales.colour
+      .domain(colourDomain)
+      .range(colourRange)
+  }
 }
 
 const _locus = {
@@ -687,10 +729,7 @@ const _locus = {
       .call(_locus.updateHoverBox)
   },
   dragResize: selection => {
-    let minPos,
-      value,
-      side,
-      initial
+    let minPos, value, initial
 
     const started = (_, d) => {
       [minPos, _] = _cluster.extent([d.uid])
@@ -700,15 +739,11 @@ const _locus = {
 
     function dragged(event, d) {
       let handle = d3.select(this)
-      let func
       if (handle.attr("class") === "leftHandle") {
-        side = "left"
-        func = _left
+        _left(event, d, handle)
       } else {
-        side = "right"
-        func = _right
+        _right(event, d, handle)
       }
-      func(event, d, handle)
     }
 
     const _left = (event, d, handle) => {
@@ -736,7 +771,7 @@ const _locus = {
 
       // Hide any gene links connected to hidden genes
       d3.selectAll("path.geneLink")
-        .attr("display", _link.display)
+        .attr("opacity", _link.opacity)
 
       if (config.cluster.alignLabels) {
         // Add offset/locus scale values to make equivalent to minPos from
@@ -777,7 +812,7 @@ const _locus = {
 
       // Hide any gene links attached to hidden genes
       d3.selectAll("path.geneLink")
-        .attr("display", _link.display)
+        .attr("opacity", _link.opacity)
 
       // Adjust position of legend when final locus _end property changes
       d3.select("g.legend")
@@ -940,6 +975,12 @@ const _scale = {
 
 config.gene.shape.onClick = _gene.anchor
 config.legend.onClickText = renameText
+config.legend.onAltClickText = (event) => {
+  event.preventDefault()
+  let group = d3.select(event.target).datum()
+  _link.hideGroup(group)
+  plot.update()
+}
 
 export {
   config,

@@ -68,9 +68,7 @@ export default function clusterMap() {
           },
           update => update.call(
             update => {
-              update
-                // .transition(transition)
-                .call(arrangePlot)
+              update.call(arrangePlot)
             })
         )
 
@@ -112,15 +110,14 @@ export default function clusterMap() {
               .on("click", renameText)
             info.append("text")
               .attr("class", "locusText")
-              .attr("y", 10)
+              .attr("y", 12)
               .style("dominant-baseline", "hanging")
             enter.append("g")
               .attr("class", "loci")
             info.selectAll("text")
               .attr("text-anchor", "end")
               .style("font-family", "sans")
-            return enter
-              .call(api.cluster.update)
+            return enter.call(api.cluster.update)
           },
           update => update.call(
             update => update
@@ -159,8 +156,7 @@ export default function clusterMap() {
             hover.selectAll(".leftHandle, .rightHandle")
               .attr("width", 8)
               .attr("cursor", "pointer")
-            enter
-              .on("mouseenter", event => {
+            enter.on("mouseenter", event => {
                 if (api.flags.isDragging) return
                 d3.select(event.target)
                   .select("g.hover")
@@ -221,12 +217,21 @@ export default function clusterMap() {
             .style("fill", d => api.scales.score(d.identity))
             .style("stroke", "black")
             .style("stroke-width", "0.5px")
+            .attr("opacity", api.link.opacity)
             .call(api.link.setPath),
           update => update.call(
-            update => update
-              .transition(transition)
+            update => update.transition(transition)
+              .attr("opacity", api.link.opacity)
               .call(api.link.setPath, true)
+          ),
+          exit => exit.call(
+            exit => {
+              exit.transition(transition)
+                .attr("opacity", 0)
+                .remove()
+            }
           )
+
         )
 
       let legendFn = getLegendFn()
@@ -332,6 +337,7 @@ export default function clusterMap() {
       .entryHeight(api.config.legend.entryHeight)
       .onClickCircle(api.config.legend.onClickCircle || changeGeneColour)
       .onClickText(api.config.legend.onClickText)
+      .onAltClickText(api.config.legend.onAltClickText)
   }
 
   my.config = function(_) {

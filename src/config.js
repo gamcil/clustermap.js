@@ -12,7 +12,7 @@ export default {
     marginLeft: 20,
 	},
 	colourBar: {
-		fontSize: 12,
+		fontSize: 10,
 		height: 12,
 		show: true,
 		width: 150,
@@ -20,7 +20,7 @@ export default {
 	},
 	scaleBar: {
 		colour: "black",
-		fontSize: 12,
+		fontSize: 10,
 		height: 12,
 		basePair: 2500,
 		show: true,
@@ -28,6 +28,7 @@ export default {
     marginTop: 20,
 	},
 	link: {
+    show: true,
 		threshold: 0,
     bestOnly: false,
 	},
@@ -35,7 +36,7 @@ export default {
 		nameFontSize: 12,
 		lociFontSize: 10,
     hideLocusCoordinates: false,
-		spacing: 50,
+		spacing: 40,
 		alignLabels: true,
 	},
 	locus: {

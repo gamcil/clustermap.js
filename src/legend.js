@@ -8,8 +8,9 @@ export default function legend(colourScale) {
 	let entryHeight = 15
 	let fontSize = 12
 	let hidden = []
-	let onClickCircle = null
+	let onClickCircle = () => {}
 	let onClickText = renameText
+  let onAltClickText = () => {}
 	let y = d3.scaleBand().paddingInner(0.5)
 	let t = d3.transition().duration(500)
 
@@ -31,7 +32,7 @@ export default function legend(colourScale) {
 			// Render each legend element <g>
       let translate = d => `translate(0, ${y(d)})`
 			g.selectAll("g.element")
-				.data(visible)
+				.data(visible, d => d)
 				.join(
 					enter => {
 						enter = enter.append("g")
@@ -39,7 +40,6 @@ export default function legend(colourScale) {
 							.attr("transform", translate)
 						enter.append("circle")
 							.attr("class", d => `group-${d}`)
-							// .attr("width", 6)
 						enter.append("text")
 							.text(d => `Group ${d}`)
 							.attr("x", 16)
@@ -60,10 +60,10 @@ export default function legend(colourScale) {
 				g.selectAll("circle")
 					.attr("cursor", "pointer")
 					.on("click", onClickCircle)
-			if (onClickText)
-				g.selectAll("text")
-					.attr("cursor", "pointer")
-					.on("click", onClickText)
+      g.selectAll("text")
+        .attr("cursor", "pointer")
+        .on("click", onClickText)
+        .on("contextmenu", onAltClickText)
 		})
 	}
 
@@ -87,6 +87,7 @@ export default function legend(colourScale) {
 	my.fontSize = _ => arguments.length ? (fontSize = parseInt(_), my) : fontSize
 	my.onClickCircle = _ => arguments.length ? (onClickCircle = _, my) : onClickCircle
 	my.onClickText = _ => arguments.length ? (onClickText = _, my) : onClickText
+	my.onAltClickText = _ => arguments.length ? (onAltClickText = _, my) : onAltClickText
 
 	return my
 }
