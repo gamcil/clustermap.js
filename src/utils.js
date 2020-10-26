@@ -1,6 +1,7 @@
-export function renameText() {
+export function renameText(event) {
 	// Changes value of a text node to a prompted value
-	let text = d3.select(this)
+  if (event.defaultPrevented) return
+	let text = d3.select(event.target)
 	let result = prompt("Enter new value:", text.text())
 	if (result) text.text(result)
 }
