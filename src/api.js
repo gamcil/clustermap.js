@@ -74,7 +74,7 @@ const scales = {
 const _gene = {
   getId: d => `gene_${d.uid}`,
   fill: g => {
-    if (!scales.colour || !scales.group) return "#bbb"
+    if (!scales.group) return "#bbb"
     let groupId = scales.group(g.uid)
     return scales.colour(groupId)
   },
@@ -574,23 +574,24 @@ const _link = {
    * @param {Array} links - Link objects
    */
   getGroups: links => {
-    let groups = []
-    for (const link of links) {
-      if (link.identity < config.link.threshold) continue
-      let found = false
-      for (let i = 0; i < groups.length; i++) {
-        let group = groups[i]
-        if (group.includes(link.query.uid) || group.includes(link.target.uid))
-          found = true
-        if (found) {
-          if (!group.includes(link.query.uid)) group.push(link.query.uid);
-          if (!group.includes(link.target.uid)) group.push(link.target.uid);
-          break;
-        }
-      }
-      if (!found) groups.push([link.query.uid, link.target.uid])
-    }
-    return groups
+    return links
+      .map(link => [link.query.uid, link.target.uid])
+      .map((e, i, a) => (
+        a.slice(i).reduce(
+          (p, c) => e.some(n => c.includes(n))
+          ? [...new Set([...p, ...c])]
+          : p,
+        [])
+      )).reduce((r, s) => {
+        let merged = false
+        r = r.map(a => (
+          a.some(n => s.includes(n))
+          ? (merged = true, [...new Set([...a, ...s])])
+          : a
+        ))
+        !merged && r.push(s)
+        return r
+      }, [])
   },
   /**
    * TODO: collapse this function into getGeneLinkGroups
