@@ -523,7 +523,7 @@
 	      .attr("display", config$1.gene.label.show ? "inherit" : "none")
 	      .attr("transform", _gene.labelTransform)
 	      .attr("font-size", config$1.gene.label.fontSize)
-	      .attr("text-anchor", config$1.gene.label.Anchor);
+	      .attr("text-anchor", config$1.gene.label.anchor);
 	    return selection
 	  },
 	  anchor: (_, anchor) => {
