@@ -133,17 +133,23 @@ const _gene = {
       : config.gene.label.rotation
     return `translate(${gx}, 0) rotate(${rotate})`
   },
+  labelText: g => {
+    if (config.gene.label.name === "uid") return g.uid
+    return g.names[config.gene.label.name] || g.uid
+  },
+  polygonClass: g => {
+    let group = scales.group(g.uid)
+    return (group !== null) ? `genePolygon group-${group}` : "genePolygon"
+  },
   update: selection => {
     selection.selectAll("polygon")
-      .attr("class", g => {
-        let group = scales.group(g.uid)
-        return (group !== null) ? `genePolygon group-${group}` : "genePolygon"
-      })
+      .attr("class", _gene.polygonClass)
       .attr("points", _gene.points)
       .attr("fill", _gene.fill)
       .style("stroke", config.gene.shape.stroke)
       .style("stroke-width", config.gene.shape.strokeWidth)
     selection.selectAll("text.geneLabel")
+      .text(_gene.labelText)
       .attr("display", config.gene.label.show ? "inherit" : "none")
       .attr("transform", _gene.labelTransform)
       .attr("font-size", config.gene.label.fontSize)

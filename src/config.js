@@ -61,6 +61,7 @@ export default {
 			rotation: 25,
 			show: false,
 			start: 0.5,
+      name: "uid",
 		},
 	},
 }

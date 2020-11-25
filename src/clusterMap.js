@@ -196,7 +196,6 @@ export default function clusterMap() {
               .on("click", api.config.gene.shape.onClick)
               .attr("class", "genePolygon")
             enter.append("text")
-              .text(g => g.name)
               .attr("class", "geneLabel")
               .attr("dy", "-0.3em")
             return enter
