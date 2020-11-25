@@ -366,6 +366,7 @@
 				rotation: 25,
 				show: false,
 				start: 0.5,
+	      name: "uid",
 			},
 		},
 	};
@@ -502,17 +503,23 @@
 	      : config$1.gene.label.rotation;
 	    return `translate(${gx}, 0) rotate(${rotate})`
 	  },
+	  labelText: g => {
+	    if (config$1.gene.label.name === "uid") return g.uid
+	    return g.names[config$1.gene.label.name] || g.uid
+	  },
+	  polygonClass: g => {
+	    let group = scales.group(g.uid);
+	    return (group !== null) ? `genePolygon group-${group}` : "genePolygon"
+	  },
 	  update: selection => {
 	    selection.selectAll("polygon")
-	      .attr("class", g => {
-	        let group = scales.group(g.uid);
-	        return (group !== null) ? `genePolygon group-${group}` : "genePolygon"
-	      })
+	      .attr("class", _gene.polygonClass)
 	      .attr("points", _gene.points)
 	      .attr("fill", _gene.fill)
 	      .style("stroke", config$1.gene.shape.stroke)
 	      .style("stroke-width", config$1.gene.shape.strokeWidth);
 	    selection.selectAll("text.geneLabel")
+	      .text(_gene.labelText)
 	      .attr("display", config$1.gene.label.show ? "inherit" : "none")
 	      .attr("transform", _gene.labelTransform)
 	      .attr("font-size", config$1.gene.label.fontSize)
@@ -1542,7 +1549,6 @@
 	              .on("click", config$1.gene.shape.onClick)
 	              .attr("class", "genePolygon");
 	            enter.append("text")
-	              .text(g => g.name)
 	              .attr("class", "geneLabel")
 	              .attr("dy", "-0.3em");
 	            return enter
