@@ -153,7 +153,7 @@ const _gene = {
       .attr("display", config.gene.label.show ? "inherit" : "none")
       .attr("transform", _gene.labelTransform)
       .attr("font-size", config.gene.label.fontSize)
-      .attr("text-anchor", config.gene.label.Anchor)
+      .attr("text-anchor", config.gene.label.anchor)
     return selection
   },
   anchor: (_, anchor) => {
