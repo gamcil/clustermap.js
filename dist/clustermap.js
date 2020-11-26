@@ -503,10 +503,70 @@
 	      : config$1.gene.label.rotation;
 	    return `translate(${gx}, 0) rotate(${rotate})`
 	  },
-	  labelText: g => {
-	    if (config$1.gene.label.name === "uid") return g.uid
-	    return g.names[config$1.gene.label.name] || g.uid
+	  tooltipHTML: g => {
+	    // Create detached <div>
+	    let div = d3.create("div")
+	      .attr("class", "tooltip-contents")
+	      .style("display", "flex")
+	      .style("flex-direction", "column");
+
+	    // Add <input> so label can be edited directly
+	    div.append("text").text("Edit label");
+	    let text = div.append("input")
+	      .attr("type", "input")
+	      .attr("value", g.label || g.uid);
+
+	    // Add multiple <select> for each saved gene identifier
+	    div.append("text").text("Gene identifiers");
+	    let select = div.append("select")
+	      .attr("multiple", true);
+	    select.selectAll("option")
+	      .data(Object.keys(g.names))
+	      .join("option")
+	      .text(d => `${g.names[d]} [${d}]`)
+	      .attr("value", d => g.names[d]);
+
+	    // Add event handlers to update labels
+	    text.on("input", e => {
+	      g.label = e.target.value;
+	      select.attr("value", null);
+	      plot.update({});
+	    });
+	    select.on("change", e => {
+	      g.label = e.target.value;
+	      text.attr("value", e.target.value);
+	      plot.update({});
+	    });
+	    return div
 	  },
+	  contextMenu: (event, data) => {
+	    event.preventDefault();
+
+	    // Clear tooltip contents, generate new data
+	    let tip = d3.select("div.tooltip");
+	    tip.html("");
+	    tip.append(() => _gene.tooltipHTML(data).node());
+
+	    // Get position relative to clicked element
+	    let rect = event.target.getBoundingClientRect(); 
+	    let bbox = tip.node().getBoundingClientRect();
+	    let xOffset = rect.width / 2 - bbox.width / 2;
+	    let yOffset = rect.height * 1.2;
+
+	    // Adjust position and show tooltip
+	    // Add a delayed fade-out transition if user does not enter tooltip
+	    tip.style("left", rect.x + xOffset + "px")
+	      .style("top", rect.y + yOffset + "px");
+	    tip.transition()
+	      .duration(100)
+	      .style("opacity", 1)
+	      .style("pointer-events", "all");
+	    tip.transition()
+	      .delay(1000)
+	      .style("opacity", 0)
+	      .style("pointer-events", "none");
+	  },
+	  labelText: g => g.label || g.uid,
 	  polygonClass: g => {
 	    let group = scales.group(g.uid);
 	    return (group !== null) ? `genePolygon group-${group}` : "genePolygon"
@@ -732,10 +792,7 @@
 	    return selection
 	  },
 	  drag: selection => {
-	    let free, y;
-	    let body = config$1.gene.shape.bodyHeight + config$1.gene.shape.tipHeight * 2;
-	    let range = scales.y.range();
-	    let height = range[range.length - 1];
+	    let free, y, range, height;
 	    selection.each((d, i) => {d.slot = i;});
 
 	    const getDomain = () => {
@@ -747,12 +804,19 @@
 
 	    const started = (event, d) => {
 	      flags.isDragging = true;
-	      get.cluster(d.uid)
-	        .classed("active", true)
-	        .attr("cursor", "grabbing");
 	      free = d.slot;
+
+	      // Get subject cluster, change cursor
 	      let cluster = get.cluster(d.uid);
+	      cluster.classed("active", true)
+	        .attr("cursor", "grabbing");
+
+	      // Get current position of subject cluster
 	      y = get.matrix(cluster).f - event.y;
+
+	      // Get y-axis bounds for dragging
+	      range = scales.y.range();
+	      height = range[range.length - 1];
 	    };
 
 	    const dragged = (event, d) => {
@@ -1350,6 +1414,38 @@
 	  }
 	};
 
+	const _tooltip = {
+	  enter: event => {
+	    // Show the tooltip
+			d3.select(event.target)
+	      .transition()
+				.duration(0)
+				.style("opacity", 1)
+				.style("pointer-events", "all");
+
+	    // Hide tooltip when there's a click anywhere else in the window
+	    d3.select(window)
+	      .on("click", e => {
+	        if (e.target === event.target || event.target.contains(e.target))
+	          return
+	        d3.select(event.target)
+	          .transition()
+	          .style("opacity", 0)
+	          .style("pointer-events", "none");
+	      });
+	  },
+	  leave: event => {
+	    // Do not hide tooltip if <input> has focus
+			let tip = d3.select(event.target);
+	    let active = document.activeElement;
+	    if (active.tagName === "INPUT" && tip.node().contains(active)) return
+	    tip.transition()
+				.delay(400)
+				.style("opacity", 0)
+				.style("pointer-events", "none");
+	  },
+	};
+
 	config$1.gene.shape.onClick = _gene.anchor;
 	config$1.legend.onClickText = renameText;
 	config$1.legend.onAltClickText = (event) => {
@@ -1390,6 +1486,15 @@
 	              .attr("class", "colourPicker")
 	              .attr("type", "color")
 	              .style("opacity", 0);
+
+	            // Add tooltip element
+	            enter.append("div")
+	              .attr("class", "tooltip")
+	              .style("opacity", 0)
+	              .style("position", "absolute")
+	              .style("pointer-events", "none")
+	              .on("mouseenter", _tooltip.enter)
+	              .on("mouseleave", _tooltip.leave);
 
 	            // Add root SVG element
 	            let svg = enter.append("svg")
@@ -1547,6 +1652,7 @@
 	              .attr("display", "inline");
 	            enter.append("polygon")
 	              .on("click", config$1.gene.shape.onClick)
+	              .on("contextmenu", _gene.contextMenu)
 	              .attr("class", "genePolygon");
 	            enter.append("text")
 	              .attr("class", "geneLabel")

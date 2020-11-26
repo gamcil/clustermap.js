@@ -38,6 +38,15 @@ export default function clusterMap() {
               .attr("type", "color")
               .style("opacity", 0)
 
+            // Add tooltip element
+            enter.append("div")
+              .attr("class", "tooltip")
+              .style("opacity", 0)
+              .style("position", "absolute")
+              .style("pointer-events", "none")
+              .on("mouseenter", api.tooltip.enter)
+              .on("mouseleave", api.tooltip.leave)
+
             // Add root SVG element
             let svg = enter.append("svg")
               .attr("class", "clusterMap")
@@ -194,6 +203,7 @@ export default function clusterMap() {
               .attr("display", "inline")
             enter.append("polygon")
               .on("click", api.config.gene.shape.onClick)
+              .on("contextmenu", api.gene.contextMenu)
               .attr("class", "genePolygon")
             enter.append("text")
               .attr("class", "geneLabel")

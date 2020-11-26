@@ -133,10 +133,70 @@ const _gene = {
       : config.gene.label.rotation
     return `translate(${gx}, 0) rotate(${rotate})`
   },
-  labelText: g => {
-    if (config.gene.label.name === "uid") return g.uid
-    return g.names[config.gene.label.name] || g.uid
+  tooltipHTML: g => {
+    // Create detached <div>
+    let div = d3.create("div")
+      .attr("class", "tooltip-contents")
+      .style("display", "flex")
+      .style("flex-direction", "column")
+
+    // Add <input> so label can be edited directly
+    div.append("text").text("Edit label")
+    let text = div.append("input")
+      .attr("type", "input")
+      .attr("value", g.label || g.uid)
+
+    // Add multiple <select> for each saved gene identifier
+    div.append("text").text("Gene identifiers")
+    let select = div.append("select")
+      .attr("multiple", true)
+    select.selectAll("option")
+      .data(Object.keys(g.names))
+      .join("option")
+      .text(d => `${g.names[d]} [${d}]`)
+      .attr("value", d => g.names[d])
+
+    // Add event handlers to update labels
+    text.on("input", e => {
+      g.label = e.target.value
+      select.attr("value", null)
+      plot.update({})
+    })
+    select.on("change", e => {
+      g.label = e.target.value
+      text.attr("value", e.target.value)
+      plot.update({})
+    })
+    return div
   },
+  contextMenu: (event, data) => {
+    event.preventDefault()
+
+    // Clear tooltip contents, generate new data
+    let tip = d3.select("div.tooltip")
+    tip.html("")
+    tip.append(() => _gene.tooltipHTML(data).node())
+
+    // Get position relative to clicked element
+    let rect = event.target.getBoundingClientRect() 
+    let bbox = tip.node().getBoundingClientRect()
+    let xOffset = rect.width / 2 - bbox.width / 2
+    let yOffset = rect.height * 1.2
+
+    // Adjust position and show tooltip
+    // Add a delayed fade-out transition if user does not enter tooltip
+    tip.style("left", rect.x + xOffset + "px")
+      .style("top", rect.y + yOffset + "px")
+    tip.transition()
+      .duration(100)
+      .style("opacity", 1)
+      .style("pointer-events", "all")
+    tip.transition()
+      .delay(1000)
+      .style("opacity", 0)
+      .style("pointer-events", "none")
+  },
+  labelText: g => g.label || g.uid,
   polygonClass: g => {
     let group = scales.group(g.uid)
     return (group !== null) ? `genePolygon group-${group}` : "genePolygon"
@@ -362,10 +422,7 @@ const _cluster = {
     return selection
   },
   drag: selection => {
-    let free, y
-    let body = config.gene.shape.bodyHeight + config.gene.shape.tipHeight * 2
-    let range = scales.y.range()
-    let height = range[range.length - 1]
+    let free, y, range, height
     selection.each((d, i) => {d.slot = i})
 
     const getDomain = () => {
@@ -377,12 +434,19 @@ const _cluster = {
 
     const started = (event, d) => {
       flags.isDragging = true
-      get.cluster(d.uid)
-        .classed("active", true)
-        .attr("cursor", "grabbing")
       free = d.slot
+
+      // Get subject cluster, change cursor
       let cluster = get.cluster(d.uid)
+      cluster.classed("active", true)
+        .attr("cursor", "grabbing")
+
+      // Get current position of subject cluster
       y = get.matrix(cluster).f - event.y
+
+      // Get y-axis bounds for dragging
+      range = scales.y.range()
+      height = range[range.length - 1]
     }
 
     const dragged = (event, d) => {
@@ -980,6 +1044,38 @@ const _scale = {
   }
 }
 
+const _tooltip = {
+  enter: event => {
+    // Show the tooltip
+		d3.select(event.target)
+      .transition()
+			.duration(0)
+			.style("opacity", 1)
+			.style("pointer-events", "all")
+
+    // Hide tooltip when there's a click anywhere else in the window
+    d3.select(window)
+      .on("click", e => {
+        if (e.target === event.target || event.target.contains(e.target))
+          return
+        d3.select(event.target)
+          .transition()
+          .style("opacity", 0)
+          .style("pointer-events", "none")
+      })
+  },
+  leave: event => {
+    // Do not hide tooltip if <input> has focus
+		let tip = d3.select(event.target)
+    let active = document.activeElement
+    if (active.tagName === "INPUT" && tip.node().contains(active)) return
+    tip.transition()
+			.delay(400)
+			.style("opacity", 0)
+			.style("pointer-events", "none")
+  },
+}
+
 config.gene.shape.onClick = _gene.anchor
 config.legend.onClickText = renameText
 config.legend.onAltClickText = (event) => {
@@ -1000,4 +1096,5 @@ export {
   _link as link,
   _locus as locus,
   _scale as scale,
+  _tooltip as tooltip,
 }
