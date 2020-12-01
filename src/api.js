@@ -462,8 +462,8 @@ const _cluster = {
       let domain = scales.y.domain()
       let p = Math.round(yy / (height / domain.length))
 
-      d3.selectAll("path.geneLink")
-        .call(_link.setPath)
+      d3.selectAll("g.geneLinkG")
+        .call(_link.update)
 
       if (p === d.slot) return
 
@@ -514,11 +514,41 @@ const _link = {
     return (!config.link.show || (hide.includes(a) || hide.includes(b))) ? 0 : 1
   },
   /**
-   * Sets the d attribute on a selection of link lines.
+   * Updates position of gene link <path> and <text> elements.
    * @param {bool} snap - calculate path to axis, not including transform matrix
    */
-  setPath: (selection, snap) => {
-    return selection.attr("d", d => _link.path(d, snap))
+  update: (selection, snap) => {
+    if (!config.link.show) return selection.attr("opacity", 0)
+
+    const values = {}
+    selection.each(function(data) {
+      const anchors = _link.path(data, snap)
+      if (!anchors || data.identity < config.link.threshold) {
+        values[data.uid] = {d: null, opacity: 0, x: null, y: null}
+        return
+      }
+      const [ax1, ax2, ay, bx1, bx2, by] = anchors
+      let aMid = ax1 + (ax2 - ax1) / 2
+      let bMid = bx1 + (bx2 - bx1) / 2
+      let horizontalMid = aMid + (bMid - aMid) / 2
+      let verticalMid = ay + Math.abs(by - ay) / 2
+      values[data.uid] = {
+        d: `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`,
+        opacity: 1,
+        x: horizontalMid,
+        y: verticalMid,
+      }
+    })
+    selection.attr("opacity", 1)
+    selection.selectAll("path")
+      .attr("d", d => values[d.uid].d)
+    selection.selectAll("text")
+      .attr("opacity", d => config.link.label.show ? values[d.uid].opacity : 0)
+      .attr("filter", () => config.link.label.background ? "url(#filter_solid)" : null)
+      .style("font-size", () => `${config.link.label.fontSize}px`)
+      .attr("x", d => values[d.uid].x)
+      .attr("y", d => values[d.uid].y)
+    return selection
   },
   /**
    * Filters links for only the best between each cluster.
@@ -594,6 +624,15 @@ const _link = {
     }
     return groups.reduce().filter(link => link.identity > config.link.threshold)
   },
+  labelX: d => {
+    let a = get.geneData(d.query.uid)
+    let b = get.geneData(d.target.uid)
+    if (!_cluster.adjacent(a._cluster, b._cluster)) {
+      return null
+    }
+    return 
+  },
+  labelY: () => config.cluster.spacing / 2,
   path: (d, snap) => {
     snap = snap || false
 
@@ -635,8 +674,7 @@ const _link = {
     let [ax1, ax2, ay] = getAnchors(a, aOffset)
     let [bx1, bx2, by] = getAnchors(b, bOffset)
 
-    // Generate the path d attribute
-    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`
+    return (ay > by) ? [bx1, bx2, by, ax1, ax2, ay] : [ax1, ax2, ay, bx1, bx2, by]
   },
   /**
    * Gets all groups of gene links from an array of link objects.
@@ -926,8 +964,8 @@ const _locus = {
 
       // Adjust any gene links affected by moving the locus.
       // Make sure setLinkPath is called with snap=false
-      d3.selectAll("path.geneLink")
-        .call(_link.setPath, false)
+      d3.selectAll("g.geneLinkG")
+        .call(_link.update, false)
 
       // Adjust clusterInfo groups
       let locData = locus.datum()

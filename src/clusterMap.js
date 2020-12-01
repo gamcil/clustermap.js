@@ -57,6 +57,18 @@ export default function clusterMap() {
               .attr("xmlns", "http://www.w3.org/2000/svg")
               .attr("xmlns:xhtml", "http://www.w3.org/1999/xhtml")
 
+            let defs = svg.append("defs")
+            let filter = defs.append("filter")
+              .attr("id", "filter_solid")
+              .attr("x", 0)
+              .attr("y", 0)
+              .attr("width", 1)
+              .attr("height", 1)
+            filter.append("feFlood")
+              .attr("flood-color", "rgba(0, 0, 0, 0.8)")
+            filter.append("feComposite")
+              .attr("in", "SourceGraphic")
+
             let g = svg.append("g")
               .attr("class", "clusterMapG")
 
@@ -217,21 +229,28 @@ export default function clusterMap() {
           )
         )
 
-      linkGroup.selectAll("path.geneLink")
+      linkGroup.selectAll("g.geneLinkG")
         .data(api.link.filter(data.links), api.link.getId)
         .join(
-          enter => enter.append("path")
-            .attr("id", api.link.getId)
-            .attr("class", "geneLink")
-            .style("fill", d => api.scales.score(d.identity))
-            .style("stroke", "black")
-            .style("stroke-width", "0.5px")
-            .attr("opacity", api.link.opacity)
-            .call(api.link.setPath),
+          enter => {
+            enter = enter.append("g")
+              .attr("id", api.link.getId)
+              .attr("class", "geneLinkG")
+            enter.append("path")
+              .attr("class", "geneLink")
+              .style("fill", d => api.scales.score(d.identity))
+              .style("stroke", "black")
+              .style("stroke-width", "0.5px")
+            enter.append("text")
+              .text(d => d.identity.toFixed(2))
+              .attr("class", "geneLinkLabel")
+              .style("fill", "white")
+              .style("text-anchor", "middle")
+            return enter.call(api.link.update)
+          },
           update => update.call(
             update => update.transition(transition)
-              .attr("opacity", api.link.opacity)
-              .call(api.link.setPath, true)
+              .call(api.link.update, true)
           ),
           exit => exit.call(
             exit => {

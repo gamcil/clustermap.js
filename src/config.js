@@ -31,6 +31,11 @@ export default {
     show: true,
 		threshold: 0,
     bestOnly: false,
+    label: {
+      show: false,
+      fontSize: 10,
+      background: true,
+    }
 	},
 	cluster: {
 		nameFontSize: 12,
