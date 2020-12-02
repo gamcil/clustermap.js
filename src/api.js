@@ -147,7 +147,7 @@ const _gene = {
       .attr("value", g.label || g.uid)
 
     // Add multiple <select> for each saved gene identifier
-    div.append("text").text("Gene identifiers")
+    div.append("text").text("Gene qualifiers")
     let select = div.append("select")
       .attr("multiple", true)
     select.selectAll("option")
@@ -519,7 +519,6 @@ const _link = {
    */
   update: (selection, snap) => {
     if (!config.link.show) return selection.attr("opacity", 0)
-
     const values = {}
     selection.each(function(data) {
       const anchors = _link.path(data, snap)
@@ -530,8 +529,8 @@ const _link = {
       const [ax1, ax2, ay, bx1, bx2, by] = anchors
       let aMid = ax1 + (ax2 - ax1) / 2
       let bMid = bx1 + (bx2 - bx1) / 2
-      let horizontalMid = aMid + (bMid - aMid) / 2
-      let verticalMid = ay + Math.abs(by - ay) / 2
+      let horizontalMid = aMid + (bMid - aMid) * config.link.label.position
+      let verticalMid = ay + Math.abs(by - ay) * config.link.label.position
       values[data.uid] = {
         d: `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`,
         opacity: 1,
@@ -624,15 +623,6 @@ const _link = {
     }
     return groups.reduce().filter(link => link.identity > config.link.threshold)
   },
-  labelX: d => {
-    let a = get.geneData(d.query.uid)
-    let b = get.geneData(d.target.uid)
-    if (!_cluster.adjacent(a._cluster, b._cluster)) {
-      return null
-    }
-    return 
-  },
-  labelY: () => config.cluster.spacing / 2,
   path: (d, snap) => {
     snap = snap || false
 
@@ -671,9 +661,10 @@ const _link = {
       ]
     }
 
+    // Ensure ax/y is always top and bx/y is always bottom,
+    // so label position can just be some % of these values
     let [ax1, ax2, ay] = getAnchors(a, aOffset)
     let [bx1, bx2, by] = getAnchors(b, bOffset)
-
     return (ay > by) ? [bx1, bx2, by, ax1, ax2, ay] : [ax1, ax2, ay, bx1, bx2, by]
   },
   /**
@@ -756,9 +747,7 @@ const _link = {
   },
   updateGroups: links => {
     let oldRange = scales.group.range()
-    let oldGroups = Array.from(
-      d3.group(scales.group.domain(), (_, i) => oldRange[i]).values()
-    )
+    let oldGroups = Array.from(d3.group(scales.group.domain(), (_, i) => oldRange[i]).values())
     let newGroups = _link.getGroups(links)
     let merged = _link.mergeGroups(oldGroups, newGroups)
     let match = _link.compareGroups(oldGroups, merged)

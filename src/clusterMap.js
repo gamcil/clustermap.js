@@ -36,6 +36,7 @@ export default function clusterMap() {
               .attr("id", "picker")
               .attr("class", "colourPicker")
               .attr("type", "color")
+              .style("position", "absolute")
               .style("opacity", 0)
 
             // Add tooltip element

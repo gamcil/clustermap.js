@@ -35,6 +35,7 @@ export default {
       show: false,
       fontSize: 10,
       background: true,
+      position: 0.5,
     }
 	},
 	cluster: {

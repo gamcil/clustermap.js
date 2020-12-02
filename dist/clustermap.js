@@ -336,6 +336,12 @@
 	    show: true,
 			threshold: 0,
 	    bestOnly: false,
+	    label: {
+	      show: false,
+	      fontSize: 10,
+	      background: true,
+	      position: 0.5,
+	    }
 		},
 		cluster: {
 			nameFontSize: 12,
@@ -517,7 +523,7 @@
 	      .attr("value", g.label || g.uid);
 
 	    // Add multiple <select> for each saved gene identifier
-	    div.append("text").text("Gene identifiers");
+	    div.append("text").text("Gene qualifiers");
 	    let select = div.append("select")
 	      .attr("multiple", true);
 	    select.selectAll("option")
@@ -832,8 +838,8 @@
 	      let domain = scales.y.domain();
 	      let p = Math.round(yy / (height / domain.length));
 
-	      d3.selectAll("path.geneLink")
-	        .call(_link.setPath);
+	      d3.selectAll("g.geneLinkG")
+	        .call(_link.update);
 
 	      if (p === d.slot) return
 
@@ -884,11 +890,40 @@
 	    return (!config$1.link.show || (hide.includes(a) || hide.includes(b))) ? 0 : 1
 	  },
 	  /**
-	   * Sets the d attribute on a selection of link lines.
+	   * Updates position of gene link <path> and <text> elements.
 	   * @param {bool} snap - calculate path to axis, not including transform matrix
 	   */
-	  setPath: (selection, snap) => {
-	    return selection.attr("d", d => _link.path(d, snap))
+	  update: (selection, snap) => {
+	    if (!config$1.link.show) return selection.attr("opacity", 0)
+	    const values = {};
+	    selection.each(function(data) {
+	      const anchors = _link.path(data, snap);
+	      if (!anchors || data.identity < config$1.link.threshold) {
+	        values[data.uid] = {d: null, opacity: 0, x: null, y: null};
+	        return
+	      }
+	      const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+	      let aMid = ax1 + (ax2 - ax1) / 2;
+	      let bMid = bx1 + (bx2 - bx1) / 2;
+	      let horizontalMid = aMid + (bMid - aMid) * config$1.link.label.position;
+	      let verticalMid = ay + Math.abs(by - ay) * config$1.link.label.position;
+	      values[data.uid] = {
+	        d: `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`,
+	        opacity: 1,
+	        x: horizontalMid,
+	        y: verticalMid,
+	      };
+	    });
+	    selection.attr("opacity", 1);
+	    selection.selectAll("path")
+	      .attr("d", d => values[d.uid].d);
+	    selection.selectAll("text")
+	      .attr("opacity", d => config$1.link.label.show ? values[d.uid].opacity : 0)
+	      .attr("filter", () => config$1.link.label.background ? "url(#filter_solid)" : null)
+	      .style("font-size", () => `${config$1.link.label.fontSize}px`)
+	      .attr("x", d => values[d.uid].x)
+	      .attr("y", d => values[d.uid].y);
+	    return selection
 	  },
 	  /**
 	   * Filters links for only the best between each cluster.
@@ -1002,11 +1037,11 @@
 	      ]
 	    };
 
+	    // Ensure ax/y is always top and bx/y is always bottom,
+	    // so label position can just be some % of these values
 	    let [ax1, ax2, ay] = getAnchors(a, aOffset);
 	    let [bx1, bx2, by] = getAnchors(b, bOffset);
-
-	    // Generate the path d attribute
-	    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`
+	    return (ay > by) ? [bx1, bx2, by, ax1, ax2, ay] : [ax1, ax2, ay, bx1, bx2, by]
 	  },
 	  /**
 	   * Gets all groups of gene links from an array of link objects.
@@ -1088,9 +1123,7 @@
 	  },
 	  updateGroups: links => {
 	    let oldRange = scales.group.range();
-	    let oldGroups = Array.from(
-	      d3.group(scales.group.domain(), (_, i) => oldRange[i]).values()
-	    );
+	    let oldGroups = Array.from(d3.group(scales.group.domain(), (_, i) => oldRange[i]).values());
 	    let newGroups = _link.getGroups(links);
 	    let merged = _link.mergeGroups(oldGroups, newGroups);
 	    let match = _link.compareGroups(oldGroups, merged);
@@ -1296,8 +1329,8 @@
 
 	      // Adjust any gene links affected by moving the locus.
 	      // Make sure setLinkPath is called with snap=false
-	      d3.selectAll("path.geneLink")
-	        .call(_link.setPath, false);
+	      d3.selectAll("g.geneLinkG")
+	        .call(_link.update, false);
 
 	      // Adjust clusterInfo groups
 	      let locData = locus.datum();
@@ -1485,6 +1518,7 @@
 	              .attr("id", "picker")
 	              .attr("class", "colourPicker")
 	              .attr("type", "color")
+	              .style("position", "absolute")
 	              .style("opacity", 0);
 
 	            // Add tooltip element
@@ -1505,6 +1539,18 @@
 	              .attr("height", "100%")
 	              .attr("xmlns", "http://www.w3.org/2000/svg")
 	              .attr("xmlns:xhtml", "http://www.w3.org/1999/xhtml");
+
+	            let defs = svg.append("defs");
+	            let filter = defs.append("filter")
+	              .attr("id", "filter_solid")
+	              .attr("x", 0)
+	              .attr("y", 0)
+	              .attr("width", 1)
+	              .attr("height", 1);
+	            filter.append("feFlood")
+	              .attr("flood-color", "rgba(0, 0, 0, 0.8)");
+	            filter.append("feComposite")
+	              .attr("in", "SourceGraphic");
 
 	            let g = svg.append("g")
 	              .attr("class", "clusterMapG");
@@ -1666,21 +1712,28 @@
 	          )
 	        );
 
-	      linkGroup.selectAll("path.geneLink")
+	      linkGroup.selectAll("g.geneLinkG")
 	        .data(_link.filter(data.links), _link.getId)
 	        .join(
-	          enter => enter.append("path")
-	            .attr("id", _link.getId)
-	            .attr("class", "geneLink")
-	            .style("fill", d => scales.score(d.identity))
-	            .style("stroke", "black")
-	            .style("stroke-width", "0.5px")
-	            .attr("opacity", _link.opacity)
-	            .call(_link.setPath),
+	          enter => {
+	            enter = enter.append("g")
+	              .attr("id", _link.getId)
+	              .attr("class", "geneLinkG");
+	            enter.append("path")
+	              .attr("class", "geneLink")
+	              .style("fill", d => scales.score(d.identity))
+	              .style("stroke", "black")
+	              .style("stroke-width", "0.5px");
+	            enter.append("text")
+	              .text(d => d.identity.toFixed(2))
+	              .attr("class", "geneLinkLabel")
+	              .style("fill", "white")
+	              .style("text-anchor", "middle");
+	            return enter.call(_link.update)
+	          },
 	          update => update.call(
 	            update => update.transition(transition)
-	              .attr("opacity", _link.opacity)
-	              .call(_link.setPath, true)
+	              .call(_link.update, true)
 	          ),
 	          exit => exit.call(
 	            exit => {
