@@ -66,6 +66,7 @@ const scales = {
   y: d3.scaleOrdinal(),
   group: d3.scaleOrdinal().unknown(null),
   colour: d3.scaleOrdinal().unknown("#bbb"),
+  name: d3.scaleOrdinal().unknown("None"),
   score: d3.scaleSequential(d3.interpolateGreys).domain([0, 1]),
   offset: d3.scaleOrdinal(),
   locus: d3.scaleOrdinal(),
@@ -155,6 +156,16 @@ const _gene = {
       .join("option")
       .text(d => `${g.names[d]} [${d}]`)
       .attr("value", d => g.names[d])
+
+    // Add group label
+    let group = div.append("div").style("margin-top", "2px").append("text")
+    let groupId = scales.group(g.uid)
+    group.append("tspan")
+      .text("Similarity group: ")
+    group.append("tspan")
+      .text(scales.name(groupId))
+      .style("color", scales.colour(groupId))
+      .style("font-weight", "bold")
 
     // Add event handlers to update labels
     text.on("input", e => {
@@ -672,65 +683,36 @@ const _link = {
    * Any link with identity score below the config threshold is ignored.
    * @param {Array} links - Link objects
    */
-  getGroups: links => {
+  getGroups: (links, oldGroups) => {
+    const merge = (oldGroup, newGroup) => {
+      oldGroup.genes = [...new Set([...oldGroup.genes, ...newGroup.genes])]
+    }
     return links
       .map(link => [link.query.uid, link.target.uid])
-      .map((e, i, a) => (
-        a.slice(i).reduce(
-          (p, c) => e.some(n => c.includes(n))
-          ? [...new Set([...p, ...c])]
-          : p,
-        [])
-      )).reduce((r, s) => {
+      .map((e, i, a) => a.slice(i).reduce(
+        // Form initial groups of overlapping links
+        (p, c) => e.some(n => c.includes(n))
+        ? [...new Set([...p, ...c])]
+        : p,
+      []))
+      .map((group, index) => ({
+        label: `Group ${index}`,
+        genes: group,
+        hidden: false,
+      }))
+      .reduce((r, s) => {
+        // Merge groups into old groups if any genes are shared
         let merged = false
-        r = r.map(a => (
-          a.some(n => s.includes(n))
-          ? (merged = true, [...new Set([...a, ...s])])
-          : a
-        ))
-        !merged && r.push(s)
+        r = r.map(a => {
+          if (a.genes.some(n => s.genes.includes(n))) {
+            merged = true
+            a.genes = [...new Set([...a.genes, ...s.genes])]
+          }
+          return a
+        })
+        !merged && r.push({...s, uid: r.length})
         return r
-      }, [])
-  },
-  /**
-   * TODO: collapse this function into getGeneLinkGroups
-   * Merges two arrays of gene link groups and returns new array.
-   * @param {Array} one - An array of link group arrays
-   * @param {Array} two - Another array of link group arrays
-   * @return {Array} A new array consisting of merged groups
-   */
-  mergeGroups: (one, two) => {
-    if (one.length === 0 || one === two) return [...two]
-    let setA, intersect
-    let merged = [...one]
-    merged.forEach(a => {
-      setA = new Set(a)
-      two.forEach(b => {
-        intersect = new Set([...b].filter(x => setA.has(x)))
-        if (intersect)
-          a.push(...b.filter(e => !a.includes(e)))
-      })
-    })
-    return merged
-  },
-  /**
-   * Tests two arrays of gene link groups for equality.
-   * @param {Array} one - An array of link group arrays
-   * @param {Array} two - Another array of link group arrays
-   * @return {boolean}
-    * */
-  compareGroups: (one, two) => {
-    let setA, found, intersect
-    one.forEach(a => {
-      setA = new Set(a)
-      found = false
-      two.forEach(b => {
-        intersect = new Set([...b].filter(x => setA.has(x)))
-        if (intersect.size > 0) found = true
-      })
-      if (!found) return false
-    })
-    return (found) ? true : false
+      }, oldGroups || [])
   },
   /**
    * Creates flat link group domain and range for creating d3 scales.
@@ -738,27 +720,45 @@ const _link = {
    * @return {Object} An object with flattened domain and range arrays
    */
   getGroupDomainAndRange: groups => {
-    let scale = {domain: [], range: []}
-    groups.forEach((group, i) => {
-      scale.domain.push(...group)
-      scale.range.push(...group.map(() => i))
+    let values = { domain: [], range: [] }
+    groups.forEach(group => {
+      if (group.hidden) return
+      for (const gene of group.genes) {
+        values.domain.push(gene)
+        values.range.push(group.uid)
+      }
     })
-    return scale
+    return values
   },
-  updateGroups: links => {
-    let oldRange = scales.group.range()
-    let oldGroups = Array.from(d3.group(scales.group.domain(), (_, i) => oldRange[i]).values())
-    let newGroups = _link.getGroups(links)
-    let merged = _link.mergeGroups(oldGroups, newGroups)
-    let match = _link.compareGroups(oldGroups, merged)
-    if (!match) {
-      scales.colour
-        .domain(merged.map((_, i) => i))
-        .range(d3.quantize(d3.interpolateRainbow, merged.length + 1))
-      let {domain, range} = _link.getGroupDomainAndRange(merged)
-      scales.group
-        .domain(domain)
-        .range(range)
+  /**
+   * Update group scales given new data.
+   */
+  updateGroups: groups => {
+    let {domain, range} = _link.getGroupDomainAndRange(groups)
+    let uids = groups.map(g => g.uid)
+    scales.group
+      .domain(domain)
+      .range(range)
+    scales.name
+      .domain(uids)
+      .range(groups.map(g => g.label))
+    scales.colour
+      .domain(uids)
+      .range(d3.quantize(d3.interpolateRainbow, groups.length + 1))
+  },
+  hide: (event, datum) => {
+    event.preventDefault()
+    datum.hidden = true
+    plot.update()
+  },
+  rename: (event, datum) => {
+    if (event.defaultPrevented) return
+    let text = d3.select(event.target)
+    let result = prompt("Enter new value:", text.text())
+    if (result) {
+      datum.label = result
+      text.text(result)
+      plot.update()
     }
   },
   /**
@@ -1104,13 +1104,8 @@ const _tooltip = {
 }
 
 config.gene.shape.onClick = _gene.anchor
-config.legend.onClickText = renameText
-config.legend.onAltClickText = (event) => {
-  event.preventDefault()
-  let group = d3.select(event.target).datum()
-  _link.hideGroup(group)
-  plot.update()
-}
+config.legend.onClickText = _link.rename
+config.legend.onAltClickText = _link.hide
 
 export {
   config,

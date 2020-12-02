@@ -1,6 +1,3 @@
-import { renameText } from "./utils.js"
-
-
 export default function legend(colourScale) {
 	/* Creates a legend component from a colour scale.
 	 */
@@ -9,7 +6,7 @@ export default function legend(colourScale) {
 	let fontSize = 12
 	let hidden = []
 	let onClickCircle = () => {}
-	let onClickText = renameText
+  let onClickText = () => {}
   let onAltClickText = () => {}
 	let y = d3.scaleBand().paddingInner(0.5)
 	let t = d3.transition().duration(500)
@@ -17,9 +14,9 @@ export default function legend(colourScale) {
 	function my(selection) {
 		selection.each(function(data) {
 			// Grab new domain from colourScale and update the y-scale
-			let domain = colourScale.domain()
-			let visible = domain.filter(g => !hidden.includes(g))
-			y.domain(visible)
+			let visible = data.groups.filter(g => !hidden.includes(g.uid) && !g.hidden)
+
+      y.domain(visible.map(v => v.uid))
 				.range([0, entryHeight * visible.length])
 
 			// Grab the <g> element, if it exists
@@ -30,18 +27,17 @@ export default function legend(colourScale) {
 				.attr("class", "legend")
 
 			// Render each legend element <g>
-      let translate = d => `translate(0, ${y(d)})`
+      let translate = d => `translate(0, ${y(d.uid)})`
 			g.selectAll("g.element")
-				.data(visible, d => d)
+				.data(visible, d => d.uid)
 				.join(
 					enter => {
 						enter = enter.append("g")
 							.attr("class", "element")
 							.attr("transform", translate)
 						enter.append("circle")
-							.attr("class", d => `group-${d}`)
+							.attr("class", d => `group-${d.uid}`)
 						enter.append("text")
-							.text(d => `Group ${d}`)
 							.attr("x", 16)
 							.attr("text-anchor", "start")
 							.style("font-family", "sans")
@@ -68,16 +64,17 @@ export default function legend(colourScale) {
 	}
 
   function updateLegend(selection) {
-    selection.attr("transform", d => `translate(0, ${y(d)})`)
+    selection.attr("transform", d => `translate(0, ${y(d.uid)})`)
     let half = y.bandwidth() / 2
     selection.selectAll("text")
+      .text(d => d.label)
       .attr("x", half + 6)
       .attr("y", half + 1)
       .style("font-size", `${fontSize}px`)
     selection.selectAll("circle")
       .attr("cy", half)
       .attr("r", half)
-      .attr("fill", d => colourScale(d))
+      .attr("fill", d => colourScale(d.uid))
   }
 
 	my.colourScale = _ => arguments.length ? (colourScale = _, my) : colourScale
