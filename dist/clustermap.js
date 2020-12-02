@@ -4,30 +4,6 @@
 	(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ClusterMap = {}));
 }(this, (function (exports) { 'use strict';
 
-	function renameText(event) {
-		// Changes value of a text node to a prompted value
-	  if (event.defaultPrevented) return
-		let text = d3.select(event.target);
-		let result = prompt("Enter new value:", text.text());
-		if (result) text.text(result);
-	}
-
-	function isObject(a) {
-		return (!!a) && (a.constructor === Object)
-	}
-
-	function updateConfig(target, source) {
-		for (const [key, value] of Object.entries(source)) {
-			if (!target.hasOwnProperty(key))
-				continue
-			if (isObject(value)) {
-				updateConfig(target[key], value);
-			} else {
-				target[key] = value;
-			}
-		}
-	}
-
 	function legend(colourScale) {
 		/* Creates a legend component from a colour scale.
 		 */
@@ -36,7 +12,7 @@
 		let fontSize = 12;
 		let hidden = [];
 		let onClickCircle = () => {};
-		let onClickText = renameText;
+	  let onClickText = () => {};
 	  let onAltClickText = () => {};
 		let y = d3.scaleBand().paddingInner(0.5);
 		let t = d3.transition().duration(500);
@@ -44,9 +20,9 @@
 		function my(selection) {
 			selection.each(function(data) {
 				// Grab new domain from colourScale and update the y-scale
-				let domain = colourScale.domain();
-				let visible = domain.filter(g => !hidden.includes(g));
-				y.domain(visible)
+				let visible = data.groups.filter(g => !hidden.includes(g.uid) && !g.hidden);
+
+	      y.domain(visible.map(v => v.uid))
 					.range([0, entryHeight * visible.length]);
 
 				// Grab the <g> element, if it exists
@@ -57,18 +33,17 @@
 					.attr("class", "legend");
 
 				// Render each legend element <g>
-	      let translate = d => `translate(0, ${y(d)})`;
+	      let translate = d => `translate(0, ${y(d.uid)})`;
 				g.selectAll("g.element")
-					.data(visible, d => d)
+					.data(visible, d => d.uid)
 					.join(
 						enter => {
 							enter = enter.append("g")
 								.attr("class", "element")
 								.attr("transform", translate);
 							enter.append("circle")
-								.attr("class", d => `group-${d}`);
+								.attr("class", d => `group-${d.uid}`);
 							enter.append("text")
-								.text(d => `Group ${d}`)
 								.attr("x", 16)
 								.attr("text-anchor", "start")
 								.style("font-family", "sans")
@@ -95,16 +70,17 @@
 		}
 
 	  function updateLegend(selection) {
-	    selection.attr("transform", d => `translate(0, ${y(d)})`);
+	    selection.attr("transform", d => `translate(0, ${y(d.uid)})`);
 	    let half = y.bandwidth() / 2;
 	    selection.selectAll("text")
+	      .text(d => d.label)
 	      .attr("x", half + 6)
 	      .attr("y", half + 1)
 	      .style("font-size", `${fontSize}px`);
 	    selection.selectAll("circle")
 	      .attr("cy", half)
 	      .attr("r", half)
-	      .attr("fill", d => colourScale(d));
+	      .attr("fill", d => colourScale(d.uid));
 	  }
 
 		my.colourScale = _ => arguments.length ? (colourScale = _, my) : colourScale;
@@ -303,6 +279,30 @@
 		return my
 	}
 
+	// Changes value of a text node to a prompted value
+	function renameText(event) {
+	  if (event.defaultPrevented) return
+		let text = d3.select(event.target);
+		let result = prompt("Enter new value:", text.text());
+		if (result) text.text(result);
+	}
+
+	function isObject(a) {
+		return (!!a) && (a.constructor === Object)
+	}
+
+	function updateConfig(target, source) {
+		for (const [key, value] of Object.entries(source)) {
+			if (!target.hasOwnProperty(key))
+				continue
+			if (isObject(value)) {
+				updateConfig(target[key], value);
+			} else {
+				target[key] = value;
+			}
+		}
+	}
+
 	var defaultConfig = {
 		plot: {
 			transitionDuration: 250,
@@ -442,6 +442,7 @@
 	  y: d3.scaleOrdinal(),
 	  group: d3.scaleOrdinal().unknown(null),
 	  colour: d3.scaleOrdinal().unknown("#bbb"),
+	  name: d3.scaleOrdinal().unknown("None"),
 	  score: d3.scaleSequential(d3.interpolateGreys).domain([0, 1]),
 	  offset: d3.scaleOrdinal(),
 	  locus: d3.scaleOrdinal(),
@@ -531,6 +532,16 @@
 	      .join("option")
 	      .text(d => `${g.names[d]} [${d}]`)
 	      .attr("value", d => g.names[d]);
+
+	    // Add group label
+	    let group = div.append("div").style("margin-top", "2px").append("text");
+	    let groupId = scales.group(g.uid);
+	    group.append("tspan")
+	      .text("Similarity group: ");
+	    group.append("tspan")
+	      .text(scales.name(groupId))
+	      .style("color", scales.colour(groupId))
+	      .style("font-weight", "bold");
 
 	    // Add event handlers to update labels
 	    text.on("input", e => {
@@ -1048,65 +1059,33 @@
 	   * Any link with identity score below the config threshold is ignored.
 	   * @param {Array} links - Link objects
 	   */
-	  getGroups: links => {
+	  getGroups: (links, oldGroups) => {
 	    return links
 	      .map(link => [link.query.uid, link.target.uid])
-	      .map((e, i, a) => (
-	        a.slice(i).reduce(
-	          (p, c) => e.some(n => c.includes(n))
-	          ? [...new Set([...p, ...c])]
-	          : p,
-	        [])
-	      )).reduce((r, s) => {
+	      .map((e, i, a) => a.slice(i).reduce(
+	        // Form initial groups of overlapping links
+	        (p, c) => e.some(n => c.includes(n))
+	        ? [...new Set([...p, ...c])]
+	        : p,
+	      []))
+	      .map((group, index) => ({
+	        label: `Group ${index}`,
+	        genes: group,
+	        hidden: false,
+	      }))
+	      .reduce((r, s) => {
+	        // Merge groups into old groups if any genes are shared
 	        let merged = false;
-	        r = r.map(a => (
-	          a.some(n => s.includes(n))
-	          ? (merged = true, [...new Set([...a, ...s])])
-	          : a
-	        ));
-	        !merged && r.push(s);
+	        r = r.map(a => {
+	          if (a.genes.some(n => s.genes.includes(n))) {
+	            merged = true;
+	            a.genes = [...new Set([...a.genes, ...s.genes])];
+	          }
+	          return a
+	        });
+	        !merged && r.push({...s, uid: r.length});
 	        return r
-	      }, [])
-	  },
-	  /**
-	   * TODO: collapse this function into getGeneLinkGroups
-	   * Merges two arrays of gene link groups and returns new array.
-	   * @param {Array} one - An array of link group arrays
-	   * @param {Array} two - Another array of link group arrays
-	   * @return {Array} A new array consisting of merged groups
-	   */
-	  mergeGroups: (one, two) => {
-	    if (one.length === 0 || one === two) return [...two]
-	    let setA, intersect;
-	    let merged = [...one];
-	    merged.forEach(a => {
-	      setA = new Set(a);
-	      two.forEach(b => {
-	        intersect = new Set([...b].filter(x => setA.has(x)));
-	        if (intersect)
-	          a.push(...b.filter(e => !a.includes(e)));
-	      });
-	    });
-	    return merged
-	  },
-	  /**
-	   * Tests two arrays of gene link groups for equality.
-	   * @param {Array} one - An array of link group arrays
-	   * @param {Array} two - Another array of link group arrays
-	   * @return {boolean}
-	    * */
-	  compareGroups: (one, two) => {
-	    let setA, found, intersect;
-	    one.forEach(a => {
-	      setA = new Set(a);
-	      found = false;
-	      two.forEach(b => {
-	        intersect = new Set([...b].filter(x => setA.has(x)));
-	        if (intersect.size > 0) found = true;
-	      });
-	      if (!found) return false
-	    });
-	    return (found) ? true : false
+	      }, oldGroups || [])
 	  },
 	  /**
 	   * Creates flat link group domain and range for creating d3 scales.
@@ -1114,27 +1093,45 @@
 	   * @return {Object} An object with flattened domain and range arrays
 	   */
 	  getGroupDomainAndRange: groups => {
-	    let scale = {domain: [], range: []};
-	    groups.forEach((group, i) => {
-	      scale.domain.push(...group);
-	      scale.range.push(...group.map(() => i));
+	    let values = { domain: [], range: [] };
+	    groups.forEach(group => {
+	      if (group.hidden) return
+	      for (const gene of group.genes) {
+	        values.domain.push(gene);
+	        values.range.push(group.uid);
+	      }
 	    });
-	    return scale
+	    return values
 	  },
-	  updateGroups: links => {
-	    let oldRange = scales.group.range();
-	    let oldGroups = Array.from(d3.group(scales.group.domain(), (_, i) => oldRange[i]).values());
-	    let newGroups = _link.getGroups(links);
-	    let merged = _link.mergeGroups(oldGroups, newGroups);
-	    let match = _link.compareGroups(oldGroups, merged);
-	    if (!match) {
-	      scales.colour
-	        .domain(merged.map((_, i) => i))
-	        .range(d3.quantize(d3.interpolateRainbow, merged.length + 1));
-	      let {domain, range} = _link.getGroupDomainAndRange(merged);
-	      scales.group
-	        .domain(domain)
-	        .range(range);
+	  /**
+	   * Update group scales given new data.
+	   */
+	  updateGroups: groups => {
+	    let {domain, range} = _link.getGroupDomainAndRange(groups);
+	    let uids = groups.map(g => g.uid);
+	    scales.group
+	      .domain(domain)
+	      .range(range);
+	    scales.name
+	      .domain(uids)
+	      .range(groups.map(g => g.label));
+	    scales.colour
+	      .domain(uids)
+	      .range(d3.quantize(d3.interpolateRainbow, groups.length + 1));
+	  },
+	  hide: (event, datum) => {
+	    event.preventDefault();
+	    datum.hidden = true;
+	    plot.update();
+	  },
+	  rename: (event, datum) => {
+	    if (event.defaultPrevented) return
+	    let text = d3.select(event.target);
+	    let result = prompt("Enter new value:", text.text());
+	    if (result) {
+	      datum.label = result;
+	      text.text(result);
+	      plot.update();
 	    }
 	  },
 	  /**
@@ -1480,13 +1477,8 @@
 	};
 
 	config$1.gene.shape.onClick = _gene.anchor;
-	config$1.legend.onClickText = renameText;
-	config$1.legend.onAltClickText = (event) => {
-	  event.preventDefault();
-	  let group = d3.select(event.target).datum();
-	  _link.hideGroup(group);
-	  plot.update();
-	};
+	config$1.legend.onClickText = _link.rename;
+	config$1.legend.onAltClickText = _link.hide;
 
 	function clusterMap() {
 	  /* A ClusterMap plot. */
@@ -1577,7 +1569,9 @@
 	        );
 
 	      _scale.update(data);
-	      _link.updateGroups(data.links);
+
+	      data.groups = _link.getGroups(data.links, data.groups);
+	      _link.updateGroups(data.groups);
 
 	      container = d3.select(this);
 
@@ -1742,7 +1736,6 @@
 	                .remove();
 	            }
 	          )
-
 	        );
 
 	      let legendFn = getLegendFn();

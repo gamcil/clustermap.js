@@ -95,7 +95,9 @@ export default function clusterMap() {
         )
 
       api.scale.update(data)
-      api.link.updateGroups(data.links)
+
+      data.groups = api.link.getGroups(data.links, data.groups)
+      api.link.updateGroups(data.groups)
 
       container = d3.select(this)
 
@@ -260,7 +262,6 @@ export default function clusterMap() {
                 .remove()
             }
           )
-
         )
 
       let legendFn = getLegendFn()
