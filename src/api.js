@@ -684,9 +684,6 @@ const _link = {
    * @param {Array} links - Link objects
    */
   getGroups: (links, oldGroups) => {
-    const merge = (oldGroup, newGroup) => {
-      oldGroup.genes = [...new Set([...oldGroup.genes, ...newGroup.genes])]
-    }
     return links
       .map(link => [link.query.uid, link.target.uid])
       .map((e, i, a) => a.slice(i).reduce(
@@ -699,6 +696,7 @@ const _link = {
         label: `Group ${index}`,
         genes: group,
         hidden: false,
+        colour: null,
       }))
       .reduce((r, s) => {
         // Merge groups into old groups if any genes are shared
@@ -742,9 +740,14 @@ const _link = {
     scales.name
       .domain(uids)
       .range(groups.map(g => g.label))
+    let colours = d3.quantize(d3.interpolateRainbow, groups.length + 1)
+    groups.forEach((group, index) => {
+      if (group.colour)
+        colours[index] = group.colour 
+    })
     scales.colour
       .domain(uids)
-      .range(d3.quantize(d3.interpolateRainbow, groups.length + 1))
+      .range(colours)
   },
   hide: (event, datum) => {
     event.preventDefault()
@@ -761,34 +764,6 @@ const _link = {
       plot.update()
     }
   },
-  /**
-   * Hides a homology group, removing gene fills and legend entry.
-   */
-  hideGroup: group => {
-    let oldDomain = scales.group.domain()
-    let oldRange = scales.group.range()
-    let newDomain = [] 
-    let newRange = [] 
-
-    // Filter domain/range for entries matching given group
-    for (let [i, d] of oldRange.entries()) {
-      if (d === group) continue
-      newRange.push(d)
-      newDomain.push(oldDomain[i])
-    }
-    scales.group.domain(newDomain)
-    scales.group.range(newRange)
-
-    // Remove the group from the colour scale
-    let colourDomain = scales.colour.domain()
-    let colourRange = scales.colour.range()
-    let index = colourDomain.indexOf(group)
-    colourDomain.splice(index, 1)
-    colourRange.splice(index, 1)
-    scales.colour
-      .domain(colourDomain)
-      .range(colourRange)
-  }
 }
 
 const _locus = {

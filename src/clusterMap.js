@@ -302,15 +302,11 @@ export default function clusterMap() {
     })
   }
 
-  function changeGeneColour(_, d) {
+  function changeGeneColour(_, data) {
     let picker = d3.select("input.colourPicker")
     picker.on("change", () => {
-      let value = picker.node().value
-      let range = api.scales.colour.range()
-      range[d] = value
-      api.scales.colour.range(range)
-      d3.selectAll(`.group-${d}`)
-        .attr("fill", value)
+      data.colour = picker.node().value
+      api.plot.update()
     })
     picker.node().click()
   }
