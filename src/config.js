@@ -31,8 +31,10 @@ export default {
 	link: {
     show: true,
     asLine: false,
-    straight: true,
+    straight: false,
 		threshold: 0,
+    strokeWidth: 0.5,
+    groupColour: false,
     bestOnly: false,
     label: {
       show: false,

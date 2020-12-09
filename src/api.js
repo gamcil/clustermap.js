@@ -526,6 +526,22 @@ const _link = {
     let hide = ["none", null]  // Set to none or still undefined
     return (!config.link.show || (hide.includes(a) || hide.includes(b))) ? 0 : 1
   },
+  fill: d => {
+    if (config.link.asLine) return "none"
+    if (config.link.groupColour) {
+      let hex = scales.colour(scales.group(d.query.uid))
+      return hex.replace(")", ", 0.6)")
+    }
+    return scales.score(d.identity)
+  },
+  stroke: d => {
+    if (config.link.groupColour) {
+      let hex = scales.colour(scales.group(d.query.uid))
+      return config.link.asLine ? hex.replace(")", ", 0.6)") : hex
+    }
+    if (config.link.asLine) return scales.score(d.identity)
+    return "black"
+  },
   /**
    * Updates position of gene link <path> and <text> elements.
    * @param {bool} snap - calculate path to axis, not including transform matrix
@@ -534,9 +550,9 @@ const _link = {
     if (!config.link.show) return selection.attr("opacity", 0)
     const values = {}
     selection.each(function(data) {
-      const anchors = _link.path(data, snap)
+      const anchors = _link.getAnchors(data, snap)
       if (!anchors || data.identity < config.link.threshold) {
-        values[data.uid] = {d: null, opacity: 0, x: null, y: null}
+        values[data.uid] = {d: null, anchors: null, opacity: 0, x: null, y: null}
         return
       }
       const [ax1, ax2, ay, bx1, bx2, by] = anchors
@@ -546,6 +562,7 @@ const _link = {
       let verticalMid = ay + Math.abs(by - ay) * config.link.label.position
       values[data.uid] = {
         d: `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`,
+        anchors: anchors,
         opacity: 1,
         x: horizontalMid,
         y: verticalMid,
@@ -553,7 +570,10 @@ const _link = {
     })
     selection.attr("opacity", 1)
     selection.selectAll("path")
-      .attr("d", d => values[d.uid].d)
+      .attr("d", d => _link.path(values[d.uid].anchors))
+      .style("fill", _link.fill)
+      .style("stroke", _link.stroke)
+      .style("stroke-width", `${config.link.strokeWidth}px`)
     selection.selectAll("text")
       .attr("opacity", d => config.link.label.show ? values[d.uid].opacity : 0)
       .attr("filter", () => config.link.label.background ? "url(#filter_solid)" : null)
@@ -561,6 +581,35 @@ const _link = {
       .attr("x", d => values[d.uid].x)
       .attr("y", d => values[d.uid].y)
     return selection
+  },
+  /**
+   * Generate sankey link path.
+   */
+  sankey: anchors => {
+    const [ax1, ax2, ay, bx1, bx2, by] = anchors
+    let vMid = ay + Math.abs(by - ay) / 2
+    let path = d3.path()  
+    path.moveTo(ax2, ay)
+    path.bezierCurveTo(ax2, vMid, bx2, vMid, bx2, by)
+    path.lineTo(bx1, by)
+    path.bezierCurveTo(bx1, vMid, ax1, vMid, ax1, ay)
+    path.lineTo(ax2, ay)
+    return path.toString()
+  },
+  path: anchors => {
+    if (!anchors) return null
+    const [ax1, ax2, ay, bx1, bx2, by] = anchors
+    let aMid = ax1 + (ax2 - ax1) / 2
+    let bMid = bx1 + (bx2 - bx1) / 2
+    if (config.link.asLine) {
+      if (config.link.straight)
+        return `M${aMid},${ay} L${bMid},${by}`
+      let link = d3.linkVertical()
+      return link({ source: [aMid, ay], target: [bMid, by] })
+    }
+    if (config.link.straight)
+      return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`
+    return _link.sankey(anchors)
   },
   /**
    * Filters links for only the best between each cluster.
@@ -636,7 +685,7 @@ const _link = {
     }
     return groups.reduce().filter(link => link.identity > config.link.threshold)
   },
-  path: (d, snap) => {
+  getAnchors: (d, snap) => {
     snap = snap || false
 
     // Calculates points linking two genes
