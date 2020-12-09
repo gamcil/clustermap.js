@@ -279,9 +279,11 @@ export default function clusterMap() {
   function arrangePlot(selection) {
     selection.select("g.scaleBar")
       .transition(transition)
+      .attr("opacity", api.config.plot.scaleGenes ? 1 : 0)
       .attr("transform", api.plot.scaleBarTransform)
     selection.select("g.colourBar")
       .transition(transition)
+      .attr("opacity", api.config.link.show ? 1 : 0)
       .attr("transform", api.plot.colourBarTransform)
     selection.select("g.legend")
       .transition(transition)
@@ -295,9 +297,14 @@ export default function clusterMap() {
       locus._offset = 0
       locus._cluster = cluster.uid
       locus._flipped = false
+      locus._trimLeft = null
+      locus._trimRight = null
       locus.genes.forEach(gene => {
         gene._locus = locus.uid
         gene._cluster = cluster.uid
+        gene._start = gene.start
+        gene._end = gene.end
+        gene._strand = gene.strand
       })
     })
   }

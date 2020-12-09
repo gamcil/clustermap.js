@@ -2,6 +2,7 @@ export default {
 	plot: {
 		transitionDuration: 250,
 		scaleFactor: 15,
+    scaleGenes: true,
 	},
 	legend: {
 		entryHeight: 18,

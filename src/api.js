@@ -45,7 +45,7 @@ const plot = {
     return range[range.length - 1] + body
   },
   colourBarTransform: () => {
-    let x = scales.x(config.scaleBar.basePair) + 20
+    let x = config.plot.scaleGenes ? scales.x(config.scaleBar.basePair) + 20 : 0
     let y = plot.bottomY() + config.colourBar.marginTop
     return `translate(${x}, ${y})`
   },
@@ -409,6 +409,8 @@ const _cluster = {
     })
   },
   update: selection => {
+    selection.selectAll("g.locus")
+      .each(_locus.updateScaling)
     selection.attr("transform", _cluster.transform)
     if (config.cluster.alignLabels) {
       selection
@@ -794,6 +796,35 @@ const _locus = {
       .attr("x", d => scales.x(d._end))
     return selection
   },
+  updateScaling: locus => {
+    // Recalculate gene positions:
+    // Gene length = 1000bp if unscaled mode
+    // Gene start = real start if scaled, else previous end or 0
+    // Gene end = new gene start + length
+    locus.genes.forEach((g, i, n) => {
+      let length = config.plot.scaleGenes ? g._end - g._start : 1000
+      g.start = config.plot.scaleGenes
+        ? g._start
+        : i > 0 ? n[i - 1].end : 0
+      g.end = g.start + length
+      g.strand = g._strand
+    })
+    // Recalculate locus boundaries & locus scale offset:
+    // Start = trim start or 0
+    // End = trim end or actual end if scaled, end of last gene if unscaled
+    // Scale - difference between previous and new _start property
+    let oldStart = locus._start
+    let total = locus.genes.length - 1
+    locus._start = locus._trimLeft ? locus._trimLeft.start : 0
+    locus._end = locus._trimRight
+      ? locus._trimRight.end
+      : config.plot.scaleGenes ? locus.end : locus.genes[total].end
+    updateScaleRange(
+      "locus",
+      locus.uid,
+      scales.locus(locus.uid) + scales.x(oldStart - locus._start)
+    )
+  },
   update: selection => {
     let translate = d => `translate(${scales.locus(d.uid)}, 0)`
     return selection
@@ -821,14 +852,15 @@ const _locus = {
 
     const _left = (event, d, handle) => {
       // Find closest gene start, from start to _end
-      let geneStarts = d.genes
+      let genes = d.genes
         .filter(gene => gene.end <= d._end)
-        .map(gene => gene.start)
-      let starts = [d.start, ...geneStarts].sort((a, b) => a > b ? 1 : -1)
+        .sort((a, b) => a > b ? 1 : -1)
+      let starts = [d.start, ...genes.map(gene => gene.start)]
       let coords = starts.map(value => scales.x(value))
       let position = getClosestValue(coords, event.x)
       value = coords[position]
       d._start = starts[position]
+      d._trimLeft = d._start === starts[0] ? null : genes[position - 1]
 
       // Adjust the dragged rect
       handle.attr("x", value - 8)
@@ -864,12 +896,14 @@ const _locus = {
 
     const _right = (event, d, handle) => {
       // Find closest visible gene end, from _start to end
-      let ends = d.genes
+      let genes = d.genes
         .filter(gene => gene.start >= d._start)
-        .map(gene => gene.end)
         .sort((a, b) => a > b ? 1 : -1)
+      let geneEnds = genes.map(g => g.end)
+      let ends = [...geneEnds, config.plot.scaleGenes ? d.end : d._end]
       let range = ends.map(value => scales.x(value))
       let position = getClosestValue(range, event.x)
+      d._trimRight = genes[position] ? genes[position] : null
       d._end = ends[position]
 
       // Transform handle rect
@@ -894,6 +928,8 @@ const _locus = {
 
     const ended = (_, d) => {
       flags.isDragging = false
+      if (d.end === d.genes[d.genes.length - 1]._end)
+        d._trimRight = null
       d3.select(`#locus_${d.uid} .hover`)
         .transition()
         .attr("opacity", 0)
@@ -971,22 +1007,25 @@ const _locus = {
   flip: d => {
     // Invert locus coordinates
     d._flipped = !d._flipped
-    let length = d.end - d.start + 2
-    let tmp = d._start
-    d._start = length - d._end
-    d._end = length - tmp
+    let length = d.end - d.start
+
+    // Invert trimmed genes
+    let tmp = d._trimRight
+    d._trimRight = d._trimLeft
+    d._trimLeft = tmp
 
     // Invert coordinates of genes in the locus
     d.genes.forEach(g => {
-      let tmp = g.start
-      g.start = length - g.end
-      g.end = length - tmp
-      g.strand = (g.strand === 1) ? -1 : 1
+      let tmp = g._start
+      g._start = length - g._end
+      g._end = length - tmp
+      g._strand = (g._strand === 1) ? -1 : 1
     })
+    d.genes.sort((a, b) => a._start - b._start)
 
-    // Update range of locus scale
-    let diff = scales.x(tmp - d._start)
-    updateScaleRange("locus", d.uid, scales.locus(d.uid) + diff)
+    // Update the plot; coordinates are recalculated based on
+    // the new underlying gene/locus data in _locus.updateScaling
+    plot.update()
   }
 }
 
