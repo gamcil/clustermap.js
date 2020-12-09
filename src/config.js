@@ -30,6 +30,8 @@ export default {
 	},
 	link: {
     show: true,
+    asLine: false,
+    straight: true,
 		threshold: 0,
     bestOnly: false,
     label: {
