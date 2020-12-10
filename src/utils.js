@@ -21,3 +21,12 @@ export function updateConfig(target, source) {
 		}
 	}
 }
+
+export function rgbaToRgb(rgba, opacity=0.6) {
+  let colour = d3.color(rgba).rgb()
+  return d3.rgb(
+    ((1 - opacity) * 255) + (opacity * colour.r),
+    ((1 - opacity) * 255) + (opacity * colour.g),
+    ((1 - opacity) * 255) + (opacity * colour.b),
+  )
+}

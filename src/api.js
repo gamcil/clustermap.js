@@ -1,4 +1,4 @@
-import { renameText, updateConfig } from "./utils.js"
+import { renameText, updateConfig, rgbaToRgb } from "./utils.js"
 import defaultConfig from "./config.js"
 
 function getClosestValue(values, value) {
@@ -528,16 +528,14 @@ const _link = {
   },
   fill: d => {
     if (config.link.asLine) return "none"
-    if (config.link.groupColour) {
-      let hex = scales.colour(scales.group(d.query.uid))
-      return hex.replace(")", ", 0.6)")
-    }
+    if (config.link.groupColour)
+      return rgbaToRgb(scales.colour(scales.group(d.query.uid)))
     return scales.score(d.identity)
   },
   stroke: d => {
     if (config.link.groupColour) {
-      let hex = scales.colour(scales.group(d.query.uid))
-      return config.link.asLine ? hex.replace(")", ", 0.6)") : hex
+      let colour = scales.colour(scales.group(d.query.uid))
+      return config.link.asLine ? rgbaToRgb(colour) : colour
     }
     if (config.link.asLine) return scales.score(d.identity)
     return "black"
