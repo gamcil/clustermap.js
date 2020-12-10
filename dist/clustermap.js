@@ -308,7 +308,6 @@
 			transitionDuration: 250,
 			scaleFactor: 15,
 	    scaleGenes: true,
-	    showGaps: true,
 		},
 		legend: {
 			entryHeight: 18,
@@ -336,7 +335,11 @@
 		},
 		link: {
 	    show: true,
+	    asLine: false,
+	    straight: false,
 			threshold: 0,
+	    strokeWidth: 0.5,
+	    groupColour: false,
 	    bestOnly: false,
 	    label: {
 	      show: false,
@@ -904,6 +907,22 @@
 	    let hide = ["none", null];  // Set to none or still undefined
 	    return (!config$1.link.show || (hide.includes(a) || hide.includes(b))) ? 0 : 1
 	  },
+	  fill: d => {
+	    if (config$1.link.asLine) return "none"
+	    if (config$1.link.groupColour) {
+	      let hex = scales.colour(scales.group(d.query.uid));
+	      return hex.replace(")", ", 0.6)")
+	    }
+	    return scales.score(d.identity)
+	  },
+	  stroke: d => {
+	    if (config$1.link.groupColour) {
+	      let hex = scales.colour(scales.group(d.query.uid));
+	      return config$1.link.asLine ? hex.replace(")", ", 0.6)") : hex
+	    }
+	    if (config$1.link.asLine) return scales.score(d.identity)
+	    return "black"
+	  },
 	  /**
 	   * Updates position of gene link <path> and <text> elements.
 	   * @param {bool} snap - calculate path to axis, not including transform matrix
@@ -912,9 +931,9 @@
 	    if (!config$1.link.show) return selection.attr("opacity", 0)
 	    const values = {};
 	    selection.each(function(data) {
-	      const anchors = _link.path(data, snap);
+	      const anchors = _link.getAnchors(data, snap);
 	      if (!anchors || data.identity < config$1.link.threshold) {
-	        values[data.uid] = {d: null, opacity: 0, x: null, y: null};
+	        values[data.uid] = {d: null, anchors: null, opacity: 0, x: null, y: null};
 	        return
 	      }
 	      const [ax1, ax2, ay, bx1, bx2, by] = anchors;
@@ -924,6 +943,7 @@
 	      let verticalMid = ay + Math.abs(by - ay) * config$1.link.label.position;
 	      values[data.uid] = {
 	        d: `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`,
+	        anchors: anchors,
 	        opacity: 1,
 	        x: horizontalMid,
 	        y: verticalMid,
@@ -931,7 +951,10 @@
 	    });
 	    selection.attr("opacity", 1);
 	    selection.selectAll("path")
-	      .attr("d", d => values[d.uid].d);
+	      .attr("d", d => _link.path(values[d.uid].anchors))
+	      .style("fill", _link.fill)
+	      .style("stroke", _link.stroke)
+	      .style("stroke-width", `${config$1.link.strokeWidth}px`);
 	    selection.selectAll("text")
 	      .attr("opacity", d => config$1.link.label.show ? values[d.uid].opacity : 0)
 	      .attr("filter", () => config$1.link.label.background ? "url(#filter_solid)" : null)
@@ -939,6 +962,35 @@
 	      .attr("x", d => values[d.uid].x)
 	      .attr("y", d => values[d.uid].y);
 	    return selection
+	  },
+	  /**
+	   * Generate sankey link path.
+	   */
+	  sankey: anchors => {
+	    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+	    let vMid = ay + Math.abs(by - ay) / 2;
+	    let path = d3.path();  
+	    path.moveTo(ax2, ay);
+	    path.bezierCurveTo(ax2, vMid, bx2, vMid, bx2, by);
+	    path.lineTo(bx1, by);
+	    path.bezierCurveTo(bx1, vMid, ax1, vMid, ax1, ay);
+	    path.lineTo(ax2, ay);
+	    return path.toString()
+	  },
+	  path: anchors => {
+	    if (!anchors) return null
+	    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+	    let aMid = ax1 + (ax2 - ax1) / 2;
+	    let bMid = bx1 + (bx2 - bx1) / 2;
+	    if (config$1.link.asLine) {
+	      if (config$1.link.straight)
+	        return `M${aMid},${ay} L${bMid},${by}`
+	      let link = d3.linkVertical();
+	      return link({ source: [aMid, ay], target: [bMid, by] })
+	    }
+	    if (config$1.link.straight)
+	      return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`
+	    return _link.sankey(anchors)
 	  },
 	  /**
 	   * Filters links for only the best between each cluster.
@@ -1014,7 +1066,7 @@
 	    }
 	    return groups.reduce().filter(link => link.identity > config$1.link.threshold)
 	  },
-	  path: (d, snap) => {
+	  getAnchors: (d, snap) => {
 	    snap = snap || false;
 
 	    // Calculates points linking two genes
@@ -1733,10 +1785,7 @@
 	              .attr("id", _link.getId)
 	              .attr("class", "geneLinkG");
 	            enter.append("path")
-	              .attr("class", "geneLink")
-	              .style("fill", d => scales.score(d.identity))
-	              .style("stroke", "black")
-	              .style("stroke-width", "0.5px");
+	              .attr("class", "geneLink");
 	            enter.append("text")
 	              .text(d => d.identity.toFixed(2))
 	              .attr("class", "geneLinkLabel")
@@ -1776,7 +1825,7 @@
 	      .attr("transform", plot.scaleBarTransform);
 	    selection.select("g.colourBar")
 	      .transition(transition)
-	      .attr("opacity", config$1.link.show ? 1 : 0)
+	      .attr("opacity", config$1.link.groupColour || !config$1.link.show ? 0 : 1)
 	      .attr("transform", plot.colourBarTransform);
 	    selection.select("g.legend")
 	      .transition(transition)
