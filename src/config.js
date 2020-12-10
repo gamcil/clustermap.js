@@ -2,6 +2,7 @@ export default {
 	plot: {
 		transitionDuration: 250,
 		scaleFactor: 15,
+    scaleGenes: true,
 	},
 	legend: {
 		entryHeight: 18,
@@ -29,7 +30,11 @@ export default {
 	},
 	link: {
     show: true,
+    asLine: false,
+    straight: false,
 		threshold: 0,
+    strokeWidth: 0.5,
+    groupColour: false,
     bestOnly: false,
     label: {
       show: false,

@@ -1,4 +1,4 @@
-import { renameText, updateConfig } from "./utils.js"
+import { renameText, updateConfig, rgbaToRgb } from "./utils.js"
 import defaultConfig from "./config.js"
 
 function getClosestValue(values, value) {
@@ -45,7 +45,7 @@ const plot = {
     return range[range.length - 1] + body
   },
   colourBarTransform: () => {
-    let x = scales.x(config.scaleBar.basePair) + 20
+    let x = config.plot.scaleGenes ? scales.x(config.scaleBar.basePair) + 20 : 0
     let y = plot.bottomY() + config.colourBar.marginTop
     return `translate(${x}, ${y})`
   },
@@ -409,6 +409,8 @@ const _cluster = {
     })
   },
   update: selection => {
+    selection.selectAll("g.locus")
+      .each(_locus.updateScaling)
     selection.attr("transform", _cluster.transform)
     if (config.cluster.alignLabels) {
       selection
@@ -524,6 +526,20 @@ const _link = {
     let hide = ["none", null]  // Set to none or still undefined
     return (!config.link.show || (hide.includes(a) || hide.includes(b))) ? 0 : 1
   },
+  fill: d => {
+    if (config.link.asLine) return "none"
+    if (config.link.groupColour)
+      return rgbaToRgb(scales.colour(scales.group(d.query.uid)))
+    return scales.score(d.identity)
+  },
+  stroke: d => {
+    if (config.link.groupColour) {
+      let colour = scales.colour(scales.group(d.query.uid))
+      return config.link.asLine ? rgbaToRgb(colour) : colour
+    }
+    if (config.link.asLine) return scales.score(d.identity)
+    return "black"
+  },
   /**
    * Updates position of gene link <path> and <text> elements.
    * @param {bool} snap - calculate path to axis, not including transform matrix
@@ -532,9 +548,9 @@ const _link = {
     if (!config.link.show) return selection.attr("opacity", 0)
     const values = {}
     selection.each(function(data) {
-      const anchors = _link.path(data, snap)
+      const anchors = _link.getAnchors(data, snap)
       if (!anchors || data.identity < config.link.threshold) {
-        values[data.uid] = {d: null, opacity: 0, x: null, y: null}
+        values[data.uid] = {d: null, anchors: null, opacity: 0, x: null, y: null}
         return
       }
       const [ax1, ax2, ay, bx1, bx2, by] = anchors
@@ -544,6 +560,7 @@ const _link = {
       let verticalMid = ay + Math.abs(by - ay) * config.link.label.position
       values[data.uid] = {
         d: `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`,
+        anchors: anchors,
         opacity: 1,
         x: horizontalMid,
         y: verticalMid,
@@ -551,7 +568,10 @@ const _link = {
     })
     selection.attr("opacity", 1)
     selection.selectAll("path")
-      .attr("d", d => values[d.uid].d)
+      .attr("d", d => _link.path(values[d.uid].anchors))
+      .style("fill", _link.fill)
+      .style("stroke", _link.stroke)
+      .style("stroke-width", `${config.link.strokeWidth}px`)
     selection.selectAll("text")
       .attr("opacity", d => config.link.label.show ? values[d.uid].opacity : 0)
       .attr("filter", () => config.link.label.background ? "url(#filter_solid)" : null)
@@ -559,6 +579,42 @@ const _link = {
       .attr("x", d => values[d.uid].x)
       .attr("y", d => values[d.uid].y)
     return selection
+  },
+  /**
+   * Generates sankey link path.
+   * Draws bezier curves connecting ends of two genes.
+   */
+  sankey: ([ax1, ax2, ay, bx1, bx2, by]) => {
+    let vMid = ay + Math.abs(by - ay) / 2
+    let path = d3.path()  
+    path.moveTo(ax2, ay)
+    path.bezierCurveTo(ax2, vMid, bx2, vMid, bx2, by)
+    path.lineTo(bx1, by)
+    path.bezierCurveTo(bx1, vMid, ax1, vMid, ax1, ay)
+    path.lineTo(ax2, ay)
+    return path.toString()
+  },
+  /**
+   * Generates straight link path.
+   */
+  straight: ([ax1, ax2, ay, bx1, bx2, by]) => (
+    `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`
+  ),
+  /**
+   * Generates single line path.
+   */
+  line: ([ax1, ax2, ay, bx1, bx2, by]) => {
+    let aMid = ax1 + (ax2 - ax1) / 2
+    let bMid = bx1 + (bx2 - bx1) / 2
+    return config.link.straight
+      ? `M${aMid},${ay} L${bMid},${by}`
+      : d3.linkVertical()({ source: [aMid, ay], target: [bMid, by] })
+  },
+  path: anchors => {
+    if (!anchors) return null
+    return config.link.asLine
+      ? _link.line(anchors)
+      : config.link.straight ? _link.straight(anchors) : _link.sankey(anchors)
   },
   /**
    * Filters links for only the best between each cluster.
@@ -634,7 +690,7 @@ const _link = {
     }
     return groups.reduce().filter(link => link.identity > config.link.threshold)
   },
-  path: (d, snap) => {
+  getAnchors: (d, snap) => {
     snap = snap || false
 
     // Calculates points linking two genes
@@ -794,6 +850,35 @@ const _locus = {
       .attr("x", d => scales.x(d._end))
     return selection
   },
+  updateScaling: locus => {
+    // Recalculate gene positions:
+    // Gene length = 1000bp if unscaled mode
+    // Gene start = real start if scaled, else previous end or 0
+    // Gene end = new gene start + length
+    locus.genes.forEach((g, i, n) => {
+      let length = config.plot.scaleGenes ? g._end - g._start : 1000
+      g.start = config.plot.scaleGenes
+        ? g._start
+        : i > 0 ? n[i - 1].end : 0
+      g.end = g.start + length
+      g.strand = g._strand
+    })
+    // Recalculate locus boundaries & locus scale offset:
+    // Start = trim start or 0
+    // End = trim end or actual end if scaled, end of last gene if unscaled
+    // Scale - difference between previous and new _start property
+    let oldStart = locus._start
+    let total = locus.genes.length - 1
+    locus._start = locus._trimLeft ? locus._trimLeft.start : 0
+    locus._end = locus._trimRight
+      ? locus._trimRight.end
+      : config.plot.scaleGenes ? locus.end : locus.genes[total].end
+    updateScaleRange(
+      "locus",
+      locus.uid,
+      scales.locus(locus.uid) + scales.x(oldStart - locus._start)
+    )
+  },
   update: selection => {
     let translate = d => `translate(${scales.locus(d.uid)}, 0)`
     return selection
@@ -821,14 +906,15 @@ const _locus = {
 
     const _left = (event, d, handle) => {
       // Find closest gene start, from start to _end
-      let geneStarts = d.genes
+      let genes = d.genes
         .filter(gene => gene.end <= d._end)
-        .map(gene => gene.start)
-      let starts = [d.start, ...geneStarts].sort((a, b) => a > b ? 1 : -1)
+        .sort((a, b) => a > b ? 1 : -1)
+      let starts = [d.start, ...genes.map(gene => gene.start)]
       let coords = starts.map(value => scales.x(value))
       let position = getClosestValue(coords, event.x)
       value = coords[position]
       d._start = starts[position]
+      d._trimLeft = d._start === starts[0] ? null : genes[position - 1]
 
       // Adjust the dragged rect
       handle.attr("x", value - 8)
@@ -864,12 +950,14 @@ const _locus = {
 
     const _right = (event, d, handle) => {
       // Find closest visible gene end, from _start to end
-      let ends = d.genes
+      let genes = d.genes
         .filter(gene => gene.start >= d._start)
-        .map(gene => gene.end)
         .sort((a, b) => a > b ? 1 : -1)
+      let geneEnds = genes.map(g => g.end)
+      let ends = [...geneEnds, config.plot.scaleGenes ? d.end : d._end]
       let range = ends.map(value => scales.x(value))
       let position = getClosestValue(range, event.x)
+      d._trimRight = genes[position] ? genes[position] : null
       d._end = ends[position]
 
       // Transform handle rect
@@ -894,6 +982,8 @@ const _locus = {
 
     const ended = (_, d) => {
       flags.isDragging = false
+      if (d.end === d.genes[d.genes.length - 1]._end)
+        d._trimRight = null
       d3.select(`#locus_${d.uid} .hover`)
         .transition()
         .attr("opacity", 0)
@@ -971,22 +1061,25 @@ const _locus = {
   flip: d => {
     // Invert locus coordinates
     d._flipped = !d._flipped
-    let length = d.end - d.start + 2
-    let tmp = d._start
-    d._start = length - d._end
-    d._end = length - tmp
+    let length = d.end - d.start
+
+    // Invert trimmed genes
+    let tmp = d._trimRight
+    d._trimRight = d._trimLeft
+    d._trimLeft = tmp
 
     // Invert coordinates of genes in the locus
     d.genes.forEach(g => {
-      let tmp = g.start
-      g.start = length - g.end
-      g.end = length - tmp
-      g.strand = (g.strand === 1) ? -1 : 1
+      let tmp = g._start
+      g._start = length - g._end
+      g._end = length - tmp
+      g._strand = (g._strand === 1) ? -1 : 1
     })
+    d.genes.sort((a, b) => a._start - b._start)
 
-    // Update range of locus scale
-    let diff = scales.x(tmp - d._start)
-    updateScaleRange("locus", d.uid, scales.locus(d.uid) + diff)
+    // Update the plot; coordinates are recalculated based on
+    // the new underlying gene/locus data in _locus.updateScaling
+    plot.update()
   }
 }
 
