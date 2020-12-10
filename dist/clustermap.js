@@ -303,6 +303,15 @@
 		}
 	}
 
+	function rgbaToRgb(rgba, opacity=0.6) {
+	  let colour = d3.color(rgba).rgb();
+	  return d3.rgb(
+	    ((1 - opacity) * 255) + (opacity * colour.r),
+	    ((1 - opacity) * 255) + (opacity * colour.g),
+	    ((1 - opacity) * 255) + (opacity * colour.b),
+	  )
+	}
+
 	var defaultConfig = {
 		plot: {
 			transitionDuration: 250,
@@ -909,16 +918,14 @@
 	  },
 	  fill: d => {
 	    if (config$1.link.asLine) return "none"
-	    if (config$1.link.groupColour) {
-	      let hex = scales.colour(scales.group(d.query.uid));
-	      return hex.replace(")", ", 0.6)")
-	    }
+	    if (config$1.link.groupColour)
+	      return rgbaToRgb(scales.colour(scales.group(d.query.uid)))
 	    return scales.score(d.identity)
 	  },
 	  stroke: d => {
 	    if (config$1.link.groupColour) {
-	      let hex = scales.colour(scales.group(d.query.uid));
-	      return config$1.link.asLine ? hex.replace(")", ", 0.6)") : hex
+	      let colour = scales.colour(scales.group(d.query.uid));
+	      return config$1.link.asLine ? rgbaToRgb(colour) : colour
 	    }
 	    if (config$1.link.asLine) return scales.score(d.identity)
 	    return "black"
@@ -964,10 +971,10 @@
 	    return selection
 	  },
 	  /**
-	   * Generate sankey link path.
+	   * Generates sankey link path.
+	   * Draws bezier curves connecting ends of two genes.
 	   */
-	  sankey: anchors => {
-	    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+	  sankey: ([ax1, ax2, ay, bx1, bx2, by]) => {
 	    let vMid = ay + Math.abs(by - ay) / 2;
 	    let path = d3.path();  
 	    path.moveTo(ax2, ay);
@@ -977,20 +984,27 @@
 	    path.lineTo(ax2, ay);
 	    return path.toString()
 	  },
-	  path: anchors => {
-	    if (!anchors) return null
-	    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+	  /**
+	   * Generates straight link path.
+	   */
+	  straight: ([ax1, ax2, ay, bx1, bx2, by]) => (
+	    `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`
+	  ),
+	  /**
+	   * Generates single line path.
+	   */
+	  line: ([ax1, ax2, ay, bx1, bx2, by]) => {
 	    let aMid = ax1 + (ax2 - ax1) / 2;
 	    let bMid = bx1 + (bx2 - bx1) / 2;
-	    if (config$1.link.asLine) {
-	      if (config$1.link.straight)
-	        return `M${aMid},${ay} L${bMid},${by}`
-	      let link = d3.linkVertical();
-	      return link({ source: [aMid, ay], target: [bMid, by] })
-	    }
-	    if (config$1.link.straight)
-	      return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`
-	    return _link.sankey(anchors)
+	    return config$1.link.straight
+	      ? `M${aMid},${ay} L${bMid},${by}`
+	      : d3.linkVertical()({ source: [aMid, ay], target: [bMid, by] })
+	  },
+	  path: anchors => {
+	    if (!anchors) return null
+	    return config$1.link.asLine
+	      ? _link.line(anchors)
+	      : config$1.link.straight ? _link.straight(anchors) : _link.sankey(anchors)
 	  },
 	  /**
 	   * Filters links for only the best between each cluster.
