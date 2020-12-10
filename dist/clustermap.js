@@ -1130,7 +1130,7 @@
 	   * @param {Array} links - Link objects
 	   */
 	  getGroups: (links, oldGroups) => {
-	    return links
+	    let groups = links
 	      .map(link => [link.query.uid, link.target.uid])
 	      .map((e, i, a) => a.slice(i).reduce(
 	        // Form initial groups of overlapping links
@@ -1156,7 +1156,10 @@
 	        });
 	        !merged && r.push({...s, uid: r.length});
 	        return r
-	      }, oldGroups || [])
+	      }, oldGroups || []);
+	    if (!oldGroups)
+	      groups.forEach((group, index) => group.label = `Group ${index}`);
+	    return groups
 	  },
 	  /**
 	   * Creates flat link group domain and range for creating d3 scales.
