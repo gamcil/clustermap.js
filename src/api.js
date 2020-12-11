@@ -511,10 +511,7 @@ const _cluster = {
 }
 
 const _link = {
-  getId: l => {
-    let [a, b] = [l.query.uid, l.target.uid].sort()
-    return `${a}-${b}`
-  },
+  getId: l => `link-${l.uid}`,
   /**
    * Determines the opacity of a given link.
    * A link is hidden (opacity set to 0) if a) the query or target genes are
@@ -611,7 +608,7 @@ const _link = {
       : d3.linkVertical()({ source: [aMid, ay], target: [bMid, by] })
   },
   path: anchors => {
-    if (!anchors) return null
+    if (!anchors) return ""
     return config.link.asLine
       ? _link.line(anchors)
       : config.link.straight ? _link.straight(anchors) : _link.sankey(anchors)
