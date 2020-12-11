@@ -901,10 +901,7 @@
 	};
 
 	const _link = {
-	  getId: l => {
-	    let [a, b] = [l.query.uid, l.target.uid].sort();
-	    return `${a}-${b}`
-	  },
+	  getId: l => `link-${l.uid}`,
 	  /**
 	   * Determines the opacity of a given link.
 	   * A link is hidden (opacity set to 0) if a) the query or target genes are
@@ -1001,7 +998,7 @@
 	      : d3.linkVertical()({ source: [aMid, ay], target: [bMid, by] })
 	  },
 	  path: anchors => {
-	    if (!anchors) return null
+	    if (!anchors) return ""
 	    return config$1.link.asLine
 	      ? _link.line(anchors)
 	      : config$1.link.straight ? _link.straight(anchors) : _link.sankey(anchors)
@@ -1630,7 +1627,8 @@
 	            filter.append("feFlood")
 	              .attr("flood-color", "rgba(0, 0, 0, 0.8)");
 	            filter.append("feComposite")
-	              .attr("in", "SourceGraphic");
+	              .attr("in", "SourceGraphic")
+	              .attr("in2", "");
 
 	            let g = svg.append("g")
 	              .attr("class", "clusterMapG");
