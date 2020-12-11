@@ -69,6 +69,7 @@ export default function clusterMap() {
               .attr("flood-color", "rgba(0, 0, 0, 0.8)")
             filter.append("feComposite")
               .attr("in", "SourceGraphic")
+              .attr("in2", "")
 
             let g = svg.append("g")
               .attr("class", "clusterMapG")
