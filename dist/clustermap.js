@@ -46,7 +46,7 @@
 							enter.append("text")
 								.attr("x", 16)
 								.attr("text-anchor", "start")
-								.style("font-family", "sans")
+								.style("font-family", "sans-serif")
 	              .style("dominant-baseline", "middle");
 							return enter.call(updateLegend)
 						},
@@ -221,6 +221,7 @@
 								.attr("class", "barText")
 								.attr("text-anchor", "middle")
 								.attr("cursor", "pointer")
+	              .style("font-family", "sans-serif")
 								.on("click", onClickText || promptNewLength);
 							enter.call(updateScaleBar);
 							return enter
@@ -557,6 +558,11 @@
 	      .style("color", scales.colour(groupId))
 	      .style("font-weight", "bold");
 
+	    // Add anchoring button which will also automatically flip loci
+	    div.append("button")
+	      .text("Anchor map on gene")
+	      .on("click", _ => _gene.anchor(_, g, true));
+
 	    // Add event handlers to update labels
 	    text.on("input", e => {
 	      g.label = e.target.value;
@@ -617,7 +623,7 @@
 	      .attr("text-anchor", config$1.gene.label.anchor);
 	    return selection
 	  },
-	  anchor: (_, anchor) => {
+	  anchor: (_, anchor, flipLoci=false) => {
 	    // Get original domain and range of cluster offset scale
 	    let domain = scales.offset.domain();
 	    let range = scales.offset.range();
@@ -634,24 +640,27 @@
 	        return g1 !== null && g1 === g2
 	      })
 	      .forEach(uid => {  // Group remaining anchors by cluster
-	        let cluster = get.geneData(uid)._cluster;
-	        if (anchors.has(cluster)) {
-	          anchors.get(cluster).push(uid);
+	        let gene = get.geneData(uid);
+	        if (flipLoci && gene.strand !== anchor.strand) {
+	          let locus = get.locusData(gene._locus);
+	          _locus.flip(locus);
+	          _locus.updateScaling(locus);
+	        }
+	        if (anchors.has(gene._cluster)) {
+	          anchors.get(gene._cluster).push(uid);
 	        } else {
-	          anchors.set(cluster, [uid]);
+	          anchors.set(gene._cluster, [uid]);
 	        }
 	      });
+
 	    if (anchors.length === 0) return
 
 	    // Get the midpoint of the clicked anchor gene
-	    let getMidPoint = data => {
-	      let length = data.end - data.start;
-	      return (
-	        scales.x(data.start + length / 2)
-	        + scales.locus(data._locus)
-	        + scales.offset(data._cluster)
-	      )
-	    };
+	    let getMidPoint = data => (
+	      scales.x(data.start + (data.end - data.start) / 2)
+	      + scales.locus(data._locus)
+	      + scales.offset(data._cluster)
+	    );
 	    let midPoint = getMidPoint(anchor);
 
 	    // Calculate offset value of a link anchor from clicked anchor
@@ -1466,10 +1475,6 @@
 	      g._strand = (g._strand === 1) ? -1 : 1;
 	    });
 	    d.genes.sort((a, b) => a._start - b._start);
-
-	    // Update the plot; coordinates are recalculated based on
-	    // the new underlying gene/locus data in _locus.updateScaling
-	    plot.update();
 	  }
 	};
 
@@ -1615,7 +1620,8 @@
 	              .attr("width", "100%")
 	              .attr("height", "100%")
 	              .attr("xmlns", "http://www.w3.org/2000/svg")
-	              .attr("xmlns:xhtml", "http://www.w3.org/1999/xhtml");
+	              .attr("xmlns:xhtml", "http://www.w3.org/1999/xhtml")
+	              .style("font-family", "Sans, Arial");
 
 	            let defs = svg.append("defs");
 	            let filter = defs.append("filter")
@@ -1691,16 +1697,18 @@
 	              .attr("y", 8)
 	              .attr("cursor", "pointer")
 	              .style("font-weight", "bold")
+	              .style("font-family", "sans-serif")
 	              .on("click", renameText);
 	            info.append("text")
 	              .attr("class", "locusText")
 	              .attr("y", 12)
-	              .style("dominant-baseline", "hanging");
+	              .style("dominant-baseline", "hanging")
+	              .style("font-family", "sans-serif");
 	            enter.append("g")
 	              .attr("class", "loci");
 	            info.selectAll("text")
 	              .attr("text-anchor", "end")
-	              .style("font-family", "sans");
+	              .style("font-family", "sans-serif");
 	            return enter.call(_cluster.update)
 	          },
 	          update => update.call(
@@ -1782,7 +1790,8 @@
 	              .attr("class", "genePolygon");
 	            enter.append("text")
 	              .attr("class", "geneLabel")
-	              .attr("dy", "-0.3em");
+	              .attr("dy", "-0.3em")
+	              .style("font-family", "sans-serif");
 	            return enter
 	              .call(_gene.update)
 	          },
@@ -1805,7 +1814,8 @@
 	              .text(d => d.identity.toFixed(2))
 	              .attr("class", "geneLinkLabel")
 	              .style("fill", "white")
-	              .style("text-anchor", "middle");
+	              .style("text-anchor", "middle")
+	              .style("font-family", "sans-serif");
 	            return enter.call(_link.update)
 	          },
 	          update => update.call(
