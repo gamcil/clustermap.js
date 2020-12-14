@@ -1297,6 +1297,7 @@
 	    function dragged(event, d) {
 	      let handle = d3.select(this);
 	      if (handle.attr("class") === "leftHandle") {
+	        console.log("Start left drag");
 	        _left(event, d, handle);
 	      } else {
 	        _right(event, d, handle);
@@ -1307,8 +1308,9 @@
 	      // Find closest gene start, from start to _end
 	      let genes = d.genes
 	        .filter(gene => gene.end <= d._end)
-	        .sort((a, b) => a > b ? 1 : -1);
+	        .sort((a, b) => a.start - b.start);
 	      let starts = [d.start, ...genes.map(gene => gene.start)];
+	      console.log(starts);
 	      let coords = starts.map(value => scales.x(value));
 	      let position = getClosestValue(coords, event.x);
 	      value = coords[position];
@@ -1351,7 +1353,7 @@
 	      // Find closest visible gene end, from _start to end
 	      let genes = d.genes
 	        .filter(gene => gene.start >= d._start)
-	        .sort((a, b) => a > b ? 1 : -1);
+	        .sort((a, b) => a.start - b.start);
 	      let geneEnds = genes.map(g => g.end);
 	      let ends = [...geneEnds, config$1.plot.scaleGenes ? d.end : d._end];
 	      let range = ends.map(value => scales.x(value));
