@@ -167,6 +167,11 @@ const _gene = {
       .style("color", scales.colour(groupId))
       .style("font-weight", "bold")
 
+    // Add anchoring button which will also automatically flip loci
+    div.append("button")
+      .text("Anchor map on gene")
+      .on("click", _ => _gene.anchor(_, g, true))
+
     // Add event handlers to update labels
     text.on("input", e => {
       g.label = e.target.value
@@ -227,7 +232,7 @@ const _gene = {
       .attr("text-anchor", config.gene.label.anchor)
     return selection
   },
-  anchor: (_, anchor) => {
+  anchor: (_, anchor, flipLoci=false) => {
     // Get original domain and range of cluster offset scale
     let domain = scales.offset.domain()
     let range = scales.offset.range()
@@ -244,24 +249,27 @@ const _gene = {
         return g1 !== null && g1 === g2
       })
       .forEach(uid => {  // Group remaining anchors by cluster
-        let cluster = get.geneData(uid)._cluster
-        if (anchors.has(cluster)) {
-          anchors.get(cluster).push(uid)
+        let gene = get.geneData(uid)
+        if (flipLoci && gene.strand !== anchor.strand) {
+          let locus = get.locusData(gene._locus)
+          _locus.flip(locus)
+          _locus.updateScaling(locus)
+        }
+        if (anchors.has(gene._cluster)) {
+          anchors.get(gene._cluster).push(uid)
         } else {
-          anchors.set(cluster, [uid])
+          anchors.set(gene._cluster, [uid])
         }
       })
+
     if (anchors.length === 0) return
 
     // Get the midpoint of the clicked anchor gene
-    let getMidPoint = data => {
-      let length = data.end - data.start
-      return (
-        scales.x(data.start + length / 2)
-        + scales.locus(data._locus)
-        + scales.offset(data._cluster)
-      )
-    }
+    let getMidPoint = data => (
+      scales.x(data.start + (data.end - data.start) / 2)
+      + scales.locus(data._locus)
+      + scales.offset(data._cluster)
+    )
     let midPoint = getMidPoint(anchor)
 
     // Calculate offset value of a link anchor from clicked anchor
@@ -1076,10 +1084,6 @@ const _locus = {
       g._strand = (g._strand === 1) ? -1 : 1
     })
     d.genes.sort((a, b) => a._start - b._start)
-
-    // Update the plot; coordinates are recalculated based on
-    // the new underlying gene/locus data in _locus.updateScaling
-    plot.update()
   }
 }
 

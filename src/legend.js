@@ -40,7 +40,7 @@ export default function legend(colourScale) {
 						enter.append("text")
 							.attr("x", 16)
 							.attr("text-anchor", "start")
-							.style("font-family", "sans")
+							.style("font-family", "sans-serif")
               .style("dominant-baseline", "middle")
 						return enter.call(updateLegend)
 					},
