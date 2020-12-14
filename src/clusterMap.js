@@ -57,6 +57,7 @@ export default function clusterMap() {
               .attr("height", "100%")
               .attr("xmlns", "http://www.w3.org/2000/svg")
               .attr("xmlns:xhtml", "http://www.w3.org/1999/xhtml")
+              .style("font-family", "Sans, Arial")
 
             let defs = svg.append("defs")
             let filter = defs.append("filter")
@@ -132,16 +133,18 @@ export default function clusterMap() {
               .attr("y", 8)
               .attr("cursor", "pointer")
               .style("font-weight", "bold")
+              .style("font-family", "sans-serif")
               .on("click", renameText)
             info.append("text")
               .attr("class", "locusText")
               .attr("y", 12)
               .style("dominant-baseline", "hanging")
+              .style("font-family", "sans-serif")
             enter.append("g")
               .attr("class", "loci")
             info.selectAll("text")
               .attr("text-anchor", "end")
-              .style("font-family", "sans")
+              .style("font-family", "sans-serif")
             return enter.call(api.cluster.update)
           },
           update => update.call(
@@ -224,6 +227,7 @@ export default function clusterMap() {
             enter.append("text")
               .attr("class", "geneLabel")
               .attr("dy", "-0.3em")
+              .style("font-family", "sans-serif")
             return enter
               .call(api.gene.update)
           },
@@ -247,6 +251,7 @@ export default function clusterMap() {
               .attr("class", "geneLinkLabel")
               .style("fill", "white")
               .style("text-anchor", "middle")
+              .style("font-family", "sans-serif")
             return enter.call(api.link.update)
           },
           update => update.call(

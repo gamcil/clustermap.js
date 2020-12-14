@@ -26,6 +26,7 @@ export default function scaleBar(x) {
 							.attr("class", "barText")
 							.attr("text-anchor", "middle")
 							.attr("cursor", "pointer")
+              .style("font-family", "sans-serif")
 							.on("click", onClickText || promptNewLength)
 						enter.call(updateScaleBar)
 						return enter
