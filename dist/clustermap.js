@@ -102,6 +102,8 @@
 		let height = 25;
 		let width = 150;
 		let fontSize = 12;
+	  let lowerBound = 0;
+	  let upperBound = 1;
 		let t = d3.transition();
 
 		function my(selection) {
@@ -143,19 +145,15 @@
 								.attr("class", "labelText")
 								.attr("text-anchor", "middle");
 							cbar.append("text")
-								.text("0")
 								.attr("class", "startText")
 								.attr("text-anchor", "start");
 							cbar.append("text")
-								.text("100")
 								.attr("class", "endText")
 								.attr("text-anchor", "end");
 							cbar.selectAll("text")
 								.style("font-family", "sans-serif")
 	              .style("dominant-baseline", "hanging");
-
-							enter.call(updateColourBar);
-							return enter
+							return enter.call(updateColourBar)
 						},
 						update => update.call(
 							update => update.transition(t).call(updateColourBar)
@@ -167,9 +165,9 @@
 		function updateColourBar(selection) {
 			// Updates colour bar styling/positioning
 			selection.select(".startStop")
-				.attr("stop-color", colourScale(0));
+				.attr("stop-color", colourScale(lowerBound));
 			selection.select(".endStop")
-				.attr("stop-color", colourScale(1));
+				.attr("stop-color", colourScale(upperBound));
 			selection.selectAll("rect")
 				.attr("width", width)
 				.attr("height", height);
@@ -177,10 +175,14 @@
 				.attr("y", height + 5);
 			selection.select(".labelText")
 				.attr("x", width / 2);
+			selection.select(".startText")
+	      .text(`${Math.round(lowerBound * 100)}`);
 			selection.select(".endText")
+	      .text(`${Math.round(upperBound * 100)}`)
 				.attr("x", width);
 			selection.selectAll("text")
 				.style("font-size", `${fontSize}pt`);					
+	    return selection
 		}
 
 		// Setters/getters
@@ -189,6 +191,8 @@
 		my.fontSize = _ => arguments.length ? (fontSize = parseInt(_), my) : fontSize;
 		my.colourScale = _ => arguments.length ? (colourScale = _, my) : colourScale;
 		my.transition = _ => arguments.length ? (t = _, my) : t;
+	  my.lowerBound = _ => arguments.length ? (lowerBound = parseFloat(_), my) : lowerBound;
+	  my.upperBound = _ => arguments.length ? (upperBound = parseFloat(_), my) : upperBound;
 
 		return my
 	}
@@ -333,6 +337,10 @@
 			show: true,
 			width: 150,
 	    marginTop: 20,
+	    lowerBound: 0,
+	    upperBound: 1,
+	    lowerColor: "white",
+	    upperColor: "black"
 		},
 		scaleBar: {
 			colour: "black",
@@ -458,7 +466,7 @@
 	  group: d3.scaleOrdinal().unknown(null),
 	  colour: d3.scaleOrdinal().unknown("#bbb"),
 	  name: d3.scaleOrdinal().unknown("None"),
-	  score: d3.scaleSequential(d3.interpolateGreys).domain([0, 1]),
+	  score: d3.scaleSequential().domain([0, 1]),
 	  offset: d3.scaleOrdinal(),
 	  locus: d3.scaleOrdinal(),
 	};
@@ -1526,6 +1534,9 @@
 	    _scale.updateX();
 	    _scale.rescaleRanges(oldX);
 
+	    let interp = d3.interpolateRgb(config$1.colourBar.lowerColor, config$1.colourBar.upperColor);
+	    scales.score = d3.scaleSequential(interp).domain([0, 1]);
+
 	    if (!_scale.check("y"))
 	      scales.y.domain(data.clusters.map(c => c.uid));
 	    _scale.updateY(data);
@@ -1913,6 +1924,8 @@
 	      .width(config$1.colourBar.width)
 	      .height(config$1.colourBar.height)
 	      .fontSize(config$1.colourBar.fontSize)
+	      .lowerBound(config$1.colourBar.lowerBound)
+	      .upperBound(config$1.colourBar.upperBound)
 	      .transition(transition)
 	  }
 
