@@ -345,6 +345,8 @@ export default function clusterMap() {
       .width(api.config.colourBar.width)
       .height(api.config.colourBar.height)
       .fontSize(api.config.colourBar.fontSize)
+      .lowerBound(api.config.colourBar.lowerBound)
+      .upperBound(api.config.colourBar.upperBound)
       .transition(transition)
   }
 

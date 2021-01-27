@@ -67,7 +67,7 @@ const scales = {
   group: d3.scaleOrdinal().unknown(null),
   colour: d3.scaleOrdinal().unknown("#bbb"),
   name: d3.scaleOrdinal().unknown("None"),
-  score: d3.scaleSequential(d3.interpolateGreys).domain([0, 1]),
+  score: d3.scaleSequential().domain([0, 1]),
   offset: d3.scaleOrdinal(),
   locus: d3.scaleOrdinal(),
 }
@@ -1134,6 +1134,9 @@ const _scale = {
     let oldX = scales.x.copy()
     _scale.updateX()
     _scale.rescaleRanges(oldX)
+
+    let interp = d3.interpolateRgb(config.colourBar.lowerColor, config.colourBar.upperColor)
+    scales.score = d3.scaleSequential(interp).domain([0, 1])
 
     if (!_scale.check("y"))
       scales.y.domain(data.clusters.map(c => c.uid))

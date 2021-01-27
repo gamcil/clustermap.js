@@ -18,6 +18,10 @@ export default {
 		show: true,
 		width: 150,
     marginTop: 20,
+    lowerBound: 0,
+    upperBound: 1,
+    lowerColor: "white",
+    upperColor: "black"
 	},
 	scaleBar: {
 		colour: "black",

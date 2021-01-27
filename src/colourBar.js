@@ -5,6 +5,8 @@ export default function colourBar(colourScale) {
 	let height = 25
 	let width = 150
 	let fontSize = 12
+  let lowerBound = 0
+  let upperBound = 1
 	let t = d3.transition()
 
 	function my(selection) {
@@ -46,19 +48,15 @@ export default function colourBar(colourScale) {
 							.attr("class", "labelText")
 							.attr("text-anchor", "middle")
 						cbar.append("text")
-							.text("0")
 							.attr("class", "startText")
 							.attr("text-anchor", "start")
 						cbar.append("text")
-							.text("100")
 							.attr("class", "endText")
 							.attr("text-anchor", "end")
 						cbar.selectAll("text")
 							.style("font-family", "sans-serif")
               .style("dominant-baseline", "hanging")
-
-						enter.call(updateColourBar)
-						return enter
+						return enter.call(updateColourBar)
 					},
 					update => update.call(
 						update => update.transition(t).call(updateColourBar)
@@ -70,9 +68,9 @@ export default function colourBar(colourScale) {
 	function updateColourBar(selection) {
 		// Updates colour bar styling/positioning
 		selection.select(".startStop")
-			.attr("stop-color", colourScale(0))
+			.attr("stop-color", colourScale(lowerBound))
 		selection.select(".endStop")
-			.attr("stop-color", colourScale(1))
+			.attr("stop-color", colourScale(upperBound))
 		selection.selectAll("rect")
 			.attr("width", width)
 			.attr("height", height)
@@ -80,10 +78,14 @@ export default function colourBar(colourScale) {
 			.attr("y", height + 5)
 		selection.select(".labelText")
 			.attr("x", width / 2)
+		selection.select(".startText")
+      .text(`${Math.round(lowerBound * 100)}`)
 		selection.select(".endText")
+      .text(`${Math.round(upperBound * 100)}`)
 			.attr("x", width)
 		selection.selectAll("text")
 			.style("font-size", `${fontSize}pt`)					
+    return selection
 	}
 
 	// Setters/getters
@@ -92,6 +94,8 @@ export default function colourBar(colourScale) {
 	my.fontSize = _ => arguments.length ? (fontSize = parseInt(_), my) : fontSize
 	my.colourScale = _ => arguments.length ? (colourScale = _, my) : colourScale
 	my.transition = _ => arguments.length ? (t = _, my) : t
+  my.lowerBound = _ => arguments.length ? (lowerBound = parseFloat(_), my) : lowerBound
+  my.upperBound = _ => arguments.length ? (upperBound = parseFloat(_), my) : upperBound
 
 	return my
 }
