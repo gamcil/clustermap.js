@@ -1297,7 +1297,6 @@
 	    function dragged(event, d) {
 	      let handle = d3.select(this);
 	      if (handle.attr("class") === "leftHandle") {
-	        console.log("Start left drag");
 	        _left(event, d, handle);
 	      } else {
 	        _right(event, d, handle);
@@ -1308,9 +1307,8 @@
 	      // Find closest gene start, from start to _end
 	      let genes = d.genes
 	        .filter(gene => gene.end <= d._end)
-	        .sort((a, b) => a.start - b.start);
+	        .sort((a, b) => a.start > b.start ? 1 : -1);
 	      let starts = [d.start, ...genes.map(gene => gene.start)];
-	      console.log(starts);
 	      let coords = starts.map(value => scales.x(value));
 	      let position = getClosestValue(coords, event.x);
 	      value = coords[position];
@@ -1353,7 +1351,7 @@
 	      // Find closest visible gene end, from _start to end
 	      let genes = d.genes
 	        .filter(gene => gene.start >= d._start)
-	        .sort((a, b) => a.start - b.start);
+	        .sort((a, b) => a.start > b.start ? 1 : -1);
 	      let geneEnds = genes.map(g => g.end);
 	      let ends = [...geneEnds, config$1.plot.scaleGenes ? d.end : d._end];
 	      let range = ends.map(value => scales.x(value));
@@ -1383,8 +1381,12 @@
 
 	    const ended = (_, d) => {
 	      flags.isDragging = false;
-	      if (d.end === d.genes[d.genes.length - 1]._end)
+	      // Check if visible locus coordinates equal default coordinates in data
+	      // If yes, make sure trimLeft/trimRight are reset to null
+	      if (d._end === d.end)
 	        d._trimRight = null;
+	      if (d._start === d.start)
+	        d._trimLeft = null;
 	      d3.select(`#locus_${d.uid} .hover`)
 	        .transition()
 	        .attr("opacity", 0);
@@ -1477,7 +1479,7 @@
 	      g._strand = (g._strand === 1) ? -1 : 1;
 	    });
 	    d.genes.sort((a, b) => a._start - b._start);
-	  }
+	  },
 	};
 
 	const _scale = {
