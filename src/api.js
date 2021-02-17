@@ -318,8 +318,8 @@ const _cluster = {
         return `${locus.name}${flipped}`
       return (
         `${locus.name}${flipped}:`
-        + `${locus._start.toFixed(0)}`
-        + `-${locus._end.toFixed(0)}`
+        + `${locus._bio_start || locus._start.toFixed(0)}`
+        + `-${locus._bio_end || locus._end.toFixed(0)}`
       )
     }).join(", ")
   ),
@@ -419,6 +419,7 @@ const _cluster = {
   update: selection => {
     selection.selectAll("g.locus")
       .each(_locus.updateScaling)
+
     selection.attr("transform", _cluster.transform)
     if (config.cluster.alignLabels) {
       selection
@@ -806,8 +807,7 @@ const _link = {
       .range(groups.map(g => g.label))
     let colours = d3.quantize(d3.interpolateRainbow, groups.length + 1)
     groups.forEach((group, index) => {
-      if (group.colour)
-        colours[index] = group.colour 
+      if (group.colour) colours[index] = group.colour
     })
     scales.colour
       .domain(uids)
@@ -887,13 +887,10 @@ const _locus = {
       scales.locus(locus.uid) + scales.x(oldStart - locus._start)
     )
   },
-  update: selection => {
-    let translate = d => `translate(${scales.locus(d.uid)}, 0)`
-    return selection
-      .attr("transform", translate)
-      .call(_locus.updateTrackBar)
-      .call(_locus.updateHoverBox)
-  },
+  update: selection => selection
+    .attr("transform", d => `translate(${scales.locus(d.uid)}, 0)`)
+    .call(_locus.updateTrackBar)
+    .call(_locus.updateHoverBox),
   dragResize: selection => {
     let minPos, value, initial
 
