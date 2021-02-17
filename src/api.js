@@ -535,7 +535,15 @@ const _link = {
     if (config.link.asLine) return "none"
     if (config.link.groupColour)
       return rgbaToRgb(scales.colour(scales.group(d.query.uid)))
-    return scales.score(d.identity)
+    let value
+    if (d.identity > config.colourBar.upperBound) {
+      value = config.colourBar.upperBound
+    } else if (d.identity < config.colourBar.lowerBound) {
+      value = config.colourBar.lowerBound
+    } else {
+      value = d.identity
+    }
+    return scales.score(value)
   },
   stroke: d => {
     if (config.link.groupColour) {
@@ -1136,7 +1144,7 @@ const _scale = {
     _scale.rescaleRanges(oldX)
 
     let interp = d3.interpolateRgb(config.colourBar.lowerColor, config.colourBar.upperColor)
-    scales.score = d3.scaleSequential(interp).domain([0, 1])
+    scales.score = d3.scaleSequential(interp).domain([config.colourBar.lowerBound, config.colourBar.upperBound])
 
     if (!_scale.check("y"))
       scales.y.domain(data.clusters.map(c => c.uid))
