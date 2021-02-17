@@ -98,8 +98,13 @@ export default function clusterMap() {
 
       api.scale.update(data)
 
-      data.groups = api.link.getGroups(data.links, data.groups)
-      api.link.updateGroups(data.groups)
+      // Only disable grouping if explicitly defined false
+      if (data.config.updateGroups !== false) {
+        data.groups = api.link.getGroups(data.links, data.groups)
+        api.link.updateGroups(data.groups)
+      } else {
+        if (!data.groups) data.groups = []
+      }
 
       container = d3.select(this)
 
