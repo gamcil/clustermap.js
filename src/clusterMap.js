@@ -1,10 +1,9 @@
 import legend from "./legend.js"
 import colourBar from "./colourBar.js"
 import scaleBar from "./scaleBar.js"
-
 import { renameText } from "./utils.js"
-
 import * as api from "./api.js"
+
 
 export default function clusterMap() {
   /* A ClusterMap plot. */
@@ -99,12 +98,13 @@ export default function clusterMap() {
       api.scale.update(data)
 
       // Only disable grouping if explicitly defined false
-      if (data.config.updateGroups !== false) {
-        data.groups = api.link.getGroups(data.links, data.groups)
-        api.link.updateGroups(data.groups)
-      } else {
+      if (data.config && data.config.updateGroups === false) {
         if (!data.groups) data.groups = []
+      } else {
+        data.groups = api.link.getGroups(data.links, data.groups)
       }
+
+      api.link.updateGroups(data.groups)
 
       container = d3.select(this)
 
@@ -164,6 +164,20 @@ export default function clusterMap() {
         .data(d => d.loci, d => d.uid)
         .join(
           enter => {
+            // Make sure that, on first appearance of data, we
+            // convert to relative coordinates.
+            for (const locus of enter.data()) {
+              if (locus.start === 0)
+                continue
+              locus._bio_start = locus.start
+              locus._bio_end = locus.end
+              locus.start = 0
+              locus.end = locus._bio_end - locus._bio_start
+              for (const gene of locus.genes) {
+                gene._start = gene.start - locus._bio_start
+                gene._end = gene.end - locus._bio_start
+              }
+            }
             enter = enter.append("g")
               .attr("id", api.locus.getId)
               .attr("class", "locus")
