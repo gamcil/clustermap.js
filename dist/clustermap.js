@@ -709,8 +709,8 @@
 	        return `${locus.name}${flipped}`
 	      return (
 	        `${locus.name}${flipped}:`
-	        + `${locus._start.toFixed(0)}`
-	        + `-${locus._end.toFixed(0)}`
+	        + `${locus._bio_start || locus._start.toFixed(0)}`
+	        + `-${locus._bio_end || locus._end.toFixed(0)}`
 	      )
 	    }).join(", ")
 	  ),
@@ -810,6 +810,7 @@
 	  update: selection => {
 	    selection.selectAll("g.locus")
 	      .each(_locus.updateScaling);
+
 	    selection.attr("transform", _cluster.transform);
 	    if (config$1.cluster.alignLabels) {
 	      selection
@@ -1197,8 +1198,7 @@
 	      .range(groups.map(g => g.label));
 	    let colours = d3.quantize(d3.interpolateRainbow, groups.length + 1);
 	    groups.forEach((group, index) => {
-	      if (group.colour)
-	        colours[index] = group.colour; 
+	      if (group.colour) colours[index] = group.colour;
 	    });
 	    scales.colour
 	      .domain(uids)
@@ -1278,13 +1278,10 @@
 	      scales.locus(locus.uid) + scales.x(oldStart - locus._start)
 	    );
 	  },
-	  update: selection => {
-	    let translate = d => `translate(${scales.locus(d.uid)}, 0)`;
-	    return selection
-	      .attr("transform", translate)
-	      .call(_locus.updateTrackBar)
-	      .call(_locus.updateHoverBox)
-	  },
+	  update: selection => selection
+	    .attr("transform", d => `translate(${scales.locus(d.uid)}, 0)`)
+	    .call(_locus.updateTrackBar)
+	    .call(_locus.updateHoverBox),
 	  dragResize: selection => {
 	    let minPos, value, initial;
 
@@ -1666,7 +1663,13 @@
 
 	      _scale.update(data);
 
-	      data.groups = _link.getGroups(data.links, data.groups);
+	      // Only disable grouping if explicitly defined false
+	      if (data.config && data.config.updateGroups === false) {
+	        if (!data.groups) data.groups = [];
+	      } else {
+	        data.groups = _link.getGroups(data.links, data.groups);
+	      }
+
 	      _link.updateGroups(data.groups);
 
 	      container = d3.select(this);
@@ -1727,6 +1730,20 @@
 	        .data(d => d.loci, d => d.uid)
 	        .join(
 	          enter => {
+	            // Make sure that, on first appearance of data, we
+	            // convert to relative coordinates.
+	            for (const locus of enter.data()) {
+	              if (locus.start === 0)
+	                continue
+	              locus._bio_start = locus.start;
+	              locus._bio_end = locus.end;
+	              locus.start = 0;
+	              locus.end = locus._bio_end - locus._bio_start;
+	              for (const gene of locus.genes) {
+	                gene._start = gene.start - locus._bio_start;
+	                gene._end = gene.end - locus._bio_start;
+	              }
+	            }
 	            enter = enter.append("g")
 	              .attr("id", _locus.getId)
 	              .attr("class", "locus");
