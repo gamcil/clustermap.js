@@ -26,7 +26,7 @@ The clustermap chart expects data in the following format:
               "name": "Gene 1",
               "start": 2300,
               "end": 5000,
-              "strand": 1,
+              "strand": 1
             }
           ]
         }
@@ -45,7 +45,7 @@ The clustermap chart expects data in the following format:
       },
       "identity": 0.5
     }
-  ],
+  ]
 }
 ```
 
