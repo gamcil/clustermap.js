@@ -70,6 +70,8 @@ export default {
 			anchor: "start",
 			fontSize: 10,
 			rotation: 25,
+			position: "top",
+			spacing: 2,
 			show: false,
 			start: 0.5,
       name: "uid",
