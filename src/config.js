@@ -2,7 +2,7 @@ export default {
 	plot: {
 		transitionDuration: 250,
 		scaleFactor: 15,
-    scaleGenes: true,
+		scaleGenes: true,
 	},
 	legend: {
 		entryHeight: 18,
@@ -10,14 +10,14 @@ export default {
 		onClickCircle: null,
 		onClickText: null,
 		show: true,
-    marginLeft: 20,
+		marginLeft: 20,
 	},
 	colourBar: {
 		fontSize: 10,
 		height: 12,
 		show: true,
 		width: 150,
-    marginTop: 20,
+		marginTop: 20,
 	},
 	scaleBar: {
 		colour: "black",
@@ -26,27 +26,27 @@ export default {
 		basePair: 2500,
 		show: true,
 		stroke: 1,
-    marginTop: 20,
+		marginTop: 20,
 	},
 	link: {
-    show: true,
-    asLine: false,
-    straight: false,
+		show: true,
+		asLine: false,
+		straight: false,
 		threshold: 0,
-    strokeWidth: 0.5,
-    groupColour: false,
-    bestOnly: false,
-    label: {
-      show: false,
-      fontSize: 10,
-      background: true,
-      position: 0.5,
-    }
+		strokeWidth: 0.5,
+		groupColour: false,
+		bestOnly: false,
+		label: {
+			show: false,
+			fontSize: 10,
+			background: true,
+			position: 0.5,
+		}
 	},
 	cluster: {
 		nameFontSize: 12,
 		lociFontSize: 10,
-    hideLocusCoordinates: false,
+		hideLocusCoordinates: false,
 		spacing: 40,
 		alignLabels: true,
 	},
@@ -74,7 +74,7 @@ export default {
 			spacing: 2,
 			show: false,
 			start: 0.5,
-      name: "uid",
+			name: "uid",
 		},
 	},
 }
