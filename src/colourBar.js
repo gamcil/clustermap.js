@@ -1,3 +1,5 @@
+import * as api from "./api.js"
+
 export default function colourBar(colourScale) {
 	/* Creates the colour bar component.
 	*/
@@ -54,7 +56,7 @@ export default function colourBar(colourScale) {
 							.attr("class", "endText")
 							.attr("text-anchor", "end")
 						cbar.selectAll("text")
-							.style("font-family", "sans-serif")
+							.style("font-family", api.config.plot.fontFamily)
               .style("dominant-baseline", "hanging")
 
 						enter.call(updateColourBar)

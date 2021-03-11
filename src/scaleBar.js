@@ -1,3 +1,5 @@
+import * as api from "./api.js"
+
 export default function scaleBar(x) {
 	/* Creates a scale bar component
 	*/
@@ -26,7 +28,7 @@ export default function scaleBar(x) {
 							.attr("class", "barText")
 							.attr("text-anchor", "middle")
 							.attr("cursor", "pointer")
-              .style("font-family", "sans-serif")
+              .style("font-family", api.config.plot.fontFamily)
 							.on("click", onClickText || promptNewLength)
 						enter.call(updateScaleBar)
 						return enter

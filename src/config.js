@@ -3,6 +3,7 @@ export default {
 		transitionDuration: 250,
 		scaleFactor: 15,
 		scaleGenes: true,
+		fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif'
 	},
 	legend: {
 		entryHeight: 18,

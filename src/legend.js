@@ -1,3 +1,5 @@
+import * as api from "./api.js"
+
 export default function legend(colourScale) {
 	/* Creates a legend component from a colour scale.
 	 */
@@ -40,7 +42,7 @@ export default function legend(colourScale) {
 						enter.append("text")
 							.attr("x", 16)
 							.attr("text-anchor", "start")
-							.style("font-family", "sans-serif")
+							.style("font-family", api.config.plot.fontFamily)
               .style("dominant-baseline", "middle")
 						return enter.call(updateLegend)
 					},
