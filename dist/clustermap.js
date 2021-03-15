@@ -456,6 +456,30 @@
 		 */
 		locusText: cluster => (
 			cluster.loci.map(locus => {
+				let start, end;
+
+				// Calculate biological start/end, if exists
+				// -- Calculate difference between trimmed start and real start of loci
+				// -- Flip them if locus is flipped
+				// -- Calculate new biological start/end based on differences
+				// Note: adds 1 to locus start for display, as all coordinates are 0-based
+				if (locus._bio_start) {
+					let startDiff = locus._start - locus.start;
+					let endDiff = locus.end - locus._end;
+					if (locus._flipped)
+						[startDiff, endDiff] = [endDiff, startDiff];
+					start = locus._bio_start + startDiff + 1;
+					end = locus._bio_end - endDiff;
+				} else {
+					// Otherwise, just use current relative start/end
+					start = locus._start + 1;
+					end = locus._end;
+				}
+
+				// Display in reverse if locus is flipped
+				if (locus._flipped)
+					[start, end] = [end, start];
+
 				let flipped = locus._flipped ? " (reversed)" : "";
 				if (
 					config.cluster.hideLocusCoordinates
@@ -463,11 +487,7 @@
 					|| locus._end == null
 				)
 					return `${locus.name}${flipped}`
-				return (
-					`${locus.name}${flipped}:`
-					+ `${locus._bio_start || locus._start.toFixed(0)}`
-					+ `-${locus._bio_end || locus._end.toFixed(0)}`
-				)
+				return `${locus.name}${flipped}:${start.toFixed(0)}-${end.toFixed(0)}`
 			}).join(", ")
 		),
 		/**
@@ -566,7 +586,6 @@
 		update: selection => {
 			selection.selectAll("g.locus")
 				.each(_locus.updateScaling);
-
 			selection.attr("transform", _cluster.transform);
 			if (config.cluster.alignLabels) {
 				selection
@@ -582,12 +601,12 @@
 					});
 			}
 			selection
-				.selectAll("text.clusterText")
-				.style("font-size", `${config.cluster.nameFontSize}px`);
-			selection
 				.selectAll("text.locusText")
 				.text(_cluster.locusText)
 				.style("font-size", `${config.cluster.lociFontSize}px`);
+			selection
+				.selectAll("text.clusterText")
+				.style("font-size", `${config.cluster.nameFontSize}px`);
 			return selection
 		},
 		drag: selection => {
