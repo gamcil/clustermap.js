@@ -1,11 +1,14 @@
 # clustermap.js
+
 A d3 chart for generating gene cluster comparison figures
 
 ## What is it?
+
 clustermap.js is an interactive, reusable d3 chart designed to visualise homology between
 multiple gene clusters.
 
 ## Input data
+
 The clustermap chart expects data in the following format:
 
 ```json
@@ -50,6 +53,7 @@ The clustermap chart expects data in the following format:
 ```
 
 ## Example usage
+
 1. Import d3 v6
 2. Import clustermap.js
 3. Style container div element to take up entire viewport
@@ -66,38 +70,34 @@ The clustermap chart expects data in the following format:
     <!-- Make div take up entire viewport -->
     <!-- clustermap.js <svg> element has 100% width/height -->
     <style>
-    div#plot {
+      div#plot {
         width: 100vw;
         height: 100vh;
-    }
-    #plot div {
+      }
+      #plot div {
         width: 100vw;
         height: 100vh;
-    }
+      }
     </style>
   </head>
   <body>
     <!-- Create a <div> container for the clustermap.js plot -->
     <!-- clustermap.js will create child <svg> (plot) and <input> (colour picker) elements -->
-    <div id='plot'></div>
+    <div id="plot"></div>
     <script>
       // Create and configure the ClusterMap function.
-      let chart = ClusterMap.ClusterMap()
-        .config({
-          cluster: {
-            spacing: 30,
-            alignLabels: true,
-          }
-        })
+      let chart = ClusterMap.ClusterMap().config({
+        cluster: {
+          spacing: 30,
+          alignLabels: true,
+        },
+      });
 
       // Load in data via d3.json, select <div> elements and call the
       // chart function on the selection.
-      d3.json("data.json")
-        .then(data => {
-          d3.select("#plot")
-            .datum(data)
-            .call(chart)
-        })
+      d3.json("data.json").then((data) => {
+        d3.select("#plot").datum(data).call(chart);
+      });
     </script>
   </body>
 </html>

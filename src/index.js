@@ -1,1 +1,1 @@
-export {default as ClusterMap} from './clusterMap.js'
+export { default as ClusterMap } from "./clusterMap.js";
