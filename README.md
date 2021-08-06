@@ -11,42 +11,49 @@ multiple gene clusters.
 
 The clustermap chart expects data in the following format:
 
-```json
+```
 {
   "clusters": [
     {
-      "uid": 1234,
-      "name": "Cluster 1",
+      "uid":  <str: Unique ID>,
+      "name": <str: Cluster name>,
       "loci": [
         {
-          "uid": 2345,
-          "name": "Locus 1",
-          "start": 1,
-          "end": 20000,
+          "uid":   <str: Unique ID>,
+          "name":  <str: Locus name>,
+          "start": <int: Locus start position>,
+          "end":   <int: Locus end position>,
           "genes": [
             {
-              "uid": 3456,
-              "name": "Gene 1",
-              "start": 2300,
-              "end": 5000,
-              "strand": 1
+              "uid":    <str: Unique ID>,
+              "name":   <str: Gene name>,
+              "start":  <int: Gene start position>,
+              "end":    <int: Gene end position>,
+              "strand": <int: Gene strand (0 or 1)>,
             }
-          ]
-        }
-      ]
-    }
+          ]}
+      ]}
   ],
   "links": [
     {
       "query": {
-        "uid": 3456,
-        "name": "Gene 1"
+      	"uid":  <str: Unique ID of query gene>,
+      	"name": <str: Name of query gene>
       },
       "target": {
-        "uid": 4567,
-        "name": "Gene 2"
+      	"uid":  <str: Unique ID of target gene>,
+      	"name": <str: Name of target gene>
       },
-      "identity": 0.5
+      "identity": <float: Percent identity query-target alignment>
+    }
+  ],
+  "groups": [
+    {
+      "uid":     <str: Unique ID of group>,
+      "label":   <str: Group label>,
+      "genes":  [<str: Gene UID>],
+      "colour":  <str: Colour code for gene fill>,
+      "hidden":  <bool: Hide group in the plot>
     }
   ]
 }
