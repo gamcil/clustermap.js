@@ -1,0 +1,129 @@
+{
+	"clusters": [
+		{
+			"uid": "ceb43bf4-2419-4176-8805-351e2540c014",
+			"name": "input_sequence",
+			"loci": [
+				{
+					"uid": "d78ae4d6-8516-413d-889a-ea002a9833c1",
+					"name": "input_locus",
+					"start": 0,
+					"end": 10000,
+					"genes": [
+						{
+							"uid": "0",
+							"name": "WP_011026966.1",
+							"start": 0,
+							"end": 1000,
+							"strand": 0
+						},
+						{
+							"uid": "1",
+							"name": "WP_011026967.1",
+							"start": 2500,
+							"end": 3500,
+							"strand": 0
+						},
+						{
+							"uid": "3",
+							"name": "WP_011026967.1",
+							"start": 5500,
+							"end": 6500,
+							"strand": 0
+						}
+					]
+				}
+			]
+		},
+		{
+			"uid": "49512155-3d67-471e-b9c3-1652b32cd350",
+			"name": "GCF_008931305.1",
+			"loci": [
+				{
+					"uid": "9b1db410-b17b-41f5-b054-4871b44416db",
+					"name": "NZ_CP042324.1",
+					"start": 0,
+					"end": 10000,
+					"genes": [
+						{
+							"uid": "1001",
+							"name": "WP_011026966.1",
+							"start": 0,
+							"end": 1000,
+							"strand": 0
+						},
+						{
+							"uid": "1002",
+							"name": "WP_011026967.1",
+							"start": 2500,
+							"end": 3500,
+							"strand": 0
+						},
+						{
+							"uid": "1003",
+							"name": "WP_011026968.1",
+							"start": 5500,
+							"end": 6500,
+							"strand": 0
+						}
+					]
+				}
+			]
+		}
+	],
+	"links": [
+		{
+			"uid": "link1",
+			"target": {
+				"uid": "0",
+				"name": "a.1"
+			},
+			"query": {
+				"uid": "1001",
+				"name": "TODO1"
+			},
+			"identity": 0.5
+		},
+		{
+			"uid": "link2",
+			"target": {
+				"uid": "1",
+				"name": "a.2"
+			},
+			"query": {
+				"uid": "1002",
+				"name": "TODO2"
+			},
+			"identity": 0.5
+		},
+		{
+			"uid": "link3",
+			"target": {
+				"uid": "3",
+				"name": "a.3"
+			},
+			"query": {
+				"uid": "1003",
+				"name": "TODO3"
+			},
+			"identity": 0.5
+		}
+	],
+	"groups": [
+		{
+			"uid": "group1",
+			"label": "group 1",
+			"genes": ["0", "1001"]
+		},
+		{
+			"uid": "group2",
+			"label": "group 2",
+			"genes": ["1", "1002"]
+		},
+		{
+			"uid": "group3",
+			"label": "group 3",
+			"genes": ["3", "1003"]
+		}
+	]
+}
