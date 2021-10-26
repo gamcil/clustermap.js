@@ -1,13 +1,8 @@
 (function (global, factory) {
-  typeof exports === "object" && typeof module !== "undefined"
-    ? factory(exports)
-    : typeof define === "function" && define.amd
-    ? define(["exports"], factory)
-    : ((global =
-        typeof globalThis !== "undefined" ? globalThis : global || self),
-      factory((global.ClusterMap = {})));
-})(this, function (exports) {
-  "use strict";
+  typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
+  typeof define === 'function' && define.amd ? define(['exports'], factory) :
+  (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ClusterMap = {}));
+}(this, (function (exports) { 'use strict';
 
   // Changes value of a text node to a prompted value
   function renameText(event) {
@@ -125,10 +120,7 @@
   };
 
   function getClosestValue(values, value) {
-    return Math.max(
-      Math.min(d3.bisectLeft(values, value), values.length - 1),
-      0
-    );
+    return Math.max(Math.min(d3.bisectLeft(values, value), values.length - 1), 0);
   }
 
   function updateScaleRange(scale, uid, value) {
@@ -181,6 +173,7 @@
       updateConfig(config, target);
     },
     update: null,
+  	data: null,
   };
 
   const scales = {
@@ -212,8 +205,7 @@
       let geneLength = scaledEnd - scaledStart;
 
       // Calculate scaled constants based on scaled coordinates
-      let bottom =
-        config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
+      let bottom = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
       let midpoint = bottom / 2;
       let third = config.gene.shape.tipHeight + config.gene.shape.bodyHeight;
 
@@ -520,9 +512,7 @@
             locus._end == null
           )
             return `${locus.name}${flipped}`;
-          return `${locus.name}${flipped}:${start.toFixed(0)}-${end.toFixed(
-            0
-          )}`;
+          return `${locus.name}${flipped}:${start.toFixed(0)}-${end.toFixed(0)}`;
         })
         .join(", "),
     /**
@@ -677,10 +667,7 @@
 
         // Get current y value with mouse event
         let yy = Math.min(height, Math.max(0, y + event.y));
-        me.attr(
-          "transform",
-          (d) => `translate(${scales.offset(d.uid)}, ${yy})`
-        );
+        me.attr("transform", (d) => `translate(${scales.offset(d.uid)}, ${yy})`);
 
         // Get closest index based on new y-position
         let domain = scales.y.domain();
@@ -905,8 +892,7 @@
           if (
             !groups.get(pair).some((l) => {
               let genes = new Set([l.query.uid, l.target.uid]);
-              let share =
-                genes.has(link.query.uid) || genes.has(link.target.uid);
+              let share = genes.has(link.query.uid) || genes.has(link.target.uid);
               return share && link.identity < l.identity;
             })
           )
@@ -1031,6 +1017,7 @@
       let colours = d3.quantize(d3.interpolateRainbow, groups.length + 1);
       groups.forEach((group, index) => {
         if (group.colour) colours[index] = group.colour;
+  			else group.colour = colours[index];
       });
       scales.colour.domain(uids).range(colours);
     },
@@ -1226,14 +1213,9 @@
         plot.update();
       };
 
-      return d3
-        .drag()
-        .on("start", started)
-        .on("drag", dragged)
-        .on(
-          "end",
-          ended
-        )(selection);
+      return d3.drag().on("start", started).on("drag", dragged).on("end", ended)(
+        selection
+      );
     },
     dragPosition: (selection) => {
       let minPos, maxPos, offset, value, locus;
@@ -1287,14 +1269,9 @@
         plot.update();
       };
 
-      return d3
-        .drag()
-        .on("start", started)
-        .on("drag", dragged)
-        .on(
-          "end",
-          ended
-        )(selection);
+      return d3.drag().on("start", started).on("drag", dragged).on("end", ended)(
+        selection
+      );
     },
     /**
      * Flips a locus by calculating inverse coordinates.
@@ -1386,8 +1363,7 @@
 
       // Hide tooltip when there's a click anywhere else in the window
       d3.select(window).on("click", (e) => {
-        if (e.target === event.target || event.target.contains(e.target))
-          return;
+        if (e.target === event.target || event.target.contains(e.target)) return;
         d3.select(event.target)
           .transition()
           .style("opacity", 0)
@@ -1407,9 +1383,126 @@
     },
   };
 
+  const _group = {
+    tooltipHTML: (g) => {
+      // Create detached <div>
+      let div = d3
+        .create("div")
+        .attr("class", "tooltip-contents")
+        .style("display", "flex")
+        .style("flex-direction", "column");
+
+      // Add <input> so label can be edited directly
+      div.append("text").text("Edit label");
+      let text = div
+        .append("input")
+        .attr("type", "input")
+        .attr("value", g.label || g.uid);
+
+      // Add multiple <select> for each saved gene identifier
+      div.append("text").text("Merge with...");
+  		// let groups = d3.select("g.legend").data()[0].groups
+  		let groups = plot.data().groups;
+      let select = div.append("select").attr("multiple", true);
+      select
+        .selectAll("option")
+        .data(groups.filter(d => d.uid !== g.uid))
+        .join("option")
+        .text(d => d.label)
+        .attr("value", d => d.uid);
+
+  		div.append("button")
+  			.text("Merge!")
+  			.on("click", () => {
+  				// Find selected options from multiselect
+  				const selected = [];
+  				for (let opt of select.node().options)
+  					if (opt.selected) selected.push(opt);
+
+  				// Find indexes of selected groups in groups
+  				// + Merge genes to the current group
+  				// + Remove them from the multiselect
+  				let mergeeIds = [];
+  				for (const opt of selected) {
+  					let idx = groups.findIndex(d => d.uid === opt.value);
+  					mergeeIds.push(idx);
+  					g.genes.push(...groups[idx].genes);
+  					opt.remove();
+  				}
+
+  				// Remove merged groups from the data
+  				// Reverse sort ensures splices do not affect lower indexes
+  				mergeeIds.sort((a, b) => b - a);
+  				for (const idx of mergeeIds)
+  					groups.splice(idx, 1);
+
+  				// Update the plot
+  				plot.data({...plot.data(), groups: groups});
+  				plot.update();
+  			});
+
+      // Add colour picker for changing individual gene colour
+      div
+        .append("label")
+        .append("text")
+        .text("Choose group colour: ")
+        .append("input")
+        .attr("type", "color")
+        .attr("default", g.colour)
+        .on("change", (e) => {
+          g.colour = e.target.value;
+          plot.update();
+        });
+
+      // Add anchoring button which will also automatically flip loci
+      div
+        .append("button")
+        .text("Hide group")
+        .on("click", () => {g.hidden = true; plot.update();});
+
+      // Add event handlers to update labels
+      text.on("input", (e) => {
+        g.label = e.target.value;
+        select.attr("value", null);
+        plot.update({});
+      });
+      return div;
+    },
+    contextMenu: (event, data) => {
+      event.preventDefault();
+
+      // Clear tooltip contents, generate new data
+      let tip = d3.select("div.tooltip");
+      tip.html("");
+      tip.append(() => _group.tooltipHTML(data).node());
+
+      // Get position relative to clicked element
+      let rect = event.target.getBoundingClientRect();
+      let bbox = tip.node().getBoundingClientRect();
+      let xOffset = rect.width / 2 - bbox.width / 2;
+      let yOffset = rect.height * 1.2;
+
+      // Adjust position and show tooltip
+      // Add a delayed fade-out transition if user does not enter tooltip
+      tip
+        .style("left", rect.x + xOffset + "px")
+        .style("top", rect.y + yOffset + "px");
+      tip
+        .transition()
+        .duration(100)
+        .style("opacity", 1)
+        .style("pointer-events", "all");
+      tip
+        .transition()
+        .delay(1000)
+        .style("opacity", 0)
+        .style("pointer-events", "none");
+    },
+  };
+
   config.gene.shape.onClick = _gene.anchor;
   config.legend.onClickText = _link.rename;
-  config.legend.onAltClickText = _link.hide;
+  config.legend.onAltClickText = _group.contextMenu;
 
   function legend(colourScale) {
     /* Creates a legend component from a colour scale.
@@ -1588,9 +1681,7 @@
               return enter;
             },
             (update) =>
-              update.call((update) =>
-                update.transition(t).call(updateColourBar)
-              )
+              update.call((update) => update.transition(t).call(updateColourBar))
           );
       });
     }
@@ -1610,8 +1701,7 @@
 
     // Setters/getters
     my.width = (_) => (arguments.length ? ((width = parseInt(_)), my) : width);
-    my.height = (_) =>
-      arguments.length ? ((height = parseInt(_)), my) : height;
+    my.height = (_) => (arguments.length ? ((height = parseInt(_)), my) : height);
     my.fontSize = (_) =>
       arguments.length ? ((fontSize = parseInt(_)), my) : fontSize;
     my.colourScale = (_) =>
@@ -1705,12 +1795,10 @@
       arguments.length ? ((colourScale = _), my) : colourScale;
     my.fontSize = (_) =>
       arguments.length ? ((fontSize = parseInt(_)), my) : fontSize;
-    my.height = (_) =>
-      arguments.length ? ((height = parseInt(_)), my) : height;
+    my.height = (_) => (arguments.length ? ((height = parseInt(_)), my) : height);
     my.onClickText = (_) =>
       arguments.length ? ((onClickText = _), my) : onClickText;
-    my.stroke = (_) =>
-      arguments.length ? ((stroke = parseInt(_)), my) : stroke;
+    my.stroke = (_) => (arguments.length ? ((stroke = parseInt(_)), my) : stroke);
     my.transition = (_) => (arguments.length ? ((t = _), my) : t);
     my.width = (_) => (arguments.length ? ((width = parseInt(_)), my) : width);
 
@@ -1724,6 +1812,7 @@
     let transition = d3.transition();
 
     plot.update = () => container.call(my);
+  	plot.data = (data) => my.data(data);
 
     function my(selection) {
       selection.each(update);
@@ -1904,10 +1993,7 @@
               .append("g")
               .attr("id", _locus.getId)
               .attr("class", "locus");
-            enter
-              .append("line")
-              .attr("class", "trackBar")
-              .style("fill", "#111");
+            enter.append("line").attr("class", "trackBar").style("fill", "#111");
             let hover = enter
               .append("g")
               .attr("class", "hover hidden")
@@ -2026,11 +2112,7 @@
       let scaleBarFn = getScaleBarFn();
       let colourBarFn = getColourBarFn();
 
-      plot$1
-        .call(legendFn)
-        .call(colourBarFn)
-        .call(scaleBarFn)
-        .call(arrangePlot);
+      plot$1.call(legendFn).call(colourBarFn).call(scaleBarFn).call(arrangePlot);
     }
 
     function arrangePlot(selection) {
@@ -2155,5 +2237,6 @@
 
   exports.ClusterMap = clusterMap;
 
-  Object.defineProperty(exports, "__esModule", { value: true });
-});
+  Object.defineProperty(exports, '__esModule', { value: true });
+
+})));

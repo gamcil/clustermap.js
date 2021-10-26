@@ -55,6 +55,7 @@ const plot = {
     updateConfig(config, target);
   },
   update: null,
+	data: null,
 };
 
 const scales = {
@@ -898,6 +899,7 @@ const _link = {
     let colours = d3.quantize(d3.interpolateRainbow, groups.length + 1);
     groups.forEach((group, index) => {
       if (group.colour) colours[index] = group.colour;
+			else group.colour = colours[index]
     });
     scales.colour.domain(uids).range(colours);
   },
@@ -1263,9 +1265,126 @@ const _tooltip = {
   },
 };
 
+const _group = {
+  tooltipHTML: (g) => {
+    // Create detached <div>
+    let div = d3
+      .create("div")
+      .attr("class", "tooltip-contents")
+      .style("display", "flex")
+      .style("flex-direction", "column");
+
+    // Add <input> so label can be edited directly
+    div.append("text").text("Edit label");
+    let text = div
+      .append("input")
+      .attr("type", "input")
+      .attr("value", g.label || g.uid);
+
+    // Add multiple <select> for each saved gene identifier
+    div.append("text").text("Merge with...");
+		let groups = plot.data().groups
+    let select = div.append("select").attr("multiple", true);
+    select
+      .selectAll("option")
+      .data(groups.filter(d => d.uid !== g.uid))
+      .join("option")
+      .text(d => d.label)
+      .attr("value", d => d.uid)
+
+		div.append("button")
+			.text("Merge!")
+			.on("click", () => {
+				// Find selected options from multiselect
+				const selected = []
+				for (let opt of select.node().options)
+					if (opt.selected) selected.push(opt)
+
+				// Find indexes of selected groups in groups
+				// + Merge genes to the current group
+				// + Remove them from the multiselect
+				let mergeeIds = []
+				for (const opt of selected) {
+					let idx = groups.findIndex(d => d.uid === opt.value)
+					mergeeIds.push(idx)
+					g.genes.push(...groups[idx].genes)
+					opt.remove()
+				}
+
+				// Remove merged groups from the data
+				// Reverse sort ensures splices do not affect lower indexes
+				mergeeIds.sort((a, b) => b - a)
+				for (const idx of mergeeIds)
+					groups.splice(idx, 1)
+
+				// Update the plot
+				plot.data({...plot.data(), groups: groups})
+				plot.update()
+			})
+
+    // Add colour picker for changing individual gene colour
+    div
+      .append("label")
+      .append("text")
+      .text("Choose group colour: ")
+      .append("input")
+      .attr("type", "color")
+      .attr("default", g.colour)
+      .on("change", (e) => {
+        g.colour = e.target.value;
+        plot.update();
+      });
+
+    // Add anchoring button which will also automatically flip loci
+    div
+      .append("button")
+      .text("Hide group")
+      .on("click", () => {g.hidden = true; plot.update();});
+
+    // Add event handlers to update labels
+    text.on("input", (e) => {
+      g.label = e.target.value;
+      select.attr("value", null);
+      plot.update({});
+    });
+    select
+    return div;
+  },
+  contextMenu: (event, data) => {
+    event.preventDefault();
+
+    // Clear tooltip contents, generate new data
+    let tip = d3.select("div.tooltip");
+    tip.html("");
+    tip.append(() => _group.tooltipHTML(data).node());
+
+    // Get position relative to clicked element
+    let rect = event.target.getBoundingClientRect();
+    let bbox = tip.node().getBoundingClientRect();
+    let xOffset = rect.width / 2 - bbox.width / 2;
+    let yOffset = rect.height * 1.2;
+
+    // Adjust position and show tooltip
+    // Add a delayed fade-out transition if user does not enter tooltip
+    tip
+      .style("left", rect.x + xOffset + "px")
+      .style("top", rect.y + yOffset + "px");
+    tip
+      .transition()
+      .duration(100)
+      .style("opacity", 1)
+      .style("pointer-events", "all");
+    tip
+      .transition()
+      .delay(1000)
+      .style("opacity", 0)
+      .style("pointer-events", "none");
+  },
+}
+
 config.gene.shape.onClick = _gene.anchor;
 config.legend.onClickText = _link.rename;
-config.legend.onAltClickText = _link.hide;
+config.legend.onAltClickText = _group.contextMenu;
 
 export {
   config,
@@ -1275,6 +1394,7 @@ export {
   scales,
   _cluster as cluster,
   _gene as gene,
+	_group as group,
   _link as link,
   _locus as locus,
   _scale as scale,
