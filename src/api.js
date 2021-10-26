@@ -55,7 +55,7 @@ const plot = {
     updateConfig(config, target);
   },
   update: null,
-	data: null,
+  data: null,
 };
 
 const scales = {
@@ -899,7 +899,7 @@ const _link = {
     let colours = d3.quantize(d3.interpolateRainbow, groups.length + 1);
     groups.forEach((group, index) => {
       if (group.colour) colours[index] = group.colour;
-			else group.colour = colours[index]
+      else group.colour = colours[index];
     });
     scales.colour.domain(uids).range(colours);
   },
@@ -1283,44 +1283,44 @@ const _group = {
 
     // Add multiple <select> for each saved gene identifier
     div.append("text").text("Merge with...");
-		let groups = plot.data().groups
+    let groups = plot.data().groups;
     let select = div.append("select").attr("multiple", true);
     select
       .selectAll("option")
-      .data(groups.filter(d => d.uid !== g.uid))
+      .data(groups.filter((d) => d.uid !== g.uid))
       .join("option")
-      .text(d => d.label)
-      .attr("value", d => d.uid)
+      .text((d) => d.label)
+      .attr("value", (d) => d.uid);
 
-		div.append("button")
-			.text("Merge!")
-			.on("click", () => {
-				// Find selected options from multiselect
-				const selected = []
-				for (let opt of select.node().options)
-					if (opt.selected) selected.push(opt)
+    div
+      .append("button")
+      .text("Merge!")
+      .on("click", () => {
+        // Find selected options from multiselect
+        const selected = [];
+        for (let opt of select.node().options)
+          if (opt.selected) selected.push(opt);
 
-				// Find indexes of selected groups in groups
-				// + Merge genes to the current group
-				// + Remove them from the multiselect
-				let mergeeIds = []
-				for (const opt of selected) {
-					let idx = groups.findIndex(d => d.uid === opt.value)
-					mergeeIds.push(idx)
-					g.genes.push(...groups[idx].genes)
-					opt.remove()
-				}
+        // Find indexes of selected groups in groups
+        // + Merge genes to the current group
+        // + Remove them from the multiselect
+        let mergeeIds = [];
+        for (const opt of selected) {
+          let idx = groups.findIndex((d) => d.uid === opt.value);
+          mergeeIds.push(idx);
+          g.genes.push(...groups[idx].genes);
+          opt.remove();
+        }
 
-				// Remove merged groups from the data
-				// Reverse sort ensures splices do not affect lower indexes
-				mergeeIds.sort((a, b) => b - a)
-				for (const idx of mergeeIds)
-					groups.splice(idx, 1)
+        // Remove merged groups from the data
+        // Reverse sort ensures splices do not affect lower indexes
+        mergeeIds.sort((a, b) => b - a);
+        for (const idx of mergeeIds) groups.splice(idx, 1);
 
-				// Update the plot
-				plot.data({...plot.data(), groups: groups})
-				plot.update()
-			})
+        // Update the plot
+        plot.data({ ...plot.data(), groups: groups });
+        plot.update();
+      });
 
     // Add colour picker for changing individual gene colour
     div
@@ -1339,7 +1339,10 @@ const _group = {
     div
       .append("button")
       .text("Hide group")
-      .on("click", () => {g.hidden = true; plot.update();});
+      .on("click", () => {
+        g.hidden = true;
+        plot.update();
+      });
 
     // Add event handlers to update labels
     text.on("input", (e) => {
@@ -1347,7 +1350,7 @@ const _group = {
       select.attr("value", null);
       plot.update({});
     });
-    select
+    select;
     return div;
   },
   contextMenu: (event, data) => {
@@ -1380,7 +1383,7 @@ const _group = {
       .style("opacity", 0)
       .style("pointer-events", "none");
   },
-}
+};
 
 config.gene.shape.onClick = _gene.anchor;
 config.legend.onClickText = _link.rename;
@@ -1394,7 +1397,7 @@ export {
   scales,
   _cluster as cluster,
   _gene as gene,
-	_group as group,
+  _group as group,
   _link as link,
   _locus as locus,
   _scale as scale,

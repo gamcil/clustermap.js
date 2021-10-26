@@ -11,7 +11,7 @@ export default function clusterMap() {
   let transition = d3.transition();
 
   api.plot.update = () => container.call(my);
-	api.plot.data = (data) => my.data(data);
+  api.plot.data = (data) => my.data(data);
 
   function my(selection) {
     selection.each(update);
