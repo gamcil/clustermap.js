@@ -131,6 +131,10 @@
     scales[scale].range(range);
   }
 
+  function xDistance(start, end) {
+    return scales.x(end) - scales.x(start);
+  }
+
   const config = Object.assign({}, defaultConfig);
   const flags = { isDragging: false };
 
@@ -257,7 +261,7 @@
       return points.join(" ");
     },
     labelTransform: (g) => {
-      let offset = scales.x(g.end - g.start) * config.gene.label.start;
+      let offset = xDistance(g.start, g.end) * config.gene.label.start;
       let gx = scales.x(g.start) + offset;
       let gy;
       if (config.gene.label.position === "middle")
@@ -958,9 +962,13 @@
         let matrix = get.matrix(cluster);
         let left = scales.x(g.start) + offset;
         let right = scales.x(g.end) + offset;
+        // Match the gene polygon convention: only strand 1 is forward/right.
+        // Some inputs use 0 for reverse/left, which must anchor links on the
+        // same side as an explicit -1 strand.
+        let forward = g.strand === 1;
         return [
-          g.strand === -1 ? right : left,
-          g.strand === -1 ? left : right,
+          forward ? left : right,
+          forward ? right : left,
           snap ? scales.y(g._cluster) + mid : matrix.f + mid,
         ];
       };
@@ -1062,7 +1070,7 @@
 
   const _locus = {
     getId: (d) => `locus_${d.uid}`,
-    realLength: (d) => scales.x(d._end - d._start),
+    realLength: (d) => xDistance(d._start, d._end),
     updateTrackBar: (selection) => {
       let midPoint =
         config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
@@ -1119,7 +1127,7 @@
       updateScaleRange(
         "locus",
         locus.uid,
-        scales.locus(locus.uid) + scales.x(oldStart - locus._start)
+        scales.locus(locus.uid) + xDistance(locus._start, oldStart)
       );
     },
     update: (selection) =>
@@ -1363,7 +1371,13 @@
     update: (data) => {
       let oldX = scales.x.copy();
       _scale.updateX();
-      _scale.rescaleRanges(oldX);
+      // Reproject dependent ranges only when the x-scale range actually
+      // changes. Repeating invert()/scale() on every redraw accumulates small
+      // floating-point errors, causing static link paths to drift after flips.
+      let xRangeChanged = oldX
+        .range()
+        .some((value, index) => value !== scales.x.range()[index]);
+      if (xRangeChanged) _scale.rescaleRanges(oldX);
 
       if (!_scale.check("y")) scales.y.domain(data.clusters.map((c) => c.uid));
       _scale.updateY(data);
@@ -2123,7 +2137,9 @@
               .style("fill", "white")
               .style("text-anchor", "middle")
               .style("font-family", config.plot.fontFamily);
-            return enter.call(_link.update);
+            // Initial and subsequent static renders must use the scale model.
+            // Live DOM transforms are only needed while a locus is being dragged.
+            return enter.call(_link.update, true);
           },
           (update) =>
             update.call((update) =>

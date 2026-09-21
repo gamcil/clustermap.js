@@ -298,7 +298,9 @@ export default function clusterMap() {
             .style("fill", "white")
             .style("text-anchor", "middle")
             .style("font-family", api.config.plot.fontFamily);
-          return enter.call(api.link.update);
+          // Initial and subsequent static renders must use the scale model.
+          // Live DOM transforms are only needed while a locus is being dragged.
+          return enter.call(api.link.update, true);
         },
         (update) =>
           update.call((update) =>
