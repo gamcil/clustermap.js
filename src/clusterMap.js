@@ -46,6 +46,14 @@ export default function clusterMap() {
             .style("opacity", 0)
             .style("position", "absolute")
             .style("pointer-events", "none")
+            .style("z-index", 1)
+            .style("box-sizing", "border-box")
+            .style("padding", "8px")
+            .style("background", "white")
+            .style("border", "1px solid #999")
+            .style("border-radius", "4px")
+            .style("box-shadow", "0 2px 8px rgba(0, 0, 0, 0.2)")
+            .style("font-family", api.config.plot.fontFamily)
             .on("mouseenter", api.tooltip.enter)
             .on("mouseleave", api.tooltip.leave);
 

@@ -3,10 +3,11 @@
 	<head>
 		<meta charset="utf-8">
 		<title>cmap</title>
-		<script src="https://d3js.org/d3.v6.min.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 		<style>
 			body { margin: 0; padding: 0; }
-			div {
+			#plot,
+			#plot > .chart-host {
 				width: 100vw;
 				height: 100vh;
 				margin: 0;
@@ -92,6 +93,7 @@
 				div.selectAll("div")
 					.data([data])
 					.join("div")
+					.attr("class", "chart-host")
 					.call(chart)
 
 				let svg = div.select("svg")

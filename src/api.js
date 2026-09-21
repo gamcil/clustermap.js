@@ -171,43 +171,65 @@ const _gene = {
       .create("div")
       .attr("class", "tooltip-contents")
       .style("display", "flex")
-      .style("flex-direction", "column");
+      .style("flex-direction", "column")
+      .style("gap", "4px")
+      .style("width", "260px");
 
-    // Add <input> so label can be edited directly
-    div.append("text").text("Edit label");
+    // This is HTML, not SVG: use ordinary form elements rather than SVG
+    // <text> nodes so consumers can style the tooltip predictably.
+    div.append("label").attr("for", "gene-label-input").text("Edit label");
     let text = div
       .append("input")
-      .attr("type", "input")
-      .attr("value", g.label || g.uid);
+      .attr("id", "gene-label-input")
+      .attr("type", "text")
+      .attr("value", g.label || g.name || g.uid)
+      .style("box-sizing", "border-box")
+      .style("width", "100%");
 
     // Add multiple <select> for each saved gene identifier
-    div.append("text").text("Gene qualifiers");
-    let select = div.append("select").attr("multiple", true);
+    div
+      .append("label")
+      .attr("for", "gene-qualifiers-input")
+      .text("Gene qualifiers");
+    let select = div
+      .append("select")
+      .attr("id", "gene-qualifiers-input")
+      .attr("multiple", true)
+      .attr("size", 4)
+      .style("box-sizing", "border-box")
+      .style("width", "100%");
+    const names = g.names || {};
     select
       .selectAll("option")
-      .data(Object.keys(g.names))
+      .data(Object.keys(names))
       .join("option")
-      .text((d) => `${g.names[d]} [${d}]`)
-      .attr("value", (d) => g.names[d]);
+      .text((d) => `${names[d]} [${d}]`)
+      .attr("value", (d) => names[d]);
 
     // Add group label
-    let group = div.append("div").style("margin-top", "2px").append("text");
-    let groupId = scales.group(g.uid);
-    group.append("tspan").text("Similarity group: ");
+    let group = div.append("div").style("margin-top", "2px");
+    const groupId = scales.group(g.uid);
+    group.append("span").text("Similarity group: ");
     group
-      .append("tspan")
+      .append("span")
       .text(scales.name(groupId))
       .style("color", scales.colour(groupId))
       .style("font-weight", "bold");
 
+    // HTML colour inputs accept only hexadecimal colour values. D3's
+    // interpolators produce rgb(...) strings, which browsers otherwise reset
+    // to black when assigned as an input value.
+    const geneColour = d3.color(g.colour || scales.colour(groupId));
+    const pickerColour = geneColour ? geneColour.formatHex() : "#000000";
+
     // Add colour picker for changing individual gene colour
     div
       .append("label")
-      .append("text")
       .text("Choose gene colour: ")
       .append("input")
       .attr("type", "color")
-      .attr("default", scales.colour(groupId))
+      .attr("value", pickerColour)
+      .property("value", pickerColour)
       .on("change", (e) => {
         g.colour = e.target.value;
         plot.update();
