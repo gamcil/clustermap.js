@@ -1834,6 +1834,8 @@
 
     let container = null;
     let transition = d3.transition();
+    let zoom = null;
+    let hasInitialView = false;
 
     plot.update = () => container.call(my);
     plot.data = (data) => my.data(data);
@@ -1910,17 +1912,13 @@
             let g = svg.append("g").attr("class", "clusterMapG");
 
             // Attach pan/zoom behaviour
-            let zoom = d3
+            zoom = d3
               .zoom()
               .scaleExtent([0, 8])
               .on("zoom", (event) => g.attr("transform", event.transform))
               .on("start", () => svg.attr("cursor", "grabbing"))
               .on("end", () => svg.attr("cursor", "grab"));
-            let transform = d3.zoomIdentity.translate(20, 50).scale(1.2);
-            svg
-              .call(zoom)
-              .call(zoom.transform, transform)
-              .on("dblclick.zoom", null);
+            svg.call(zoom).on("dblclick.zoom", null);
 
             return g;
           },
@@ -2145,6 +2143,30 @@
       let colourBarFn = getColourBarFn();
 
       plot$1.call(legendFn).call(colourBarFn).call(scaleBarFn).call(arrangePlot);
+
+      if (!hasInitialView) fitInitialView(container.select("svg.clusterMap"), plot$1);
+    }
+
+    function fitInitialView(svg, plot) {
+      const svgNode = svg.node();
+      const plotNode = plot.node();
+      if (!zoom || !svgNode || !plotNode) return;
+
+      const { width, height } = svgNode.getBoundingClientRect();
+      const bounds = plotNode.getBBox();
+      if (!width || !height || !bounds.width || !bounds.height) return;
+
+      const padding = 20;
+      const scale = Math.min(
+        1.2,
+        (width - padding * 2) / bounds.width,
+        (height - padding * 2) / bounds.height
+      );
+      const x = (width - bounds.width * scale) / 2 - bounds.x * scale;
+      const y = (height - bounds.height * scale) / 2 - bounds.y * scale;
+
+      svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(scale));
+      hasInitialView = true;
     }
 
     function arrangePlot(selection) {
