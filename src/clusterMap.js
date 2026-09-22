@@ -152,6 +152,7 @@ export default function clusterMap() {
     applyCamera(svg.select("g.clusterMapViewport"));
 
     api.scale.update(data);
+    api.synchronizeLocusLayoutStates(data);
 
     // Only disable grouping if explicitly defined false
     if (data.config && data.config.updateGroups === false) {

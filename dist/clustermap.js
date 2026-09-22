@@ -260,7 +260,12 @@
       .join(", ");
   }
 
-  function recalculateLocusCoordinates(chartState, locus, scaleGenes) {
+  /**
+   * Synchronize derived display coordinates after a trim, flip, or a change to
+   * unscaled-gene mode. This is state work: it deliberately does not depend on
+   * a renderer or a D3 scale.
+   */
+  function synchronizeLocusState(chartState, locus, scaleGenes) {
     locus.genes.forEach((gene, index, genes) => {
       const state = getGeneState(chartState, gene);
       const length = scaleGenes ? state.end - state.start : 1000;
@@ -2147,8 +2152,8 @@
     };
   }
 
-  function updateLocusScaling(locus) {
-    const { oldStart } = recalculateLocusCoordinates(
+  function synchronizeLocusLayoutState(locus) {
+    const { oldStart } = synchronizeLocusState(
       chartState,
       locus,
       config.plot.scaleGenes
@@ -2160,6 +2165,12 @@
         xDistance(scales.x, locusState(locus).start, oldStart)
     );
     refreshLocusOffsetScale();
+  }
+
+  function synchronizeLocusLayoutStates(data) {
+    data.clusters.forEach((cluster) =>
+      cluster.loci.forEach((locus) => synchronizeLocusLayoutState(locus))
+    );
   }
 
   const config = Object.assign({}, defaultConfig);
@@ -2224,11 +2235,8 @@
 
   const _layout = {
     update: (data) => {
-      // Normalise scale-dependent locus state before deriving immutable scene
-      // geometry. Rendering must not be responsible for this state work.
-      data.clusters.forEach((cluster) =>
-        cluster.loci.forEach((locus) => updateLocusScaling(locus))
-      );
+      // Scene construction is read-only. The controller synchronizes any
+      // scale-dependent chart state before asking the runtime to project it.
       scene = buildScene(data, {
         scaleX: scales.x,
         scaleY: scales.y,
@@ -2285,7 +2293,7 @@
           );
         },
         flipMismatchedLoci: flipLoci,
-        onLocusFlipped: updateLocusScaling,
+        onLocusFlipped: synchronizeLocusLayoutState,
       });
 
       refreshClusterOffsetScale();
@@ -2427,6 +2435,7 @@
     config,
     get,
     ids,
+    synchronizeLocusLayoutStates,
     setChartIndex,
     setChartState,
     plot,
@@ -2571,6 +2580,7 @@
       applyCamera(svg.select("g.clusterMapViewport"));
 
       api.scale.update(data);
+      api.synchronizeLocusLayoutStates(data);
 
       // Only disable grouping if explicitly defined false
       if (data.config && data.config.updateGroups === false) {

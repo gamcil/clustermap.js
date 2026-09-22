@@ -149,7 +149,12 @@ export function formatLocusText(loci, chartState, hideCoordinates) {
     .join(", ");
 }
 
-export function recalculateLocusCoordinates(chartState, locus, scaleGenes) {
+/**
+ * Synchronize derived display coordinates after a trim, flip, or a change to
+ * unscaled-gene mode. This is state work: it deliberately does not depend on
+ * a renderer or a D3 scale.
+ */
+export function synchronizeLocusState(chartState, locus, scaleGenes) {
   locus.genes.forEach((gene, index, genes) => {
     const state = getGeneState(chartState, gene);
     const length = scaleGenes ? state.end - state.start : 1000;

@@ -43,6 +43,7 @@ test("scene derives world-space geometry without DOM state", async () => {
     ["top-gene", { start: 2, end: 8, strand: 1 }],
     ["bottom-gene", { start: 10, end: 16, strand: 0 }],
   ]);
+  const before = structuredClone({ data, locusStates, geneStates });
 
   const scene = buildScene(data, {
     scaleX: (value) => value,
@@ -74,4 +75,5 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.deepEqual(scene.links.get("link").anchors, [8, 14, 11, 28, 22, 41]);
   assert.equal(scene.links.get("link").visible, true);
   assert.deepEqual(scene.bounds, { minX: 6, maxX: 32, minY: 0, maxY: 52 });
+  assert.deepEqual({ data, locusStates, geneStates }, before);
 });

@@ -29,8 +29,8 @@ test("flipping a locus twice restores its gene state", async () => {
   assert.deepEqual(locus, before);
 });
 
-test("recalculating a trimmed locus updates gene and locus coordinates", async () => {
-  const { createChartState, getGeneState, recalculateLocusCoordinates } = await import(
+test("synchronizing a trimmed locus updates gene and locus coordinates", async () => {
+  const { createChartState, getGeneState, synchronizeLocusState } = await import(
     "../src/chartState.mjs"
   );
   const locus = createLocus();
@@ -38,7 +38,7 @@ test("recalculating a trimmed locus updates gene and locus coordinates", async (
   state.loci.get(locus.uid).trimLeft = locus.genes[1];
   state.loci.get(locus.uid).trimRight = locus.genes[1];
 
-  const { oldStart } = recalculateLocusCoordinates(state, locus, true);
+  const { oldStart } = synchronizeLocusState(state, locus, true);
 
   assert.equal(oldStart, 0);
   assert.equal(state.loci.get(locus.uid).start, 2500);
@@ -52,8 +52,8 @@ test("recalculating a trimmed locus updates gene and locus coordinates", async (
   );
 });
 
-test("flipping a trimmed locus recalculates its bounds in display coordinates", async () => {
-  const { createChartState, flipLocus, getGeneState, recalculateLocusCoordinates } = await import(
+test("flipping a trimmed locus synchronizes its bounds in display coordinates", async () => {
+  const { createChartState, flipLocus, getGeneState, synchronizeLocusState } = await import(
     "../src/chartState.mjs"
   );
   const locus = createLocus();
@@ -66,7 +66,7 @@ test("flipping a trimmed locus recalculates its bounds in display coordinates", 
   locusState.end = 6500;
 
   flipLocus(state, locus);
-  recalculateLocusCoordinates(state, locus, true);
+  synchronizeLocusState(state, locus, true);
 
   // The retained portion is now the right-hand side of the flipped display.
   assert.equal(locusState.start, 3500);
@@ -78,7 +78,7 @@ test("flipping a trimmed locus recalculates its bounds in display coordinates", 
 });
 
 test("trimming a flipped locus retains the selected display-side genes", async () => {
-  const { createChartState, flipLocus, getGeneState, recalculateLocusCoordinates } = await import(
+  const { createChartState, flipLocus, getGeneState, synchronizeLocusState } = await import(
     "../src/chartState.mjs"
   );
   const locus = createLocus();
@@ -91,7 +91,7 @@ test("trimming a flipped locus retains the selected display-side genes", async (
   locusState.trimRight = displayedMiddleGene;
   locusState.end = getGeneState(state, displayedMiddleGene).end;
 
-  recalculateLocusCoordinates(state, locus, true);
+  synchronizeLocusState(state, locus, true);
 
   assert.equal(locusState.start, 0);
   assert.equal(locusState.end, 7500);

@@ -10,7 +10,7 @@ import {
   getLocusOffset,
   getLocusState,
   initializeLocusOffsets,
-  recalculateLocusCoordinates,
+  synchronizeLocusState,
   setClusterOffset,
   setLocusOffset,
 } from "./chartState.mjs";
@@ -46,8 +46,8 @@ function locusLayout() {
   };
 }
 
-function updateLocusScaling(locus) {
-  const { oldStart } = recalculateLocusCoordinates(
+function synchronizeLocusLayoutState(locus) {
+  const { oldStart } = synchronizeLocusState(
     chartState,
     locus,
     config.plot.scaleGenes
@@ -59,6 +59,12 @@ function updateLocusScaling(locus) {
       xDistance(scales.x, locusState(locus).start, oldStart)
   );
   refreshLocusOffsetScale();
+}
+
+function synchronizeLocusLayoutStates(data) {
+  data.clusters.forEach((cluster) =>
+    cluster.loci.forEach((locus) => synchronizeLocusLayoutState(locus))
+  );
 }
 
 const config = Object.assign({}, defaultConfig);
@@ -123,11 +129,8 @@ const scales = {
 
 const _layout = {
   update: (data) => {
-    // Normalise scale-dependent locus state before deriving immutable scene
-    // geometry. Rendering must not be responsible for this state work.
-    data.clusters.forEach((cluster) =>
-      cluster.loci.forEach((locus) => updateLocusScaling(locus))
-    );
+    // Scene construction is read-only. The controller synchronizes any
+    // scale-dependent chart state before asking the runtime to project it.
     scene = buildScene(data, {
       scaleX: scales.x,
       scaleY: scales.y,
@@ -184,7 +187,7 @@ const _gene = {
         );
       },
       flipMismatchedLoci: flipLoci,
-      onLocusFlipped: updateLocusScaling,
+      onLocusFlipped: synchronizeLocusLayoutState,
     });
 
     refreshClusterOffsetScale();
@@ -326,6 +329,7 @@ return {
   config,
   get,
   ids,
+  synchronizeLocusLayoutStates,
   setChartIndex,
   setChartState,
   plot,
