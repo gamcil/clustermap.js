@@ -1,11 +1,8 @@
-import legend from "./legend.js";
-import colourBar from "./colourBar.js";
-import scaleBar from "./scaleBar.js";
-import { renameText } from "./utils.js";
-import { createLinkGroups, filterLinks } from "./links/groups.mjs";
+import { createLinkGroups } from "./links/groups.mjs";
 import { createChartState, getCamera, flipLocus, setCamera } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
+import { renderSvg } from "./svgRenderer.js";
 import * as api from "./api.js";
 
 export default function clusterMap() {
@@ -131,214 +128,17 @@ export default function clusterMap() {
 
     api.link.updateGroups(data.groups);
 
-    container = d3.select(this);
-
-    let linkGroup = plot
-      .selectAll("g.links")
-      .data([data])
-      .join("g")
-      .attr("class", "links");
-
-    let clusterGroup = plot
-      .selectAll("g.clusters")
-      .data([data.clusters])
-      .join("g")
-      .attr("class", "clusters");
-
-    let clusters = clusterGroup
-      .selectAll("g.cluster")
-      .data(data.clusters, (d) => d.uid)
-      .join(
-        (enter) => {
-          enter = enter
-            .append("g")
-            .attr("id", api.cluster.getId)
-            .attr("class", "cluster");
-          let info = enter
-            .append("g")
-            .attr("id", (c) => `cinfo_${c.uid}`)
-            .attr("class", "clusterInfo")
-            .attr("transform", `translate(-10, 0)`)
-            .call(api.cluster.drag);
-          info
-            .append("text")
-            .text((c) => c.name)
-            .attr("class", "clusterText")
-            .attr("y", 8)
-            .attr("cursor", "pointer")
-            .style("font-weight", "bold")
-            .style("font-size", `${api.config.cluster.nameFontSize}px`)
-            .style("font-family", api.config.plot.fontFamily)
-            .on("click", renameText);
-          info
-            .append("text")
-            .attr("class", "locusText")
-            .attr("y", 12)
-            .attr("dominant-baseline", "hanging")
-            .style("text-rendering", "geometricPrecision")
-            .style("font-size", `${api.config.cluster.lociFontSize}px`)
-            .style("font-family", api.config.plot.fontFamily);
-          enter.append("g").attr("class", "loci");
-          info
-            .selectAll("text")
-            .attr("text-anchor", "end")
-            .style("font-family", api.config.plot.fontFamily);
-          return enter.call(api.cluster.update);
-        },
-        (update) =>
-          update.call((update) =>
-            update.transition(transition).call(api.cluster.update)
-          )
-      );
-
-    api.layout.update(data);
-
-    let loci = clusters
-      .selectAll("g.loci")
-      .selectAll("g.locus")
-      .data(
-        (d) => d.loci,
-        (d) => d.uid
-      )
-      .join(
-        (enter) => {
-          enter = enter
-            .append("g")
-            .attr("id", api.locus.getId)
-            .attr("class", "locus");
-          enter.append("line").attr("class", "trackBar").style("fill", "#111");
-          let hover = enter
-            .append("g")
-            .attr("class", "hover hidden")
-            .attr("opacity", 0);
-          enter.append("g").attr("class", "genes");
-          hover
-            .append("rect")
-            .attr("class", "hover")
-            .attr("fill", "rgba(0, 0, 0, 0.4)")
-            .call(api.locus.dragPosition);
-          hover
-            .append("rect")
-            .attr("class", "leftHandle")
-            .attr("x", -8)
-            .call(api.locus.dragResize);
-          hover
-            .append("rect")
-            .attr("class", "rightHandle")
-            .call(api.locus.dragResize);
-          hover
-            .selectAll(".leftHandle, .rightHandle")
-            .attr("width", 8)
-            .attr("cursor", "pointer");
-          enter
-            .on("mouseenter", (event) => {
-              if (api.flags.isDragging) return;
-              d3.select(event.target)
-                .select("g.hover")
-                .transition()
-                .attr("opacity", 1);
-            })
-            .on("mouseleave", (event) => {
-              if (api.flags.isDragging) return;
-              d3.select(event.target)
-                .select("g.hover")
-                .transition()
-                .attr("opacity", 0);
-            })
-            .on("dblclick", (_, d) => {
-              flipLocus(chartState, d);
-              api.plot.update();
-            });
-          return enter.call(api.locus.update);
-        },
-        (update) =>
-          update.call((update) =>
-            update.transition(transition).call(api.locus.update)
-          )
-      );
-
-    loci
-      .selectAll("g.genes")
-      .selectAll("g.gene")
-      .data(
-        (d) => d.genes,
-        (d) => d.uid
-      )
-      .join(
-        (enter) => {
-          enter = enter
-            .append("g")
-            .attr("id", api.gene.getId)
-            .attr("class", "gene")
-            .attr("display", "inline");
-          enter
-            .append("polygon")
-            .on("click", api.config.gene.shape.onClick)
-            .on("contextmenu", api.gene.contextMenu)
-            .attr("class", "genePolygon");
-          enter
-            .append("text")
-            .attr("class", "geneLabel")
-            .attr("dy", "-0.3em")
-            .style("font-family", api.config.plot.fontFamily);
-          return enter.call(api.gene.update);
-        },
-        (update) =>
-          update.call((update) =>
-            update.transition(transition).call(api.gene.update)
-          )
-      );
-
-    linkGroup
-      .selectAll("g.geneLinkG")
-      .data(
-        filterLinks(data.links, {
-          groupForGene: api.scales.group,
-          geneForUid: api.get.geneData,
-          bestOnly: api.config.link.bestOnly,
-          threshold: api.config.link.threshold,
-        }),
-        api.link.getId
-      )
-      .join(
-        (enter) => {
-          enter = enter
-            .append("g")
-            .attr("id", api.link.getId)
-            .attr("class", "geneLinkG");
-          enter.append("path").attr("class", "geneLink");
-          enter
-            .append("text")
-            .text((d) => d.identity.toFixed(2))
-            .attr("class", "geneLinkLabel")
-            .style("fill", "white")
-            .style("text-anchor", "middle")
-            .style("font-family", api.config.plot.fontFamily);
-          // Initial and subsequent static renders must use the scale model.
-          // Live DOM transforms are only needed while a locus is being dragged.
-          return enter.call(api.link.update, true);
-        },
-        (update) =>
-          update.call((update) =>
-            update
-              .classed("hidden", api.config.link.show ? false : true)
-              .transition(transition)
-              .call(api.link.update, true)
-          ),
-        (exit) =>
-          exit.call((exit) => {
-            exit.transition(transition).attr("opacity", 0).remove();
-          })
-      );
-
-    let legendFn = getLegendFn();
-    let scaleBarFn = getScaleBarFn();
-    let colourBarFn = getColourBarFn();
-
-    plot.call(legendFn).call(colourBarFn).call(scaleBarFn);
-    // Fit against the completed first layout. Otherwise the camera bounds are
-    // measured while chart chrome is still transitioning from the origin.
-    arrangePlot(plot, hasInitialView);
+    renderSvg({
+      plot,
+      data,
+      api,
+      transition,
+      animate: hasInitialView,
+      flipLocus: (locus) => {
+        flipLocus(chartState, locus);
+        api.plot.update();
+      },
+    });
 
     if (!hasInitialView) fitInitialView(svg, plot);
   }
@@ -368,90 +168,6 @@ export default function clusterMap() {
   function applyCamera(selection) {
     const { x, y, k } = getCamera(chartState);
     selection.attr("transform", `translate(${x}, ${y}) scale(${k})`);
-  }
-
-  function arrangePlot(selection, animate = true) {
-    let showSbar = api.config.plot.scaleGenes;
-    let scaleBar = selection
-      .select("g.scaleBar")
-      .classed("hidden", !showSbar);
-    if (animate) scaleBar = scaleBar.transition(transition);
-    scaleBar.attr("opacity", showSbar ? 1 : 0).attr("transform", api.plot.scaleBarTransform);
-
-    let showCbar = api.config.link.groupColour || !api.config.link.show;
-    let colourBar = selection
-      .select("g.colourBar")
-      .classed("hidden", showCbar);
-    if (animate) colourBar = colourBar.transition(transition);
-    colourBar.attr("opacity", showCbar ? 0 : 1).attr("transform", api.plot.colourBarTransform);
-
-    let legend = selection.select("g.legend");
-    if (animate) legend = legend.transition(transition);
-    legend.attr("transform", api.plot.legendTransform);
-  }
-
-  function changeGeneColour(_, data) {
-    let picker = d3.select("input.colourPicker");
-    picker.on("change", () => {
-      data.colour = picker.node().value;
-      api.plot.update();
-    });
-    picker.node().click();
-  }
-
-  function resizeScaleBar() {
-    let result = prompt("Enter new length (bp):", api.config.scaleBar.basePair);
-    if (result) {
-      api.config.scaleBar.basePair = result;
-      api.plot.update();
-    }
-  }
-
-  function getScaleBarFn() {
-    return scaleBar(api.scales.x)
-      .stroke(api.config.scaleBar.stroke)
-      .height(api.config.scaleBar.height)
-      .colour(api.config.scaleBar.colour)
-      .basePair(api.config.scaleBar.basePair)
-      .fontSize(api.config.scaleBar.fontSize)
-      .onClickText(resizeScaleBar)
-      .transition(transition);
-  }
-
-  function getColourBarFn() {
-    return colourBar(api.scales.score)
-      .width(api.config.colourBar.width)
-      .height(api.config.colourBar.height)
-      .fontSize(api.config.colourBar.fontSize)
-      .transition(transition);
-  }
-
-  function getHiddenGeneGroups() {
-    let hidden;
-    let genes = d3.selectAll("g.gene");
-    if (genes.empty()) {
-      hidden = [];
-    } else {
-      hidden = api.scales.colour.domain();
-      genes.each((d, i, n) => {
-        let display = d3.select(n[i]).attr("display");
-        let group = api.scales.group(d.uid);
-        if (display === "inline" && group !== null && hidden.includes(group))
-          hidden = hidden.filter((g) => g !== group);
-      });
-    }
-    return hidden;
-  }
-
-  function getLegendFn() {
-    let hidden = getHiddenGeneGroups();
-    return legend(api.scales.colour)
-      .hidden(hidden)
-      .fontSize(api.config.legend.fontSize)
-      .entryHeight(api.config.legend.entryHeight)
-      .onClickCircle(api.config.legend.onClickCircle || changeGeneColour)
-      .onClickText(api.config.legend.onClickText)
-      .onAltClickText(api.config.legend.onAltClickText);
   }
 
   my.config = function (_) {

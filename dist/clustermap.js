@@ -4,121 +4,6 @@
   (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ClusterMap = {}));
 })(this, (function (exports) { 'use strict';
 
-  // Changes value of a text node to a prompted value
-  function renameText(event) {
-    if (event.defaultPrevented) return;
-    let text = d3.select(event.target);
-    let result = prompt("Enter new value:", text.text());
-    if (result) text.text(result);
-  }
-
-  function isObject(a) {
-    return !!a && a.constructor === Object;
-  }
-
-  function updateConfig(target, source) {
-    for (const [key, value] of Object.entries(source)) {
-      if (!target.hasOwnProperty(key)) continue;
-      if (isObject(value)) {
-        updateConfig(target[key], value);
-      } else {
-        target[key] = value;
-      }
-    }
-  }
-
-  function rgbaToRgb(rgba, opacity = 0.6) {
-    let colour = d3.color(rgba).rgb();
-    return d3.rgb(
-      (1 - opacity) * 255 + opacity * colour.r,
-      (1 - opacity) * 255 + opacity * colour.g,
-      (1 - opacity) * 255 + opacity * colour.b
-    );
-  }
-
-  var defaultConfig = {
-    plot: {
-      transitionDuration: 250,
-      scaleFactor: 15,
-      scaleGenes: true,
-      fontFamily:
-        'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif',
-    },
-    legend: {
-      entryHeight: 18,
-      fontSize: 14,
-      onClickCircle: null,
-      onClickText: null,
-      show: true,
-      marginLeft: 20,
-    },
-    colourBar: {
-      fontSize: 10,
-      height: 12,
-      show: true,
-      width: 150,
-      marginTop: 20,
-    },
-    scaleBar: {
-      colour: "black",
-      fontSize: 10,
-      height: 12,
-      basePair: 2500,
-      show: true,
-      stroke: 1,
-      marginTop: 20,
-    },
-    link: {
-      show: true,
-      asLine: false,
-      straight: false,
-      threshold: 0,
-      strokeWidth: 0.5,
-      groupColour: false,
-      bestOnly: false,
-      label: {
-        show: false,
-        fontSize: 10,
-        background: true,
-        position: 0.5,
-      },
-    },
-    cluster: {
-      nameFontSize: 12,
-      lociFontSize: 10,
-      hideLocusCoordinates: false,
-      spacing: 40,
-      alignLabels: true,
-    },
-    locus: {
-      trackBar: {
-        colour: "#111",
-        stroke: 1,
-      },
-      spacing: 50,
-    },
-    gene: {
-      shape: {
-        bodyHeight: 12,
-        tipHeight: 5,
-        tipLength: 12,
-        onClick: null,
-        stroke: "black",
-        strokeWidth: 1,
-      },
-      label: {
-        anchor: "start",
-        fontSize: 10,
-        rotation: 25,
-        position: "top",
-        spacing: 2,
-        show: false,
-        start: 0.5,
-        name: "uid",
-      },
-    },
-  };
-
   function createLinkGroups(links, oldGroups) {
     const groups = links
       .map((link) => [link.query.uid, link.target.uid])
@@ -226,170 +111,6 @@
     return [...linksByClusterPair.values()]
       .flat()
       .filter((link) => link.identity > threshold);
-  }
-
-  function getLinkAnchors(
-    link,
-    {
-      geneForUid,
-      areClustersAdjacent,
-      scaleX,
-      horizontalOffset,
-      verticalPosition,
-      geneMidpoint,
-    }
-  ) {
-    const query = geneForUid(link.query.uid);
-    const target = geneForUid(link.target.uid);
-
-    if (!areClustersAdjacent(query._cluster, target._cluster)) return null;
-
-    const getGeneAnchors = (gene) => {
-      const offset = horizontalOffset(gene);
-      const left = scaleX(gene.start) + offset;
-      const right = scaleX(gene.end) + offset;
-      const forward = gene.strand === 1;
-      return [
-        forward ? left : right,
-        forward ? right : left,
-        verticalPosition(gene) + geneMidpoint,
-      ];
-    };
-
-    const [ax1, ax2, ay] = getGeneAnchors(query);
-    const [bx1, bx2, by] = getGeneAnchors(target);
-
-    return ay > by
-      ? [bx1, bx2, by, ax1, ax2, ay]
-      : [ax1, ax2, ay, bx1, bx2, by];
-  }
-
-  function getLinkLabelPosition(
-    [ax1, ax2, ay, bx1, bx2, by],
-    position
-  ) {
-    const aMid = ax1 + (ax2 - ax1) / 2;
-    const bMid = bx1 + (bx2 - bx1) / 2;
-    return {
-      x: aMid + (bMid - aMid) * position,
-      y: ay + Math.abs(by - ay) * position,
-    };
-  }
-
-  function straightLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
-    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`;
-  }
-
-  function sankeyLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
-    const verticalMidpoint = ay + Math.abs(by - ay) / 2;
-    return `M${ax2},${ay}C${ax2},${verticalMidpoint},${bx2},${verticalMidpoint},${bx2},${by}L${bx1},${by}C${bx1},${verticalMidpoint},${ax1},${verticalMidpoint},${ax1},${ay}L${ax2},${ay}`;
-  }
-
-  function lineLinkPath([ax1, ax2, ay, bx1, bx2, by], straight) {
-    const aMid = ax1 + (ax2 - ax1) / 2;
-    const bMid = bx1 + (bx2 - bx1) / 2;
-    if (straight) return `M${aMid},${ay} L${bMid},${by}`;
-
-    const verticalMidpoint = (ay + by) / 2;
-    return `M${aMid},${ay}C${aMid},${verticalMidpoint},${bMid},${verticalMidpoint},${bMid},${by}`;
-  }
-
-  function getLinkPath(anchors, { asLine, straight }) {
-    if (!anchors) return "";
-    if (asLine) return lineLinkPath(anchors, straight);
-    return straight ? straightLinkPath(anchors) : sankeyLinkPath(anchors);
-  }
-
-  function getGenePolygonCoordinates(gene, { scaleX, shape }) {
-    const scaledStart = scaleX(gene.start);
-    const scaledEnd = scaleX(gene.end);
-    const geneLength = scaledEnd - scaledStart;
-    const bottom = shape.tipHeight * 2 + shape.bodyHeight;
-    const midpoint = bottom / 2;
-    const third = shape.tipHeight + shape.bodyHeight;
-    let points;
-
-    if (gene.strand === 1) {
-      const shaft = scaledEnd - shape.tipLength;
-      points = [
-        scaledStart,
-        shape.tipHeight,
-        shaft,
-        shape.tipHeight,
-        shaft,
-        0,
-        scaledEnd,
-        midpoint,
-        shaft,
-        bottom,
-        shaft,
-        third,
-        scaledStart,
-        third,
-      ];
-      if (geneLength < shape.tipLength) {
-        [2, 4, 8, 10].forEach((index) => (points[index] = scaledStart));
-      }
-    } else {
-      const shaft = scaledStart + shape.tipLength;
-      points = [
-        scaledEnd,
-        shape.tipHeight,
-        shaft,
-        shape.tipHeight,
-        shaft,
-        0,
-        scaledStart,
-        midpoint,
-        shaft,
-        bottom,
-        shaft,
-        third,
-        scaledEnd,
-        third,
-      ];
-      if (geneLength < shape.tipLength) {
-        [2, 4, 8, 10].forEach((index) => (points[index] = scaledEnd));
-      }
-    }
-
-    return points;
-  }
-
-  function getGenePolygonPoints(gene, options) {
-    return getGenePolygonCoordinates(gene, options).join(" ");
-  }
-
-  function getGeneLabelTransform(gene, { scaleX, shape, label }) {
-    const scaledLength = scaleX(gene.end) - scaleX(gene.start);
-    const x = scaleX(gene.start) + scaledLength * label.start;
-    let y;
-
-    if (label.position === "middle") {
-      y = shape.tipHeight + shape.bodyHeight / 2;
-    } else if (label.position === "bottom") {
-      y = 2 * shape.tipHeight + shape.bodyHeight + label.spacing;
-    } else {
-      y = -label.spacing;
-    }
-
-    const rotation = ["start", "middle"].includes(label.anchor)
-      ? -label.rotation
-      : label.rotation;
-    return `translate(${x}, ${y}) rotate(${rotation})`;
-  }
-
-  function getGeneLabelDy(position) {
-    switch (position) {
-      case "top":
-        return "-0.4em";
-      case "middle":
-        return "0.4em";
-      case "bottom":
-        return "0.8em";
-      default:
-        return undefined;
-    }
   }
 
   function createChartState(data, previous = null) {
@@ -571,6 +292,369 @@
     locus.genes.sort(
       (a, b) => getGeneState(chartState, a).start - getGeneState(chartState, b).start
     );
+  }
+
+  function setDefault(object, key, value) {
+    if (object[key] == null) object[key] = value;
+  }
+
+  function normalizeGene(gene) {
+    return {
+      ...gene,
+      bio: gene.bio || { start: gene.start, end: gene.end, strand: gene.strand },
+    };
+  }
+
+  function normalizeLocus(locus) {
+    const bio = locus.bio || { start: locus.start, end: locus.end };
+    return {
+      ...locus,
+      bio,
+      _bio_start: bio.start,
+      _bio_end: bio.end,
+      start: 0,
+      end: bio.end - bio.start,
+      genes: locus.genes.map(normalizeGene),
+    };
+  }
+
+  function normalizeChartData(data) {
+    return {
+      ...data,
+      clusters: data.clusters.map((cluster) => ({
+        ...cluster,
+        loci: cluster.loci.map(normalizeLocus),
+      })),
+      links: [...data.links],
+      groups: data.groups?.map((group) => ({
+        ...group,
+        genes: group.genes ? [...group.genes] : group.genes,
+      })),
+    };
+  }
+
+  function initializeClusterData(cluster) {
+    for (const locus of cluster.loci) {
+      setDefault(locus, "_cluster", cluster.uid);
+
+      for (const gene of locus.genes) {
+        setDefault(gene, "_locus", locus.uid);
+        setDefault(gene, "_cluster", cluster.uid);
+      }
+    }
+
+    return cluster;
+  }
+
+  function appendToIndex(index, key, value) {
+    const values = index.get(key);
+    if (values) values.push(value);
+    else index.set(key, [value]);
+  }
+
+  function createChartIndex(data) {
+    const clusterById = new Map();
+    const locusById = new Map();
+    const geneById = new Map();
+    const linkById = new Map();
+    const linksByGeneId = new Map();
+
+    for (const cluster of data.clusters) {
+      initializeClusterData(cluster);
+      clusterById.set(cluster.uid, cluster);
+
+      for (const locus of cluster.loci) {
+        locusById.set(locus.uid, locus);
+        for (const gene of locus.genes) geneById.set(gene.uid, gene);
+      }
+    }
+
+    for (const link of data.links) {
+      linkById.set(link.uid, link);
+      appendToIndex(linksByGeneId, link.query.uid, link);
+      appendToIndex(linksByGeneId, link.target.uid, link);
+    }
+
+    return { clusterById, locusById, geneById, linkById, linksByGeneId };
+  }
+
+  // Changes value of a text node to a prompted value
+  function renameText(event) {
+    if (event.defaultPrevented) return;
+    let text = d3.select(event.target);
+    let result = prompt("Enter new value:", text.text());
+    if (result) text.text(result);
+  }
+
+  function isObject(a) {
+    return !!a && a.constructor === Object;
+  }
+
+  function updateConfig(target, source) {
+    for (const [key, value] of Object.entries(source)) {
+      if (!target.hasOwnProperty(key)) continue;
+      if (isObject(value)) {
+        updateConfig(target[key], value);
+      } else {
+        target[key] = value;
+      }
+    }
+  }
+
+  function rgbaToRgb(rgba, opacity = 0.6) {
+    let colour = d3.color(rgba).rgb();
+    return d3.rgb(
+      (1 - opacity) * 255 + opacity * colour.r,
+      (1 - opacity) * 255 + opacity * colour.g,
+      (1 - opacity) * 255 + opacity * colour.b
+    );
+  }
+
+  var defaultConfig = {
+    plot: {
+      transitionDuration: 250,
+      scaleFactor: 15,
+      scaleGenes: true,
+      fontFamily:
+        'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif',
+    },
+    legend: {
+      entryHeight: 18,
+      fontSize: 14,
+      onClickCircle: null,
+      onClickText: null,
+      show: true,
+      marginLeft: 20,
+    },
+    colourBar: {
+      fontSize: 10,
+      height: 12,
+      show: true,
+      width: 150,
+      marginTop: 20,
+    },
+    scaleBar: {
+      colour: "black",
+      fontSize: 10,
+      height: 12,
+      basePair: 2500,
+      show: true,
+      stroke: 1,
+      marginTop: 20,
+    },
+    link: {
+      show: true,
+      asLine: false,
+      straight: false,
+      threshold: 0,
+      strokeWidth: 0.5,
+      groupColour: false,
+      bestOnly: false,
+      label: {
+        show: false,
+        fontSize: 10,
+        background: true,
+        position: 0.5,
+      },
+    },
+    cluster: {
+      nameFontSize: 12,
+      lociFontSize: 10,
+      hideLocusCoordinates: false,
+      spacing: 40,
+      alignLabels: true,
+    },
+    locus: {
+      trackBar: {
+        colour: "#111",
+        stroke: 1,
+      },
+      spacing: 50,
+    },
+    gene: {
+      shape: {
+        bodyHeight: 12,
+        tipHeight: 5,
+        tipLength: 12,
+        onClick: null,
+        stroke: "black",
+        strokeWidth: 1,
+      },
+      label: {
+        anchor: "start",
+        fontSize: 10,
+        rotation: 25,
+        position: "top",
+        spacing: 2,
+        show: false,
+        start: 0.5,
+        name: "uid",
+      },
+    },
+  };
+
+  function getLinkAnchors(
+    link,
+    {
+      geneForUid,
+      areClustersAdjacent,
+      scaleX,
+      horizontalOffset,
+      verticalPosition,
+      geneMidpoint,
+    }
+  ) {
+    const query = geneForUid(link.query.uid);
+    const target = geneForUid(link.target.uid);
+
+    if (!areClustersAdjacent(query._cluster, target._cluster)) return null;
+
+    const getGeneAnchors = (gene) => {
+      const offset = horizontalOffset(gene);
+      const left = scaleX(gene.start) + offset;
+      const right = scaleX(gene.end) + offset;
+      const forward = gene.strand === 1;
+      return [
+        forward ? left : right,
+        forward ? right : left,
+        verticalPosition(gene) + geneMidpoint,
+      ];
+    };
+
+    const [ax1, ax2, ay] = getGeneAnchors(query);
+    const [bx1, bx2, by] = getGeneAnchors(target);
+
+    return ay > by
+      ? [bx1, bx2, by, ax1, ax2, ay]
+      : [ax1, ax2, ay, bx1, bx2, by];
+  }
+
+  function getLinkLabelPosition(
+    [ax1, ax2, ay, bx1, bx2, by],
+    position
+  ) {
+    const aMid = ax1 + (ax2 - ax1) / 2;
+    const bMid = bx1 + (bx2 - bx1) / 2;
+    return {
+      x: aMid + (bMid - aMid) * position,
+      y: ay + Math.abs(by - ay) * position,
+    };
+  }
+
+  function straightLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
+    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`;
+  }
+
+  function sankeyLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
+    const verticalMidpoint = ay + Math.abs(by - ay) / 2;
+    return `M${ax2},${ay}C${ax2},${verticalMidpoint},${bx2},${verticalMidpoint},${bx2},${by}L${bx1},${by}C${bx1},${verticalMidpoint},${ax1},${verticalMidpoint},${ax1},${ay}L${ax2},${ay}`;
+  }
+
+  function lineLinkPath([ax1, ax2, ay, bx1, bx2, by], straight) {
+    const aMid = ax1 + (ax2 - ax1) / 2;
+    const bMid = bx1 + (bx2 - bx1) / 2;
+    if (straight) return `M${aMid},${ay} L${bMid},${by}`;
+
+    const verticalMidpoint = (ay + by) / 2;
+    return `M${aMid},${ay}C${aMid},${verticalMidpoint},${bMid},${verticalMidpoint},${bMid},${by}`;
+  }
+
+  function getLinkPath(anchors, { asLine, straight }) {
+    if (!anchors) return "";
+    if (asLine) return lineLinkPath(anchors, straight);
+    return straight ? straightLinkPath(anchors) : sankeyLinkPath(anchors);
+  }
+
+  function getGenePolygonCoordinates(gene, { scaleX, shape }) {
+    const scaledStart = scaleX(gene.start);
+    const scaledEnd = scaleX(gene.end);
+    const geneLength = scaledEnd - scaledStart;
+    const bottom = shape.tipHeight * 2 + shape.bodyHeight;
+    const midpoint = bottom / 2;
+    const third = shape.tipHeight + shape.bodyHeight;
+    let points;
+
+    if (gene.strand === 1) {
+      const shaft = scaledEnd - shape.tipLength;
+      points = [
+        scaledStart,
+        shape.tipHeight,
+        shaft,
+        shape.tipHeight,
+        shaft,
+        0,
+        scaledEnd,
+        midpoint,
+        shaft,
+        bottom,
+        shaft,
+        third,
+        scaledStart,
+        third,
+      ];
+      if (geneLength < shape.tipLength) {
+        [2, 4, 8, 10].forEach((index) => (points[index] = scaledStart));
+      }
+    } else {
+      const shaft = scaledStart + shape.tipLength;
+      points = [
+        scaledEnd,
+        shape.tipHeight,
+        shaft,
+        shape.tipHeight,
+        shaft,
+        0,
+        scaledStart,
+        midpoint,
+        shaft,
+        bottom,
+        shaft,
+        third,
+        scaledEnd,
+        third,
+      ];
+      if (geneLength < shape.tipLength) {
+        [2, 4, 8, 10].forEach((index) => (points[index] = scaledEnd));
+      }
+    }
+
+    return points;
+  }
+
+  function getGenePolygonPoints(gene, options) {
+    return getGenePolygonCoordinates(gene, options).join(" ");
+  }
+
+  function getGeneLabelTransform(gene, { scaleX, shape, label }) {
+    const scaledLength = scaleX(gene.end) - scaleX(gene.start);
+    const x = scaleX(gene.start) + scaledLength * label.start;
+    let y;
+
+    if (label.position === "middle") {
+      y = shape.tipHeight + shape.bodyHeight / 2;
+    } else if (label.position === "bottom") {
+      y = 2 * shape.tipHeight + shape.bodyHeight + label.spacing;
+    } else {
+      y = -label.spacing;
+    }
+
+    const rotation = ["start", "middle"].includes(label.anchor)
+      ? -label.rotation
+      : label.rotation;
+    return `translate(${x}, ${y}) rotate(${rotation})`;
+  }
+
+  function getGeneLabelDy(position) {
+    switch (position) {
+      case "top":
+        return "-0.4em";
+      case "middle":
+        return "0.4em";
+      case "bottom":
+        return "0.8em";
+      default:
+        return undefined;
+    }
   }
 
   function xDistance(scaleX, start, end) {
@@ -1871,6 +1955,25 @@
   config.legend.onClickText = _link.rename;
   config.legend.onAltClickText = _group.contextMenu;
 
+  var api = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    config: config,
+    flags: flags,
+    get: get,
+    setChartIndex: setChartIndex,
+    setChartState: setChartState,
+    plot: plot,
+    scales: scales,
+    cluster: _cluster,
+    gene: _gene,
+    group: _group,
+    link: _link,
+    locus: _locus,
+    scale: _scale,
+    layout: _layout,
+    tooltip: _tooltip
+  });
+
   function legend(colourScale) {
     /* Creates a legend component from a colour scale.
      */
@@ -2172,88 +2275,274 @@
     return my;
   }
 
-  function setDefault(object, key, value) {
-    if (object[key] == null) object[key] = value;
+  // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
+  // host, camera viewport, and interaction state that causes a redraw.
+  function renderSvg({
+    plot,
+    data,
+    api,
+    transition,
+    flipLocus,
+    animate,
+  }) {
+    const linkGroup = plot
+      .selectAll("g.links")
+      .data([data])
+      .join("g")
+      .attr("class", "links");
+    const clusterGroup = plot
+      .selectAll("g.clusters")
+      .data([data.clusters])
+      .join("g")
+      .attr("class", "clusters");
+
+    const clusters = clusterGroup
+      .selectAll("g.cluster")
+      .data(data.clusters, (d) => d.uid)
+      .join(
+        (enter) => {
+          enter = enter
+            .append("g")
+            .attr("id", api.cluster.getId)
+            .attr("class", "cluster");
+          const info = enter
+            .append("g")
+            .attr("id", (cluster) => `cinfo_${cluster.uid}`)
+            .attr("class", "clusterInfo")
+            .attr("transform", "translate(-10, 0)")
+            .call(api.cluster.drag);
+
+          info
+            .append("text")
+            .text((cluster) => cluster.name)
+            .attr("class", "clusterText")
+            .attr("y", 8)
+            .attr("cursor", "pointer")
+            .style("font-weight", "bold")
+            .style("font-size", `${api.config.cluster.nameFontSize}px`)
+            .style("font-family", api.config.plot.fontFamily)
+            .on("click", renameText);
+          info
+            .append("text")
+            .attr("class", "locusText")
+            .attr("y", 12)
+            .attr("dominant-baseline", "hanging")
+            .style("text-rendering", "geometricPrecision")
+            .style("font-size", `${api.config.cluster.lociFontSize}px`)
+            .style("font-family", api.config.plot.fontFamily);
+          info.selectAll("text").attr("text-anchor", "end");
+          enter.append("g").attr("class", "loci");
+          return enter.call(api.cluster.update);
+        },
+        (update) =>
+          update.call((selection) =>
+            selection.transition(transition).call(api.cluster.update)
+          )
+      );
+
+    api.layout.update(data);
+
+    const loci = clusters
+      .selectAll("g.loci")
+      .selectAll("g.locus")
+      .data((cluster) => cluster.loci, (locus) => locus.uid)
+      .join(
+        (enter) => {
+          enter = enter
+            .append("g")
+            .attr("id", api.locus.getId)
+            .attr("class", "locus");
+          enter.append("line").attr("class", "trackBar").style("fill", "#111");
+          const hover = enter
+            .append("g")
+            .attr("class", "hover hidden")
+            .attr("opacity", 0);
+          // Hover must remain below genes: a handle drag may finish over a gene,
+          // and the overlay must not intercept that pointer-up event.
+          enter.append("g").attr("class", "genes");
+          hover
+            .append("rect")
+            .attr("class", "hover")
+            .attr("fill", "rgba(0, 0, 0, 0.4)")
+            .call(api.locus.dragPosition);
+          hover
+            .append("rect")
+            .attr("class", "leftHandle")
+            .attr("x", -8)
+            .call(api.locus.dragResize);
+          hover
+            .append("rect")
+            .attr("class", "rightHandle")
+            .call(api.locus.dragResize);
+          hover
+            .selectAll(".leftHandle, .rightHandle")
+            .attr("width", 8)
+            .attr("cursor", "pointer");
+          enter
+            .on("mouseenter", (event) => {
+              if (!api.flags.isDragging) {
+                d3.select(event.target).select("g.hover").transition().attr("opacity", 1);
+              }
+            })
+            .on("mouseleave", (event) => {
+              if (!api.flags.isDragging) {
+                d3.select(event.target).select("g.hover").transition().attr("opacity", 0);
+              }
+            })
+            .on("dblclick", (_, locus) => flipLocus(locus));
+          return enter.call(api.locus.update);
+        },
+        (update) =>
+          update.call((selection) =>
+            selection.transition(transition).call(api.locus.update)
+          )
+      );
+
+    loci
+      .selectAll("g.genes")
+      .selectAll("g.gene")
+      .data((locus) => locus.genes, (gene) => gene.uid)
+      .join(
+        (enter) => {
+          enter = enter
+            .append("g")
+            .attr("id", api.gene.getId)
+            .attr("class", "gene")
+            .attr("display", "inline");
+          enter
+            .append("polygon")
+            .on("click", api.config.gene.shape.onClick)
+            .on("contextmenu", api.gene.contextMenu)
+            .attr("class", "genePolygon");
+          enter
+            .append("text")
+            .attr("class", "geneLabel")
+            .attr("dy", "-0.3em")
+            .style("font-family", api.config.plot.fontFamily);
+          return enter.call(api.gene.update);
+        },
+        (update) =>
+          update.call((selection) =>
+            selection.transition(transition).call(api.gene.update)
+          )
+      );
+
+    const visibleLinks = filterLinks(data.links, {
+      groupForGene: api.scales.group,
+      geneForUid: api.get.geneData,
+      bestOnly: api.config.link.bestOnly,
+      threshold: api.config.link.threshold,
+    });
+    linkGroup
+      .selectAll("g.geneLinkG")
+      .data(visibleLinks, api.link.getId)
+      .join(
+        (enter) => {
+          enter = enter
+            .append("g")
+            .attr("id", api.link.getId)
+            .attr("class", "geneLinkG");
+          enter.append("path").attr("class", "geneLink");
+          enter
+            .append("text")
+            .text((link) => link.identity.toFixed(2))
+            .attr("class", "geneLinkLabel")
+            .style("fill", "white")
+            .style("text-anchor", "middle")
+            .style("font-family", api.config.plot.fontFamily);
+          return enter.call(api.link.update, true);
+        },
+        (update) =>
+          update.call((selection) =>
+            selection
+              .classed("hidden", !api.config.link.show)
+              .transition(transition)
+              .call(api.link.update, true)
+          ),
+        (exit) =>
+          exit.call((selection) => selection.transition(transition).attr("opacity", 0).remove())
+      );
+
+    plot
+      .call(getLegend(api))
+      .call(getColourBar(api, transition))
+      .call(getScaleBar(api, transition));
+    arrangePlot(plot, api, transition, animate);
   }
 
-  function normalizeGene(gene) {
-    return {
-      ...gene,
-      bio: gene.bio || { start: gene.start, end: gene.end, strand: gene.strand },
-    };
+  function arrangePlot(plot, api, transition, animate) {
+    let scale = plot
+      .select("g.scaleBar")
+      .classed("hidden", !api.config.plot.scaleGenes);
+    if (animate) scale = scale.transition(transition);
+    scale
+      .attr("opacity", api.config.plot.scaleGenes ? 1 : 0)
+      .attr("transform", api.plot.scaleBarTransform);
+
+    const showColour = api.config.link.groupColour || !api.config.link.show;
+    let colour = plot.select("g.colourBar").classed("hidden", showColour);
+    if (animate) colour = colour.transition(transition);
+    colour
+      .attr("opacity", showColour ? 0 : 1)
+      .attr("transform", api.plot.colourBarTransform);
+
+    let key = plot.select("g.legend");
+    if (animate) key = key.transition(transition);
+    key.attr("transform", api.plot.legendTransform);
   }
 
-  function normalizeLocus(locus) {
-    const bio = locus.bio || { start: locus.start, end: locus.end };
-    return {
-      ...locus,
-      bio,
-      _bio_start: bio.start,
-      _bio_end: bio.end,
-      start: 0,
-      end: bio.end - bio.start,
-      genes: locus.genes.map(normalizeGene),
-    };
+  function getScaleBar(api, transition) {
+    return scaleBar(api.scales.x)
+      .stroke(api.config.scaleBar.stroke)
+      .height(api.config.scaleBar.height)
+      .colour(api.config.scaleBar.colour)
+      .basePair(api.config.scaleBar.basePair)
+      .fontSize(api.config.scaleBar.fontSize)
+      .onClickText(() => {
+        const value = prompt("Enter new length (bp):", api.config.scaleBar.basePair);
+        if (value) {
+          api.config.scaleBar.basePair = value;
+          api.plot.update();
+        }
+      })
+      .transition(transition);
   }
 
-  function normalizeChartData(data) {
-    return {
-      ...data,
-      clusters: data.clusters.map((cluster) => ({
-        ...cluster,
-        loci: cluster.loci.map(normalizeLocus),
-      })),
-      links: [...data.links],
-      groups: data.groups?.map((group) => ({
-        ...group,
-        genes: group.genes ? [...group.genes] : group.genes,
-      })),
-    };
+  function getColourBar(api, transition) {
+    return colourBar(api.scales.score)
+      .width(api.config.colourBar.width)
+      .height(api.config.colourBar.height)
+      .fontSize(api.config.colourBar.fontSize)
+      .transition(transition);
   }
 
-  function initializeClusterData(cluster) {
-    for (const locus of cluster.loci) {
-      setDefault(locus, "_cluster", cluster.uid);
-
-      for (const gene of locus.genes) {
-        setDefault(gene, "_locus", locus.uid);
-        setDefault(gene, "_cluster", cluster.uid);
+  function getLegend(api) {
+    const genes = d3.selectAll("g.gene");
+    let hidden = genes.empty() ? [] : api.scales.colour.domain();
+    genes.each(function (gene) {
+      if (d3.select(this).attr("display") === "inline") {
+        const group = api.scales.group(gene.uid);
+        if (group !== null) hidden = hidden.filter((id) => id !== group);
       }
-    }
+    });
 
-    return cluster;
-  }
-
-  function appendToIndex(index, key, value) {
-    const values = index.get(key);
-    if (values) values.push(value);
-    else index.set(key, [value]);
-  }
-
-  function createChartIndex(data) {
-    const clusterById = new Map();
-    const locusById = new Map();
-    const geneById = new Map();
-    const linkById = new Map();
-    const linksByGeneId = new Map();
-
-    for (const cluster of data.clusters) {
-      initializeClusterData(cluster);
-      clusterById.set(cluster.uid, cluster);
-
-      for (const locus of cluster.loci) {
-        locusById.set(locus.uid, locus);
-        for (const gene of locus.genes) geneById.set(gene.uid, gene);
-      }
-    }
-
-    for (const link of data.links) {
-      linkById.set(link.uid, link);
-      appendToIndex(linksByGeneId, link.query.uid, link);
-      appendToIndex(linksByGeneId, link.target.uid, link);
-    }
-
-    return { clusterById, locusById, geneById, linkById, linksByGeneId };
+    return legend(api.scales.colour)
+      .hidden(hidden)
+      .fontSize(api.config.legend.fontSize)
+      .entryHeight(api.config.legend.entryHeight)
+      .onClickCircle(
+        api.config.legend.onClickCircle ||
+          ((_, data) => {
+            const picker = d3.select("input.colourPicker");
+            picker.on("change", () => {
+              data.colour = picker.node().value;
+              api.plot.update();
+            });
+            picker.node().click();
+          })
+      )
+      .onClickText(api.config.legend.onClickText)
+      .onAltClickText(api.config.legend.onAltClickText);
   }
 
   function clusterMap() {
@@ -2379,214 +2668,17 @@
 
       _link.updateGroups(data.groups);
 
-      container = d3.select(this);
-
-      let linkGroup = plot$1
-        .selectAll("g.links")
-        .data([data])
-        .join("g")
-        .attr("class", "links");
-
-      let clusterGroup = plot$1
-        .selectAll("g.clusters")
-        .data([data.clusters])
-        .join("g")
-        .attr("class", "clusters");
-
-      let clusters = clusterGroup
-        .selectAll("g.cluster")
-        .data(data.clusters, (d) => d.uid)
-        .join(
-          (enter) => {
-            enter = enter
-              .append("g")
-              .attr("id", _cluster.getId)
-              .attr("class", "cluster");
-            let info = enter
-              .append("g")
-              .attr("id", (c) => `cinfo_${c.uid}`)
-              .attr("class", "clusterInfo")
-              .attr("transform", `translate(-10, 0)`)
-              .call(_cluster.drag);
-            info
-              .append("text")
-              .text((c) => c.name)
-              .attr("class", "clusterText")
-              .attr("y", 8)
-              .attr("cursor", "pointer")
-              .style("font-weight", "bold")
-              .style("font-size", `${config.cluster.nameFontSize}px`)
-              .style("font-family", config.plot.fontFamily)
-              .on("click", renameText);
-            info
-              .append("text")
-              .attr("class", "locusText")
-              .attr("y", 12)
-              .attr("dominant-baseline", "hanging")
-              .style("text-rendering", "geometricPrecision")
-              .style("font-size", `${config.cluster.lociFontSize}px`)
-              .style("font-family", config.plot.fontFamily);
-            enter.append("g").attr("class", "loci");
-            info
-              .selectAll("text")
-              .attr("text-anchor", "end")
-              .style("font-family", config.plot.fontFamily);
-            return enter.call(_cluster.update);
-          },
-          (update) =>
-            update.call((update) =>
-              update.transition(transition).call(_cluster.update)
-            )
-        );
-
-      _layout.update(data);
-
-      let loci = clusters
-        .selectAll("g.loci")
-        .selectAll("g.locus")
-        .data(
-          (d) => d.loci,
-          (d) => d.uid
-        )
-        .join(
-          (enter) => {
-            enter = enter
-              .append("g")
-              .attr("id", _locus.getId)
-              .attr("class", "locus");
-            enter.append("line").attr("class", "trackBar").style("fill", "#111");
-            let hover = enter
-              .append("g")
-              .attr("class", "hover hidden")
-              .attr("opacity", 0);
-            enter.append("g").attr("class", "genes");
-            hover
-              .append("rect")
-              .attr("class", "hover")
-              .attr("fill", "rgba(0, 0, 0, 0.4)")
-              .call(_locus.dragPosition);
-            hover
-              .append("rect")
-              .attr("class", "leftHandle")
-              .attr("x", -8)
-              .call(_locus.dragResize);
-            hover
-              .append("rect")
-              .attr("class", "rightHandle")
-              .call(_locus.dragResize);
-            hover
-              .selectAll(".leftHandle, .rightHandle")
-              .attr("width", 8)
-              .attr("cursor", "pointer");
-            enter
-              .on("mouseenter", (event) => {
-                if (flags.isDragging) return;
-                d3.select(event.target)
-                  .select("g.hover")
-                  .transition()
-                  .attr("opacity", 1);
-              })
-              .on("mouseleave", (event) => {
-                if (flags.isDragging) return;
-                d3.select(event.target)
-                  .select("g.hover")
-                  .transition()
-                  .attr("opacity", 0);
-              })
-              .on("dblclick", (_, d) => {
-                flipLocus(chartState, d);
-                plot.update();
-              });
-            return enter.call(_locus.update);
-          },
-          (update) =>
-            update.call((update) =>
-              update.transition(transition).call(_locus.update)
-            )
-        );
-
-      loci
-        .selectAll("g.genes")
-        .selectAll("g.gene")
-        .data(
-          (d) => d.genes,
-          (d) => d.uid
-        )
-        .join(
-          (enter) => {
-            enter = enter
-              .append("g")
-              .attr("id", _gene.getId)
-              .attr("class", "gene")
-              .attr("display", "inline");
-            enter
-              .append("polygon")
-              .on("click", config.gene.shape.onClick)
-              .on("contextmenu", _gene.contextMenu)
-              .attr("class", "genePolygon");
-            enter
-              .append("text")
-              .attr("class", "geneLabel")
-              .attr("dy", "-0.3em")
-              .style("font-family", config.plot.fontFamily);
-            return enter.call(_gene.update);
-          },
-          (update) =>
-            update.call((update) =>
-              update.transition(transition).call(_gene.update)
-            )
-        );
-
-      linkGroup
-        .selectAll("g.geneLinkG")
-        .data(
-          filterLinks(data.links, {
-            groupForGene: scales.group,
-            geneForUid: get.geneData,
-            bestOnly: config.link.bestOnly,
-            threshold: config.link.threshold,
-          }),
-          _link.getId
-        )
-        .join(
-          (enter) => {
-            enter = enter
-              .append("g")
-              .attr("id", _link.getId)
-              .attr("class", "geneLinkG");
-            enter.append("path").attr("class", "geneLink");
-            enter
-              .append("text")
-              .text((d) => d.identity.toFixed(2))
-              .attr("class", "geneLinkLabel")
-              .style("fill", "white")
-              .style("text-anchor", "middle")
-              .style("font-family", config.plot.fontFamily);
-            // Initial and subsequent static renders must use the scale model.
-            // Live DOM transforms are only needed while a locus is being dragged.
-            return enter.call(_link.update, true);
-          },
-          (update) =>
-            update.call((update) =>
-              update
-                .classed("hidden", config.link.show ? false : true)
-                .transition(transition)
-                .call(_link.update, true)
-            ),
-          (exit) =>
-            exit.call((exit) => {
-              exit.transition(transition).attr("opacity", 0).remove();
-            })
-        );
-
-      let legendFn = getLegendFn();
-      let scaleBarFn = getScaleBarFn();
-      let colourBarFn = getColourBarFn();
-
-      plot$1.call(legendFn).call(colourBarFn).call(scaleBarFn);
-      // Fit against the completed first layout. Otherwise the camera bounds are
-      // measured while chart chrome is still transitioning from the origin.
-      arrangePlot(plot$1, hasInitialView);
+      renderSvg({
+        plot: plot$1,
+        data,
+        api,
+        transition,
+        animate: hasInitialView,
+        flipLocus: (locus) => {
+          flipLocus(chartState, locus);
+          plot.update();
+        },
+      });
 
       if (!hasInitialView) fitInitialView(svg, plot$1);
     }
@@ -2616,90 +2708,6 @@
     function applyCamera(selection) {
       const { x, y, k } = getCamera(chartState);
       selection.attr("transform", `translate(${x}, ${y}) scale(${k})`);
-    }
-
-    function arrangePlot(selection, animate = true) {
-      let showSbar = config.plot.scaleGenes;
-      let scaleBar = selection
-        .select("g.scaleBar")
-        .classed("hidden", !showSbar);
-      if (animate) scaleBar = scaleBar.transition(transition);
-      scaleBar.attr("opacity", showSbar ? 1 : 0).attr("transform", plot.scaleBarTransform);
-
-      let showCbar = config.link.groupColour || !config.link.show;
-      let colourBar = selection
-        .select("g.colourBar")
-        .classed("hidden", showCbar);
-      if (animate) colourBar = colourBar.transition(transition);
-      colourBar.attr("opacity", showCbar ? 0 : 1).attr("transform", plot.colourBarTransform);
-
-      let legend = selection.select("g.legend");
-      if (animate) legend = legend.transition(transition);
-      legend.attr("transform", plot.legendTransform);
-    }
-
-    function changeGeneColour(_, data) {
-      let picker = d3.select("input.colourPicker");
-      picker.on("change", () => {
-        data.colour = picker.node().value;
-        plot.update();
-      });
-      picker.node().click();
-    }
-
-    function resizeScaleBar() {
-      let result = prompt("Enter new length (bp):", config.scaleBar.basePair);
-      if (result) {
-        config.scaleBar.basePair = result;
-        plot.update();
-      }
-    }
-
-    function getScaleBarFn() {
-      return scaleBar(scales.x)
-        .stroke(config.scaleBar.stroke)
-        .height(config.scaleBar.height)
-        .colour(config.scaleBar.colour)
-        .basePair(config.scaleBar.basePair)
-        .fontSize(config.scaleBar.fontSize)
-        .onClickText(resizeScaleBar)
-        .transition(transition);
-    }
-
-    function getColourBarFn() {
-      return colourBar(scales.score)
-        .width(config.colourBar.width)
-        .height(config.colourBar.height)
-        .fontSize(config.colourBar.fontSize)
-        .transition(transition);
-    }
-
-    function getHiddenGeneGroups() {
-      let hidden;
-      let genes = d3.selectAll("g.gene");
-      if (genes.empty()) {
-        hidden = [];
-      } else {
-        hidden = scales.colour.domain();
-        genes.each((d, i, n) => {
-          let display = d3.select(n[i]).attr("display");
-          let group = scales.group(d.uid);
-          if (display === "inline" && group !== null && hidden.includes(group))
-            hidden = hidden.filter((g) => g !== group);
-        });
-      }
-      return hidden;
-    }
-
-    function getLegendFn() {
-      let hidden = getHiddenGeneGroups();
-      return legend(scales.colour)
-        .hidden(hidden)
-        .fontSize(config.legend.fontSize)
-        .entryHeight(config.legend.entryHeight)
-        .onClickCircle(config.legend.onClickCircle || changeGeneColour)
-        .onClickText(config.legend.onClickText)
-        .onAltClickText(config.legend.onAltClickText);
     }
 
     my.config = function (_) {
