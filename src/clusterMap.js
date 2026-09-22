@@ -2,6 +2,7 @@ import legend from "./legend.js";
 import colourBar from "./colourBar.js";
 import scaleBar from "./scaleBar.js";
 import { renameText } from "./utils.js";
+import { createLinkGroups, filterLinks } from "./links/groups.mjs";
 import * as api from "./api.js";
 
 export default function clusterMap() {
@@ -109,7 +110,7 @@ export default function clusterMap() {
     if (data.config && data.config.updateGroups === false) {
       if (!data.groups) data.groups = [];
     } else {
-      data.groups = api.link.getGroups(data.links, data.groups);
+      data.groups = createLinkGroups(data.links, data.groups);
     }
 
     api.link.updateGroups(data.groups);
@@ -283,7 +284,15 @@ export default function clusterMap() {
 
     linkGroup
       .selectAll("g.geneLinkG")
-      .data(api.link.filter(data.links), api.link.getId)
+      .data(
+        filterLinks(data.links, {
+          groupForGene: api.scales.group,
+          geneForUid: api.get.geneData,
+          bestOnly: api.config.link.bestOnly,
+          threshold: api.config.link.threshold,
+        }),
+        api.link.getId
+      )
       .join(
         (enter) => {
           enter = enter
