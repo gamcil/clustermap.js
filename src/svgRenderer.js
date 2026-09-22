@@ -104,11 +104,11 @@ export function renderSvg({
           .append("rect")
           .attr("class", "leftHandle")
           .attr("x", -8)
-          .call(interactions.dragLocusResize);
+          .call(createLocusResizeDrag({ config, scales, ids, interactions }));
         hover
           .append("rect")
           .attr("class", "rightHandle")
-          .call(interactions.dragLocusResize);
+          .call(createLocusResizeDrag({ config, scales, ids, interactions }));
         hover
           .selectAll(".leftHandle, .rightHandle")
           .attr("width", 8)
@@ -331,6 +331,114 @@ function createLocusPositionDrag({ config, scales, ids, interactions }) {
   const ended = (_, locus) => {
     interactions.setDragging(false);
     interactions.setLocusOffset(locus.uid, value);
+    interactions.redraw();
+  };
+
+  return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
+}
+
+// Resize changes chart state through the controller, while this renderer-owned
+// adapter supplies immediate SVG feedback until the final redraw.
+function createLocusResizeDrag({ config, scales, ids, interactions }) {
+  let minPos;
+  let maxPos;
+
+  const locusSelection = (uid) => d3.select(`#${ids.locus({ uid })}`);
+  const realLength = (state) => scales.x(state.end) - scales.x(state.start);
+  const updateTrackBar = (selection, state) => {
+    const y = config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
+    selection
+      .select("line.trackBar")
+      .attr("x1", scales.x(state.start))
+      .attr("x2", scales.x(state.end))
+      .attr("y1", y)
+      .attr("y2", y);
+  };
+  const updateVisibleGenes = (selection, state) => {
+    selection.selectAll("g.gene").attr("display", (gene) => {
+      const display = interactions.getGeneState(gene);
+      return display.start >= state.start && display.end <= state.end + 1
+        ? "inline"
+        : "none";
+    });
+  };
+  const updateLinkVisibility = () => {
+    d3.selectAll("path.geneLink").attr("opacity", (link) => {
+      const query = d3.select(`#${ids.gene({ uid: link.query.uid })}`).attr("display");
+      const target = d3.select(`#${ids.gene({ uid: link.target.uid })}`).attr("display");
+      return config.link.show && query !== "none" && target !== "none" ? 1 : 0;
+    });
+  };
+
+  const started = (_, locus) => {
+    [minPos, maxPos] = interactions.getLocusMoveBounds(locus.uid);
+    interactions.setDragging(true);
+  };
+
+  const dragLeft = (event, locus, handle) => {
+    const { state, coordinate } = interactions.trimLocus(locus, {
+      edge: "left",
+      position: event.x,
+      coordinateFor: scales.x,
+      scaleGenes: config.plot.scaleGenes,
+    });
+    const subject = locusSelection(locus.uid);
+    handle.attr("x", coordinate - 8);
+    subject
+      .select("rect.hover")
+      .attr("x", coordinate)
+      .attr("width", realLength(state));
+    updateVisibleGenes(subject, state);
+    updateTrackBar(subject, state);
+    updateLinkVisibility();
+
+    if (config.cluster.alignLabels) {
+      const offset = scales.offset(locus._cluster) + scales.locus(locus.uid);
+      const newMin = Math.min(coordinate + offset, minPos) - 10;
+      d3.selectAll("g.clusterInfo").attr(
+        "transform",
+        (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
+      );
+    } else {
+      d3.select(`#cinfo_${locus._cluster}`).attr(
+        "transform",
+        `translate(${scales.locus(locus.uid) + scales.x(state.start) - 10}, 0)`
+      );
+    }
+  };
+
+  const dragRight = (event, locus, handle) => {
+    const { state, coordinate } = interactions.trimLocus(locus, {
+      edge: "right",
+      position: event.x,
+      coordinateFor: scales.x,
+      scaleGenes: config.plot.scaleGenes,
+    });
+    const subject = locusSelection(locus.uid);
+    handle.attr("x", coordinate);
+    subject.select("rect.hover").attr("width", realLength(state));
+    updateVisibleGenes(subject, state);
+    updateTrackBar(subject, state);
+    updateLinkVisibility();
+
+    const locusEnd = scales.x(state.end);
+    const newMax = Math.max(
+      scales.offset(locus._cluster) + scales.locus(locus.uid) + locusEnd,
+      maxPos
+    ) + config.legend.marginLeft;
+    d3.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
+  };
+
+  const dragged = function (event, locus) {
+    const handle = d3.select(this);
+    if (handle.classed("leftHandle")) dragLeft(event, locus, handle);
+    else dragRight(event, locus, handle);
+  };
+
+  const ended = (_, locus) => {
+    interactions.setDragging(false);
+    interactions.finalizeLocusTrim(locus);
+    locusSelection(locus.uid).select("g.hover").transition().attr("opacity", 0);
     interactions.redraw();
   };
 

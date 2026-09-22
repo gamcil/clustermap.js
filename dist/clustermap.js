@@ -891,11 +891,11 @@
             .append("rect")
             .attr("class", "leftHandle")
             .attr("x", -8)
-            .call(interactions.dragLocusResize);
+            .call(createLocusResizeDrag({ config, scales, ids, interactions }));
           hover
             .append("rect")
             .attr("class", "rightHandle")
-            .call(interactions.dragLocusResize);
+            .call(createLocusResizeDrag({ config, scales, ids, interactions }));
           hover
             .selectAll(".leftHandle, .rightHandle")
             .attr("width", 8)
@@ -1118,6 +1118,114 @@
     const ended = (_, locus) => {
       interactions.setDragging(false);
       interactions.setLocusOffset(locus.uid, value);
+      interactions.redraw();
+    };
+
+    return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
+  }
+
+  // Resize changes chart state through the controller, while this renderer-owned
+  // adapter supplies immediate SVG feedback until the final redraw.
+  function createLocusResizeDrag({ config, scales, ids, interactions }) {
+    let minPos;
+    let maxPos;
+
+    const locusSelection = (uid) => d3.select(`#${ids.locus({ uid })}`);
+    const realLength = (state) => scales.x(state.end) - scales.x(state.start);
+    const updateTrackBar = (selection, state) => {
+      const y = config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
+      selection
+        .select("line.trackBar")
+        .attr("x1", scales.x(state.start))
+        .attr("x2", scales.x(state.end))
+        .attr("y1", y)
+        .attr("y2", y);
+    };
+    const updateVisibleGenes = (selection, state) => {
+      selection.selectAll("g.gene").attr("display", (gene) => {
+        const display = interactions.getGeneState(gene);
+        return display.start >= state.start && display.end <= state.end + 1
+          ? "inline"
+          : "none";
+      });
+    };
+    const updateLinkVisibility = () => {
+      d3.selectAll("path.geneLink").attr("opacity", (link) => {
+        const query = d3.select(`#${ids.gene({ uid: link.query.uid })}`).attr("display");
+        const target = d3.select(`#${ids.gene({ uid: link.target.uid })}`).attr("display");
+        return config.link.show && query !== "none" && target !== "none" ? 1 : 0;
+      });
+    };
+
+    const started = (_, locus) => {
+      [minPos, maxPos] = interactions.getLocusMoveBounds(locus.uid);
+      interactions.setDragging(true);
+    };
+
+    const dragLeft = (event, locus, handle) => {
+      const { state, coordinate } = interactions.trimLocus(locus, {
+        edge: "left",
+        position: event.x,
+        coordinateFor: scales.x,
+        scaleGenes: config.plot.scaleGenes,
+      });
+      const subject = locusSelection(locus.uid);
+      handle.attr("x", coordinate - 8);
+      subject
+        .select("rect.hover")
+        .attr("x", coordinate)
+        .attr("width", realLength(state));
+      updateVisibleGenes(subject, state);
+      updateTrackBar(subject, state);
+      updateLinkVisibility();
+
+      if (config.cluster.alignLabels) {
+        const offset = scales.offset(locus._cluster) + scales.locus(locus.uid);
+        const newMin = Math.min(coordinate + offset, minPos) - 10;
+        d3.selectAll("g.clusterInfo").attr(
+          "transform",
+          (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
+        );
+      } else {
+        d3.select(`#cinfo_${locus._cluster}`).attr(
+          "transform",
+          `translate(${scales.locus(locus.uid) + scales.x(state.start) - 10}, 0)`
+        );
+      }
+    };
+
+    const dragRight = (event, locus, handle) => {
+      const { state, coordinate } = interactions.trimLocus(locus, {
+        edge: "right",
+        position: event.x,
+        coordinateFor: scales.x,
+        scaleGenes: config.plot.scaleGenes,
+      });
+      const subject = locusSelection(locus.uid);
+      handle.attr("x", coordinate);
+      subject.select("rect.hover").attr("width", realLength(state));
+      updateVisibleGenes(subject, state);
+      updateTrackBar(subject, state);
+      updateLinkVisibility();
+
+      const locusEnd = scales.x(state.end);
+      const newMax = Math.max(
+        scales.offset(locus._cluster) + scales.locus(locus.uid) + locusEnd,
+        maxPos
+      ) + config.legend.marginLeft;
+      d3.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
+    };
+
+    const dragged = function (event, locus) {
+      const handle = d3.select(this);
+      if (handle.classed("leftHandle")) dragLeft(event, locus, handle);
+      else dragRight(event, locus, handle);
+    };
+
+    const ended = (_, locus) => {
+      interactions.setDragging(false);
+      interactions.finalizeLocusTrim(locus);
+      locusSelection(locus.uid).select("g.hover").transition().attr("opacity", 0);
       interactions.redraw();
     };
 
@@ -1806,11 +1914,6 @@
     };
   }
 
-  function getChartExtent(ignoredLoci) {
-    const clusters = scales.offset.domain().map(get.clusterData);
-    return getClusterExtents(clusters, locusLayout(), ignoredLoci);
-  }
-
   function updateLocusScaling(locus) {
     const { oldStart } = recalculateLocusCoordinates(
       chartState,
@@ -2346,157 +2449,6 @@
 
   const _locus = {
     getId: (d) => `locus_${d.uid}`,
-    realLength: (d) => {
-      const state = locusState(d);
-      return xDistance(scales.x, state.start, state.end);
-    },
-    updateTrackBar: (selection) => {
-      let midPoint =
-        config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
-      selection
-        .select("line.trackBar")
-        .attr("x1", (d) => scales.x(locusState(d).start))
-        .attr("x2", (d) => scales.x(locusState(d).end))
-        .attr("y1", midPoint)
-        .attr("y2", midPoint)
-        .style("stroke", config.locus.trackBar.colour)
-        .style("stroke-width", config.locus.trackBar.stroke);
-      return selection;
-    },
-    updateHoverBox: (selection) => {
-      let botPoint =
-        config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
-      selection
-        .selectAll("rect.hover, rect.leftHandle, rect.rightHandle")
-        .attr("y", -10)
-        .attr("height", botPoint + 20);
-      selection
-        .select("rect.hover")
-        .attr("x", (d) => scales.x(locusState(d).start))
-        .attr("width", _locus.realLength);
-      selection
-        .select("rect.leftHandle")
-        .attr("x", (d) => scales.x(locusState(d).start) - 8);
-      selection
-        .select("rect.rightHandle")
-        .attr("x", (d) => scales.x(locusState(d).end));
-      return selection;
-    },
-    update: (selection) =>
-      selection
-        .attr("transform", (d) => `translate(${scales.locus(d.uid)}, 0)`)
-        .call(_locus.updateTrackBar)
-        .call(_locus.updateHoverBox),
-    dragResize: (selection) => {
-      let minPos, value;
-
-      const started = (_, d) => {
-        [minPos] = getChartExtent([d.uid]);
-        flags.isDragging = true;
-        scales.x(locusState(d).start);
-      };
-
-      function dragged(event, d) {
-        let handle = d3.select(this);
-        if (handle.attr("class") === "leftHandle") {
-          _left(event, d, handle);
-        } else {
-          _right(event, d, handle);
-        }
-      }
-
-      const _left = (event, d, handle) => {
-        const { state, coordinate } = trimLocus(chartState, d, {
-          edge: "left",
-          position: event.x,
-          coordinateFor: scales.x,
-          scaleGenes: config.plot.scaleGenes,
-        });
-        value = coordinate;
-
-        // Adjust the dragged rect
-        handle.attr("x", value - 8);
-
-        // Resize the hover <rect>, hide any genes not within bounds
-        let locus = get.locus(d.uid);
-        locus
-          .select("rect.hover")
-          .attr("x", value)
-          .attr("width", _locus.realLength);
-        locus
-          .selectAll("g.gene")
-          .attr("display", (g) =>
-            displayGene(g).start >= state.start &&
-            displayGene(g).end <= state.end + 1
-              ? "inline"
-              : "none"
-          );
-        locus.call(_locus.updateTrackBar);
-
-        // Hide any gene links connected to hidden genes
-        d3.selectAll("path.geneLink").attr("opacity", _link.opacity);
-
-        if (config.cluster.alignLabels) {
-          // Add offset/locus scale values to make equivalent to minPos from
-          // cluster.extent(), then remove from per-cluster transforms
-          let offs = scales.offset(d._cluster) + scales.locus(d.uid);
-          let newMin = Math.min(value + offs, minPos) - 10;
-          d3.selectAll("g.clusterInfo").attr("transform", (c) => {
-            let blah = newMin - scales.offset(c.uid);
-            return `translate(${blah}, 0)`;
-          });
-        } else {
-          d3.select(`#cinfo_${d._cluster}`).attr(
-            "transform",
-            `translate(${scales.locus(d.uid) + scales.x(state.start) - 10}, 0)`
-          );
-        }
-      };
-
-      const _right = (event, d, handle) => {
-        const { state } = trimLocus(chartState, d, {
-          edge: "right",
-          position: event.x,
-          coordinateFor: scales.x,
-          scaleGenes: config.plot.scaleGenes,
-        });
-
-        // Transform handle rect
-        handle.attr("x", scales.x(state.end));
-
-        // Update rect width, hide genes out of bounds
-        let locus = get.locus(d.uid);
-        locus.select("rect.hover").attr("width", _locus.realLength);
-        locus
-          .selectAll("g.gene")
-          .attr("display", (g) =>
-            displayGene(g).start >= state.start &&
-            displayGene(g).end <= state.end + 1
-              ? "inline"
-              : "none"
-          );
-        locus.call(_locus.updateTrackBar);
-
-        // Hide any gene links attached to hidden genes
-        d3.selectAll("path.geneLink").attr("opacity", _link.opacity);
-
-        // Adjust position of legend when final locus _end property changes
-        d3.select("g.legend").attr("transform", plot.legendTransform);
-      };
-
-      const ended = (_, d) => {
-        flags.isDragging = false;
-        // Check if visible locus coordinates equal default coordinates in data
-        // If yes, make sure trimLeft/trimRight are reset to null
-        finalizeLocusTrim(chartState, d);
-        d3.select(`#locus_${d.uid} .hover`).transition().attr("opacity", 0);
-        plot.update();
-      };
-
-      return d3.drag().on("start", started).on("drag", dragged).on("end", ended)(
-        selection
-      );
-    },
   };
 
   const _scale = {
@@ -2861,7 +2813,6 @@
         },
         lookup: { gene: get.geneData },
         interactions: {
-          dragLocusResize: _locus.dragResize,
           isDragging: () => flags.isDragging,
           setDragging: (isDragging) => {
             flags.isDragging = isDragging;
@@ -2873,11 +2824,18 @@
           redraw: () => plot.update(),
           getLocusOffset: (uid) => getLocusOffset(chartState, uid),
           getLocusState: (locus) => getLocusState(chartState, locus),
+          getGeneState: (gene) => getGeneState(chartState, gene),
           setLocusOffset: (uid, offset) => setLocusOffset(chartState, uid, offset),
+          trimLocus: (locus, options) => trimLocus(chartState, locus, options),
+          finalizeLocusTrim: (locus) => finalizeLocusTrim(chartState, locus),
           getLocusMoveBounds: (locusUid) => {
             const otherLoci = [...scene.loci.values()].filter(
               (locus) => locus.source.uid !== locusUid
             );
+            const currentLocus = scene.loci.get(locusUid);
+            if (!otherLoci.length) {
+              return [currentLocus.worldStart, currentLocus.worldEnd];
+            }
             return [
               Math.min(...otherLoci.map((locus) => locus.worldStart)),
               Math.max(...otherLoci.map((locus) => locus.worldEnd)),

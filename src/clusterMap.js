@@ -3,12 +3,15 @@ import {
   createChartState,
   getCamera,
   getClusterOrder,
+  getGeneState,
   getLocusOffset,
   getLocusState,
+  finalizeLocusTrim,
   flipLocus,
   moveClusterToIndex,
   setCamera,
   setLocusOffset,
+  trimLocus,
 } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
@@ -156,7 +159,6 @@ export default function clusterMap() {
       },
       lookup: { gene: api.get.geneData },
       interactions: {
-        dragLocusResize: api.locus.dragResize,
         isDragging: () => api.flags.isDragging,
         setDragging: (isDragging) => {
           api.flags.isDragging = isDragging;
@@ -168,11 +170,18 @@ export default function clusterMap() {
         redraw: () => api.plot.update(),
         getLocusOffset: (uid) => getLocusOffset(chartState, uid),
         getLocusState: (locus) => getLocusState(chartState, locus),
+        getGeneState: (gene) => getGeneState(chartState, gene),
         setLocusOffset: (uid, offset) => setLocusOffset(chartState, uid, offset),
+        trimLocus: (locus, options) => trimLocus(chartState, locus, options),
+        finalizeLocusTrim: (locus) => finalizeLocusTrim(chartState, locus),
         getLocusMoveBounds: (locusUid) => {
           const otherLoci = [...scene.loci.values()].filter(
             (locus) => locus.source.uid !== locusUid
           );
+          const currentLocus = scene.loci.get(locusUid);
+          if (!otherLoci.length) {
+            return [currentLocus.worldStart, currentLocus.worldEnd];
+          }
           return [
             Math.min(...otherLoci.map((locus) => locus.worldStart)),
             Math.max(...otherLoci.map((locus) => locus.worldEnd)),
