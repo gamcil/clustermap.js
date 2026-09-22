@@ -348,8 +348,17 @@ test("dragging a locus persists its horizontal position", async ({ page }, testI
   const before = await captureCheckpoint(page, testInfo, "before-locus-reposition", async () => ({
     locusX: await readTranslateX(locus),
   }));
+  const beforePaths = await readLinkPaths(page);
 
-  await hover.dragTo(target);
+  const start = await hover.boundingBox();
+  const end = await target.boundingBox();
+  if (!start || !end) throw new Error("locus drag targets are not visible");
+
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2);
+  await expect.poll(() => readLinkPaths(page)).not.toEqual(beforePaths);
+  await page.mouse.up();
   await waitForPaint(page);
 
   await expect

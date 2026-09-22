@@ -791,6 +791,78 @@
     );
   }
 
+  function getLinkAnchors(
+    link,
+    {
+      geneForUid,
+      areClustersAdjacent,
+      scaleX,
+      horizontalOffset,
+      verticalPosition,
+      geneMidpoint,
+    }
+  ) {
+    const query = geneForUid(link.query.uid);
+    const target = geneForUid(link.target.uid);
+
+    if (!areClustersAdjacent(query._cluster, target._cluster)) return null;
+
+    const getGeneAnchors = (gene) => {
+      const offset = horizontalOffset(gene);
+      const left = scaleX(gene.start) + offset;
+      const right = scaleX(gene.end) + offset;
+      const forward = gene.strand === 1;
+      return [
+        forward ? left : right,
+        forward ? right : left,
+        verticalPosition(gene) + geneMidpoint,
+      ];
+    };
+
+    const [ax1, ax2, ay] = getGeneAnchors(query);
+    const [bx1, bx2, by] = getGeneAnchors(target);
+
+    return ay > by
+      ? [bx1, bx2, by, ax1, ax2, ay]
+      : [ax1, ax2, ay, bx1, bx2, by];
+  }
+
+  function getLinkLabelPosition(
+    [ax1, ax2, ay, bx1, bx2, by],
+    position
+  ) {
+    const aMid = ax1 + (ax2 - ax1) / 2;
+    const bMid = bx1 + (bx2 - bx1) / 2;
+    return {
+      x: aMid + (bMid - aMid) * position,
+      y: ay + Math.abs(by - ay) * position,
+    };
+  }
+
+  function straightLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
+    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`;
+  }
+
+  function sankeyLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
+    const verticalMidpoint = ay + Math.abs(by - ay) / 2;
+    return `M${ax2},${ay}C${ax2},${verticalMidpoint},${bx2},${verticalMidpoint},${bx2},${by}L${bx1},${by}C${bx1},${verticalMidpoint},${ax1},${verticalMidpoint},${ax1},${ay}L${ax2},${ay}`;
+  }
+
+  function lineLinkPath([ax1, ax2, ay, bx1, bx2, by], straight) {
+    const aMid = ax1 + (ax2 - ax1) / 2;
+    const bMid = bx1 + (bx2 - bx1) / 2;
+    if (straight) return `M${aMid},${ay} L${bMid},${by}`;
+
+    const verticalMidpoint = (ay + by) / 2;
+    return `M${aMid},${ay}C${aMid},${verticalMidpoint},${bMid},${verticalMidpoint},${bMid},${by}`;
+  }
+
+  function getLinkPath(anchors, { asLine, straight }) {
+    if (!anchors) return "";
+    if (asLine) return lineLinkPath(anchors, straight);
+    return straight ? straightLinkPath(anchors) : sankeyLinkPath(anchors);
+  }
+
   // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
   // host, camera viewport, and interaction state that causes a redraw.
   function renderSvg({
@@ -815,6 +887,14 @@
       .data([data.clusters])
       .join("g")
       .attr("class", "clusters");
+    const refreshLinkPreview = createLinkPreview({
+      plot,
+      config,
+      scales,
+      ids,
+      lookup,
+      interactions,
+    });
 
     const clusters = clusterGroup
       .selectAll("g.cluster")
@@ -830,7 +910,7 @@
             .attr("id", (cluster) => `cinfo_${cluster.uid}`)
             .attr("class", "clusterInfo")
             .attr("transform", "translate(-10, 0)")
-            .call(createClusterDrag({ scales, ids, interactions }));
+            .call(createClusterDrag({ scales, ids, interactions, refreshLinkPreview }));
 
           info
             .append("text")
@@ -886,16 +966,40 @@
             .append("rect")
             .attr("class", "hover")
             .attr("fill", "rgba(0, 0, 0, 0.4)")
-            .call(createLocusPositionDrag({ config, scales, ids, interactions }));
+            .call(
+              createLocusPositionDrag({
+                config,
+                scales,
+                ids,
+                interactions,
+                refreshLinkPreview,
+              })
+            );
           hover
             .append("rect")
             .attr("class", "leftHandle")
             .attr("x", -8)
-            .call(createLocusResizeDrag({ config, scales, ids, interactions }));
+            .call(
+              createLocusResizeDrag({
+                config,
+                scales,
+                ids,
+                interactions,
+                refreshLinkPreview,
+              })
+            );
           hover
             .append("rect")
             .attr("class", "rightHandle")
-            .call(createLocusResizeDrag({ config, scales, ids, interactions }));
+            .call(
+              createLocusResizeDrag({
+                config,
+                scales,
+                ids,
+                interactions,
+                refreshLinkPreview,
+              })
+            );
           hover
             .selectAll(".leftHandle, .rightHandle")
             .attr("width", 8)
@@ -1009,7 +1113,7 @@
     return selection;
   }
 
-  function createClusterDrag({ scales, ids, interactions }) {
+  function createClusterDrag({ scales, ids, interactions, refreshLinkPreview }) {
     let pointerOffset;
     let range;
     let order;
@@ -1044,7 +1148,7 @@
         0
       );
       const currentIndex = order.indexOf(cluster.uid);
-      interactions.updateLinkPreview();
+      refreshLinkPreview();
       if (targetIndex === currentIndex) return;
 
       order.splice(currentIndex, 1);
@@ -1073,7 +1177,13 @@
       .on("end", ended);
   }
 
-  function createLocusPositionDrag({ config, scales, ids, interactions }) {
+  function createLocusPositionDrag({
+    config,
+    scales,
+    ids,
+    interactions,
+    refreshLinkPreview,
+  }) {
     let minPos;
     let maxPos;
     let pointerStart;
@@ -1092,7 +1202,7 @@
       value += event.x - pointerStart;
       const subject = locusSelection(locus.uid);
       subject.attr("transform", `translate(${value}, 0)`);
-      interactions.updateLinkPreview();
+      refreshLinkPreview();
 
       const state = interactions.getLocusState(locus);
       const locusStart = scales.x(state.start);
@@ -1126,7 +1236,13 @@
 
   // Resize changes chart state through the controller, while this renderer-owned
   // adapter supplies immediate SVG feedback until the final redraw.
-  function createLocusResizeDrag({ config, scales, ids, interactions }) {
+  function createLocusResizeDrag({
+    config,
+    scales,
+    ids,
+    interactions,
+    refreshLinkPreview,
+  }) {
     let minPos;
     let maxPos;
 
@@ -1149,14 +1265,6 @@
           : "none";
       });
     };
-    const updateLinkVisibility = () => {
-      d3.selectAll("path.geneLink").attr("opacity", (link) => {
-        const query = d3.select(`#${ids.gene({ uid: link.query.uid })}`).attr("display");
-        const target = d3.select(`#${ids.gene({ uid: link.target.uid })}`).attr("display");
-        return config.link.show && query !== "none" && target !== "none" ? 1 : 0;
-      });
-    };
-
     const started = (_, locus) => {
       [minPos, maxPos] = interactions.getLocusMoveBounds(locus.uid);
       interactions.setDragging(true);
@@ -1177,7 +1285,7 @@
         .attr("width", realLength(state));
       updateVisibleGenes(subject, state);
       updateTrackBar(subject, state);
-      updateLinkVisibility();
+      refreshLinkPreview();
 
       if (config.cluster.alignLabels) {
         const offset = scales.offset(locus._cluster) + scales.locus(locus.uid);
@@ -1206,7 +1314,7 @@
       subject.select("rect.hover").attr("width", realLength(state));
       updateVisibleGenes(subject, state);
       updateTrackBar(subject, state);
-      updateLinkVisibility();
+      refreshLinkPreview();
 
       const locusEnd = scales.x(state.end);
       const newMax = Math.max(
@@ -1230,6 +1338,71 @@
     };
 
     return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
+  }
+
+  function createLinkPreview({ plot, config, scales, ids, lookup, interactions }) {
+    const matrix = (selection) => {
+      const transform = selection.node().transform.baseVal;
+      return transform.numberOfItems ? transform.getItem(0).matrix : { e: 0, f: 0 };
+    };
+    const geneIsVisible = (uid) =>
+      d3.select(`#${ids.gene({ uid })}`).attr("display") !== "none";
+    const displayGene = (uid) => {
+      const gene = lookup.gene(uid);
+      return gene && { ...gene, ...interactions.getGeneState(gene) };
+    };
+    const areClustersAdjacent = (one, two) => {
+      const order = interactions.getClusterOrder();
+      return Math.abs(order.indexOf(one) - order.indexOf(two)) === 1;
+    };
+    const linkValues = (link) => {
+      if (
+        !config.link.show ||
+        link.identity < config.link.threshold ||
+        !geneIsVisible(link.query.uid) ||
+        !geneIsVisible(link.target.uid)
+      ) {
+        return { anchors: null, visible: false, labelPosition: null };
+      }
+      const anchors = getLinkAnchors(link, {
+        geneForUid: displayGene,
+        areClustersAdjacent,
+        scaleX: scales.x,
+        horizontalOffset: (gene) =>
+          scales.offset(gene._cluster) + matrix(d3.select(`#${ids.locus({ uid: gene._locus })}`)).e,
+        verticalPosition: (gene) => matrix(d3.select(`#${ids.cluster({ uid: gene._cluster })}`)).f,
+        geneMidpoint: config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2,
+      });
+      return {
+        anchors,
+        visible: Boolean(anchors),
+        labelPosition: anchors
+          ? getLinkLabelPosition(anchors, config.link.label.position)
+          : null,
+      };
+    };
+
+    return () => {
+      const values = new Map();
+      const links = plot.selectAll("g.geneLinkG");
+      links.each((link) => values.set(link.uid, linkValues(link)));
+      links.attr("opacity", (link) => (values.get(link.uid).visible ? 1 : 0));
+      links
+        .select("path.geneLink")
+        .attr("d", (link) =>
+          getLinkPath(values.get(link.uid).anchors, {
+            asLine: config.link.asLine,
+            straight: config.link.straight,
+          })
+        );
+      links
+        .select("text.geneLinkLabel")
+        .attr("opacity", (link) =>
+          config.link.label.show && values.get(link.uid).visible ? 1 : 0
+        )
+        .attr("x", (link) => values.get(link.uid).labelPosition?.x)
+        .attr("y", (link) => values.get(link.uid).labelPosition?.y);
+    };
   }
 
   function updateLoci(selection, scene, config) {
@@ -1484,78 +1657,6 @@
       },
     },
   };
-
-  function getLinkAnchors(
-    link,
-    {
-      geneForUid,
-      areClustersAdjacent,
-      scaleX,
-      horizontalOffset,
-      verticalPosition,
-      geneMidpoint,
-    }
-  ) {
-    const query = geneForUid(link.query.uid);
-    const target = geneForUid(link.target.uid);
-
-    if (!areClustersAdjacent(query._cluster, target._cluster)) return null;
-
-    const getGeneAnchors = (gene) => {
-      const offset = horizontalOffset(gene);
-      const left = scaleX(gene.start) + offset;
-      const right = scaleX(gene.end) + offset;
-      const forward = gene.strand === 1;
-      return [
-        forward ? left : right,
-        forward ? right : left,
-        verticalPosition(gene) + geneMidpoint,
-      ];
-    };
-
-    const [ax1, ax2, ay] = getGeneAnchors(query);
-    const [bx1, bx2, by] = getGeneAnchors(target);
-
-    return ay > by
-      ? [bx1, bx2, by, ax1, ax2, ay]
-      : [ax1, ax2, ay, bx1, bx2, by];
-  }
-
-  function getLinkLabelPosition(
-    [ax1, ax2, ay, bx1, bx2, by],
-    position
-  ) {
-    const aMid = ax1 + (ax2 - ax1) / 2;
-    const bMid = bx1 + (bx2 - bx1) / 2;
-    return {
-      x: aMid + (bMid - aMid) * position,
-      y: ay + Math.abs(by - ay) * position,
-    };
-  }
-
-  function straightLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
-    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`;
-  }
-
-  function sankeyLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
-    const verticalMidpoint = ay + Math.abs(by - ay) / 2;
-    return `M${ax2},${ay}C${ax2},${verticalMidpoint},${bx2},${verticalMidpoint},${bx2},${by}L${bx1},${by}C${bx1},${verticalMidpoint},${ax1},${verticalMidpoint},${ax1},${ay}L${ax2},${ay}`;
-  }
-
-  function lineLinkPath([ax1, ax2, ay, bx1, bx2, by], straight) {
-    const aMid = ax1 + (ax2 - ax1) / 2;
-    const bMid = bx1 + (bx2 - bx1) / 2;
-    if (straight) return `M${aMid},${ay} L${bMid},${by}`;
-
-    const verticalMidpoint = (ay + by) / 2;
-    return `M${aMid},${ay}C${aMid},${verticalMidpoint},${bMid},${verticalMidpoint},${bMid},${by}`;
-  }
-
-  function getLinkPath(anchors, { asLine, straight }) {
-    if (!anchors) return "";
-    if (asLine) return lineLinkPath(anchors, straight);
-    return straight ? straightLinkPath(anchors) : sankeyLinkPath(anchors);
-  }
 
   function getGenePolygonCoordinates(gene, { scaleX, shape }) {
     const scaledStart = scaleX(gene.start);
@@ -1971,7 +2072,6 @@
     geneData: (uid) => chartIndex?.geneById.get(uid),
     locusData: (uid) => chartIndex?.locusById.get(uid),
     clusterData: (uid) => chartIndex?.clusterById.get(uid),
-    matrix: (selection) => selection.node().transform.baseVal[0].matrix,
   };
 
   const plot = {
@@ -2314,107 +2414,6 @@
 
   const _link = {
     getId: (l) => `link-${l.uid}`,
-    /**
-     * Determines the opacity of a given link.
-     * A link is hidden (opacity set to 0) if a) the query or target genes are
-     * hidden, or b) if config.link.show is false.
-     */
-    opacity: (l) => {
-      let a = get.gene(l.query.uid).attr("display");
-      let b = get.gene(l.target.uid).attr("display");
-      let hide = ["none", null]; // Set to none or still undefined
-      return !config.link.show || hide.includes(a) || hide.includes(b) ? 0 : 1;
-    },
-    fill: (d) => {
-      if (config.link.asLine) return "none";
-      if (config.link.groupColour)
-        return rgbaToRgb(scales.colour(scales.group(d.query.uid)));
-      return scales.score(d.identity);
-    },
-    stroke: (d) => {
-      if (config.link.groupColour) {
-        let colour = scales.colour(scales.group(d.query.uid));
-        return config.link.asLine ? rgbaToRgb(colour) : colour;
-      }
-      if (config.link.asLine) return scales.score(d.identity);
-      return "black";
-    },
-    /**
-     * Updates position of gene link <path> and <text> elements.
-     * @param {bool} snap - calculate path to axis, not including transform matrix
-     */
-    update: (selection, snap) => {
-      if (!config.link.show) return selection.attr("opacity", 0);
-      const values = {};
-      selection.each(function (data) {
-        const anchors = _link.getAnchors(data, snap);
-        if (!anchors || data.identity < config.link.threshold) {
-          values[data.uid] = {
-            d: null,
-            anchors: null,
-            opacity: 0,
-            x: null,
-            y: null,
-          };
-          return;
-        }
-        const labelPosition = getLinkLabelPosition(
-          anchors,
-          config.link.label.position
-        );
-        values[data.uid] = {
-          anchors: anchors,
-          opacity: 1,
-          x: labelPosition.x,
-          y: labelPosition.y,
-        };
-      });
-      selection.attr("opacity", 1);
-      selection
-        .selectAll("path")
-        .attr("d", (d) => _link.path(values[d.uid].anchors))
-        .style("fill", _link.fill)
-        .style("stroke", _link.stroke)
-        .style("stroke-width", `${config.link.strokeWidth}px`);
-      selection
-        .selectAll("text")
-        .attr("opacity", (d) =>
-          config.link.label.show ? values[d.uid].opacity : 0
-        )
-        .attr("filter", () =>
-          config.link.label.background ? "url(#filter_solid)" : null
-        )
-        .style("font-size", () => `${config.link.label.fontSize}px`)
-        .attr("x", (d) => values[d.uid].x)
-        .attr("y", (d) => values[d.uid].y);
-      return selection;
-    },
-    path: (anchors) =>
-      getLinkPath(anchors, {
-        asLine: config.link.asLine,
-        straight: config.link.straight,
-      }),
-    getAnchors: (d, snap) => {
-      const useScalePositions = snap || false;
-      if (useScalePositions && scene)
-        return scene.links.get(d.uid)?.anchors ?? null;
-      return getLinkAnchors(d, {
-        geneForUid: (uid) => displayGene(get.geneData(uid)),
-        areClustersAdjacent: _cluster.adjacent,
-        scaleX: scales.x,
-        horizontalOffset: (gene) => {
-          if (useScalePositions)
-            return scales.offset(gene._cluster) + scales.locus(gene._locus);
-          return scales.offset(gene._cluster) + get.matrix(get.locus(gene._locus)).e;
-        },
-        verticalPosition: (gene) =>
-          useScalePositions
-            ? scales.y(gene._cluster)
-            : get.matrix(get.cluster(gene._cluster)).f,
-        geneMidpoint:
-          config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2,
-      });
-    },
     /**
      * Update group scales given new data.
      */
@@ -2820,7 +2819,6 @@
           getClusterOrder: () => getClusterOrder(chartState),
           moveClusterToIndex: (uid, index) =>
             moveClusterToIndex(chartState, uid, index),
-          updateLinkPreview: () => d3.selectAll("g.geneLinkG").call(_link.update),
           redraw: () => plot.update(),
           getLocusOffset: (uid) => getLocusOffset(chartState, uid),
           getLocusState: (locus) => getLocusState(chartState, locus),

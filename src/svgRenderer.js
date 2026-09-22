@@ -3,6 +3,11 @@ import colourBar from "./colourBar.js";
 import scaleBar from "./scaleBar.js";
 import { renameText, rgbaToRgb } from "./utils.js";
 import { filterLinks } from "./links/groups.mjs";
+import {
+  getLinkAnchors,
+  getLinkLabelPosition,
+  getLinkPath,
+} from "./links/layout.mjs";
 
 // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
 // host, camera viewport, and interaction state that causes a redraw.
@@ -28,6 +33,14 @@ export function renderSvg({
     .data([data.clusters])
     .join("g")
     .attr("class", "clusters");
+  const refreshLinkPreview = createLinkPreview({
+    plot,
+    config,
+    scales,
+    ids,
+    lookup,
+    interactions,
+  });
 
   const clusters = clusterGroup
     .selectAll("g.cluster")
@@ -43,7 +56,7 @@ export function renderSvg({
           .attr("id", (cluster) => `cinfo_${cluster.uid}`)
           .attr("class", "clusterInfo")
           .attr("transform", "translate(-10, 0)")
-          .call(createClusterDrag({ scales, ids, interactions }));
+          .call(createClusterDrag({ scales, ids, interactions, refreshLinkPreview }));
 
         info
           .append("text")
@@ -99,16 +112,40 @@ export function renderSvg({
           .append("rect")
           .attr("class", "hover")
           .attr("fill", "rgba(0, 0, 0, 0.4)")
-          .call(createLocusPositionDrag({ config, scales, ids, interactions }));
+          .call(
+            createLocusPositionDrag({
+              config,
+              scales,
+              ids,
+              interactions,
+              refreshLinkPreview,
+            })
+          );
         hover
           .append("rect")
           .attr("class", "leftHandle")
           .attr("x", -8)
-          .call(createLocusResizeDrag({ config, scales, ids, interactions }));
+          .call(
+            createLocusResizeDrag({
+              config,
+              scales,
+              ids,
+              interactions,
+              refreshLinkPreview,
+            })
+          );
         hover
           .append("rect")
           .attr("class", "rightHandle")
-          .call(createLocusResizeDrag({ config, scales, ids, interactions }));
+          .call(
+            createLocusResizeDrag({
+              config,
+              scales,
+              ids,
+              interactions,
+              refreshLinkPreview,
+            })
+          );
         hover
           .selectAll(".leftHandle, .rightHandle")
           .attr("width", 8)
@@ -222,7 +259,7 @@ function updateClusters(selection, scene) {
   return selection;
 }
 
-function createClusterDrag({ scales, ids, interactions }) {
+function createClusterDrag({ scales, ids, interactions, refreshLinkPreview }) {
   let pointerOffset;
   let range;
   let order;
@@ -257,7 +294,7 @@ function createClusterDrag({ scales, ids, interactions }) {
       0
     );
     const currentIndex = order.indexOf(cluster.uid);
-    interactions.updateLinkPreview();
+    refreshLinkPreview();
     if (targetIndex === currentIndex) return;
 
     order.splice(currentIndex, 1);
@@ -286,7 +323,13 @@ function createClusterDrag({ scales, ids, interactions }) {
     .on("end", ended);
 }
 
-function createLocusPositionDrag({ config, scales, ids, interactions }) {
+function createLocusPositionDrag({
+  config,
+  scales,
+  ids,
+  interactions,
+  refreshLinkPreview,
+}) {
   let minPos;
   let maxPos;
   let pointerStart;
@@ -305,7 +348,7 @@ function createLocusPositionDrag({ config, scales, ids, interactions }) {
     value += event.x - pointerStart;
     const subject = locusSelection(locus.uid);
     subject.attr("transform", `translate(${value}, 0)`);
-    interactions.updateLinkPreview();
+    refreshLinkPreview();
 
     const state = interactions.getLocusState(locus);
     const locusStart = scales.x(state.start);
@@ -339,7 +382,13 @@ function createLocusPositionDrag({ config, scales, ids, interactions }) {
 
 // Resize changes chart state through the controller, while this renderer-owned
 // adapter supplies immediate SVG feedback until the final redraw.
-function createLocusResizeDrag({ config, scales, ids, interactions }) {
+function createLocusResizeDrag({
+  config,
+  scales,
+  ids,
+  interactions,
+  refreshLinkPreview,
+}) {
   let minPos;
   let maxPos;
 
@@ -362,14 +411,6 @@ function createLocusResizeDrag({ config, scales, ids, interactions }) {
         : "none";
     });
   };
-  const updateLinkVisibility = () => {
-    d3.selectAll("path.geneLink").attr("opacity", (link) => {
-      const query = d3.select(`#${ids.gene({ uid: link.query.uid })}`).attr("display");
-      const target = d3.select(`#${ids.gene({ uid: link.target.uid })}`).attr("display");
-      return config.link.show && query !== "none" && target !== "none" ? 1 : 0;
-    });
-  };
-
   const started = (_, locus) => {
     [minPos, maxPos] = interactions.getLocusMoveBounds(locus.uid);
     interactions.setDragging(true);
@@ -390,7 +431,7 @@ function createLocusResizeDrag({ config, scales, ids, interactions }) {
       .attr("width", realLength(state));
     updateVisibleGenes(subject, state);
     updateTrackBar(subject, state);
-    updateLinkVisibility();
+    refreshLinkPreview();
 
     if (config.cluster.alignLabels) {
       const offset = scales.offset(locus._cluster) + scales.locus(locus.uid);
@@ -419,7 +460,7 @@ function createLocusResizeDrag({ config, scales, ids, interactions }) {
     subject.select("rect.hover").attr("width", realLength(state));
     updateVisibleGenes(subject, state);
     updateTrackBar(subject, state);
-    updateLinkVisibility();
+    refreshLinkPreview();
 
     const locusEnd = scales.x(state.end);
     const newMax = Math.max(
@@ -443,6 +484,71 @@ function createLocusResizeDrag({ config, scales, ids, interactions }) {
   };
 
   return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
+}
+
+function createLinkPreview({ plot, config, scales, ids, lookup, interactions }) {
+  const matrix = (selection) => {
+    const transform = selection.node().transform.baseVal;
+    return transform.numberOfItems ? transform.getItem(0).matrix : { e: 0, f: 0 };
+  };
+  const geneIsVisible = (uid) =>
+    d3.select(`#${ids.gene({ uid })}`).attr("display") !== "none";
+  const displayGene = (uid) => {
+    const gene = lookup.gene(uid);
+    return gene && { ...gene, ...interactions.getGeneState(gene) };
+  };
+  const areClustersAdjacent = (one, two) => {
+    const order = interactions.getClusterOrder();
+    return Math.abs(order.indexOf(one) - order.indexOf(two)) === 1;
+  };
+  const linkValues = (link) => {
+    if (
+      !config.link.show ||
+      link.identity < config.link.threshold ||
+      !geneIsVisible(link.query.uid) ||
+      !geneIsVisible(link.target.uid)
+    ) {
+      return { anchors: null, visible: false, labelPosition: null };
+    }
+    const anchors = getLinkAnchors(link, {
+      geneForUid: displayGene,
+      areClustersAdjacent,
+      scaleX: scales.x,
+      horizontalOffset: (gene) =>
+        scales.offset(gene._cluster) + matrix(d3.select(`#${ids.locus({ uid: gene._locus })}`)).e,
+      verticalPosition: (gene) => matrix(d3.select(`#${ids.cluster({ uid: gene._cluster })}`)).f,
+      geneMidpoint: config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2,
+    });
+    return {
+      anchors,
+      visible: Boolean(anchors),
+      labelPosition: anchors
+        ? getLinkLabelPosition(anchors, config.link.label.position)
+        : null,
+    };
+  };
+
+  return () => {
+    const values = new Map();
+    const links = plot.selectAll("g.geneLinkG");
+    links.each((link) => values.set(link.uid, linkValues(link)));
+    links.attr("opacity", (link) => (values.get(link.uid).visible ? 1 : 0));
+    links
+      .select("path.geneLink")
+      .attr("d", (link) =>
+        getLinkPath(values.get(link.uid).anchors, {
+          asLine: config.link.asLine,
+          straight: config.link.straight,
+        })
+      );
+    links
+      .select("text.geneLinkLabel")
+      .attr("opacity", (link) =>
+        config.link.label.show && values.get(link.uid).visible ? 1 : 0
+      )
+      .attr("x", (link) => values.get(link.uid).labelPosition?.x)
+      .attr("y", (link) => values.get(link.uid).labelPosition?.y);
+  };
 }
 
 function updateLoci(selection, scene, config) {

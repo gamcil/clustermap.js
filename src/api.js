@@ -1,11 +1,6 @@
-import { renameText, updateConfig, rgbaToRgb } from "./utils.js";
+import { renameText, updateConfig } from "./utils.js";
 import defaultConfig from "./config.js";
 import { getGroupScaleValues } from "./links/groups.mjs";
-import {
-  getLinkAnchors,
-  getLinkLabelPosition,
-  getLinkPath,
-} from "./links/layout.mjs";
 import {
   getGeneLabelDy,
   getGeneLabelTransform,
@@ -110,7 +105,6 @@ const get = {
   geneData: (uid) => chartIndex?.geneById.get(uid),
   locusData: (uid) => chartIndex?.locusById.get(uid),
   clusterData: (uid) => chartIndex?.clusterById.get(uid),
-  matrix: (selection) => selection.node().transform.baseVal[0].matrix,
 };
 
 const plot = {
@@ -453,107 +447,6 @@ const _cluster = {
 
 const _link = {
   getId: (l) => `link-${l.uid}`,
-  /**
-   * Determines the opacity of a given link.
-   * A link is hidden (opacity set to 0) if a) the query or target genes are
-   * hidden, or b) if config.link.show is false.
-   */
-  opacity: (l) => {
-    let a = get.gene(l.query.uid).attr("display");
-    let b = get.gene(l.target.uid).attr("display");
-    let hide = ["none", null]; // Set to none or still undefined
-    return !config.link.show || hide.includes(a) || hide.includes(b) ? 0 : 1;
-  },
-  fill: (d) => {
-    if (config.link.asLine) return "none";
-    if (config.link.groupColour)
-      return rgbaToRgb(scales.colour(scales.group(d.query.uid)));
-    return scales.score(d.identity);
-  },
-  stroke: (d) => {
-    if (config.link.groupColour) {
-      let colour = scales.colour(scales.group(d.query.uid));
-      return config.link.asLine ? rgbaToRgb(colour) : colour;
-    }
-    if (config.link.asLine) return scales.score(d.identity);
-    return "black";
-  },
-  /**
-   * Updates position of gene link <path> and <text> elements.
-   * @param {bool} snap - calculate path to axis, not including transform matrix
-   */
-  update: (selection, snap) => {
-    if (!config.link.show) return selection.attr("opacity", 0);
-    const values = {};
-    selection.each(function (data) {
-      const anchors = _link.getAnchors(data, snap);
-      if (!anchors || data.identity < config.link.threshold) {
-        values[data.uid] = {
-          d: null,
-          anchors: null,
-          opacity: 0,
-          x: null,
-          y: null,
-        };
-        return;
-      }
-      const labelPosition = getLinkLabelPosition(
-        anchors,
-        config.link.label.position
-      );
-      values[data.uid] = {
-        anchors: anchors,
-        opacity: 1,
-        x: labelPosition.x,
-        y: labelPosition.y,
-      };
-    });
-    selection.attr("opacity", 1);
-    selection
-      .selectAll("path")
-      .attr("d", (d) => _link.path(values[d.uid].anchors))
-      .style("fill", _link.fill)
-      .style("stroke", _link.stroke)
-      .style("stroke-width", `${config.link.strokeWidth}px`);
-    selection
-      .selectAll("text")
-      .attr("opacity", (d) =>
-        config.link.label.show ? values[d.uid].opacity : 0
-      )
-      .attr("filter", () =>
-        config.link.label.background ? "url(#filter_solid)" : null
-      )
-      .style("font-size", () => `${config.link.label.fontSize}px`)
-      .attr("x", (d) => values[d.uid].x)
-      .attr("y", (d) => values[d.uid].y);
-    return selection;
-  },
-  path: (anchors) =>
-    getLinkPath(anchors, {
-      asLine: config.link.asLine,
-      straight: config.link.straight,
-    }),
-  getAnchors: (d, snap) => {
-    const useScalePositions = snap || false;
-    if (useScalePositions && scene)
-      return scene.links.get(d.uid)?.anchors ?? null;
-    return getLinkAnchors(d, {
-      geneForUid: (uid) => displayGene(get.geneData(uid)),
-      areClustersAdjacent: _cluster.adjacent,
-      scaleX: scales.x,
-      horizontalOffset: (gene) => {
-        if (useScalePositions)
-          return scales.offset(gene._cluster) + scales.locus(gene._locus);
-        return scales.offset(gene._cluster) + get.matrix(get.locus(gene._locus)).e;
-      },
-      verticalPosition: (gene) =>
-        useScalePositions
-          ? scales.y(gene._cluster)
-          : get.matrix(get.cluster(gene._cluster)).f,
-      geneMidpoint:
-        config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2,
-    });
-  },
   /**
    * Update group scales given new data.
    */

@@ -166,7 +166,6 @@ export default function clusterMap() {
         getClusterOrder: () => getClusterOrder(chartState),
         moveClusterToIndex: (uid, index) =>
           moveClusterToIndex(chartState, uid, index),
-        updateLinkPreview: () => d3.selectAll("g.geneLinkG").call(api.link.update),
         redraw: () => api.plot.update(),
         getLocusOffset: (uid) => getLocusOffset(chartState, uid),
         getLocusState: (locus) => getLocusState(chartState, locus),
