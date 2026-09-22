@@ -297,6 +297,80 @@
     locus.genes.sort((a, b) => a._start - b._start);
   }
 
+  function xDistance(scaleX, start, end) {
+    return scaleX(end) - scaleX(start);
+  }
+
+  function getClusterExtent(
+    cluster,
+    { scaleX, clusterOffset, locusOffset },
+    ignoredLoci = []
+  ) {
+    let start;
+    let end;
+
+    for (const locus of cluster.loci) {
+      if (ignoredLoci.includes(locus.uid)) continue;
+      const offset = clusterOffset(cluster.uid) + locusOffset(locus.uid);
+      const locusStart = scaleX(locus._start) + offset;
+      const locusEnd = scaleX(locus._end) + offset;
+      if (start == null || locusStart < start) start = locusStart;
+      if (end == null || locusEnd > end) end = locusEnd;
+    }
+
+    return [start, end];
+  }
+
+  function getClusterExtents(clusters, layout, ignoredLoci = []) {
+    let start;
+    let end;
+
+    for (const cluster of clusters) {
+      const [clusterStart, clusterEnd] = getClusterExtent(
+        cluster,
+        layout,
+        ignoredLoci
+      );
+      if (clusterStart != null && (start == null || clusterStart < start))
+        start = clusterStart;
+      if (clusterEnd != null && (end == null || clusterEnd > end)) end = clusterEnd;
+    }
+
+    return [start, end];
+  }
+
+  function getClusterLocusRange(
+    cluster,
+    { scaleX, locusOffset, spacing }
+  ) {
+    const range = [];
+    let value = 1;
+    let start;
+    let end;
+
+    for (const [index, locus] of cluster.loci.entries()) {
+      if (index > 0) value = range[range.length - 1] + end - start + spacing;
+      const offset = locusOffset(locus.uid) || 0;
+      start = scaleX(locus._start || locus.start);
+      end = scaleX(locus._end || locus.end);
+      range.push(value - start + offset);
+    }
+
+    return range;
+  }
+
+  function getLocusScaleValues(clusters, layout) {
+    const domain = [];
+    const range = [];
+
+    for (const cluster of clusters) {
+      domain.push(...cluster.loci.map((locus) => locus.uid));
+      range.push(...getClusterLocusRange(cluster, layout));
+    }
+
+    return { domain, range };
+  }
+
   function getClosestValue(values, value) {
     return Math.max(Math.min(d3.bisectLeft(values, value), values.length - 1), 0);
   }
@@ -309,8 +383,18 @@
     scales[scale].range(range);
   }
 
-  function xDistance(start, end) {
-    return scales.x(end) - scales.x(start);
+  function locusLayout() {
+    return {
+      scaleX: scales.x,
+      clusterOffset: scales.offset,
+      locusOffset: scales.locus,
+      spacing: config.locus.spacing,
+    };
+  }
+
+  function getChartExtent(ignoredLoci) {
+    const clusters = scales.offset.domain().map(get.clusterData);
+    return getClusterExtents(clusters, locusLayout(), ignoredLoci);
   }
 
   function updateLocusScaling(locus) {
@@ -321,7 +405,7 @@
     updateScaleRange(
       "locus",
       locus.uid,
-      scales.locus(locus.uid) + xDistance(locus._start, oldStart)
+      scales.locus(locus.uid) + xDistance(scales.x, locus._start, oldStart)
     );
   }
 
@@ -344,7 +428,7 @@
 
   const plot = {
     legendTransform: (d) => {
-      let [_, max] = _cluster.extent(d.clusters);
+      let [_, max] = getClusterExtents(d.clusters, locusLayout());
       return `translate(${max + config.legend.marginLeft}, ${0})`;
     },
     bottomY: () => {
@@ -451,7 +535,7 @@
       return points.join(" ");
     },
     labelTransform: (g) => {
-      let offset = xDistance(g.start, g.end) * config.gene.label.start;
+      let offset = xDistance(scales.x, g.start, g.end) * config.gene.label.start;
       let gx = scales.x(g.start) + offset;
       let gy;
       if (config.gene.label.position === "middle")
@@ -699,42 +783,6 @@
     locusText: (cluster) =>
       formatLocusText(cluster.loci, config.cluster.hideLocusCoordinates),
     /**
-     * Calculates the extent of a single cluster.
-     * @param {Object} cluster - Cluster data object
-     * @return {Array} 2-element array containing min and max of the cluster
-     */
-    extentOne: (cluster, ignore) => {
-      ignore = ignore || [];
-      let start;
-      let end;
-      for (let locus of cluster.loci) {
-        if (ignore.includes(locus.uid)) continue;
-        let offset = scales.offset(cluster.uid) + scales.locus(locus.uid);
-        let _start = scales.x(locus._start) + offset;
-        let _end = scales.x(locus._end) + offset;
-        if (!start || (start && _start < start)) start = _start;
-        if (!end || (end && _end > end)) end = _end;
-      }
-      return [start, end];
-    },
-    /**
-     * Finds minimum and maximum points of all clusters/loci.
-     * @param {Array} ignore - Cluster UIDs to ignore
-     * @return {Array} 2-element array containing min and max
-     */
-    extent: (ignore) => {
-      ignore = ignore || [];
-      let min, max;
-      for (const uid of scales.offset.domain()) {
-        // if (ignore.includes(uid)) continue
-        let cluster = get.clusterData(uid);
-        let [_min, _max] = _cluster.extentOne(cluster, ignore);
-        if (!min || (min && _min < min)) min = _min;
-        if (!max || (max && _max > max)) max = _max;
-      }
-      return [min, max];
-    },
-    /**
      * Tests if two clusters are vertically adjacent.
      * @param {String} one - First cluster UID
      * @param {String} two - Second cluster UID
@@ -746,46 +794,13 @@
       return Math.abs(a.slot - b.slot) === 1;
     },
     /**
-     * Gets range for a cluster scale based on its loci
-     * Note: transform on <g> element only applies to visible elements,
-     *			 so no point adding offset here
-     */
-    getRange: (c) => {
-      let range = [];
-      let value = 1;
-      let start, end, offset;
-      for (const [index, locus] of c.loci.entries()) {
-        if (index > 0)
-          value = range[range.length - 1] + end - start + config.locus.spacing;
-        offset = scales.locus(locus.uid) || 0;
-        start = scales.x(locus._start || locus.start);
-        end = scales.x(locus._end || locus.end);
-        range.push(value - start + offset);
-      }
-      return range;
-    },
-    /**
-     * Gets domain and range for the locus offset scale
-     */
-    getLocusScaleValues: (clusters) => {
-      let domain = [];
-      let range = [];
-      clusters.forEach((cluster) => {
-        let d = cluster.loci.map((locus) => locus.uid);
-        let r = _cluster.getRange(cluster);
-        domain.push(...d);
-        range.push(...r);
-      });
-      return [domain, range];
-    },
-    /**
      * Aligns clusterInfo <g> elements based on leftmost cluster in the map.
      * Should be used on a D3 selection using call().
      * @param {d3.selection} selection - g.clusterInfo selection
      * @return {d3.selection}
      */
     alignLabels: (selection) => {
-      let [min, _] = _cluster.extent();
+      let [min] = getChartExtent();
       return selection.attr("transform", (d) => {
         let value = min - scales.offset(d.uid);
         return `translate(${value - 10}, 0)`;
@@ -798,7 +813,7 @@
         selection.selectAll(".clusterInfo").call(_cluster.alignLabels);
       } else {
         selection.selectAll(".clusterInfo").attr("transform", (d) => {
-          let [min, _] = _cluster.extentOne(d);
+          let [min] = getClusterExtent(d, locusLayout());
           let value = min - 10 - scales.offset(d.uid);
           return `translate(${value}, 0)`;
         });
@@ -1094,7 +1109,7 @@
 
   const _locus = {
     getId: (d) => `locus_${d.uid}`,
-    realLength: (d) => xDistance(d._start, d._end),
+    realLength: (d) => xDistance(scales.x, d._start, d._end),
     updateTrackBar: (selection) => {
       let midPoint =
         config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
@@ -1134,7 +1149,7 @@
       let minPos, value;
 
       const started = (_, d) => {
-        [minPos, _] = _cluster.extent([d.uid]);
+        [minPos] = getChartExtent([d.uid]);
         flags.isDragging = true;
         scales.x(d._start);
       };
@@ -1246,7 +1261,7 @@
       let minPos, maxPos, offset, value, locus;
 
       const started = (event, d) => {
-        [minPos, maxPos] = _cluster.extent([d.uid]);
+        [minPos, maxPos] = getChartExtent([d.uid]);
         offset = event.x;
         value = scales.locus(d.uid);
         flags.isDragging = true;
@@ -1320,7 +1335,7 @@
         .range(clusters.map(() => 0));
     },
     updateLocus: (clusters) => {
-      let [domain, range] = _cluster.getLocusScaleValues(clusters);
+      let { domain, range } = getLocusScaleValues(clusters, locusLayout());
       scales.locus.domain(domain).range(range);
     },
     /**
