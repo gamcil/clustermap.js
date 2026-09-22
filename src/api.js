@@ -15,7 +15,6 @@ import {
   setLocusOffset,
 } from "./chartState.mjs";
 import {
-  getClusterExtents,
   getLocusScaleValues,
   xDistance,
 } from "./loci/layout.mjs";
@@ -87,26 +86,6 @@ const get = {
 };
 
 const plot = {
-  legendTransform: (d) => {
-    let [_, max] = getClusterExtents(d.clusters, locusLayout());
-    return `translate(${max + config.legend.marginLeft}, ${0})`;
-  },
-  bottomY: () => {
-    let range = scales.y.range();
-    let body = config.gene.shape.bodyHeight + 2 * config.gene.shape.tipHeight;
-    return range[range.length - 1] + body;
-  },
-  colourBarTransform: () => {
-    let x = config.plot.scaleGenes
-      ? scales.x(config.scaleBar.basePair) + 20
-      : 0;
-    let y = plot.bottomY() + config.colourBar.marginTop;
-    return `translate(${x}, ${y})`;
-  },
-  scaleBarTransform: () => {
-    let y = plot.bottomY() + config.scaleBar.marginTop;
-    return `translate(0, ${y})`;
-  },
   updateConfig: function (target) {
     updateConfig(config, target);
   },
@@ -595,7 +574,6 @@ const _group = {
 
 config.gene.shape.onClick = _gene.anchor;
 config.legend.onClickText = _link.rename;
-config.legend.onAltClickText = _group.contextMenu;
 
 export {
   config,

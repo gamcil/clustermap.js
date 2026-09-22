@@ -15,6 +15,7 @@ import {
 } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
+import { createHtmlOverlay } from "./htmlOverlay.js";
 import { renderSvg } from "./svgRenderer.js";
 import * as api from "./api.js";
 
@@ -76,9 +77,7 @@ export default function clusterMap() {
             .style("border", "1px solid #999")
             .style("border-radius", "4px")
             .style("box-shadow", "0 2px 8px rgba(0, 0, 0, 0.2)")
-            .style("font-family", api.config.plot.fontFamily)
-            .on("mouseenter", api.tooltip.enter)
-            .on("mouseleave", api.tooltip.leave);
+            .style("font-family", api.config.plot.fontFamily);
 
           // Add root SVG element
           let svg = enter
@@ -128,6 +127,11 @@ export default function clusterMap() {
       );
 
     const plot = svg.select("g.clusterMapG");
+    const overlay = createHtmlOverlay(container.select("div.tooltip"));
+    container
+      .select("div.tooltip")
+      .on("mouseenter", overlay.enter)
+      .on("mouseleave", overlay.leave);
     applyCamera(svg.select("g.clusterMapViewport"));
 
     api.scale.update(data);
@@ -191,7 +195,14 @@ export default function clusterMap() {
           api.plot.update();
         },
         onGeneClick: api.config.gene.shape.onClick,
-        showGeneMenu: api.gene.contextMenu,
+        showGeneMenu: (event, gene) => {
+          event.preventDefault();
+          overlay.show(event, api.gene.tooltipHTML(gene));
+        },
+        showGroupMenu: (event, group) => {
+          event.preventDefault();
+          overlay.show(event, api.group.tooltipHTML(group));
+        },
         setScaleBarLength: (value) => {
           api.config.scaleBar.basePair = value;
           api.plot.update();

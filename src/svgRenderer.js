@@ -718,5 +718,5 @@ function getLegend(scene, config, scales, interactions) {
         ((_, group) => interactions.chooseLegendColour(group))
     )
     .onClickText(config.legend.onClickText)
-    .onAltClickText(config.legend.onAltClickText);
+    .onAltClickText(config.legend.onAltClickText || interactions.showGroupMenu);
 }

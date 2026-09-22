@@ -500,6 +500,34 @@
     return { clusterById, locusById, geneById, linkById, linksByGeneId };
   }
 
+  // Browser-only tooltip lifecycle shared by any chart renderer. Menu content is
+  // supplied by the caller because those controls may dispatch chart actions.
+  function createHtmlOverlay(tooltip) {
+    const show = (event, contents) => {
+      tooltip.html("").append(() => contents.node());
+      const rect = event.target.getBoundingClientRect();
+      const bounds = tooltip.node().getBoundingClientRect();
+      tooltip
+        .style("left", `${rect.x + rect.width / 2 - bounds.width / 2}px`)
+        .style("top", `${rect.y + rect.height * 1.2}px`)
+        .transition()
+        .duration(100)
+        .style("opacity", 1)
+        .style("pointer-events", "all");
+      tooltip
+        .transition()
+        .delay(1000)
+        .style("opacity", 0)
+        .style("pointer-events", "none");
+    };
+
+    return {
+      enter: (event) => d3.select(event.target).interrupt(),
+      leave: () => d3.select(window).on("click", () => tooltip.interrupt().style("opacity", 0)),
+      show,
+    };
+  }
+
   function legend(colourScale) {
     /* Creates a legend component from a colour scale.
      */
@@ -1623,7 +1651,7 @@
           ((_, group) => interactions.chooseLegendColour(group))
       )
       .onClickText(config.legend.onClickText)
-      .onAltClickText(config.legend.onAltClickText);
+      .onAltClickText(config.legend.onAltClickText || interactions.showGroupMenu);
   }
 
   var defaultConfig = {
@@ -1711,45 +1739,6 @@
 
   function xDistance(scaleX, start, end) {
     return scaleX(end) - scaleX(start);
-  }
-
-  function getClusterExtent(
-    cluster,
-    { scaleX, clusterOffset, locusOffset, locusState },
-    ignoredLoci = []
-  ) {
-    let start;
-    let end;
-
-    for (const locus of cluster.loci) {
-      if (ignoredLoci.includes(locus.uid)) continue;
-      const offset = clusterOffset(cluster.uid) + locusOffset(locus.uid);
-      const state = locusState ? locusState(locus) : locus;
-      const locusStart = scaleX(state.start ?? state._start) + offset;
-      const locusEnd = scaleX(state.end ?? state._end) + offset;
-      if (start == null || locusStart < start) start = locusStart;
-      if (end == null || locusEnd > end) end = locusEnd;
-    }
-
-    return [start, end];
-  }
-
-  function getClusterExtents(clusters, layout, ignoredLoci = []) {
-    let start;
-    let end;
-
-    for (const cluster of clusters) {
-      const [clusterStart, clusterEnd] = getClusterExtent(
-        cluster,
-        layout,
-        ignoredLoci
-      );
-      if (clusterStart != null && (start == null || clusterStart < start))
-        start = clusterStart;
-      if (clusterEnd != null && (end == null || clusterEnd > end)) end = clusterEnd;
-    }
-
-    return [start, end];
   }
 
   function getClusterLocusRange(
@@ -2106,26 +2095,6 @@
   };
 
   const plot = {
-    legendTransform: (d) => {
-      let [_, max] = getClusterExtents(d.clusters, locusLayout());
-      return `translate(${max + config.legend.marginLeft}, ${0})`;
-    },
-    bottomY: () => {
-      let range = scales.y.range();
-      let body = config.gene.shape.bodyHeight + 2 * config.gene.shape.tipHeight;
-      return range[range.length - 1] + body;
-    },
-    colourBarTransform: () => {
-      let x = config.plot.scaleGenes
-        ? scales.x(config.scaleBar.basePair) + 20
-        : 0;
-      let y = plot.bottomY() + config.colourBar.marginTop;
-      return `translate(${x}, ${y})`;
-    },
-    scaleBarTransform: () => {
-      let y = plot.bottomY() + config.scaleBar.marginTop;
-      return `translate(0, ${y})`;
-    },
     updateConfig: function (target) {
       updateConfig(config, target);
     },
@@ -2461,37 +2430,6 @@
     },
   };
 
-  const _tooltip = {
-    enter: (event) => {
-      // Show the tooltip
-      d3.select(event.target)
-        .transition()
-        .duration(0)
-        .style("opacity", 1)
-        .style("pointer-events", "all");
-
-      // Hide tooltip when there's a click anywhere else in the window
-      d3.select(window).on("click", (e) => {
-        if (e.target === event.target || event.target.contains(e.target)) return;
-        d3.select(event.target)
-          .transition()
-          .style("opacity", 0)
-          .style("pointer-events", "none");
-      });
-    },
-    leave: (event) => {
-      // Do not hide tooltip if <input> has focus
-      let tip = d3.select(event.target);
-      let active = document.activeElement;
-      if (active.tagName === "INPUT" && tip.node().contains(active)) return;
-      tip
-        .transition()
-        .delay(400)
-        .style("opacity", 0)
-        .style("pointer-events", "none");
-    },
-  };
-
   const _group = {
     tooltipHTML: (g) => {
       // Create detached <div>
@@ -2613,7 +2551,6 @@
 
   config.gene.shape.onClick = _gene.anchor;
   config.legend.onClickText = _link.rename;
-  config.legend.onAltClickText = _group.contextMenu;
 
   function clusterMap() {
     /* A ClusterMap plot. */
@@ -2673,9 +2610,7 @@
               .style("border", "1px solid #999")
               .style("border-radius", "4px")
               .style("box-shadow", "0 2px 8px rgba(0, 0, 0, 0.2)")
-              .style("font-family", config.plot.fontFamily)
-              .on("mouseenter", _tooltip.enter)
-              .on("mouseleave", _tooltip.leave);
+              .style("font-family", config.plot.fontFamily);
 
             // Add root SVG element
             let svg = enter
@@ -2725,6 +2660,11 @@
         );
 
       const plot$1 = svg.select("g.clusterMapG");
+      const overlay = createHtmlOverlay(container.select("div.tooltip"));
+      container
+        .select("div.tooltip")
+        .on("mouseenter", overlay.enter)
+        .on("mouseleave", overlay.leave);
       applyCamera(svg.select("g.clusterMapViewport"));
 
       _scale.update(data);
@@ -2788,7 +2728,14 @@
             plot.update();
           },
           onGeneClick: config.gene.shape.onClick,
-          showGeneMenu: _gene.contextMenu,
+          showGeneMenu: (event, gene) => {
+            event.preventDefault();
+            overlay.show(event, _gene.tooltipHTML(gene));
+          },
+          showGroupMenu: (event, group) => {
+            event.preventDefault();
+            overlay.show(event, _group.tooltipHTML(group));
+          },
           setScaleBarLength: (value) => {
             config.scaleBar.basePair = value;
             plot.update();
