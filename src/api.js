@@ -2,11 +2,6 @@ import { renameText, updateConfig } from "./utils.js";
 import defaultConfig from "./config.js";
 import { getGroupScaleValues } from "./links/groups.mjs";
 import {
-  getGeneLabelDy,
-  getGeneLabelTransform,
-  getGenePolygonPoints,
-} from "./genes/layout.mjs";
-import {
   flipLocus,
   getClusterOffset,
   formatLocusText,
@@ -85,23 +80,7 @@ function displayGene(gene) {
   return { ...gene, ...getGeneState(chartState, gene) };
 }
 
-function geneVisible(gene) {
-  const projected = scene?.genes.get(gene.uid);
-  if (projected) return projected.visible;
-  const locus = get.locusData(gene._locus);
-  const bounds = locusState(locus);
-  const display = displayGene(gene);
-  return display.start >= bounds.start && display.end <= bounds.end + 1;
-}
-
-function _get(uid, type) {
-  return d3.select(`#${type}_${uid}`);
-}
-
 const get = {
-  gene: (uid) => _get(uid, "gene"),
-  locus: (uid) => _get(uid, "locus"),
-  cluster: (uid) => _get(uid, "cluster"),
   geneData: (uid) => chartIndex?.geneById.get(uid),
   locusData: (uid) => chartIndex?.locusById.get(uid),
   clusterData: (uid) => chartIndex?.clusterById.get(uid),
@@ -188,26 +167,6 @@ const _layout = {
 
 const _gene = {
   getId: (d) => `gene_${d.uid}`,
-  fill: (g) => {
-    if (g.colour) return g.colour;
-    if (!scales.group) return "#bbb";
-    let groupId = scales.group(g.uid);
-    return scales.colour(groupId);
-  },
-  points: (gene) =>
-    scene?.genes.get(gene.uid)?.localPolygon.join(" ") ||
-    getGenePolygonPoints(displayGene(gene), {
-      scaleX: scales.x,
-      shape: config.gene.shape,
-    }),
-  labelTransform: (gene) =>
-    scene?.genes.get(gene.uid)?.labelTransform ||
-    getGeneLabelTransform(displayGene(gene), {
-      scaleX: scales.x,
-      shape: config.gene.shape,
-      label: config.gene.label,
-    }),
-  labelDy: () => getGeneLabelDy(config.gene.label.position),
   tooltipHTML: (g) => {
     // Create detached <div>
     let div = d3
@@ -326,31 +285,6 @@ const _gene = {
       .delay(1000)
       .style("opacity", 0)
       .style("pointer-events", "none");
-  },
-  labelText: (g) => g.label || g.uid,
-  polygonClass: (g) => {
-    let group = scales.group(g.uid);
-    return group !== null ? `genePolygon group-${group}` : "genePolygon";
-  },
-  update: (selection) => {
-    selection.attr("display", (gene) => (geneVisible(gene) ? "inline" : "none"));
-    selection
-      .selectAll("polygon")
-      .attr("class", _gene.polygonClass)
-      .attr("points", _gene.points)
-      .attr("fill", _gene.fill)
-      .style("stroke", config.gene.shape.stroke)
-      .style("stroke-width", config.gene.shape.strokeWidth);
-    selection
-      .selectAll("text.geneLabel")
-      .text(_gene.labelText)
-      .attr("dy", _gene.labelDy)
-      .attr("display", config.gene.label.show ? "inherit" : "none")
-      .attr("transform", _gene.labelTransform)
-      .attr("font-size", config.gene.label.fontSize)
-      .attr("text-anchor", config.gene.label.anchor);
-    // .attr("dominant-baseline", _gene.labelBaseline)
-    return selection;
   },
   anchor: (_, anchor, flipLoci = false) => {
     // Anchor map on given uid
