@@ -747,63 +747,6 @@ const _locus = {
       selection
     );
   },
-  dragPosition: (selection) => {
-    let minPos, maxPos, offset, value, locus;
-
-    const started = (event, d) => {
-      [minPos, maxPos] = getChartExtent([d.uid]);
-      offset = event.x;
-      value = scales.locus(d.uid);
-      flags.isDragging = true;
-    };
-
-    const dragged = (event, d) => {
-      value += event.x - offset;
-
-      locus = get.locus(d.uid);
-      locus.attr("transform", `translate(${value}, 0)`);
-
-      // Adjust any gene links affected by moving the locus.
-      // Make sure setLinkPath is called with snap=false
-      d3.selectAll("g.geneLinkG").call(_link.update, false);
-
-      // Adjust clusterInfo groups
-      let locData = locus.datum();
-      let locStart = scales.x(locusState(locData).start);
-      if (config.cluster.alignLabels) {
-        let locMin = value + scales.offset(d._cluster) + locStart;
-        let newMin = Math.min(locMin, minPos) - 10;
-        d3.selectAll("g.clusterInfo").attr(
-          "transform",
-          (c) => `translate(${newMin - scales.offset(c.uid)}, 0)`
-        );
-      } else {
-        // TODO: should take into consideration all loci in the cluster
-        // use extentOne?
-        d3.select(`#cinfo_${d._cluster}`).attr(
-          "transform",
-          `translate(${value + locStart - 10}, 0)`
-        );
-      }
-
-      // Adjust legend group
-      let locEnd = scales.x(locusState(locData).end);
-      let newMax =
-        Math.max(value + scales.offset(d._cluster) + locEnd, maxPos) + 20;
-      d3.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
-    };
-
-    const ended = (_, d) => {
-      flags.isDragging = false;
-      setLocusOffset(chartState, d.uid, value);
-      refreshLocusOffsetScale();
-      plot.update();
-    };
-
-    return d3.drag().on("start", started).on("drag", dragged).on("end", ended)(
-      selection
-    );
-  },
 };
 
 const _scale = {

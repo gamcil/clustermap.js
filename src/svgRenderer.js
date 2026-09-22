@@ -99,7 +99,7 @@ export function renderSvg({
           .append("rect")
           .attr("class", "hover")
           .attr("fill", "rgba(0, 0, 0, 0.4)")
-          .call(interactions.dragLocusPosition);
+          .call(createLocusPositionDrag({ config, scales, ids, interactions }));
         hover
           .append("rect")
           .attr("class", "leftHandle")
@@ -284,6 +284,57 @@ function createClusterDrag({ scales, ids, interactions }) {
     .on("start", started)
     .on("drag", dragged)
     .on("end", ended);
+}
+
+function createLocusPositionDrag({ config, scales, ids, interactions }) {
+  let minPos;
+  let maxPos;
+  let pointerStart;
+  let value;
+
+  const locusSelection = (uid) => d3.select(`#${ids.locus({ uid })}`);
+
+  const started = (event, locus) => {
+    [minPos, maxPos] = interactions.getLocusMoveBounds(locus.uid);
+    pointerStart = event.x;
+    value = interactions.getLocusOffset(locus.uid);
+    interactions.setDragging(true);
+  };
+
+  const dragged = (event, locus) => {
+    value += event.x - pointerStart;
+    const subject = locusSelection(locus.uid);
+    subject.attr("transform", `translate(${value}, 0)`);
+    interactions.updateLinkPreview();
+
+    const state = interactions.getLocusState(locus);
+    const locusStart = scales.x(state.start);
+    if (config.cluster.alignLabels) {
+      const locusMin = value + scales.offset(locus._cluster) + locusStart;
+      const newMin = Math.min(locusMin, minPos) - 10;
+      d3.selectAll("g.clusterInfo").attr(
+        "transform",
+        (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
+      );
+    } else {
+      d3.select(`#cinfo_${locus._cluster}`).attr(
+        "transform",
+        `translate(${value + locusStart - 10}, 0)`
+      );
+    }
+
+    const locusEnd = scales.x(state.end);
+    const newMax = Math.max(value + scales.offset(locus._cluster) + locusEnd, maxPos) + 20;
+    d3.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
+  };
+
+  const ended = (_, locus) => {
+    interactions.setDragging(false);
+    interactions.setLocusOffset(locus.uid, value);
+    interactions.redraw();
+  };
+
+  return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
 }
 
 function updateLoci(selection, scene, config) {

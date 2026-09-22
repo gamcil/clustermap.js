@@ -3,9 +3,12 @@ import {
   createChartState,
   getCamera,
   getClusterOrder,
+  getLocusOffset,
+  getLocusState,
   flipLocus,
   moveClusterToIndex,
   setCamera,
+  setLocusOffset,
 } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
@@ -153,7 +156,6 @@ export default function clusterMap() {
       },
       lookup: { gene: api.get.geneData },
       interactions: {
-        dragLocusPosition: api.locus.dragPosition,
         dragLocusResize: api.locus.dragResize,
         isDragging: () => api.flags.isDragging,
         setDragging: (isDragging) => {
@@ -164,6 +166,18 @@ export default function clusterMap() {
           moveClusterToIndex(chartState, uid, index),
         updateLinkPreview: () => d3.selectAll("g.geneLinkG").call(api.link.update),
         redraw: () => api.plot.update(),
+        getLocusOffset: (uid) => getLocusOffset(chartState, uid),
+        getLocusState: (locus) => getLocusState(chartState, locus),
+        setLocusOffset: (uid, offset) => setLocusOffset(chartState, uid, offset),
+        getLocusMoveBounds: (locusUid) => {
+          const otherLoci = [...scene.loci.values()].filter(
+            (locus) => locus.source.uid !== locusUid
+          );
+          return [
+            Math.min(...otherLoci.map((locus) => locus.worldStart)),
+            Math.max(...otherLoci.map((locus) => locus.worldEnd)),
+          ];
+        },
         flipLocus: (locus) => {
           flipLocus(chartState, locus);
           api.plot.update();

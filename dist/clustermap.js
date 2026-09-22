@@ -886,7 +886,7 @@
             .append("rect")
             .attr("class", "hover")
             .attr("fill", "rgba(0, 0, 0, 0.4)")
-            .call(interactions.dragLocusPosition);
+            .call(createLocusPositionDrag({ config, scales, ids, interactions }));
           hover
             .append("rect")
             .attr("class", "leftHandle")
@@ -1071,6 +1071,57 @@
       .on("start", started)
       .on("drag", dragged)
       .on("end", ended);
+  }
+
+  function createLocusPositionDrag({ config, scales, ids, interactions }) {
+    let minPos;
+    let maxPos;
+    let pointerStart;
+    let value;
+
+    const locusSelection = (uid) => d3.select(`#${ids.locus({ uid })}`);
+
+    const started = (event, locus) => {
+      [minPos, maxPos] = interactions.getLocusMoveBounds(locus.uid);
+      pointerStart = event.x;
+      value = interactions.getLocusOffset(locus.uid);
+      interactions.setDragging(true);
+    };
+
+    const dragged = (event, locus) => {
+      value += event.x - pointerStart;
+      const subject = locusSelection(locus.uid);
+      subject.attr("transform", `translate(${value}, 0)`);
+      interactions.updateLinkPreview();
+
+      const state = interactions.getLocusState(locus);
+      const locusStart = scales.x(state.start);
+      if (config.cluster.alignLabels) {
+        const locusMin = value + scales.offset(locus._cluster) + locusStart;
+        const newMin = Math.min(locusMin, minPos) - 10;
+        d3.selectAll("g.clusterInfo").attr(
+          "transform",
+          (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
+        );
+      } else {
+        d3.select(`#cinfo_${locus._cluster}`).attr(
+          "transform",
+          `translate(${value + locusStart - 10}, 0)`
+        );
+      }
+
+      const locusEnd = scales.x(state.end);
+      const newMax = Math.max(value + scales.offset(locus._cluster) + locusEnd, maxPos) + 20;
+      d3.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
+    };
+
+    const ended = (_, locus) => {
+      interactions.setDragging(false);
+      interactions.setLocusOffset(locus.uid, value);
+      interactions.redraw();
+    };
+
+    return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
   }
 
   function updateLoci(selection, scene, config) {
@@ -2446,63 +2497,6 @@
         selection
       );
     },
-    dragPosition: (selection) => {
-      let minPos, maxPos, offset, value, locus;
-
-      const started = (event, d) => {
-        [minPos, maxPos] = getChartExtent([d.uid]);
-        offset = event.x;
-        value = scales.locus(d.uid);
-        flags.isDragging = true;
-      };
-
-      const dragged = (event, d) => {
-        value += event.x - offset;
-
-        locus = get.locus(d.uid);
-        locus.attr("transform", `translate(${value}, 0)`);
-
-        // Adjust any gene links affected by moving the locus.
-        // Make sure setLinkPath is called with snap=false
-        d3.selectAll("g.geneLinkG").call(_link.update, false);
-
-        // Adjust clusterInfo groups
-        let locData = locus.datum();
-        let locStart = scales.x(locusState(locData).start);
-        if (config.cluster.alignLabels) {
-          let locMin = value + scales.offset(d._cluster) + locStart;
-          let newMin = Math.min(locMin, minPos) - 10;
-          d3.selectAll("g.clusterInfo").attr(
-            "transform",
-            (c) => `translate(${newMin - scales.offset(c.uid)}, 0)`
-          );
-        } else {
-          // TODO: should take into consideration all loci in the cluster
-          // use extentOne?
-          d3.select(`#cinfo_${d._cluster}`).attr(
-            "transform",
-            `translate(${value + locStart - 10}, 0)`
-          );
-        }
-
-        // Adjust legend group
-        let locEnd = scales.x(locusState(locData).end);
-        let newMax =
-          Math.max(value + scales.offset(d._cluster) + locEnd, maxPos) + 20;
-        d3.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
-      };
-
-      const ended = (_, d) => {
-        flags.isDragging = false;
-        setLocusOffset(chartState, d.uid, value);
-        refreshLocusOffsetScale();
-        plot.update();
-      };
-
-      return d3.drag().on("start", started).on("drag", dragged).on("end", ended)(
-        selection
-      );
-    },
   };
 
   const _scale = {
@@ -2867,7 +2861,6 @@
         },
         lookup: { gene: get.geneData },
         interactions: {
-          dragLocusPosition: _locus.dragPosition,
           dragLocusResize: _locus.dragResize,
           isDragging: () => flags.isDragging,
           setDragging: (isDragging) => {
@@ -2878,6 +2871,18 @@
             moveClusterToIndex(chartState, uid, index),
           updateLinkPreview: () => d3.selectAll("g.geneLinkG").call(_link.update),
           redraw: () => plot.update(),
+          getLocusOffset: (uid) => getLocusOffset(chartState, uid),
+          getLocusState: (locus) => getLocusState(chartState, locus),
+          setLocusOffset: (uid, offset) => setLocusOffset(chartState, uid, offset),
+          getLocusMoveBounds: (locusUid) => {
+            const otherLoci = [...scene.loci.values()].filter(
+              (locus) => locus.source.uid !== locusUid
+            );
+            return [
+              Math.min(...otherLoci.map((locus) => locus.worldStart)),
+              Math.max(...otherLoci.map((locus) => locus.worldEnd)),
+            ];
+          },
           flipLocus: (locus) => {
             flipLocus(chartState, locus);
             plot.update();
