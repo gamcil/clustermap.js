@@ -63,6 +63,11 @@ function updateLocusScaling(locus) {
 
 const config = Object.assign({}, defaultConfig);
 const flags = { isDragging: false };
+let chartIndex = null;
+
+function setChartIndex(index) {
+  chartIndex = index;
+}
 
 function _get(uid, type) {
   return d3.select(`#${type}_${uid}`);
@@ -72,9 +77,9 @@ const get = {
   gene: (uid) => _get(uid, "gene"),
   locus: (uid) => _get(uid, "locus"),
   cluster: (uid) => _get(uid, "cluster"),
-  geneData: (uid) => get.gene(uid).datum(),
-  locusData: (uid) => get.locus(uid).datum(),
-  clusterData: (uid) => get.cluster(uid).datum(),
+  geneData: (uid) => chartIndex?.geneById.get(uid),
+  locusData: (uid) => chartIndex?.locusById.get(uid),
+  clusterData: (uid) => chartIndex?.clusterById.get(uid),
   matrix: (selection) => selection.node().transform.baseVal[0].matrix,
 };
 
@@ -1046,6 +1051,7 @@ export {
   config,
   flags,
   get,
+  setChartIndex,
   plot,
   scales,
   _cluster as cluster,

@@ -571,6 +571,11 @@
 
   const config = Object.assign({}, defaultConfig);
   const flags = { isDragging: false };
+  let chartIndex = null;
+
+  function setChartIndex(index) {
+    chartIndex = index;
+  }
 
   function _get(uid, type) {
     return d3.select(`#${type}_${uid}`);
@@ -580,9 +585,9 @@
     gene: (uid) => _get(uid, "gene"),
     locus: (uid) => _get(uid, "locus"),
     cluster: (uid) => _get(uid, "cluster"),
-    geneData: (uid) => get.gene(uid).datum(),
-    locusData: (uid) => get.locus(uid).datum(),
-    clusterData: (uid) => get.cluster(uid).datum(),
+    geneData: (uid) => chartIndex?.geneById.get(uid),
+    locusData: (uid) => chartIndex?.locusById.get(uid),
+    clusterData: (uid) => chartIndex?.clusterById.get(uid),
     matrix: (selection) => selection.node().transform.baseVal[0].matrix,
   };
 
@@ -1925,6 +1930,7 @@
 
     function update(data) {
       const chartIndex = createChartIndex(data);
+      setChartIndex(chartIndex);
 
       // Save the container for later updates
       container = d3.select(this).attr("width", "100%").attr("height", "100%");
@@ -2191,7 +2197,7 @@
         .data(
           filterLinks(data.links, {
             groupForGene: scales.group,
-            geneForUid: (uid) => chartIndex.geneById.get(uid),
+            geneForUid: get.geneData,
             bestOnly: config.link.bestOnly,
             threshold: config.link.threshold,
           }),

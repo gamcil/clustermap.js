@@ -24,6 +24,7 @@ export default function clusterMap() {
 
   function update(data) {
     const chartIndex = createChartIndex(data);
+    api.setChartIndex(chartIndex);
 
     // Save the container for later updates
     container = d3.select(this).attr("width", "100%").attr("height", "100%");
@@ -290,7 +291,7 @@ export default function clusterMap() {
       .data(
         filterLinks(data.links, {
           groupForGene: api.scales.group,
-          geneForUid: (uid) => chartIndex.geneById.get(uid),
+          geneForUid: api.get.geneData,
           bestOnly: api.config.link.bestOnly,
           threshold: api.config.link.threshold,
         }),
