@@ -2,6 +2,11 @@ import { renameText, updateConfig, rgbaToRgb } from "./utils.js";
 import defaultConfig from "./config.js";
 import { getGroupScaleValues } from "./links/groups.mjs";
 import {
+  getLinkAnchors,
+  getLinkLabelPosition,
+  getLinkPath,
+} from "./links/layout.mjs";
+import {
   flipLocus,
   formatLocusText,
   recalculateLocusCoordinates,
@@ -597,17 +602,15 @@ const _link = {
         };
         return;
       }
-      const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-      let aMid = ax1 + (ax2 - ax1) / 2;
-      let bMid = bx1 + (bx2 - bx1) / 2;
-      let horizontalMid = aMid + (bMid - aMid) * config.link.label.position;
-      let verticalMid = ay + Math.abs(by - ay) * config.link.label.position;
+      const labelPosition = getLinkLabelPosition(
+        anchors,
+        config.link.label.position
+      );
       values[data.uid] = {
-        d: `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`,
         anchors: anchors,
         opacity: 1,
-        x: horizontalMid,
-        y: verticalMid,
+        x: labelPosition.x,
+        y: labelPosition.y,
       };
     });
     selection.attr("opacity", 1);
@@ -630,92 +633,29 @@ const _link = {
       .attr("y", (d) => values[d.uid].y);
     return selection;
   },
-  /**
-   * Generates sankey link path.
-   * Draws bezier curves connecting ends of two genes.
-   */
-  sankey: ([ax1, ax2, ay, bx1, bx2, by]) => {
-    let vMid = ay + Math.abs(by - ay) / 2;
-    let path = d3.path();
-    path.moveTo(ax2, ay);
-    path.bezierCurveTo(ax2, vMid, bx2, vMid, bx2, by);
-    path.lineTo(bx1, by);
-    path.bezierCurveTo(bx1, vMid, ax1, vMid, ax1, ay);
-    path.lineTo(ax2, ay);
-    return path.toString();
-  },
-  /**
-   * Generates straight link path.
-   */
-  straight: ([ax1, ax2, ay, bx1, bx2, by]) =>
-    `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`,
-  /**
-   * Generates single line path.
-   */
-  line: ([ax1, ax2, ay, bx1, bx2, by]) => {
-    let aMid = ax1 + (ax2 - ax1) / 2;
-    let bMid = bx1 + (bx2 - bx1) / 2;
-    return config.link.straight
-      ? `M${aMid},${ay} L${bMid},${by}`
-      : d3.linkVertical()({ source: [aMid, ay], target: [bMid, by] });
-  },
-  path: (anchors) => {
-    if (!anchors) return "";
-    return config.link.asLine
-      ? _link.line(anchors)
-      : config.link.straight
-      ? _link.straight(anchors)
-      : _link.sankey(anchors);
-  },
+  path: (anchors) =>
+    getLinkPath(anchors, {
+      asLine: config.link.asLine,
+      straight: config.link.straight,
+    }),
   getAnchors: (d, snap) => {
-    snap = snap || false;
-
-    // Calculates points linking two genes
-    // Select genes by unique ID, get underlying data
-    let a = get.geneData(d.query.uid);
-    let b = get.geneData(d.target.uid);
-
-    if (!_cluster.adjacent(a._cluster, b._cluster)) {
-      return null;
-    }
-
-    // Calculate vertical midpoint based on shape config
-    let mid = config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
-
-    // Locus offset in each cluster, mostly 0
-    let getOffset = (g) => {
-      if (snap) return scales.offset(g._cluster) + scales.locus(g._locus);
-      let locus = get.locus(g._locus);
-      let matrix = get.matrix(locus);
-      return scales.offset(g._cluster) + matrix.e;
-    };
-    let aOffset = getOffset(a);
-    let bOffset = getOffset(b);
-
-    // Get anchoring points for each gene polygon
-    let getAnchors = (g, offset) => {
-      let cluster = get.cluster(g._cluster);
-      let matrix = get.matrix(cluster);
-      let left = scales.x(g.start) + offset;
-      let right = scales.x(g.end) + offset;
-      // Match the gene polygon convention: only strand 1 is forward/right.
-      // Some inputs use 0 for reverse/left, which must anchor links on the
-      // same side as an explicit -1 strand.
-      let forward = g.strand === 1;
-      return [
-        forward ? left : right,
-        forward ? right : left,
-        snap ? scales.y(g._cluster) + mid : matrix.f + mid,
-      ];
-    };
-
-    // Ensure ax/y is always top and bx/y is always bottom,
-    // so label position can just be some % of these values
-    let [ax1, ax2, ay] = getAnchors(a, aOffset);
-    let [bx1, bx2, by] = getAnchors(b, bOffset);
-    return ay > by
-      ? [bx1, bx2, by, ax1, ax2, ay]
-      : [ax1, ax2, ay, bx1, bx2, by];
+    const useScalePositions = snap || false;
+    return getLinkAnchors(d, {
+      geneForUid: get.geneData,
+      areClustersAdjacent: _cluster.adjacent,
+      scaleX: scales.x,
+      horizontalOffset: (gene) => {
+        if (useScalePositions)
+          return scales.offset(gene._cluster) + scales.locus(gene._locus);
+        return scales.offset(gene._cluster) + get.matrix(get.locus(gene._locus)).e;
+      },
+      verticalPosition: (gene) =>
+        useScalePositions
+          ? scales.y(gene._cluster)
+          : get.matrix(get.cluster(gene._cluster)).f,
+      geneMidpoint:
+        config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2,
+    });
   },
   /**
    * Update group scales given new data.
