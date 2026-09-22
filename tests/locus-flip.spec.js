@@ -1,5 +1,6 @@
 // @ts-check
 import { test, expect } from "@playwright/test";
+import { captureCheckpoint, waitForPaint } from "./helpers/report.js";
 
 async function readLocusState(locus) {
   return locus.evaluate((node) => {
@@ -15,16 +16,6 @@ async function readLocusState(locus) {
       })),
     };
   });
-}
-
-async function waitForPaint(page) {
-  // A zero-duration D3 transition still completes on a future animation frame.
-  await page.evaluate(
-    () =>
-      new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
-      )
-  );
 }
 
 async function readTranslateX(locator) {
@@ -45,11 +36,9 @@ test("double-clicking a locus reverses its gene layout", async ({ page }, testIn
 
   const locus = page.locator("g.locus").first();
   await expect(locus).toBeVisible();
-  await waitForPaint(page);
-
-  const before = await readLocusState(locus);
-  await testInfo.attach("before-flip.json", { body: Buffer.from(JSON.stringify(before, null, 2)), contentType: "application/json", });
-  await testInfo.attach("before-flip.png", { body: await page.screenshot(), contentType: "image/png", });
+  const before = await captureCheckpoint(page, testInfo, "before-flip", () =>
+    readLocusState(locus)
+  );
 
   // The listener is on g.locus. A visible child receives the pointer event,
   // then bubbles it to that group.
@@ -70,10 +59,9 @@ test("double-clicking a locus reverses its gene layout", async ({ page }, testIn
       })),
     });
 
-  await waitForPaint(page);
-  const after = await readLocusState(locus);
-  await testInfo.attach("after-flip.json", { body: Buffer.from(JSON.stringify(after, null, 2)), contentType: "application/json", });
-  await testInfo.attach("after-flip.png", { body: await page.screenshot(), contentType: "image/png", });
+  await captureCheckpoint(page, testInfo, "after-flip", () =>
+    readLocusState(locus)
+  );
 
   await expect
     .poll(() =>
@@ -105,19 +93,18 @@ test("dragging left end of locus trims it and hides gene", async ({ page }, test
 
   const locus = page.locator("g.locus").first();
   await expect(locus).toBeVisible();
-  await waitForPaint(page);
 
-  const before = await readLocusState(locus);
   const clusterInfoId = await locus.evaluate(
     (node) => node.closest("g.cluster").querySelector("g.clusterInfo").id
   );
   const clusterInfo = page.locator(`#${clusterInfoId}`);
   const locusText = clusterInfo.locator("text.locusText");
-  const beforeClusterInfoX = await readTranslateX(clusterInfo);
+  const before = await captureCheckpoint(page, testInfo, "before-trim", async () => ({
+    locus: await readLocusState(locus),
+    clusterInfoX: await readTranslateX(clusterInfo),
+  }));
+  const beforeClusterInfoX = before.clusterInfoX;
   await expect(locusText).toHaveText("input_locus:1-10000");
-
-  await testInfo.attach("before-trim.json", { body: Buffer.from( JSON.stringify({ locus: before, clusterInfoX: beforeClusterInfoX }, null, 2)), contentType: "application/json", });
-  await testInfo.attach("before-trim.png", { body: await page.screenshot(), contentType: "image/png", });
 
   const locusLeftHandle = page.locator("rect.leftHandle").first();
   const locusFirstGene = page.locator("g.gene").first();
@@ -132,10 +119,10 @@ test("dragging left end of locus trims it and hides gene", async ({ page }, test
     .poll(() => readTranslateX(clusterInfo))
     .toBeGreaterThan(beforeClusterInfoX);
 
-  const after = await readLocusState(locus);
-  const afterClusterInfoX = await readTranslateX(clusterInfo);
-  await testInfo.attach("after-trim.json", { body: Buffer.from( JSON.stringify({ locus: after, clusterInfoX: afterClusterInfoX }, null, 2)), contentType: "application/json", });
-  await testInfo.attach("after-trim.png", { body: await page.screenshot(), contentType: "image/png", });
+  await captureCheckpoint(page, testInfo, "after-trim", async () => ({
+    locus: await readLocusState(locus),
+    clusterInfoX: await readTranslateX(clusterInfo),
+  }));
 });
 
 test("dragging right handles trims loci and moves the legend", async ({ page }, testInfo) => {
@@ -149,11 +136,13 @@ test("dragging right handles trims loci and moves the legend", async ({ page }, 
   await expect(loci).toHaveCount(2);
   await expect(rightHandles).toHaveCount(2);
   await expect(legend).toBeVisible();
-  await waitForPaint(page);
-
-  const beforeLegendX = await readTranslateX(legend);
-  await testInfo.attach("before-right-trim.json", { body: Buffer.from(JSON.stringify({ legendX: beforeLegendX }, null, 2)), contentType: "application/json", });
-  await testInfo.attach("before-right-trim.png", { body: await page.screenshot(), contentType: "image/png", });
+  const before = await captureCheckpoint(
+    page,
+    testInfo,
+    "before-right-trim",
+    () => readTranslateX(legend).then((legendX) => ({ legendX }))
+  );
+  const beforeLegendX = before.legendX;
 
   for (let index = 0; index < 2; index += 1) {
     const lastGene = loci
@@ -170,7 +159,10 @@ test("dragging right handles trims loci and moves the legend", async ({ page }, 
   await expect(locusLabels.nth(1)).toHaveText("NZ_CP042324.1:1-6500");
   await expect.poll(() => readTranslateX(legend)).toBeLessThan(beforeLegendX);
 
-  const afterLegendX = await readTranslateX(legend);
-  await testInfo.attach("after-right-trim.json", { body: Buffer.from(JSON.stringify({ legendX: afterLegendX }, null, 2)), contentType: "application/json", });
-  await testInfo.attach("after-right-trim.png", { body: await page.screenshot(), contentType: "image/png", });
+  await captureCheckpoint(
+    page,
+    testInfo,
+    "after-right-trim",
+    () => readTranslateX(legend).then((legendX) => ({ legendX }))
+  );
 });
