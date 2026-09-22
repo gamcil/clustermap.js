@@ -10,14 +10,11 @@ test("chart normalization establishes explicit hierarchy relationships", async (
         loci: [
           {
             uid: "locus-a",
-            _cluster: "legacy-cluster",
             start: 0,
             end: 100,
             genes: [
               {
                 uid: "gene-a",
-                _locus: "legacy-locus",
-                _cluster: "legacy-cluster",
                 start: 0,
                 end: 20,
                 strand: 1,
@@ -37,10 +34,6 @@ test("chart normalization establishes explicit hierarchy relationships", async (
   assert.equal(locus.clusterUid, "cluster-a");
   assert.equal(gene.locusUid, "locus-a");
   assert.equal(gene.clusterUid, "cluster-a");
-  assert.equal(locus._cluster, undefined);
-  assert.equal(gene._locus, undefined);
-  assert.equal(gene._cluster, undefined);
-  assert.equal(data.clusters[0].loci[0]._cluster, "legacy-cluster");
 });
 
 test("chart normalization preserves source data and records biological coordinates", async () => {
@@ -54,18 +47,12 @@ test("chart normalization preserves source data and records biological coordinat
             uid: "locus-a",
             start: 500,
             end: 700,
-            _start: 50,
-            _end: 150,
-            _flipped: true,
-            _trimLeft: { uid: "gene-a" },
-            _trimRight: { uid: "gene-a" },
             genes: [
               {
                 uid: "gene-a",
                 start: 550,
                 end: 600,
                 strand: 1,
-                _strand: -1,
               },
             ],
           },
@@ -84,14 +71,6 @@ test("chart normalization preserves source data and records biological coordinat
   assert.notEqual(gene, data.clusters[0].loci[0].genes[0]);
   assert.deepEqual(locus.bio, { start: 500, end: 700 });
   assert.deepEqual(gene.bio, { start: 550, end: 600, strand: 1 });
-  assert.equal(locus._bio_start, undefined);
-  assert.equal(locus._bio_end, undefined);
-  assert.equal(locus._start, undefined);
-  assert.equal(locus._end, undefined);
-  assert.equal(locus._flipped, undefined);
-  assert.equal(locus._trimLeft, undefined);
-  assert.equal(locus._trimRight, undefined);
-  assert.equal(gene._strand, undefined);
   assert.equal(data.clusters[0].loci[0].bio, undefined);
   assert.equal(data.clusters[0].loci[0].genes[0].bio, undefined);
 });

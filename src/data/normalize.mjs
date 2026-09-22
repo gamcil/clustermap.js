@@ -1,48 +1,26 @@
 function normalizeGene(gene, locusUid, clusterUid) {
-  const {
-    _locus: legacyLocusUid,
-    _cluster: legacyClusterUid,
-    _strand: legacyStrand,
-    locusUid: sourceLocusUid,
-    clusterUid: sourceClusterUid,
-    ...source
-  } = gene;
   return {
-    ...source,
-    // Parent hierarchy is canonical. Legacy relationship fields are ignored
-    // after this boundary rather than being trusted as mutable display data.
+    ...gene,
     locusUid,
     clusterUid,
-    bio: source.bio || {
-      start: source.start,
-      end: source.end,
-      strand: source.strand,
+    bio: gene.bio || {
+      start: gene.start,
+      end: gene.end,
+      strand: gene.strand,
     },
   };
 }
 
 function normalizeLocus(locus, clusterUid) {
-  const {
-    _cluster: legacyClusterUid,
-    _bio_start: legacyBioStart,
-    _bio_end: legacyBioEnd,
-    _start: legacyStart,
-    _end: legacyEnd,
-    _flipped: legacyFlipped,
-    _trimLeft: legacyTrimLeft,
-    _trimRight: legacyTrimRight,
-    clusterUid: sourceClusterUid,
-    ...source
-  } = locus;
-  const bio = source.bio || { start: source.start, end: source.end };
+  const bio = locus.bio || { start: locus.start, end: locus.end };
   return {
-    ...source,
+    ...locus,
     clusterUid,
     bio,
     start: 0,
     end: bio.end - bio.start,
-    genes: source.genes.map((gene) =>
-      normalizeGene(gene, source.uid, clusterUid)
+    genes: locus.genes.map((gene) =>
+      normalizeGene(gene, locus.uid, clusterUid)
     ),
   };
 }

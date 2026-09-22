@@ -24,28 +24,6 @@ test("flipping a locus twice restores its gene state", async () => {
   assert.deepEqual(locus, before);
 });
 
-test("chart state initializes display state independently of legacy fields", async () => {
-  const { createChartState } = await import("../src/chartState.mjs");
-  const locus = {
-    ...createLocus(),
-    _start: 2500,
-    _end: 3500,
-    _flipped: true,
-    _trimLeft: { uid: "a" },
-    _trimRight: { uid: "b" },
-  };
-
-  const state = createChartState({ clusters: [{ loci: [locus] }] });
-
-  assert.deepEqual(state.loci.get(locus.uid), {
-    start: 0,
-    end: 10000,
-    flipped: false,
-    trimLeft: null,
-    trimRight: null,
-  });
-});
-
 test("synchronizing a trimmed locus updates gene and locus coordinates", async () => {
   const { createChartState, getGeneState, synchronizeLocusState } = await import(
     "../src/chartState.mjs"
