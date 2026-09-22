@@ -1,7 +1,7 @@
 import legend from "./legend.js";
 import colourBar from "./colourBar.js";
 import scaleBar from "./scaleBar.js";
-import { renameText } from "./utils.js";
+import { renameText, rgbaToRgb } from "./utils.js";
 import { filterLinks } from "./links/groups.mjs";
 
 // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
@@ -11,6 +11,7 @@ export function renderSvg({
   data,
   api,
   transition,
+  createScene,
   flipLocus,
   animate,
 }) {
@@ -69,7 +70,9 @@ export function renderSvg({
         )
     );
 
-  api.layout.update(data);
+  // Cluster updates may normalize locus offsets, so derive the immutable scene
+  // only after the cluster join has applied that state.
+  const scene = createScene(data);
 
   const loci = clusters
     .selectAll("g.loci")
@@ -148,11 +151,11 @@ export function renderSvg({
           .attr("class", "geneLabel")
           .attr("dy", "-0.3em")
           .style("font-family", api.config.plot.fontFamily);
-        return enter.call(api.gene.update);
+        return updateGenes(enter, scene, api);
       },
       (update) =>
         update.call((selection) =>
-          selection.transition(transition).call(api.gene.update)
+          updateGenes(selection.transition(transition), scene, api)
         )
     );
 
@@ -179,14 +182,14 @@ export function renderSvg({
           .style("fill", "white")
           .style("text-anchor", "middle")
           .style("font-family", api.config.plot.fontFamily);
-        return enter.call(api.link.update, true);
+        return updateLinks(enter, scene, api);
       },
       (update) =>
         update.call((selection) =>
           selection
             .classed("hidden", !api.config.link.show)
             .transition(transition)
-            .call(api.link.update, true)
+            .call(updateLinks, scene, api)
         ),
       (exit) =>
         exit.call((selection) => selection.transition(transition).attr("opacity", 0).remove())
@@ -197,6 +200,76 @@ export function renderSvg({
     .call(getColourBar(api, transition))
     .call(getScaleBar(api, transition));
   arrangePlot(plot, api, transition, animate);
+}
+
+function updateGenes(selection, scene, api) {
+  const { config, scales } = api;
+  const geneLayout = (gene) => scene.genes.get(gene.uid);
+  const fill = (gene) => {
+    if (gene.colour) return gene.colour;
+    const group = scales.group(gene.uid);
+    return scales.colour(group);
+  };
+
+  selection.attr("display", (gene) =>
+    geneLayout(gene)?.visible ? "inline" : "none"
+  );
+  selection
+    .selectAll("polygon")
+    .attr("class", (gene) => {
+      const group = scales.group(gene.uid);
+      return group === null ? "genePolygon" : `genePolygon group-${group}`;
+    })
+    .attr("points", (gene) => geneLayout(gene)?.localPolygon.join(" ") || "")
+    .attr("fill", fill)
+    .style("stroke", config.gene.shape.stroke)
+    .style("stroke-width", config.gene.shape.strokeWidth);
+  selection
+    .selectAll("text.geneLabel")
+    .text((gene) => gene.label || gene.uid)
+    .attr("dy", (gene) => geneLayout(gene)?.labelDy)
+    .attr("display", config.gene.label.show ? "inherit" : "none")
+    .attr("transform", (gene) => geneLayout(gene)?.labelTransform)
+    .attr("font-size", config.gene.label.fontSize)
+    .attr("text-anchor", config.gene.label.anchor);
+  return selection;
+}
+
+function updateLinks(selection, scene, api) {
+  const { config, scales } = api;
+  const linkLayout = (link) => scene.links.get(link.uid);
+  const fill = (link) => {
+    if (config.link.asLine) return "none";
+    if (config.link.groupColour) return rgbaToRgb(scales.colour(scales.group(link.query.uid)));
+    return scales.score(link.identity);
+  };
+  const stroke = (link) => {
+    if (config.link.groupColour) {
+      const colour = scales.colour(scales.group(link.query.uid));
+      return config.link.asLine ? rgbaToRgb(colour) : colour;
+    }
+    return config.link.asLine ? scales.score(link.identity) : "black";
+  };
+
+  selection.attr("opacity", (link) =>
+    config.link.show && linkLayout(link)?.visible ? 1 : 0
+  );
+  selection
+    .selectAll("path")
+    .attr("d", (link) => linkLayout(link)?.path || "")
+    .style("fill", fill)
+    .style("stroke", stroke)
+    .style("stroke-width", `${config.link.strokeWidth}px`);
+  selection
+    .selectAll("text")
+    .attr("opacity", (link) =>
+      config.link.label.show && linkLayout(link)?.visible ? 1 : 0
+    )
+    .attr("filter", config.link.label.background ? "url(#filter_solid)" : null)
+    .style("font-size", `${config.link.label.fontSize}px`)
+    .attr("x", (link) => linkLayout(link)?.labelPosition?.x)
+    .attr("y", (link) => linkLayout(link)?.labelPosition?.y);
+  return selection;
 }
 
 function arrangePlot(plot, api, transition, animate) {
@@ -227,6 +300,7 @@ function getScaleBar(api, transition) {
     .colour(api.config.scaleBar.colour)
     .basePair(api.config.scaleBar.basePair)
     .fontSize(api.config.scaleBar.fontSize)
+    .fontFamily(api.config.plot.fontFamily)
     .onClickText(() => {
       const value = prompt("Enter new length (bp):", api.config.scaleBar.basePair);
       if (value) {
@@ -242,6 +316,7 @@ function getColourBar(api, transition) {
     .width(api.config.colourBar.width)
     .height(api.config.colourBar.height)
     .fontSize(api.config.colourBar.fontSize)
+    .fontFamily(api.config.plot.fontFamily)
     .transition(transition);
 }
 
@@ -258,6 +333,7 @@ function getLegend(api) {
   return legend(api.scales.colour)
     .hidden(hidden)
     .fontSize(api.config.legend.fontSize)
+    .fontFamily(api.config.plot.fontFamily)
     .entryHeight(api.config.legend.entryHeight)
     .onClickCircle(
       api.config.legend.onClickCircle ||

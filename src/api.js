@@ -31,7 +31,7 @@ import {
   getLocusScaleValues,
   xDistance,
 } from "./loci/layout.mjs";
-import { createLayoutProjection } from "./layout.mjs";
+import { buildScene } from "./layout.mjs";
 
 function getClosestValue(values, value) {
   return Math.max(Math.min(d3.bisectLeft(values, value), values.length - 1), 0);
@@ -83,7 +83,7 @@ const config = Object.assign({}, defaultConfig);
 const flags = { isDragging: false };
 let chartIndex = null;
 let chartState = null;
-let layoutProjection = null;
+let scene = null;
 
 function setChartIndex(index) {
   chartIndex = index;
@@ -102,7 +102,7 @@ function displayGene(gene) {
 }
 
 function geneVisible(gene) {
-  const projected = layoutProjection?.genes.get(gene.uid);
+  const projected = scene?.genes.get(gene.uid);
   if (projected) return projected.visible;
   const locus = get.locusData(gene._locus);
   const bounds = locusState(locus);
@@ -165,7 +165,7 @@ const scales = {
 
 const _layout = {
   update: (data) => {
-    layoutProjection = createLayoutProjection(data, {
+    scene = buildScene(data, {
       scaleX: scales.x,
       scaleY: scales.y,
       clusterOffset: scales.offset,
@@ -181,10 +181,21 @@ const _layout = {
         threshold: config.link.threshold,
         labelPosition: config.link.label.position,
       },
+      clusterLabel: _cluster.locusText,
+      alignLabels: config.cluster.alignLabels,
+      chrome: {
+        legendMarginLeft: config.legend.marginLeft,
+        scaleBarX: 0,
+        scaleBarMarginTop: config.scaleBar.marginTop,
+        colourBarX: config.plot.scaleGenes
+          ? scales.x(config.scaleBar.basePair) + 20
+          : 0,
+        colourBarMarginTop: config.colourBar.marginTop,
+      },
     });
-    return layoutProjection;
+    return scene;
   },
-  get: () => layoutProjection,
+  get: () => scene,
 };
 
 const _gene = {
@@ -196,13 +207,13 @@ const _gene = {
     return scales.colour(groupId);
   },
   points: (gene) =>
-    layoutProjection?.genes.get(gene.uid)?.localPolygon.join(" ") ||
+    scene?.genes.get(gene.uid)?.localPolygon.join(" ") ||
     getGenePolygonPoints(displayGene(gene), {
       scaleX: scales.x,
       shape: config.gene.shape,
     }),
   labelTransform: (gene) =>
-    layoutProjection?.genes.get(gene.uid)?.labelTransform ||
+    scene?.genes.get(gene.uid)?.labelTransform ||
     getGeneLabelTransform(displayGene(gene), {
       scaleX: scales.x,
       shape: config.gene.shape,
@@ -630,8 +641,8 @@ const _link = {
     }),
   getAnchors: (d, snap) => {
     const useScalePositions = snap || false;
-    if (useScalePositions && layoutProjection)
-      return layoutProjection.links.get(d.uid)?.anchors ?? null;
+    if (useScalePositions && scene)
+      return scene.links.get(d.uid)?.anchors ?? null;
     return getLinkAnchors(d, {
       geneForUid: (uid) => displayGene(get.geneData(uid)),
       areClustersAdjacent: _cluster.adjacent,

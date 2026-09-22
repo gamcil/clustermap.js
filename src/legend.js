@@ -1,5 +1,3 @@
-import * as api from "./api.js";
-
 export default function legend(colourScale) {
   /* Creates a legend component from a colour scale.
    */
@@ -10,6 +8,7 @@ export default function legend(colourScale) {
   let onClickCircle = () => {};
   let onClickText = () => {};
   let onAltClickText = () => {};
+  let fontFamily = null;
   let y = d3.scaleBand().paddingInner(0.5);
   let t = d3.transition().duration(500);
 
@@ -48,7 +47,7 @@ export default function legend(colourScale) {
               .append("text")
               .attr("x", 16)
               .attr("text-anchor", "start")
-              .style("font-family", api.config.plot.fontFamily)
+              .style("font-family", fontFamily)
               .style("dominant-baseline", "middle");
             return enter.call(updateLegend);
           },
@@ -97,6 +96,8 @@ export default function legend(colourScale) {
     arguments.length ? ((entryHeight = parseInt(_)), my) : entryHeight;
   my.fontSize = (_) =>
     arguments.length ? ((fontSize = parseInt(_)), my) : fontSize;
+  my.fontFamily = (_) =>
+    arguments.length ? ((fontFamily = _), my) : fontFamily;
   my.onClickCircle = (_) =>
     arguments.length ? ((onClickCircle = _), my) : onClickCircle;
   my.onClickText = (_) =>

@@ -1,5 +1,3 @@
-import * as api from "./api.js";
-
 export default function scaleBar(x) {
   /* Creates a scale bar component
    */
@@ -11,6 +9,7 @@ export default function scaleBar(x) {
   let fontSize = 12;
   let t = d3.transition().duration(500);
   let onClickText = null;
+  let fontFamily = null;
 
   function my(selection) {
     selection.each(function (data) {
@@ -29,7 +28,7 @@ export default function scaleBar(x) {
               .attr("class", "barText")
               .attr("text-anchor", "middle")
               .attr("cursor", "pointer")
-              .style("font-family", api.config.plot.fontFamily)
+              .style("font-family", fontFamily)
               .on("click", onClickText || promptNewLength);
             enter.call(updateScaleBar);
             return enter;
@@ -84,6 +83,8 @@ export default function scaleBar(x) {
     arguments.length ? ((colourScale = _), my) : colourScale;
   my.fontSize = (_) =>
     arguments.length ? ((fontSize = parseInt(_)), my) : fontSize;
+  my.fontFamily = (_) =>
+    arguments.length ? ((fontFamily = _), my) : fontFamily;
   my.height = (_) => (arguments.length ? ((height = parseInt(_)), my) : height);
   my.onClickText = (_) =>
     arguments.length ? ((onClickText = _), my) : onClickText;

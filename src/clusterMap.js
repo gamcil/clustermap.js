@@ -133,6 +133,7 @@ export default function clusterMap() {
       data,
       api,
       transition,
+      createScene: api.layout.update,
       animate: hasInitialView,
       flipLocus: (locus) => {
         flipLocus(chartState, locus);

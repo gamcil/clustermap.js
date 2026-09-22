@@ -18,7 +18,7 @@ function worldPolygon(points, x, y) {
  * The returned records contain no DOM selections and can be consumed by SVG,
  * Canvas, or an SVG export renderer.
  */
-export function createLayoutProjection(
+export function buildScene(
   data,
   {
     scaleX,
@@ -31,6 +31,9 @@ export function createLayoutProjection(
     shape,
     label,
     link,
+    clusterLabel = () => "",
+    alignLabels = true,
+    chrome = null,
   }
 ) {
   const clusters = new Map();
@@ -46,7 +49,8 @@ export function createLayoutProjection(
   for (const cluster of data.clusters) {
     const x = clusterOffset(cluster.uid);
     const y = scaleY(cluster.uid);
-    clusters.set(cluster.uid, { source: cluster, x, y });
+    const clusterLayout = { source: cluster, x, y, loci: [] };
+    clusters.set(cluster.uid, clusterLayout);
 
     for (const locus of cluster.loci) {
       const state = getLocusState(locus);
@@ -65,8 +69,23 @@ export function createLayoutProjection(
         end,
         worldStart: worldX + start,
         worldEnd: worldX + end,
+        transform: { x: localX, y: 0 },
+        track: {
+          x1: start,
+          x2: end,
+          y: geneMidpoint,
+        },
+        hover: {
+          x: start,
+          y: -10,
+          width: end - start,
+          height: shape.tipHeight * 2 + shape.bodyHeight + 20,
+          leftHandleX: start - 8,
+          rightHandleX: end,
+        },
       };
       loci.set(locus.uid, locusLayout);
+      clusterLayout.loci.push(locusLayout);
       minX = Math.min(minX, locusLayout.worldStart);
       maxX = Math.max(maxX, locusLayout.worldEnd);
       minY = Math.min(minY, y);
@@ -89,6 +108,20 @@ export function createLayoutProjection(
         });
       }
     }
+  }
+
+  const bounds =
+    minX === Infinity ? null : { minX, maxX, minY, maxY };
+  for (const cluster of clusters.values()) {
+    const clusterMinX = cluster.loci.length
+      ? Math.min(...cluster.loci.map((locus) => locus.worldStart))
+      : cluster.x;
+    const labelX = (alignLabels && bounds ? bounds.minX : clusterMinX) - cluster.x - 10;
+    cluster.info = {
+      x: labelX,
+      y: 0,
+      locusText: clusterLabel(cluster.source),
+    };
   }
 
   for (const source of data.links) {
@@ -128,9 +161,20 @@ export function createLayoutProjection(
     loci,
     genes,
     links,
-    bounds:
-      minX === Infinity
-        ? null
-        : { minX, maxX, minY, maxY },
+    bounds,
+    chrome:
+      chrome && bounds
+        ? {
+            legend: { x: bounds.maxX + chrome.legendMarginLeft, y: 0 },
+            scaleBar: { x: chrome.scaleBarX, y: bounds.maxY + chrome.scaleBarMarginTop },
+            colourBar: {
+              x: chrome.colourBarX,
+              y: bounds.maxY + chrome.colourBarMarginTop,
+            },
+          }
+        : null,
   };
 }
+
+// Kept as a compatibility alias while callers adopt the scene terminology.
+export const createLayoutProjection = buildScene;

@@ -1,8 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-test("layout projection derives world-space genes and links without DOM state", async () => {
-  const { createLayoutProjection } = await import("../src/layout.mjs");
+test("scene derives world-space geometry without DOM state", async () => {
+  const { buildScene } = await import("../src/layout.mjs");
   const data = {
     clusters: [
       {
@@ -44,7 +44,7 @@ test("layout projection derives world-space genes and links without DOM state", 
     ["bottom-gene", { start: 10, end: 16, strand: 0 }],
   ]);
 
-  const projection = createLayoutProjection(data, {
+  const scene = buildScene(data, {
     scaleX: (value) => value,
     scaleY: (uid) => (uid === "top" ? 0 : 30),
     clusterOffset: (uid) => (uid === "top" ? 5 : 10),
@@ -57,11 +57,21 @@ test("layout projection derives world-space genes and links without DOM state", 
     link: { asLine: false, straight: true, threshold: 0.3, labelPosition: 0.5 },
   });
 
-  const topGene = projection.genes.get("top-gene");
+  const topGene = scene.genes.get("top-gene");
   assert.equal(topGene.visible, true);
   assert.deepEqual(topGene.polygon.slice(0, 2), [6 + 2, 5]);
-  assert.equal(projection.loci.get("top-locus").worldStart, 6);
-  assert.deepEqual(projection.links.get("link").anchors, [8, 14, 11, 28, 22, 41]);
-  assert.equal(projection.links.get("link").visible, true);
-  assert.deepEqual(projection.bounds, { minX: 6, maxX: 32, minY: 0, maxY: 52 });
+  const topLocus = scene.loci.get("top-locus");
+  assert.equal(topLocus.worldStart, 6);
+  assert.deepEqual(topLocus.track, { x1: 0, x2: 20, y: 11 });
+  assert.deepEqual(topLocus.hover, {
+    x: 0,
+    y: -10,
+    width: 20,
+    height: 42,
+    leftHandleX: -8,
+    rightHandleX: 20,
+  });
+  assert.deepEqual(scene.links.get("link").anchors, [8, 14, 11, 28, 22, 41]);
+  assert.equal(scene.links.get("link").visible, true);
+  assert.deepEqual(scene.bounds, { minX: 6, maxX: 32, minY: 0, maxY: 52 });
 });

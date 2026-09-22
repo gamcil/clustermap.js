@@ -1,5 +1,3 @@
-import * as api from "./api.js";
-
 export default function colourBar(colourScale) {
   /* Creates the colour bar component.
    */
@@ -8,6 +6,7 @@ export default function colourBar(colourScale) {
   let width = 150;
   let fontSize = 12;
   let t = d3.transition();
+  let fontFamily = null;
 
   function my(selection) {
     selection.each(function (data) {
@@ -63,7 +62,7 @@ export default function colourBar(colourScale) {
               .attr("text-anchor", "end");
             cbar
               .selectAll("text")
-              .style("font-family", api.config.plot.fontFamily)
+              .style("font-family", fontFamily)
               .style("dominant-baseline", "hanging");
 
             enter.call(updateColourBar);
@@ -93,6 +92,8 @@ export default function colourBar(colourScale) {
   my.height = (_) => (arguments.length ? ((height = parseInt(_)), my) : height);
   my.fontSize = (_) =>
     arguments.length ? ((fontSize = parseInt(_)), my) : fontSize;
+  my.fontFamily = (_) =>
+    arguments.length ? ((fontFamily = _), my) : fontFamily;
   my.colourScale = (_) =>
     arguments.length ? ((colourScale = _), my) : colourScale;
   my.transition = (_) => (arguments.length ? ((t = _), my) : t);
