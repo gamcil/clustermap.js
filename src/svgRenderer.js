@@ -43,7 +43,7 @@ export function renderSvg({
           .attr("id", (cluster) => `cinfo_${cluster.uid}`)
           .attr("class", "clusterInfo")
           .attr("transform", "translate(-10, 0)")
-          .call(interactions.dragCluster);
+          .call(createClusterDrag({ scales, ids, interactions }));
 
         info
           .append("text")
@@ -220,6 +220,70 @@ function updateClusters(selection, scene) {
     if (this.textContent !== text) this.textContent = text;
   });
   return selection;
+}
+
+function createClusterDrag({ scales, ids, interactions }) {
+  let pointerOffset;
+  let range;
+  let order;
+
+  const clusterSelection = (uid) => d3.select(`#${ids.cluster({ uid })}`);
+  const matrixY = (selection) => {
+    const transform = selection.node().transform.baseVal;
+    return transform.numberOfItems ? transform.getItem(0).matrix.f : 0;
+  };
+
+  const started = (event, cluster) => {
+    interactions.setDragging(true);
+    order = [...interactions.getClusterOrder()];
+    const subject = clusterSelection(cluster.uid);
+    subject.classed("active", true).attr("cursor", "grabbing");
+    pointerOffset = matrixY(subject) - event.y;
+    range = scales.y.range();
+  };
+
+  const dragged = (event, cluster) => {
+    const subject = clusterSelection(cluster.uid);
+    subject.raise();
+    const y = Math.min(
+      range[range.length - 1],
+      Math.max(range[0], pointerOffset + event.y)
+    );
+    subject.attr("transform", `translate(${scales.offset(cluster.uid)}, ${y})`);
+
+    const targetIndex = range.reduce(
+      (closest, position, index) =>
+        Math.abs(position - y) < Math.abs(range[closest] - y) ? index : closest,
+      0
+    );
+    const currentIndex = order.indexOf(cluster.uid);
+    interactions.updateLinkPreview();
+    if (targetIndex === currentIndex) return;
+
+    order.splice(currentIndex, 1);
+    order.splice(targetIndex, 0, cluster.uid);
+    order.forEach((uid, index) => {
+      if (uid === cluster.uid) return;
+      clusterSelection(uid)
+        .transition()
+        .attr("transform", `translate(${scales.offset(uid)}, ${range[index]})`);
+    });
+  };
+
+  const ended = (_, cluster) => {
+    interactions.setDragging(false);
+    interactions.moveClusterToIndex(cluster.uid, order.indexOf(cluster.uid));
+    interactions.redraw();
+  };
+
+  return d3
+    .drag()
+    .container(function () {
+      return this.parentNode.parentNode;
+    })
+    .on("start", started)
+    .on("drag", dragged)
+    .on("end", ended);
 }
 
 function updateLoci(selection, scene, config) {

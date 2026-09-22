@@ -1,5 +1,12 @@
 import { createLinkGroups } from "./links/groups.mjs";
-import { createChartState, getCamera, flipLocus, setCamera } from "./chartState.mjs";
+import {
+  createChartState,
+  getCamera,
+  getClusterOrder,
+  flipLocus,
+  moveClusterToIndex,
+  setCamera,
+} from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
 import { renderSvg } from "./svgRenderer.js";
@@ -146,10 +153,17 @@ export default function clusterMap() {
       },
       lookup: { gene: api.get.geneData },
       interactions: {
-        dragCluster: api.cluster.drag,
         dragLocusPosition: api.locus.dragPosition,
         dragLocusResize: api.locus.dragResize,
         isDragging: () => api.flags.isDragging,
+        setDragging: (isDragging) => {
+          api.flags.isDragging = isDragging;
+        },
+        getClusterOrder: () => getClusterOrder(chartState),
+        moveClusterToIndex: (uid, index) =>
+          moveClusterToIndex(chartState, uid, index),
+        updateLinkPreview: () => d3.selectAll("g.geneLinkG").call(api.link.update),
+        redraw: () => api.plot.update(),
         flipLocus: (locus) => {
           flipLocus(chartState, locus);
           api.plot.update();

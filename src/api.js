@@ -21,7 +21,6 @@ import {
   getLocusOffset,
   getLocusState,
   initializeLocusOffsets,
-  moveClusterToIndex,
   recalculateLocusCoordinates,
   setClusterOffset,
   setLocusOffset,
@@ -440,7 +439,6 @@ const _gene = {
 
 const _cluster = {
   getId: (d) => `cluster_${d.uid}`,
-  transform: (c) => `translate(${scales.offset(c.uid)}, ${scales.y(c.uid)})`,
   /**
    * Generates locus coordinates displayed next underneath a cluster name.
    * If a locus is flipped, (reversed) will be added to its name.
@@ -458,105 +456,6 @@ const _cluster = {
   adjacent: (one, two) => {
     const domain = getClusterOrder(chartState);
     return Math.abs(domain.indexOf(one) - domain.indexOf(two)) === 1;
-  },
-  /**
-   * Aligns clusterInfo <g> elements based on leftmost cluster in the map.
-   * Should be used on a D3 selection using call().
-   * @param {d3.selection} selection - g.clusterInfo selection
-   * @return {d3.selection}
-   */
-  alignLabels: (selection) => {
-    let [min] = getChartExtent();
-    return selection.attr("transform", (d) => {
-      let value = min - scales.offset(d.uid);
-      return `translate(${value - 10}, 0)`;
-    });
-  },
-  update: (selection) => {
-    selection.selectAll("g.locus").each(updateLocusScaling);
-    selection.attr("transform", _cluster.transform);
-    if (config.cluster.alignLabels) {
-      selection.selectAll(".clusterInfo").call(_cluster.alignLabels);
-    } else {
-      selection.selectAll(".clusterInfo").attr("transform", (d) => {
-        let [min] = getClusterExtent(d, locusLayout());
-        let value = min - 10 - scales.offset(d.uid);
-        return `translate(${value}, 0)`;
-      });
-    }
-    selection.selectAll("text.locusText").each(function (cluster) {
-      const text = _cluster.locusText(cluster);
-      if (this.textContent !== text) this.textContent = text;
-    });
-    return selection;
-  },
-  drag: (selection) => {
-    let y, range, order;
-
-    const started = (event, d) => {
-      flags.isDragging = true;
-      order = [...getClusterOrder(chartState)];
-
-      // Get subject cluster, change cursor
-      let cluster = get.cluster(d.uid);
-      cluster.classed("active", true).attr("cursor", "grabbing");
-
-      // Get current position of subject cluster
-      y = get.matrix(cluster).f - event.y;
-
-      // Get y-axis bounds for dragging
-      range = scales.y.range();
-    };
-
-    const dragged = (event, d) => {
-      // Select cluster and raise here to not consume click event in cluster label
-      let me = get.cluster(d.uid);
-      me.raise();
-
-      // Get current y value with mouse event
-      let yy = Math.min(range[range.length - 1], Math.max(range[0], y + event.y));
-      me.attr("transform", (d) => `translate(${scales.offset(d.uid)}, ${yy})`);
-
-      // Snap to the closest configured cluster row, while leaving the dragged
-      // cluster under the pointer until the drag ends.
-      let p = range.reduce(
-        (closest, position, index) =>
-          Math.abs(position - yy) < Math.abs(range[closest] - yy) ? index : closest,
-        0
-      );
-      let current = order.indexOf(d.uid);
-
-      d3.selectAll("g.geneLinkG").call(_link.update);
-
-      if (p === current) return;
-
-      order.splice(current, 1);
-      order.splice(p, 0, d.uid);
-      order.forEach((uid, index) => {
-        if (uid === d.uid) return;
-        get.cluster(uid)
-          .transition()
-          .attr("transform", `translate(${scales.offset(uid)}, ${range[index]})`);
-      });
-    };
-
-    const ended = (_, d) => {
-      flags.isDragging = false;
-      moveClusterToIndex(chartState, d.uid, order.indexOf(d.uid));
-      plot.update();
-    };
-
-    return d3
-      .drag()
-      .container(function () {
-        return this.parentNode.parentNode;
-      })
-      .on("start", started)
-      .on("drag", dragged)
-      .on(
-        "end",
-        ended
-      )(selection);
   },
 };
 
