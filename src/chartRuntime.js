@@ -70,7 +70,7 @@ function synchronizeLocusLayoutStates(data) {
 const config = Object.assign({}, defaultConfig);
 let chartIndex = null;
 let chartState = null;
-let scene = null;
+let currentScene = null;
 
 // IDs are part of the SVG surface, so they must be unique when several maps
 // are mounted on the same document. Keep the logical suffix stable: it is
@@ -127,11 +127,11 @@ const scales = {
   locus: d3.scaleOrdinal(),
 };
 
-const _layout = {
-  update: (data) => {
+const scene = {
+  build: (data) => {
     // Scene construction is read-only. The controller synchronizes any
     // scale-dependent chart state before asking the runtime to project it.
-    scene = buildScene(data, {
+    currentScene = buildScene(data, {
       scaleX: scales.x,
       scaleY: scales.y,
       clusterOffset: scales.offset,
@@ -159,9 +159,9 @@ const _layout = {
         colourBarMarginTop: config.colourBar.marginTop,
       },
     });
-    return scene;
+    return currentScene;
   },
-  get: () => scene,
+  get: () => currentScene,
 };
 
 const _gene = {
@@ -339,6 +339,6 @@ return {
   link: _link,
   locus: _locus,
   scale: _scale,
-  layout: _layout,
+  scene,
 };
 }

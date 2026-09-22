@@ -2176,7 +2176,7 @@
   const config = Object.assign({}, defaultConfig);
   let chartIndex = null;
   let chartState = null;
-  let scene = null;
+  let currentScene = null;
 
   // IDs are part of the SVG surface, so they must be unique when several maps
   // are mounted on the same document. Keep the logical suffix stable: it is
@@ -2233,11 +2233,11 @@
     locus: d3.scaleOrdinal(),
   };
 
-  const _layout = {
-    update: (data) => {
+  const scene = {
+    build: (data) => {
       // Scene construction is read-only. The controller synchronizes any
       // scale-dependent chart state before asking the runtime to project it.
-      scene = buildScene(data, {
+      currentScene = buildScene(data, {
         scaleX: scales.x,
         scaleY: scales.y,
         clusterOffset: scales.offset,
@@ -2265,9 +2265,9 @@
           colourBarMarginTop: config.colourBar.marginTop,
         },
       });
-      return scene;
+      return currentScene;
     },
-    get: () => scene,
+    get: () => currentScene,
   };
 
   const _gene = {
@@ -2445,7 +2445,7 @@
     link: _link,
     locus: _locus,
     scale: _scale,
-    layout: _layout,
+    scene,
   };
   }
 
@@ -2459,10 +2459,10 @@
     let zoom = null;
     let hasInitialView = false;
     let chartState = null;
-    const api = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+    const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
 
-    api.plot.update = () => container.call(my);
-    api.plot.data = (data) => my.data(data);
+    runtime.plot.update = () => container.call(my);
+    runtime.plot.data = (data) => my.data(data);
 
     function my(selection) {
       selection.each(update);
@@ -2472,14 +2472,14 @@
       data = normalizeChartData(data);
       const chartIndex = createChartIndex(data);
       chartState = createChartState(data, chartState);
-      api.setChartIndex(chartIndex);
-      api.setChartState(chartState);
+      runtime.setChartIndex(chartIndex);
+      runtime.setChartState(chartState);
 
       // Save the container for later updates
       container = d3.select(this).attr("width", "100%").attr("height", "100%");
 
       // Set up the shared transition
-      transition = d3.transition().duration(api.config.plot.transitionDuration);
+      transition = d3.transition().duration(runtime.config.plot.transitionDuration);
 
       // Build the figure
       const svg = container
@@ -2490,7 +2490,7 @@
             // Add HTML colour picker input
             enter
               .append("input")
-              .attr("id", api.ids.picker)
+              .attr("id", runtime.ids.picker)
               .attr("class", "colourPicker")
               .attr("type", "color")
               .style("position", "absolute")
@@ -2510,13 +2510,13 @@
               .style("border", "1px solid #999")
               .style("border-radius", "4px")
               .style("box-shadow", "0 2px 8px rgba(0, 0, 0, 0.2)")
-              .style("font-family", api.config.plot.fontFamily);
+              .style("font-family", runtime.config.plot.fontFamily);
 
             // Add root SVG element
             let svg = enter
               .append("svg")
               .attr("class", "clusterMap")
-              .attr("id", api.ids.root)
+              .attr("id", runtime.ids.root)
               .attr("cursor", "grab")
               .attr("width", "100%")
               .attr("height", "100%")
@@ -2526,7 +2526,7 @@
             let defs = svg.append("defs");
             let filter = defs
               .append("filter")
-              .attr("id", api.ids.filter)
+              .attr("id", runtime.ids.filter)
               .attr("x", 0)
               .attr("y", 0)
               .attr("width", 1)
@@ -2562,14 +2562,14 @@
       const plot = svg.select("g.clusterMapG");
       const overlay = createHtmlOverlay({
         tooltip: container.select("div.tooltip"),
-        scales: api.scales,
+        scales: runtime.scales,
         actions: {
-          redraw: () => api.plot.update(),
-          anchorGene: (gene) => api.gene.anchor(null, gene, true),
+          redraw: () => runtime.plot.update(),
+          anchorGene: (gene) => runtime.gene.anchor(null, gene, true),
           getGroups: () => data.groups,
           setGroups: (groups) => {
             data.groups = groups;
-            api.plot.update();
+            runtime.plot.update();
           },
         },
       });
@@ -2579,8 +2579,8 @@
         .on("mouseleave", overlay.leave);
       applyCamera(svg.select("g.clusterMapViewport"));
 
-      api.scale.update(data);
-      api.synchronizeLocusLayoutStates(data);
+      runtime.scale.update(data);
+      runtime.synchronizeLocusLayoutStates(data);
 
       // Only disable grouping if explicitly defined false
       if (data.config && data.config.updateGroups === false) {
@@ -2589,9 +2589,9 @@
         data.groups = createLinkGroups(data.links, data.groups);
       }
 
-      api.link.updateGroups(data.groups);
+      runtime.link.updateGroups(data.groups);
 
-      const scene = api.layout.update(data);
+      const scene = runtime.scene.build(data);
 
       renderSvg({
         plot,
@@ -2599,17 +2599,17 @@
         scene,
         transition,
         animate: hasInitialView,
-        config: api.config,
-        scales: api.scales,
-        ids: api.ids,
-        lookup: { gene: api.get.geneData },
+        config: runtime.config,
+        scales: runtime.scales,
+        ids: runtime.ids,
+        lookup: { gene: runtime.get.geneData },
         interactions: {
           isDragging: () => isDragging(chartState),
           setDragging: (dragging) => setDragging(chartState, dragging),
           getClusterOrder: () => getClusterOrder(chartState),
           moveClusterToIndex: (uid, index) =>
             moveClusterToIndex(chartState, uid, index),
-          redraw: () => api.plot.update(),
+          redraw: () => runtime.plot.update(),
           getLocusOffset: (uid) => getLocusOffset(chartState, uid),
           getLocusState: (locus) => getLocusState(chartState, locus),
           getGeneState: (gene) => getGeneState(chartState, gene),
@@ -2631,20 +2631,20 @@
           },
           flipLocus: (locus) => {
             flipLocus(chartState, locus);
-            api.plot.update();
+            runtime.plot.update();
           },
-          onGeneClick: api.config.gene.shape.onClick,
+          onGeneClick: runtime.config.gene.shape.onClick,
           showGeneMenu: overlay.showGeneMenu,
           showGroupMenu: overlay.showGroupMenu,
           setScaleBarLength: (value) => {
-            api.config.scaleBar.basePair = value;
-            api.plot.update();
+            runtime.config.scaleBar.basePair = value;
+            runtime.plot.update();
           },
           chooseLegendColour: (group) => {
             const picker = container.select("input.colourPicker");
             picker.on("change", () => {
               group.colour = picker.node().value;
-              api.plot.update();
+              runtime.plot.update();
             });
             picker.node().click();
           },
@@ -2682,8 +2682,8 @@
     }
 
     my.config = function (_) {
-      if (!arguments.length) return api.config;
-      api.plot.updateConfig(_);
+      if (!arguments.length) return runtime.config;
+      runtime.plot.updateConfig(_);
       return my;
     };
     my.data = (data) => {
