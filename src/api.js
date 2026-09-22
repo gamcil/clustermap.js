@@ -31,6 +31,7 @@ import {
   getLocusScaleValues,
   xDistance,
 } from "./loci/layout.mjs";
+import { createLayoutProjection } from "./layout.mjs";
 
 function getClosestValue(values, value) {
   return Math.max(Math.min(d3.bisectLeft(values, value), values.length - 1), 0);
@@ -82,6 +83,7 @@ const config = Object.assign({}, defaultConfig);
 const flags = { isDragging: false };
 let chartIndex = null;
 let chartState = null;
+let layoutProjection = null;
 
 function setChartIndex(index) {
   chartIndex = index;
@@ -100,6 +102,8 @@ function displayGene(gene) {
 }
 
 function geneVisible(gene) {
+  const projected = layoutProjection?.genes.get(gene.uid);
+  if (projected) return projected.visible;
   const locus = get.locusData(gene._locus);
   const bounds = locusState(locus);
   const display = displayGene(gene);
@@ -159,6 +163,30 @@ const scales = {
   locus: d3.scaleOrdinal(),
 };
 
+const _layout = {
+  update: (data) => {
+    layoutProjection = createLayoutProjection(data, {
+      scaleX: scales.x,
+      scaleY: scales.y,
+      clusterOffset: scales.offset,
+      locusOffset: scales.locus,
+      getLocusState: locusState,
+      getGeneState: (gene) => getGeneState(chartState, gene),
+      areClustersAdjacent: _cluster.adjacent,
+      shape: config.gene.shape,
+      label: config.gene.label,
+      link: {
+        asLine: config.link.asLine,
+        straight: config.link.straight,
+        threshold: config.link.threshold,
+        labelPosition: config.link.label.position,
+      },
+    });
+    return layoutProjection;
+  },
+  get: () => layoutProjection,
+};
+
 const _gene = {
   getId: (d) => `gene_${d.uid}`,
   fill: (g) => {
@@ -168,11 +196,13 @@ const _gene = {
     return scales.colour(groupId);
   },
   points: (gene) =>
+    layoutProjection?.genes.get(gene.uid)?.localPolygon.join(" ") ||
     getGenePolygonPoints(displayGene(gene), {
       scaleX: scales.x,
       shape: config.gene.shape,
     }),
   labelTransform: (gene) =>
+    layoutProjection?.genes.get(gene.uid)?.labelTransform ||
     getGeneLabelTransform(displayGene(gene), {
       scaleX: scales.x,
       shape: config.gene.shape,
@@ -440,13 +470,10 @@ const _cluster = {
         return `translate(${value}, 0)`;
       });
     }
-    selection
-      .selectAll("text.locusText")
-      .text(_cluster.locusText)
-      .style("font-size", `${config.cluster.lociFontSize}px`);
-    selection
-      .selectAll("text.clusterText")
-      .style("font-size", `${config.cluster.nameFontSize}px`);
+    selection.selectAll("text.locusText").each(function (cluster) {
+      const text = _cluster.locusText(cluster);
+      if (this.textContent !== text) this.textContent = text;
+    });
     return selection;
   },
   drag: (selection) => {
@@ -603,6 +630,8 @@ const _link = {
     }),
   getAnchors: (d, snap) => {
     const useScalePositions = snap || false;
+    if (useScalePositions && layoutProjection)
+      return layoutProjection.links.get(d.uid)?.anchors ?? null;
     return getLinkAnchors(d, {
       geneForUid: (uid) => displayGene(get.geneData(uid)),
       areClustersAdjacent: _cluster.adjacent,
@@ -1115,5 +1144,6 @@ export {
   _link as link,
   _locus as locus,
   _scale as scale,
+  _layout as layout,
   _tooltip as tooltip,
 };

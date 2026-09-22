@@ -300,7 +300,7 @@
     return straight ? straightLinkPath(anchors) : sankeyLinkPath(anchors);
   }
 
-  function getGenePolygonPoints(gene, { scaleX, shape }) {
+  function getGenePolygonCoordinates(gene, { scaleX, shape }) {
     const scaledStart = scaleX(gene.start);
     const scaledEnd = scaleX(gene.end);
     const geneLength = scaledEnd - scaledStart;
@@ -353,7 +353,11 @@
       }
     }
 
-    return points.join(" ");
+    return points;
+  }
+
+  function getGenePolygonPoints(gene, options) {
+    return getGenePolygonCoordinates(gene, options).join(" ");
   }
 
   function getGeneLabelTransform(gene, { scaleX, shape, label }) {
@@ -393,6 +397,7 @@
     const genes = previous?.genes || new Map();
     const clusterOffsets = previous?.clusterOffsets || new Map();
     const locusOffsets = previous?.locusOffsets || new Map();
+    const camera = previous?.camera || { x: 0, y: 0, k: 1 };
     const clusterIds = data.clusters.map((cluster) => cluster.uid);
     const clusterIdSet = new Set(clusterIds);
     const clusterOrder = [
@@ -442,7 +447,7 @@
     for (const uid of locusOffsets.keys()) {
       if (!loci.has(uid)) locusOffsets.delete(uid);
     }
-    return { loci, genes, clusterOffsets, locusOffsets, clusterOrder };
+    return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera };
   }
 
   function getClusterOrder(chartState) {
@@ -473,6 +478,14 @@
     for (const [uid, offset] of defaults) {
       if (!chartState.locusOffsets.has(uid)) chartState.locusOffsets.set(uid, offset);
     }
+  }
+
+  function getCamera(chartState) {
+    return chartState.camera;
+  }
+
+  function setCamera(chartState, { x, y, k }) {
+    chartState.camera = { x, y, k };
   }
 
   function getLocusState(chartState, locus) {
@@ -636,6 +649,132 @@
     return { domain, range };
   }
 
+  function worldPolygon(points, x, y) {
+    return points.map((point, index) => point + (index % 2 === 0 ? x : y));
+  }
+
+  /**
+   * Derive renderer-neutral, world-space geometry from chart data and state.
+   * The returned records contain no DOM selections and can be consumed by SVG,
+   * Canvas, or an SVG export renderer.
+   */
+  function createLayoutProjection(
+    data,
+    {
+      scaleX,
+      scaleY,
+      clusterOffset,
+      locusOffset,
+      getLocusState,
+      getGeneState,
+      areClustersAdjacent,
+      shape,
+      label,
+      link,
+    }
+  ) {
+    const clusters = new Map();
+    const loci = new Map();
+    const genes = new Map();
+    const links = new Map();
+    const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    for (const cluster of data.clusters) {
+      const x = clusterOffset(cluster.uid);
+      const y = scaleY(cluster.uid);
+      clusters.set(cluster.uid, { source: cluster, x, y });
+
+      for (const locus of cluster.loci) {
+        const state = getLocusState(locus);
+        const localX = locusOffset(locus.uid);
+        const start = scaleX(state.start);
+        const end = scaleX(state.end);
+        const worldX = x + localX;
+        const locusLayout = {
+          source: locus,
+          cluster,
+          state,
+          localX,
+          x: worldX,
+          y,
+          start,
+          end,
+          worldStart: worldX + start,
+          worldEnd: worldX + end,
+        };
+        loci.set(locus.uid, locusLayout);
+        minX = Math.min(minX, locusLayout.worldStart);
+        maxX = Math.max(maxX, locusLayout.worldEnd);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y + shape.tipHeight * 2 + shape.bodyHeight);
+
+        for (const gene of locus.genes) {
+          const display = { ...gene, ...getGeneState(gene) };
+          const visible =
+            display.start >= state.start && display.end <= state.end + 1;
+          const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
+          genes.set(gene.uid, {
+            source: gene,
+            display,
+            locus: locusLayout,
+            visible,
+            localPolygon,
+            polygon: worldPolygon(localPolygon, worldX, y),
+            labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
+            labelDy: getGeneLabelDy(label.position),
+          });
+        }
+      }
+    }
+
+    for (const source of data.links) {
+      const query = genes.get(source.query.uid);
+      const target = genes.get(source.target.uid);
+      let anchors = null;
+      if (query && target) {
+        anchors = getLinkAnchors(source, {
+          geneForUid: (uid) => genes.get(uid)?.display,
+          areClustersAdjacent,
+          scaleX,
+          horizontalOffset: (gene) => {
+            const locus = loci.get(gene._locus);
+            return locus ? locus.x : 0;
+          },
+          verticalPosition: (gene) => clusters.get(gene._cluster)?.y ?? 0,
+          geneMidpoint,
+        });
+      }
+      links.set(source.uid, {
+        source,
+        anchors,
+        path: getLinkPath(anchors, link),
+        labelPosition: anchors
+          ? getLinkLabelPosition(anchors, link.labelPosition)
+          : null,
+        visible:
+          Boolean(anchors) &&
+          source.identity >= link.threshold &&
+          query?.visible &&
+          target?.visible,
+      });
+    }
+
+    return {
+      clusters,
+      loci,
+      genes,
+      links,
+      bounds:
+        minX === Infinity
+          ? null
+          : { minX, maxX, minY, maxY },
+    };
+  }
+
   function getClosestValue(values, value) {
     return Math.max(Math.min(d3.bisectLeft(values, value), values.length - 1), 0);
   }
@@ -686,6 +825,7 @@
   const flags = { isDragging: false };
   let chartIndex = null;
   let chartState = null;
+  let layoutProjection = null;
 
   function setChartIndex(index) {
     chartIndex = index;
@@ -704,6 +844,8 @@
   }
 
   function geneVisible(gene) {
+    const projected = layoutProjection?.genes.get(gene.uid);
+    if (projected) return projected.visible;
     const locus = get.locusData(gene._locus);
     const bounds = locusState(locus);
     const display = displayGene(gene);
@@ -763,6 +905,30 @@
     locus: d3.scaleOrdinal(),
   };
 
+  const _layout = {
+    update: (data) => {
+      layoutProjection = createLayoutProjection(data, {
+        scaleX: scales.x,
+        scaleY: scales.y,
+        clusterOffset: scales.offset,
+        locusOffset: scales.locus,
+        getLocusState: locusState,
+        getGeneState: (gene) => getGeneState(chartState, gene),
+        areClustersAdjacent: _cluster.adjacent,
+        shape: config.gene.shape,
+        label: config.gene.label,
+        link: {
+          asLine: config.link.asLine,
+          straight: config.link.straight,
+          threshold: config.link.threshold,
+          labelPosition: config.link.label.position,
+        },
+      });
+      return layoutProjection;
+    },
+    get: () => layoutProjection,
+  };
+
   const _gene = {
     getId: (d) => `gene_${d.uid}`,
     fill: (g) => {
@@ -772,11 +938,13 @@
       return scales.colour(groupId);
     },
     points: (gene) =>
+      layoutProjection?.genes.get(gene.uid)?.localPolygon.join(" ") ||
       getGenePolygonPoints(displayGene(gene), {
         scaleX: scales.x,
         shape: config.gene.shape,
       }),
     labelTransform: (gene) =>
+      layoutProjection?.genes.get(gene.uid)?.labelTransform ||
       getGeneLabelTransform(displayGene(gene), {
         scaleX: scales.x,
         shape: config.gene.shape,
@@ -1044,13 +1212,10 @@
           return `translate(${value}, 0)`;
         });
       }
-      selection
-        .selectAll("text.locusText")
-        .text(_cluster.locusText)
-        .style("font-size", `${config.cluster.lociFontSize}px`);
-      selection
-        .selectAll("text.clusterText")
-        .style("font-size", `${config.cluster.nameFontSize}px`);
+      selection.selectAll("text.locusText").each(function (cluster) {
+        const text = _cluster.locusText(cluster);
+        if (this.textContent !== text) this.textContent = text;
+      });
       return selection;
     },
     drag: (selection) => {
@@ -1207,6 +1372,8 @@
       }),
     getAnchors: (d, snap) => {
       const useScalePositions = snap || false;
+      if (useScalePositions && layoutProjection)
+        return layoutProjection.links.get(d.uid)?.anchors ?? null;
       return getLinkAnchors(d, {
         geneForUid: (uid) => displayGene(get.geneData(uid)),
         areClustersAdjacent: _cluster.adjacent,
@@ -2119,7 +2286,7 @@
       transition = d3.transition().duration(config.plot.transitionDuration);
 
       // Build the figure
-      let plot$1 = container
+      const svg = container
         .selectAll("svg.clusterMap")
         .data([data])
         .join(
@@ -2176,24 +2343,30 @@
               .attr("in", "SourceGraphic")
               .attr("in2", "");
 
-            let g = svg.append("g").attr("class", "clusterMapG");
+            // Keep the viewport transform separate from the chart content. Layout
+            // and fit-to-view measure `clusterMapG` in world coordinates, while
+            // zoom/pan only transform this outer viewport group.
+            const viewport = svg.append("g").attr("class", "clusterMapViewport");
+            viewport.append("g").attr("class", "clusterMapG");
 
             // Attach pan/zoom behaviour
             zoom = d3
               .zoom()
               .scaleExtent([0, 8])
-              .on("zoom", (event) => g.attr("transform", event.transform))
+              .on("zoom", (event) => {
+                setCamera(chartState, event.transform);
+                applyCamera(viewport);
+              })
               .on("start", () => svg.attr("cursor", "grabbing"))
               .on("end", () => svg.attr("cursor", "grab"));
             svg.call(zoom).on("dblclick.zoom", null);
 
-            return g;
-          },
-          (update) =>
-            update.call((update) => {
-              update.call(arrangePlot);
-            })
+            return svg;
+          }
         );
+
+      const plot$1 = svg.select("g.clusterMapG");
+      applyCamera(svg.select("g.clusterMapViewport"));
 
       _scale.update(data);
 
@@ -2242,13 +2415,16 @@
               .attr("y", 8)
               .attr("cursor", "pointer")
               .style("font-weight", "bold")
+              .style("font-size", `${config.cluster.nameFontSize}px`)
               .style("font-family", config.plot.fontFamily)
               .on("click", renameText);
             info
               .append("text")
               .attr("class", "locusText")
               .attr("y", 12)
-              .style("dominant-baseline", "hanging")
+              .attr("dominant-baseline", "hanging")
+              .style("text-rendering", "geometricPrecision")
+              .style("font-size", `${config.cluster.lociFontSize}px`)
               .style("font-family", config.plot.fontFamily);
             enter.append("g").attr("class", "loci");
             info
@@ -2262,6 +2438,8 @@
               update.transition(transition).call(_cluster.update)
             )
         );
+
+      _layout.update(data);
 
       let loci = clusters
         .selectAll("g.loci")
@@ -2405,9 +2583,12 @@
       let scaleBarFn = getScaleBarFn();
       let colourBarFn = getColourBarFn();
 
-      plot$1.call(legendFn).call(colourBarFn).call(scaleBarFn).call(arrangePlot);
+      plot$1.call(legendFn).call(colourBarFn).call(scaleBarFn);
+      // Fit against the completed first layout. Otherwise the camera bounds are
+      // measured while chart chrome is still transitioning from the origin.
+      arrangePlot(plot$1, hasInitialView);
 
-      if (!hasInitialView) fitInitialView(container.select("svg.clusterMap"), plot$1);
+      if (!hasInitialView) fitInitialView(svg, plot$1);
     }
 
     function fitInitialView(svg, plot) {
@@ -2432,27 +2613,29 @@
       hasInitialView = true;
     }
 
-    function arrangePlot(selection) {
+    function applyCamera(selection) {
+      const { x, y, k } = getCamera(chartState);
+      selection.attr("transform", `translate(${x}, ${y}) scale(${k})`);
+    }
+
+    function arrangePlot(selection, animate = true) {
       let showSbar = config.plot.scaleGenes;
-      selection
+      let scaleBar = selection
         .select("g.scaleBar")
-        .classed("hidden", showSbar ? false : true)
-        .transition(transition)
-        .attr("opacity", showSbar ? 1 : 0)
-        .attr("transform", plot.scaleBarTransform);
+        .classed("hidden", !showSbar);
+      if (animate) scaleBar = scaleBar.transition(transition);
+      scaleBar.attr("opacity", showSbar ? 1 : 0).attr("transform", plot.scaleBarTransform);
 
       let showCbar = config.link.groupColour || !config.link.show;
-      selection
+      let colourBar = selection
         .select("g.colourBar")
-        .classed("hidden", showCbar ? true : false)
-        .transition(transition)
-        .attr("opacity", showCbar ? 0 : 1)
-        .attr("transform", plot.colourBarTransform);
+        .classed("hidden", showCbar);
+      if (animate) colourBar = colourBar.transition(transition);
+      colourBar.attr("opacity", showCbar ? 0 : 1).attr("transform", plot.colourBarTransform);
 
-      selection
-        .select("g.legend")
-        .transition(transition)
-        .attr("transform", plot.legendTransform);
+      let legend = selection.select("g.legend");
+      if (animate) legend = legend.transition(transition);
+      legend.attr("transform", plot.legendTransform);
     }
 
     function changeGeneColour(_, data) {

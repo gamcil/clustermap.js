@@ -51,3 +51,16 @@ test("chart state persists horizontal offsets across data refreshes", async () =
   assert.equal(getClusterOffset(state, "cluster-a"), 42);
   assert.equal(getLocusOffset(state, "locus-a"), 17);
 });
+
+test("chart state persists the camera transform across data refreshes", async () => {
+  const { createChartState, getCamera, setCamera } = await import(
+    "../src/chartState.mjs"
+  );
+  let state = createChartState(dataFor("a"));
+
+  assert.deepEqual(getCamera(state), { x: 0, y: 0, k: 1 });
+
+  setCamera(state, { x: 20, y: -10, k: 1.5 });
+  state = createChartState(dataFor("a"), state);
+  assert.deepEqual(getCamera(state), { x: 20, y: -10, k: 1.5 });
+});

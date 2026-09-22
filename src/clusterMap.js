@@ -3,7 +3,7 @@ import colourBar from "./colourBar.js";
 import scaleBar from "./scaleBar.js";
 import { renameText } from "./utils.js";
 import { createLinkGroups, filterLinks } from "./links/groups.mjs";
-import { createChartState, flipLocus } from "./chartState.mjs";
+import { createChartState, getCamera, flipLocus, setCamera } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
 import * as api from "./api.js";
@@ -38,7 +38,7 @@ export default function clusterMap() {
     transition = d3.transition().duration(api.config.plot.transitionDuration);
 
     // Build the figure
-    let plot = container
+    const svg = container
       .selectAll("svg.clusterMap")
       .data([data])
       .join(
@@ -95,24 +95,30 @@ export default function clusterMap() {
             .attr("in", "SourceGraphic")
             .attr("in2", "");
 
-          let g = svg.append("g").attr("class", "clusterMapG");
+          // Keep the viewport transform separate from the chart content. Layout
+          // and fit-to-view measure `clusterMapG` in world coordinates, while
+          // zoom/pan only transform this outer viewport group.
+          const viewport = svg.append("g").attr("class", "clusterMapViewport");
+          const g = viewport.append("g").attr("class", "clusterMapG");
 
           // Attach pan/zoom behaviour
           zoom = d3
             .zoom()
             .scaleExtent([0, 8])
-            .on("zoom", (event) => g.attr("transform", event.transform))
+            .on("zoom", (event) => {
+              setCamera(chartState, event.transform);
+              applyCamera(viewport);
+            })
             .on("start", () => svg.attr("cursor", "grabbing"))
             .on("end", () => svg.attr("cursor", "grab"));
           svg.call(zoom).on("dblclick.zoom", null);
 
-          return g;
-        },
-        (update) =>
-          update.call((update) => {
-            update.call(arrangePlot);
-          })
+          return svg;
+        }
       );
+
+    const plot = svg.select("g.clusterMapG");
+    applyCamera(svg.select("g.clusterMapViewport"));
 
     api.scale.update(data);
 
@@ -161,13 +167,16 @@ export default function clusterMap() {
             .attr("y", 8)
             .attr("cursor", "pointer")
             .style("font-weight", "bold")
+            .style("font-size", `${api.config.cluster.nameFontSize}px`)
             .style("font-family", api.config.plot.fontFamily)
             .on("click", renameText);
           info
             .append("text")
             .attr("class", "locusText")
             .attr("y", 12)
-            .style("dominant-baseline", "hanging")
+            .attr("dominant-baseline", "hanging")
+            .style("text-rendering", "geometricPrecision")
+            .style("font-size", `${api.config.cluster.lociFontSize}px`)
             .style("font-family", api.config.plot.fontFamily);
           enter.append("g").attr("class", "loci");
           info
@@ -181,6 +190,8 @@ export default function clusterMap() {
             update.transition(transition).call(api.cluster.update)
           )
       );
+
+    api.layout.update(data);
 
     let loci = clusters
       .selectAll("g.loci")
@@ -324,9 +335,12 @@ export default function clusterMap() {
     let scaleBarFn = getScaleBarFn();
     let colourBarFn = getColourBarFn();
 
-    plot.call(legendFn).call(colourBarFn).call(scaleBarFn).call(arrangePlot);
+    plot.call(legendFn).call(colourBarFn).call(scaleBarFn);
+    // Fit against the completed first layout. Otherwise the camera bounds are
+    // measured while chart chrome is still transitioning from the origin.
+    arrangePlot(plot, hasInitialView);
 
-    if (!hasInitialView) fitInitialView(container.select("svg.clusterMap"), plot);
+    if (!hasInitialView) fitInitialView(svg, plot);
   }
 
   function fitInitialView(svg, plot) {
@@ -351,27 +365,29 @@ export default function clusterMap() {
     hasInitialView = true;
   }
 
-  function arrangePlot(selection) {
+  function applyCamera(selection) {
+    const { x, y, k } = getCamera(chartState);
+    selection.attr("transform", `translate(${x}, ${y}) scale(${k})`);
+  }
+
+  function arrangePlot(selection, animate = true) {
     let showSbar = api.config.plot.scaleGenes;
-    selection
+    let scaleBar = selection
       .select("g.scaleBar")
-      .classed("hidden", showSbar ? false : true)
-      .transition(transition)
-      .attr("opacity", showSbar ? 1 : 0)
-      .attr("transform", api.plot.scaleBarTransform);
+      .classed("hidden", !showSbar);
+    if (animate) scaleBar = scaleBar.transition(transition);
+    scaleBar.attr("opacity", showSbar ? 1 : 0).attr("transform", api.plot.scaleBarTransform);
 
     let showCbar = api.config.link.groupColour || !api.config.link.show;
-    selection
+    let colourBar = selection
       .select("g.colourBar")
-      .classed("hidden", showCbar ? true : false)
-      .transition(transition)
-      .attr("opacity", showCbar ? 0 : 1)
-      .attr("transform", api.plot.colourBarTransform);
+      .classed("hidden", showCbar);
+    if (animate) colourBar = colourBar.transition(transition);
+    colourBar.attr("opacity", showCbar ? 0 : 1).attr("transform", api.plot.colourBarTransform);
 
-    selection
-      .select("g.legend")
-      .transition(transition)
-      .attr("transform", api.plot.legendTransform);
+    let legend = selection.select("g.legend");
+    if (animate) legend = legend.transition(transition);
+    legend.attr("transform", api.plot.legendTransform);
   }
 
   function changeGeneColour(_, data) {

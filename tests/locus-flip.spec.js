@@ -30,6 +30,42 @@ async function readTranslateY(locator) {
   });
 }
 
+async function readCamera(locator) {
+  return locator.evaluate((node) => {
+    const transform = node.transform.baseVal.consolidate();
+    const matrix = transform ? transform.matrix : null;
+    return matrix ? { x: matrix.e, y: matrix.f, k: matrix.a } : { x: 0, y: 0, k: 1 };
+  });
+}
+
+function camerasMatch(left, right) {
+  return (
+    Math.abs(left.x - right.x) < 1e-6 &&
+    Math.abs(left.y - right.y) < 1e-6 &&
+    Math.abs(left.k - right.k) < 1e-6
+  );
+}
+
+async function readScreenBounds(locator) {
+  return locator.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const { x, y, width, height } = node.getBoundingClientRect();
+      return { x, y, width, height };
+    })
+  );
+}
+
+function boundsMatch(left, right) {
+  return (
+    left.length === right.length &&
+    left.every((bounds, index) =>
+      ["x", "y", "width", "height"].every(
+        (property) => Math.abs(bounds[property] - right[index][property]) < 1e-6
+      )
+    )
+  );
+}
+
 async function readLinkPaths(page) {
   return page
     .locator("path.geneLink")
@@ -322,4 +358,39 @@ test("dragging a locus persists its horizontal position", async ({ page }, testI
   await captureCheckpoint(page, testInfo, "after-locus-reposition", async () => ({
     locusX: await readTranslateX(locus),
   }));
+});
+
+test("zoom state persists across a chart redraw", async ({ page }, testInfo) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const svg = page.locator("svg.clusterMap");
+  const root = svg.locator("g.clusterMapViewport");
+  const locus = page.locator("g.locus").first();
+  const clusterNames = page.locator("g.clusterInfo > text.clusterText");
+  await expect(locus).toBeVisible();
+  const initial = await captureCheckpoint(page, testInfo, "initial-camera", () => readCamera(root));
+  const initialLabelBounds = await readScreenBounds(clusterNames);
+
+  // The first chart redraw must retain both the automatic fit-to-view transform
+  // and the screen-space geometry of labels whose content did not change.
+  await locus.dblclick({ position: { x: 20, y: 11 } });
+  await waitForPaint(page);
+  await expect.poll(async () => camerasMatch(await readCamera(root), initial)).toBe(true);
+  await expect
+    .poll(async () => boundsMatch(await readScreenBounds(clusterNames), initialLabelBounds))
+    .toBe(true);
+
+  await svg.hover();
+  await page.mouse.wheel(0, -400);
+  await waitForPaint(page);
+  await expect.poll(() => readCamera(root).then((camera) => camera.k)).toBeGreaterThan(initial.k);
+  const zoomed = await captureCheckpoint(page, testInfo, "after-zoom", () => readCamera(root));
+
+  // Flipping causes a full chart redraw. The viewport transform must be
+  // restored from camera state rather than reset by the SVG renderer.
+  await locus.dblclick({ position: { x: 20, y: 11 } });
+  await waitForPaint(page);
+  await expect
+    .poll(async () => camerasMatch(await readCamera(root), zoomed))
+    .toBe(true);
 });

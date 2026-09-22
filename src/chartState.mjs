@@ -3,6 +3,7 @@ export function createChartState(data, previous = null) {
   const genes = previous?.genes || new Map();
   const clusterOffsets = previous?.clusterOffsets || new Map();
   const locusOffsets = previous?.locusOffsets || new Map();
+  const camera = previous?.camera || { x: 0, y: 0, k: 1 };
   const clusterIds = data.clusters.map((cluster) => cluster.uid);
   const clusterIdSet = new Set(clusterIds);
   const clusterOrder = [
@@ -52,7 +53,7 @@ export function createChartState(data, previous = null) {
   for (const uid of locusOffsets.keys()) {
     if (!loci.has(uid)) locusOffsets.delete(uid);
   }
-  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder };
+  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera };
 }
 
 export function getClusterOrder(chartState) {
@@ -83,6 +84,14 @@ export function initializeLocusOffsets(chartState, defaults) {
   for (const [uid, offset] of defaults) {
     if (!chartState.locusOffsets.has(uid)) chartState.locusOffsets.set(uid, offset);
   }
+}
+
+export function getCamera(chartState) {
+  return chartState.camera;
+}
+
+export function setCamera(chartState, { x, y, k }) {
+  chartState.camera = { x, y, k };
 }
 
 export function getLocusState(chartState, locus) {

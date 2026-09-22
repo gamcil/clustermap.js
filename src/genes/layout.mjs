@@ -1,4 +1,4 @@
-export function getGenePolygonPoints(gene, { scaleX, shape }) {
+export function getGenePolygonCoordinates(gene, { scaleX, shape }) {
   const scaledStart = scaleX(gene.start);
   const scaledEnd = scaleX(gene.end);
   const geneLength = scaledEnd - scaledStart;
@@ -51,7 +51,11 @@ export function getGenePolygonPoints(gene, { scaleX, shape }) {
     }
   }
 
-  return points.join(" ");
+  return points;
+}
+
+export function getGenePolygonPoints(gene, options) {
+  return getGenePolygonCoordinates(gene, options).join(" ");
 }
 
 export function getGeneLabelTransform(gene, { scaleX, shape, label }) {
