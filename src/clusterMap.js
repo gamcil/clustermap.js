@@ -4,6 +4,7 @@ import scaleBar from "./scaleBar.js";
 import { renameText } from "./utils.js";
 import { createLinkGroups, filterLinks } from "./links/groups.mjs";
 import { flipLocus } from "./loci/state.mjs";
+import { initializeClusterData } from "./data/normalize.mjs";
 import * as api from "./api.js";
 
 export default function clusterMap() {
@@ -139,7 +140,7 @@ export default function clusterMap() {
             .append("g")
             .attr("id", api.cluster.getId)
             .attr("class", "cluster")
-            .each(initialiseData);
+            .each(initializeClusterData);
           let info = enter
             .append("g")
             .attr("id", (c) => `cinfo_${c.uid}`)
@@ -377,25 +378,6 @@ export default function clusterMap() {
       .select("g.legend")
       .transition(transition)
       .attr("transform", api.plot.legendTransform);
-  }
-
-  function initialiseData(cluster) {
-    cluster.loci.forEach((locus) => {
-      locus._start = locus._start || locus.start;
-      locus._end = locus._end || locus.end;
-      locus._offset = locus._offset || 0;
-      locus._cluster = locus._cluster || cluster.uid;
-      locus._flipped = locus._flipped || false;
-      locus._trimLeft = locus._trimLeft || null;
-      locus._trimRight = locus._trimRight || null;
-      locus.genes.forEach((gene) => {
-        gene._locus = gene._locus || locus.uid;
-        gene._cluster = gene._cluster || cluster.uid;
-        gene._start = gene._start || gene.start;
-        gene._end = gene._end || gene.end;
-        gene._strand = gene._strand || gene.strand;
-      });
-    });
   }
 
   function changeGeneColour(_, data) {

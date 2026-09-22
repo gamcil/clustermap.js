@@ -1850,6 +1850,32 @@
     return my;
   }
 
+  function setDefault(object, key, value) {
+    if (object[key] == null) object[key] = value;
+  }
+
+  function initializeClusterData(cluster) {
+    for (const locus of cluster.loci) {
+      setDefault(locus, "_start", locus.start);
+      setDefault(locus, "_end", locus.end);
+      setDefault(locus, "_offset", 0);
+      setDefault(locus, "_cluster", cluster.uid);
+      setDefault(locus, "_flipped", false);
+      setDefault(locus, "_trimLeft", null);
+      setDefault(locus, "_trimRight", null);
+
+      for (const gene of locus.genes) {
+        setDefault(gene, "_locus", locus.uid);
+        setDefault(gene, "_cluster", cluster.uid);
+        setDefault(gene, "_start", gene.start);
+        setDefault(gene, "_end", gene.end);
+        setDefault(gene, "_strand", gene.strand);
+      }
+    }
+
+    return cluster;
+  }
+
   function clusterMap() {
     /* A ClusterMap plot. */
 
@@ -1983,7 +2009,7 @@
               .append("g")
               .attr("id", _cluster.getId)
               .attr("class", "cluster")
-              .each(initialiseData);
+              .each(initializeClusterData);
             let info = enter
               .append("g")
               .attr("id", (c) => `cinfo_${c.uid}`)
@@ -2221,25 +2247,6 @@
         .select("g.legend")
         .transition(transition)
         .attr("transform", plot.legendTransform);
-    }
-
-    function initialiseData(cluster) {
-      cluster.loci.forEach((locus) => {
-        locus._start = locus._start || locus.start;
-        locus._end = locus._end || locus.end;
-        locus._offset = locus._offset || 0;
-        locus._cluster = locus._cluster || cluster.uid;
-        locus._flipped = locus._flipped || false;
-        locus._trimLeft = locus._trimLeft || null;
-        locus._trimRight = locus._trimRight || null;
-        locus.genes.forEach((gene) => {
-          gene._locus = gene._locus || locus.uid;
-          gene._cluster = gene._cluster || cluster.uid;
-          gene._start = gene._start || gene.start;
-          gene._end = gene._end || gene.end;
-          gene._strand = gene._strand || gene.strand;
-        });
-      });
     }
 
     function changeGeneColour(_, data) {
