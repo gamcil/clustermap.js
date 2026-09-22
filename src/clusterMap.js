@@ -127,7 +127,19 @@ export default function clusterMap() {
       );
 
     const plot = svg.select("g.clusterMapG");
-    const overlay = createHtmlOverlay(container.select("div.tooltip"));
+    const overlay = createHtmlOverlay({
+      tooltip: container.select("div.tooltip"),
+      scales: api.scales,
+      actions: {
+        redraw: () => api.plot.update(),
+        anchorGene: (gene) => api.gene.anchor(null, gene, true),
+        getGroups: () => data.groups,
+        setGroups: (groups) => {
+          data.groups = groups;
+          api.plot.update();
+        },
+      },
+    });
     container
       .select("div.tooltip")
       .on("mouseenter", overlay.enter)
@@ -195,14 +207,8 @@ export default function clusterMap() {
           api.plot.update();
         },
         onGeneClick: api.config.gene.shape.onClick,
-        showGeneMenu: (event, gene) => {
-          event.preventDefault();
-          overlay.show(event, api.gene.tooltipHTML(gene));
-        },
-        showGroupMenu: (event, group) => {
-          event.preventDefault();
-          overlay.show(event, api.group.tooltipHTML(group));
-        },
+        showGeneMenu: overlay.showGeneMenu,
+        showGroupMenu: overlay.showGroupMenu,
         setScaleBarLength: (value) => {
           api.config.scaleBar.basePair = value;
           api.plot.update();
