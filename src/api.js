@@ -23,7 +23,7 @@ import { buildScene } from "./layout.mjs";
 // This is deliberately one factory per chart, not a collection of tiny API
 // factories: configuration, scales, indexes, and mutable scene state must not
 // leak between independently mounted maps.
-export function createChartRuntime() {
+export function createChartRuntime({ idPrefix = "" } = {}) {
 function refreshClusterOffsetScale() {
   scales.offset.range(
     scales.offset.domain().map((uid) => getClusterOffset(chartState, uid))
@@ -65,6 +65,20 @@ const config = Object.assign({}, defaultConfig);
 let chartIndex = null;
 let chartState = null;
 let scene = null;
+
+// IDs are part of the SVG surface, so they must be unique when several maps
+// are mounted on the same document. Keep the logical suffix stable: it is
+// useful for debugging and for data-driven selectors within a chart.
+const ids = {
+  root: `${idPrefix}root-svg`,
+  picker: `${idPrefix}picker`,
+  filter: `${idPrefix}filter_solid`,
+  cluster: (d) => `${idPrefix}cluster_${d.uid}`,
+  clusterInfo: (d) => `${idPrefix}cinfo_${d.uid}`,
+  locus: (d) => `${idPrefix}locus_${d.uid}`,
+  gene: (d) => `${idPrefix}gene_${d.uid}`,
+  link: (d) => `${idPrefix}link-${d.uid}`,
+};
 
 function setChartIndex(index) {
   chartIndex = index;
@@ -148,7 +162,7 @@ const _layout = {
 };
 
 const _gene = {
-  getId: (d) => `gene_${d.uid}`,
+  getId: ids.gene,
   anchor: (_, anchor, flipLoci = false) => {
     const genes = scales.group
       .domain()
@@ -179,7 +193,7 @@ const _gene = {
 };
 
 const _cluster = {
-  getId: (d) => `cluster_${d.uid}`,
+  getId: ids.cluster,
   /**
    * Generates locus coordinates displayed next underneath a cluster name.
    * If a locus is flipped, (reversed) will be added to its name.
@@ -201,7 +215,7 @@ const _cluster = {
 };
 
 const _link = {
-  getId: (l) => `link-${l.uid}`,
+  getId: ids.link,
   /**
    * Update group scales given new data.
    */
@@ -235,7 +249,7 @@ const _link = {
 };
 
 const _locus = {
-  getId: (d) => `locus_${d.uid}`,
+  getId: ids.locus,
 };
 
 const _scale = {
@@ -311,6 +325,7 @@ config.legend.onClickText = _link.rename;
 return {
   config,
   get,
+  ids,
   setChartIndex,
   setChartState,
   plot,

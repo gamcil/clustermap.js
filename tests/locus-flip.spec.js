@@ -74,7 +74,9 @@ async function readLinkPaths(page) {
 
 async function readGeneDisplays(locus) {
   return locus.locator("g.genes > g.gene").evaluateAll((nodes) =>
-    Object.fromEntries(nodes.map((node) => [node.id, node.getAttribute("display")]))
+    Object.fromEntries(
+      nodes.map((node) => [node.id.slice(node.id.lastIndexOf("gene_")), node.getAttribute("display")])
+    )
   );
 }
 
@@ -116,7 +118,9 @@ test("double-clicking a locus reverses its gene layout", async ({ page }, testIn
     .poll(() =>
       locus
         .locator("g.genes > g.gene")
-        .evaluateAll((nodes) => nodes.map((node) => node.id))
+        .evaluateAll((nodes) =>
+          nodes.map((node) => node.id.slice(node.id.lastIndexOf("gene_")))
+        )
     )
     .toEqual([...before.genes].reverse().map((uid) => `gene_${uid}`));
 });
@@ -222,7 +226,7 @@ test("flipping then trimming uses the flipped gene coordinates", async ({ page }
   const locus = page.locator("g.locus").first();
   const locusText = await getLocusText(page, locus);
   const rightHandle = locus.locator("rect.rightHandle");
-  const displayedMiddleGene = locus.locator("#gene_1 polygon.genePolygon");
+  const displayedMiddleGene = locus.locator('[id$="gene_1"] polygon.genePolygon');
   await expect(locus).toBeVisible();
 
   await locus.dblclick({ position: { x: 20, y: 11 } });
@@ -253,7 +257,7 @@ test("trimming then flipping preserves the selected genes", async ({ page }, tes
   const locus = page.locator("g.locus").first();
   const locusText = await getLocusText(page, locus);
   const rightHandle = locus.locator("rect.rightHandle");
-  const originalMiddleGene = locus.locator("#gene_1 polygon.genePolygon");
+  const originalMiddleGene = locus.locator('[id$="gene_1"] polygon.genePolygon');
   await expect(locus).toBeVisible();
 
   await rightHandle.dragTo(originalMiddleGene);
@@ -342,7 +346,7 @@ test("dragging a locus persists its horizontal position", async ({ page }, testI
 
   const locus = page.locator("g.locus").first();
   const hover = locus.locator("rect.hover");
-  const target = locus.locator("#gene_1 polygon.genePolygon");
+  const target = locus.locator('[id$="gene_1"] polygon.genePolygon');
   await expect(locus).toBeVisible();
 
   const before = await captureCheckpoint(page, testInfo, "before-locus-reposition", async () => ({
@@ -402,4 +406,61 @@ test("zoom state persists across a chart redraw", async ({ page }, testInfo) => 
   await expect
     .poll(async () => camerasMatch(await readCamera(root), zoomed))
     .toBe(true);
+});
+
+test("separate chart instances keep SVG IDs and interactions isolated", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await expect(page.locator("svg.clusterMap")).toHaveCount(1);
+
+  await page.evaluate(async () => {
+    const host = document.createElement("div");
+    host.style.cssText =
+      "position: absolute; top: 0; left: 0; width: 320px; height: 240px;";
+    document.body.append(host);
+
+    const [module, response] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json"),
+    ]);
+    const data = await response.json();
+    const chart = module.default().config({
+      plot: { transitionDuration: 0 },
+      link: { label: { show: true, background: true } },
+    });
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const charts = page.locator("svg.clusterMap");
+  await expect(charts).toHaveCount(2);
+  await expect(charts.nth(1).locator("g.locus").first()).toBeVisible();
+
+  const ids = await charts.evaluateAll((nodes) =>
+    nodes.map((svg) => ({
+      root: svg.id,
+      filter: svg.querySelector("filter").id,
+      cluster: svg.querySelector("g.cluster").id,
+      clusterInfo: svg.querySelector("g.clusterInfo").id,
+      locus: svg.querySelector("g.locus").id,
+      gene: svg.querySelector("g.gene").id,
+      linkLabelFilter: svg.querySelector("text.geneLinkLabel").getAttribute("filter"),
+    }))
+  );
+  for (const key of Object.keys(ids[0])) {
+    expect(ids[0][key]).not.toBe(ids[1][key]);
+  }
+  for (const chartIds of ids) {
+    expect(chartIds.linkLabelFilter).toBe(`url(#${chartIds.filter})`);
+  }
+
+  const firstLocus = charts.nth(0).locator("g.locus").first();
+  const secondLocus = charts.nth(1).locator("g.locus").first();
+  const secondBefore = await readLocusState(secondLocus);
+
+  await firstLocus.dblclick({ position: { x: 20, y: 11 } });
+  await waitForPaint(page);
+
+  await expect
+    .poll(() => readLocusState(firstLocus).then((state) => state.flipped))
+    .toBe(true);
+  await expect.poll(() => readLocusState(secondLocus)).toEqual(secondBefore);
 });

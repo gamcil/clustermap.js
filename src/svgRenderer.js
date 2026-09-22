@@ -53,7 +53,7 @@ export function renderSvg({
           .attr("class", "cluster");
         const info = enter
           .append("g")
-          .attr("id", (cluster) => `cinfo_${cluster.uid}`)
+          .attr("id", ids.clusterInfo)
           .attr("class", "clusterInfo")
           .attr("transform", "translate(-10, 0)")
           .call(
@@ -227,14 +227,14 @@ export function renderSvg({
           .style("fill", "white")
           .style("text-anchor", "middle")
           .style("font-family", config.plot.fontFamily);
-        return updateLinks(enter, scene, config, scales);
+        return updateLinks(enter, scene, config, scales, ids);
       },
       (update) =>
         update.call((selection) =>
           selection
             .classed("hidden", !config.link.show)
             .transition(transition)
-            .call(updateLinks, scene, config, scales)
+            .call(updateLinks, scene, config, scales, ids)
         ),
       (exit) =>
         exit.call((selection) => selection.transition(transition).attr("opacity", 0).remove())
@@ -366,7 +366,7 @@ function createLocusPositionDrag({
         (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
       );
     } else {
-      plot.select(`#cinfo_${locus._cluster}`).attr(
+      plot.select(`#${ids.clusterInfo({ uid: locus._cluster })}`).attr(
         "transform",
         `translate(${value + locusStart - 10}, 0)`
       );
@@ -448,7 +448,7 @@ function createLocusResizeDrag({
         (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
       );
     } else {
-      plot.select(`#cinfo_${locus._cluster}`).attr(
+      plot.select(`#${ids.clusterInfo({ uid: locus._cluster })}`).attr(
         "transform",
         `translate(${scales.locus(locus.uid) + scales.x(state.start) - 10}, 0)`
       );
@@ -622,7 +622,7 @@ function updateGenes(selection, scene, config, scales) {
   return selection;
 }
 
-function updateLinks(selection, scene, config, scales) {
+function updateLinks(selection, scene, config, scales, ids) {
   const linkLayout = (link) => scene.links.get(link.uid);
   const fill = (link) => {
     if (config.link.asLine) return "none";
@@ -651,7 +651,7 @@ function updateLinks(selection, scene, config, scales) {
     .attr("opacity", (link) =>
       config.link.label.show && linkLayout(link)?.visible ? 1 : 0
     )
-    .attr("filter", config.link.label.background ? "url(#filter_solid)" : null)
+    .attr("filter", config.link.label.background ? `url(#${ids.filter})` : null)
     .style("font-size", `${config.link.label.fontSize}px`)
     .attr("x", (link) => linkLayout(link)?.labelPosition?.x)
     .attr("y", (link) => linkLayout(link)?.labelPosition?.y);

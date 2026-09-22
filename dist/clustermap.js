@@ -1071,7 +1071,7 @@
             .attr("class", "cluster");
           const info = enter
             .append("g")
-            .attr("id", (cluster) => `cinfo_${cluster.uid}`)
+            .attr("id", ids.clusterInfo)
             .attr("class", "clusterInfo")
             .attr("transform", "translate(-10, 0)")
             .call(
@@ -1245,14 +1245,14 @@
             .style("fill", "white")
             .style("text-anchor", "middle")
             .style("font-family", config.plot.fontFamily);
-          return updateLinks(enter, scene, config, scales);
+          return updateLinks(enter, scene, config, scales, ids);
         },
         (update) =>
           update.call((selection) =>
             selection
               .classed("hidden", !config.link.show)
               .transition(transition)
-              .call(updateLinks, scene, config, scales)
+              .call(updateLinks, scene, config, scales, ids)
           ),
         (exit) =>
           exit.call((selection) => selection.transition(transition).attr("opacity", 0).remove())
@@ -1384,7 +1384,7 @@
           (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
         );
       } else {
-        plot.select(`#cinfo_${locus._cluster}`).attr(
+        plot.select(`#${ids.clusterInfo({ uid: locus._cluster })}`).attr(
           "transform",
           `translate(${value + locusStart - 10}, 0)`
         );
@@ -1466,7 +1466,7 @@
           (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
         );
       } else {
-        plot.select(`#cinfo_${locus._cluster}`).attr(
+        plot.select(`#${ids.clusterInfo({ uid: locus._cluster })}`).attr(
           "transform",
           `translate(${scales.locus(locus.uid) + scales.x(state.start) - 10}, 0)`
         );
@@ -1640,7 +1640,7 @@
     return selection;
   }
 
-  function updateLinks(selection, scene, config, scales) {
+  function updateLinks(selection, scene, config, scales, ids) {
     const linkLayout = (link) => scene.links.get(link.uid);
     const fill = (link) => {
       if (config.link.asLine) return "none";
@@ -1669,7 +1669,7 @@
       .attr("opacity", (link) =>
         config.link.label.show && linkLayout(link)?.visible ? 1 : 0
       )
-      .attr("filter", config.link.label.background ? "url(#filter_solid)" : null)
+      .attr("filter", config.link.label.background ? `url(#${ids.filter})` : null)
       .style("font-size", `${config.link.label.fontSize}px`)
       .attr("x", (link) => linkLayout(link)?.labelPosition?.x)
       .attr("y", (link) => linkLayout(link)?.labelPosition?.y);
@@ -2124,7 +2124,7 @@
   // This is deliberately one factory per chart, not a collection of tiny API
   // factories: configuration, scales, indexes, and mutable scene state must not
   // leak between independently mounted maps.
-  function createChartRuntime() {
+  function createChartRuntime({ idPrefix = "" } = {}) {
   function refreshClusterOffsetScale() {
     scales.offset.range(
       scales.offset.domain().map((uid) => getClusterOffset(chartState, uid))
@@ -2166,6 +2166,20 @@
   let chartIndex = null;
   let chartState = null;
   let scene = null;
+
+  // IDs are part of the SVG surface, so they must be unique when several maps
+  // are mounted on the same document. Keep the logical suffix stable: it is
+  // useful for debugging and for data-driven selectors within a chart.
+  const ids = {
+    root: `${idPrefix}root-svg`,
+    picker: `${idPrefix}picker`,
+    filter: `${idPrefix}filter_solid`,
+    cluster: (d) => `${idPrefix}cluster_${d.uid}`,
+    clusterInfo: (d) => `${idPrefix}cinfo_${d.uid}`,
+    locus: (d) => `${idPrefix}locus_${d.uid}`,
+    gene: (d) => `${idPrefix}gene_${d.uid}`,
+    link: (d) => `${idPrefix}link-${d.uid}`,
+  };
 
   function setChartIndex(index) {
     chartIndex = index;
@@ -2249,7 +2263,7 @@
   };
 
   const _gene = {
-    getId: (d) => `gene_${d.uid}`,
+    getId: ids.gene,
     anchor: (_, anchor, flipLoci = false) => {
       const genes = scales.group
         .domain()
@@ -2280,7 +2294,7 @@
   };
 
   const _cluster = {
-    getId: (d) => `cluster_${d.uid}`,
+    getId: ids.cluster,
     /**
      * Generates locus coordinates displayed next underneath a cluster name.
      * If a locus is flipped, (reversed) will be added to its name.
@@ -2302,7 +2316,7 @@
   };
 
   const _link = {
-    getId: (l) => `link-${l.uid}`,
+    getId: ids.link,
     /**
      * Update group scales given new data.
      */
@@ -2336,7 +2350,7 @@
   };
 
   const _locus = {
-    getId: (d) => `locus_${d.uid}`,
+    getId: ids.locus,
   };
 
   const _scale = {
@@ -2412,6 +2426,7 @@
   return {
     config,
     get,
+    ids,
     setChartIndex,
     setChartState,
     plot,
@@ -2425,6 +2440,8 @@
   };
   }
 
+  let nextChartInstance = 0;
+
   function clusterMap() {
     /* A ClusterMap plot. */
 
@@ -2433,7 +2450,7 @@
     let zoom = null;
     let hasInitialView = false;
     let chartState = null;
-    const api = createChartRuntime();
+    const api = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
 
     api.plot.update = () => container.call(my);
     api.plot.data = (data) => my.data(data);
@@ -2464,7 +2481,7 @@
             // Add HTML colour picker input
             enter
               .append("input")
-              .attr("id", "picker")
+              .attr("id", api.ids.picker)
               .attr("class", "colourPicker")
               .attr("type", "color")
               .style("position", "absolute")
@@ -2490,7 +2507,7 @@
             let svg = enter
               .append("svg")
               .attr("class", "clusterMap")
-              .attr("id", "root-svg")
+              .attr("id", api.ids.root)
               .attr("cursor", "grab")
               .attr("width", "100%")
               .attr("height", "100%")
@@ -2500,7 +2517,7 @@
             let defs = svg.append("defs");
             let filter = defs
               .append("filter")
-              .attr("id", "filter_solid")
+              .attr("id", api.ids.filter)
               .attr("x", 0)
               .attr("y", 0)
               .attr("width", 1)
@@ -2574,12 +2591,7 @@
         animate: hasInitialView,
         config: api.config,
         scales: api.scales,
-        ids: {
-          cluster: api.cluster.getId,
-          locus: api.locus.getId,
-          gene: api.gene.getId,
-          link: api.link.getId,
-        },
+        ids: api.ids,
         lookup: { gene: api.get.geneData },
         interactions: {
           isDragging: () => isDragging(chartState),

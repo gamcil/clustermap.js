@@ -21,6 +21,8 @@ import { createHtmlOverlay } from "./htmlOverlay.js";
 import { renderSvg } from "./svgRenderer.js";
 import { createChartRuntime } from "./api.js";
 
+let nextChartInstance = 0;
+
 export default function clusterMap() {
   /* A ClusterMap plot. */
 
@@ -29,7 +31,7 @@ export default function clusterMap() {
   let zoom = null;
   let hasInitialView = false;
   let chartState = null;
-  const api = createChartRuntime();
+  const api = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
 
   api.plot.update = () => container.call(my);
   api.plot.data = (data) => my.data(data);
@@ -60,7 +62,7 @@ export default function clusterMap() {
           // Add HTML colour picker input
           enter
             .append("input")
-            .attr("id", "picker")
+            .attr("id", api.ids.picker)
             .attr("class", "colourPicker")
             .attr("type", "color")
             .style("position", "absolute")
@@ -86,7 +88,7 @@ export default function clusterMap() {
           let svg = enter
             .append("svg")
             .attr("class", "clusterMap")
-            .attr("id", "root-svg")
+            .attr("id", api.ids.root)
             .attr("cursor", "grab")
             .attr("width", "100%")
             .attr("height", "100%")
@@ -96,7 +98,7 @@ export default function clusterMap() {
           let defs = svg.append("defs");
           let filter = defs
             .append("filter")
-            .attr("id", "filter_solid")
+            .attr("id", api.ids.filter)
             .attr("x", 0)
             .attr("y", 0)
             .attr("width", 1)
@@ -170,12 +172,7 @@ export default function clusterMap() {
       animate: hasInitialView,
       config: api.config,
       scales: api.scales,
-      ids: {
-        cluster: api.cluster.getId,
-        locus: api.locus.getId,
-        gene: api.gene.getId,
-        link: api.link.getId,
-      },
+      ids: api.ids,
       lookup: { gene: api.get.geneData },
       interactions: {
         isDragging: () => isDragging(chartState),
