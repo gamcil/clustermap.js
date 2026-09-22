@@ -4,7 +4,7 @@ import scaleBar from "./scaleBar.js";
 import { renameText } from "./utils.js";
 import { createLinkGroups, filterLinks } from "./links/groups.mjs";
 import { flipLocus } from "./loci/state.mjs";
-import { initializeClusterData } from "./data/normalize.mjs";
+import { createChartIndex } from "./data/index.mjs";
 import * as api from "./api.js";
 
 export default function clusterMap() {
@@ -23,6 +23,8 @@ export default function clusterMap() {
   }
 
   function update(data) {
+    const chartIndex = createChartIndex(data);
+
     // Save the container for later updates
     container = d3.select(this).attr("width", "100%").attr("height", "100%");
 
@@ -139,8 +141,7 @@ export default function clusterMap() {
           enter = enter
             .append("g")
             .attr("id", api.cluster.getId)
-            .attr("class", "cluster")
-            .each(initializeClusterData);
+            .attr("class", "cluster");
           let info = enter
             .append("g")
             .attr("id", (c) => `cinfo_${c.uid}`)
@@ -289,7 +290,7 @@ export default function clusterMap() {
       .data(
         filterLinks(data.links, {
           groupForGene: api.scales.group,
-          geneForUid: api.get.geneData,
+          geneForUid: (uid) => chartIndex.geneById.get(uid),
           bestOnly: api.config.link.bestOnly,
           threshold: api.config.link.threshold,
         }),

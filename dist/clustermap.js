@@ -1876,6 +1876,38 @@
     return cluster;
   }
 
+  function appendToIndex(index, key, value) {
+    const values = index.get(key);
+    if (values) values.push(value);
+    else index.set(key, [value]);
+  }
+
+  function createChartIndex(data) {
+    const clusterById = new Map();
+    const locusById = new Map();
+    const geneById = new Map();
+    const linkById = new Map();
+    const linksByGeneId = new Map();
+
+    for (const cluster of data.clusters) {
+      initializeClusterData(cluster);
+      clusterById.set(cluster.uid, cluster);
+
+      for (const locus of cluster.loci) {
+        locusById.set(locus.uid, locus);
+        for (const gene of locus.genes) geneById.set(gene.uid, gene);
+      }
+    }
+
+    for (const link of data.links) {
+      linkById.set(link.uid, link);
+      appendToIndex(linksByGeneId, link.query.uid, link);
+      appendToIndex(linksByGeneId, link.target.uid, link);
+    }
+
+    return { clusterById, locusById, geneById, linkById, linksByGeneId };
+  }
+
   function clusterMap() {
     /* A ClusterMap plot. */
 
@@ -1892,6 +1924,8 @@
     }
 
     function update(data) {
+      const chartIndex = createChartIndex(data);
+
       // Save the container for later updates
       container = d3.select(this).attr("width", "100%").attr("height", "100%");
 
@@ -2008,8 +2042,7 @@
             enter = enter
               .append("g")
               .attr("id", _cluster.getId)
-              .attr("class", "cluster")
-              .each(initializeClusterData);
+              .attr("class", "cluster");
             let info = enter
               .append("g")
               .attr("id", (c) => `cinfo_${c.uid}`)
@@ -2158,7 +2191,7 @@
         .data(
           filterLinks(data.links, {
             groupForGene: scales.group,
-            geneForUid: get.geneData,
+            geneForUid: (uid) => chartIndex.geneById.get(uid),
             bestOnly: config.link.bestOnly,
             threshold: config.link.threshold,
           }),
