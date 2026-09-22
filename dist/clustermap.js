@@ -388,34 +388,60 @@
     }
   }
 
-  function formatLocusText(loci, hideCoordinates) {
+  function createChartState(data, previous = null) {
+    const loci = previous?.loci || new Map();
+    const present = new Set();
+    for (const cluster of data.clusters) {
+      for (const locus of cluster.loci) {
+        present.add(locus.uid);
+        if (!loci.has(locus.uid)) {
+          loci.set(locus.uid, {
+            start: locus._start ?? locus.start,
+            end: locus._end ?? locus.end,
+            flipped: locus._flipped ?? false,
+            trimLeft: locus._trimLeft ?? null,
+            trimRight: locus._trimRight ?? null,
+          });
+        }
+      }
+    }
+    for (const uid of loci.keys()) if (!present.has(uid)) loci.delete(uid);
+    return { loci };
+  }
+
+  function getLocusState(chartState, locus) {
+    return chartState.loci.get(locus.uid);
+  }
+
+  function formatLocusText(loci, chartState, hideCoordinates) {
     return loci
       .map((locus) => {
         let start;
         let end;
 
+        const state = getLocusState(chartState, locus);
         if (locus._bio_start) {
-          let startDiff = locus._start - locus.start;
-          let endDiff = locus.end - locus._end;
-          if (locus._flipped) [startDiff, endDiff] = [endDiff, startDiff];
+          let startDiff = state.start - locus.start;
+          let endDiff = locus.end - state.end;
+          if (state.flipped) [startDiff, endDiff] = [endDiff, startDiff];
           start = locus._bio_start + startDiff + 1;
           end = locus._bio_end - endDiff;
         } else {
-          start = locus._start + 1;
-          end = locus._end;
+          start = state.start + 1;
+          end = state.end;
         }
 
-        if (locus._flipped) [start, end] = [end, start];
+        if (state.flipped) [start, end] = [end, start];
 
-        const reversed = locus._flipped ? " (reversed)" : "";
-        if (hideCoordinates || locus._start == null || locus._end == null)
+        const reversed = state.flipped ? " (reversed)" : "";
+        if (hideCoordinates || state.start == null || state.end == null)
           return `${locus.name}${reversed}`;
         return `${locus.name}${reversed}:${start.toFixed(0)}-${end.toFixed(0)}`;
       })
       .join(", ");
   }
 
-  function recalculateLocusCoordinates(locus, scaleGenes) {
+  function recalculateLocusCoordinates(chartState, locus, scaleGenes) {
     locus.genes.forEach((gene, index, genes) => {
       const length = scaleGenes ? gene._end - gene._start : 1000;
       gene.start = scaleGenes ? gene._start : index > 0 ? genes[index - 1].end : 0;
@@ -423,11 +449,12 @@
       gene.strand = gene._strand;
     });
 
-    const oldStart = locus._start;
+    const state = getLocusState(chartState, locus);
+    const oldStart = state.start;
     const lastGene = locus.genes[locus.genes.length - 1];
-    locus._start = locus._trimLeft ? locus._trimLeft.start : 0;
-    locus._end = locus._trimRight
-      ? locus._trimRight.end
+    state.start = state.trimLeft ? state.trimLeft.start : 0;
+    state.end = state.trimRight
+      ? state.trimRight.end
       : scaleGenes
       ? locus.end
       : lastGene.end;
@@ -435,13 +462,14 @@
     return { oldStart };
   }
 
-  function flipLocus(locus) {
-    locus._flipped = !locus._flipped;
+  function flipLocus(chartState, locus) {
+    const state = getLocusState(chartState, locus);
+    state.flipped = !state.flipped;
     const length = locus.end - locus.start;
 
-    [locus._trimLeft, locus._trimRight] = [
-      locus._trimRight,
-      locus._trimLeft,
+    [state.trimLeft, state.trimRight] = [
+      state.trimRight,
+      state.trimLeft,
     ];
 
     locus.genes.forEach((gene) => {
@@ -459,7 +487,7 @@
 
   function getClusterExtent(
     cluster,
-    { scaleX, clusterOffset, locusOffset },
+    { scaleX, clusterOffset, locusOffset, locusState },
     ignoredLoci = []
   ) {
     let start;
@@ -468,8 +496,9 @@
     for (const locus of cluster.loci) {
       if (ignoredLoci.includes(locus.uid)) continue;
       const offset = clusterOffset(cluster.uid) + locusOffset(locus.uid);
-      const locusStart = scaleX(locus._start) + offset;
-      const locusEnd = scaleX(locus._end) + offset;
+      const state = locusState ? locusState(locus) : locus;
+      const locusStart = scaleX(state.start ?? state._start) + offset;
+      const locusEnd = scaleX(state.end ?? state._end) + offset;
       if (start == null || locusStart < start) start = locusStart;
       if (end == null || locusEnd > end) end = locusEnd;
     }
@@ -497,7 +526,7 @@
 
   function getClusterLocusRange(
     cluster,
-    { scaleX, locusOffset, spacing }
+    { scaleX, locusOffset, spacing, locusState }
   ) {
     const range = [];
     let value = 1;
@@ -507,8 +536,9 @@
     for (const [index, locus] of cluster.loci.entries()) {
       if (index > 0) value = range[range.length - 1] + end - start + spacing;
       const offset = locusOffset(locus.uid) || 0;
-      start = scaleX(locus._start || locus.start);
-      end = scaleX(locus._end || locus.end);
+      const state = locusState ? locusState(locus) : locus;
+      start = scaleX(state.start ?? state._start ?? locus.start);
+      end = scaleX(state.end ?? state._end ?? locus.end);
       range.push(value - start + offset);
     }
 
@@ -544,6 +574,7 @@
       scaleX: scales.x,
       clusterOffset: scales.offset,
       locusOffset: scales.locus,
+      locusState,
       spacing: config.locus.spacing,
     };
   }
@@ -555,22 +586,33 @@
 
   function updateLocusScaling(locus) {
     const { oldStart } = recalculateLocusCoordinates(
+      chartState,
       locus,
       config.plot.scaleGenes
     );
     updateScaleRange(
       "locus",
       locus.uid,
-      scales.locus(locus.uid) + xDistance(scales.x, locus._start, oldStart)
+      scales.locus(locus.uid) +
+        xDistance(scales.x, locusState(locus).start, oldStart)
     );
   }
 
   const config = Object.assign({}, defaultConfig);
   const flags = { isDragging: false };
   let chartIndex = null;
+  let chartState = null;
 
   function setChartIndex(index) {
     chartIndex = index;
+  }
+
+  function setChartState(state) {
+    chartState = state;
+  }
+
+  function locusState(locus) {
+    return getLocusState(chartState, locus);
   }
 
   function _get(uid, type) {
@@ -811,7 +853,7 @@
           let gene = get.geneData(uid);
           if (flipLoci && gene.strand !== anchor.strand) {
             let locus = get.locusData(gene._locus);
-            flipLocus(locus);
+            flipLocus(chartState, locus);
             updateLocusScaling(locus);
           }
           if (anchors.has(gene._cluster)) {
@@ -866,7 +908,7 @@
      * @returns {String} Comma-separated locus coordinates
      */
     locusText: (cluster) =>
-      formatLocusText(cluster.loci, config.cluster.hideLocusCoordinates),
+      formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates),
     /**
      * Tests if two clusters are vertically adjacent.
      * @param {String} one - First cluster UID
@@ -1129,14 +1171,17 @@
 
   const _locus = {
     getId: (d) => `locus_${d.uid}`,
-    realLength: (d) => xDistance(scales.x, d._start, d._end),
+    realLength: (d) => {
+      const state = locusState(d);
+      return xDistance(scales.x, state.start, state.end);
+    },
     updateTrackBar: (selection) => {
       let midPoint =
         config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
       selection
         .select("line.trackBar")
-        .attr("x1", (d) => scales.x(d._start))
-        .attr("x2", (d) => scales.x(d._end))
+        .attr("x1", (d) => scales.x(locusState(d).start))
+        .attr("x2", (d) => scales.x(locusState(d).end))
         .attr("y1", midPoint)
         .attr("y2", midPoint)
         .style("stroke", config.locus.trackBar.colour)
@@ -1152,12 +1197,14 @@
         .attr("height", botPoint + 20);
       selection
         .select("rect.hover")
-        .attr("x", (d) => scales.x(d._start))
+        .attr("x", (d) => scales.x(locusState(d).start))
         .attr("width", _locus.realLength);
       selection
         .select("rect.leftHandle")
-        .attr("x", (d) => scales.x(d._start) - 8);
-      selection.select("rect.rightHandle").attr("x", (d) => scales.x(d._end));
+        .attr("x", (d) => scales.x(locusState(d).start) - 8);
+      selection
+        .select("rect.rightHandle")
+        .attr("x", (d) => scales.x(locusState(d).end));
       return selection;
     },
     update: (selection) =>
@@ -1171,7 +1218,7 @@
       const started = (_, d) => {
         [minPos] = getChartExtent([d.uid]);
         flags.isDragging = true;
-        scales.x(d._start);
+        scales.x(locusState(d).start);
       };
 
       function dragged(event, d) {
@@ -1184,16 +1231,17 @@
       }
 
       const _left = (event, d, handle) => {
+        const state = locusState(d);
         // Find closest gene start, from start to _end
         let genes = d.genes
-          .filter((gene) => gene.end <= d._end)
+          .filter((gene) => gene.end <= state.end)
           .sort((a, b) => (a.start > b.start ? 1 : -1));
         let starts = [d.start, ...genes.map((gene) => gene.start)];
         let coords = starts.map((value) => scales.x(value));
         let position = getClosestValue(coords, event.x);
         value = coords[position];
-        d._start = starts[position];
-        d._trimLeft = d._start === starts[0] ? null : genes[position - 1];
+        state.start = starts[position];
+        state.trimLeft = state.start === starts[0] ? null : genes[position - 1];
 
         // Adjust the dragged rect
         handle.attr("x", value - 8);
@@ -1207,7 +1255,7 @@
         locus
           .selectAll("g.gene")
           .attr("display", (g) =>
-            g.start >= d._start && g.end <= d._end + 1 ? "inline" : "none"
+            g.start >= state.start && g.end <= state.end + 1 ? "inline" : "none"
           );
         locus.call(_locus.updateTrackBar);
 
@@ -1226,25 +1274,26 @@
         } else {
           d3.select(`#cinfo_${d._cluster}`).attr(
             "transform",
-            `translate(${scales.locus(d.uid) + scales.x(d._start) - 10}, 0)`
+            `translate(${scales.locus(d.uid) + scales.x(state.start) - 10}, 0)`
           );
         }
       };
 
       const _right = (event, d, handle) => {
+        const state = locusState(d);
         // Find closest visible gene end, from _start to end
         let genes = d.genes
-          .filter((gene) => gene.start >= d._start)
+          .filter((gene) => gene.start >= state.start)
           .sort((a, b) => (a.start > b.start ? 1 : -1));
         let geneEnds = genes.map((g) => g.end);
-        let ends = [...geneEnds, config.plot.scaleGenes ? d.end : d._end];
+        let ends = [...geneEnds, config.plot.scaleGenes ? d.end : state.end];
         let range = ends.map((value) => scales.x(value));
         let position = getClosestValue(range, event.x);
-        d._trimRight = genes[position] ? genes[position] : null;
-        d._end = ends[position];
+        state.trimRight = genes[position] ? genes[position] : null;
+        state.end = ends[position];
 
         // Transform handle rect
-        handle.attr("x", scales.x(d._end));
+        handle.attr("x", scales.x(state.end));
 
         // Update rect width, hide genes out of bounds
         let locus = get.locus(d.uid);
@@ -1252,7 +1301,7 @@
         locus
           .selectAll("g.gene")
           .attr("display", (g) =>
-            g.start >= d._start && g.end <= d._end + 1 ? "inline" : "none"
+            g.start >= state.start && g.end <= state.end + 1 ? "inline" : "none"
           );
         locus.call(_locus.updateTrackBar);
 
@@ -1267,8 +1316,9 @@
         flags.isDragging = false;
         // Check if visible locus coordinates equal default coordinates in data
         // If yes, make sure trimLeft/trimRight are reset to null
-        if (d._end === d.end) d._trimRight = null;
-        if (d._start === d.start) d._trimLeft = null;
+        const state = locusState(d);
+        if (state.end === d.end) state.trimRight = null;
+        if (state.start === d.start) state.trimLeft = null;
         d3.select(`#locus_${d.uid} .hover`).transition().attr("opacity", 0);
         plot.update();
       };
@@ -1299,7 +1349,7 @@
 
         // Adjust clusterInfo groups
         let locData = locus.datum();
-        let locStart = scales.x(locData._start);
+        let locStart = scales.x(locusState(locData).start);
         if (config.cluster.alignLabels) {
           let locMin = value + scales.offset(d._cluster) + locStart;
           let newMin = Math.min(locMin, minPos) - 10;
@@ -1317,7 +1367,7 @@
         }
 
         // Adjust legend group
-        let locEnd = scales.x(locData._end);
+        let locEnd = scales.x(locusState(locData).end);
         let newMax =
           Math.max(value + scales.offset(d._cluster) + locEnd, maxPos) + 20;
         d3.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
@@ -1857,13 +1907,8 @@
 
   function initializeClusterData(cluster) {
     for (const locus of cluster.loci) {
-      setDefault(locus, "_start", locus.start);
-      setDefault(locus, "_end", locus.end);
       setDefault(locus, "_offset", 0);
       setDefault(locus, "_cluster", cluster.uid);
-      setDefault(locus, "_flipped", false);
-      setDefault(locus, "_trimLeft", null);
-      setDefault(locus, "_trimRight", null);
 
       for (const gene of locus.genes) {
         setDefault(gene, "_locus", locus.uid);
@@ -1916,6 +1961,7 @@
     let transition = d3.transition();
     let zoom = null;
     let hasInitialView = false;
+    let chartState = null;
 
     plot.update = () => container.call(my);
     plot.data = (data) => my.data(data);
@@ -1926,7 +1972,9 @@
 
     function update(data) {
       const chartIndex = createChartIndex(data);
+      chartState = createChartState(data, chartState);
       setChartIndex(chartIndex);
+      setChartState(chartState);
 
       // Save the container for later updates
       container = d3.select(this).attr("width", "100%").attr("height", "100%");
@@ -2145,7 +2193,7 @@
                   .attr("opacity", 0);
               })
               .on("dblclick", (_, d) => {
-                flipLocus(d);
+                flipLocus(chartState, d);
                 plot.update();
               });
             return enter.call(_locus.update);

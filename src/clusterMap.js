@@ -3,7 +3,7 @@ import colourBar from "./colourBar.js";
 import scaleBar from "./scaleBar.js";
 import { renameText } from "./utils.js";
 import { createLinkGroups, filterLinks } from "./links/groups.mjs";
-import { flipLocus } from "./chartState.mjs";
+import { createChartState, flipLocus } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import * as api from "./api.js";
 
@@ -14,6 +14,7 @@ export default function clusterMap() {
   let transition = d3.transition();
   let zoom = null;
   let hasInitialView = false;
+  let chartState = null;
 
   api.plot.update = () => container.call(my);
   api.plot.data = (data) => my.data(data);
@@ -24,7 +25,9 @@ export default function clusterMap() {
 
   function update(data) {
     const chartIndex = createChartIndex(data);
+    chartState = createChartState(data, chartState);
     api.setChartIndex(chartIndex);
+    api.setChartState(chartState);
 
     // Save the container for later updates
     container = d3.select(this).attr("width", "100%").attr("height", "100%");
@@ -243,7 +246,7 @@ export default function clusterMap() {
                 .attr("opacity", 0);
             })
             .on("dblclick", (_, d) => {
-              flipLocus(d);
+              flipLocus(chartState, d);
               api.plot.update();
             });
           return enter.call(api.locus.update);

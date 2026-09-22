@@ -14,6 +14,7 @@ import {
 import {
   flipLocus,
   formatLocusText,
+  getLocusState,
   recalculateLocusCoordinates,
 } from "./chartState.mjs";
 import {
@@ -40,6 +41,7 @@ function locusLayout() {
     scaleX: scales.x,
     clusterOffset: scales.offset,
     locusOffset: scales.locus,
+    locusState,
     spacing: config.locus.spacing,
   };
 }
@@ -51,22 +53,33 @@ function getChartExtent(ignoredLoci) {
 
 function updateLocusScaling(locus) {
   const { oldStart } = recalculateLocusCoordinates(
+    chartState,
     locus,
     config.plot.scaleGenes
   );
   updateScaleRange(
     "locus",
     locus.uid,
-    scales.locus(locus.uid) + xDistance(scales.x, locus._start, oldStart)
+    scales.locus(locus.uid) +
+      xDistance(scales.x, locusState(locus).start, oldStart)
   );
 }
 
 const config = Object.assign({}, defaultConfig);
 const flags = { isDragging: false };
 let chartIndex = null;
+let chartState = null;
 
 function setChartIndex(index) {
   chartIndex = index;
+}
+
+function setChartState(state) {
+  chartState = state;
+}
+
+function locusState(locus) {
+  return getLocusState(chartState, locus);
 }
 
 function _get(uid, type) {
@@ -307,7 +320,7 @@ const _gene = {
         let gene = get.geneData(uid);
         if (flipLoci && gene.strand !== anchor.strand) {
           let locus = get.locusData(gene._locus);
-          flipLocus(locus);
+          flipLocus(chartState, locus);
           updateLocusScaling(locus);
         }
         if (anchors.has(gene._cluster)) {
@@ -362,7 +375,7 @@ const _cluster = {
    * @returns {String} Comma-separated locus coordinates
    */
   locusText: (cluster) =>
-    formatLocusText(cluster.loci, config.cluster.hideLocusCoordinates),
+    formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates),
   /**
    * Tests if two clusters are vertically adjacent.
    * @param {String} one - First cluster UID
@@ -625,14 +638,17 @@ const _link = {
 
 const _locus = {
   getId: (d) => `locus_${d.uid}`,
-  realLength: (d) => xDistance(scales.x, d._start, d._end),
+  realLength: (d) => {
+    const state = locusState(d);
+    return xDistance(scales.x, state.start, state.end);
+  },
   updateTrackBar: (selection) => {
     let midPoint =
       config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
     selection
       .select("line.trackBar")
-      .attr("x1", (d) => scales.x(d._start))
-      .attr("x2", (d) => scales.x(d._end))
+      .attr("x1", (d) => scales.x(locusState(d).start))
+      .attr("x2", (d) => scales.x(locusState(d).end))
       .attr("y1", midPoint)
       .attr("y2", midPoint)
       .style("stroke", config.locus.trackBar.colour)
@@ -648,12 +664,14 @@ const _locus = {
       .attr("height", botPoint + 20);
     selection
       .select("rect.hover")
-      .attr("x", (d) => scales.x(d._start))
+      .attr("x", (d) => scales.x(locusState(d).start))
       .attr("width", _locus.realLength);
     selection
       .select("rect.leftHandle")
-      .attr("x", (d) => scales.x(d._start) - 8);
-    selection.select("rect.rightHandle").attr("x", (d) => scales.x(d._end));
+      .attr("x", (d) => scales.x(locusState(d).start) - 8);
+    selection
+      .select("rect.rightHandle")
+      .attr("x", (d) => scales.x(locusState(d).end));
     return selection;
   },
   update: (selection) =>
@@ -667,7 +685,7 @@ const _locus = {
     const started = (_, d) => {
       [minPos] = getChartExtent([d.uid]);
       flags.isDragging = true;
-      initial = scales.x(d._start);
+      initial = scales.x(locusState(d).start);
     };
 
     function dragged(event, d) {
@@ -680,16 +698,17 @@ const _locus = {
     }
 
     const _left = (event, d, handle) => {
+      const state = locusState(d);
       // Find closest gene start, from start to _end
       let genes = d.genes
-        .filter((gene) => gene.end <= d._end)
+        .filter((gene) => gene.end <= state.end)
         .sort((a, b) => (a.start > b.start ? 1 : -1));
       let starts = [d.start, ...genes.map((gene) => gene.start)];
       let coords = starts.map((value) => scales.x(value));
       let position = getClosestValue(coords, event.x);
       value = coords[position];
-      d._start = starts[position];
-      d._trimLeft = d._start === starts[0] ? null : genes[position - 1];
+      state.start = starts[position];
+      state.trimLeft = state.start === starts[0] ? null : genes[position - 1];
 
       // Adjust the dragged rect
       handle.attr("x", value - 8);
@@ -703,7 +722,7 @@ const _locus = {
       locus
         .selectAll("g.gene")
         .attr("display", (g) =>
-          g.start >= d._start && g.end <= d._end + 1 ? "inline" : "none"
+          g.start >= state.start && g.end <= state.end + 1 ? "inline" : "none"
         );
       locus.call(_locus.updateTrackBar);
 
@@ -722,25 +741,26 @@ const _locus = {
       } else {
         d3.select(`#cinfo_${d._cluster}`).attr(
           "transform",
-          `translate(${scales.locus(d.uid) + scales.x(d._start) - 10}, 0)`
+          `translate(${scales.locus(d.uid) + scales.x(state.start) - 10}, 0)`
         );
       }
     };
 
     const _right = (event, d, handle) => {
+      const state = locusState(d);
       // Find closest visible gene end, from _start to end
       let genes = d.genes
-        .filter((gene) => gene.start >= d._start)
+        .filter((gene) => gene.start >= state.start)
         .sort((a, b) => (a.start > b.start ? 1 : -1));
       let geneEnds = genes.map((g) => g.end);
-      let ends = [...geneEnds, config.plot.scaleGenes ? d.end : d._end];
+      let ends = [...geneEnds, config.plot.scaleGenes ? d.end : state.end];
       let range = ends.map((value) => scales.x(value));
       let position = getClosestValue(range, event.x);
-      d._trimRight = genes[position] ? genes[position] : null;
-      d._end = ends[position];
+      state.trimRight = genes[position] ? genes[position] : null;
+      state.end = ends[position];
 
       // Transform handle rect
-      handle.attr("x", scales.x(d._end));
+      handle.attr("x", scales.x(state.end));
 
       // Update rect width, hide genes out of bounds
       let locus = get.locus(d.uid);
@@ -748,7 +768,7 @@ const _locus = {
       locus
         .selectAll("g.gene")
         .attr("display", (g) =>
-          g.start >= d._start && g.end <= d._end + 1 ? "inline" : "none"
+          g.start >= state.start && g.end <= state.end + 1 ? "inline" : "none"
         );
       locus.call(_locus.updateTrackBar);
 
@@ -763,8 +783,9 @@ const _locus = {
       flags.isDragging = false;
       // Check if visible locus coordinates equal default coordinates in data
       // If yes, make sure trimLeft/trimRight are reset to null
-      if (d._end === d.end) d._trimRight = null;
-      if (d._start === d.start) d._trimLeft = null;
+      const state = locusState(d);
+      if (state.end === d.end) state.trimRight = null;
+      if (state.start === d.start) state.trimLeft = null;
       d3.select(`#locus_${d.uid} .hover`).transition().attr("opacity", 0);
       plot.update();
     };
@@ -795,7 +816,7 @@ const _locus = {
 
       // Adjust clusterInfo groups
       let locData = locus.datum();
-      let locStart = scales.x(locData._start);
+      let locStart = scales.x(locusState(locData).start);
       if (config.cluster.alignLabels) {
         let locMin = value + scales.offset(d._cluster) + locStart;
         let newMin = Math.min(locMin, minPos) - 10;
@@ -813,7 +834,7 @@ const _locus = {
       }
 
       // Adjust legend group
-      let locEnd = scales.x(locData._end);
+      let locEnd = scales.x(locusState(locData).end);
       let newMax =
         Math.max(value + scales.offset(d._cluster) + locEnd, maxPos) + 20;
       d3.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
@@ -1052,6 +1073,7 @@ export {
   flags,
   get,
   setChartIndex,
+  setChartState,
   plot,
   scales,
   _cluster as cluster,

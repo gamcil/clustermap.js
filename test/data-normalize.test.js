@@ -21,22 +21,12 @@ test("cluster normalization initializes display fields and relationships", async
   const [gene] = locus.genes;
   assert.deepEqual(
     {
-      start: locus._start,
-      end: locus._end,
       offset: locus._offset,
       cluster: locus._cluster,
-      flipped: locus._flipped,
-      trimLeft: locus._trimLeft,
-      trimRight: locus._trimRight,
     },
     {
-      start: 0,
-      end: 100,
       offset: 0,
       cluster: "cluster-a",
-      flipped: false,
-      trimLeft: null,
-      trimRight: null,
     }
   );
   assert.deepEqual(
@@ -60,8 +50,6 @@ test("cluster normalization preserves existing display state", async () => {
         uid: "locus-a",
         start: 0,
         end: 100,
-        _start: 25,
-        _flipped: true,
         genes: [
           {
             uid: "gene-a",
@@ -77,7 +65,5 @@ test("cluster normalization preserves existing display state", async () => {
 
   initializeClusterData(cluster);
 
-  assert.equal(cluster.loci[0]._start, 25);
-  assert.equal(cluster.loci[0]._flipped, true);
   assert.equal(cluster.loci[0].genes[0]._strand, 0);
 });

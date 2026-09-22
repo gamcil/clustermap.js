@@ -4,13 +4,8 @@ function setDefault(object, key, value) {
 
 export function initializeClusterData(cluster) {
   for (const locus of cluster.loci) {
-    setDefault(locus, "_start", locus.start);
-    setDefault(locus, "_end", locus.end);
     setDefault(locus, "_offset", 0);
     setDefault(locus, "_cluster", cluster.uid);
-    setDefault(locus, "_flipped", false);
-    setDefault(locus, "_trimLeft", null);
-    setDefault(locus, "_trimRight", null);
 
     for (const gene of locus.genes) {
       setDefault(gene, "_locus", locus.uid);

@@ -5,8 +5,11 @@ import { captureCheckpoint, waitForPaint } from "./helpers/report.js";
 async function readLocusState(locus) {
   return locus.evaluate((node) => {
     const datum = d3.select(node).datum();
+    const locusText = node
+      .closest("g.cluster")
+      .querySelector("text.locusText").textContent;
     return {
-      flipped: datum._flipped,
+      flipped: locusText.includes("(reversed)"),
       length: datum.end - datum.start,
       genes: datum.genes.map((gene) => ({
         uid: gene.uid,

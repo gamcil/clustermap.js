@@ -4,7 +4,7 @@ export function xDistance(scaleX, start, end) {
 
 export function getClusterExtent(
   cluster,
-  { scaleX, clusterOffset, locusOffset },
+  { scaleX, clusterOffset, locusOffset, locusState },
   ignoredLoci = []
 ) {
   let start;
@@ -13,8 +13,9 @@ export function getClusterExtent(
   for (const locus of cluster.loci) {
     if (ignoredLoci.includes(locus.uid)) continue;
     const offset = clusterOffset(cluster.uid) + locusOffset(locus.uid);
-    const locusStart = scaleX(locus._start) + offset;
-    const locusEnd = scaleX(locus._end) + offset;
+    const state = locusState ? locusState(locus) : locus;
+    const locusStart = scaleX(state.start ?? state._start) + offset;
+    const locusEnd = scaleX(state.end ?? state._end) + offset;
     if (start == null || locusStart < start) start = locusStart;
     if (end == null || locusEnd > end) end = locusEnd;
   }
@@ -42,7 +43,7 @@ export function getClusterExtents(clusters, layout, ignoredLoci = []) {
 
 export function getClusterLocusRange(
   cluster,
-  { scaleX, locusOffset, spacing }
+  { scaleX, locusOffset, spacing, locusState }
 ) {
   const range = [];
   let value = 1;
@@ -52,8 +53,9 @@ export function getClusterLocusRange(
   for (const [index, locus] of cluster.loci.entries()) {
     if (index > 0) value = range[range.length - 1] + end - start + spacing;
     const offset = locusOffset(locus.uid) || 0;
-    start = scaleX(locus._start || locus.start);
-    end = scaleX(locus._end || locus.end);
+    const state = locusState ? locusState(locus) : locus;
+    start = scaleX(state.start ?? state._start ?? locus.start);
+    end = scaleX(state.end ?? state._end ?? locus.end);
     range.push(value - start + offset);
   }
 

@@ -17,29 +17,31 @@ const createLocus = () => ({
 });
 
 test("flipping a locus twice restores its gene state", async () => {
-  const { flipLocus } = await import("../src/chartState.mjs");
+  const { createChartState, flipLocus } = await import("../src/chartState.mjs");
   const locus = createLocus();
   const before = structuredClone(locus);
+  const state = createChartState({ clusters: [{ loci: [locus] }] });
 
-  flipLocus(locus);
-  flipLocus(locus);
+  flipLocus(state, locus);
+  flipLocus(state, locus);
 
   assert.deepEqual(locus, before);
 });
 
 test("recalculating a trimmed locus updates gene and locus coordinates", async () => {
-  const { recalculateLocusCoordinates } = await import(
+  const { createChartState, recalculateLocusCoordinates } = await import(
     "../src/chartState.mjs"
   );
   const locus = createLocus();
-  locus._trimLeft = { start: 2500 };
-  locus._trimRight = { end: 3500 };
+  const state = createChartState({ clusters: [{ loci: [locus] }] });
+  state.loci.get(locus.uid).trimLeft = { start: 2500 };
+  state.loci.get(locus.uid).trimRight = { end: 3500 };
 
-  const { oldStart } = recalculateLocusCoordinates(locus, true);
+  const { oldStart } = recalculateLocusCoordinates(state, locus, true);
 
   assert.equal(oldStart, 0);
-  assert.equal(locus._start, 2500);
-  assert.equal(locus._end, 3500);
+  assert.equal(state.loci.get(locus.uid).start, 2500);
+  assert.equal(state.loci.get(locus.uid).end, 3500);
   assert.deepEqual(
     locus.genes.map(({ start, end, strand }) => ({ start, end, strand })),
     [
@@ -50,16 +52,17 @@ test("recalculating a trimmed locus updates gene and locus coordinates", async (
 });
 
 test("locus labels show trimmed and reversed coordinates", async () => {
-  const { formatLocusText } = await import("../src/chartState.mjs");
+  const { createChartState, formatLocusText } = await import("../src/chartState.mjs");
   const locus = createLocus();
-  locus._start = 2500;
-  locus._end = 6500;
+  const state = createChartState({ clusters: [{ loci: [locus] }] });
+  state.loci.get(locus.uid).start = 2500;
+  state.loci.get(locus.uid).end = 6500;
 
-  assert.equal(formatLocusText([locus], false), "locus:2501-6500");
+  assert.equal(formatLocusText([locus], state, false), "locus:2501-6500");
 
-  locus._flipped = true;
+  state.loci.get(locus.uid).flipped = true;
   assert.equal(
-    formatLocusText([locus], false),
+    formatLocusText([locus], state, false),
     "locus (reversed):6500-2501"
   );
 });
