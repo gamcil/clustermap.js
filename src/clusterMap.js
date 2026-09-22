@@ -19,7 +19,7 @@ import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { renderSvg } from "./svgRenderer.js";
-import * as api from "./api.js";
+import { createChartRuntime } from "./api.js";
 
 export default function clusterMap() {
   /* A ClusterMap plot. */
@@ -29,6 +29,7 @@ export default function clusterMap() {
   let zoom = null;
   let hasInitialView = false;
   let chartState = null;
+  const api = createChartRuntime();
 
   api.plot.update = () => container.call(my);
   api.plot.data = (data) => my.data(data);

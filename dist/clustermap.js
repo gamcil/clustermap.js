@@ -2114,6 +2114,10 @@
     };
   }
 
+  // This is deliberately one factory per chart, not a collection of tiny API
+  // factories: configuration, scales, indexes, and mutable scene state must not
+  // leak between independently mounted maps.
+  function createChartRuntime() {
   function refreshClusterOffsetScale() {
     scales.offset.range(
       scales.offset.domain().map((uid) => getClusterOffset(chartState, uid))
@@ -2398,6 +2402,22 @@
   config.gene.shape.onClick = _gene.anchor;
   config.legend.onClickText = _link.rename;
 
+  return {
+    config,
+    get,
+    setChartIndex,
+    setChartState,
+    plot,
+    scales,
+    cluster: _cluster,
+    gene: _gene,
+    link: _link,
+    locus: _locus,
+    scale: _scale,
+    layout: _layout,
+  };
+  }
+
   function clusterMap() {
     /* A ClusterMap plot. */
 
@@ -2406,9 +2426,10 @@
     let zoom = null;
     let hasInitialView = false;
     let chartState = null;
+    const api = createChartRuntime();
 
-    plot.update = () => container.call(my);
-    plot.data = (data) => my.data(data);
+    api.plot.update = () => container.call(my);
+    api.plot.data = (data) => my.data(data);
 
     function my(selection) {
       selection.each(update);
@@ -2418,14 +2439,14 @@
       data = normalizeChartData(data);
       const chartIndex = createChartIndex(data);
       chartState = createChartState(data, chartState);
-      setChartIndex(chartIndex);
-      setChartState(chartState);
+      api.setChartIndex(chartIndex);
+      api.setChartState(chartState);
 
       // Save the container for later updates
       container = d3.select(this).attr("width", "100%").attr("height", "100%");
 
       // Set up the shared transition
-      transition = d3.transition().duration(config.plot.transitionDuration);
+      transition = d3.transition().duration(api.config.plot.transitionDuration);
 
       // Build the figure
       const svg = container
@@ -2456,7 +2477,7 @@
               .style("border", "1px solid #999")
               .style("border-radius", "4px")
               .style("box-shadow", "0 2px 8px rgba(0, 0, 0, 0.2)")
-              .style("font-family", config.plot.fontFamily);
+              .style("font-family", api.config.plot.fontFamily);
 
             // Add root SVG element
             let svg = enter
@@ -2505,17 +2526,17 @@
           }
         );
 
-      const plot$1 = svg.select("g.clusterMapG");
+      const plot = svg.select("g.clusterMapG");
       const overlay = createHtmlOverlay({
         tooltip: container.select("div.tooltip"),
-        scales: scales,
+        scales: api.scales,
         actions: {
-          redraw: () => plot.update(),
-          anchorGene: (gene) => _gene.anchor(null, gene, true),
+          redraw: () => api.plot.update(),
+          anchorGene: (gene) => api.gene.anchor(null, gene, true),
           getGroups: () => data.groups,
           setGroups: (groups) => {
             data.groups = groups;
-            plot.update();
+            api.plot.update();
           },
         },
       });
@@ -2525,7 +2546,7 @@
         .on("mouseleave", overlay.leave);
       applyCamera(svg.select("g.clusterMapViewport"));
 
-      _scale.update(data);
+      api.scale.update(data);
 
       // Only disable grouping if explicitly defined false
       if (data.config && data.config.updateGroups === false) {
@@ -2534,32 +2555,32 @@
         data.groups = createLinkGroups(data.links, data.groups);
       }
 
-      _link.updateGroups(data.groups);
+      api.link.updateGroups(data.groups);
 
-      const scene = _layout.update(data);
+      const scene = api.layout.update(data);
 
       renderSvg({
-        plot: plot$1,
+        plot,
         data,
         scene,
         transition,
         animate: hasInitialView,
-        config: config,
-        scales: scales,
+        config: api.config,
+        scales: api.scales,
         ids: {
-          cluster: _cluster.getId,
-          locus: _locus.getId,
-          gene: _gene.getId,
-          link: _link.getId,
+          cluster: api.cluster.getId,
+          locus: api.locus.getId,
+          gene: api.gene.getId,
+          link: api.link.getId,
         },
-        lookup: { gene: get.geneData },
+        lookup: { gene: api.get.geneData },
         interactions: {
           isDragging: () => isDragging(chartState),
           setDragging: (dragging) => setDragging(chartState, dragging),
           getClusterOrder: () => getClusterOrder(chartState),
           moveClusterToIndex: (uid, index) =>
             moveClusterToIndex(chartState, uid, index),
-          redraw: () => plot.update(),
+          redraw: () => api.plot.update(),
           getLocusOffset: (uid) => getLocusOffset(chartState, uid),
           getLocusState: (locus) => getLocusState(chartState, locus),
           getGeneState: (gene) => getGeneState(chartState, gene),
@@ -2581,27 +2602,27 @@
           },
           flipLocus: (locus) => {
             flipLocus(chartState, locus);
-            plot.update();
+            api.plot.update();
           },
-          onGeneClick: config.gene.shape.onClick,
+          onGeneClick: api.config.gene.shape.onClick,
           showGeneMenu: overlay.showGeneMenu,
           showGroupMenu: overlay.showGroupMenu,
           setScaleBarLength: (value) => {
-            config.scaleBar.basePair = value;
-            plot.update();
+            api.config.scaleBar.basePair = value;
+            api.plot.update();
           },
           chooseLegendColour: (group) => {
             const picker = container.select("input.colourPicker");
             picker.on("change", () => {
               group.colour = picker.node().value;
-              plot.update();
+              api.plot.update();
             });
             picker.node().click();
           },
         },
       });
 
-      if (!hasInitialView) fitInitialView(svg, plot$1);
+      if (!hasInitialView) fitInitialView(svg, plot);
     }
 
     function fitInitialView(svg, plot) {
@@ -2632,8 +2653,8 @@
     }
 
     my.config = function (_) {
-      if (!arguments.length) return config;
-      plot.updateConfig(_);
+      if (!arguments.length) return api.config;
+      api.plot.updateConfig(_);
       return my;
     };
     my.data = (data) => {

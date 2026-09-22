@@ -20,6 +20,10 @@ import {
 } from "./loci/layout.mjs";
 import { buildScene } from "./layout.mjs";
 
+// This is deliberately one factory per chart, not a collection of tiny API
+// factories: configuration, scales, indexes, and mutable scene state must not
+// leak between independently mounted maps.
+export function createChartRuntime() {
 function refreshClusterOffsetScale() {
   scales.offset.range(
     scales.offset.domain().map((uid) => getClusterOffset(chartState, uid))
@@ -304,17 +308,18 @@ const _scale = {
 config.gene.shape.onClick = _gene.anchor;
 config.legend.onClickText = _link.rename;
 
-export {
+return {
   config,
   get,
   setChartIndex,
   setChartState,
   plot,
   scales,
-  _cluster as cluster,
-  _gene as gene,
-  _link as link,
-  _locus as locus,
-  _scale as scale,
-  _layout as layout,
+  cluster: _cluster,
+  gene: _gene,
+  link: _link,
+  locus: _locus,
+  scale: _scale,
+  layout: _layout,
 };
+}
