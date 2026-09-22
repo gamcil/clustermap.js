@@ -119,6 +119,7 @@
     const clusterOffsets = previous?.clusterOffsets || new Map();
     const locusOffsets = previous?.locusOffsets || new Map();
     const camera = previous?.camera || { x: 0, y: 0, k: 1 };
+    const dragging = previous?.dragging || false;
     const clusterIds = data.clusters.map((cluster) => cluster.uid);
     const clusterIdSet = new Set(clusterIds);
     const clusterOrder = [
@@ -168,7 +169,15 @@
     for (const uid of locusOffsets.keys()) {
       if (!loci.has(uid)) locusOffsets.delete(uid);
     }
-    return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera };
+    return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging };
+  }
+
+  function isDragging(chartState) {
+    return chartState.dragging;
+  }
+
+  function setDragging(chartState, dragging) {
+    chartState.dragging = dragging;
   }
 
   function getClusterOrder(chartState) {
@@ -2143,7 +2152,6 @@
   }
 
   const config = Object.assign({}, defaultConfig);
-  const flags = { isDragging: false };
   let chartIndex = null;
   let chartState = null;
   let scene = null;
@@ -2546,10 +2554,8 @@
         },
         lookup: { gene: get.geneData },
         interactions: {
-          isDragging: () => flags.isDragging,
-          setDragging: (isDragging) => {
-            flags.isDragging = isDragging;
-          },
+          isDragging: () => isDragging(chartState),
+          setDragging: (dragging) => setDragging(chartState, dragging),
           getClusterOrder: () => getClusterOrder(chartState),
           moveClusterToIndex: (uid, index) =>
             moveClusterToIndex(chartState, uid, index),

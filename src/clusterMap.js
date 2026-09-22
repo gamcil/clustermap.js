@@ -6,10 +6,12 @@ import {
   getGeneState,
   getLocusOffset,
   getLocusState,
+  isDragging,
   finalizeLocusTrim,
   flipLocus,
   moveClusterToIndex,
   setCamera,
+  setDragging,
   setLocusOffset,
   trimLocus,
 } from "./chartState.mjs";
@@ -175,10 +177,8 @@ export default function clusterMap() {
       },
       lookup: { gene: api.get.geneData },
       interactions: {
-        isDragging: () => api.flags.isDragging,
-        setDragging: (isDragging) => {
-          api.flags.isDragging = isDragging;
-        },
+        isDragging: () => isDragging(chartState),
+        setDragging: (dragging) => setDragging(chartState, dragging),
         getClusterOrder: () => getClusterOrder(chartState),
         moveClusterToIndex: (uid, index) =>
           moveClusterToIndex(chartState, uid, index),

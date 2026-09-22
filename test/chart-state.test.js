@@ -78,6 +78,17 @@ test("chart state persists the camera transform across data refreshes", async ()
   assert.deepEqual(getCamera(state), { x: 20, y: -10, k: 1.5 });
 });
 
+test("chart state tracks transient drag interactions", async () => {
+  const { createChartState, isDragging, setDragging } = await import(
+    "../src/chartState.mjs"
+  );
+  const state = createChartState(dataFor("a"));
+
+  assert.equal(isDragging(state), false);
+  setDragging(state, true);
+  assert.equal(isDragging(state), true);
+});
+
 test("chart state anchors matching genes by moving their clusters", async () => {
   const {
     anchorGeneGroup,

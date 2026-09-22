@@ -58,7 +58,6 @@ function updateLocusScaling(locus) {
 }
 
 const config = Object.assign({}, defaultConfig);
-const flags = { isDragging: false };
 let chartIndex = null;
 let chartState = null;
 let scene = null;
@@ -307,7 +306,6 @@ config.legend.onClickText = _link.rename;
 
 export {
   config,
-  flags,
   get,
   setChartIndex,
   setChartState,

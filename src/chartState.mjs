@@ -4,6 +4,7 @@ export function createChartState(data, previous = null) {
   const clusterOffsets = previous?.clusterOffsets || new Map();
   const locusOffsets = previous?.locusOffsets || new Map();
   const camera = previous?.camera || { x: 0, y: 0, k: 1 };
+  const dragging = previous?.dragging || false;
   const clusterIds = data.clusters.map((cluster) => cluster.uid);
   const clusterIdSet = new Set(clusterIds);
   const clusterOrder = [
@@ -53,7 +54,15 @@ export function createChartState(data, previous = null) {
   for (const uid of locusOffsets.keys()) {
     if (!loci.has(uid)) locusOffsets.delete(uid);
   }
-  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera };
+  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging };
+}
+
+export function isDragging(chartState) {
+  return chartState.dragging;
+}
+
+export function setDragging(chartState, dragging) {
+  chartState.dragging = dragging;
 }
 
 export function getClusterOrder(chartState) {
