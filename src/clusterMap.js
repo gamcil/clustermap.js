@@ -3,6 +3,7 @@ import colourBar from "./colourBar.js";
 import scaleBar from "./scaleBar.js";
 import { renameText } from "./utils.js";
 import { createLinkGroups, filterLinks } from "./links/groups.mjs";
+import { flipLocus } from "./loci/state.mjs";
 import * as api from "./api.js";
 
 export default function clusterMap() {
@@ -239,7 +240,7 @@ export default function clusterMap() {
                 .attr("opacity", 0);
             })
             .on("dblclick", (_, d) => {
-              api.locus.flip(d);
+              flipLocus(d);
               api.plot.update();
             });
           return enter.call(api.locus.update);

@@ -228,6 +228,75 @@
       .filter((link) => link.identity > threshold);
   }
 
+  function formatLocusText(loci, hideCoordinates) {
+    return loci
+      .map((locus) => {
+        let start;
+        let end;
+
+        if (locus._bio_start) {
+          let startDiff = locus._start - locus.start;
+          let endDiff = locus.end - locus._end;
+          if (locus._flipped) [startDiff, endDiff] = [endDiff, startDiff];
+          start = locus._bio_start + startDiff + 1;
+          end = locus._bio_end - endDiff;
+        } else {
+          start = locus._start + 1;
+          end = locus._end;
+        }
+
+        if (locus._flipped) [start, end] = [end, start];
+
+        const reversed = locus._flipped ? " (reversed)" : "";
+        if (
+          hideCoordinates ||
+          locus._start == null ||
+          locus._end == null
+        )
+          return `${locus.name}${reversed}`;
+        return `${locus.name}${reversed}:${start.toFixed(0)}-${end.toFixed(0)}`;
+      })
+      .join(", ");
+  }
+
+  function recalculateLocusCoordinates(locus, scaleGenes) {
+    locus.genes.forEach((gene, index, genes) => {
+      const length = scaleGenes ? gene._end - gene._start : 1000;
+      gene.start = scaleGenes ? gene._start : index > 0 ? genes[index - 1].end : 0;
+      gene.end = gene.start + length;
+      gene.strand = gene._strand;
+    });
+
+    const oldStart = locus._start;
+    const lastGene = locus.genes[locus.genes.length - 1];
+    locus._start = locus._trimLeft ? locus._trimLeft.start : 0;
+    locus._end = locus._trimRight
+      ? locus._trimRight.end
+      : scaleGenes
+      ? locus.end
+      : lastGene.end;
+
+    return { oldStart };
+  }
+
+  function flipLocus(locus) {
+    locus._flipped = !locus._flipped;
+    const length = locus.end - locus.start;
+
+    [locus._trimLeft, locus._trimRight] = [
+      locus._trimRight,
+      locus._trimLeft,
+    ];
+
+    locus.genes.forEach((gene) => {
+      const start = gene._start;
+      gene._start = length - gene._end;
+      gene._end = length - start;
+      gene._strand = gene._strand === 1 ? -1 : 1;
+    });
+    locus.genes.sort((a, b) => a._start - b._start);
+  }
+
   function getClosestValue(values, value) {
     return Math.max(Math.min(d3.bisectLeft(values, value), values.length - 1), 0);
   }
@@ -242,6 +311,18 @@
 
   function xDistance(start, end) {
     return scales.x(end) - scales.x(start);
+  }
+
+  function updateLocusScaling(locus) {
+    const { oldStart } = recalculateLocusCoordinates(
+      locus,
+      config.plot.scaleGenes
+    );
+    updateScaleRange(
+      "locus",
+      locus.uid,
+      scales.locus(locus.uid) + xDistance(locus._start, oldStart)
+    );
   }
 
   const config = Object.assign({}, defaultConfig);
@@ -561,8 +642,8 @@
           let gene = get.geneData(uid);
           if (flipLoci && gene.strand !== anchor.strand) {
             let locus = get.locusData(gene._locus);
-            _locus.flip(locus);
-            _locus.updateScaling(locus);
+            flipLocus(locus);
+            updateLocusScaling(locus);
           }
           if (anchors.has(gene._cluster)) {
             anchors.get(gene._cluster).push(uid);
@@ -616,40 +697,7 @@
      * @returns {String} Comma-separated locus coordinates
      */
     locusText: (cluster) =>
-      cluster.loci
-        .map((locus) => {
-          let start, end;
-
-          // Calculate biological start/end, if exists
-          // -- Calculate difference between trimmed start and real start of loci
-          // -- Flip them if locus is flipped
-          // -- Calculate new biological start/end based on differences
-          // Note: adds 1 to locus start for display, as all coordinates are 0-based
-          if (locus._bio_start) {
-            let startDiff = locus._start - locus.start;
-            let endDiff = locus.end - locus._end;
-            if (locus._flipped) [startDiff, endDiff] = [endDiff, startDiff];
-            start = locus._bio_start + startDiff + 1;
-            end = locus._bio_end - endDiff;
-          } else {
-            // Otherwise, just use current relative start/end
-            start = locus._start + 1;
-            end = locus._end;
-          }
-
-          // Display in reverse if locus is flipped
-          if (locus._flipped) [start, end] = [end, start];
-
-          let flipped = locus._flipped ? " (reversed)" : "";
-          if (
-            config.cluster.hideLocusCoordinates ||
-            locus._start == null ||
-            locus._end == null
-          )
-            return `${locus.name}${flipped}`;
-          return `${locus.name}${flipped}:${start.toFixed(0)}-${end.toFixed(0)}`;
-        })
-        .join(", "),
+      formatLocusText(cluster.loci, config.cluster.hideLocusCoordinates),
     /**
      * Calculates the extent of a single cluster.
      * @param {Object} cluster - Cluster data object
@@ -744,7 +792,7 @@
       });
     },
     update: (selection) => {
-      selection.selectAll("g.locus").each(_locus.updateScaling);
+      selection.selectAll("g.locus").each(updateLocusScaling);
       selection.attr("transform", _cluster.transform);
       if (config.cluster.alignLabels) {
         selection.selectAll(".clusterInfo").call(_cluster.alignLabels);
@@ -1077,35 +1125,6 @@
       selection.select("rect.rightHandle").attr("x", (d) => scales.x(d._end));
       return selection;
     },
-    updateScaling: (locus) => {
-      // Recalculate gene positions:
-      // Gene length = 1000bp if unscaled mode
-      // Gene start = real start if scaled, else previous end or 0
-      // Gene end = new gene start + length
-      locus.genes.forEach((g, i, n) => {
-        let length = config.plot.scaleGenes ? g._end - g._start : 1000;
-        g.start = config.plot.scaleGenes ? g._start : i > 0 ? n[i - 1].end : 0;
-        g.end = g.start + length;
-        g.strand = g._strand;
-      });
-      // Recalculate locus boundaries & locus scale offset:
-      // Start = trim start or 0
-      // End = trim end or actual end if scaled, end of last gene if unscaled
-      // Scale - difference between previous and new _start property
-      let oldStart = locus._start;
-      let total = locus.genes.length - 1;
-      locus._start = locus._trimLeft ? locus._trimLeft.start : 0;
-      locus._end = locus._trimRight
-        ? locus._trimRight.end
-        : config.plot.scaleGenes
-        ? locus.end
-        : locus.genes[total].end;
-      updateScaleRange(
-        "locus",
-        locus.uid,
-        scales.locus(locus.uid) + xDistance(locus._start, oldStart)
-      );
-    },
     update: (selection) =>
       selection
         .attr("transform", (d) => `translate(${scales.locus(d.uid)}, 0)`)
@@ -1278,28 +1297,6 @@
       return d3.drag().on("start", started).on("drag", dragged).on("end", ended)(
         selection
       );
-    },
-    /**
-     * Flips a locus by calculating inverse coordinates.
-     */
-    flip: (d) => {
-      // Invert locus coordinates
-      d._flipped = !d._flipped;
-      let length = d.end - d.start;
-
-      // Invert trimmed genes
-      let tmp = d._trimRight;
-      d._trimRight = d._trimLeft;
-      d._trimLeft = tmp;
-
-      // Invert coordinates of genes in the locus
-      d.genes.forEach((g) => {
-        let tmp = g._start;
-        g._start = length - g._end;
-        g._end = length - tmp;
-        g._strand = g._strand === 1 ? -1 : 1;
-      });
-      d.genes.sort((a, b) => a._start - b._start);
     },
   };
 
@@ -2053,7 +2050,7 @@
                   .attr("opacity", 0);
               })
               .on("dblclick", (_, d) => {
-                _locus.flip(d);
+                flipLocus(d);
                 plot.update();
               });
             return enter.call(_locus.update);
