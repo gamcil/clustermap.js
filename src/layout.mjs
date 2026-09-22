@@ -13,6 +13,83 @@ function worldPolygon(points, x, y) {
   return points.map((point, index) => point + (index % 2 === 0 ? x : y));
 }
 
+function formatKilobases(basePairs) {
+  return `${+(basePairs / 1000).toFixed(1)}kb`;
+}
+
+function buildChrome(bounds, genes, chrome) {
+  if (!bounds || !chrome) return null;
+
+  const visibleGroupIds = new Set();
+  for (const gene of genes.values()) {
+    if (!gene.visible) continue;
+    const groupUid = chrome.legend.groupForGene(gene.source.uid);
+    if (groupUid !== null) visibleGroupIds.add(groupUid);
+  }
+
+  const groups = chrome.legend.groups.filter(
+    (group) => !group.hidden && visibleGroupIds.has(group.uid)
+  );
+  const totalHeight = chrome.legend.entryHeight * groups.length;
+  const step = groups.length > 1 ? totalHeight / (groups.length - 0.5) : totalHeight;
+  const radius = step / 4;
+  const legend = {
+    visible: chrome.legend.show,
+    position: { x: bounds.maxX + chrome.legend.marginLeft, y: 0 },
+    fontSize: chrome.legend.fontSize,
+    fontFamily: chrome.legend.fontFamily,
+    items: groups.map((group, index) => ({
+      uid: group.uid,
+      source: group,
+      label: group.label,
+      colour: chrome.legend.colourForGroup(group.uid),
+      x: 0,
+      y: index * step,
+      radius,
+      circleY: radius,
+      textX: radius + 6,
+      textY: radius + 1,
+    })),
+  };
+
+  const scaleBarLength = chrome.scaleBar.coordinateFor(chrome.scaleBar.basePair);
+  const scaleBar = {
+    visible: chrome.scaleBar.show,
+    position: {
+      x: chrome.scaleBar.x,
+      y: bounds.maxY + chrome.scaleBar.marginTop,
+    },
+    length: scaleBarLength,
+    basePair: chrome.scaleBar.basePair,
+    height: chrome.scaleBar.height,
+    middle: chrome.scaleBar.height / 2,
+    label: formatKilobases(chrome.scaleBar.basePair),
+    colour: chrome.scaleBar.colour,
+    strokeWidth: chrome.scaleBar.strokeWidth,
+    fontSize: chrome.scaleBar.fontSize,
+    fontFamily: chrome.scaleBar.fontFamily,
+  };
+
+  const colourBar = {
+    visible: chrome.colourBar.show && !chrome.link.groupColour && chrome.link.show,
+    position: {
+      x: chrome.colourBar.x,
+      y: bounds.maxY + chrome.colourBar.marginTop,
+    },
+    width: chrome.colourBar.width,
+    height: chrome.colourBar.height,
+    fontSize: chrome.colourBar.fontSize,
+    fontFamily: chrome.colourBar.fontFamily,
+    startColour: chrome.colourBar.scoreColour(0),
+    endColour: chrome.colourBar.scoreColour(1),
+    label: "Identity (%)",
+    startLabel: "0",
+    endLabel: "100",
+  };
+
+  return { legend, scaleBar, colourBar };
+}
+
 /**
  * Derive renderer-neutral, world-space geometry from chart data and state.
  * The returned records contain no DOM selections and can be consumed by SVG,
@@ -162,17 +239,7 @@ export function buildScene(
     genes,
     links,
     bounds,
-    chrome:
-      chrome && bounds
-        ? {
-            legend: { x: bounds.maxX + chrome.legendMarginLeft, y: 0 },
-            scaleBar: { x: chrome.scaleBarX, y: bounds.maxY + chrome.scaleBarMarginTop },
-            colourBar: {
-              x: chrome.colourBarX,
-              y: bounds.maxY + chrome.colourBarMarginTop,
-            },
-          }
-        : null,
+    chrome: buildChrome(bounds, genes, chrome),
   };
 }
 

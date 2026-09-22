@@ -79,6 +79,7 @@ const ids = {
   root: `${idPrefix}root-svg`,
   picker: `${idPrefix}picker`,
   filter: `${idPrefix}filter_solid`,
+  colourGradient: `${idPrefix}colour-gradient`,
   cluster: (d) => `${idPrefix}cluster_${d.uid}`,
   clusterInfo: (d) => `${idPrefix}cinfo_${d.uid}`,
   locus: (d) => `${idPrefix}locus_${d.uid}`,
@@ -150,13 +151,42 @@ const scene = {
       clusterLabel: cluster.locusText,
       alignLabels: config.cluster.alignLabels,
       chrome: {
-        legendMarginLeft: config.legend.marginLeft,
-        scaleBarX: 0,
-        scaleBarMarginTop: config.scaleBar.marginTop,
-        colourBarX: config.plot.scaleGenes
-          ? scales.x(config.scaleBar.basePair) + 20
-          : 0,
-        colourBarMarginTop: config.colourBar.marginTop,
+        legend: {
+          show: config.legend.show,
+          marginLeft: config.legend.marginLeft,
+          entryHeight: config.legend.entryHeight,
+          fontSize: config.legend.fontSize,
+          fontFamily: config.plot.fontFamily,
+          groups: data.groups,
+          groupForGene: scales.group,
+          colourForGroup: scales.colour,
+        },
+        scaleBar: {
+          show: config.plot.scaleGenes && config.scaleBar.show,
+          x: 0,
+          marginTop: config.scaleBar.marginTop,
+          basePair: config.scaleBar.basePair,
+          coordinateFor: scales.x,
+          height: config.scaleBar.height,
+          colour: config.scaleBar.colour,
+          strokeWidth: config.scaleBar.stroke,
+          fontSize: config.scaleBar.fontSize,
+          fontFamily: config.plot.fontFamily,
+        },
+        colourBar: {
+          show: config.colourBar.show,
+          x: config.plot.scaleGenes ? scales.x(config.scaleBar.basePair) + 20 : 0,
+          marginTop: config.colourBar.marginTop,
+          width: config.colourBar.width,
+          height: config.colourBar.height,
+          fontSize: config.colourBar.fontSize,
+          fontFamily: config.plot.fontFamily,
+          scoreColour: scales.score,
+        },
+        link: {
+          show: config.link.show,
+          groupColour: config.link.groupColour,
+        },
       },
     });
     return currentScene;

@@ -1,6 +1,3 @@
-import legend from "./legend.js";
-import colourBar from "./colourBar.js";
-import scaleBar from "./scaleBar.js";
 import { renameText, rgbaToRgb } from "./utils.js";
 import { filterLinks } from "./links/groups.mjs";
 import {
@@ -240,11 +237,7 @@ export function renderSvg({
         exit.call((selection) => selection.transition(transition).attr("opacity", 0).remove())
     );
 
-  plot
-    .call(getLegend(scene, config, scales, interactions))
-    .call(getColourBar(config, scales, transition))
-    .call(getScaleBar(config, scales, transition, interactions));
-  arrangePlot(plot, scene, config, transition, animate);
+  renderChrome({ plot, chrome: scene.chrome, ids, config, interactions });
 }
 
 function updateClusters(selection, scene) {
@@ -658,72 +651,169 @@ function updateLinks(selection, scene, config, scales, ids) {
   return selection;
 }
 
-function arrangePlot(plot, scene, config, transition, animate) {
-  const chrome = scene.chrome;
+function renderChrome({ plot, chrome, ids, config, interactions }) {
   if (!chrome) return;
   const transform = ({ x, y }) => `translate(${x}, ${y})`;
-  let scale = plot
-    .select("g.scaleBar")
-    .classed("hidden", !config.plot.scaleGenes);
-  if (animate) scale = scale.transition(transition);
-  scale
-    .attr("opacity", config.plot.scaleGenes ? 1 : 0)
-    .attr("transform", transform(chrome.scaleBar));
-
-  const showColour = config.link.groupColour || !config.link.show;
-  let colour = plot.select("g.colourBar").classed("hidden", showColour);
-  if (animate) colour = colour.transition(transition);
-  colour
-    .attr("opacity", showColour ? 0 : 1)
-    .attr("transform", transform(chrome.colourBar));
-
-  let key = plot.select("g.legend");
-  if (animate) key = key.transition(transition);
-  key.attr("transform", transform(chrome.legend));
+  renderLegend({ plot, legend: chrome.legend, config, interactions, transform });
+  renderScaleBar({ plot, scaleBar: chrome.scaleBar, interactions, transform });
+  renderColourBar({ plot, colourBar: chrome.colourBar, ids, transform });
 }
 
-function getScaleBar(config, scales, transition, interactions) {
-  return scaleBar(scales.x)
-    .stroke(config.scaleBar.stroke)
-    .height(config.scaleBar.height)
-    .colour(config.scaleBar.colour)
-    .basePair(config.scaleBar.basePair)
-    .fontSize(config.scaleBar.fontSize)
-    .fontFamily(config.plot.fontFamily)
-    .onClickText(() => {
-      const value = prompt("Enter new length (bp):", config.scaleBar.basePair);
-      if (value) interactions.setScaleBarLength(value);
-    })
-    .transition(transition);
-}
+function renderLegend({ plot, legend, config, interactions, transform }) {
+  const key = plot
+    .selectAll("g.legend")
+    .data([legend])
+    .join("g")
+    .attr("class", "legend")
+    .attr("opacity", legend.visible ? 1 : 0)
+    .attr("transform", () => transform(legend.position));
 
-function getColourBar(config, scales, transition) {
-  return colourBar(scales.score)
-    .width(config.colourBar.width)
-    .height(config.colourBar.height)
-    .fontSize(config.colourBar.fontSize)
-    .fontFamily(config.plot.fontFamily)
-    .transition(transition);
-}
+  const items = key
+    .selectAll("g.element")
+    .data(legend.items, (item) => item.uid)
+    .join((enter) => {
+      const item = enter.append("g").attr("class", "element");
+      item.append("circle");
+      item
+        .append("text")
+        .attr("text-anchor", "start")
+        .style("dominant-baseline", "middle");
+      return item;
+    });
 
-function getLegend(scene, config, scales, interactions) {
-  let hidden = scene.genes.size ? scales.colour.domain() : [];
-  for (const gene of scene.genes.values()) {
-    if (gene.visible) {
-      const group = scales.group(gene.source.uid);
-      if (group !== null) hidden = hidden.filter((id) => id !== group);
-    }
-  }
-
-  return legend(scales.colour)
-    .hidden(hidden)
-    .fontSize(config.legend.fontSize)
-    .fontFamily(config.plot.fontFamily)
-    .entryHeight(config.legend.entryHeight)
-    .onClickCircle(
-      config.legend.onClickCircle ||
-        ((_, group) => interactions.chooseLegendColour(group))
+  items.attr("transform", (item) => `translate(${item.x}, ${item.y})`);
+  items
+    .select("circle")
+    .attr("class", (item) => `group-${item.uid}`)
+    .attr("cy", (item) => item.circleY)
+    .attr("r", (item) => item.radius)
+    .attr("fill", (item) => item.colour)
+    .attr("cursor", "pointer")
+    .on("click", (event, item) => {
+      if (config.legend.onClickCircle) config.legend.onClickCircle(event, item.source);
+      else interactions.chooseLegendColour(item.source);
+    });
+  items
+    .select("text")
+    .text((item) => item.label)
+    .attr("x", (item) => item.textX)
+    .attr("y", (item) => item.textY)
+    .style("font-size", `${legend.fontSize}px`)
+    .style("font-family", legend.fontFamily)
+    .attr("cursor", "pointer")
+    .on(
+      "click",
+      config.legend.onClickText
+        ? (event, item) => config.legend.onClickText(event, item.source)
+        : null
     )
-    .onClickText(config.legend.onClickText)
-    .onAltClickText(config.legend.onAltClickText || interactions.showGroupMenu);
+    .on("contextmenu", (event, item) => {
+      const handler = config.legend.onAltClickText || interactions.showGroupMenu;
+      handler(event, item.source);
+    });
+}
+
+function renderScaleBar({ plot, scaleBar, interactions, transform }) {
+  const bar = plot
+    .selectAll("g.scaleBar")
+    .data([scaleBar])
+    .join((enter) => {
+      const group = enter.append("g").attr("class", "scaleBar");
+      group.append("line").attr("class", "flatBar");
+      group.append("line").attr("class", "leftBar");
+      group.append("line").attr("class", "rightBar");
+      group.append("text").attr("class", "barText").attr("text-anchor", "middle");
+      return group;
+    })
+    .attr("opacity", scaleBar.visible ? 1 : 0)
+    .attr("transform", () => transform(scaleBar.position));
+
+  bar
+    .select("line.flatBar")
+    .attr("x2", scaleBar.length)
+    .attr("y1", scaleBar.middle)
+    .attr("y2", scaleBar.middle);
+  bar.select("line.leftBar").attr("y2", scaleBar.height);
+  bar
+    .select("line.rightBar")
+    .attr("x1", scaleBar.length)
+    .attr("x2", scaleBar.length)
+    .attr("y2", scaleBar.height);
+  bar
+    .select("text.barText")
+    .text(scaleBar.label)
+    .attr("x", scaleBar.length / 2)
+    .attr("y", scaleBar.height + 5)
+    .style("dominant-baseline", "hanging")
+    .style("font-size", `${scaleBar.fontSize}pt`)
+    .style("font-family", scaleBar.fontFamily)
+    .attr("cursor", "pointer")
+    .on("click", () => {
+      const value = prompt("Enter new length (bp):", scaleBar.basePair);
+      if (value) interactions.setScaleBarLength(value);
+    });
+  bar
+    .selectAll("line")
+    .style("stroke", scaleBar.colour)
+    .style("stroke-width", scaleBar.strokeWidth);
+}
+
+function renderColourBar({ plot, colourBar, ids, transform }) {
+  const bar = plot
+    .selectAll("g.colourBar")
+    .data([colourBar])
+    .join((enter) => {
+      const group = enter.append("g").attr("class", "colourBar");
+      const gradient = group
+        .append("defs")
+        .append("linearGradient")
+        .attr("id", ids.colourGradient)
+        .attr("x1", "0%")
+        .attr("x2", "100%");
+      gradient.append("stop").attr("class", "startStop").attr("offset", "0%");
+      gradient.append("stop").attr("class", "endStop").attr("offset", "100%");
+      const parts = group.append("g").attr("class", "cbarParts");
+      parts.append("rect").attr("class", "colourBarBG");
+      parts.append("rect").attr("class", "colourBarFill");
+      parts.append("text").attr("class", "labelText").attr("text-anchor", "middle");
+      parts.append("text").attr("class", "startText").attr("text-anchor", "start");
+      parts.append("text").attr("class", "endText").attr("text-anchor", "end");
+      return group;
+    })
+    .attr("opacity", colourBar.visible ? 1 : 0)
+    .attr("transform", () => transform(colourBar.position));
+
+  bar.select(".startStop").attr("stop-color", colourBar.startColour);
+  bar.select(".endStop").attr("stop-color", colourBar.endColour);
+  bar
+    .select(".colourBarBG")
+    .attr("width", colourBar.width)
+    .attr("height", colourBar.height)
+    .style("fill", "white")
+    .style("stroke", "black")
+    .style("stroke-width", "1px");
+  bar
+    .select(".colourBarFill")
+    .attr("width", colourBar.width)
+    .attr("height", colourBar.height)
+    .style("fill", `url(#${ids.colourGradient})`);
+  bar
+    .select(".labelText")
+    .text(colourBar.label)
+    .attr("x", colourBar.width / 2)
+    .attr("y", colourBar.height + 5);
+  bar
+    .select(".startText")
+    .text(colourBar.startLabel)
+    .attr("y", colourBar.height + 5);
+  bar
+    .select(".endText")
+    .text(colourBar.endLabel)
+    .attr("x", colourBar.width)
+    .attr("y", colourBar.height + 5);
+  bar
+    .selectAll("text")
+    .style("font-family", colourBar.fontFamily)
+    .style("font-size", `${colourBar.fontSize}pt`)
+    .style("dominant-baseline", "hanging");
 }

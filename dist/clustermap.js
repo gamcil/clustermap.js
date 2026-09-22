@@ -607,316 +607,6 @@
     };
   }
 
-  function legend(colourScale) {
-    /* Creates a legend component from a colour scale.
-     */
-
-    let entryHeight = 15;
-    let fontSize = 12;
-    let hidden = [];
-    let onClickCircle = () => {};
-    let onClickText = () => {};
-    let onAltClickText = () => {};
-    let fontFamily = null;
-    let y = d3.scaleBand().paddingInner(0.5);
-    let t = d3.transition().duration(500);
-
-    function my(selection) {
-      selection.each(function (data) {
-        // Grab new domain from colourScale and update the y-scale
-        let visible = data.groups.filter(
-          (g) => !hidden.includes(g.uid) && !g.hidden
-        );
-
-        y.domain(visible.map((v) => v.uid)).range([
-          0,
-          entryHeight * visible.length,
-        ]);
-
-        // Grab the <g> element, if it exists
-        let g = d3
-          .select(this)
-          .selectAll("g.legend")
-          .data([data])
-          .join("g")
-          .attr("class", "legend");
-
-        // Render each legend element <g>
-        let translate = (d) => `translate(0, ${y(d.uid)})`;
-        g.selectAll("g.element")
-          .data(visible, (d) => d.uid)
-          .join(
-            (enter) => {
-              enter = enter
-                .append("g")
-                .attr("class", "element")
-                .attr("transform", translate);
-              enter.append("circle").attr("class", (d) => `group-${d.uid}`);
-              enter
-                .append("text")
-                .attr("x", 16)
-                .attr("text-anchor", "start")
-                .style("font-family", fontFamily)
-                .style("dominant-baseline", "middle");
-              return enter.call(updateLegend);
-            },
-            (update) =>
-              update.call((update) =>
-                update
-                  .transition(t)
-                  .attr("transform", translate)
-                  .call(updateLegend)
-              )
-          );
-
-        // If click callbacks are specified, bind them
-        if (onClickCircle)
-          g.selectAll("circle")
-            .attr("cursor", "pointer")
-            .on("click", onClickCircle);
-        g.selectAll("text")
-          .attr("cursor", "pointer")
-          .on("click", onClickText)
-          .on("contextmenu", onAltClickText);
-      });
-    }
-
-    function updateLegend(selection) {
-      selection.attr("transform", (d) => `translate(0, ${y(d.uid)})`);
-      let half = y.bandwidth() / 2;
-      selection
-        .selectAll("text")
-        .text((d) => d.label)
-        .attr("x", half + 6)
-        .attr("y", half + 1)
-        .style("font-size", `${fontSize}px`);
-      selection
-        .selectAll("circle")
-        .attr("cy", half)
-        .attr("r", half)
-        .attr("fill", (d) => colourScale(d.uid));
-    }
-
-    my.colourScale = (_) =>
-      arguments.length ? ((colourScale = _), my) : colourScale;
-    my.transition = (_) => (arguments.length ? ((t = _), my) : t);
-    my.hidden = (_) => (arguments.length ? ((hidden = _), my) : hidden);
-    my.entryHeight = (_) =>
-      arguments.length ? ((entryHeight = parseInt(_)), my) : entryHeight;
-    my.fontSize = (_) =>
-      arguments.length ? ((fontSize = parseInt(_)), my) : fontSize;
-    my.fontFamily = (_) =>
-      arguments.length ? ((fontFamily = _), my) : fontFamily;
-    my.onClickCircle = (_) =>
-      arguments.length ? ((onClickCircle = _), my) : onClickCircle;
-    my.onClickText = (_) =>
-      arguments.length ? ((onClickText = _), my) : onClickText;
-    my.onAltClickText = (_) =>
-      arguments.length ? ((onAltClickText = _), my) : onAltClickText;
-
-    return my;
-  }
-
-  function colourBar(colourScale) {
-    /* Creates the colour bar component.
-     */
-
-    let height = 25;
-    let width = 150;
-    let fontSize = 12;
-    let t = d3.transition();
-    let fontFamily = null;
-
-    function my(selection) {
-      selection.each(function (data) {
-        d3.select(this)
-          .selectAll("g.colourBar")
-          .data([data])
-          .join(
-            (enter) => {
-              enter = enter.append("g").attr("class", "colourBar");
-
-              // Add the gradient to <defs>
-              let defs = enter.append("defs");
-              let gradient = defs
-                .append("linearGradient")
-                .attr("id", "cbarGradient")
-                .attr("x1", "0%")
-                .attr("x2", "100%");
-              gradient
-                .append("stop")
-                .attr("class", "startStop")
-                .attr("offset", "0%");
-              gradient
-                .append("stop")
-                .attr("class", "endStop")
-                .attr("offset", "100%");
-
-              // Draw the colour bar itself
-              let cbar = enter.append("g").attr("class", "cbarParts");
-              cbar
-                .append("rect")
-                .attr("class", "colourBarBG")
-                .style("fill", "white")
-                .style("stroke", "black")
-                .style("stroke-width", "1px");
-              cbar
-                .append("rect")
-                .attr("class", "colourBarFill")
-                .style("fill", "url(#cbarGradient)");
-              cbar
-                .append("text")
-                .text("Identity (%)")
-                .attr("class", "labelText")
-                .attr("text-anchor", "middle");
-              cbar
-                .append("text")
-                .text("0")
-                .attr("class", "startText")
-                .attr("text-anchor", "start");
-              cbar
-                .append("text")
-                .text("100")
-                .attr("class", "endText")
-                .attr("text-anchor", "end");
-              cbar
-                .selectAll("text")
-                .style("font-family", fontFamily)
-                .style("dominant-baseline", "hanging");
-
-              enter.call(updateColourBar);
-              return enter;
-            },
-            (update) =>
-              update.call((update) => update.transition(t).call(updateColourBar))
-          );
-      });
-    }
-
-    function updateColourBar(selection) {
-      // Updates colour bar styling/positioning
-      selection.select(".startStop").attr("stop-color", colourScale(0));
-      selection.select(".endStop").attr("stop-color", colourScale(1));
-      selection.selectAll("rect").attr("width", width).attr("height", height);
-      selection
-        .selectAll(".startText, .endText, .labelText")
-        .attr("y", height + 5);
-      selection.select(".labelText").attr("x", width / 2);
-      selection.select(".endText").attr("x", width);
-      selection.selectAll("text").style("font-size", `${fontSize}pt`);
-    }
-
-    // Setters/getters
-    my.width = (_) => (arguments.length ? ((width = parseInt(_)), my) : width);
-    my.height = (_) => (arguments.length ? ((height = parseInt(_)), my) : height);
-    my.fontSize = (_) =>
-      arguments.length ? ((fontSize = parseInt(_)), my) : fontSize;
-    my.fontFamily = (_) =>
-      arguments.length ? ((fontFamily = _), my) : fontFamily;
-    my.colourScale = (_) =>
-      arguments.length ? ((colourScale = _), my) : colourScale;
-    my.transition = (_) => (arguments.length ? ((t = _), my) : t);
-
-    return my;
-  }
-
-  function scaleBar(x) {
-    /* Creates a scale bar component
-     */
-
-    let basePair = 1000;
-    let stroke = 1;
-    let height = 10;
-    let colour = "black";
-    let fontSize = 12;
-    let t = d3.transition().duration(500);
-    let onClickText = null;
-    let fontFamily = null;
-
-    function my(selection) {
-      selection.each(function (data) {
-        // Grab the <g> element, if it exists and draw scale bar
-        d3.select(this)
-          .selectAll("g.scaleBar")
-          .data([data])
-          .join(
-            (enter) => {
-              enter = enter.append("g").attr("class", "scaleBar");
-              enter.append("line").attr("class", "flatBar");
-              enter.append("line").attr("class", "leftBar");
-              enter.append("line").attr("class", "rightBar");
-              enter
-                .append("text")
-                .attr("class", "barText")
-                .attr("text-anchor", "middle")
-                .attr("cursor", "pointer")
-                .style("font-family", fontFamily)
-                .on("click", onClickText || promptNewLength);
-              enter.call(updateScaleBar);
-              return enter;
-            },
-            (update) =>
-              update.call((update) => update.transition(t).call(updateScaleBar))
-          );
-      });
-    }
-
-    function getLabel() {
-      return `${+(basePair / 1000).toFixed(1)}kb`;
-    }
-
-    function updateScaleBar(selection) {
-      // Updates position and styling of scale bar components
-      let middle = height / 2;
-      let end = x(basePair);
-      selection
-        .select(".flatBar")
-        .attr("x2", end)
-        .attr("y1", middle)
-        .attr("y2", middle);
-      selection.select(".leftBar").attr("y2", height);
-      selection
-        .select(".rightBar")
-        .attr("x1", end)
-        .attr("x2", end)
-        .attr("y2", height);
-      selection
-        .select("text.barText")
-        .text(getLabel)
-        .attr("x", end / 2)
-        .attr("y", height + 5)
-        .style("dominant-baseline", "hanging")
-        .style("font-size", `${fontSize}pt`);
-      selection
-        .selectAll("line")
-        .style("stroke", colour)
-        .style("stroke-width", stroke);
-    }
-
-    function promptNewLength() {
-      let result = prompt("Enter new length (bp):", basePair);
-      if (result) my.basePair(result);
-    }
-
-    my.basePair = (_) =>
-      arguments.length ? ((basePair = parseInt(_)), my) : basePair;
-    my.colour = (_) => (arguments.length ? ((colour = _), my) : colour);
-    my.colourScale = (_) =>
-      arguments.length ? ((colourScale = _), my) : colourScale;
-    my.fontSize = (_) =>
-      arguments.length ? ((fontSize = parseInt(_)), my) : fontSize;
-    my.fontFamily = (_) =>
-      arguments.length ? ((fontFamily = _), my) : fontFamily;
-    my.height = (_) => (arguments.length ? ((height = parseInt(_)), my) : height);
-    my.onClickText = (_) =>
-      arguments.length ? ((onClickText = _), my) : onClickText;
-    my.stroke = (_) => (arguments.length ? ((stroke = parseInt(_)), my) : stroke);
-    my.transition = (_) => (arguments.length ? ((t = _), my) : t);
-    my.width = (_) => (arguments.length ? ((width = parseInt(_)), my) : width);
-
-    return my;
-  }
-
   // Changes value of a text node to a prompted value
   function renameText(event) {
     if (event.defaultPrevented) return;
@@ -1252,11 +942,7 @@
           exit.call((selection) => selection.transition(transition).attr("opacity", 0).remove())
       );
 
-    plot
-      .call(getLegend(scene, config, scales, interactions))
-      .call(getColourBar(config, scales, transition))
-      .call(getScaleBar(config, scales, transition, interactions));
-    arrangePlot(plot, scene, config, transition, animate);
+    renderChrome({ plot, chrome: scene.chrome, ids, config, interactions });
   }
 
   function updateClusters(selection, scene) {
@@ -1670,74 +1356,171 @@
     return selection;
   }
 
-  function arrangePlot(plot, scene, config, transition, animate) {
-    const chrome = scene.chrome;
+  function renderChrome({ plot, chrome, ids, config, interactions }) {
     if (!chrome) return;
     const transform = ({ x, y }) => `translate(${x}, ${y})`;
-    let scale = plot
-      .select("g.scaleBar")
-      .classed("hidden", !config.plot.scaleGenes);
-    if (animate) scale = scale.transition(transition);
-    scale
-      .attr("opacity", config.plot.scaleGenes ? 1 : 0)
-      .attr("transform", transform(chrome.scaleBar));
-
-    const showColour = config.link.groupColour || !config.link.show;
-    let colour = plot.select("g.colourBar").classed("hidden", showColour);
-    if (animate) colour = colour.transition(transition);
-    colour
-      .attr("opacity", showColour ? 0 : 1)
-      .attr("transform", transform(chrome.colourBar));
-
-    let key = plot.select("g.legend");
-    if (animate) key = key.transition(transition);
-    key.attr("transform", transform(chrome.legend));
+    renderLegend({ plot, legend: chrome.legend, config, interactions, transform });
+    renderScaleBar({ plot, scaleBar: chrome.scaleBar, interactions, transform });
+    renderColourBar({ plot, colourBar: chrome.colourBar, ids, transform });
   }
 
-  function getScaleBar(config, scales, transition, interactions) {
-    return scaleBar(scales.x)
-      .stroke(config.scaleBar.stroke)
-      .height(config.scaleBar.height)
-      .colour(config.scaleBar.colour)
-      .basePair(config.scaleBar.basePair)
-      .fontSize(config.scaleBar.fontSize)
-      .fontFamily(config.plot.fontFamily)
-      .onClickText(() => {
-        const value = prompt("Enter new length (bp):", config.scaleBar.basePair);
-        if (value) interactions.setScaleBarLength(value);
-      })
-      .transition(transition);
-  }
+  function renderLegend({ plot, legend, config, interactions, transform }) {
+    const key = plot
+      .selectAll("g.legend")
+      .data([legend])
+      .join("g")
+      .attr("class", "legend")
+      .attr("opacity", legend.visible ? 1 : 0)
+      .attr("transform", () => transform(legend.position));
 
-  function getColourBar(config, scales, transition) {
-    return colourBar(scales.score)
-      .width(config.colourBar.width)
-      .height(config.colourBar.height)
-      .fontSize(config.colourBar.fontSize)
-      .fontFamily(config.plot.fontFamily)
-      .transition(transition);
-  }
+    const items = key
+      .selectAll("g.element")
+      .data(legend.items, (item) => item.uid)
+      .join((enter) => {
+        const item = enter.append("g").attr("class", "element");
+        item.append("circle");
+        item
+          .append("text")
+          .attr("text-anchor", "start")
+          .style("dominant-baseline", "middle");
+        return item;
+      });
 
-  function getLegend(scene, config, scales, interactions) {
-    let hidden = scene.genes.size ? scales.colour.domain() : [];
-    for (const gene of scene.genes.values()) {
-      if (gene.visible) {
-        const group = scales.group(gene.source.uid);
-        if (group !== null) hidden = hidden.filter((id) => id !== group);
-      }
-    }
-
-    return legend(scales.colour)
-      .hidden(hidden)
-      .fontSize(config.legend.fontSize)
-      .fontFamily(config.plot.fontFamily)
-      .entryHeight(config.legend.entryHeight)
-      .onClickCircle(
-        config.legend.onClickCircle ||
-          ((_, group) => interactions.chooseLegendColour(group))
+    items.attr("transform", (item) => `translate(${item.x}, ${item.y})`);
+    items
+      .select("circle")
+      .attr("class", (item) => `group-${item.uid}`)
+      .attr("cy", (item) => item.circleY)
+      .attr("r", (item) => item.radius)
+      .attr("fill", (item) => item.colour)
+      .attr("cursor", "pointer")
+      .on("click", (event, item) => {
+        if (config.legend.onClickCircle) config.legend.onClickCircle(event, item.source);
+        else interactions.chooseLegendColour(item.source);
+      });
+    items
+      .select("text")
+      .text((item) => item.label)
+      .attr("x", (item) => item.textX)
+      .attr("y", (item) => item.textY)
+      .style("font-size", `${legend.fontSize}px`)
+      .style("font-family", legend.fontFamily)
+      .attr("cursor", "pointer")
+      .on(
+        "click",
+        config.legend.onClickText
+          ? (event, item) => config.legend.onClickText(event, item.source)
+          : null
       )
-      .onClickText(config.legend.onClickText)
-      .onAltClickText(config.legend.onAltClickText || interactions.showGroupMenu);
+      .on("contextmenu", (event, item) => {
+        const handler = config.legend.onAltClickText || interactions.showGroupMenu;
+        handler(event, item.source);
+      });
+  }
+
+  function renderScaleBar({ plot, scaleBar, interactions, transform }) {
+    const bar = plot
+      .selectAll("g.scaleBar")
+      .data([scaleBar])
+      .join((enter) => {
+        const group = enter.append("g").attr("class", "scaleBar");
+        group.append("line").attr("class", "flatBar");
+        group.append("line").attr("class", "leftBar");
+        group.append("line").attr("class", "rightBar");
+        group.append("text").attr("class", "barText").attr("text-anchor", "middle");
+        return group;
+      })
+      .attr("opacity", scaleBar.visible ? 1 : 0)
+      .attr("transform", () => transform(scaleBar.position));
+
+    bar
+      .select("line.flatBar")
+      .attr("x2", scaleBar.length)
+      .attr("y1", scaleBar.middle)
+      .attr("y2", scaleBar.middle);
+    bar.select("line.leftBar").attr("y2", scaleBar.height);
+    bar
+      .select("line.rightBar")
+      .attr("x1", scaleBar.length)
+      .attr("x2", scaleBar.length)
+      .attr("y2", scaleBar.height);
+    bar
+      .select("text.barText")
+      .text(scaleBar.label)
+      .attr("x", scaleBar.length / 2)
+      .attr("y", scaleBar.height + 5)
+      .style("dominant-baseline", "hanging")
+      .style("font-size", `${scaleBar.fontSize}pt`)
+      .style("font-family", scaleBar.fontFamily)
+      .attr("cursor", "pointer")
+      .on("click", () => {
+        const value = prompt("Enter new length (bp):", scaleBar.basePair);
+        if (value) interactions.setScaleBarLength(value);
+      });
+    bar
+      .selectAll("line")
+      .style("stroke", scaleBar.colour)
+      .style("stroke-width", scaleBar.strokeWidth);
+  }
+
+  function renderColourBar({ plot, colourBar, ids, transform }) {
+    const bar = plot
+      .selectAll("g.colourBar")
+      .data([colourBar])
+      .join((enter) => {
+        const group = enter.append("g").attr("class", "colourBar");
+        const gradient = group
+          .append("defs")
+          .append("linearGradient")
+          .attr("id", ids.colourGradient)
+          .attr("x1", "0%")
+          .attr("x2", "100%");
+        gradient.append("stop").attr("class", "startStop").attr("offset", "0%");
+        gradient.append("stop").attr("class", "endStop").attr("offset", "100%");
+        const parts = group.append("g").attr("class", "cbarParts");
+        parts.append("rect").attr("class", "colourBarBG");
+        parts.append("rect").attr("class", "colourBarFill");
+        parts.append("text").attr("class", "labelText").attr("text-anchor", "middle");
+        parts.append("text").attr("class", "startText").attr("text-anchor", "start");
+        parts.append("text").attr("class", "endText").attr("text-anchor", "end");
+        return group;
+      })
+      .attr("opacity", colourBar.visible ? 1 : 0)
+      .attr("transform", () => transform(colourBar.position));
+
+    bar.select(".startStop").attr("stop-color", colourBar.startColour);
+    bar.select(".endStop").attr("stop-color", colourBar.endColour);
+    bar
+      .select(".colourBarBG")
+      .attr("width", colourBar.width)
+      .attr("height", colourBar.height)
+      .style("fill", "white")
+      .style("stroke", "black")
+      .style("stroke-width", "1px");
+    bar
+      .select(".colourBarFill")
+      .attr("width", colourBar.width)
+      .attr("height", colourBar.height)
+      .style("fill", `url(#${ids.colourGradient})`);
+    bar
+      .select(".labelText")
+      .text(colourBar.label)
+      .attr("x", colourBar.width / 2)
+      .attr("y", colourBar.height + 5);
+    bar
+      .select(".startText")
+      .text(colourBar.startLabel)
+      .attr("y", colourBar.height + 5);
+    bar
+      .select(".endText")
+      .text(colourBar.endLabel)
+      .attr("x", colourBar.width)
+      .attr("y", colourBar.height + 5);
+    bar
+      .selectAll("text")
+      .style("font-family", colourBar.fontFamily)
+      .style("font-size", `${colourBar.fontSize}pt`)
+      .style("dominant-baseline", "hanging");
   }
 
   var defaultConfig = {
@@ -1952,6 +1735,83 @@
     return points.map((point, index) => point + (index % 2 === 0 ? x : y));
   }
 
+  function formatKilobases(basePairs) {
+    return `${+(basePairs / 1000).toFixed(1)}kb`;
+  }
+
+  function buildChrome(bounds, genes, chrome) {
+    if (!bounds || !chrome) return null;
+
+    const visibleGroupIds = new Set();
+    for (const gene of genes.values()) {
+      if (!gene.visible) continue;
+      const groupUid = chrome.legend.groupForGene(gene.source.uid);
+      if (groupUid !== null) visibleGroupIds.add(groupUid);
+    }
+
+    const groups = chrome.legend.groups.filter(
+      (group) => !group.hidden && visibleGroupIds.has(group.uid)
+    );
+    const totalHeight = chrome.legend.entryHeight * groups.length;
+    const step = groups.length > 1 ? totalHeight / (groups.length - 0.5) : totalHeight;
+    const radius = step / 4;
+    const legend = {
+      visible: chrome.legend.show,
+      position: { x: bounds.maxX + chrome.legend.marginLeft, y: 0 },
+      fontSize: chrome.legend.fontSize,
+      fontFamily: chrome.legend.fontFamily,
+      items: groups.map((group, index) => ({
+        uid: group.uid,
+        source: group,
+        label: group.label,
+        colour: chrome.legend.colourForGroup(group.uid),
+        x: 0,
+        y: index * step,
+        radius,
+        circleY: radius,
+        textX: radius + 6,
+        textY: radius + 1,
+      })),
+    };
+
+    const scaleBarLength = chrome.scaleBar.coordinateFor(chrome.scaleBar.basePair);
+    const scaleBar = {
+      visible: chrome.scaleBar.show,
+      position: {
+        x: chrome.scaleBar.x,
+        y: bounds.maxY + chrome.scaleBar.marginTop,
+      },
+      length: scaleBarLength,
+      basePair: chrome.scaleBar.basePair,
+      height: chrome.scaleBar.height,
+      middle: chrome.scaleBar.height / 2,
+      label: formatKilobases(chrome.scaleBar.basePair),
+      colour: chrome.scaleBar.colour,
+      strokeWidth: chrome.scaleBar.strokeWidth,
+      fontSize: chrome.scaleBar.fontSize,
+      fontFamily: chrome.scaleBar.fontFamily,
+    };
+
+    const colourBar = {
+      visible: chrome.colourBar.show && !chrome.link.groupColour && chrome.link.show,
+      position: {
+        x: chrome.colourBar.x,
+        y: bounds.maxY + chrome.colourBar.marginTop,
+      },
+      width: chrome.colourBar.width,
+      height: chrome.colourBar.height,
+      fontSize: chrome.colourBar.fontSize,
+      fontFamily: chrome.colourBar.fontFamily,
+      startColour: chrome.colourBar.scoreColour(0),
+      endColour: chrome.colourBar.scoreColour(1),
+      label: "Identity (%)",
+      startLabel: "0",
+      endLabel: "100",
+    };
+
+    return { legend, scaleBar, colourBar };
+  }
+
   /**
    * Derive renderer-neutral, world-space geometry from chart data and state.
    * The returned records contain no DOM selections and can be consumed by SVG,
@@ -2101,17 +1961,7 @@
       genes,
       links,
       bounds,
-      chrome:
-        chrome && bounds
-          ? {
-              legend: { x: bounds.maxX + chrome.legendMarginLeft, y: 0 },
-              scaleBar: { x: chrome.scaleBarX, y: bounds.maxY + chrome.scaleBarMarginTop },
-              colourBar: {
-                x: chrome.colourBarX,
-                y: bounds.maxY + chrome.colourBarMarginTop,
-              },
-            }
-          : null,
+      chrome: buildChrome(bounds, genes, chrome),
     };
   }
 
@@ -2174,6 +2024,7 @@
     root: `${idPrefix}root-svg`,
     picker: `${idPrefix}picker`,
     filter: `${idPrefix}filter_solid`,
+    colourGradient: `${idPrefix}colour-gradient`,
     cluster: (d) => `${idPrefix}cluster_${d.uid}`,
     clusterInfo: (d) => `${idPrefix}cinfo_${d.uid}`,
     locus: (d) => `${idPrefix}locus_${d.uid}`,
@@ -2245,13 +2096,42 @@
         clusterLabel: cluster.locusText,
         alignLabels: config.cluster.alignLabels,
         chrome: {
-          legendMarginLeft: config.legend.marginLeft,
-          scaleBarX: 0,
-          scaleBarMarginTop: config.scaleBar.marginTop,
-          colourBarX: config.plot.scaleGenes
-            ? scales.x(config.scaleBar.basePair) + 20
-            : 0,
-          colourBarMarginTop: config.colourBar.marginTop,
+          legend: {
+            show: config.legend.show,
+            marginLeft: config.legend.marginLeft,
+            entryHeight: config.legend.entryHeight,
+            fontSize: config.legend.fontSize,
+            fontFamily: config.plot.fontFamily,
+            groups: data.groups,
+            groupForGene: scales.group,
+            colourForGroup: scales.colour,
+          },
+          scaleBar: {
+            show: config.plot.scaleGenes && config.scaleBar.show,
+            x: 0,
+            marginTop: config.scaleBar.marginTop,
+            basePair: config.scaleBar.basePair,
+            coordinateFor: scales.x,
+            height: config.scaleBar.height,
+            colour: config.scaleBar.colour,
+            strokeWidth: config.scaleBar.stroke,
+            fontSize: config.scaleBar.fontSize,
+            fontFamily: config.plot.fontFamily,
+          },
+          colourBar: {
+            show: config.colourBar.show,
+            x: config.plot.scaleGenes ? scales.x(config.scaleBar.basePair) + 20 : 0,
+            marginTop: config.colourBar.marginTop,
+            width: config.colourBar.width,
+            height: config.colourBar.height,
+            fontSize: config.colourBar.fontSize,
+            fontFamily: config.plot.fontFamily,
+            scoreColour: scales.score,
+          },
+          link: {
+            show: config.link.show,
+            groupColour: config.link.groupColour,
+          },
         },
       });
       return currentScene;
