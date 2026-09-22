@@ -15,14 +15,18 @@ function normalizeGene(gene, locusUid, clusterUid) {
 }
 
 function normalizeLocus(locus, clusterUid) {
-  const { _cluster, clusterUid: _sourceClusterUid, ...source } = locus;
+  const {
+    _cluster,
+    _bio_start,
+    _bio_end,
+    clusterUid: _sourceClusterUid,
+    ...source
+  } = locus;
   const bio = source.bio || { start: source.start, end: source.end };
   return {
     ...source,
     clusterUid,
     bio,
-    _bio_start: bio.start,
-    _bio_end: bio.end,
     start: 0,
     end: bio.end - bio.start,
     genes: source.genes.map((gene) =>

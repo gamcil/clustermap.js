@@ -71,6 +71,8 @@ test("chart normalization preserves source data and records biological coordinat
   assert.notEqual(gene, data.clusters[0].loci[0].genes[0]);
   assert.deepEqual(locus.bio, { start: 500, end: 700 });
   assert.deepEqual(gene.bio, { start: 550, end: 600, strand: 1 });
+  assert.equal(locus._bio_start, undefined);
+  assert.equal(locus._bio_end, undefined);
   assert.equal(data.clusters[0].loci[0].bio, undefined);
   assert.equal(data.clusters[0].loci[0].genes[0].bio, undefined);
 });

@@ -128,12 +128,12 @@ export function formatLocusText(loci, chartState, hideCoordinates) {
       let end;
 
       const state = getLocusState(chartState, locus);
-      if (locus._bio_start != null && locus._bio_end != null) {
+      if (locus.bio) {
         let startDiff = state.start - locus.start;
         let endDiff = locus.end - state.end;
         if (state.flipped) [startDiff, endDiff] = [endDiff, startDiff];
-        start = locus._bio_start + startDiff + 1;
-        end = locus._bio_end - endDiff;
+        start = locus.bio.start + startDiff + 1;
+        end = locus.bio.end - endDiff;
       } else {
         start = state.start + 1;
         end = state.end;

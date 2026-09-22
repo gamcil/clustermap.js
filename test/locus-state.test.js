@@ -146,8 +146,7 @@ test("locus labels preserve zero-based biological coordinates after a flip", asy
   const { createChartState, formatLocusText } = await import("../src/chartState.mjs");
   const locus = {
     ...createLocus(),
-    _bio_start: 0,
-    _bio_end: 10000,
+    bio: { start: 0, end: 10000 },
   };
   const state = createChartState({ clusters: [{ loci: [locus] }] });
   Object.assign(state.loci.get(locus.uid), {

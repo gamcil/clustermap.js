@@ -239,12 +239,12 @@
         let end;
 
         const state = getLocusState(chartState, locus);
-        if (locus._bio_start != null && locus._bio_end != null) {
+        if (locus.bio) {
           let startDiff = state.start - locus.start;
           let endDiff = locus.end - state.end;
           if (state.flipped) [startDiff, endDiff] = [endDiff, startDiff];
-          start = locus._bio_start + startDiff + 1;
-          end = locus._bio_end - endDiff;
+          start = locus.bio.start + startDiff + 1;
+          end = locus.bio.end - endDiff;
         } else {
           start = state.start + 1;
           end = state.end;
@@ -478,14 +478,18 @@
   }
 
   function normalizeLocus(locus, clusterUid) {
-    const { _cluster, clusterUid: _sourceClusterUid, ...source } = locus;
+    const {
+      _cluster,
+      _bio_start,
+      _bio_end,
+      clusterUid: _sourceClusterUid,
+      ...source
+    } = locus;
     const bio = source.bio || { start: source.start, end: source.end };
     return {
       ...source,
       clusterUid,
       bio,
-      _bio_start: bio.start,
-      _bio_end: bio.end,
       start: 0,
       end: bio.end - bio.start,
       genes: source.genes.map((gene) =>
