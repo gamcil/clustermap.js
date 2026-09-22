@@ -133,11 +133,11 @@
         present.add(locus.uid);
         if (!loci.has(locus.uid)) {
           loci.set(locus.uid, {
-            start: locus._start ?? locus.start,
-            end: locus._end ?? locus.end,
-            flipped: locus._flipped ?? false,
-            trimLeft: locus._trimLeft ?? null,
-            trimRight: locus._trimRight ?? null,
+            start: locus.start,
+            end: locus.end,
+            flipped: false,
+            trimLeft: null,
+            trimRight: null,
           });
         }
         for (const gene of locus.genes) {
@@ -462,7 +462,14 @@
   }
 
   function normalizeGene(gene, locusUid, clusterUid) {
-    const { _locus, _cluster, locusUid: _sourceLocusUid, clusterUid: _sourceClusterUid, ...source } = gene;
+    const {
+      _locus: legacyLocusUid,
+      _cluster: legacyClusterUid,
+      _strand: legacyStrand,
+      locusUid: sourceLocusUid,
+      clusterUid: sourceClusterUid,
+      ...source
+    } = gene;
     return {
       ...source,
       // Parent hierarchy is canonical. Legacy relationship fields are ignored
@@ -479,10 +486,15 @@
 
   function normalizeLocus(locus, clusterUid) {
     const {
-      _cluster,
-      _bio_start,
-      _bio_end,
-      clusterUid: _sourceClusterUid,
+      _cluster: legacyClusterUid,
+      _bio_start: legacyBioStart,
+      _bio_end: legacyBioEnd,
+      _start: legacyStart,
+      _end: legacyEnd,
+      _flipped: legacyFlipped,
+      _trimLeft: legacyTrimLeft,
+      _trimRight: legacyTrimRight,
+      clusterUid: sourceClusterUid,
       ...source
     } = locus;
     const bio = source.bio || { start: source.start, end: source.end };
@@ -1850,8 +1862,8 @@
       if (index > 0) value = range[range.length - 1] + end - start + spacing;
       const offset = locusOffset(locus.uid) || 0;
       const state = locusState ? locusState(locus) : locus;
-      start = scaleX(state.start ?? state._start ?? locus.start);
-      end = scaleX(state.end ?? state._end ?? locus.end);
+      start = scaleX(state.start ?? locus.start);
+      end = scaleX(state.end ?? locus.end);
       range.push(value - start + offset);
     }
 
@@ -2243,7 +2255,7 @@
         locusOffset: scales.locus,
         getLocusState: locusState,
         getGeneState: (gene) => getGeneState(chartState, gene),
-        areClustersAdjacent: _cluster.adjacent,
+        areClustersAdjacent: cluster.adjacent,
         shape: config.gene.shape,
         label: config.gene.label,
         link: {
@@ -2252,7 +2264,7 @@
           threshold: config.link.threshold,
           labelPosition: config.link.label.position,
         },
-        clusterLabel: _cluster.locusText,
+        clusterLabel: cluster.locusText,
         alignLabels: config.cluster.alignLabels,
         chrome: {
           legendMarginLeft: config.legend.marginLeft,
@@ -2269,7 +2281,7 @@
     get: () => currentScene,
   };
 
-  const _gene = {
+  const gene = {
     getId: ids.gene,
     anchor: (_, anchor, flipLoci = false) => {
       const genes = scales.group
@@ -2300,7 +2312,7 @@
     },
   };
 
-  const _cluster = {
+  const cluster = {
     getId: ids.cluster,
     /**
      * Generates locus coordinates displayed next underneath a cluster name.
@@ -2322,7 +2334,7 @@
     },
   };
 
-  const _link = {
+  const link = {
     getId: ids.link,
     /**
      * Update group scales given new data.
@@ -2356,12 +2368,12 @@
     },
   };
 
-  const _locus = {
+  const locus = {
     getId: ids.locus,
   };
 
-  const _scale = {
-    check: (s) => _scale.checkDomain(s) && _scale.checkRange(s),
+  const scale = {
+    check: (s) => scale.checkDomain(s) && scale.checkRange(s),
     checkDomain: (s) => scales[s].domain().length > 0,
     checkRange: (s) => scales[s].range().length > 0,
     updateX: () => {
@@ -2369,8 +2381,8 @@
     },
     updateY: (data) => {
       let body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
-      let rng = data.clusters.map((_, i) => {
-        return i * (config.cluster.spacing + body);
+      let rng = data.clusters.map((cluster, index) => {
+        return index * (config.cluster.spacing + body);
       });
       scales.y.range(rng);
     },
@@ -2410,25 +2422,25 @@
      */
     update: (data) => {
       let oldX = scales.x.copy();
-      _scale.updateX();
+      scale.updateX();
       // Reproject dependent ranges only when the x-scale range actually
       // changes. Repeating invert()/scale() on every redraw accumulates small
       // floating-point errors, causing static link paths to drift after flips.
       let xRangeChanged = oldX
         .range()
         .some((value, index) => value !== scales.x.range()[index]);
-      if (xRangeChanged) _scale.rescaleRanges(oldX);
+      if (xRangeChanged) scale.rescaleRanges(oldX);
 
       scales.y.domain(getClusterOrder(chartState));
-      _scale.updateY(data);
+      scale.updateY(data);
 
-      _scale.updateOffset(data.clusters);
-      _scale.updateLocus(data.clusters);
+      scale.updateOffset(data.clusters);
+      scale.updateLocus(data.clusters);
     },
   };
 
-  config.gene.shape.onClick = _gene.anchor;
-  config.legend.onClickText = _link.rename;
+  config.gene.shape.onClick = gene.anchor;
+  config.legend.onClickText = link.rename;
 
   return {
     config,
@@ -2439,11 +2451,11 @@
     setChartState,
     plot,
     scales,
-    cluster: _cluster,
-    gene: _gene,
-    link: _link,
-    locus: _locus,
-    scale: _scale,
+    cluster,
+    gene,
+    link,
+    locus,
+    scale,
     scene,
   };
   }

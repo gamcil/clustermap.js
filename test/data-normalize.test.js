@@ -54,7 +54,20 @@ test("chart normalization preserves source data and records biological coordinat
             uid: "locus-a",
             start: 500,
             end: 700,
-            genes: [{ uid: "gene-a", start: 550, end: 600, strand: 1 }],
+            _start: 50,
+            _end: 150,
+            _flipped: true,
+            _trimLeft: { uid: "gene-a" },
+            _trimRight: { uid: "gene-a" },
+            genes: [
+              {
+                uid: "gene-a",
+                start: 550,
+                end: 600,
+                strand: 1,
+                _strand: -1,
+              },
+            ],
           },
         ],
       },
@@ -73,6 +86,12 @@ test("chart normalization preserves source data and records biological coordinat
   assert.deepEqual(gene.bio, { start: 550, end: 600, strand: 1 });
   assert.equal(locus._bio_start, undefined);
   assert.equal(locus._bio_end, undefined);
+  assert.equal(locus._start, undefined);
+  assert.equal(locus._end, undefined);
+  assert.equal(locus._flipped, undefined);
+  assert.equal(locus._trimLeft, undefined);
+  assert.equal(locus._trimRight, undefined);
+  assert.equal(gene._strand, undefined);
   assert.equal(data.clusters[0].loci[0].bio, undefined);
   assert.equal(data.clusters[0].loci[0].genes[0].bio, undefined);
 });

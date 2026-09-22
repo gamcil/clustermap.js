@@ -14,8 +14,8 @@ export function getClusterExtent(
     if (ignoredLoci.includes(locus.uid)) continue;
     const offset = clusterOffset(cluster.uid) + locusOffset(locus.uid);
     const state = locusState ? locusState(locus) : locus;
-    const locusStart = scaleX(state.start ?? state._start) + offset;
-    const locusEnd = scaleX(state.end ?? state._end) + offset;
+    const locusStart = scaleX(state.start) + offset;
+    const locusEnd = scaleX(state.end) + offset;
     if (start == null || locusStart < start) start = locusStart;
     if (end == null || locusEnd > end) end = locusEnd;
   }
@@ -54,8 +54,8 @@ export function getClusterLocusRange(
     if (index > 0) value = range[range.length - 1] + end - start + spacing;
     const offset = locusOffset(locus.uid) || 0;
     const state = locusState ? locusState(locus) : locus;
-    start = scaleX(state.start ?? state._start ?? locus.start);
-    end = scaleX(state.end ?? state._end ?? locus.end);
+    start = scaleX(state.start ?? locus.start);
+    end = scaleX(state.end ?? locus.end);
     range.push(value - start + offset);
   }
 

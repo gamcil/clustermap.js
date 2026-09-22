@@ -1,5 +1,12 @@
 function normalizeGene(gene, locusUid, clusterUid) {
-  const { _locus, _cluster, locusUid: _sourceLocusUid, clusterUid: _sourceClusterUid, ...source } = gene;
+  const {
+    _locus: legacyLocusUid,
+    _cluster: legacyClusterUid,
+    _strand: legacyStrand,
+    locusUid: sourceLocusUid,
+    clusterUid: sourceClusterUid,
+    ...source
+  } = gene;
   return {
     ...source,
     // Parent hierarchy is canonical. Legacy relationship fields are ignored
@@ -16,10 +23,15 @@ function normalizeGene(gene, locusUid, clusterUid) {
 
 function normalizeLocus(locus, clusterUid) {
   const {
-    _cluster,
-    _bio_start,
-    _bio_end,
-    clusterUid: _sourceClusterUid,
+    _cluster: legacyClusterUid,
+    _bio_start: legacyBioStart,
+    _bio_end: legacyBioEnd,
+    _start: legacyStart,
+    _end: legacyEnd,
+    _flipped: legacyFlipped,
+    _trimLeft: legacyTrimLeft,
+    _trimRight: legacyTrimRight,
+    clusterUid: sourceClusterUid,
     ...source
   } = locus;
   const bio = source.bio || { start: source.start, end: source.end };

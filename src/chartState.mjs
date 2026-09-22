@@ -18,11 +18,11 @@ export function createChartState(data, previous = null) {
       present.add(locus.uid);
       if (!loci.has(locus.uid)) {
         loci.set(locus.uid, {
-          start: locus._start ?? locus.start,
-          end: locus._end ?? locus.end,
-          flipped: locus._flipped ?? false,
-          trimLeft: locus._trimLeft ?? null,
-          trimRight: locus._trimRight ?? null,
+          start: locus.start,
+          end: locus.end,
+          flipped: false,
+          trimLeft: null,
+          trimRight: null,
         });
       }
       for (const gene of locus.genes) {
