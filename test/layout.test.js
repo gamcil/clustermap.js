@@ -10,7 +10,7 @@ test("scene derives world-space geometry without DOM state", async () => {
         loci: [
           {
             uid: "top-locus",
-            genes: [{ uid: "top-gene", _locus: "top-locus", _cluster: "top" }],
+            genes: [{ uid: "top-gene", locusUid: "top-locus", clusterUid: "top" }],
           },
         ],
       },
@@ -20,7 +20,7 @@ test("scene derives world-space geometry without DOM state", async () => {
           {
             uid: "bottom-locus",
             genes: [
-              { uid: "bottom-gene", _locus: "bottom-locus", _cluster: "bottom" },
+              { uid: "bottom-gene", locusUid: "bottom-locus", clusterUid: "bottom" },
             ],
           },
         ],

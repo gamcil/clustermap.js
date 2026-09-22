@@ -33,9 +33,9 @@ test("link grouping merges overlapping links and omits hidden groups from scales
 test("best-only filtering keeps the highest-identity overlapping link per cluster pair", async () => {
   const { filterLinks } = await import("../src/links/groups.mjs");
   const genes = new Map([
-    ["a", { _cluster: "one" }],
-    ["b", { _cluster: "two" }],
-    ["c", { _cluster: "two" }],
+    ["a", { clusterUid: "one" }],
+    ["b", { clusterUid: "two" }],
+    ["c", { clusterUid: "two" }],
   ]);
   const links = [
     link("lower", "a", "b", 0.6),

@@ -1,62 +1,46 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-test("cluster normalization initializes display fields and relationships", async () => {
-  const { initializeClusterData } = await import("../src/data/normalize.mjs");
-  const cluster = {
-    uid: "cluster-a",
-    loci: [
+test("chart normalization establishes explicit hierarchy relationships", async () => {
+  const { normalizeChartData } = await import("../src/data/normalize.mjs");
+  const data = {
+    clusters: [
       {
-        uid: "locus-a",
-        start: 0,
-        end: 100,
-        genes: [{ uid: "gene-a", start: 0, end: 20, strand: 0 }],
-      },
-    ],
-  };
-
-  initializeClusterData(cluster);
-
-  const [locus] = cluster.loci;
-  const [gene] = locus.genes;
-  assert.deepEqual(
-    { cluster: locus._cluster },
-    { cluster: "cluster-a" }
-  );
-  assert.deepEqual(
-    {
-      locus: gene._locus,
-      cluster: gene._cluster,
-    },
-    { locus: "locus-a", cluster: "cluster-a" }
-  );
-});
-
-test("cluster normalization preserves existing display state", async () => {
-  const { initializeClusterData } = await import("../src/data/normalize.mjs");
-  const cluster = {
-    uid: "cluster-a",
-    loci: [
-      {
-        uid: "locus-a",
-        start: 0,
-        end: 100,
-        genes: [
+        uid: "cluster-a",
+        loci: [
           {
-            uid: "gene-a",
+            uid: "locus-a",
+            _cluster: "legacy-cluster",
             start: 0,
-            end: 20,
-            strand: 1,
-            _strand: 0,
+            end: 100,
+            genes: [
+              {
+                uid: "gene-a",
+                _locus: "legacy-locus",
+                _cluster: "legacy-cluster",
+                start: 0,
+                end: 20,
+                strand: 1,
+              },
+            ],
           },
         ],
       },
     ],
+    links: [],
   };
 
-  initializeClusterData(cluster);
+  const normalized = normalizeChartData(data);
+  const locus = normalized.clusters[0].loci[0];
+  const gene = locus.genes[0];
 
-  assert.equal(cluster.loci[0].genes[0]._strand, 0);
+  assert.equal(locus.clusterUid, "cluster-a");
+  assert.equal(gene.locusUid, "locus-a");
+  assert.equal(gene.clusterUid, "cluster-a");
+  assert.equal(locus._cluster, undefined);
+  assert.equal(gene._locus, undefined);
+  assert.equal(gene._cluster, undefined);
+  assert.equal(data.clusters[0].loci[0]._cluster, "legacy-cluster");
 });
 
 test("chart normalization preserves source data and records biological coordinates", async () => {

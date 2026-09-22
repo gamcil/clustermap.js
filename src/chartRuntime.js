@@ -177,13 +177,13 @@ const _gene = {
     anchorGeneGroup(chartState, {
       anchor,
       genes,
-      locusForGene: (gene) => get.locusData(gene._locus),
+      locusForGene: (gene) => get.locusData(gene.locusUid),
       coordinateForGene: (gene) => {
         const display = displayGene(gene);
         return (
           scales.x(display.start + (display.end - display.start) / 2) +
-          scales.locus(gene._locus) +
-          scales.offset(gene._cluster)
+          scales.locus(gene.locusUid) +
+          scales.offset(gene.clusterUid)
         );
       },
       flipMismatchedLoci: flipLoci,

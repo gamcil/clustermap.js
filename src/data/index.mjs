@@ -1,5 +1,3 @@
-import { initializeClusterData } from "./normalize.mjs";
-
 function appendToIndex(index, key, value) {
   const values = index.get(key);
   if (values) values.push(value);
@@ -14,7 +12,6 @@ export function createChartIndex(data) {
   const linksByGeneId = new Map();
 
   for (const cluster of data.clusters) {
-    initializeClusterData(cluster);
     clusterById.set(cluster.uid, cluster);
 
     for (const locus of cluster.loci) {

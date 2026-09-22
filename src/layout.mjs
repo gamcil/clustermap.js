@@ -134,10 +134,10 @@ export function buildScene(
         areClustersAdjacent,
         scaleX,
         horizontalOffset: (gene) => {
-          const locus = loci.get(gene._locus);
+          const locus = loci.get(gene.locusUid);
           return locus ? locus.x : 0;
         },
-        verticalPosition: (gene) => clusters.get(gene._cluster)?.y ?? 0,
+        verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
         geneMidpoint,
       });
     }

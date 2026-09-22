@@ -12,7 +12,7 @@ export function getLinkAnchors(
   const query = geneForUid(link.query.uid);
   const target = geneForUid(link.target.uid);
 
-  if (!areClustersAdjacent(query._cluster, target._cluster)) return null;
+  if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
 
   const getGeneAnchors = (gene) => {
     const offset = horizontalOffset(gene);

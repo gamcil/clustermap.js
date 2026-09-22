@@ -1,24 +1,33 @@
-function setDefault(object, key, value) {
-  if (object[key] == null) object[key] = value;
-}
-
-function normalizeGene(gene) {
+function normalizeGene(gene, locusUid, clusterUid) {
+  const { _locus, _cluster, locusUid: _sourceLocusUid, clusterUid: _sourceClusterUid, ...source } = gene;
   return {
-    ...gene,
-    bio: gene.bio || { start: gene.start, end: gene.end, strand: gene.strand },
+    ...source,
+    // Parent hierarchy is canonical. Legacy relationship fields are ignored
+    // after this boundary rather than being trusted as mutable display data.
+    locusUid,
+    clusterUid,
+    bio: source.bio || {
+      start: source.start,
+      end: source.end,
+      strand: source.strand,
+    },
   };
 }
 
-function normalizeLocus(locus) {
-  const bio = locus.bio || { start: locus.start, end: locus.end };
+function normalizeLocus(locus, clusterUid) {
+  const { _cluster, clusterUid: _sourceClusterUid, ...source } = locus;
+  const bio = source.bio || { start: source.start, end: source.end };
   return {
-    ...locus,
+    ...source,
+    clusterUid,
     bio,
     _bio_start: bio.start,
     _bio_end: bio.end,
     start: 0,
     end: bio.end - bio.start,
-    genes: locus.genes.map(normalizeGene),
+    genes: source.genes.map((gene) =>
+      normalizeGene(gene, source.uid, clusterUid)
+    ),
   };
 }
 
@@ -27,7 +36,7 @@ export function normalizeChartData(data) {
     ...data,
     clusters: data.clusters.map((cluster) => ({
       ...cluster,
-      loci: cluster.loci.map(normalizeLocus),
+      loci: cluster.loci.map((locus) => normalizeLocus(locus, cluster.uid)),
     })),
     links: [...data.links],
     groups: data.groups?.map((group) => ({
@@ -35,17 +44,4 @@ export function normalizeChartData(data) {
       genes: group.genes ? [...group.genes] : group.genes,
     })),
   };
-}
-
-export function initializeClusterData(cluster) {
-  for (const locus of cluster.loci) {
-    setDefault(locus, "_cluster", cluster.uid);
-
-    for (const gene of locus.genes) {
-      setDefault(gene, "_locus", locus.uid);
-      setDefault(gene, "_cluster", cluster.uid);
-    }
-  }
-
-  return cluster;
 }

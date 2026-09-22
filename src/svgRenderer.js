@@ -359,21 +359,21 @@ function createLocusPositionDrag({
     const state = interactions.getLocusState(locus);
     const locusStart = scales.x(state.start);
     if (config.cluster.alignLabels) {
-      const locusMin = value + scales.offset(locus._cluster) + locusStart;
+      const locusMin = value + scales.offset(locus.clusterUid) + locusStart;
       const newMin = Math.min(locusMin, minPos) - 10;
       plot.selectAll("g.clusterInfo").attr(
         "transform",
         (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
       );
     } else {
-      plot.select(`#${ids.clusterInfo({ uid: locus._cluster })}`).attr(
+      plot.select(`#${ids.clusterInfo({ uid: locus.clusterUid })}`).attr(
         "transform",
         `translate(${value + locusStart - 10}, 0)`
       );
     }
 
     const locusEnd = scales.x(state.end);
-    const newMax = Math.max(value + scales.offset(locus._cluster) + locusEnd, maxPos) + 20;
+    const newMax = Math.max(value + scales.offset(locus.clusterUid) + locusEnd, maxPos) + 20;
     plot.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
   };
 
@@ -441,14 +441,14 @@ function createLocusResizeDrag({
     refreshLinkPreview();
 
     if (config.cluster.alignLabels) {
-      const offset = scales.offset(locus._cluster) + scales.locus(locus.uid);
+      const offset = scales.offset(locus.clusterUid) + scales.locus(locus.uid);
       const newMin = Math.min(coordinate + offset, minPos) - 10;
       plot.selectAll("g.clusterInfo").attr(
         "transform",
         (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
       );
     } else {
-      plot.select(`#${ids.clusterInfo({ uid: locus._cluster })}`).attr(
+      plot.select(`#${ids.clusterInfo({ uid: locus.clusterUid })}`).attr(
         "transform",
         `translate(${scales.locus(locus.uid) + scales.x(state.start) - 10}, 0)`
       );
@@ -471,7 +471,7 @@ function createLocusResizeDrag({
 
     const locusEnd = scales.x(state.end);
     const newMax = Math.max(
-      scales.offset(locus._cluster) + scales.locus(locus.uid) + locusEnd,
+      scales.offset(locus.clusterUid) + scales.locus(locus.uid) + locusEnd,
       maxPos
     ) + config.legend.marginLeft;
     plot.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
@@ -522,8 +522,8 @@ function createLinkPreview({ plot, config, scales, ids, lookup, interactions }) 
       areClustersAdjacent,
       scaleX: scales.x,
       horizontalOffset: (gene) =>
-        scales.offset(gene._cluster) + matrix(plot.select(`#${ids.locus({ uid: gene._locus })}`)).e,
-      verticalPosition: (gene) => matrix(plot.select(`#${ids.cluster({ uid: gene._cluster })}`)).f,
+        scales.offset(gene.clusterUid) + matrix(plot.select(`#${ids.locus({ uid: gene.locusUid })}`)).e,
+      verticalPosition: (gene) => matrix(plot.select(`#${ids.cluster({ uid: gene.clusterUid })}`)).f,
       geneMidpoint: config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2,
     });
     return {

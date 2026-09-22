@@ -84,8 +84,8 @@ export function filterLinks(
 
   for (const link of byIdentity) {
     const clusterPair = new Set([
-      geneForUid(link.query.uid)._cluster,
-      geneForUid(link.target.uid)._cluster,
+      geneForUid(link.query.uid).clusterUid,
+      geneForUid(link.target.uid).clusterUid,
     ]);
 
     if (!linksByClusterPair.has(clusterPair)) {

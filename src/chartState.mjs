@@ -118,7 +118,7 @@ export function getLocusState(chartState, locus) {
 }
 
 export function getGeneState(chartState, gene) {
-  return chartState.genes.get(`${gene._locus}:${gene.uid}`);
+  return chartState.genes.get(`${gene.locusUid}:${gene.uid}`);
 }
 
 export function formatLocusText(loci, chartState, hideCoordinates) {
@@ -271,9 +271,9 @@ export function anchorGeneGroup(chartState, {
       flipLocus(chartState, locus);
       onLocusFlipped(locus);
     }
-    const clusterGenes = anchorsByCluster.get(gene._cluster) || [];
+    const clusterGenes = anchorsByCluster.get(gene.clusterUid) || [];
     clusterGenes.push(gene);
-    anchorsByCluster.set(gene._cluster, clusterGenes);
+    anchorsByCluster.set(gene.clusterUid, clusterGenes);
   }
 
   const midpoint = coordinateForGene(anchor);

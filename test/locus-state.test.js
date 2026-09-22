@@ -12,8 +12,8 @@ const createLocus = () => ({
   _trimLeft: null,
   _trimRight: null,
   genes: [
-    { uid: "a", _locus: "locus", start: 0, end: 1000, strand: -1 },
-    { uid: "b", _locus: "locus", start: 2500, end: 3500, strand: 1 },
+    { uid: "a", locusUid: "locus", start: 0, end: 1000, strand: -1 },
+    { uid: "b", locusUid: "locus", start: 2500, end: 3500, strand: 1 },
   ],
 });
 
@@ -57,7 +57,7 @@ test("flipping a trimmed locus synchronizes its bounds in display coordinates", 
     "../src/chartState.mjs"
   );
   const locus = createLocus();
-  locus.genes.push({ uid: "c", _locus: "locus", start: 5500, end: 6500, strand: -1 });
+  locus.genes.push({ uid: "c", locusUid: "locus", start: 5500, end: 6500, strand: -1 });
   const state = createChartState({ clusters: [{ loci: [locus] }] });
 
   // This is the state produced by trimming the original locus at gene c's end.
@@ -82,7 +82,7 @@ test("trimming a flipped locus retains the selected display-side genes", async (
     "../src/chartState.mjs"
   );
   const locus = createLocus();
-  locus.genes.push({ uid: "c", _locus: "locus", start: 5500, end: 6500, strand: -1 });
+  locus.genes.push({ uid: "c", locusUid: "locus", start: 5500, end: 6500, strand: -1 });
   const state = createChartState({ clusters: [{ loci: [locus] }] });
 
   flipLocus(state, locus);
@@ -104,7 +104,7 @@ test("trimming a flipped locus retains the selected display-side genes", async (
 test("trimming selects display-side gene boundaries without renderer state", async () => {
   const { createChartState, trimLocus } = await import("../src/chartState.mjs");
   const locus = createLocus();
-  locus.genes.push({ uid: "c", _locus: "locus", start: 5500, end: 6500, strand: -1 });
+  locus.genes.push({ uid: "c", locusUid: "locus", start: 5500, end: 6500, strand: -1 });
   const state = createChartState({ clusters: [{ loci: [locus] }] });
 
   trimLocus(state, locus, {

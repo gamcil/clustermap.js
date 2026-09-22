@@ -98,16 +98,16 @@ test("chart state anchors matching genes by moving their clusters", async () => 
   } = await import("../src/chartState.mjs");
   const anchor = {
     uid: "gene-a",
-    _cluster: "cluster-a",
-    _locus: "locus-a",
+    clusterUid: "cluster-a",
+    locusUid: "locus-a",
     start: 0,
     end: 10,
     strand: 1,
   };
   const match = {
     uid: "gene-b",
-    _cluster: "cluster-b",
-    _locus: "locus-b",
+    clusterUid: "cluster-b",
+    locusUid: "locus-b",
     start: 20,
     end: 30,
     strand: 1,
@@ -124,13 +124,13 @@ test("chart state anchors matching genes by moving their clusters", async () => 
   });
   const coordinateForGene = (gene) => {
     const display = getGeneState(state, gene);
-    return getClusterOffset(state, gene._cluster) + (display.start + display.end) / 2;
+    return getClusterOffset(state, gene.clusterUid) + (display.start + display.end) / 2;
   };
 
   const changes = anchorGeneGroup(state, {
     anchor,
     genes: [anchor, match],
-    locusForGene: (gene) => loci.get(gene._locus),
+    locusForGene: (gene) => loci.get(gene.locusUid),
     coordinateForGene,
   });
 
@@ -150,16 +150,16 @@ test("chart state anchoring flips mismatched loci before finding offsets", async
   } = await import("../src/chartState.mjs");
   const anchor = {
     uid: "gene-a",
-    _cluster: "cluster-a",
-    _locus: "locus-a",
+    clusterUid: "cluster-a",
+    locusUid: "locus-a",
     start: 0,
     end: 10,
     strand: 1,
   };
   const match = {
     uid: "gene-b",
-    _cluster: "cluster-b",
-    _locus: "locus-b",
+    clusterUid: "cluster-b",
+    locusUid: "locus-b",
     start: 20,
     end: 30,
     strand: -1,
@@ -179,10 +179,10 @@ test("chart state anchoring flips mismatched loci before finding offsets", async
   anchorGeneGroup(state, {
     anchor,
     genes: [anchor, match],
-    locusForGene: (gene) => loci.get(gene._locus),
+    locusForGene: (gene) => loci.get(gene.locusUid),
     coordinateForGene: (gene) => {
       const display = getGeneState(state, gene);
-      return getClusterOffset(state, gene._cluster) + (display.start + display.end) / 2;
+      return getClusterOffset(state, gene.clusterUid) + (display.start + display.end) / 2;
     },
     flipMismatchedLoci: true,
     onLocusFlipped: (locus) => flipped.push(locus.uid),

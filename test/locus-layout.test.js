@@ -8,8 +8,8 @@ test("locus layout calculates ranges and extents from supplied scales", async ()
   const cluster = {
     uid: "cluster-a",
     loci: [
-      { uid: "locus-a", start: 0, end: 100, _start: 0, _end: 100 },
-      { uid: "locus-b", start: 0, end: 50, _start: 0, _end: 50 },
+      { uid: "locus-a", start: 0, end: 100 },
+      { uid: "locus-b", start: 0, end: 50 },
     ],
   };
   const layout = {

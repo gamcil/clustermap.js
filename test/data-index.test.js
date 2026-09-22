@@ -28,6 +28,6 @@ test("chart index maps hierarchy and links by stable identifiers", async () => {
   assert.equal(index.linkById.get("link-a-b"), link);
   assert.deepEqual(index.linksByGeneId.get("gene-a"), [link]);
   assert.deepEqual(index.linksByGeneId.get("gene-b"), [link]);
-  assert.equal(geneA._locus, "locus-a");
-  assert.equal(geneB._cluster, "cluster-a");
+  assert.equal(geneA.locusUid, undefined);
+  assert.equal(geneB.clusterUid, undefined);
 });

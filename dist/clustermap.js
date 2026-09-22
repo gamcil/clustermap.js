@@ -90,8 +90,8 @@
 
     for (const link of byIdentity) {
       const clusterPair = new Set([
-        geneForUid(link.query.uid)._cluster,
-        geneForUid(link.target.uid)._cluster,
+        geneForUid(link.query.uid).clusterUid,
+        geneForUid(link.target.uid).clusterUid,
       ]);
 
       if (!linksByClusterPair.has(clusterPair)) {
@@ -229,7 +229,7 @@
   }
 
   function getGeneState(chartState, gene) {
-    return chartState.genes.get(`${gene._locus}:${gene.uid}`);
+    return chartState.genes.get(`${gene.locusUid}:${gene.uid}`);
   }
 
   function formatLocusText(loci, chartState, hideCoordinates) {
@@ -382,9 +382,9 @@
         flipLocus(chartState, locus);
         onLocusFlipped(locus);
       }
-      const clusterGenes = anchorsByCluster.get(gene._cluster) || [];
+      const clusterGenes = anchorsByCluster.get(gene.clusterUid) || [];
       clusterGenes.push(gene);
-      anchorsByCluster.set(gene._cluster, clusterGenes);
+      anchorsByCluster.set(gene.clusterUid, clusterGenes);
     }
 
     const midpoint = coordinateForGene(anchor);
@@ -430,58 +430,6 @@
     );
   }
 
-  function setDefault(object, key, value) {
-    if (object[key] == null) object[key] = value;
-  }
-
-  function normalizeGene(gene) {
-    return {
-      ...gene,
-      bio: gene.bio || { start: gene.start, end: gene.end, strand: gene.strand },
-    };
-  }
-
-  function normalizeLocus(locus) {
-    const bio = locus.bio || { start: locus.start, end: locus.end };
-    return {
-      ...locus,
-      bio,
-      _bio_start: bio.start,
-      _bio_end: bio.end,
-      start: 0,
-      end: bio.end - bio.start,
-      genes: locus.genes.map(normalizeGene),
-    };
-  }
-
-  function normalizeChartData(data) {
-    return {
-      ...data,
-      clusters: data.clusters.map((cluster) => ({
-        ...cluster,
-        loci: cluster.loci.map(normalizeLocus),
-      })),
-      links: [...data.links],
-      groups: data.groups?.map((group) => ({
-        ...group,
-        genes: group.genes ? [...group.genes] : group.genes,
-      })),
-    };
-  }
-
-  function initializeClusterData(cluster) {
-    for (const locus of cluster.loci) {
-      setDefault(locus, "_cluster", cluster.uid);
-
-      for (const gene of locus.genes) {
-        setDefault(gene, "_locus", locus.uid);
-        setDefault(gene, "_cluster", cluster.uid);
-      }
-    }
-
-    return cluster;
-  }
-
   function appendToIndex(index, key, value) {
     const values = index.get(key);
     if (values) values.push(value);
@@ -496,7 +444,6 @@
     const linksByGeneId = new Map();
 
     for (const cluster of data.clusters) {
-      initializeClusterData(cluster);
       clusterById.set(cluster.uid, cluster);
 
       for (const locus of cluster.loci) {
@@ -512,6 +459,54 @@
     }
 
     return { clusterById, locusById, geneById, linkById, linksByGeneId };
+  }
+
+  function normalizeGene(gene, locusUid, clusterUid) {
+    const { _locus, _cluster, locusUid: _sourceLocusUid, clusterUid: _sourceClusterUid, ...source } = gene;
+    return {
+      ...source,
+      // Parent hierarchy is canonical. Legacy relationship fields are ignored
+      // after this boundary rather than being trusted as mutable display data.
+      locusUid,
+      clusterUid,
+      bio: source.bio || {
+        start: source.start,
+        end: source.end,
+        strand: source.strand,
+      },
+    };
+  }
+
+  function normalizeLocus(locus, clusterUid) {
+    const { _cluster, clusterUid: _sourceClusterUid, ...source } = locus;
+    const bio = source.bio || { start: source.start, end: source.end };
+    return {
+      ...source,
+      clusterUid,
+      bio,
+      _bio_start: bio.start,
+      _bio_end: bio.end,
+      start: 0,
+      end: bio.end - bio.start,
+      genes: source.genes.map((gene) =>
+        normalizeGene(gene, source.uid, clusterUid)
+      ),
+    };
+  }
+
+  function normalizeChartData(data) {
+    return {
+      ...data,
+      clusters: data.clusters.map((cluster) => ({
+        ...cluster,
+        loci: cluster.loci.map((locus) => normalizeLocus(locus, cluster.uid)),
+      })),
+      links: [...data.links],
+      groups: data.groups?.map((group) => ({
+        ...group,
+        genes: group.genes ? [...group.genes] : group.genes,
+      })),
+    };
   }
 
   // Browser-only tooltip lifecycle shared by any chart renderer. Menu content is
@@ -974,7 +969,7 @@
     const query = geneForUid(link.query.uid);
     const target = geneForUid(link.target.uid);
 
-    if (!areClustersAdjacent(query._cluster, target._cluster)) return null;
+    if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
 
     const getGeneAnchors = (gene) => {
       const offset = horizontalOffset(gene);
@@ -1382,21 +1377,21 @@
       const state = interactions.getLocusState(locus);
       const locusStart = scales.x(state.start);
       if (config.cluster.alignLabels) {
-        const locusMin = value + scales.offset(locus._cluster) + locusStart;
+        const locusMin = value + scales.offset(locus.clusterUid) + locusStart;
         const newMin = Math.min(locusMin, minPos) - 10;
         plot.selectAll("g.clusterInfo").attr(
           "transform",
           (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
         );
       } else {
-        plot.select(`#${ids.clusterInfo({ uid: locus._cluster })}`).attr(
+        plot.select(`#${ids.clusterInfo({ uid: locus.clusterUid })}`).attr(
           "transform",
           `translate(${value + locusStart - 10}, 0)`
         );
       }
 
       const locusEnd = scales.x(state.end);
-      const newMax = Math.max(value + scales.offset(locus._cluster) + locusEnd, maxPos) + 20;
+      const newMax = Math.max(value + scales.offset(locus.clusterUid) + locusEnd, maxPos) + 20;
       plot.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
     };
 
@@ -1464,14 +1459,14 @@
       refreshLinkPreview();
 
       if (config.cluster.alignLabels) {
-        const offset = scales.offset(locus._cluster) + scales.locus(locus.uid);
+        const offset = scales.offset(locus.clusterUid) + scales.locus(locus.uid);
         const newMin = Math.min(coordinate + offset, minPos) - 10;
         plot.selectAll("g.clusterInfo").attr(
           "transform",
           (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
         );
       } else {
-        plot.select(`#${ids.clusterInfo({ uid: locus._cluster })}`).attr(
+        plot.select(`#${ids.clusterInfo({ uid: locus.clusterUid })}`).attr(
           "transform",
           `translate(${scales.locus(locus.uid) + scales.x(state.start) - 10}, 0)`
         );
@@ -1494,7 +1489,7 @@
 
       const locusEnd = scales.x(state.end);
       const newMax = Math.max(
-        scales.offset(locus._cluster) + scales.locus(locus.uid) + locusEnd,
+        scales.offset(locus.clusterUid) + scales.locus(locus.uid) + locusEnd,
         maxPos
       ) + config.legend.marginLeft;
       plot.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
@@ -1545,8 +1540,8 @@
         areClustersAdjacent,
         scaleX: scales.x,
         horizontalOffset: (gene) =>
-          scales.offset(gene._cluster) + matrix(plot.select(`#${ids.locus({ uid: gene._locus })}`)).e,
-        verticalPosition: (gene) => matrix(plot.select(`#${ids.cluster({ uid: gene._cluster })}`)).f,
+          scales.offset(gene.clusterUid) + matrix(plot.select(`#${ids.locus({ uid: gene.locusUid })}`)).e,
+        verticalPosition: (gene) => matrix(plot.select(`#${ids.cluster({ uid: gene.clusterUid })}`)).f,
         geneMidpoint: config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2,
       });
       return {
@@ -2084,10 +2079,10 @@
           areClustersAdjacent,
           scaleX,
           horizontalOffset: (gene) => {
-            const locus = loci.get(gene._locus);
+            const locus = loci.get(gene.locusUid);
             return locus ? locus.x : 0;
           },
-          verticalPosition: (gene) => clusters.get(gene._cluster)?.y ?? 0,
+          verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
           geneMidpoint,
         });
       }
@@ -2283,13 +2278,13 @@
       anchorGeneGroup(chartState, {
         anchor,
         genes,
-        locusForGene: (gene) => get.locusData(gene._locus),
+        locusForGene: (gene) => get.locusData(gene.locusUid),
         coordinateForGene: (gene) => {
           const display = displayGene(gene);
           return (
             scales.x(display.start + (display.end - display.start) / 2) +
-            scales.locus(gene._locus) +
-            scales.offset(gene._cluster)
+            scales.locus(gene.locusUid) +
+            scales.offset(gene.clusterUid)
           );
         },
         flipMismatchedLoci: flipLoci,

@@ -6,8 +6,8 @@ test("link layout anchors reverse genes on their displayed left edge", async () 
     "../src/links/layout.mjs"
   );
   const genes = new Map([
-    ["query", { uid: "query", _cluster: "top", start: 10, end: 20, strand: 0 }],
-    ["target", { uid: "target", _cluster: "bottom", start: 30, end: 40, strand: 1 }],
+    ["query", { uid: "query", clusterUid: "top", start: 10, end: 20, strand: 0 }],
+    ["target", { uid: "target", clusterUid: "bottom", start: 30, end: 40, strand: 1 }],
   ]);
   const anchors = getLinkAnchors(
     { query: { uid: "query" }, target: { uid: "target" } },
@@ -16,7 +16,7 @@ test("link layout anchors reverse genes on their displayed left edge", async () 
       areClustersAdjacent: () => true,
       scaleX: (value) => value,
       horizontalOffset: () => 5,
-      verticalPosition: (gene) => (gene._cluster === "top" ? 10 : 40),
+      verticalPosition: (gene) => (gene.clusterUid === "top" ? 10 : 40),
       geneMidpoint: 2,
     }
   );
