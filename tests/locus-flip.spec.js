@@ -23,10 +23,30 @@ async function readTranslateX(locator) {
   });
 }
 
+async function readTranslateY(locator) {
+  return locator.evaluate((node) => {
+    const transform = node.transform.baseVal.consolidate();
+    return transform ? transform.matrix.f : 0;
+  });
+}
+
 async function readLinkPaths(page) {
   return page
     .locator("path.geneLink")
     .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("d")));
+}
+
+async function readGeneDisplays(locus) {
+  return locus.locator("g.genes > g.gene").evaluateAll((nodes) =>
+    Object.fromEntries(nodes.map((node) => [node.id, node.getAttribute("display")]))
+  );
+}
+
+async function getLocusText(page, locus) {
+  const clusterInfoId = await locus.evaluate(
+    (node) => node.closest("g.cluster").querySelector("g.clusterInfo").id
+  );
+  return page.locator(`#${clusterInfoId} text.locusText`);
 }
 
 test("double-clicking a locus reverses its gene layout", async ({ page }, testInfo) => {
@@ -126,8 +146,8 @@ test("dragging right handles trims loci and moves the legend", async ({ page }, 
   const legend = page.locator("g.legend");
   const locusLabels = page.locator("g.clusterInfo text.locusText");
 
-  await expect(loci).toHaveCount(2);
-  await expect(rightHandles).toHaveCount(2);
+  await expect(loci).toHaveCount(3);
+  await expect(rightHandles).toHaveCount(3);
   await expect(legend).toBeVisible();
   const before = await captureCheckpoint(
     page,
@@ -158,4 +178,125 @@ test("dragging right handles trims loci and moves the legend", async ({ page }, 
     "after-right-trim",
     () => readTranslateX(legend).then((legendX) => ({ legendX }))
   );
+});
+
+test("flipping then trimming uses the flipped gene coordinates", async ({ page }, testInfo) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const locus = page.locator("g.locus").first();
+  const locusText = await getLocusText(page, locus);
+  const rightHandle = locus.locator("rect.rightHandle");
+  const displayedMiddleGene = locus.locator("#gene_1 polygon.genePolygon");
+  await expect(locus).toBeVisible();
+
+  await locus.dblclick({ position: { x: 20, y: 11 } });
+  await waitForPaint(page);
+  await expect(locusText).toHaveText("input_locus (reversed):10000-1");
+
+  // After the flip, gene 1 ends at display coordinate 7500. Trimming at it
+  // must hide the original leftmost gene (gene 0), not gene 3.
+  await rightHandle.dragTo(displayedMiddleGene);
+  await waitForPaint(page);
+
+  await expect(locusText).toHaveText("input_locus (reversed):10000-2501");
+  await expect.poll(() => readGeneDisplays(locus)).toEqual({
+    gene_3: "inline",
+    gene_1: "inline",
+    gene_0: "none",
+  });
+  await captureCheckpoint(page, testInfo, "after-flip-then-trim", async () => ({
+    locus: await readLocusState(locus),
+    label: await locusText.textContent(),
+    geneDisplays: await readGeneDisplays(locus),
+  }));
+});
+
+test("trimming then flipping preserves the selected genes", async ({ page }, testInfo) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const locus = page.locator("g.locus").first();
+  const locusText = await getLocusText(page, locus);
+  const rightHandle = locus.locator("rect.rightHandle");
+  const originalMiddleGene = locus.locator("#gene_1 polygon.genePolygon");
+  await expect(locus).toBeVisible();
+
+  await rightHandle.dragTo(originalMiddleGene);
+  await waitForPaint(page);
+  await expect(locusText).toHaveText("input_locus:1-3500");
+  await expect.poll(() => readGeneDisplays(locus)).toEqual({
+    gene_0: "inline",
+    gene_1: "inline",
+    gene_3: "none",
+  });
+
+  await locus.dblclick({ position: { x: 20, y: 11 } });
+  await waitForPaint(page);
+
+  await expect(locusText).toHaveText("input_locus (reversed):3500-1");
+  await expect.poll(() => readGeneDisplays(locus)).toEqual({
+    gene_3: "none",
+    gene_1: "inline",
+    gene_0: "inline",
+  });
+  await captureCheckpoint(page, testInfo, "after-trim-then-flip", async () => ({
+    locus: await readLocusState(locus),
+    label: await locusText.textContent(),
+    geneDisplays: await readGeneDisplays(locus),
+  }));
+});
+
+test("dragging a cluster persists a snapped vertical order", async ({ page }, testInfo) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const clusters = page.locator("g.cluster");
+  const first = clusters.nth(0);
+  const second = clusters.nth(1);
+  const third = clusters.nth(2);
+  const firstInfo = first.locator("g.clusterInfo");
+  const thirdInfo = third.locator("g.clusterInfo");
+  await expect(clusters).toHaveCount(3);
+
+  const before = await captureCheckpoint(page, testInfo, "before-cluster-reorder", async () => ({
+    firstY: await readTranslateY(first),
+    secondY: await readTranslateY(second),
+    thirdY: await readTranslateY(third),
+  }));
+
+  await firstInfo.dragTo(thirdInfo);
+  await waitForPaint(page);
+
+  await expect.poll(() => readTranslateY(first)).toBeCloseTo(before.thirdY);
+  await expect.poll(() => readTranslateY(second)).toBeCloseTo(before.firstY);
+  await expect.poll(() => readTranslateY(third)).toBeCloseTo(before.secondY);
+  await captureCheckpoint(page, testInfo, "after-cluster-reorder", async () => ({
+    firstY: await readTranslateY(first),
+    secondY: await readTranslateY(second),
+    thirdY: await readTranslateY(third),
+  }));
+});
+
+test("inserting an unlinked cluster hides links between separated clusters", async ({ page }, testInfo) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const clusters = page.locator("g.cluster");
+  const secondInfo = clusters.nth(1).locator("g.clusterInfo");
+  const thirdInfo = clusters.nth(2).locator("g.clusterInfo");
+  await expect(clusters).toHaveCount(3);
+
+  const beforePaths = await readLinkPaths(page);
+  expect(beforePaths).toHaveLength(3);
+  expect(beforePaths).toEqual(expect.not.arrayContaining([""]));
+  await captureCheckpoint(page, testInfo, "before-separating-linked-clusters", () => ({
+    linkPaths: beforePaths,
+  }));
+
+  // The unlinked third cluster becomes the middle row, so clusters one and
+  // two are no longer adjacent and their links must not be rendered.
+  await thirdInfo.dragTo(secondInfo);
+  await waitForPaint(page);
+
+  await expect.poll(() => readLinkPaths(page)).toEqual(beforePaths.map(() => ""));
+  await captureCheckpoint(page, testInfo, "after-separating-linked-clusters", async () => ({
+    linkPaths: await readLinkPaths(page),
+  }));
 });

@@ -391,6 +391,12 @@
   function createChartState(data, previous = null) {
     const loci = previous?.loci || new Map();
     const genes = previous?.genes || new Map();
+    const clusterIds = data.clusters.map((cluster) => cluster.uid);
+    const clusterIdSet = new Set(clusterIds);
+    const clusterOrder = [
+      ...(previous?.clusterOrder || []).filter((uid) => clusterIdSet.has(uid)),
+      ...clusterIds.filter((uid) => !previous?.clusterOrder?.includes(uid)),
+    ];
     const present = new Set();
     for (const cluster of data.clusters) {
       for (const locus of cluster.loci) {
@@ -427,7 +433,15 @@
       if (!data.clusters.some((cluster) => cluster.loci.some((locus) => locus.uid === uid))) loci.delete(uid);
     }
     for (const uid of genes.keys()) if (!present.has(uid)) genes.delete(uid);
-    return { loci, genes };
+    return { loci, genes, clusterOrder };
+  }
+
+  function getClusterOrder(chartState) {
+    return chartState.clusterOrder;
+  }
+
+  function setClusterOrder(chartState, order) {
+    chartState.clusterOrder = [...order];
   }
 
   function getLocusState(chartState, locus) {
@@ -445,7 +459,7 @@
         let end;
 
         const state = getLocusState(chartState, locus);
-        if (locus._bio_start) {
+        if (locus._bio_start != null && locus._bio_end != null) {
           let startDiff = state.start - locus.start;
           let endDiff = locus.end - state.end;
           if (state.flipped) [startDiff, endDiff] = [endDiff, startDiff];
@@ -481,9 +495,11 @@
     const state = getLocusState(chartState, locus);
     const oldStart = state.start;
     const lastGene = locus.genes[locus.genes.length - 1];
-    state.start = state.trimLeft ? state.trimLeft.start : 0;
+    state.start = state.trimLeft
+      ? getGeneState(chartState, state.trimLeft).start
+      : 0;
     state.end = state.trimRight
-      ? state.trimRight.end
+      ? getGeneState(chartState, state.trimRight).end
       : scaleGenes
       ? locus.end
       : lastGene.end;
@@ -649,6 +665,13 @@
 
   function displayGene(gene) {
     return { ...gene, ...getGeneState(chartState, gene) };
+  }
+
+  function geneVisible(gene) {
+    const locus = get.locusData(gene._locus);
+    const bounds = locusState(locus);
+    const display = displayGene(gene);
+    return display.start >= bounds.start && display.end <= bounds.end + 1;
   }
 
   function _get(uid, type) {
@@ -849,6 +872,7 @@
       return group !== null ? `genePolygon group-${group}` : "genePolygon";
     },
     update: (selection) => {
+      selection.attr("display", (gene) => (geneVisible(gene) ? "inline" : "none"));
       selection
         .selectAll("polygon")
         .attr("class", _gene.polygonClass)
@@ -958,7 +982,7 @@
      * @return {bool} - Clusters are adjacent
      */
     adjacent: (one, two) => {
-      const domain = scales.y.domain();
+      const domain = getClusterOrder(chartState);
       return Math.abs(domain.indexOf(one) - domain.indexOf(two)) === 1;
     },
     /**
@@ -996,23 +1020,11 @@
       return selection;
     },
     drag: (selection) => {
-      let free, y, range, height;
-      selection.each((d, i) => {
-        d.slot = i;
-      });
-
-      const getDomain = () => {
-        let clusters = [];
-        selection.each((c) => {
-          clusters.push(c);
-        });
-        clusters = clusters.sort((a, b) => (a.slot > b.slot ? 1 : -1));
-        return clusters.map((c) => c.uid);
-      };
+      let y, range, order;
 
       const started = (event, d) => {
         flags.isDragging = true;
-        free = d.slot;
+        order = [...getClusterOrder(chartState)];
 
         // Get subject cluster, change cursor
         let cluster = get.cluster(d.uid);
@@ -1023,7 +1035,6 @@
 
         // Get y-axis bounds for dragging
         range = scales.y.range();
-        height = range[range.length - 1];
       };
 
       const dragged = (event, d) => {
@@ -1032,34 +1043,35 @@
         me.raise();
 
         // Get current y value with mouse event
-        let yy = Math.min(height, Math.max(0, y + event.y));
+        let yy = Math.min(range[range.length - 1], Math.max(range[0], y + event.y));
         me.attr("transform", (d) => `translate(${scales.offset(d.uid)}, ${yy})`);
 
-        // Get closest index based on new y-position
-        let domain = scales.y.domain();
-        let p = Math.round(yy / (height / domain.length));
+        // Snap to the closest configured cluster row, while leaving the dragged
+        // cluster under the pointer until the drag ends.
+        let p = range.reduce(
+          (closest, position, index) =>
+            Math.abs(position - yy) < Math.abs(range[closest] - yy) ? index : closest,
+          0
+        );
+        let current = order.indexOf(d.uid);
 
         d3.selectAll("g.geneLinkG").call(_link.update);
 
-        if (p === d.slot) return;
+        if (p === current) return;
 
-        // Re-arrange the y-scale domain
-        selection.each(function (e) {
-          if (e.uid !== d.uid && e.slot === p) {
-            e.slot = free;
-            d.slot = free = p;
-            let uid = scales.y.domain()[e.slot];
-            let translate = (c) =>
-              `translate(${scales.offset(c.uid)}, ${scales.y(uid)})`;
-            get.cluster(e.uid).transition().attr("transform", translate);
-          }
+        order.splice(current, 1);
+        order.splice(p, 0, d.uid);
+        order.forEach((uid, index) => {
+          if (uid === d.uid) return;
+          get.cluster(uid)
+            .transition()
+            .attr("transform", `translate(${scales.offset(uid)}, ${range[index]})`);
         });
       };
 
       const ended = () => {
         flags.isDragging = false;
-        let dom = getDomain();
-        scales.y.domain(dom);
+        setClusterOrder(chartState, order);
         plot.update();
       };
 
@@ -1488,7 +1500,7 @@
         .some((value, index) => value !== scales.x.range()[index]);
       if (xRangeChanged) _scale.rescaleRanges(oldX);
 
-      if (!_scale.check("y")) scales.y.domain(data.clusters.map((c) => c.uid));
+      scales.y.domain(getClusterOrder(chartState));
       _scale.updateY(data);
 
       if (!_scale.check("offset")) _scale.updateOffset(data.clusters);

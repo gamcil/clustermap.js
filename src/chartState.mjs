@@ -1,6 +1,12 @@
 export function createChartState(data, previous = null) {
   const loci = previous?.loci || new Map();
   const genes = previous?.genes || new Map();
+  const clusterIds = data.clusters.map((cluster) => cluster.uid);
+  const clusterIdSet = new Set(clusterIds);
+  const clusterOrder = [
+    ...(previous?.clusterOrder || []).filter((uid) => clusterIdSet.has(uid)),
+    ...clusterIds.filter((uid) => !previous?.clusterOrder?.includes(uid)),
+  ];
   const present = new Set();
   for (const cluster of data.clusters) {
     for (const locus of cluster.loci) {
@@ -37,7 +43,15 @@ export function createChartState(data, previous = null) {
     if (!data.clusters.some((cluster) => cluster.loci.some((locus) => locus.uid === uid))) loci.delete(uid);
   }
   for (const uid of genes.keys()) if (!present.has(uid)) genes.delete(uid);
-  return { loci, genes };
+  return { loci, genes, clusterOrder };
+}
+
+export function getClusterOrder(chartState) {
+  return chartState.clusterOrder;
+}
+
+export function setClusterOrder(chartState, order) {
+  chartState.clusterOrder = [...order];
 }
 
 export function getLocusState(chartState, locus) {
@@ -55,7 +69,7 @@ export function formatLocusText(loci, chartState, hideCoordinates) {
       let end;
 
       const state = getLocusState(chartState, locus);
-      if (locus._bio_start) {
+      if (locus._bio_start != null && locus._bio_end != null) {
         let startDiff = state.start - locus.start;
         let endDiff = locus.end - state.end;
         if (state.flipped) [startDiff, endDiff] = [endDiff, startDiff];
@@ -91,9 +105,11 @@ export function recalculateLocusCoordinates(chartState, locus, scaleGenes) {
   const state = getLocusState(chartState, locus);
   const oldStart = state.start;
   const lastGene = locus.genes[locus.genes.length - 1];
-  state.start = state.trimLeft ? state.trimLeft.start : 0;
+  state.start = state.trimLeft
+    ? getGeneState(chartState, state.trimLeft).start
+    : 0;
   state.end = state.trimRight
-    ? state.trimRight.end
+    ? getGeneState(chartState, state.trimRight).end
     : scaleGenes
     ? locus.end
     : lastGene.end;
