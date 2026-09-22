@@ -64,6 +64,16 @@ export function setClusterOrder(chartState, order) {
   chartState.clusterOrder = [...order];
 }
 
+export function moveClusterToIndex(chartState, uid, index) {
+  const order = [...chartState.clusterOrder];
+  const current = order.indexOf(uid);
+  if (current === -1) return order;
+  order.splice(current, 1);
+  order.splice(Math.max(0, Math.min(index, order.length)), 0, uid);
+  chartState.clusterOrder = order;
+  return order;
+}
+
 export function getClusterOffset(chartState, uid) {
   return chartState.clusterOffsets.get(uid) ?? 0;
 }

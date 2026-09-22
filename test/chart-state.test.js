@@ -23,6 +23,19 @@ test("chart state persists cluster order across data refreshes", async () => {
   assert.deepEqual(getClusterOrder(state), ["b", "c"]);
 });
 
+test("chart state moves a cluster to a requested row", async () => {
+  const { createChartState, getClusterOrder, moveClusterToIndex } = await import(
+    "../src/chartState.mjs"
+  );
+  const state = createChartState(dataFor("a", "b", "c"));
+
+  moveClusterToIndex(state, "c", 1);
+  assert.deepEqual(getClusterOrder(state), ["a", "c", "b"]);
+
+  moveClusterToIndex(state, "a", 2);
+  assert.deepEqual(getClusterOrder(state), ["c", "b", "a"]);
+});
+
 test("chart state persists horizontal offsets across data refreshes", async () => {
   const {
     createChartState,

@@ -21,9 +21,9 @@ import {
   getLocusOffset,
   getLocusState,
   initializeLocusOffsets,
+  moveClusterToIndex,
   recalculateLocusCoordinates,
   setClusterOffset,
-  setClusterOrder,
   setLocusOffset,
   trimLocus,
 } from "./chartState.mjs";
@@ -540,9 +540,9 @@ const _cluster = {
       });
     };
 
-    const ended = () => {
+    const ended = (_, d) => {
       flags.isDragging = false;
-      setClusterOrder(chartState, order);
+      moveClusterToIndex(chartState, d.uid, order.indexOf(d.uid));
       plot.update();
     };
 
