@@ -13,6 +13,7 @@ import {
 } from "./genes/layout.mjs";
 import {
   flipLocus,
+  finalizeLocusTrim,
   getClusterOffset,
   formatLocusText,
   getClusterOrder,
@@ -24,6 +25,7 @@ import {
   setClusterOffset,
   setClusterOrder,
   setLocusOffset,
+  trimLocus,
 } from "./chartState.mjs";
 import {
   getClusterExtent,
@@ -32,10 +34,6 @@ import {
   xDistance,
 } from "./loci/layout.mjs";
 import { buildScene } from "./layout.mjs";
-
-function getClosestValue(values, value) {
-  return Math.max(Math.min(d3.bisectLeft(values, value), values.length - 1), 0);
-}
 
 function refreshClusterOffsetScale() {
   scales.offset.range(
@@ -759,19 +757,13 @@ const _locus = {
     }
 
     const _left = (event, d, handle) => {
-      const state = locusState(d);
-      // Find closest gene start, from start to _end
-      let genes = d.genes
-        .filter((gene) => displayGene(gene).end <= state.end)
-        .sort((a, b) =>
-          displayGene(a).start > displayGene(b).start ? 1 : -1
-        );
-      let starts = [d.start, ...genes.map((gene) => displayGene(gene).start)];
-      let coords = starts.map((value) => scales.x(value));
-      let position = getClosestValue(coords, event.x);
-      value = coords[position];
-      state.start = starts[position];
-      state.trimLeft = state.start === starts[0] ? null : genes[position - 1];
+      const { state, coordinate } = trimLocus(chartState, d, {
+        edge: "left",
+        position: event.x,
+        coordinateFor: scales.x,
+        scaleGenes: config.plot.scaleGenes,
+      });
+      value = coordinate;
 
       // Adjust the dragged rect
       handle.attr("x", value - 8);
@@ -813,19 +805,12 @@ const _locus = {
     };
 
     const _right = (event, d, handle) => {
-      const state = locusState(d);
-      // Find closest visible gene end, from _start to end
-      let genes = d.genes
-        .filter((gene) => displayGene(gene).start >= state.start)
-        .sort((a, b) =>
-          displayGene(a).start > displayGene(b).start ? 1 : -1
-        );
-      let geneEnds = genes.map((gene) => displayGene(gene).end);
-      let ends = [...geneEnds, config.plot.scaleGenes ? d.end : state.end];
-      let range = ends.map((value) => scales.x(value));
-      let position = getClosestValue(range, event.x);
-      state.trimRight = genes[position] ? genes[position] : null;
-      state.end = ends[position];
+      const { state } = trimLocus(chartState, d, {
+        edge: "right",
+        position: event.x,
+        coordinateFor: scales.x,
+        scaleGenes: config.plot.scaleGenes,
+      });
 
       // Transform handle rect
       handle.attr("x", scales.x(state.end));
@@ -854,9 +839,7 @@ const _locus = {
       flags.isDragging = false;
       // Check if visible locus coordinates equal default coordinates in data
       // If yes, make sure trimLeft/trimRight are reset to null
-      const state = locusState(d);
-      if (state.end === d.end) state.trimRight = null;
-      if (state.start === d.start) state.trimLeft = null;
+      finalizeLocusTrim(chartState, d);
       d3.select(`#locus_${d.uid} .hover`).transition().attr("opacity", 0);
       plot.update();
     };

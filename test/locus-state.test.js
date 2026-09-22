@@ -101,6 +101,31 @@ test("trimming a flipped locus retains the selected display-side genes", async (
   );
 });
 
+test("trimming selects display-side gene boundaries without renderer state", async () => {
+  const { createChartState, trimLocus } = await import("../src/chartState.mjs");
+  const locus = createLocus();
+  locus.genes.push({ uid: "c", _locus: "locus", start: 5500, end: 6500, strand: -1 });
+  const state = createChartState({ clusters: [{ loci: [locus] }] });
+
+  trimLocus(state, locus, {
+    edge: "left",
+    position: 2400,
+    coordinateFor: (value) => value,
+    scaleGenes: true,
+  });
+  assert.equal(state.loci.get(locus.uid).start, 2500);
+  assert.equal(state.loci.get(locus.uid).trimLeft, locus.genes[1]);
+
+  trimLocus(state, locus, {
+    edge: "right",
+    position: 3400,
+    coordinateFor: (value) => value,
+    scaleGenes: true,
+  });
+  assert.equal(state.loci.get(locus.uid).end, 3500);
+  assert.equal(state.loci.get(locus.uid).trimRight, locus.genes[1]);
+});
+
 test("locus labels show trimmed and reversed coordinates", async () => {
   const { createChartState, formatLocusText } = await import("../src/chartState.mjs");
   const locus = createLocus();

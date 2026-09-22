@@ -157,6 +157,71 @@ export function recalculateLocusCoordinates(chartState, locus, scaleGenes) {
   return { oldStart };
 }
 
+function closestIndex(values, target) {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (values[middle] < target) low = middle + 1;
+    else high = middle;
+  }
+  return Math.max(Math.min(low, values.length - 1), 0);
+}
+
+/**
+ * Apply a trim at the display coordinate nearest to a valid gene boundary.
+ * `coordinateFor` is supplied by the caller, keeping the state transition
+ * independent of D3 scales and any particular renderer.
+ */
+export function trimLocus(chartState, locus, {
+  edge,
+  position,
+  coordinateFor,
+  scaleGenes,
+}) {
+  const state = getLocusState(chartState, locus);
+  const genes = [...locus.genes].sort(
+    (left, right) =>
+      getGeneState(chartState, left).start - getGeneState(chartState, right).start
+  );
+
+  if (edge === "left") {
+    const visible = genes.filter(
+      (gene) => getGeneState(chartState, gene).end <= state.end
+    );
+    const boundaries = [
+      locus.start,
+      ...visible.map((gene) => getGeneState(chartState, gene).start),
+    ];
+    const index = closestIndex(boundaries.map(coordinateFor), position);
+    state.start = boundaries[index];
+    state.trimLeft = index === 0 ? null : visible[index - 1];
+    return { state, coordinate: coordinateFor(state.start) };
+  }
+
+  if (edge === "right") {
+    const visible = genes.filter(
+      (gene) => getGeneState(chartState, gene).start >= state.start
+    );
+    const boundaries = [
+      ...visible.map((gene) => getGeneState(chartState, gene).end),
+      scaleGenes ? locus.end : state.end,
+    ];
+    const index = closestIndex(boundaries.map(coordinateFor), position);
+    state.end = boundaries[index];
+    state.trimRight = visible[index] || null;
+    return { state, coordinate: coordinateFor(state.end) };
+  }
+
+  throw new Error(`Unknown locus trim edge: ${edge}`);
+}
+
+export function finalizeLocusTrim(chartState, locus) {
+  const state = getLocusState(chartState, locus);
+  if (state.end === locus.end) state.trimRight = null;
+  if (state.start === locus.start) state.trimLeft = null;
+}
+
 export function flipLocus(chartState, locus) {
   const state = getLocusState(chartState, locus);
   state.flipped = !state.flipped;
