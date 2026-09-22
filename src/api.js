@@ -15,7 +15,7 @@ import {
   flipLocus,
   formatLocusText,
   recalculateLocusCoordinates,
-} from "./loci/state.mjs";
+} from "./chartState.mjs";
 import {
   getClusterExtent,
   getClusterExtents,

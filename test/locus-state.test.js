@@ -17,7 +17,7 @@ const createLocus = () => ({
 });
 
 test("flipping a locus twice restores its gene state", async () => {
-  const { flipLocus } = await import("../src/loci/state.mjs");
+  const { flipLocus } = await import("../src/chartState.mjs");
   const locus = createLocus();
   const before = structuredClone(locus);
 
@@ -29,7 +29,7 @@ test("flipping a locus twice restores its gene state", async () => {
 
 test("recalculating a trimmed locus updates gene and locus coordinates", async () => {
   const { recalculateLocusCoordinates } = await import(
-    "../src/loci/state.mjs"
+    "../src/chartState.mjs"
   );
   const locus = createLocus();
   locus._trimLeft = { start: 2500 };
@@ -50,7 +50,7 @@ test("recalculating a trimmed locus updates gene and locus coordinates", async (
 });
 
 test("locus labels show trimmed and reversed coordinates", async () => {
-  const { formatLocusText } = await import("../src/loci/state.mjs");
+  const { formatLocusText } = await import("../src/chartState.mjs");
   const locus = createLocus();
   locus._start = 2500;
   locus._end = 6500;

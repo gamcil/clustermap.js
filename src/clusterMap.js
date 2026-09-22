@@ -3,7 +3,7 @@ import colourBar from "./colourBar.js";
 import scaleBar from "./scaleBar.js";
 import { renameText } from "./utils.js";
 import { createLinkGroups, filterLinks } from "./links/groups.mjs";
-import { flipLocus } from "./loci/state.mjs";
+import { flipLocus } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import * as api from "./api.js";
 

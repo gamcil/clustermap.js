@@ -408,11 +408,7 @@
         if (locus._flipped) [start, end] = [end, start];
 
         const reversed = locus._flipped ? " (reversed)" : "";
-        if (
-          hideCoordinates ||
-          locus._start == null ||
-          locus._end == null
-        )
+        if (hideCoordinates || locus._start == null || locus._end == null)
           return `${locus.name}${reversed}`;
         return `${locus.name}${reversed}:${start.toFixed(0)}-${end.toFixed(0)}`;
       })
