@@ -128,16 +128,46 @@ export default function clusterMap() {
 
     api.link.updateGroups(data.groups);
 
+    const scene = api.layout.update(data);
+
     renderSvg({
       plot,
       data,
-      api,
+      scene,
       transition,
-      createScene: api.layout.update,
       animate: hasInitialView,
-      flipLocus: (locus) => {
-        flipLocus(chartState, locus);
-        api.plot.update();
+      config: api.config,
+      scales: api.scales,
+      ids: {
+        cluster: api.cluster.getId,
+        locus: api.locus.getId,
+        gene: api.gene.getId,
+        link: api.link.getId,
+      },
+      lookup: { gene: api.get.geneData },
+      interactions: {
+        dragCluster: api.cluster.drag,
+        dragLocusPosition: api.locus.dragPosition,
+        dragLocusResize: api.locus.dragResize,
+        isDragging: () => api.flags.isDragging,
+        flipLocus: (locus) => {
+          flipLocus(chartState, locus);
+          api.plot.update();
+        },
+        onGeneClick: api.config.gene.shape.onClick,
+        showGeneMenu: api.gene.contextMenu,
+        setScaleBarLength: (value) => {
+          api.config.scaleBar.basePair = value;
+          api.plot.update();
+        },
+        chooseLegendColour: (group) => {
+          const picker = container.select("input.colourPicker");
+          picker.on("change", () => {
+            group.colour = picker.node().value;
+            api.plot.update();
+          });
+          picker.node().click();
+        },
       },
     });
 

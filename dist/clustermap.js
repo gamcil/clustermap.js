@@ -725,11 +725,14 @@
   function renderSvg({
     plot,
     data,
-    api,
+    scene,
     transition,
-    createScene,
-    flipLocus,
     animate,
+    config,
+    scales,
+    ids,
+    lookup,
+    interactions,
   }) {
     const linkGroup = plot
       .selectAll("g.links")
@@ -749,14 +752,14 @@
         (enter) => {
           enter = enter
             .append("g")
-            .attr("id", api.cluster.getId)
+            .attr("id", ids.cluster)
             .attr("class", "cluster");
           const info = enter
             .append("g")
             .attr("id", (cluster) => `cinfo_${cluster.uid}`)
             .attr("class", "clusterInfo")
             .attr("transform", "translate(-10, 0)")
-            .call(api.cluster.drag);
+            .call(interactions.dragCluster);
 
           info
             .append("text")
@@ -765,8 +768,8 @@
             .attr("y", 8)
             .attr("cursor", "pointer")
             .style("font-weight", "bold")
-            .style("font-size", `${api.config.cluster.nameFontSize}px`)
-            .style("font-family", api.config.plot.fontFamily)
+            .style("font-size", `${config.cluster.nameFontSize}px`)
+            .style("font-family", config.plot.fontFamily)
             .on("click", renameText);
           info
             .append("text")
@@ -774,8 +777,8 @@
             .attr("y", 12)
             .attr("dominant-baseline", "hanging")
             .style("text-rendering", "geometricPrecision")
-            .style("font-size", `${api.config.cluster.lociFontSize}px`)
-            .style("font-family", api.config.plot.fontFamily);
+            .style("font-size", `${config.cluster.lociFontSize}px`)
+            .style("font-family", config.plot.fontFamily);
           info.selectAll("text").attr("text-anchor", "end");
           enter.append("g").attr("class", "loci");
           return enter;
@@ -783,7 +786,6 @@
         (update) => update
       );
 
-    const scene = createScene(data);
     // A cluster drag can leave an in-flight transform transition on sibling
     // rows. Cancel it before the scene supplies their snapped final positions.
     const clusterRender = animate
@@ -799,7 +801,7 @@
         (enter) => {
           enter = enter
             .append("g")
-            .attr("id", api.locus.getId)
+            .attr("id", ids.locus)
             .attr("class", "locus");
           enter.append("line").attr("class", "trackBar").style("fill", "#111");
           const hover = enter
@@ -813,37 +815,37 @@
             .append("rect")
             .attr("class", "hover")
             .attr("fill", "rgba(0, 0, 0, 0.4)")
-            .call(api.locus.dragPosition);
+            .call(interactions.dragLocusPosition);
           hover
             .append("rect")
             .attr("class", "leftHandle")
             .attr("x", -8)
-            .call(api.locus.dragResize);
+            .call(interactions.dragLocusResize);
           hover
             .append("rect")
             .attr("class", "rightHandle")
-            .call(api.locus.dragResize);
+            .call(interactions.dragLocusResize);
           hover
             .selectAll(".leftHandle, .rightHandle")
             .attr("width", 8)
             .attr("cursor", "pointer");
           enter
             .on("mouseenter", (event) => {
-              if (!api.flags.isDragging) {
+              if (!interactions.isDragging()) {
                 d3.select(event.target).select("g.hover").transition().attr("opacity", 1);
               }
             })
             .on("mouseleave", (event) => {
-              if (!api.flags.isDragging) {
+              if (!interactions.isDragging()) {
                 d3.select(event.target).select("g.hover").transition().attr("opacity", 0);
               }
             })
-            .on("dblclick", (_, locus) => flipLocus(locus));
-          return updateLoci(enter, scene, api);
+            .on("dblclick", (_, locus) => interactions.flipLocus(locus));
+          return updateLoci(enter, scene, config);
         },
         (update) =>
           update.call((selection) =>
-            updateLoci(selection.transition(transition), scene, api)
+            updateLoci(selection.transition(transition), scene, config)
           )
       );
 
@@ -855,41 +857,41 @@
         (enter) => {
           enter = enter
             .append("g")
-            .attr("id", api.gene.getId)
+            .attr("id", ids.gene)
             .attr("class", "gene")
             .attr("display", "inline");
           enter
             .append("polygon")
-            .on("click", api.config.gene.shape.onClick)
-            .on("contextmenu", api.gene.contextMenu)
+            .on("click", interactions.onGeneClick)
+            .on("contextmenu", interactions.showGeneMenu)
             .attr("class", "genePolygon");
           enter
             .append("text")
             .attr("class", "geneLabel")
             .attr("dy", "-0.3em")
-            .style("font-family", api.config.plot.fontFamily);
-          return updateGenes(enter, scene, api);
+            .style("font-family", config.plot.fontFamily);
+          return updateGenes(enter, scene, config, scales);
         },
         (update) =>
           update.call((selection) =>
-            updateGenes(selection.transition(transition), scene, api)
+            updateGenes(selection.transition(transition), scene, config, scales)
           )
       );
 
     const visibleLinks = filterLinks(data.links, {
-      groupForGene: api.scales.group,
-      geneForUid: api.get.geneData,
-      bestOnly: api.config.link.bestOnly,
-      threshold: api.config.link.threshold,
+      groupForGene: scales.group,
+      geneForUid: lookup.gene,
+      bestOnly: config.link.bestOnly,
+      threshold: config.link.threshold,
     });
     linkGroup
       .selectAll("g.geneLinkG")
-      .data(visibleLinks, api.link.getId)
+      .data(visibleLinks, ids.link)
       .join(
         (enter) => {
           enter = enter
             .append("g")
-            .attr("id", api.link.getId)
+            .attr("id", ids.link)
             .attr("class", "geneLinkG");
           enter.append("path").attr("class", "geneLink");
           enter
@@ -898,25 +900,25 @@
             .attr("class", "geneLinkLabel")
             .style("fill", "white")
             .style("text-anchor", "middle")
-            .style("font-family", api.config.plot.fontFamily);
-          return updateLinks(enter, scene, api);
+            .style("font-family", config.plot.fontFamily);
+          return updateLinks(enter, scene, config, scales);
         },
         (update) =>
           update.call((selection) =>
             selection
-              .classed("hidden", !api.config.link.show)
+              .classed("hidden", !config.link.show)
               .transition(transition)
-              .call(updateLinks, scene, api)
+              .call(updateLinks, scene, config, scales)
           ),
         (exit) =>
           exit.call((selection) => selection.transition(transition).attr("opacity", 0).remove())
       );
 
     plot
-      .call(getLegend(api))
-      .call(getColourBar(api, transition))
-      .call(getScaleBar(api, transition));
-    arrangePlot(plot, api, transition, animate);
+      .call(getLegend(scene, config, scales, interactions))
+      .call(getColourBar(config, scales, transition))
+      .call(getScaleBar(config, scales, transition, interactions));
+    arrangePlot(plot, scene, config, transition, animate);
   }
 
   function updateClusters(selection, scene) {
@@ -936,8 +938,7 @@
     return selection;
   }
 
-  function updateLoci(selection, scene, api) {
-    const { config } = api;
+  function updateLoci(selection, scene, config) {
     const layout = (locus) => scene.loci.get(locus.uid);
 
     selection.attr("transform", (locus) => {
@@ -969,8 +970,7 @@
     return selection;
   }
 
-  function updateGenes(selection, scene, api) {
-    const { config, scales } = api;
+  function updateGenes(selection, scene, config, scales) {
     const geneLayout = (gene) => scene.genes.get(gene.uid);
     const fill = (gene) => {
       if (gene.colour) return gene.colour;
@@ -1002,8 +1002,7 @@
     return selection;
   }
 
-  function updateLinks(selection, scene, api) {
-    const { config, scales } = api;
+  function updateLinks(selection, scene, config, scales) {
     const linkLayout = (link) => scene.links.get(link.uid);
     const fill = (link) => {
       if (config.link.asLine) return "none";
@@ -1039,82 +1038,74 @@
     return selection;
   }
 
-  function arrangePlot(plot, api, transition, animate) {
+  function arrangePlot(plot, scene, config, transition, animate) {
+    const chrome = scene.chrome;
+    if (!chrome) return;
+    const transform = ({ x, y }) => `translate(${x}, ${y})`;
     let scale = plot
       .select("g.scaleBar")
-      .classed("hidden", !api.config.plot.scaleGenes);
+      .classed("hidden", !config.plot.scaleGenes);
     if (animate) scale = scale.transition(transition);
     scale
-      .attr("opacity", api.config.plot.scaleGenes ? 1 : 0)
-      .attr("transform", api.plot.scaleBarTransform);
+      .attr("opacity", config.plot.scaleGenes ? 1 : 0)
+      .attr("transform", transform(chrome.scaleBar));
 
-    const showColour = api.config.link.groupColour || !api.config.link.show;
+    const showColour = config.link.groupColour || !config.link.show;
     let colour = plot.select("g.colourBar").classed("hidden", showColour);
     if (animate) colour = colour.transition(transition);
     colour
       .attr("opacity", showColour ? 0 : 1)
-      .attr("transform", api.plot.colourBarTransform);
+      .attr("transform", transform(chrome.colourBar));
 
     let key = plot.select("g.legend");
     if (animate) key = key.transition(transition);
-    key.attr("transform", api.plot.legendTransform);
+    key.attr("transform", transform(chrome.legend));
   }
 
-  function getScaleBar(api, transition) {
-    return scaleBar(api.scales.x)
-      .stroke(api.config.scaleBar.stroke)
-      .height(api.config.scaleBar.height)
-      .colour(api.config.scaleBar.colour)
-      .basePair(api.config.scaleBar.basePair)
-      .fontSize(api.config.scaleBar.fontSize)
-      .fontFamily(api.config.plot.fontFamily)
+  function getScaleBar(config, scales, transition, interactions) {
+    return scaleBar(scales.x)
+      .stroke(config.scaleBar.stroke)
+      .height(config.scaleBar.height)
+      .colour(config.scaleBar.colour)
+      .basePair(config.scaleBar.basePair)
+      .fontSize(config.scaleBar.fontSize)
+      .fontFamily(config.plot.fontFamily)
       .onClickText(() => {
-        const value = prompt("Enter new length (bp):", api.config.scaleBar.basePair);
-        if (value) {
-          api.config.scaleBar.basePair = value;
-          api.plot.update();
-        }
+        const value = prompt("Enter new length (bp):", config.scaleBar.basePair);
+        if (value) interactions.setScaleBarLength(value);
       })
       .transition(transition);
   }
 
-  function getColourBar(api, transition) {
-    return colourBar(api.scales.score)
-      .width(api.config.colourBar.width)
-      .height(api.config.colourBar.height)
-      .fontSize(api.config.colourBar.fontSize)
-      .fontFamily(api.config.plot.fontFamily)
+  function getColourBar(config, scales, transition) {
+    return colourBar(scales.score)
+      .width(config.colourBar.width)
+      .height(config.colourBar.height)
+      .fontSize(config.colourBar.fontSize)
+      .fontFamily(config.plot.fontFamily)
       .transition(transition);
   }
 
-  function getLegend(api) {
-    const genes = d3.selectAll("g.gene");
-    let hidden = genes.empty() ? [] : api.scales.colour.domain();
-    genes.each(function (gene) {
-      if (d3.select(this).attr("display") === "inline") {
-        const group = api.scales.group(gene.uid);
+  function getLegend(scene, config, scales, interactions) {
+    let hidden = scene.genes.size ? scales.colour.domain() : [];
+    for (const gene of scene.genes.values()) {
+      if (gene.visible) {
+        const group = scales.group(gene.source.uid);
         if (group !== null) hidden = hidden.filter((id) => id !== group);
       }
-    });
+    }
 
-    return legend(api.scales.colour)
+    return legend(scales.colour)
       .hidden(hidden)
-      .fontSize(api.config.legend.fontSize)
-      .fontFamily(api.config.plot.fontFamily)
-      .entryHeight(api.config.legend.entryHeight)
+      .fontSize(config.legend.fontSize)
+      .fontFamily(config.plot.fontFamily)
+      .entryHeight(config.legend.entryHeight)
       .onClickCircle(
-        api.config.legend.onClickCircle ||
-          ((_, data) => {
-            const picker = d3.select("input.colourPicker");
-            picker.on("change", () => {
-              data.colour = picker.node().value;
-              api.plot.update();
-            });
-            picker.node().click();
-          })
+        config.legend.onClickCircle ||
+          ((_, group) => interactions.chooseLegendColour(group))
       )
-      .onClickText(api.config.legend.onClickText)
-      .onAltClickText(api.config.legend.onAltClickText);
+      .onClickText(config.legend.onClickText)
+      .onAltClickText(config.legend.onAltClickText);
   }
 
   var defaultConfig = {
@@ -2719,25 +2710,6 @@
   config.legend.onClickText = _link.rename;
   config.legend.onAltClickText = _group.contextMenu;
 
-  var api = /*#__PURE__*/Object.freeze({
-    __proto__: null,
-    config: config,
-    flags: flags,
-    get: get,
-    setChartIndex: setChartIndex,
-    setChartState: setChartState,
-    plot: plot,
-    scales: scales,
-    cluster: _cluster,
-    gene: _gene,
-    group: _group,
-    link: _link,
-    locus: _locus,
-    scale: _scale,
-    layout: _layout,
-    tooltip: _tooltip
-  });
-
   function clusterMap() {
     /* A ClusterMap plot. */
 
@@ -2861,16 +2833,46 @@
 
       _link.updateGroups(data.groups);
 
+      const scene = _layout.update(data);
+
       renderSvg({
         plot: plot$1,
         data,
-        api,
+        scene,
         transition,
-        createScene: _layout.update,
         animate: hasInitialView,
-        flipLocus: (locus) => {
-          flipLocus(chartState, locus);
-          plot.update();
+        config: config,
+        scales: scales,
+        ids: {
+          cluster: _cluster.getId,
+          locus: _locus.getId,
+          gene: _gene.getId,
+          link: _link.getId,
+        },
+        lookup: { gene: get.geneData },
+        interactions: {
+          dragCluster: _cluster.drag,
+          dragLocusPosition: _locus.dragPosition,
+          dragLocusResize: _locus.dragResize,
+          isDragging: () => flags.isDragging,
+          flipLocus: (locus) => {
+            flipLocus(chartState, locus);
+            plot.update();
+          },
+          onGeneClick: config.gene.shape.onClick,
+          showGeneMenu: _gene.contextMenu,
+          setScaleBarLength: (value) => {
+            config.scaleBar.basePair = value;
+            plot.update();
+          },
+          chooseLegendColour: (group) => {
+            const picker = container.select("input.colourPicker");
+            picker.on("change", () => {
+              group.colour = picker.node().value;
+              plot.update();
+            });
+            picker.node().click();
+          },
         },
       });
 
