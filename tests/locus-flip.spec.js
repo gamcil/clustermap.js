@@ -300,3 +300,26 @@ test("inserting an unlinked cluster hides links between separated clusters", asy
     linkPaths: await readLinkPaths(page),
   }));
 });
+
+test("dragging a locus persists its horizontal position", async ({ page }, testInfo) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const locus = page.locator("g.locus").first();
+  const hover = locus.locator("rect.hover");
+  const target = locus.locator("#gene_1 polygon.genePolygon");
+  await expect(locus).toBeVisible();
+
+  const before = await captureCheckpoint(page, testInfo, "before-locus-reposition", async () => ({
+    locusX: await readTranslateX(locus),
+  }));
+
+  await hover.dragTo(target);
+  await waitForPaint(page);
+
+  await expect
+    .poll(async () => Math.abs((await readTranslateX(locus)) - before.locusX) > 1)
+    .toBe(true);
+  await captureCheckpoint(page, testInfo, "after-locus-reposition", async () => ({
+    locusX: await readTranslateX(locus),
+  }));
+});

@@ -391,6 +391,8 @@
   function createChartState(data, previous = null) {
     const loci = previous?.loci || new Map();
     const genes = previous?.genes || new Map();
+    const clusterOffsets = previous?.clusterOffsets || new Map();
+    const locusOffsets = previous?.locusOffsets || new Map();
     const clusterIds = data.clusters.map((cluster) => cluster.uid);
     const clusterIdSet = new Set(clusterIds);
     const clusterOrder = [
@@ -399,6 +401,7 @@
     ];
     const present = new Set();
     for (const cluster of data.clusters) {
+      if (!clusterOffsets.has(cluster.uid)) clusterOffsets.set(cluster.uid, 0);
       for (const locus of cluster.loci) {
         present.add(locus.uid);
         if (!loci.has(locus.uid)) {
@@ -433,7 +436,13 @@
       if (!data.clusters.some((cluster) => cluster.loci.some((locus) => locus.uid === uid))) loci.delete(uid);
     }
     for (const uid of genes.keys()) if (!present.has(uid)) genes.delete(uid);
-    return { loci, genes, clusterOrder };
+    for (const uid of clusterOffsets.keys()) {
+      if (!clusterIdSet.has(uid)) clusterOffsets.delete(uid);
+    }
+    for (const uid of locusOffsets.keys()) {
+      if (!loci.has(uid)) locusOffsets.delete(uid);
+    }
+    return { loci, genes, clusterOffsets, locusOffsets, clusterOrder };
   }
 
   function getClusterOrder(chartState) {
@@ -442,6 +451,28 @@
 
   function setClusterOrder(chartState, order) {
     chartState.clusterOrder = [...order];
+  }
+
+  function getClusterOffset(chartState, uid) {
+    return chartState.clusterOffsets.get(uid) ?? 0;
+  }
+
+  function setClusterOffset(chartState, uid, offset) {
+    chartState.clusterOffsets.set(uid, offset);
+  }
+
+  function getLocusOffset(chartState, uid) {
+    return chartState.locusOffsets.get(uid) ?? 0;
+  }
+
+  function setLocusOffset(chartState, uid, offset) {
+    chartState.locusOffsets.set(uid, offset);
+  }
+
+  function initializeLocusOffsets(chartState, defaults) {
+    for (const [uid, offset] of defaults) {
+      if (!chartState.locusOffsets.has(uid)) chartState.locusOffsets.set(uid, offset);
+    }
   }
 
   function getLocusState(chartState, locus) {
@@ -609,12 +640,16 @@
     return Math.max(Math.min(d3.bisectLeft(values, value), values.length - 1), 0);
   }
 
-  function updateScaleRange(scale, uid, value) {
-    let domain = scales[scale].domain();
-    let range = scales[scale].range();
-    let index = domain.indexOf(uid);
-    range[index] = value;
-    scales[scale].range(range);
+  function refreshClusterOffsetScale() {
+    scales.offset.range(
+      scales.offset.domain().map((uid) => getClusterOffset(chartState, uid))
+    );
+  }
+
+  function refreshLocusOffsetScale() {
+    scales.locus.range(
+      scales.locus.domain().map((uid) => getLocusOffset(chartState, uid))
+    );
   }
 
   function locusLayout() {
@@ -638,12 +673,13 @@
       locus,
       config.plot.scaleGenes
     );
-    updateScaleRange(
-      "locus",
+    setLocusOffset(
+      chartState,
       locus.uid,
-      scales.locus(locus.uid) +
+      getLocusOffset(chartState, locus.uid) +
         xDistance(scales.x, locusState(locus).start, oldStart)
     );
+    refreshLocusOffsetScale();
   }
 
   const config = Object.assign({}, defaultConfig);
@@ -892,10 +928,6 @@
       return selection;
     },
     anchor: (_, anchor, flipLoci = false) => {
-      // Get original domain and range of cluster offset scale
-      let domain = scales.offset.domain();
-      let range = scales.offset.range();
-
       // Anchor map on given uid
       // Finds anchor genes in clusters given some initial anchor gene
       // Find gene links, then filter out any not containing the anchor
@@ -954,12 +986,14 @@
 
       // Iterate all anchor groups and update offset scale range values
       for (const [cluster, group] of anchors.entries()) {
-        let index = domain.findIndex((el) => el === cluster);
-        range[index] += getGroupOffset(group);
+        setClusterOffset(
+          chartState,
+          cluster,
+          getClusterOffset(chartState, cluster) + getGroupOffset(group)
+        );
       }
 
-      // Update range, then update ClusterMap
-      scales.offset.range(range);
+      refreshClusterOffsetScale();
       plot.update();
     },
   };
@@ -1438,7 +1472,8 @@
 
       const ended = (_, d) => {
         flags.isDragging = false;
-        updateScaleRange("locus", d.uid, value);
+        setLocusOffset(chartState, d.uid, value);
+        refreshLocusOffsetScale();
         plot.update();
       };
 
@@ -1463,27 +1498,34 @@
       scales.y.range(rng);
     },
     updateOffset: (clusters) => {
-      scales.offset
-        .domain(clusters.map((d) => d.uid))
-        .range(clusters.map(() => 0));
+      scales.offset.domain(clusters.map((d) => d.uid));
+      refreshClusterOffsetScale();
     },
     updateLocus: (clusters) => {
-      let { domain, range } = getLocusScaleValues(clusters, locusLayout());
-      scales.locus.domain(domain).range(range);
+      let { domain, range } = getLocusScaleValues(clusters, {
+        ...locusLayout(),
+        locusOffset: () => 0,
+      });
+      initializeLocusOffsets(
+        chartState,
+        domain.map((uid, index) => [uid, range[index]])
+      );
+      scales.locus.domain(domain);
+      refreshLocusOffsetScale();
     },
     /**
      * Rescales offset and locus scales with an updated x scale.
      * @param {d3.scale} old - The old x scale
      */
     rescaleRanges: (old) => {
-      [scales.offset, scales.locus].forEach((scale) => {
-        let range = scale.range();
-        for (let i = 0; i < range.length; i++) {
-          let input = old.invert(range[i]);
-          range[i] = scales.x(input);
-        }
-        scale.range(range);
-      });
+      for (const [uid, offset] of chartState.clusterOffsets) {
+        setClusterOffset(chartState, uid, scales.x(old.invert(offset)));
+      }
+      for (const [uid, offset] of chartState.locusOffsets) {
+        setLocusOffset(chartState, uid, scales.x(old.invert(offset)));
+      }
+      refreshClusterOffsetScale();
+      refreshLocusOffsetScale();
     },
     /**
      * Updates all scales based on new data.
@@ -1503,9 +1545,8 @@
       scales.y.domain(getClusterOrder(chartState));
       _scale.updateY(data);
 
-      if (!_scale.check("offset")) _scale.updateOffset(data.clusters);
-
-      if (!_scale.check("locus")) _scale.updateLocus(data.clusters);
+      _scale.updateOffset(data.clusters);
+      _scale.updateLocus(data.clusters);
     },
   };
 
@@ -2005,7 +2046,6 @@
 
   function initializeClusterData(cluster) {
     for (const locus of cluster.loci) {
-      setDefault(locus, "_offset", 0);
       setDefault(locus, "_cluster", cluster.uid);
 
       for (const gene of locus.genes) {

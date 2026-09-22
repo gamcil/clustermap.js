@@ -39,7 +39,6 @@ export function normalizeChartData(data) {
 
 export function initializeClusterData(cluster) {
   for (const locus of cluster.loci) {
-    setDefault(locus, "_offset", 0);
     setDefault(locus, "_cluster", cluster.uid);
 
     for (const gene of locus.genes) {

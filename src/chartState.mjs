@@ -1,6 +1,8 @@
 export function createChartState(data, previous = null) {
   const loci = previous?.loci || new Map();
   const genes = previous?.genes || new Map();
+  const clusterOffsets = previous?.clusterOffsets || new Map();
+  const locusOffsets = previous?.locusOffsets || new Map();
   const clusterIds = data.clusters.map((cluster) => cluster.uid);
   const clusterIdSet = new Set(clusterIds);
   const clusterOrder = [
@@ -9,6 +11,7 @@ export function createChartState(data, previous = null) {
   ];
   const present = new Set();
   for (const cluster of data.clusters) {
+    if (!clusterOffsets.has(cluster.uid)) clusterOffsets.set(cluster.uid, 0);
     for (const locus of cluster.loci) {
       present.add(locus.uid);
       if (!loci.has(locus.uid)) {
@@ -43,7 +46,13 @@ export function createChartState(data, previous = null) {
     if (!data.clusters.some((cluster) => cluster.loci.some((locus) => locus.uid === uid))) loci.delete(uid);
   }
   for (const uid of genes.keys()) if (!present.has(uid)) genes.delete(uid);
-  return { loci, genes, clusterOrder };
+  for (const uid of clusterOffsets.keys()) {
+    if (!clusterIdSet.has(uid)) clusterOffsets.delete(uid);
+  }
+  for (const uid of locusOffsets.keys()) {
+    if (!loci.has(uid)) locusOffsets.delete(uid);
+  }
+  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder };
 }
 
 export function getClusterOrder(chartState) {
@@ -52,6 +61,28 @@ export function getClusterOrder(chartState) {
 
 export function setClusterOrder(chartState, order) {
   chartState.clusterOrder = [...order];
+}
+
+export function getClusterOffset(chartState, uid) {
+  return chartState.clusterOffsets.get(uid) ?? 0;
+}
+
+export function setClusterOffset(chartState, uid, offset) {
+  chartState.clusterOffsets.set(uid, offset);
+}
+
+export function getLocusOffset(chartState, uid) {
+  return chartState.locusOffsets.get(uid) ?? 0;
+}
+
+export function setLocusOffset(chartState, uid, offset) {
+  chartState.locusOffsets.set(uid, offset);
+}
+
+export function initializeLocusOffsets(chartState, defaults) {
+  for (const [uid, offset] of defaults) {
+    if (!chartState.locusOffsets.has(uid)) chartState.locusOffsets.set(uid, offset);
+  }
 }
 
 export function getLocusState(chartState, locus) {

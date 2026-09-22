@@ -13,12 +13,17 @@ import {
 } from "./genes/layout.mjs";
 import {
   flipLocus,
+  getClusterOffset,
   formatLocusText,
   getClusterOrder,
   getGeneState,
+  getLocusOffset,
   getLocusState,
+  initializeLocusOffsets,
   recalculateLocusCoordinates,
+  setClusterOffset,
   setClusterOrder,
+  setLocusOffset,
 } from "./chartState.mjs";
 import {
   getClusterExtent,
@@ -31,12 +36,16 @@ function getClosestValue(values, value) {
   return Math.max(Math.min(d3.bisectLeft(values, value), values.length - 1), 0);
 }
 
-function updateScaleRange(scale, uid, value) {
-  let domain = scales[scale].domain();
-  let range = scales[scale].range();
-  let index = domain.indexOf(uid);
-  range[index] = value;
-  scales[scale].range(range);
+function refreshClusterOffsetScale() {
+  scales.offset.range(
+    scales.offset.domain().map((uid) => getClusterOffset(chartState, uid))
+  );
+}
+
+function refreshLocusOffsetScale() {
+  scales.locus.range(
+    scales.locus.domain().map((uid) => getLocusOffset(chartState, uid))
+  );
 }
 
 function locusLayout() {
@@ -60,12 +69,13 @@ function updateLocusScaling(locus) {
     locus,
     config.plot.scaleGenes
   );
-  updateScaleRange(
-    "locus",
+  setLocusOffset(
+    chartState,
     locus.uid,
-    scales.locus(locus.uid) +
+    getLocusOffset(chartState, locus.uid) +
       xDistance(scales.x, locusState(locus).start, oldStart)
   );
+  refreshLocusOffsetScale();
 }
 
 const config = Object.assign({}, defaultConfig);
@@ -314,10 +324,6 @@ const _gene = {
     return selection;
   },
   anchor: (_, anchor, flipLoci = false) => {
-    // Get original domain and range of cluster offset scale
-    let domain = scales.offset.domain();
-    let range = scales.offset.range();
-
     // Anchor map on given uid
     // Finds anchor genes in clusters given some initial anchor gene
     // Find gene links, then filter out any not containing the anchor
@@ -376,12 +382,14 @@ const _gene = {
 
     // Iterate all anchor groups and update offset scale range values
     for (const [cluster, group] of anchors.entries()) {
-      let index = domain.findIndex((el) => el === cluster);
-      range[index] += getGroupOffset(group);
+      setClusterOffset(
+        chartState,
+        cluster,
+        getClusterOffset(chartState, cluster) + getGroupOffset(group)
+      );
     }
 
-    // Update range, then update ClusterMap
-    scales.offset.range(range);
+    refreshClusterOffsetScale();
     plot.update();
   },
 };
@@ -860,7 +868,8 @@ const _locus = {
 
     const ended = (_, d) => {
       flags.isDragging = false;
-      updateScaleRange("locus", d.uid, value);
+      setLocusOffset(chartState, d.uid, value);
+      refreshLocusOffsetScale();
       plot.update();
     };
 
@@ -885,27 +894,34 @@ const _scale = {
     scales.y.range(rng);
   },
   updateOffset: (clusters) => {
-    scales.offset
-      .domain(clusters.map((d) => d.uid))
-      .range(clusters.map(() => 0));
+    scales.offset.domain(clusters.map((d) => d.uid));
+    refreshClusterOffsetScale();
   },
   updateLocus: (clusters) => {
-    let { domain, range } = getLocusScaleValues(clusters, locusLayout());
-    scales.locus.domain(domain).range(range);
+    let { domain, range } = getLocusScaleValues(clusters, {
+      ...locusLayout(),
+      locusOffset: () => 0,
+    });
+    initializeLocusOffsets(
+      chartState,
+      domain.map((uid, index) => [uid, range[index]])
+    );
+    scales.locus.domain(domain);
+    refreshLocusOffsetScale();
   },
   /**
    * Rescales offset and locus scales with an updated x scale.
    * @param {d3.scale} old - The old x scale
    */
   rescaleRanges: (old) => {
-    [scales.offset, scales.locus].forEach((scale) => {
-      let range = scale.range();
-      for (let i = 0; i < range.length; i++) {
-        let input = old.invert(range[i]);
-        range[i] = scales.x(input);
-      }
-      scale.range(range);
-    });
+    for (const [uid, offset] of chartState.clusterOffsets) {
+      setClusterOffset(chartState, uid, scales.x(old.invert(offset)));
+    }
+    for (const [uid, offset] of chartState.locusOffsets) {
+      setLocusOffset(chartState, uid, scales.x(old.invert(offset)));
+    }
+    refreshClusterOffsetScale();
+    refreshLocusOffsetScale();
   },
   /**
    * Updates all scales based on new data.
@@ -925,9 +941,8 @@ const _scale = {
     scales.y.domain(getClusterOrder(chartState));
     _scale.updateY(data);
 
-    if (!_scale.check("offset")) _scale.updateOffset(data.clusters);
-
-    if (!_scale.check("locus")) _scale.updateLocus(data.clusters);
+    _scale.updateOffset(data.clusters);
+    _scale.updateLocus(data.clusters);
   },
 };
 

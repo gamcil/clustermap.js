@@ -20,14 +20,8 @@ test("cluster normalization initializes display fields and relationships", async
   const [locus] = cluster.loci;
   const [gene] = locus.genes;
   assert.deepEqual(
-    {
-      offset: locus._offset,
-      cluster: locus._cluster,
-    },
-    {
-      offset: 0,
-      cluster: "cluster-a",
-    }
+    { cluster: locus._cluster },
+    { cluster: "cluster-a" }
   );
   assert.deepEqual(
     {
