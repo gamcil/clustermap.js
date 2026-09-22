@@ -7,6 +7,11 @@ import {
   getLinkPath,
 } from "./links/layout.mjs";
 import {
+  getGeneLabelDy,
+  getGeneLabelTransform,
+  getGenePolygonPoints,
+} from "./genes/layout.mjs";
+import {
   flipLocus,
   formatLocusText,
   recalculateLocusCoordinates,
@@ -120,94 +125,18 @@ const _gene = {
     let groupId = scales.group(g.uid);
     return scales.colour(groupId);
   },
-  points: (g) => {
-    // Calculates points attribute to draw a gene polygon
-    let points = [];
-
-    // Get start and end of Gene as percentages of Locus length
-    let scaledStart = scales.x(g.start);
-    let scaledEnd = scales.x(g.end);
-    let geneLength = scaledEnd - scaledStart;
-
-    // Calculate scaled constants based on scaled coordinates
-    let bottom = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
-    let midpoint = bottom / 2;
-    let third = config.gene.shape.tipHeight + config.gene.shape.bodyHeight;
-
-    // Determine polygon points for the Gene, 5' to 3' or 3' to 5'
-    if (g.strand === 1) {
-      let shaft = scaledEnd - config.gene.shape.tipLength;
-      points = [
-        scaledStart,
-        config.gene.shape.tipHeight,
-        shaft,
-        config.gene.shape.tipHeight,
-        shaft,
-        0,
-        scaledEnd,
-        midpoint,
-        shaft,
-        bottom,
-        shaft,
-        third,
-        scaledStart,
-        third,
-      ];
-      // Squeeze arrow when total length is less than tip length
-      if (geneLength < config.gene.shape.tipLength) {
-        [2, 4, 8, 10].forEach((item) => (points[item] = scaledStart));
-      }
-    } else {
-      let shaft = scaledStart + config.gene.shape.tipLength;
-      points = [
-        scaledEnd,
-        config.gene.shape.tipHeight,
-        shaft,
-        config.gene.shape.tipHeight,
-        shaft,
-        0,
-        scaledStart,
-        midpoint,
-        shaft,
-        bottom,
-        shaft,
-        third,
-        scaledEnd,
-        third,
-      ];
-      if (geneLength < config.gene.shape.tipLength) {
-        [2, 4, 8, 10].forEach((item) => (points[item] = scaledEnd));
-      }
-    }
-    return points.join(" ");
-  },
-  labelTransform: (g) => {
-    let offset = xDistance(scales.x, g.start, g.end) * config.gene.label.start;
-    let gx = scales.x(g.start) + offset;
-    let gy;
-    if (config.gene.label.position === "middle")
-      gy = config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
-    else if (config.gene.label.position === "bottom")
-      gy =
-        2 * config.gene.shape.tipHeight +
-        config.gene.shape.bodyHeight +
-        config.gene.label.spacing;
-    else gy = -config.gene.label.spacing;
-    let rotate = ["start", "middle"].includes(config.gene.label.anchor)
-      ? -config.gene.label.rotation
-      : config.gene.label.rotation;
-    return `translate(${gx}, ${gy}) rotate(${rotate})`;
-  },
-  labelDy: () => {
-    switch (config.gene.label.position) {
-      case "top":
-        return "-0.4em";
-      case "middle":
-        return "0.4em";
-      case "bottom":
-        return "0.8em";
-    }
-  },
+  points: (gene) =>
+    getGenePolygonPoints(gene, {
+      scaleX: scales.x,
+      shape: config.gene.shape,
+    }),
+  labelTransform: (gene) =>
+    getGeneLabelTransform(gene, {
+      scaleX: scales.x,
+      shape: config.gene.shape,
+      label: config.gene.label,
+    }),
+  labelDy: () => getGeneLabelDy(config.gene.label.position),
   tooltipHTML: (g) => {
     // Create detached <div>
     let div = d3
