@@ -390,6 +390,7 @@
 
   function createChartState(data, previous = null) {
     const loci = previous?.loci || new Map();
+    const genes = previous?.genes || new Map();
     const present = new Set();
     for (const cluster of data.clusters) {
       for (const locus of cluster.loci) {
@@ -403,14 +404,38 @@
             trimRight: locus._trimRight ?? null,
           });
         }
+        for (const gene of locus.genes) {
+          const geneBio = gene.bio || {
+            start: gene.start,
+            end: gene.end,
+            strand: gene.strand,
+          };
+          const locusBio = locus.bio || { start: locus.start, end: locus.end };
+          const key = `${locus.uid}:${gene.uid}`;
+          present.add(key);
+          if (!genes.has(key)) {
+            genes.set(key, {
+              start: geneBio.start - locusBio.start,
+              end: geneBio.end - locusBio.start,
+              strand: geneBio.strand,
+            });
+          }
+        }
       }
     }
-    for (const uid of loci.keys()) if (!present.has(uid)) loci.delete(uid);
-    return { loci };
+    for (const uid of loci.keys()) {
+      if (!data.clusters.some((cluster) => cluster.loci.some((locus) => locus.uid === uid))) loci.delete(uid);
+    }
+    for (const uid of genes.keys()) if (!present.has(uid)) genes.delete(uid);
+    return { loci, genes };
   }
 
   function getLocusState(chartState, locus) {
     return chartState.loci.get(locus.uid);
+  }
+
+  function getGeneState(chartState, gene) {
+    return chartState.genes.get(`${gene._locus}:${gene.uid}`);
   }
 
   function formatLocusText(loci, chartState, hideCoordinates) {
@@ -443,10 +468,14 @@
 
   function recalculateLocusCoordinates(chartState, locus, scaleGenes) {
     locus.genes.forEach((gene, index, genes) => {
-      const length = scaleGenes ? gene._end - gene._start : 1000;
-      gene.start = scaleGenes ? gene._start : index > 0 ? genes[index - 1].end : 0;
-      gene.end = gene.start + length;
-      gene.strand = gene._strand;
+      const state = getGeneState(chartState, gene);
+      const length = scaleGenes ? state.end - state.start : 1000;
+      state.start = scaleGenes
+        ? state.start
+        : index > 0
+        ? getGeneState(chartState, genes[index - 1]).end
+        : 0;
+      state.end = state.start + length;
     });
 
     const state = getLocusState(chartState, locus);
@@ -473,12 +502,15 @@
     ];
 
     locus.genes.forEach((gene) => {
-      const start = gene._start;
-      gene._start = length - gene._end;
-      gene._end = length - start;
-      gene._strand = gene._strand === 1 ? -1 : 1;
+      const geneState = getGeneState(chartState, gene);
+      const start = geneState.start;
+      geneState.start = length - geneState.end;
+      geneState.end = length - start;
+      geneState.strand = geneState.strand === 1 ? -1 : 1;
     });
-    locus.genes.sort((a, b) => a._start - b._start);
+    locus.genes.sort(
+      (a, b) => getGeneState(chartState, a).start - getGeneState(chartState, b).start
+    );
   }
 
   function xDistance(scaleX, start, end) {
@@ -615,6 +647,10 @@
     return getLocusState(chartState, locus);
   }
 
+  function displayGene(gene) {
+    return { ...gene, ...getGeneState(chartState, gene) };
+  }
+
   function _get(uid, type) {
     return d3.select(`#${type}_${uid}`);
   }
@@ -677,12 +713,12 @@
       return scales.colour(groupId);
     },
     points: (gene) =>
-      getGenePolygonPoints(gene, {
+      getGenePolygonPoints(displayGene(gene), {
         scaleX: scales.x,
         shape: config.gene.shape,
       }),
     labelTransform: (gene) =>
-      getGeneLabelTransform(gene, {
+      getGeneLabelTransform(displayGene(gene), {
         scaleX: scales.x,
         shape: config.gene.shape,
         label: config.gene.label,
@@ -851,7 +887,10 @@
         .forEach((uid) => {
           // Group remaining anchors by cluster
           let gene = get.geneData(uid);
-          if (flipLoci && gene.strand !== anchor.strand) {
+          if (
+            flipLoci &&
+            displayGene(gene).strand !== displayGene(anchor).strand
+          ) {
             let locus = get.locusData(gene._locus);
             flipLocus(chartState, locus);
             updateLocusScaling(locus);
@@ -867,7 +906,10 @@
 
       // Get the midpoint of the clicked anchor gene
       let getMidPoint = (data) =>
-        scales.x(data.start + (data.end - data.start) / 2) +
+        scales.x(
+          displayGene(data).start +
+            (displayGene(data).end - displayGene(data).start) / 2
+        ) +
         scales.locus(data._locus) +
         scales.offset(data._cluster);
       let midPoint = getMidPoint(anchor);
@@ -916,9 +958,8 @@
      * @return {bool} - Clusters are adjacent
      */
     adjacent: (one, two) => {
-      let a = get.cluster(one).datum();
-      let b = get.cluster(two).datum();
-      return Math.abs(a.slot - b.slot) === 1;
+      const domain = scales.y.domain();
+      return Math.abs(domain.indexOf(one) - domain.indexOf(two)) === 1;
     },
     /**
      * Aligns clusterInfo <g> elements based on leftmost cluster in the map.
@@ -1121,7 +1162,7 @@
     getAnchors: (d, snap) => {
       const useScalePositions = snap || false;
       return getLinkAnchors(d, {
-        geneForUid: get.geneData,
+        geneForUid: (uid) => displayGene(get.geneData(uid)),
         areClustersAdjacent: _cluster.adjacent,
         scaleX: scales.x,
         horizontalOffset: (gene) => {
@@ -1234,9 +1275,11 @@
         const state = locusState(d);
         // Find closest gene start, from start to _end
         let genes = d.genes
-          .filter((gene) => gene.end <= state.end)
-          .sort((a, b) => (a.start > b.start ? 1 : -1));
-        let starts = [d.start, ...genes.map((gene) => gene.start)];
+          .filter((gene) => displayGene(gene).end <= state.end)
+          .sort((a, b) =>
+            displayGene(a).start > displayGene(b).start ? 1 : -1
+          );
+        let starts = [d.start, ...genes.map((gene) => displayGene(gene).start)];
         let coords = starts.map((value) => scales.x(value));
         let position = getClosestValue(coords, event.x);
         value = coords[position];
@@ -1255,7 +1298,10 @@
         locus
           .selectAll("g.gene")
           .attr("display", (g) =>
-            g.start >= state.start && g.end <= state.end + 1 ? "inline" : "none"
+            displayGene(g).start >= state.start &&
+            displayGene(g).end <= state.end + 1
+              ? "inline"
+              : "none"
           );
         locus.call(_locus.updateTrackBar);
 
@@ -1283,9 +1329,11 @@
         const state = locusState(d);
         // Find closest visible gene end, from _start to end
         let genes = d.genes
-          .filter((gene) => gene.start >= state.start)
-          .sort((a, b) => (a.start > b.start ? 1 : -1));
-        let geneEnds = genes.map((g) => g.end);
+          .filter((gene) => displayGene(gene).start >= state.start)
+          .sort((a, b) =>
+            displayGene(a).start > displayGene(b).start ? 1 : -1
+          );
+        let geneEnds = genes.map((gene) => displayGene(gene).end);
         let ends = [...geneEnds, config.plot.scaleGenes ? d.end : state.end];
         let range = ends.map((value) => scales.x(value));
         let position = getClosestValue(range, event.x);
@@ -1301,7 +1349,10 @@
         locus
           .selectAll("g.gene")
           .attr("display", (g) =>
-            g.start >= state.start && g.end <= state.end + 1 ? "inline" : "none"
+            displayGene(g).start >= state.start &&
+            displayGene(g).end <= state.end + 1
+              ? "inline"
+              : "none"
           );
         locus.call(_locus.updateTrackBar);
 
@@ -1913,9 +1964,14 @@
   }
 
   function normalizeLocus(locus) {
+    const bio = locus.bio || { start: locus.start, end: locus.end };
     return {
       ...locus,
-      bio: locus.bio || { start: locus.start, end: locus.end },
+      bio,
+      _bio_start: bio.start,
+      _bio_end: bio.end,
+      start: 0,
+      end: bio.end - bio.start,
       genes: locus.genes.map(normalizeGene),
     };
   }
@@ -1943,9 +1999,6 @@
       for (const gene of locus.genes) {
         setDefault(gene, "_locus", locus.uid);
         setDefault(gene, "_cluster", cluster.uid);
-        setDefault(gene, "_start", gene.start);
-        setDefault(gene, "_end", gene.end);
-        setDefault(gene, "_strand", gene.strand);
       }
     }
 
@@ -2167,19 +2220,6 @@
         )
         .join(
           (enter) => {
-            // Make sure that, on first appearance of data, we
-            // convert to relative coordinates.
-            for (const locus of enter.data()) {
-              if (locus.start === 0) continue;
-              locus._bio_start = locus.start;
-              locus._bio_end = locus.end;
-              locus.start = 0;
-              locus.end = locus._bio_end - locus._bio_start;
-              for (const gene of locus.genes) {
-                gene._start = gene.start - locus._bio_start;
-                gene._end = gene.end - locus._bio_start;
-              }
-            }
             enter = enter
               .append("g")
               .attr("id", _locus.getId)

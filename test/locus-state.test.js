@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const createLocus = () => ({
+  uid: "locus",
   name: "locus",
   start: 0,
   end: 10000,
@@ -11,8 +12,8 @@ const createLocus = () => ({
   _trimLeft: null,
   _trimRight: null,
   genes: [
-    { uid: "a", _start: 0, _end: 1000, _strand: -1 },
-    { uid: "b", _start: 2500, _end: 3500, _strand: 1 },
+    { uid: "a", _locus: "locus", start: 0, end: 1000, strand: -1 },
+    { uid: "b", _locus: "locus", start: 2500, end: 3500, strand: 1 },
   ],
 });
 
@@ -29,7 +30,7 @@ test("flipping a locus twice restores its gene state", async () => {
 });
 
 test("recalculating a trimmed locus updates gene and locus coordinates", async () => {
-  const { createChartState, recalculateLocusCoordinates } = await import(
+  const { createChartState, getGeneState, recalculateLocusCoordinates } = await import(
     "../src/chartState.mjs"
   );
   const locus = createLocus();
@@ -43,7 +44,7 @@ test("recalculating a trimmed locus updates gene and locus coordinates", async (
   assert.equal(state.loci.get(locus.uid).start, 2500);
   assert.equal(state.loci.get(locus.uid).end, 3500);
   assert.deepEqual(
-    locus.genes.map(({ start, end, strand }) => ({ start, end, strand })),
+    locus.genes.map((gene) => getGeneState(state, gene)),
     [
       { start: 0, end: 1000, strand: -1 },
       { start: 2500, end: 3500, strand: 1 },

@@ -10,9 +10,14 @@ function normalizeGene(gene) {
 }
 
 function normalizeLocus(locus) {
+  const bio = locus.bio || { start: locus.start, end: locus.end };
   return {
     ...locus,
-    bio: locus.bio || { start: locus.start, end: locus.end },
+    bio,
+    _bio_start: bio.start,
+    _bio_end: bio.end,
+    start: 0,
+    end: bio.end - bio.start,
     genes: locus.genes.map(normalizeGene),
   };
 }
@@ -40,9 +45,6 @@ export function initializeClusterData(cluster) {
     for (const gene of locus.genes) {
       setDefault(gene, "_locus", locus.uid);
       setDefault(gene, "_cluster", cluster.uid);
-      setDefault(gene, "_start", gene.start);
-      setDefault(gene, "_end", gene.end);
-      setDefault(gene, "_strand", gene.strand);
     }
   }
 

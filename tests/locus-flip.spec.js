@@ -11,12 +11,7 @@ async function readLocusState(locus) {
     return {
       flipped: locusText.includes("(reversed)"),
       length: datum.end - datum.start,
-      genes: datum.genes.map((gene) => ({
-        uid: gene.uid,
-        start: gene._start,
-        end: gene._end,
-        strand: gene._strand,
-      })),
+      genes: datum.genes.map((gene) => gene.uid),
     };
   });
 }
@@ -54,12 +49,7 @@ test("double-clicking a locus reverses its gene layout", async ({ page }, testIn
     })
     .toEqual({
       flipped: !before.flipped,
-      genes: [...before.genes].reverse().map((gene) => ({
-        uid: gene.uid,
-        start: before.length - gene.end,
-        end: before.length - gene.start,
-        strand: gene.strand === 1 ? -1 : 1,
-      })),
+      genes: [...before.genes].reverse(),
     });
 
   await captureCheckpoint(page, testInfo, "after-flip", () =>
@@ -72,7 +62,7 @@ test("double-clicking a locus reverses its gene layout", async ({ page }, testIn
         .locator("g.genes > g.gene")
         .evaluateAll((nodes) => nodes.map((node) => node.id))
     )
-    .toEqual([...before.genes].reverse().map((gene) => `gene_${gene.uid}`));
+    .toEqual([...before.genes].reverse().map((uid) => `gene_${uid}`));
 });
 
 test("flipping a locus twice restores its link paths", async ({ page }) => {

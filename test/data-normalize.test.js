@@ -33,11 +33,8 @@ test("cluster normalization initializes display fields and relationships", async
     {
       locus: gene._locus,
       cluster: gene._cluster,
-      start: gene._start,
-      end: gene._end,
-      strand: gene._strand,
     },
-    { locus: "locus-a", cluster: "cluster-a", start: 0, end: 20, strand: 0 }
+    { locus: "locus-a", cluster: "cluster-a" }
   );
 });
 

@@ -14,6 +14,7 @@ import {
 import {
   flipLocus,
   formatLocusText,
+  getGeneState,
   getLocusState,
   recalculateLocusCoordinates,
 } from "./chartState.mjs";
@@ -82,6 +83,10 @@ function locusState(locus) {
   return getLocusState(chartState, locus);
 }
 
+function displayGene(gene) {
+  return { ...gene, ...getGeneState(chartState, gene) };
+}
+
 function _get(uid, type) {
   return d3.select(`#${type}_${uid}`);
 }
@@ -144,12 +149,12 @@ const _gene = {
     return scales.colour(groupId);
   },
   points: (gene) =>
-    getGenePolygonPoints(gene, {
+    getGenePolygonPoints(displayGene(gene), {
       scaleX: scales.x,
       shape: config.gene.shape,
     }),
   labelTransform: (gene) =>
-    getGeneLabelTransform(gene, {
+    getGeneLabelTransform(displayGene(gene), {
       scaleX: scales.x,
       shape: config.gene.shape,
       label: config.gene.label,
@@ -318,7 +323,10 @@ const _gene = {
       .forEach((uid) => {
         // Group remaining anchors by cluster
         let gene = get.geneData(uid);
-        if (flipLoci && gene.strand !== anchor.strand) {
+        if (
+          flipLoci &&
+          displayGene(gene).strand !== displayGene(anchor).strand
+        ) {
           let locus = get.locusData(gene._locus);
           flipLocus(chartState, locus);
           updateLocusScaling(locus);
@@ -334,7 +342,10 @@ const _gene = {
 
     // Get the midpoint of the clicked anchor gene
     let getMidPoint = (data) =>
-      scales.x(data.start + (data.end - data.start) / 2) +
+      scales.x(
+        displayGene(data).start +
+          (displayGene(data).end - displayGene(data).start) / 2
+      ) +
       scales.locus(data._locus) +
       scales.offset(data._cluster);
     let midPoint = getMidPoint(anchor);
@@ -383,9 +394,8 @@ const _cluster = {
    * @return {bool} - Clusters are adjacent
    */
   adjacent: (one, two) => {
-    let a = get.cluster(one).datum();
-    let b = get.cluster(two).datum();
-    return Math.abs(a.slot - b.slot) === 1;
+    const domain = scales.y.domain();
+    return Math.abs(domain.indexOf(one) - domain.indexOf(two)) === 1;
   },
   /**
    * Aligns clusterInfo <g> elements based on leftmost cluster in the map.
@@ -588,7 +598,7 @@ const _link = {
   getAnchors: (d, snap) => {
     const useScalePositions = snap || false;
     return getLinkAnchors(d, {
-      geneForUid: get.geneData,
+      geneForUid: (uid) => displayGene(get.geneData(uid)),
       areClustersAdjacent: _cluster.adjacent,
       scaleX: scales.x,
       horizontalOffset: (gene) => {
@@ -701,9 +711,11 @@ const _locus = {
       const state = locusState(d);
       // Find closest gene start, from start to _end
       let genes = d.genes
-        .filter((gene) => gene.end <= state.end)
-        .sort((a, b) => (a.start > b.start ? 1 : -1));
-      let starts = [d.start, ...genes.map((gene) => gene.start)];
+        .filter((gene) => displayGene(gene).end <= state.end)
+        .sort((a, b) =>
+          displayGene(a).start > displayGene(b).start ? 1 : -1
+        );
+      let starts = [d.start, ...genes.map((gene) => displayGene(gene).start)];
       let coords = starts.map((value) => scales.x(value));
       let position = getClosestValue(coords, event.x);
       value = coords[position];
@@ -722,7 +734,10 @@ const _locus = {
       locus
         .selectAll("g.gene")
         .attr("display", (g) =>
-          g.start >= state.start && g.end <= state.end + 1 ? "inline" : "none"
+          displayGene(g).start >= state.start &&
+          displayGene(g).end <= state.end + 1
+            ? "inline"
+            : "none"
         );
       locus.call(_locus.updateTrackBar);
 
@@ -750,9 +765,11 @@ const _locus = {
       const state = locusState(d);
       // Find closest visible gene end, from _start to end
       let genes = d.genes
-        .filter((gene) => gene.start >= state.start)
-        .sort((a, b) => (a.start > b.start ? 1 : -1));
-      let geneEnds = genes.map((g) => g.end);
+        .filter((gene) => displayGene(gene).start >= state.start)
+        .sort((a, b) =>
+          displayGene(a).start > displayGene(b).start ? 1 : -1
+        );
+      let geneEnds = genes.map((gene) => displayGene(gene).end);
       let ends = [...geneEnds, config.plot.scaleGenes ? d.end : state.end];
       let range = ends.map((value) => scales.x(value));
       let position = getClosestValue(range, event.x);
@@ -768,7 +785,10 @@ const _locus = {
       locus
         .selectAll("g.gene")
         .attr("display", (g) =>
-          g.start >= state.start && g.end <= state.end + 1 ? "inline" : "none"
+          displayGene(g).start >= state.start &&
+          displayGene(g).end <= state.end + 1
+            ? "inline"
+            : "none"
         );
       locus.call(_locus.updateTrackBar);
 

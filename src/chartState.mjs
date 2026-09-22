@@ -1,5 +1,6 @@
 export function createChartState(data, previous = null) {
   const loci = previous?.loci || new Map();
+  const genes = previous?.genes || new Map();
   const present = new Set();
   for (const cluster of data.clusters) {
     for (const locus of cluster.loci) {
@@ -13,14 +14,38 @@ export function createChartState(data, previous = null) {
           trimRight: locus._trimRight ?? null,
         });
       }
+      for (const gene of locus.genes) {
+        const geneBio = gene.bio || {
+          start: gene.start,
+          end: gene.end,
+          strand: gene.strand,
+        };
+        const locusBio = locus.bio || { start: locus.start, end: locus.end };
+        const key = `${locus.uid}:${gene.uid}`;
+        present.add(key);
+        if (!genes.has(key)) {
+          genes.set(key, {
+            start: geneBio.start - locusBio.start,
+            end: geneBio.end - locusBio.start,
+            strand: geneBio.strand,
+          });
+        }
+      }
     }
   }
-  for (const uid of loci.keys()) if (!present.has(uid)) loci.delete(uid);
-  return { loci };
+  for (const uid of loci.keys()) {
+    if (!data.clusters.some((cluster) => cluster.loci.some((locus) => locus.uid === uid))) loci.delete(uid);
+  }
+  for (const uid of genes.keys()) if (!present.has(uid)) genes.delete(uid);
+  return { loci, genes };
 }
 
 export function getLocusState(chartState, locus) {
   return chartState.loci.get(locus.uid);
+}
+
+export function getGeneState(chartState, gene) {
+  return chartState.genes.get(`${gene._locus}:${gene.uid}`);
 }
 
 export function formatLocusText(loci, chartState, hideCoordinates) {
@@ -53,10 +78,14 @@ export function formatLocusText(loci, chartState, hideCoordinates) {
 
 export function recalculateLocusCoordinates(chartState, locus, scaleGenes) {
   locus.genes.forEach((gene, index, genes) => {
-    const length = scaleGenes ? gene._end - gene._start : 1000;
-    gene.start = scaleGenes ? gene._start : index > 0 ? genes[index - 1].end : 0;
-    gene.end = gene.start + length;
-    gene.strand = gene._strand;
+    const state = getGeneState(chartState, gene);
+    const length = scaleGenes ? state.end - state.start : 1000;
+    state.start = scaleGenes
+      ? state.start
+      : index > 0
+      ? getGeneState(chartState, genes[index - 1]).end
+      : 0;
+    state.end = state.start + length;
   });
 
   const state = getLocusState(chartState, locus);
@@ -83,10 +112,13 @@ export function flipLocus(chartState, locus) {
   ];
 
   locus.genes.forEach((gene) => {
-    const start = gene._start;
-    gene._start = length - gene._end;
-    gene._end = length - start;
-    gene._strand = gene._strand === 1 ? -1 : 1;
+    const geneState = getGeneState(chartState, gene);
+    const start = geneState.start;
+    geneState.start = length - geneState.end;
+    geneState.end = length - start;
+    geneState.strand = geneState.strand === 1 ? -1 : 1;
   });
-  locus.genes.sort((a, b) => a._start - b._start);
+  locus.genes.sort(
+    (a, b) => getGeneState(chartState, a).start - getGeneState(chartState, b).start
+  );
 }
