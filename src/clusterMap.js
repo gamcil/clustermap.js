@@ -5,6 +5,7 @@ import { renameText } from "./utils.js";
 import { createLinkGroups, filterLinks } from "./links/groups.mjs";
 import { createChartState, flipLocus } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
+import { normalizeChartData } from "./data/normalize.mjs";
 import * as api from "./api.js";
 
 export default function clusterMap() {
@@ -24,6 +25,7 @@ export default function clusterMap() {
   }
 
   function update(data) {
+    data = normalizeChartData(data);
     const chartIndex = createChartIndex(data);
     chartState = createChartState(data, chartState);
     api.setChartIndex(chartIndex);
