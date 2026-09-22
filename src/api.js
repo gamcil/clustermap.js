@@ -165,6 +165,11 @@ const scales = {
 
 const _layout = {
   update: (data) => {
+    // Normalise scale-dependent locus state before deriving immutable scene
+    // geometry. Rendering must not be responsible for this state work.
+    data.clusters.forEach((cluster) =>
+      cluster.loci.forEach((locus) => updateLocusScaling(locus))
+    );
     scene = buildScene(data, {
       scaleX: scales.x,
       scaleY: scales.y,

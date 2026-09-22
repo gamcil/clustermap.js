@@ -62,17 +62,18 @@ export function renderSvg({
           .style("font-family", api.config.plot.fontFamily);
         info.selectAll("text").attr("text-anchor", "end");
         enter.append("g").attr("class", "loci");
-        return enter.call(api.cluster.update);
+        return enter;
       },
-      (update) =>
-        update.call((selection) =>
-          selection.transition(transition).call(api.cluster.update)
-        )
+      (update) => update
     );
 
-  // Cluster updates may normalize locus offsets, so derive the immutable scene
-  // only after the cluster join has applied that state.
   const scene = createScene(data);
+  // A cluster drag can leave an in-flight transform transition on sibling
+  // rows. Cancel it before the scene supplies their snapped final positions.
+  const clusterRender = animate
+    ? clusters.interrupt().transition(transition)
+    : clusters.interrupt();
+  updateClusters(clusterRender, scene);
 
   const loci = clusters
     .selectAll("g.loci")
@@ -122,11 +123,11 @@ export function renderSvg({
             }
           })
           .on("dblclick", (_, locus) => flipLocus(locus));
-        return enter.call(api.locus.update);
+        return updateLoci(enter, scene, api);
       },
       (update) =>
         update.call((selection) =>
-          selection.transition(transition).call(api.locus.update)
+          updateLoci(selection.transition(transition), scene, api)
         )
     );
 
@@ -200,6 +201,56 @@ export function renderSvg({
     .call(getColourBar(api, transition))
     .call(getScaleBar(api, transition));
   arrangePlot(plot, api, transition, animate);
+}
+
+function updateClusters(selection, scene) {
+  const layout = (cluster) => scene.clusters.get(cluster.uid);
+  selection.attr("transform", (cluster) => {
+    const { x, y } = layout(cluster);
+    return `translate(${x}, ${y})`;
+  });
+  selection.selectAll("g.clusterInfo").attr("transform", (cluster) => {
+    const { x, y } = layout(cluster).info;
+    return `translate(${x}, ${y})`;
+  });
+  selection.selectAll("text.locusText").each(function (cluster) {
+    const text = layout(cluster).info.locusText;
+    if (this.textContent !== text) this.textContent = text;
+  });
+  return selection;
+}
+
+function updateLoci(selection, scene, api) {
+  const { config } = api;
+  const layout = (locus) => scene.loci.get(locus.uid);
+
+  selection.attr("transform", (locus) => {
+    const { x, y } = layout(locus).transform;
+    return `translate(${x}, ${y})`;
+  });
+  selection
+    .select("line.trackBar")
+    .attr("x1", (locus) => layout(locus).track.x1)
+    .attr("x2", (locus) => layout(locus).track.x2)
+    .attr("y1", (locus) => layout(locus).track.y)
+    .attr("y2", (locus) => layout(locus).track.y)
+    .style("stroke", config.locus.trackBar.colour)
+    .style("stroke-width", config.locus.trackBar.stroke);
+  selection
+    .selectAll("rect.hover, rect.leftHandle, rect.rightHandle")
+    .attr("y", (locus) => layout(locus).hover.y)
+    .attr("height", (locus) => layout(locus).hover.height);
+  selection
+    .select("rect.hover")
+    .attr("x", (locus) => layout(locus).hover.x)
+    .attr("width", (locus) => layout(locus).hover.width);
+  selection
+    .select("rect.leftHandle")
+    .attr("x", (locus) => layout(locus).hover.leftHandleX);
+  selection
+    .select("rect.rightHandle")
+    .attr("x", (locus) => layout(locus).hover.rightHandleX);
+  return selection;
 }
 
 function updateGenes(selection, scene, api) {
