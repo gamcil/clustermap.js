@@ -77,3 +77,107 @@ test("chart state persists the camera transform across data refreshes", async ()
   state = createChartState(dataFor("a"), state);
   assert.deepEqual(getCamera(state), { x: 20, y: -10, k: 1.5 });
 });
+
+test("chart state anchors matching genes by moving their clusters", async () => {
+  const {
+    anchorGeneGroup,
+    createChartState,
+    getClusterOffset,
+    getGeneState,
+  } = await import("../src/chartState.mjs");
+  const anchor = {
+    uid: "gene-a",
+    _cluster: "cluster-a",
+    _locus: "locus-a",
+    start: 0,
+    end: 10,
+    strand: 1,
+  };
+  const match = {
+    uid: "gene-b",
+    _cluster: "cluster-b",
+    _locus: "locus-b",
+    start: 20,
+    end: 30,
+    strand: 1,
+  };
+  const loci = new Map([
+    ["locus-a", { uid: "locus-a", start: 0, end: 100, genes: [anchor] }],
+    ["locus-b", { uid: "locus-b", start: 0, end: 100, genes: [match] }],
+  ]);
+  const state = createChartState({
+    clusters: [
+      { uid: "cluster-a", loci: [loci.get("locus-a")] },
+      { uid: "cluster-b", loci: [loci.get("locus-b")] },
+    ],
+  });
+  const coordinateForGene = (gene) => {
+    const display = getGeneState(state, gene);
+    return getClusterOffset(state, gene._cluster) + (display.start + display.end) / 2;
+  };
+
+  const changes = anchorGeneGroup(state, {
+    anchor,
+    genes: [anchor, match],
+    locusForGene: (gene) => loci.get(gene._locus),
+    coordinateForGene,
+  });
+
+  assert.equal(getClusterOffset(state, "cluster-a"), 0);
+  assert.equal(getClusterOffset(state, "cluster-b"), -20);
+  assert.deepEqual(changes.map(({ clusterUid, offset }) => ({ clusterUid, offset })), [
+    { clusterUid: "cluster-b", offset: -20 },
+  ]);
+});
+
+test("chart state anchoring flips mismatched loci before finding offsets", async () => {
+  const {
+    anchorGeneGroup,
+    createChartState,
+    getClusterOffset,
+    getGeneState,
+  } = await import("../src/chartState.mjs");
+  const anchor = {
+    uid: "gene-a",
+    _cluster: "cluster-a",
+    _locus: "locus-a",
+    start: 0,
+    end: 10,
+    strand: 1,
+  };
+  const match = {
+    uid: "gene-b",
+    _cluster: "cluster-b",
+    _locus: "locus-b",
+    start: 20,
+    end: 30,
+    strand: -1,
+  };
+  const loci = new Map([
+    ["locus-a", { uid: "locus-a", start: 0, end: 100, genes: [anchor] }],
+    ["locus-b", { uid: "locus-b", start: 0, end: 100, genes: [match] }],
+  ]);
+  const state = createChartState({
+    clusters: [
+      { uid: "cluster-a", loci: [loci.get("locus-a")] },
+      { uid: "cluster-b", loci: [loci.get("locus-b")] },
+    ],
+  });
+  const flipped = [];
+
+  anchorGeneGroup(state, {
+    anchor,
+    genes: [anchor, match],
+    locusForGene: (gene) => loci.get(gene._locus),
+    coordinateForGene: (gene) => {
+      const display = getGeneState(state, gene);
+      return getClusterOffset(state, gene._cluster) + (display.start + display.end) / 2;
+    },
+    flipMismatchedLoci: true,
+    onLocusFlipped: (locus) => flipped.push(locus.uid),
+  });
+
+  assert.deepEqual(flipped, ["locus-b"]);
+  assert.deepEqual(getGeneState(state, match), { start: 70, end: 80, strand: 1 });
+  assert.equal(getClusterOffset(state, "cluster-b"), -70);
+});

@@ -232,6 +232,57 @@ export function finalizeLocusTrim(chartState, locus) {
   if (state.start === locus.start) state.trimLeft = null;
 }
 
+/**
+ * Align each represented cluster with an anchor gene. Coordinate projection is
+ * injected by the controller, so this state transition remains independent of
+ * D3 and of a particular renderer.
+ */
+export function anchorGeneGroup(chartState, {
+  anchor,
+  genes,
+  locusForGene,
+  coordinateForGene,
+  flipMismatchedLoci = false,
+  onLocusFlipped = () => {},
+}) {
+  const anchorsByCluster = new Map();
+  const anchorState = getGeneState(chartState, anchor);
+
+  for (const gene of genes) {
+    if (
+      flipMismatchedLoci &&
+      getGeneState(chartState, gene).strand !== anchorState.strand
+    ) {
+      const locus = locusForGene(gene);
+      flipLocus(chartState, locus);
+      onLocusFlipped(locus);
+    }
+    const clusterGenes = anchorsByCluster.get(gene._cluster) || [];
+    clusterGenes.push(gene);
+    anchorsByCluster.set(gene._cluster, clusterGenes);
+  }
+
+  const midpoint = coordinateForGene(anchor);
+  const changes = [];
+  for (const [clusterUid, clusterGenes] of anchorsByCluster) {
+    if (clusterGenes.some((gene) => gene.uid === anchor.uid)) continue;
+    const closest = clusterGenes.reduce((best, gene) =>
+      Math.abs(coordinateForGene(gene) - midpoint) <
+      Math.abs(coordinateForGene(best) - midpoint)
+        ? gene
+        : best
+    );
+    const offset = midpoint - coordinateForGene(closest);
+    setClusterOffset(
+      chartState,
+      clusterUid,
+      getClusterOffset(chartState, clusterUid) + offset
+    );
+    changes.push({ clusterUid, offset, gene: closest });
+  }
+  return changes;
+}
+
 export function flipLocus(chartState, locus) {
   const state = getLocusState(chartState, locus);
   state.flipped = !state.flipped;

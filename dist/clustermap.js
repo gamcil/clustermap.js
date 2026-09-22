@@ -343,6 +343,57 @@
     if (state.start === locus.start) state.trimLeft = null;
   }
 
+  /**
+   * Align each represented cluster with an anchor gene. Coordinate projection is
+   * injected by the controller, so this state transition remains independent of
+   * D3 and of a particular renderer.
+   */
+  function anchorGeneGroup(chartState, {
+    anchor,
+    genes,
+    locusForGene,
+    coordinateForGene,
+    flipMismatchedLoci = false,
+    onLocusFlipped = () => {},
+  }) {
+    const anchorsByCluster = new Map();
+    const anchorState = getGeneState(chartState, anchor);
+
+    for (const gene of genes) {
+      if (
+        flipMismatchedLoci &&
+        getGeneState(chartState, gene).strand !== anchorState.strand
+      ) {
+        const locus = locusForGene(gene);
+        flipLocus(chartState, locus);
+        onLocusFlipped(locus);
+      }
+      const clusterGenes = anchorsByCluster.get(gene._cluster) || [];
+      clusterGenes.push(gene);
+      anchorsByCluster.set(gene._cluster, clusterGenes);
+    }
+
+    const midpoint = coordinateForGene(anchor);
+    const changes = [];
+    for (const [clusterUid, clusterGenes] of anchorsByCluster) {
+      if (clusterGenes.some((gene) => gene.uid === anchor.uid)) continue;
+      const closest = clusterGenes.reduce((best, gene) =>
+        Math.abs(coordinateForGene(gene) - midpoint) <
+        Math.abs(coordinateForGene(best) - midpoint)
+          ? gene
+          : best
+      );
+      const offset = midpoint - coordinateForGene(closest);
+      setClusterOffset(
+        chartState,
+        clusterUid,
+        getClusterOffset(chartState, clusterUid) + offset
+      );
+      changes.push({ clusterUid, offset, gene: closest });
+    }
+    return changes;
+  }
+
   function flipLocus(chartState, locus) {
     const state = getLocusState(chartState, locus);
     state.flipped = !state.flipped;
@@ -2255,70 +2306,28 @@
         .style("pointer-events", "none");
     },
     anchor: (_, anchor, flipLoci = false) => {
-      // Anchor map on given uid
-      // Finds anchor genes in clusters given some initial anchor gene
-      // Find gene links, then filter out any not containing the anchor
-      let anchors = new Map();
-      scales.group
+      const genes = scales.group
         .domain()
         .filter((uid) => {
-          // Filter for matching groups
-          let g1 = scales.group(uid);
-          let g2 = scales.group(anchor.uid);
-          return g1 !== null && g1 === g2;
+          return scales.group(uid) === scales.group(anchor.uid);
         })
-        .forEach((uid) => {
-          // Group remaining anchors by cluster
-          let gene = get.geneData(uid);
-          if (
-            flipLoci &&
-            displayGene(gene).strand !== displayGene(anchor).strand
-          ) {
-            let locus = get.locusData(gene._locus);
-            flipLocus(chartState, locus);
-            updateLocusScaling(locus);
-          }
-          if (anchors.has(gene._cluster)) {
-            anchors.get(gene._cluster).push(uid);
-          } else {
-            anchors.set(gene._cluster, [uid]);
-          }
-        });
+        .map(get.geneData);
 
-      if (anchors.length === 0) return;
-
-      // Get the midpoint of the clicked anchor gene
-      let getMidPoint = (data) =>
-        scales.x(
-          displayGene(data).start +
-            (displayGene(data).end - displayGene(data).start) / 2
-        ) +
-        scales.locus(data._locus) +
-        scales.offset(data._cluster);
-      let midPoint = getMidPoint(anchor);
-
-      // Calculate offset value of a link anchor from clicked anchor
-      let getOffset = (link) => {
-        let data = get.geneData(link);
-        return midPoint - getMidPoint(data);
-      };
-
-      // Get smallest offset value from anchors on the same cluster
-      let getGroupOffset = (group) => {
-        if (group.includes(anchor.uid)) return 0;
-        let offsets = group.map((l) => getOffset(l));
-        let index = d3.minIndex(offsets, (l) => Math.abs(l));
-        return offsets[index];
-      };
-
-      // Iterate all anchor groups and update offset scale range values
-      for (const [cluster, group] of anchors.entries()) {
-        setClusterOffset(
-          chartState,
-          cluster,
-          getClusterOffset(chartState, cluster) + getGroupOffset(group)
-        );
-      }
+      anchorGeneGroup(chartState, {
+        anchor,
+        genes,
+        locusForGene: (gene) => get.locusData(gene._locus),
+        coordinateForGene: (gene) => {
+          const display = displayGene(gene);
+          return (
+            scales.x(display.start + (display.end - display.start) / 2) +
+            scales.locus(gene._locus) +
+            scales.offset(gene._cluster)
+          );
+        },
+        flipMismatchedLoci: flipLoci,
+        onLocusFlipped: updateLocusScaling,
+      });
 
       refreshClusterOffsetScale();
       plot.update();
