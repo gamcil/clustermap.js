@@ -679,6 +679,105 @@
     };
   }
 
+  // Translates renderer-independent pointer coordinates into chart-state actions.
+  // Renderers only need to forward pointer events in chart-world coordinates.
+  function createInteractionController({
+    clusterRows,
+    getClusterOrder,
+    getClusterPosition,
+    getLocusOffset,
+    setDragging,
+    previewClusterDrag,
+    commitClusterOrder,
+    previewLocusOffset,
+    commitLocusOffset,
+    previewLocusTrim,
+    commitLocusTrim,
+    flipLocus,
+  }) {
+    let clusterDrag = null;
+    let locusDrag = null;
+
+    const clamp = (value, [min, max]) => Math.min(max, Math.max(min, value));
+
+    return {
+      beginClusterDrag(uid, pointerY) {
+        clusterDrag = {
+          uid,
+          order: [...getClusterOrder()],
+          pointerOffset: getClusterPosition(uid) - pointerY,
+        };
+        setDragging(true);
+      },
+
+      moveClusterDrag(pointerY) {
+        if (!clusterDrag) return;
+        const range = clusterRows();
+        const y = clamp(pointerY + clusterDrag.pointerOffset, [range[0], range.at(-1)]);
+        const targetIndex = range.reduce(
+          (closest, position, index) =>
+            Math.abs(position - y) < Math.abs(range[closest] - y) ? index : closest,
+          0
+        );
+        const currentIndex = clusterDrag.order.indexOf(clusterDrag.uid);
+        let order = null;
+        if (targetIndex !== currentIndex) {
+          clusterDrag.order.splice(currentIndex, 1);
+          clusterDrag.order.splice(targetIndex, 0, clusterDrag.uid);
+          order = clusterDrag.order;
+        }
+        previewClusterDrag(clusterDrag.uid, y, order);
+      },
+
+      endClusterDrag() {
+        if (!clusterDrag) return;
+        clusterDrag = null;
+        setDragging(false);
+        commitClusterOrder();
+      },
+
+      beginLocusDrag(uid, pointerX) {
+        locusDrag = {
+          uid,
+          pointerStart: pointerX,
+          initialOffset: getLocusOffset(uid),
+        };
+        setDragging(true);
+      },
+
+      moveLocusDrag(pointerX) {
+        if (!locusDrag) return;
+        previewLocusOffset(
+          locusDrag.uid,
+          locusDrag.initialOffset + pointerX - locusDrag.pointerStart
+        );
+      },
+
+      endLocusDrag() {
+        if (!locusDrag) return;
+        const { uid } = locusDrag;
+        locusDrag = null;
+        setDragging(false);
+        commitLocusOffset(uid);
+      },
+
+      beginLocusTrim() {
+        setDragging(true);
+      },
+
+      moveLocusTrim(locus, edge, pointerX) {
+        previewLocusTrim(locus, edge, pointerX);
+      },
+
+      endLocusTrim(locus) {
+        setDragging(false);
+        commitLocusTrim(locus);
+      },
+
+      flipLocus,
+    };
+  }
+
   // Changes value of a text node to a prompted value
   function renameText(event) {
     if (event.defaultPrevented) return;
@@ -749,7 +848,7 @@
             .attr("id", ids.clusterInfo)
             .attr("class", "clusterInfo")
             .attr("transform", "translate(-10, 0)")
-            .call(createClusterDrag({ plot, scales, ids, interactions }));
+            .call(createClusterDrag({ plot, ids, interactions }));
 
           info
             .append("text")
@@ -810,23 +909,11 @@
             .append("rect")
             .attr("class", "leftHandle")
             .attr("x", -8)
-            .call(
-              createLocusResizeDrag({
-                config,
-                scales,
-                interactions,
-              })
-            );
+            .call(createLocusResizeDrag({ interactions }));
           hover
             .append("rect")
             .attr("class", "rightHandle")
-            .call(
-              createLocusResizeDrag({
-                config,
-                scales,
-                interactions,
-              })
-            );
+            .call(createLocusResizeDrag({ interactions }));
           hover
             .selectAll(".leftHandle, .rightHandle")
             .attr("width", 8)
@@ -937,50 +1024,20 @@
     return selection;
   }
 
-  function createClusterDrag({ plot, scales, ids, interactions }) {
-    let pointerOffset;
-    let range;
-    let order;
-
+  function createClusterDrag({ plot, ids, interactions }) {
     const clusterSelection = (uid) => plot.selectAll(`#${ids.cluster({ uid })}`);
-    const matrixY = (selection) => {
-      const transform = selection.node().transform.baseVal;
-      return transform.numberOfItems ? transform.getItem(0).matrix.f : 0;
-    };
 
     const started = (event, cluster) => {
-      interactions.setDragging(true);
-      order = [...interactions.getClusterOrder()];
       const subject = clusterSelection(cluster.uid);
       subject.classed("active", true).attr("cursor", "grabbing");
-      pointerOffset = matrixY(subject) - event.y;
-      range = scales.y.range();
+      interactions.beginClusterDrag(cluster.uid, event.y);
     };
 
-    const dragged = (event, cluster) => {
-      const y = Math.min(
-        range[range.length - 1],
-        Math.max(range[0], pointerOffset + event.y)
-      );
-      const targetIndex = range.reduce(
-        (closest, position, index) =>
-          Math.abs(position - y) < Math.abs(range[closest] - y) ? index : closest,
-        0
-      );
-      const currentIndex = order.indexOf(cluster.uid);
-      let nextOrder = null;
-      if (targetIndex !== currentIndex) {
-        order.splice(currentIndex, 1);
-        order.splice(targetIndex, 0, cluster.uid);
-        nextOrder = order;
-      }
-      interactions.previewClusterDrag(cluster.uid, y, nextOrder);
-    };
+    const dragged = (event) => interactions.moveClusterDrag(event.y);
 
     const ended = (_, cluster) => {
-      interactions.setDragging(false);
       clusterSelection(cluster.uid).classed("active", false).attr("cursor", null);
-      interactions.commitClusterOrder();
+      interactions.endClusterDrag();
     };
 
     return d3
@@ -994,23 +1051,13 @@
   }
 
   function createLocusPositionDrag({ plot, interactions }) {
-    let pointerStart;
-    let initialValue;
-
     const started = (event, locus) => {
-      pointerStart = event.x;
-      initialValue = interactions.getLocusOffset(locus.uid);
-      interactions.setDragging(true);
+      interactions.beginLocusDrag(locus.uid, event.x);
     };
 
-    const dragged = (event, locus) => {
-      interactions.previewLocusOffset(locus.uid, initialValue + event.x - pointerStart);
-    };
+    const dragged = (event) => interactions.moveLocusDrag(event.x);
 
-    const ended = (_, locus) => {
-      interactions.setDragging(false);
-      interactions.commitLocusOffset(locus.uid);
-    };
+    const ended = () => interactions.endLocusDrag();
 
     return d3
       .drag()
@@ -1022,24 +1069,18 @@
 
   // Resize changes chart state through the controller, while this renderer-owned
   // adapter supplies immediate SVG feedback until the final redraw.
-  function createLocusResizeDrag({ config, scales, interactions }) {
-    const started = () => interactions.setDragging(true);
-    const trim = (event, locus, edge) =>
-      interactions.previewLocusTrim(locus, {
-        edge,
-        position: event.x,
-        coordinateFor: scales.x,
-        scaleGenes: config.plot.scaleGenes,
-      });
+  function createLocusResizeDrag({ interactions }) {
+    const started = () => interactions.beginLocusTrim();
 
     const dragged = function (event, locus) {
-      trim(event, locus, d3.select(this).classed("leftHandle") ? "left" : "right");
+      interactions.moveLocusTrim(
+        locus,
+        d3.select(this).classed("leftHandle") ? "left" : "right",
+        event.x
+      );
     };
 
-    const ended = (_, locus) => {
-      interactions.setDragging(false);
-      interactions.commitLocusTrim(locus);
-    };
+    const ended = (_, locus) => interactions.endLocusTrim(locus);
 
     return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
   }
@@ -1672,6 +1713,60 @@
     return { legend, scaleBar, colourBar };
   }
 
+  function buildHitRegions(loci, genes) {
+    const locusRegions = new Map();
+    const geneRegions = new Map();
+    const all = [];
+
+    for (const locus of loci.values()) {
+      const { source, worldStart, worldEnd, y, hover } = locus;
+      const move = {
+        type: "rect",
+        action: "move-locus",
+        locusUid: source.uid,
+        x: worldStart,
+        y: y + hover.y,
+        width: worldEnd - worldStart,
+        height: hover.height,
+      };
+      const trimLeft = {
+        type: "rect",
+        action: "trim-locus-left",
+        locusUid: source.uid,
+        x: worldStart + hover.leftHandleX - hover.x,
+        y: y + hover.y,
+        width: hover.x - hover.leftHandleX,
+        height: hover.height,
+      };
+      const trimRight = {
+        type: "rect",
+        action: "trim-locus-right",
+        locusUid: source.uid,
+        x: worldEnd,
+        y: y + hover.y,
+        width: 8,
+        height: hover.height,
+      };
+      const regions = { move, trimLeft, trimRight };
+      locusRegions.set(source.uid, regions);
+      all.push(trimLeft, trimRight, move);
+    }
+
+    for (const gene of genes.values()) {
+      if (!gene.visible) continue;
+      const region = {
+        type: "polygon",
+        action: "gene",
+        geneUid: gene.source.uid,
+        points: gene.polygon,
+      };
+      geneRegions.set(gene.source.uid, region);
+      all.push(region);
+    }
+
+    return { all, loci: locusRegions, genes: geneRegions };
+  }
+
   /**
    * Derive renderer-neutral, world-space geometry from chart data and state.
    * The returned records contain no DOM selections and can be consumed by SVG,
@@ -1822,6 +1917,7 @@
       genes,
       links,
       bounds,
+      hitRegions: buildHitRegions(loci, genes),
       chrome: buildChrome(bounds, genes, chrome),
     };
   }
@@ -2191,6 +2287,49 @@
     let hasInitialView = false;
     let chartState = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+    const interactionController = createInteractionController({
+      clusterRows: () => runtime.scales.y.range(),
+      getClusterOrder: () => getClusterOrder(chartState),
+      getClusterPosition: (uid) => runtime.scene.get().clusters.get(uid).y,
+      getLocusOffset: (uid) => getLocusOffset(chartState, uid),
+      setDragging: (dragging) => setDragging(chartState, dragging),
+      previewClusterDrag: (uid, position, order) => {
+        setPreviewClusterPosition(chartState, uid, position);
+        if (order) setPreviewClusterOrder(chartState, order);
+        runtime.plot.update({ animate: false });
+      },
+      commitClusterOrder: () => {
+        commitPreviewClusterOrder(chartState);
+        runtime.plot.update({ animate: false });
+      },
+      previewLocusOffset: (uid, offset) => {
+        setPreviewLocusOffset(chartState, uid, offset);
+        runtime.plot.update({ animate: false });
+      },
+      commitLocusOffset: (uid) => {
+        commitPreviewLocusOffset(chartState, uid);
+        runtime.plot.update({ animate: false });
+      },
+      previewLocusTrim: (locus, edge, position) => {
+        const result = previewLocusTrim(chartState, locus, {
+          edge,
+          position,
+          coordinateFor: runtime.scales.x,
+          scaleGenes: runtime.config.plot.scaleGenes,
+        });
+        runtime.plot.update({ animate: false, synchronize: false });
+        return result;
+      },
+      commitLocusTrim: (locus) => {
+        finalizeLocusTrim(chartState, locus);
+        commitPreviewLocusState(chartState, locus);
+        runtime.plot.update({ animate: false });
+      },
+      flipLocus: (locus) => {
+        flipLocus(chartState, locus);
+        runtime.plot.update();
+      },
+    });
 
     runtime.plot.update = (options) => container.call(my, options);
     runtime.plot.data = (data) => my.data(data);
@@ -2338,40 +2477,16 @@
         lookup: { gene: runtime.get.geneData },
         interactions: {
           isDragging: () => isDragging(chartState),
-          setDragging: (dragging) => setDragging(chartState, dragging),
-          getClusterOrder: () => getClusterOrder(chartState),
-          previewClusterDrag: (uid, position, order) => {
-            setPreviewClusterPosition(chartState, uid, position);
-            if (order) setPreviewClusterOrder(chartState, order);
-            runtime.plot.update({ animate: false });
-          },
-          commitClusterOrder: () => {
-            commitPreviewClusterOrder(chartState);
-            runtime.plot.update({ animate: false });
-          },
-          getLocusOffset: (uid) => getLocusOffset(chartState, uid),
-          previewLocusOffset: (uid, offset) => {
-            setPreviewLocusOffset(chartState, uid, offset);
-            runtime.plot.update({ animate: false });
-          },
-          commitLocusOffset: (uid) => {
-            commitPreviewLocusOffset(chartState, uid);
-            runtime.plot.update({ animate: false });
-          },
-          previewLocusTrim: (locus, options) => {
-            const result = previewLocusTrim(chartState, locus, options);
-            runtime.plot.update({ animate: false, synchronize: false });
-            return result;
-          },
-          commitLocusTrim: (locus) => {
-            finalizeLocusTrim(chartState, locus);
-            commitPreviewLocusState(chartState, locus);
-            runtime.plot.update({ animate: false });
-          },
-          flipLocus: (locus) => {
-            flipLocus(chartState, locus);
-            runtime.plot.update();
-          },
+          beginClusterDrag: interactionController.beginClusterDrag,
+          moveClusterDrag: interactionController.moveClusterDrag,
+          endClusterDrag: interactionController.endClusterDrag,
+          beginLocusDrag: interactionController.beginLocusDrag,
+          moveLocusDrag: interactionController.moveLocusDrag,
+          endLocusDrag: interactionController.endLocusDrag,
+          beginLocusTrim: interactionController.beginLocusTrim,
+          moveLocusTrim: interactionController.moveLocusTrim,
+          endLocusTrim: interactionController.endLocusTrim,
+          flipLocus: interactionController.flipLocus,
           onGeneClick: runtime.config.gene.shape.onClick,
           showGeneMenu: overlay.showGeneMenu,
           showGroupMenu: overlay.showGroupMenu,

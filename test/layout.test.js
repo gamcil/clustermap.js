@@ -107,6 +107,41 @@ test("scene derives world-space geometry without DOM state", async () => {
     leftHandleX: -8,
     rightHandleX: 20,
   });
+  assert.deepEqual(scene.hitRegions.loci.get("top-locus"), {
+    move: {
+      type: "rect",
+      action: "move-locus",
+      locusUid: "top-locus",
+      x: 6,
+      y: -10,
+      width: 20,
+      height: 42,
+    },
+    trimLeft: {
+      type: "rect",
+      action: "trim-locus-left",
+      locusUid: "top-locus",
+      x: -2,
+      y: -10,
+      width: 8,
+      height: 42,
+    },
+    trimRight: {
+      type: "rect",
+      action: "trim-locus-right",
+      locusUid: "top-locus",
+      x: 26,
+      y: -10,
+      width: 8,
+      height: 42,
+    },
+  });
+  assert.deepEqual(scene.hitRegions.genes.get("top-gene"), {
+    type: "polygon",
+    action: "gene",
+    geneUid: "top-gene",
+    points: topGene.polygon,
+  });
   assert.deepEqual(scene.links.get("link").anchors, [8, 14, 11, 28, 22, 41]);
   assert.equal(scene.links.get("link").visible, true);
   assert.deepEqual(scene.bounds, { minX: 6, maxX: 32, minY: 0, maxY: 52 });

@@ -20,6 +20,7 @@ import {
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
+import { createInteractionController } from "./interactionController.mjs";
 import { renderSvg } from "./svgRenderer.js";
 import { createChartRuntime } from "./chartRuntime.js";
 
@@ -34,6 +35,49 @@ export default function clusterMap() {
   let hasInitialView = false;
   let chartState = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+  const interactionController = createInteractionController({
+    clusterRows: () => runtime.scales.y.range(),
+    getClusterOrder: () => getClusterOrder(chartState),
+    getClusterPosition: (uid) => runtime.scene.get().clusters.get(uid).y,
+    getLocusOffset: (uid) => getLocusOffset(chartState, uid),
+    setDragging: (dragging) => setDragging(chartState, dragging),
+    previewClusterDrag: (uid, position, order) => {
+      setPreviewClusterPosition(chartState, uid, position);
+      if (order) setPreviewClusterOrder(chartState, order);
+      runtime.plot.update({ animate: false });
+    },
+    commitClusterOrder: () => {
+      commitPreviewClusterOrder(chartState);
+      runtime.plot.update({ animate: false });
+    },
+    previewLocusOffset: (uid, offset) => {
+      setPreviewLocusOffset(chartState, uid, offset);
+      runtime.plot.update({ animate: false });
+    },
+    commitLocusOffset: (uid) => {
+      commitPreviewLocusOffset(chartState, uid);
+      runtime.plot.update({ animate: false });
+    },
+    previewLocusTrim: (locus, edge, position) => {
+      const result = previewLocusTrim(chartState, locus, {
+        edge,
+        position,
+        coordinateFor: runtime.scales.x,
+        scaleGenes: runtime.config.plot.scaleGenes,
+      });
+      runtime.plot.update({ animate: false, synchronize: false });
+      return result;
+    },
+    commitLocusTrim: (locus) => {
+      finalizeLocusTrim(chartState, locus);
+      commitPreviewLocusState(chartState, locus);
+      runtime.plot.update({ animate: false });
+    },
+    flipLocus: (locus) => {
+      flipLocus(chartState, locus);
+      runtime.plot.update();
+    },
+  });
 
   runtime.plot.update = (options) => container.call(my, options);
   runtime.plot.data = (data) => my.data(data);
@@ -181,40 +225,16 @@ export default function clusterMap() {
       lookup: { gene: runtime.get.geneData },
       interactions: {
         isDragging: () => isDragging(chartState),
-        setDragging: (dragging) => setDragging(chartState, dragging),
-        getClusterOrder: () => getClusterOrder(chartState),
-        previewClusterDrag: (uid, position, order) => {
-          setPreviewClusterPosition(chartState, uid, position);
-          if (order) setPreviewClusterOrder(chartState, order);
-          runtime.plot.update({ animate: false });
-        },
-        commitClusterOrder: () => {
-          commitPreviewClusterOrder(chartState);
-          runtime.plot.update({ animate: false });
-        },
-        getLocusOffset: (uid) => getLocusOffset(chartState, uid),
-        previewLocusOffset: (uid, offset) => {
-          setPreviewLocusOffset(chartState, uid, offset);
-          runtime.plot.update({ animate: false });
-        },
-        commitLocusOffset: (uid) => {
-          commitPreviewLocusOffset(chartState, uid);
-          runtime.plot.update({ animate: false });
-        },
-        previewLocusTrim: (locus, options) => {
-          const result = previewLocusTrim(chartState, locus, options);
-          runtime.plot.update({ animate: false, synchronize: false });
-          return result;
-        },
-        commitLocusTrim: (locus) => {
-          finalizeLocusTrim(chartState, locus);
-          commitPreviewLocusState(chartState, locus);
-          runtime.plot.update({ animate: false });
-        },
-        flipLocus: (locus) => {
-          flipLocus(chartState, locus);
-          runtime.plot.update();
-        },
+        beginClusterDrag: interactionController.beginClusterDrag,
+        moveClusterDrag: interactionController.moveClusterDrag,
+        endClusterDrag: interactionController.endClusterDrag,
+        beginLocusDrag: interactionController.beginLocusDrag,
+        moveLocusDrag: interactionController.moveLocusDrag,
+        endLocusDrag: interactionController.endLocusDrag,
+        beginLocusTrim: interactionController.beginLocusTrim,
+        moveLocusTrim: interactionController.moveLocusTrim,
+        endLocusTrim: interactionController.endLocusTrim,
+        flipLocus: interactionController.flipLocus,
         onGeneClick: runtime.config.gene.shape.onClick,
         showGeneMenu: overlay.showGeneMenu,
         showGroupMenu: overlay.showGroupMenu,

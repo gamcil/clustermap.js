@@ -90,6 +90,60 @@ function buildChrome(bounds, genes, chrome) {
   return { legend, scaleBar, colourBar };
 }
 
+function buildHitRegions(loci, genes) {
+  const locusRegions = new Map();
+  const geneRegions = new Map();
+  const all = [];
+
+  for (const locus of loci.values()) {
+    const { source, worldStart, worldEnd, y, hover } = locus;
+    const move = {
+      type: "rect",
+      action: "move-locus",
+      locusUid: source.uid,
+      x: worldStart,
+      y: y + hover.y,
+      width: worldEnd - worldStart,
+      height: hover.height,
+    };
+    const trimLeft = {
+      type: "rect",
+      action: "trim-locus-left",
+      locusUid: source.uid,
+      x: worldStart + hover.leftHandleX - hover.x,
+      y: y + hover.y,
+      width: hover.x - hover.leftHandleX,
+      height: hover.height,
+    };
+    const trimRight = {
+      type: "rect",
+      action: "trim-locus-right",
+      locusUid: source.uid,
+      x: worldEnd,
+      y: y + hover.y,
+      width: 8,
+      height: hover.height,
+    };
+    const regions = { move, trimLeft, trimRight };
+    locusRegions.set(source.uid, regions);
+    all.push(trimLeft, trimRight, move);
+  }
+
+  for (const gene of genes.values()) {
+    if (!gene.visible) continue;
+    const region = {
+      type: "polygon",
+      action: "gene",
+      geneUid: gene.source.uid,
+      points: gene.polygon,
+    };
+    geneRegions.set(gene.source.uid, region);
+    all.push(region);
+  }
+
+  return { all, loci: locusRegions, genes: geneRegions };
+}
+
 /**
  * Derive renderer-neutral, world-space geometry from chart data and state.
  * The returned records contain no DOM selections and can be consumed by SVG,
@@ -240,6 +294,7 @@ export function buildScene(
     genes,
     links,
     bounds,
+    hitRegions: buildHitRegions(loci, genes),
     chrome: buildChrome(bounds, genes, chrome),
   };
 }

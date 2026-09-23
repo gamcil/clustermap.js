@@ -39,7 +39,7 @@ export function renderSvg({
           .attr("id", ids.clusterInfo)
           .attr("class", "clusterInfo")
           .attr("transform", "translate(-10, 0)")
-          .call(createClusterDrag({ plot, scales, ids, interactions }));
+          .call(createClusterDrag({ plot, ids, interactions }));
 
         info
           .append("text")
@@ -100,23 +100,11 @@ export function renderSvg({
           .append("rect")
           .attr("class", "leftHandle")
           .attr("x", -8)
-          .call(
-            createLocusResizeDrag({
-              config,
-              scales,
-              interactions,
-            })
-          );
+          .call(createLocusResizeDrag({ interactions }));
         hover
           .append("rect")
           .attr("class", "rightHandle")
-          .call(
-            createLocusResizeDrag({
-              config,
-              scales,
-              interactions,
-            })
-          );
+          .call(createLocusResizeDrag({ interactions }));
         hover
           .selectAll(".leftHandle, .rightHandle")
           .attr("width", 8)
@@ -227,50 +215,20 @@ function updateClusters(selection, scene) {
   return selection;
 }
 
-function createClusterDrag({ plot, scales, ids, interactions }) {
-  let pointerOffset;
-  let range;
-  let order;
-
+function createClusterDrag({ plot, ids, interactions }) {
   const clusterSelection = (uid) => plot.selectAll(`#${ids.cluster({ uid })}`);
-  const matrixY = (selection) => {
-    const transform = selection.node().transform.baseVal;
-    return transform.numberOfItems ? transform.getItem(0).matrix.f : 0;
-  };
 
   const started = (event, cluster) => {
-    interactions.setDragging(true);
-    order = [...interactions.getClusterOrder()];
     const subject = clusterSelection(cluster.uid);
     subject.classed("active", true).attr("cursor", "grabbing");
-    pointerOffset = matrixY(subject) - event.y;
-    range = scales.y.range();
+    interactions.beginClusterDrag(cluster.uid, event.y);
   };
 
-  const dragged = (event, cluster) => {
-    const y = Math.min(
-      range[range.length - 1],
-      Math.max(range[0], pointerOffset + event.y)
-    );
-    const targetIndex = range.reduce(
-      (closest, position, index) =>
-        Math.abs(position - y) < Math.abs(range[closest] - y) ? index : closest,
-      0
-    );
-    const currentIndex = order.indexOf(cluster.uid);
-    let nextOrder = null;
-    if (targetIndex !== currentIndex) {
-      order.splice(currentIndex, 1);
-      order.splice(targetIndex, 0, cluster.uid);
-      nextOrder = order;
-    }
-    interactions.previewClusterDrag(cluster.uid, y, nextOrder);
-  };
+  const dragged = (event) => interactions.moveClusterDrag(event.y);
 
   const ended = (_, cluster) => {
-    interactions.setDragging(false);
     clusterSelection(cluster.uid).classed("active", false).attr("cursor", null);
-    interactions.commitClusterOrder();
+    interactions.endClusterDrag();
   };
 
   return d3
@@ -284,23 +242,13 @@ function createClusterDrag({ plot, scales, ids, interactions }) {
 }
 
 function createLocusPositionDrag({ plot, interactions }) {
-  let pointerStart;
-  let initialValue;
-
   const started = (event, locus) => {
-    pointerStart = event.x;
-    initialValue = interactions.getLocusOffset(locus.uid);
-    interactions.setDragging(true);
+    interactions.beginLocusDrag(locus.uid, event.x);
   };
 
-  const dragged = (event, locus) => {
-    interactions.previewLocusOffset(locus.uid, initialValue + event.x - pointerStart);
-  };
+  const dragged = (event) => interactions.moveLocusDrag(event.x);
 
-  const ended = (_, locus) => {
-    interactions.setDragging(false);
-    interactions.commitLocusOffset(locus.uid);
-  };
+  const ended = () => interactions.endLocusDrag();
 
   return d3
     .drag()
@@ -312,24 +260,18 @@ function createLocusPositionDrag({ plot, interactions }) {
 
 // Resize changes chart state through the controller, while this renderer-owned
 // adapter supplies immediate SVG feedback until the final redraw.
-function createLocusResizeDrag({ config, scales, interactions }) {
-  const started = () => interactions.setDragging(true);
-  const trim = (event, locus, edge) =>
-    interactions.previewLocusTrim(locus, {
-      edge,
-      position: event.x,
-      coordinateFor: scales.x,
-      scaleGenes: config.plot.scaleGenes,
-    });
+function createLocusResizeDrag({ interactions }) {
+  const started = () => interactions.beginLocusTrim();
 
   const dragged = function (event, locus) {
-    trim(event, locus, d3.select(this).classed("leftHandle") ? "left" : "right");
+    interactions.moveLocusTrim(
+      locus,
+      d3.select(this).classed("leftHandle") ? "left" : "right",
+      event.x
+    );
   };
 
-  const ended = (_, locus) => {
-    interactions.setDragging(false);
-    interactions.commitLocusTrim(locus);
-  };
+  const ended = (_, locus) => interactions.endLocusTrim(locus);
 
   return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
 }
