@@ -181,7 +181,7 @@ export function synchronizeLocusState(chartState, locus, scaleGenes) {
   return { oldStart };
 }
 
-function closestIndex(values, target) {
+function boundaryIndex(values, target, edge) {
   let low = 0;
   let high = values.length;
   while (low < high) {
@@ -189,11 +189,16 @@ function closestIndex(values, target) {
     if (values[middle] < target) low = middle + 1;
     else high = middle;
   }
-  return Math.max(Math.min(low, values.length - 1), 0);
+  if (edge === "left") return Math.min(low, values.length - 1);
+  if (low === 0) return 0;
+  if (low === values.length) return values.length - 1;
+  return target - values[low - 1] <= values[low] - target ? low - 1 : low;
 }
 
 /**
- * Apply a trim at the display coordinate nearest to a valid gene boundary.
+ * Apply a trim at the display boundary under a resize handle. The left handle
+ * rounds forward to a gene start; the right handle selects the nearest gene
+ * end, matching the drawn gene geometry.
  * `coordinateFor` is supplied by the caller, keeping the state transition
  * independent of D3 scales and any particular renderer.
  */
@@ -217,7 +222,7 @@ export function trimLocus(chartState, locus, {
       locus.start,
       ...visible.map((gene) => getGeneState(chartState, gene).start),
     ];
-    const index = closestIndex(boundaries.map(coordinateFor), position);
+    const index = boundaryIndex(boundaries.map(coordinateFor), position, edge);
     state.start = boundaries[index];
     state.trimLeft = index === 0 ? null : visible[index - 1];
     return { state, coordinate: coordinateFor(state.start) };
@@ -231,7 +236,7 @@ export function trimLocus(chartState, locus, {
       ...visible.map((gene) => getGeneState(chartState, gene).end),
       scaleGenes ? locus.end : state.end,
     ];
-    const index = closestIndex(boundaries.map(coordinateFor), position);
+    const index = boundaryIndex(boundaries.map(coordinateFor), position, edge);
     state.end = boundaries[index];
     state.trimRight = visible[index] || null;
     return { state, coordinate: coordinateFor(state.end) };

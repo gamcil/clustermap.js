@@ -30,6 +30,19 @@ async function readTranslateY(locator) {
   });
 }
 
+async function readTrimPreview(locus) {
+  return locus.evaluate((node) => {
+    const hover = node.querySelector("rect.hover");
+    const track = node.querySelector("line.trackBar");
+    return {
+      hoverX: Number(hover.getAttribute("x")),
+      hoverWidth: Number(hover.getAttribute("width")),
+      trackStart: Number(track.getAttribute("x1")),
+      trackEnd: Number(track.getAttribute("x2")),
+    };
+  });
+}
+
 async function readCamera(locator) {
   return locator.evaluate((node) => {
     const transform = node.transform.baseVal.consolidate();
@@ -179,7 +192,7 @@ test("dragging left end of locus trims it and hides gene", async ({ page }, test
 });
 
 test("dragging right handles trims loci and moves the legend", async ({ page }, testInfo) => {
-  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.goto("http://127.0.0.1:8080/");
 
   const loci = page.locator("g.locus");
   const rightHandles = page.locator("rect.rightHandle");
@@ -196,8 +209,52 @@ test("dragging right handles trims loci and moves the legend", async ({ page }, 
     () => readTranslateX(legend).then((legendX) => ({ legendX }))
   );
   const beforeLegendX = before.legendX;
+  const initialPreview = await readTrimPreview(loci.first());
 
-  for (let index = 0; index < 2; index += 1) {
+  const firstGeneThree = loci
+    .first()
+    .locator('[id$="gene_3"]')
+    .locator("polygon.genePolygon");
+  const firstHandleBounds = await rightHandles.first().boundingBox();
+  const firstGeneBounds = await firstGeneThree.boundingBox();
+  if (!firstHandleBounds || !firstGeneBounds) {
+    throw new Error("right-trim preview targets are not visible");
+  }
+  await page.mouse.move(
+    firstHandleBounds.x + firstHandleBounds.width / 2,
+    firstHandleBounds.y + firstHandleBounds.height / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    firstGeneBounds.x + firstGeneBounds.width - 1,
+    firstGeneBounds.y + firstGeneBounds.height / 2,
+    { steps: 10 }
+  );
+  // Keep the pointer down beyond the normal SVG transition duration.  This
+  // catches a stale redraw transition overwriting the live preview.
+  await page.waitForTimeout(300);
+  await expect
+    .poll(async () => {
+      const preview = await readTrimPreview(loci.first());
+      return (
+        preview.trackEnd < initialPreview.trackEnd - 1 &&
+        Math.abs(preview.trackStart - preview.hoverX) < 0.1 &&
+        Math.abs(preview.trackEnd - (preview.hoverX + preview.hoverWidth)) < 0.1
+      );
+    })
+    .toBe(true);
+  await page.mouse.up();
+  await expect
+    .poll(async () => {
+      const preview = await readTrimPreview(loci.first());
+      return (
+        Math.abs(preview.trackStart - preview.hoverX) < 0.1 &&
+        Math.abs(preview.trackEnd - (preview.hoverX + preview.hoverWidth)) < 0.1
+      );
+    })
+    .toBe(true);
+
+  for (let index = 1; index < 2; index += 1) {
     const lastGene = loci
       .nth(index)
       .locator("g.genes > g.gene")
@@ -289,13 +346,14 @@ test("dragging a cluster persists a snapped vertical order", async ({ page }, te
   await page.goto("http://127.0.0.1:8080/?test=1");
 
   const clusters = page.locator("g.cluster");
-  const first = clusters.nth(0);
-  const second = clusters.nth(1);
-  const third = clusters.nth(2);
+  await expect(clusters).toHaveCount(3);
+  const clusterIds = await clusters.evaluateAll((nodes) => nodes.map((node) => node.id));
+  const [firstId, secondId, thirdId] = clusterIds;
+  const first = page.locator(`#${firstId}`);
+  const second = page.locator(`#${secondId}`);
+  const third = page.locator(`#${thirdId}`);
   const firstInfo = first.locator("g.clusterInfo");
   const thirdInfo = third.locator("g.clusterInfo");
-  await expect(clusters).toHaveCount(3);
-
   const before = await captureCheckpoint(page, testInfo, "before-cluster-reorder", async () => ({
     firstY: await readTranslateY(first),
     secondY: await readTranslateY(second),

@@ -33,14 +33,16 @@ export default function clusterMap() {
   let chartState = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
 
-  runtime.plot.update = () => container.call(my);
+  runtime.plot.update = (options) => container.call(my, options);
   runtime.plot.data = (data) => my.data(data);
 
-  function my(selection) {
-    selection.each(update);
+  function my(selection, options) {
+    selection.each(function (data) {
+      update.call(this, data, options);
+    });
   }
 
-  function update(data) {
+  function update(data, { animate = true } = {}) {
     data = normalizeChartData(data);
     const chartIndex = createChartIndex(data);
     chartState = createChartState(data, chartState);
@@ -136,7 +138,7 @@ export default function clusterMap() {
       tooltip: container.select("div.tooltip"),
       scales: runtime.scales,
       actions: {
-        redraw: () => runtime.plot.update(),
+        redraw: (options) => runtime.plot.update(options),
         anchorGene: (gene) => runtime.gene.anchor(null, gene, true),
         getGroups: () => data.groups,
         setGroups: (groups) => {
@@ -170,7 +172,7 @@ export default function clusterMap() {
       data,
       scene,
       transition,
-      animate: hasInitialView,
+      animate: hasInitialView && animate,
       config: runtime.config,
       scales: runtime.scales,
       ids: runtime.ids,
@@ -181,7 +183,7 @@ export default function clusterMap() {
         getClusterOrder: () => getClusterOrder(chartState),
         moveClusterToIndex: (uid, index) =>
           moveClusterToIndex(chartState, uid, index),
-        redraw: () => runtime.plot.update(),
+        redraw: (options) => runtime.plot.update(options),
         getLocusOffset: (uid) => getLocusOffset(chartState, uid),
         getLocusState: (locus) => getLocusState(chartState, locus),
         getGeneState: (gene) => getGeneState(chartState, gene),

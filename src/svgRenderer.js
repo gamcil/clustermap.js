@@ -84,9 +84,9 @@ export function renderSvg({
 
   // A cluster drag can leave an in-flight transform transition on sibling
   // rows. Cancel it before the scene supplies their snapped final positions.
-  const clusterRender = animate
-    ? clusters.interrupt().transition(transition)
-    : clusters.interrupt();
+  const updateRender = (selection) =>
+    animate ? selection.interrupt().transition(transition) : selection.interrupt();
+  const clusterRender = updateRender(clusters);
   updateClusters(clusterRender, scene);
 
   const loci = clusters
@@ -168,7 +168,7 @@ export function renderSvg({
       },
       (update) =>
         update.call((selection) =>
-          updateLoci(selection.transition(transition), scene, config)
+          updateLoci(updateRender(selection), scene, config)
         )
     );
 
@@ -197,7 +197,7 @@ export function renderSvg({
       },
       (update) =>
         update.call((selection) =>
-          updateGenes(selection.transition(transition), scene, config, scales)
+          updateGenes(updateRender(selection), scene, config, scales)
         )
     );
 
@@ -227,14 +227,15 @@ export function renderSvg({
         return updateLinks(enter, scene, config, scales, ids);
       },
       (update) =>
-        update.call((selection) =>
-          selection
-            .classed("hidden", !config.link.show)
-            .transition(transition)
-            .call(updateLinks, scene, config, scales, ids)
-        ),
+        update.call((selection) => {
+          selection.classed("hidden", !config.link.show);
+          updateRender(selection).call(updateLinks, scene, config, scales, ids);
+        }),
       (exit) =>
-        exit.call((selection) => selection.transition(transition).attr("opacity", 0).remove())
+        exit.call((selection) => {
+          if (animate) selection.transition(transition).attr("opacity", 0).remove();
+          else selection.remove();
+        })
     );
 
   renderChrome({ plot, chrome: scene.chrome, ids, config, interactions });
@@ -262,7 +263,7 @@ function createClusterDrag({ plot, scales, ids, interactions, refreshLinkPreview
   let range;
   let order;
 
-  const clusterSelection = (uid) => plot.select(`#${ids.cluster({ uid })}`);
+  const clusterSelection = (uid) => plot.selectAll(`#${ids.cluster({ uid })}`);
   const matrixY = (selection) => {
     const transform = selection.node().transform.baseVal;
     return transform.numberOfItems ? transform.getItem(0).matrix.f : 0;
@@ -308,7 +309,14 @@ function createClusterDrag({ plot, scales, ids, interactions, refreshLinkPreview
   const ended = (_, cluster) => {
     interactions.setDragging(false);
     interactions.moveClusterToIndex(cluster.uid, order.indexOf(cluster.uid));
-    interactions.redraw();
+    order.forEach((uid, index) => {
+      clusterSelection(uid)
+        .interrupt()
+        .classed("active", false)
+        .attr("cursor", null)
+        .attr("transform", `translate(${scales.offset(uid)}, ${range[index]})`);
+    });
+    refreshLinkPreview();
   };
 
   return d3
@@ -334,7 +342,7 @@ function createLocusPositionDrag({
   let pointerStart;
   let value;
 
-  const locusSelection = (uid) => plot.select(`#${ids.locus({ uid })}`);
+  const locusSelection = (uid) => plot.selectAll(`#${ids.locus({ uid })}`);
 
   const started = (event, locus) => {
     [minPos, maxPos] = interactions.getLocusMoveBounds(locus.uid);
@@ -359,7 +367,7 @@ function createLocusPositionDrag({
         (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
       );
     } else {
-      plot.select(`#${ids.clusterInfo({ uid: locus.clusterUid })}`).attr(
+      plot.selectAll(`#${ids.clusterInfo({ uid: locus.clusterUid })}`).attr(
         "transform",
         `translate(${value + locusStart - 10}, 0)`
       );
@@ -367,13 +375,13 @@ function createLocusPositionDrag({
 
     const locusEnd = scales.x(state.end);
     const newMax = Math.max(value + scales.offset(locus.clusterUid) + locusEnd, maxPos) + 20;
-    plot.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
+    plot.selectAll("g.legend").attr("transform", `translate(${newMax}, 0)`);
   };
 
   const ended = (_, locus) => {
     interactions.setDragging(false);
     interactions.setLocusOffset(locus.uid, value);
-    interactions.redraw();
+    interactions.redraw({ animate: false });
   };
 
   return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
@@ -392,19 +400,20 @@ function createLocusResizeDrag({
   let minPos;
   let maxPos;
 
-  const locusSelection = (uid) => plot.select(`#${ids.locus({ uid })}`);
+  const locusSelection = (uid) => plot.selectAll(`#${ids.locus({ uid })}`);
   const realLength = (state) => scales.x(state.end) - scales.x(state.start);
   const updateTrackBar = (selection, state) => {
     const y = config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
     selection
-      .select("line.trackBar")
+      .selectAll("line.trackBar")
+      .interrupt()
       .attr("x1", scales.x(state.start))
       .attr("x2", scales.x(state.end))
       .attr("y1", y)
       .attr("y2", y);
   };
   const updateVisibleGenes = (selection, state) => {
-    selection.selectAll("g.gene").attr("display", (gene) => {
+    selection.selectAll("g.genes").selectAll("g.gene").attr("display", (gene) => {
       const display = interactions.getGeneState(gene);
       return display.start >= state.start && display.end <= state.end + 1
         ? "inline"
@@ -426,7 +435,7 @@ function createLocusResizeDrag({
     const subject = locusSelection(locus.uid);
     handle.attr("x", coordinate - 8);
     subject
-      .select("rect.hover")
+      .selectAll("rect.hover")
       .attr("x", coordinate)
       .attr("width", realLength(state));
     updateVisibleGenes(subject, state);
@@ -441,7 +450,7 @@ function createLocusResizeDrag({
         (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
       );
     } else {
-      plot.select(`#${ids.clusterInfo({ uid: locus.clusterUid })}`).attr(
+      plot.selectAll(`#${ids.clusterInfo({ uid: locus.clusterUid })}`).attr(
         "transform",
         `translate(${scales.locus(locus.uid) + scales.x(state.start) - 10}, 0)`
       );
@@ -457,7 +466,7 @@ function createLocusResizeDrag({
     });
     const subject = locusSelection(locus.uid);
     handle.attr("x", coordinate);
-    subject.select("rect.hover").attr("width", realLength(state));
+    subject.selectAll("rect.hover").attr("width", realLength(state));
     updateVisibleGenes(subject, state);
     updateTrackBar(subject, state);
     refreshLinkPreview();
@@ -467,7 +476,7 @@ function createLocusResizeDrag({
       scales.offset(locus.clusterUid) + scales.locus(locus.uid) + locusEnd,
       maxPos
     ) + config.legend.marginLeft;
-    plot.select("g.legend").attr("transform", `translate(${newMax}, 0)`);
+    plot.selectAll("g.legend").attr("transform", `translate(${newMax}, 0)`);
   };
 
   const dragged = function (event, locus) {
@@ -480,7 +489,7 @@ function createLocusResizeDrag({
     interactions.setDragging(false);
     interactions.finalizeLocusTrim(locus);
     locusSelection(locus.uid).select("g.hover").transition().attr("opacity", 0);
-    interactions.redraw();
+    interactions.redraw({ animate: false });
   };
 
   return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
@@ -492,7 +501,7 @@ function createLinkPreview({ plot, config, scales, ids, lookup, interactions }) 
     return transform.numberOfItems ? transform.getItem(0).matrix : { e: 0, f: 0 };
   };
   const geneIsVisible = (uid) =>
-    plot.select(`#${ids.gene({ uid })}`).attr("display") !== "none";
+    plot.selectAll(`#${ids.gene({ uid })}`).attr("display") !== "none";
   const displayGene = (uid) => {
     const gene = lookup.gene(uid);
     return gene && { ...gene, ...interactions.getGeneState(gene) };
@@ -515,8 +524,8 @@ function createLinkPreview({ plot, config, scales, ids, lookup, interactions }) 
       areClustersAdjacent,
       scaleX: scales.x,
       horizontalOffset: (gene) =>
-        scales.offset(gene.clusterUid) + matrix(plot.select(`#${ids.locus({ uid: gene.locusUid })}`)).e,
-      verticalPosition: (gene) => matrix(plot.select(`#${ids.cluster({ uid: gene.clusterUid })}`)).f,
+        scales.offset(gene.clusterUid) + matrix(plot.selectAll(`#${ids.locus({ uid: gene.locusUid })}`)).e,
+      verticalPosition: (gene) => matrix(plot.selectAll(`#${ids.cluster({ uid: gene.clusterUid })}`)).f,
       geneMidpoint: config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2,
     });
     return {
