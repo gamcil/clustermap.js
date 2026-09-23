@@ -21,6 +21,7 @@ import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
+import { canvasWorldPoint, hitTestCanvas, renderCanvas } from "./canvasRenderer.js";
 import { renderSvg } from "./svgRenderer.js";
 import { createChartRuntime } from "./chartRuntime.js";
 
@@ -32,8 +33,13 @@ export default function clusterMap() {
   let container = null;
   let transition = d3.transition();
   let zoom = null;
+  let canvasZoom = null;
   let hasInitialView = false;
   let chartState = null;
+  let canvasGesture = null;
+  let canvasHoverLocusUid = null;
+  let canvasScene = null;
+  let canvasAnimation = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const interactionController = createInteractionController({
     clusterRows: () => runtime.scales.y.range(),
@@ -100,6 +106,7 @@ export default function clusterMap() {
 
     // Set up the shared transition
     transition = d3.transition().duration(runtime.config.plot.transitionDuration);
+    const useCanvas = runtime.config.plot.renderer === "canvas";
 
     // Build the figure
     const svg = container
@@ -180,6 +187,34 @@ export default function clusterMap() {
       );
 
     const plot = svg.select("g.clusterMapG");
+    const canvas = container
+      .selectAll("canvas.clusterMapCanvas")
+      .data(useCanvas ? [data] : [])
+      .join((enter) => {
+        const surface = enter
+          .append("canvas")
+          .attr("class", "clusterMapCanvas")
+          .attr("cursor", "grab")
+          .style("display", "block")
+          .style("width", "100%")
+          .style("height", "100%");
+        canvasZoom = d3
+          .zoom()
+          .scaleExtent([0, 8])
+          .on("zoom", function (event) {
+            setCamera(chartState, event.transform);
+            paintCanvas(this);
+          })
+          .on("start", function () {
+            d3.select(this).style("cursor", "grabbing");
+          })
+          .on("end", function () {
+            d3.select(this).style("cursor", "grab");
+          });
+        surface.call(canvasZoom).on("dblclick.zoom", null);
+        return surface;
+      });
+    svg.style("display", useCanvas ? "none" : null);
     const overlay = createHtmlOverlay({
       tooltip: container.select("div.tooltip"),
       scales: runtime.scales,
@@ -197,6 +232,184 @@ export default function clusterMap() {
       .select("div.tooltip")
       .on("mouseenter", overlay.enter)
       .on("mouseleave", overlay.leave);
+    const paintCanvas = (canvasNode) =>
+      renderCanvas({
+        canvas: canvasNode,
+        scene: canvasAnimation?.scene || runtime.scene.get(),
+        previousScene: canvasAnimation?.previousScene,
+        progress: canvasAnimation?.progress,
+        camera: getCamera(chartState),
+        config: runtime.config,
+        scales: runtime.scales,
+        hoverLocusUid: canvasHoverLocusUid,
+      });
+    const stopCanvasAnimation = () => {
+      if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+      canvasAnimation = null;
+    };
+    const animateCanvas = (canvasNode, scene, animate) => {
+      stopCanvasAnimation();
+      if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
+        canvasScene = scene;
+        paintCanvas(canvasNode);
+        return;
+      }
+      const previousScene = canvasScene;
+      const duration = runtime.config.plot.transitionDuration;
+      const startedAt = performance.now();
+      const frame = (now) => {
+        const elapsed = Math.min(1, (now - startedAt) / duration);
+        // Matches D3's default cubic-in-out transition closely enough that
+        // the two renderers retain the same interaction feel.
+        const progress =
+          elapsed < 0.5
+            ? 4 * elapsed * elapsed * elapsed
+            : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+        canvasAnimation = { previousScene, scene, progress, frame: null };
+        paintCanvas(canvasNode);
+        if (elapsed < 1) {
+          canvasAnimation.frame = requestAnimationFrame(frame);
+        } else {
+          canvasAnimation = null;
+          canvasScene = scene;
+        }
+      };
+      canvasAnimation = { previousScene, scene, progress: 0, frame: requestAnimationFrame(frame) };
+    };
+    const chooseLegendColour = (group) => {
+      const picker = container.select("input.colourPicker");
+      picker.on("change", () => {
+        group.colour = picker.node().value;
+        runtime.plot.update();
+      });
+      picker.node().click();
+    };
+    const setScaleBarLength = (providedValue) => {
+      const value =
+        providedValue ?? prompt("Enter new length (bp):", runtime.config.scaleBar.basePair);
+      if (!value) return;
+      runtime.config.scaleBar.basePair = value;
+      runtime.plot.update();
+    };
+    if (useCanvas) {
+      const targetForEvent = (canvasNode, event) =>
+        hitTestCanvas({
+          canvas: canvasNode,
+          scene: runtime.scene.get(),
+          camera: getCamera(chartState),
+          config: runtime.config,
+          event,
+        });
+      const locusForTarget = (target) =>
+        target?.locusUid || runtime.get.geneData(target?.geneUid)?.locusUid || null;
+      const cursorForTarget = (target) => {
+        if (!target) return "grab";
+        if (target.action === "move-cluster") return "grab";
+        if (target.action === "move-locus") return "move";
+        if (target.action.startsWith("trim-locus")) return "ew-resize";
+        return "pointer";
+      };
+      const updateCanvasAffordance = (canvasNode, target) => {
+        const locusUid = locusForTarget(target);
+        if (canvasHoverLocusUid !== locusUid) {
+          canvasHoverLocusUid = locusUid;
+          paintCanvas(canvasNode);
+        }
+        d3.select(canvasNode).style("cursor", cursorForTarget(target));
+      };
+      canvasZoom.filter(function (event) {
+        if (event.type === "wheel") return true;
+        if (event.ctrlKey || event.button) return false;
+        return !targetForEvent(this, event);
+      });
+      canvas
+        .on("pointerdown.canvasInteraction", function (event) {
+          if (event.button) return;
+          const target = targetForEvent(this, event);
+          if (!target) return;
+          const point = canvasWorldPoint(this, event, getCamera(chartState));
+          this.setPointerCapture(event.pointerId);
+          updateCanvasAffordance(this, target);
+          if (target.action === "move-cluster") {
+            canvasGesture = { action: target.action, clusterUid: target.clusterUid };
+            interactionController.beginClusterDrag(target.clusterUid, point.y);
+          } else if (target.action === "move-locus") {
+            canvasGesture = { action: target.action, locusUid: target.locusUid };
+            interactionController.beginLocusDrag(target.locusUid, point.x);
+          } else if (target.action.startsWith("trim-locus")) {
+            canvasGesture = {
+              action: target.action,
+              locusUid: target.locusUid,
+              edge: target.action.endsWith("left") ? "left" : "right",
+            };
+            interactionController.beginLocusTrim();
+          } else if (target.action === "gene") {
+            canvasGesture = { action: target.action, geneUid: target.geneUid };
+          } else if (target.action === "legend-colour") {
+            if (runtime.config.legend.onClickCircle) {
+              runtime.config.legend.onClickCircle(event, target.group);
+            } else {
+              chooseLegendColour(target.group);
+            }
+          } else if (target.action === "legend-text") {
+            runtime.config.legend.onClickText?.(event, target.group);
+          } else if (target.action === "scale-bar") {
+            setScaleBarLength();
+          }
+          event.preventDefault();
+        })
+        .on("pointermove.canvasInteraction", function (event) {
+          if (!canvasGesture) {
+            updateCanvasAffordance(this, targetForEvent(this, event));
+            return;
+          }
+          const point = canvasWorldPoint(this, event, getCamera(chartState));
+          if (canvasGesture.action === "move-cluster") {
+            interactionController.moveClusterDrag(point.y);
+          } else if (canvasGesture.action === "move-locus") {
+            interactionController.moveLocusDrag(point.x);
+          } else if (canvasGesture.edge) {
+            interactionController.moveLocusTrim(
+              runtime.get.locusData(canvasGesture.locusUid),
+              canvasGesture.edge,
+              point.x
+            );
+          }
+        })
+        .on("pointerleave.canvasInteraction", function () {
+          if (!canvasGesture) updateCanvasAffordance(this, null);
+        })
+        .on("pointerup.canvasInteraction pointercancel.canvasInteraction", function (event) {
+          if (!canvasGesture) return;
+          const gesture = canvasGesture;
+          canvasGesture = null;
+          if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
+          if (gesture.action === "move-cluster") interactionController.endClusterDrag();
+          else if (gesture.action === "move-locus") interactionController.endLocusDrag();
+          else if (gesture.edge) {
+            interactionController.endLocusTrim(runtime.get.locusData(gesture.locusUid));
+          } else if (gesture.action === "gene" && runtime.config.gene.shape.onClick) {
+            runtime.config.gene.shape.onClick(event, runtime.get.geneData(gesture.geneUid));
+          }
+          updateCanvasAffordance(this, targetForEvent(this, event));
+        })
+        .on("dblclick.canvasInteraction", function (event) {
+          const target = targetForEvent(this, event);
+          const locusUid = target?.locusUid || runtime.get.geneData(target?.geneUid)?.locusUid;
+          if (locusUid) interactionController.flipLocus(runtime.get.locusData(locusUid));
+        })
+        .on("contextmenu.canvasInteraction", function (event) {
+          const target = targetForEvent(this, event);
+          if (target?.action === "gene") {
+            event.preventDefault();
+            overlay.showGeneMenu(event, runtime.get.geneData(target.geneUid));
+          } else if (target?.action === "legend-text") {
+            event.preventDefault();
+            const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
+            handler(event, target.group);
+          }
+        });
+    }
     applyCamera(svg.select("g.clusterMapViewport"));
 
     runtime.scale.update(data);
@@ -213,47 +426,42 @@ export default function clusterMap() {
 
     const scene = runtime.scene.build(data);
 
-    renderSvg({
-      plot,
-      data,
-      scene,
-      transition,
-      animate: hasInitialView && animate,
-      config: runtime.config,
-      scales: runtime.scales,
-      ids: runtime.ids,
-      lookup: { gene: runtime.get.geneData },
-      interactions: {
-        isDragging: () => isDragging(chartState),
-        beginClusterDrag: interactionController.beginClusterDrag,
-        moveClusterDrag: interactionController.moveClusterDrag,
-        endClusterDrag: interactionController.endClusterDrag,
-        beginLocusDrag: interactionController.beginLocusDrag,
-        moveLocusDrag: interactionController.moveLocusDrag,
-        endLocusDrag: interactionController.endLocusDrag,
-        beginLocusTrim: interactionController.beginLocusTrim,
-        moveLocusTrim: interactionController.moveLocusTrim,
-        endLocusTrim: interactionController.endLocusTrim,
-        flipLocus: interactionController.flipLocus,
-        onGeneClick: runtime.config.gene.shape.onClick,
-        showGeneMenu: overlay.showGeneMenu,
-        showGroupMenu: overlay.showGroupMenu,
-        setScaleBarLength: (value) => {
-          runtime.config.scaleBar.basePair = value;
-          runtime.plot.update();
+    if (useCanvas) {
+      if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
+      animateCanvas(canvas.node(), scene, hasInitialView && animate);
+    } else {
+      renderSvg({
+        plot,
+        data,
+        scene,
+        transition,
+        animate: hasInitialView && animate,
+        config: runtime.config,
+        scales: runtime.scales,
+        ids: runtime.ids,
+        lookup: { gene: runtime.get.geneData },
+        interactions: {
+          isDragging: () => isDragging(chartState),
+          beginClusterDrag: interactionController.beginClusterDrag,
+          moveClusterDrag: interactionController.moveClusterDrag,
+          endClusterDrag: interactionController.endClusterDrag,
+          beginLocusDrag: interactionController.beginLocusDrag,
+          moveLocusDrag: interactionController.moveLocusDrag,
+          endLocusDrag: interactionController.endLocusDrag,
+          beginLocusTrim: interactionController.beginLocusTrim,
+          moveLocusTrim: interactionController.moveLocusTrim,
+          endLocusTrim: interactionController.endLocusTrim,
+          flipLocus: interactionController.flipLocus,
+          onGeneClick: runtime.config.gene.shape.onClick,
+          showGeneMenu: overlay.showGeneMenu,
+          showGroupMenu: overlay.showGroupMenu,
+          setScaleBarLength,
+          chooseLegendColour,
         },
-        chooseLegendColour: (group) => {
-          const picker = container.select("input.colourPicker");
-          picker.on("change", () => {
-            group.colour = picker.node().value;
-            runtime.plot.update();
-          });
-          picker.node().click();
-        },
-      },
-    });
+      });
 
-    if (!hasInitialView) fitInitialView(svg, plot);
+      if (!hasInitialView) fitInitialView(svg, plot);
+    }
   }
 
   function fitInitialView(svg, plot) {
@@ -275,6 +483,83 @@ export default function clusterMap() {
     const y = (height - bounds.height * scale) / 2 - bounds.y * scale;
 
     svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(scale));
+    hasInitialView = true;
+  }
+
+  function fitInitialCanvasView(canvas, scene) {
+    const { width, height } = canvas.getBoundingClientRect();
+    if (!width || !height || !scene.bounds) return;
+
+    const context = canvas.getContext("2d");
+    const bounds = { ...scene.bounds };
+    const include = (x, y) => {
+      bounds.minX = Math.min(bounds.minX, x);
+      bounds.maxX = Math.max(bounds.maxX, x);
+      bounds.minY = Math.min(bounds.minY, y);
+      bounds.maxY = Math.max(bounds.maxY, y);
+    };
+    const textWidth = (text, font) => {
+      context.save();
+      context.font = font;
+      const measured = context.measureText(text).width;
+      context.restore();
+      return measured;
+    };
+
+    for (const cluster of scene.clusters.values()) {
+      const anchorX = cluster.x + cluster.info.x;
+      include(
+        anchorX - textWidth(
+          cluster.source.name,
+          `bold ${runtime.config.cluster.nameFontSize}px ${runtime.config.plot.fontFamily}`
+        ),
+        cluster.y + 8
+      );
+      include(
+        anchorX - textWidth(
+          cluster.info.locusText,
+          `${runtime.config.cluster.lociFontSize}px ${runtime.config.plot.fontFamily}`
+        ),
+        cluster.y + 24
+      );
+    }
+    if (scene.chrome?.legend.visible) {
+      const { legend } = scene.chrome;
+      for (const item of legend.items) {
+        include(
+          legend.position.x + item.textX + textWidth(item.label, `${legend.fontSize}px ${legend.fontFamily}`),
+          legend.position.y + item.y + legend.fontSize
+        );
+      }
+    }
+    if (scene.chrome?.scaleBar.visible) {
+      const { scaleBar } = scene.chrome;
+      include(scaleBar.position.x + scaleBar.length, scaleBar.position.y + scaleBar.height + 20);
+    }
+    if (scene.chrome?.colourBar.visible) {
+      const { colourBar } = scene.chrome;
+      include(colourBar.position.x + colourBar.width, colourBar.position.y + colourBar.height + 20);
+    }
+
+    const padding = 20;
+    const scale = Math.min(
+      1.2,
+      (width - padding * 2) / (bounds.maxX - bounds.minX),
+      (height - padding * 2) / (bounds.maxY - bounds.minY)
+    );
+    const camera = {
+      x: (width - (bounds.maxX - bounds.minX) * scale) / 2 - bounds.minX * scale,
+      y: (height - (bounds.maxY - bounds.minY) * scale) / 2 - bounds.minY * scale,
+      k: scale,
+    };
+    if (canvasZoom) {
+      d3.select(canvas).call(
+        canvasZoom.transform,
+        d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+      );
+    } else {
+      setCamera(chartState, camera);
+    }
     hasInitialView = true;
   }
 

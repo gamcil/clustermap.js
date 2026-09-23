@@ -603,3 +603,115 @@ test("separate chart instances keep SVG IDs and interactions isolated", async ({
     .toBe(true);
   await expect.poll(() => readLocusState(secondLocus)).toEqual(secondBefore);
 });
+
+test("canvas renderer paints the projected chart scene", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&renderer=canvas");
+
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  await expect(canvas).toBeVisible();
+  await expect(page.locator("svg.clusterMap")).toBeHidden();
+  const painted = await canvas.evaluate((node) => {
+    const context = node.getContext("2d");
+    const { width, height } = node;
+    const pixels = context.getImageData(0, 0, width, height).data;
+    return Array.from(pixels).some((value, index) => index % 4 === 3 && value !== 0);
+  });
+  expect(painted).toBe(true);
+});
+
+test("canvas renderer forwards locus double-clicks to the shared controller", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({ plot: { transitionDuration: 0 } });
+    window.__canvasInteractionTest = { chart, data, host };
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const track = page.locator("g.locus").first().locator("line.trackBar");
+  const trackBox = await track.boundingBox();
+  expect(trackBox).not.toBeNull();
+
+  await page.evaluate(() => {
+    const { chart, data, host } = window.__canvasInteractionTest;
+    chart.config({ plot: { renderer: "canvas" } });
+    d3.select(host).datum(data).call(chart);
+  });
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  await expect(canvas).toBeVisible();
+
+  const hoverPoint = { x: trackBox.x + trackBox.width / 2, y: trackBox.y - 5 };
+  const readPixel = (point) =>
+    canvas.evaluate((node, { x, y }) => {
+      const bounds = node.getBoundingClientRect();
+      const pixelX = Math.round(((x - bounds.left) / bounds.width) * node.width);
+      const pixelY = Math.round(((y - bounds.top) / bounds.height) * node.height);
+      return [...node.getContext("2d").getImageData(pixelX, pixelY, 1, 1).data];
+    }, point);
+  const beforeHover = await readPixel(hoverPoint);
+  await page.mouse.move(hoverPoint.x, hoverPoint.y);
+  await expect(canvas).toHaveCSS("cursor", "move");
+  await expect.poll(() => readPixel(hoverPoint)).not.toEqual(beforeHover);
+
+  await page.mouse.dblclick(trackBox.x + trackBox.width / 2, trackBox.y + trackBox.height / 2);
+
+  await page.evaluate(() => {
+    const { chart, data, host } = window.__canvasInteractionTest;
+    chart.config({ plot: { renderer: "svg" } });
+    d3.select(host).datum(data).call(chart);
+  });
+  await expect(page.locator("g.clusterInfo text.locusText").first()).toContainText("(reversed)");
+});
+
+test("canvas renderer animates a locus flip between scene snapshots", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({ plot: { transitionDuration: 200 } });
+    window.__canvasAnimationTest = { chart, data, host };
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const track = page.locator("g.locus").first().locator("line.trackBar");
+  const trackBox = await track.boundingBox();
+  expect(trackBox).not.toBeNull();
+  await page.evaluate(() => {
+    const { chart, data, host } = window.__canvasAnimationTest;
+    chart.config({ plot: { renderer: "canvas" } });
+    d3.select(host).datum(data).call(chart);
+  });
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  await expect(canvas).toBeVisible();
+
+  const sample = () =>
+    canvas.evaluate((node, box) => {
+      const bounds = node.getBoundingClientRect();
+      const ratioX = node.width / bounds.width;
+      const ratioY = node.height / bounds.height;
+      const x = Math.max(0, Math.round((box.x - bounds.left - 20) * ratioX));
+      const y = Math.max(0, Math.round((box.y - bounds.top - 25) * ratioY));
+      const width = Math.min(node.width - x, Math.round((box.width + 40) * ratioX));
+      const height = Math.min(node.height - y, Math.round(60 * ratioY));
+      return [...node.getContext("2d").getImageData(x, y, width, height).data];
+    }, trackBox);
+  const before = await sample();
+
+  await page.mouse.dblclick(trackBox.x + trackBox.width / 2, trackBox.y + trackBox.height / 2);
+  await page.waitForTimeout(60);
+  const during = await sample();
+  await page.waitForTimeout(250);
+  const after = await sample();
+
+  expect(during).not.toEqual(before);
+  expect(during).not.toEqual(after);
+});

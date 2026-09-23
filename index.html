@@ -25,7 +25,9 @@
 	</body>
 	<script type="module">
 		import clusterMap from "./src/clusterMap.js"
-		const testMode = new URLSearchParams(window.location.search).has("test")
+		const params = new URLSearchParams(window.location.search)
+		const testMode = params.has("test")
+		const renderer = params.get("renderer") || "svg"
 
 		function serialise(svg) {
 			/* Saves the figure to SVG in its current state.
@@ -79,6 +81,7 @@
 			.config({
         plot: {
           transitionDuration: testMode ? 0 : 250,
+          renderer,
         },
         cluster: {
           alignLabels: false

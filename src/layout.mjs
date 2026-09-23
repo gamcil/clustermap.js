@@ -1,5 +1,6 @@
 import {
   getGeneLabelDy,
+  getGeneLabelLayout,
   getGeneLabelTransform,
   getGenePolygonCoordinates,
 } from "./genes/layout.mjs";
@@ -235,6 +236,7 @@ export function buildScene(
           visible,
           localPolygon,
           polygon: worldPolygon(localPolygon, worldX, y),
+          label: getGeneLabelLayout(display, { scaleX, shape, label }),
           labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
           labelDy: getGeneLabelDy(label.position),
         });

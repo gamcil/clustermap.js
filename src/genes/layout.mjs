@@ -58,7 +58,7 @@ export function getGenePolygonPoints(gene, options) {
   return getGenePolygonCoordinates(gene, options).join(" ");
 }
 
-export function getGeneLabelTransform(gene, { scaleX, shape, label }) {
+export function getGeneLabelLayout(gene, { scaleX, shape, label }) {
   const scaledLength = scaleX(gene.end) - scaleX(gene.start);
   const x = scaleX(gene.start) + scaledLength * label.start;
   let y;
@@ -71,9 +71,17 @@ export function getGeneLabelTransform(gene, { scaleX, shape, label }) {
     y = -label.spacing;
   }
 
-  const rotation = ["start", "middle"].includes(label.anchor)
-    ? -label.rotation
-    : label.rotation;
+  return {
+    x,
+    y,
+    rotation: ["start", "middle"].includes(label.anchor)
+      ? -label.rotation
+      : label.rotation,
+  };
+}
+
+export function getGeneLabelTransform(gene, options) {
+  const { x, y, rotation } = getGeneLabelLayout(gene, options);
   return `translate(${x}, ${y}) rotate(${rotation})`;
 }
 

@@ -1,6 +1,7 @@
 export default {
   plot: {
     transitionDuration: 250,
+    renderer: "svg",
     scaleFactor: 15,
     scaleGenes: true,
     fontFamily:

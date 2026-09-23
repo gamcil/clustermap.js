@@ -810,6 +810,479 @@
     );
   }
 
+  function containsRect({ x, y, width, height }, point) {
+    return (
+      point.x >= x &&
+      point.x <= x + width &&
+      point.y >= y &&
+      point.y <= y + height
+    );
+  }
+
+  function pointOnSegment(point, start, end) {
+    const cross =
+      (point.y - start.y) * (end.x - start.x) -
+      (point.x - start.x) * (end.y - start.y);
+    if (Math.abs(cross) > Number.EPSILON) return false;
+    return (
+      point.x >= Math.min(start.x, end.x) &&
+      point.x <= Math.max(start.x, end.x) &&
+      point.y >= Math.min(start.y, end.y) &&
+      point.y <= Math.max(start.y, end.y)
+    );
+  }
+
+  function containsPolygon({ points }, point) {
+    let inside = false;
+    for (let index = 0, previous = points.length - 2; index < points.length; previous = index, index += 2) {
+      const start = { x: points[previous], y: points[previous + 1] };
+      const end = { x: points[index], y: points[index + 1] };
+      if (pointOnSegment(point, start, end)) return true;
+      const crosses = (start.y > point.y) !== (end.y > point.y);
+      if (crosses && point.x < ((end.x - start.x) * (point.y - start.y)) / (end.y - start.y) + start.x) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  function contains(region, point) {
+    if (region.type === "rect") return containsRect(region, point);
+    if (region.type === "polygon") return containsPolygon(region, point);
+    return false;
+  }
+
+  /**
+   * Returns the topmost semantic interaction target at a chart-world point.
+   * `scene.hitRegions.all` is stored in drawing order, so reverse traversal
+   * gives genes and trim handles precedence over a locus move region.
+   */
+  function hitTest(scene, point) {
+    for (let index = scene.hitRegions.all.length - 1; index >= 0; index -= 1) {
+      const region = scene.hitRegions.all[index];
+      if (contains(region, point)) return region;
+    }
+    return null;
+  }
+
+  function canvasWorldPoint(canvas, event, camera) {
+    const bounds = canvas.getBoundingClientRect();
+    return {
+      x: (event.clientX - bounds.left - camera.x) / camera.k,
+      y: (event.clientY - bounds.top - camera.y) / camera.k,
+    };
+  }
+
+  function clusterLabelHit(context, scene, point, config) {
+    for (const cluster of [...scene.clusters.values()].reverse()) {
+      const anchorX = cluster.x + cluster.info.x;
+      const nameFont = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
+      const locusFont = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
+      context.save();
+      context.font = nameFont;
+      const nameWidth = context.measureText(cluster.source.name || "").width;
+      context.font = locusFont;
+      const locusWidth = context.measureText(cluster.info.locusText).width;
+      context.restore();
+      const width = Math.max(nameWidth, locusWidth);
+      if (
+        point.x >= anchorX - width &&
+        point.x <= anchorX &&
+        point.y >= cluster.y - config.cluster.nameFontSize &&
+        point.y <= cluster.y + config.cluster.lociFontSize + 12
+      ) {
+        return { action: "move-cluster", clusterUid: cluster.source.uid };
+      }
+    }
+    return null;
+  }
+
+  function chromeHit(context, scene, point) {
+    const chrome = scene.chrome;
+    if (!chrome) return null;
+
+    const { legend, scaleBar } = chrome;
+    if (legend.visible) {
+      context.save();
+      context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+      for (const item of [...legend.items].reverse()) {
+        const x = legend.position.x + item.x;
+        const y = legend.position.y + item.y;
+        const circleX = x;
+        const circleY = y + item.circleY;
+        if (Math.hypot(point.x - circleX, point.y - circleY) <= item.radius) {
+          context.restore();
+          return { action: "legend-colour", group: item.source };
+        }
+        const textX = x + item.textX;
+        const textWidth = context.measureText(item.label).width;
+        if (
+          point.x >= textX &&
+          point.x <= textX + textWidth &&
+          point.y >= y + item.textY - legend.fontSize / 2 &&
+          point.y <= y + item.textY + legend.fontSize / 2
+        ) {
+          context.restore();
+          return { action: "legend-text", group: item.source };
+        }
+      }
+      context.restore();
+    }
+
+    if (scaleBar.visible) {
+      const x = scaleBar.position.x + scaleBar.length / 2;
+      const y = scaleBar.position.y + scaleBar.height + 5;
+      context.save();
+      context.font = `${scaleBar.fontSize}px ${scaleBar.fontFamily}`;
+      const width = context.measureText(scaleBar.label).width;
+      context.restore();
+      if (
+        point.x >= x - width / 2 &&
+        point.x <= x + width / 2 &&
+        point.y >= y &&
+        point.y <= y + scaleBar.fontSize
+      ) {
+        return { action: "scale-bar" };
+      }
+    }
+
+    return null;
+  }
+
+  function hitTestCanvas({ canvas, scene, camera, config, event }) {
+    const point = canvasWorldPoint(canvas, event, camera);
+    const context = canvas.getContext("2d");
+    return hitTest(scene, point) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
+  }
+
+  function polygon(context, points) {
+    context.beginPath();
+    context.moveTo(points[0], points[1]);
+    for (let index = 2; index < points.length; index += 2) {
+      context.lineTo(points[index], points[index + 1]);
+    }
+    context.closePath();
+  }
+
+  function drawLink(context, layout, source, config, scales) {
+    if (!layout.visible || !layout.anchors) return;
+    const [ax1, ax2, ay, bx1, bx2, by] = layout.anchors;
+    const aMid = (ax1 + ax2) / 2;
+    const bMid = (bx1 + bx2) / 2;
+    const group = scales.group(source.query.uid);
+    const colour = scales.colour(group);
+    const score = scales.score(source.identity);
+
+    context.beginPath();
+    if (config.link.asLine) {
+      context.moveTo(aMid, ay);
+      if (config.link.straight) context.lineTo(bMid, by);
+      else {
+        const middle = (ay + by) / 2;
+        context.bezierCurveTo(aMid, middle, bMid, middle, bMid, by);
+      }
+      context.strokeStyle = config.link.groupColour ? rgbaToRgb(colour) : score;
+    } else {
+      context.moveTo(ax2, ay);
+      if (config.link.straight) {
+        context.lineTo(bx2, by);
+        context.lineTo(bx1, by);
+        context.lineTo(ax1, ay);
+      } else {
+        const middle = ay + Math.abs(by - ay) / 2;
+        context.bezierCurveTo(ax2, middle, bx2, middle, bx2, by);
+        context.lineTo(bx1, by);
+        context.bezierCurveTo(bx1, middle, ax1, middle, ax1, ay);
+      }
+      context.closePath();
+      context.fillStyle = config.link.groupColour ? rgbaToRgb(colour) : score;
+      context.fill();
+      context.strokeStyle = config.link.groupColour ? colour : "black";
+    }
+    context.lineWidth = config.link.strokeWidth;
+    context.stroke();
+
+    if (config.link.label.show && layout.labelPosition) {
+      context.fillStyle = "white";
+      context.font = `${config.link.label.fontSize}px ${config.plot.fontFamily}`;
+      context.textAlign = "center";
+      context.textBaseline = "alphabetic";
+      context.fillText(source.identity.toFixed(2), layout.labelPosition.x, layout.labelPosition.y);
+    }
+  }
+
+  function drawClusterInfo(context, cluster, config) {
+    const { x, y } = cluster;
+    const anchorX = x + cluster.info.x;
+    context.fillStyle = "black";
+    context.textAlign = "end";
+    context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
+    context.textBaseline = "alphabetic";
+    context.fillText(cluster.source.name, anchorX, y + 8);
+    context.font = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
+    context.textBaseline = "top";
+    context.fillText(cluster.info.locusText, anchorX, y + 12);
+  }
+
+  function drawGene(context, gene, config, scales) {
+    if (!gene.visible) return;
+    polygon(context, gene.polygon);
+    const group = scales.group(gene.source.uid);
+    context.fillStyle = gene.source.colour || scales.colour(group);
+    context.strokeStyle = config.gene.shape.stroke;
+    context.lineWidth = config.gene.shape.strokeWidth;
+    context.fill();
+    context.stroke();
+
+    if (!config.gene.label.show) return;
+    const { x, y, rotation } = gene.label;
+    context.save();
+    context.translate(gene.locus.x + x, gene.locus.y + y);
+    context.rotate((rotation * Math.PI) / 180);
+    context.fillStyle = "black";
+    context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
+    context.textAlign = config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor;
+    context.textBaseline = "alphabetic";
+    context.fillText(gene.source.label || gene.source.uid, 0, 0);
+    context.restore();
+  }
+
+  function drawLocusHover(context, scene, locusUid) {
+    if (!locusUid) return;
+    const locus = scene.loci.get(locusUid);
+    if (!locus) return;
+
+    const { hover } = locus;
+    const x = locus.x + hover.x;
+    const y = locus.y + hover.y;
+    context.fillStyle = "rgba(0, 0, 0, 0.4)";
+    context.fillRect(x, y, hover.width, hover.height);
+    context.fillStyle = "black";
+    context.fillRect(locus.x + hover.leftHandleX, y, 8, hover.height);
+    context.fillRect(locus.x + hover.rightHandleX, y, 8, hover.height);
+  }
+
+  function drawLegend(context, legend) {
+    if (!legend.visible) return;
+    context.save();
+    context.translate(legend.position.x, legend.position.y);
+    context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+    context.textAlign = "start";
+    context.textBaseline = "middle";
+    for (const item of legend.items) {
+      context.beginPath();
+      context.arc(item.x, item.y + item.circleY, item.radius, 0, 2 * Math.PI);
+      context.fillStyle = item.colour;
+      context.fill();
+      context.fillStyle = "black";
+      context.fillText(item.label, item.x + item.textX, item.y + item.textY);
+    }
+    context.restore();
+  }
+
+  function drawScaleBar(context, scaleBar) {
+    if (!scaleBar.visible) return;
+    const { x, y } = scaleBar.position;
+    context.save();
+    context.translate(x, y);
+    context.strokeStyle = scaleBar.colour;
+    context.lineWidth = scaleBar.strokeWidth;
+    context.beginPath();
+    context.moveTo(0, scaleBar.middle);
+    context.lineTo(scaleBar.length, scaleBar.middle);
+    context.moveTo(0, 0);
+    context.lineTo(0, scaleBar.height);
+    context.moveTo(scaleBar.length, 0);
+    context.lineTo(scaleBar.length, scaleBar.height);
+    context.stroke();
+    context.fillStyle = "black";
+    context.font = `${scaleBar.fontSize}px ${scaleBar.fontFamily}`;
+    context.textAlign = "center";
+    context.textBaseline = "top";
+    context.fillText(scaleBar.label, scaleBar.length / 2, scaleBar.height + 5);
+    context.restore();
+  }
+
+  function drawColourBar(context, colourBar) {
+    if (!colourBar.visible) return;
+    const { x, y } = colourBar.position;
+    context.save();
+    context.translate(x, y);
+    const gradient = context.createLinearGradient(0, 0, colourBar.width, 0);
+    gradient.addColorStop(0, colourBar.startColour);
+    gradient.addColorStop(1, colourBar.endColour);
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, colourBar.width, colourBar.height);
+    context.strokeStyle = "black";
+    context.lineWidth = 1;
+    context.strokeRect(0, 0, colourBar.width, colourBar.height);
+    context.fillStyle = "black";
+    context.font = `${colourBar.fontSize}px ${colourBar.fontFamily}`;
+    context.textBaseline = "top";
+    context.textAlign = "center";
+    context.fillText(colourBar.label, colourBar.width / 2, colourBar.height + 5);
+    context.textAlign = "start";
+    context.fillText(colourBar.startLabel, 0, colourBar.height + 5);
+    context.textAlign = "end";
+    context.fillText(colourBar.endLabel, colourBar.width, colourBar.height + 5);
+    context.restore();
+  }
+
+  const interpolateNumber = (from, to, amount) => from + (to - from) * amount;
+
+  function interpolatePosition(from, to, amount) {
+    if (!from || !to) return to;
+    return {
+      ...to,
+      x: interpolateNumber(from.x, to.x, amount),
+      y: interpolateNumber(from.y, to.y, amount),
+    };
+  }
+
+  function interpolateArray(from, to, amount) {
+    if (!from || !to || from.length !== to.length) return to;
+    return to.map((value, index) => interpolateNumber(from[index], value, amount));
+  }
+
+  function interpolateLocus(from, to, amount) {
+    if (!from) return to;
+    return {
+      ...to,
+      x: interpolateNumber(from.x, to.x, amount),
+      y: interpolateNumber(from.y, to.y, amount),
+      worldStart: interpolateNumber(from.worldStart, to.worldStart, amount),
+      worldEnd: interpolateNumber(from.worldEnd, to.worldEnd, amount),
+      transform: interpolatePosition(from.transform, to.transform, amount),
+      track: {
+        ...to.track,
+        y: interpolateNumber(from.track.y, to.track.y, amount),
+      },
+      hover: from.hover && to.hover
+        ? {
+            ...to.hover,
+            x: interpolateNumber(from.hover.x, to.hover.x, amount),
+            y: interpolateNumber(from.hover.y, to.hover.y, amount),
+            width: interpolateNumber(from.hover.width, to.hover.width, amount),
+            height: interpolateNumber(from.hover.height, to.hover.height, amount),
+            leftHandleX: interpolateNumber(from.hover.leftHandleX, to.hover.leftHandleX, amount),
+            rightHandleX: interpolateNumber(from.hover.rightHandleX, to.hover.rightHandleX, amount),
+          }
+        : to.hover,
+    };
+  }
+
+  /**
+   * Interpolate compatible scene geometry for Canvas animation. Sources,
+   * hit-regions, and semantic state remain those of the target scene; only the
+   * pixels in flight are interpolated.
+   */
+  function interpolateCanvasScene(previous, scene, amount) {
+    if (!previous || amount >= 1) return scene;
+    const loci = new Map();
+    for (const [uid, locus] of scene.loci) {
+      loci.set(uid, interpolateLocus(previous.loci.get(uid), locus, amount));
+    }
+
+    const clusters = new Map();
+    for (const [uid, cluster] of scene.clusters) {
+      const prior = previous.clusters.get(uid);
+      clusters.set(uid, {
+        ...cluster,
+        x: prior ? interpolateNumber(prior.x, cluster.x, amount) : cluster.x,
+        y: prior ? interpolateNumber(prior.y, cluster.y, amount) : cluster.y,
+        info: interpolatePosition(prior?.info, cluster.info, amount),
+        loci: cluster.loci.map((locus) => loci.get(locus.source.uid)),
+      });
+    }
+
+    const genes = new Map();
+    for (const [uid, gene] of scene.genes) {
+      const prior = previous.genes.get(uid);
+      genes.set(uid, {
+        ...gene,
+        polygon: interpolateArray(prior?.polygon, gene.polygon, amount),
+        locus: interpolatePosition(prior?.locus, gene.locus, amount),
+        label: {
+          ...gene.label,
+          x: interpolateNumber(prior?.label?.x ?? gene.label.x, gene.label.x, amount),
+          y: interpolateNumber(prior?.label?.y ?? gene.label.y, gene.label.y, amount),
+          rotation: interpolateNumber(
+            prior?.label?.rotation ?? gene.label.rotation,
+            gene.label.rotation,
+            amount
+          ),
+        },
+      });
+    }
+
+    const links = new Map();
+    for (const [uid, link] of scene.links) {
+      const prior = previous.links.get(uid);
+      links.set(uid, {
+        ...link,
+        anchors: interpolateArray(prior?.anchors, link.anchors, amount),
+        labelPosition: interpolatePosition(prior?.labelPosition, link.labelPosition, amount),
+      });
+    }
+
+    return { ...scene, clusters, loci, genes, links };
+  }
+
+  /** Draw a renderer-neutral chart scene into a Canvas 2D context. */
+  function renderCanvas({
+    canvas,
+    scene,
+    previousScene = null,
+    progress = 1,
+    camera,
+    config,
+    scales,
+    hoverLocusUid = null,
+  }) {
+    const displayScene = interpolateCanvasScene(previousScene, scene, progress);
+    const context = canvas.getContext("2d");
+    const bounds = canvas.getBoundingClientRect();
+    const width = bounds.width;
+    const height = bounds.height;
+    const pixelRatio = globalThis.devicePixelRatio || 1;
+    const pixelWidth = Math.round(width * pixelRatio);
+    const pixelHeight = Math.round(height * pixelRatio);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    context.save();
+    context.translate(camera.x, camera.y);
+    context.scale(camera.k, camera.k);
+
+    for (const link of displayScene.links.values()) {
+      drawLink(context, link, link.source, config, scales);
+    }
+    for (const cluster of displayScene.clusters.values()) {
+      drawClusterInfo(context, cluster, config);
+      for (const locus of cluster.loci) {
+        context.beginPath();
+        context.moveTo(locus.worldStart, locus.y + locus.track.y);
+        context.lineTo(locus.worldEnd, locus.y + locus.track.y);
+        context.strokeStyle = config.locus.trackBar.colour;
+        context.lineWidth = config.locus.trackBar.stroke;
+        context.stroke();
+      }
+    }
+    drawLocusHover(context, displayScene, hoverLocusUid);
+    for (const gene of displayScene.genes.values()) drawGene(context, gene, config, scales);
+    if (displayScene.chrome) {
+      drawLegend(context, displayScene.chrome.legend);
+      drawScaleBar(context, displayScene.chrome.scaleBar);
+      drawColourBar(context, displayScene.chrome.colourBar);
+    }
+    context.restore();
+    return { width, height, pixelRatio };
+  }
+
   // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
   // host, camera viewport, and interaction state that causes a redraw.
   function renderSvg({
@@ -1355,6 +1828,7 @@
   var defaultConfig = {
     plot: {
       transitionDuration: 250,
+      renderer: "svg",
       scaleFactor: 15,
       scaleGenes: true,
       fontFamily:
@@ -1528,7 +2002,7 @@
     return points;
   }
 
-  function getGeneLabelTransform(gene, { scaleX, shape, label }) {
+  function getGeneLabelLayout(gene, { scaleX, shape, label }) {
     const scaledLength = scaleX(gene.end) - scaleX(gene.start);
     const x = scaleX(gene.start) + scaledLength * label.start;
     let y;
@@ -1541,9 +2015,17 @@
       y = -label.spacing;
     }
 
-    const rotation = ["start", "middle"].includes(label.anchor)
-      ? -label.rotation
-      : label.rotation;
+    return {
+      x,
+      y,
+      rotation: ["start", "middle"].includes(label.anchor)
+        ? -label.rotation
+        : label.rotation,
+    };
+  }
+
+  function getGeneLabelTransform(gene, options) {
+    const { x, y, rotation } = getGeneLabelLayout(gene, options);
     return `translate(${x}, ${y}) rotate(${rotation})`;
   }
 
@@ -1858,6 +2340,7 @@
             visible,
             localPolygon,
             polygon: worldPolygon(localPolygon, worldX, y),
+            label: getGeneLabelLayout(display, { scaleX, shape, label }),
             labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
             labelDy: getGeneLabelDy(label.position),
           });
@@ -2284,8 +2767,13 @@
     let container = null;
     let transition = d3.transition();
     let zoom = null;
+    let canvasZoom = null;
     let hasInitialView = false;
     let chartState = null;
+    let canvasGesture = null;
+    let canvasHoverLocusUid = null;
+    let canvasScene = null;
+    let canvasAnimation = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
     const interactionController = createInteractionController({
       clusterRows: () => runtime.scales.y.range(),
@@ -2352,6 +2840,7 @@
 
       // Set up the shared transition
       transition = d3.transition().duration(runtime.config.plot.transitionDuration);
+      const useCanvas = runtime.config.plot.renderer === "canvas";
 
       // Build the figure
       const svg = container
@@ -2432,6 +2921,34 @@
         );
 
       const plot = svg.select("g.clusterMapG");
+      const canvas = container
+        .selectAll("canvas.clusterMapCanvas")
+        .data(useCanvas ? [data] : [])
+        .join((enter) => {
+          const surface = enter
+            .append("canvas")
+            .attr("class", "clusterMapCanvas")
+            .attr("cursor", "grab")
+            .style("display", "block")
+            .style("width", "100%")
+            .style("height", "100%");
+          canvasZoom = d3
+            .zoom()
+            .scaleExtent([0, 8])
+            .on("zoom", function (event) {
+              setCamera(chartState, event.transform);
+              paintCanvas(this);
+            })
+            .on("start", function () {
+              d3.select(this).style("cursor", "grabbing");
+            })
+            .on("end", function () {
+              d3.select(this).style("cursor", "grab");
+            });
+          surface.call(canvasZoom).on("dblclick.zoom", null);
+          return surface;
+        });
+      svg.style("display", useCanvas ? "none" : null);
       const overlay = createHtmlOverlay({
         tooltip: container.select("div.tooltip"),
         scales: runtime.scales,
@@ -2449,6 +2966,184 @@
         .select("div.tooltip")
         .on("mouseenter", overlay.enter)
         .on("mouseleave", overlay.leave);
+      const paintCanvas = (canvasNode) =>
+        renderCanvas({
+          canvas: canvasNode,
+          scene: canvasAnimation?.scene || runtime.scene.get(),
+          previousScene: canvasAnimation?.previousScene,
+          progress: canvasAnimation?.progress,
+          camera: getCamera(chartState),
+          config: runtime.config,
+          scales: runtime.scales,
+          hoverLocusUid: canvasHoverLocusUid,
+        });
+      const stopCanvasAnimation = () => {
+        if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+        canvasAnimation = null;
+      };
+      const animateCanvas = (canvasNode, scene, animate) => {
+        stopCanvasAnimation();
+        if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
+          canvasScene = scene;
+          paintCanvas(canvasNode);
+          return;
+        }
+        const previousScene = canvasScene;
+        const duration = runtime.config.plot.transitionDuration;
+        const startedAt = performance.now();
+        const frame = (now) => {
+          const elapsed = Math.min(1, (now - startedAt) / duration);
+          // Matches D3's default cubic-in-out transition closely enough that
+          // the two renderers retain the same interaction feel.
+          const progress =
+            elapsed < 0.5
+              ? 4 * elapsed * elapsed * elapsed
+              : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+          canvasAnimation = { previousScene, scene, progress, frame: null };
+          paintCanvas(canvasNode);
+          if (elapsed < 1) {
+            canvasAnimation.frame = requestAnimationFrame(frame);
+          } else {
+            canvasAnimation = null;
+            canvasScene = scene;
+          }
+        };
+        canvasAnimation = { previousScene, scene, progress: 0, frame: requestAnimationFrame(frame) };
+      };
+      const chooseLegendColour = (group) => {
+        const picker = container.select("input.colourPicker");
+        picker.on("change", () => {
+          group.colour = picker.node().value;
+          runtime.plot.update();
+        });
+        picker.node().click();
+      };
+      const setScaleBarLength = (providedValue) => {
+        const value =
+          providedValue ?? prompt("Enter new length (bp):", runtime.config.scaleBar.basePair);
+        if (!value) return;
+        runtime.config.scaleBar.basePair = value;
+        runtime.plot.update();
+      };
+      if (useCanvas) {
+        const targetForEvent = (canvasNode, event) =>
+          hitTestCanvas({
+            canvas: canvasNode,
+            scene: runtime.scene.get(),
+            camera: getCamera(chartState),
+            config: runtime.config,
+            event,
+          });
+        const locusForTarget = (target) =>
+          target?.locusUid || runtime.get.geneData(target?.geneUid)?.locusUid || null;
+        const cursorForTarget = (target) => {
+          if (!target) return "grab";
+          if (target.action === "move-cluster") return "grab";
+          if (target.action === "move-locus") return "move";
+          if (target.action.startsWith("trim-locus")) return "ew-resize";
+          return "pointer";
+        };
+        const updateCanvasAffordance = (canvasNode, target) => {
+          const locusUid = locusForTarget(target);
+          if (canvasHoverLocusUid !== locusUid) {
+            canvasHoverLocusUid = locusUid;
+            paintCanvas(canvasNode);
+          }
+          d3.select(canvasNode).style("cursor", cursorForTarget(target));
+        };
+        canvasZoom.filter(function (event) {
+          if (event.type === "wheel") return true;
+          if (event.ctrlKey || event.button) return false;
+          return !targetForEvent(this, event);
+        });
+        canvas
+          .on("pointerdown.canvasInteraction", function (event) {
+            if (event.button) return;
+            const target = targetForEvent(this, event);
+            if (!target) return;
+            const point = canvasWorldPoint(this, event, getCamera(chartState));
+            this.setPointerCapture(event.pointerId);
+            updateCanvasAffordance(this, target);
+            if (target.action === "move-cluster") {
+              canvasGesture = { action: target.action, clusterUid: target.clusterUid };
+              interactionController.beginClusterDrag(target.clusterUid, point.y);
+            } else if (target.action === "move-locus") {
+              canvasGesture = { action: target.action, locusUid: target.locusUid };
+              interactionController.beginLocusDrag(target.locusUid, point.x);
+            } else if (target.action.startsWith("trim-locus")) {
+              canvasGesture = {
+                action: target.action,
+                locusUid: target.locusUid,
+                edge: target.action.endsWith("left") ? "left" : "right",
+              };
+              interactionController.beginLocusTrim();
+            } else if (target.action === "gene") {
+              canvasGesture = { action: target.action, geneUid: target.geneUid };
+            } else if (target.action === "legend-colour") {
+              if (runtime.config.legend.onClickCircle) {
+                runtime.config.legend.onClickCircle(event, target.group);
+              } else {
+                chooseLegendColour(target.group);
+              }
+            } else if (target.action === "legend-text") {
+              runtime.config.legend.onClickText?.(event, target.group);
+            } else if (target.action === "scale-bar") {
+              setScaleBarLength();
+            }
+            event.preventDefault();
+          })
+          .on("pointermove.canvasInteraction", function (event) {
+            if (!canvasGesture) {
+              updateCanvasAffordance(this, targetForEvent(this, event));
+              return;
+            }
+            const point = canvasWorldPoint(this, event, getCamera(chartState));
+            if (canvasGesture.action === "move-cluster") {
+              interactionController.moveClusterDrag(point.y);
+            } else if (canvasGesture.action === "move-locus") {
+              interactionController.moveLocusDrag(point.x);
+            } else if (canvasGesture.edge) {
+              interactionController.moveLocusTrim(
+                runtime.get.locusData(canvasGesture.locusUid),
+                canvasGesture.edge,
+                point.x
+              );
+            }
+          })
+          .on("pointerleave.canvasInteraction", function () {
+            if (!canvasGesture) updateCanvasAffordance(this, null);
+          })
+          .on("pointerup.canvasInteraction pointercancel.canvasInteraction", function (event) {
+            if (!canvasGesture) return;
+            const gesture = canvasGesture;
+            canvasGesture = null;
+            if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
+            if (gesture.action === "move-cluster") interactionController.endClusterDrag();
+            else if (gesture.action === "move-locus") interactionController.endLocusDrag();
+            else if (gesture.edge) {
+              interactionController.endLocusTrim(runtime.get.locusData(gesture.locusUid));
+            } else if (gesture.action === "gene" && runtime.config.gene.shape.onClick) {
+              runtime.config.gene.shape.onClick(event, runtime.get.geneData(gesture.geneUid));
+            }
+            updateCanvasAffordance(this, targetForEvent(this, event));
+          })
+          .on("dblclick.canvasInteraction", function (event) {
+            const target = targetForEvent(this, event);
+            const locusUid = target?.locusUid || runtime.get.geneData(target?.geneUid)?.locusUid;
+            if (locusUid) interactionController.flipLocus(runtime.get.locusData(locusUid));
+          })
+          .on("contextmenu.canvasInteraction", function (event) {
+            const target = targetForEvent(this, event);
+            if (target?.action === "gene") {
+              event.preventDefault();
+              overlay.showGeneMenu(event, runtime.get.geneData(target.geneUid));
+            } else if (target?.action === "legend-text") {
+              event.preventDefault();
+              const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
+              handler(event, target.group);
+            }
+          });
+      }
       applyCamera(svg.select("g.clusterMapViewport"));
 
       runtime.scale.update(data);
@@ -2465,47 +3160,42 @@
 
       const scene = runtime.scene.build(data);
 
-      renderSvg({
-        plot,
-        data,
-        scene,
-        transition,
-        animate: hasInitialView && animate,
-        config: runtime.config,
-        scales: runtime.scales,
-        ids: runtime.ids,
-        lookup: { gene: runtime.get.geneData },
-        interactions: {
-          isDragging: () => isDragging(chartState),
-          beginClusterDrag: interactionController.beginClusterDrag,
-          moveClusterDrag: interactionController.moveClusterDrag,
-          endClusterDrag: interactionController.endClusterDrag,
-          beginLocusDrag: interactionController.beginLocusDrag,
-          moveLocusDrag: interactionController.moveLocusDrag,
-          endLocusDrag: interactionController.endLocusDrag,
-          beginLocusTrim: interactionController.beginLocusTrim,
-          moveLocusTrim: interactionController.moveLocusTrim,
-          endLocusTrim: interactionController.endLocusTrim,
-          flipLocus: interactionController.flipLocus,
-          onGeneClick: runtime.config.gene.shape.onClick,
-          showGeneMenu: overlay.showGeneMenu,
-          showGroupMenu: overlay.showGroupMenu,
-          setScaleBarLength: (value) => {
-            runtime.config.scaleBar.basePair = value;
-            runtime.plot.update();
+      if (useCanvas) {
+        if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
+        animateCanvas(canvas.node(), scene, hasInitialView && animate);
+      } else {
+        renderSvg({
+          plot,
+          data,
+          scene,
+          transition,
+          animate: hasInitialView && animate,
+          config: runtime.config,
+          scales: runtime.scales,
+          ids: runtime.ids,
+          lookup: { gene: runtime.get.geneData },
+          interactions: {
+            isDragging: () => isDragging(chartState),
+            beginClusterDrag: interactionController.beginClusterDrag,
+            moveClusterDrag: interactionController.moveClusterDrag,
+            endClusterDrag: interactionController.endClusterDrag,
+            beginLocusDrag: interactionController.beginLocusDrag,
+            moveLocusDrag: interactionController.moveLocusDrag,
+            endLocusDrag: interactionController.endLocusDrag,
+            beginLocusTrim: interactionController.beginLocusTrim,
+            moveLocusTrim: interactionController.moveLocusTrim,
+            endLocusTrim: interactionController.endLocusTrim,
+            flipLocus: interactionController.flipLocus,
+            onGeneClick: runtime.config.gene.shape.onClick,
+            showGeneMenu: overlay.showGeneMenu,
+            showGroupMenu: overlay.showGroupMenu,
+            setScaleBarLength,
+            chooseLegendColour,
           },
-          chooseLegendColour: (group) => {
-            const picker = container.select("input.colourPicker");
-            picker.on("change", () => {
-              group.colour = picker.node().value;
-              runtime.plot.update();
-            });
-            picker.node().click();
-          },
-        },
-      });
+        });
 
-      if (!hasInitialView) fitInitialView(svg, plot);
+        if (!hasInitialView) fitInitialView(svg, plot);
+      }
     }
 
     function fitInitialView(svg, plot) {
@@ -2527,6 +3217,83 @@
       const y = (height - bounds.height * scale) / 2 - bounds.y * scale;
 
       svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(scale));
+      hasInitialView = true;
+    }
+
+    function fitInitialCanvasView(canvas, scene) {
+      const { width, height } = canvas.getBoundingClientRect();
+      if (!width || !height || !scene.bounds) return;
+
+      const context = canvas.getContext("2d");
+      const bounds = { ...scene.bounds };
+      const include = (x, y) => {
+        bounds.minX = Math.min(bounds.minX, x);
+        bounds.maxX = Math.max(bounds.maxX, x);
+        bounds.minY = Math.min(bounds.minY, y);
+        bounds.maxY = Math.max(bounds.maxY, y);
+      };
+      const textWidth = (text, font) => {
+        context.save();
+        context.font = font;
+        const measured = context.measureText(text).width;
+        context.restore();
+        return measured;
+      };
+
+      for (const cluster of scene.clusters.values()) {
+        const anchorX = cluster.x + cluster.info.x;
+        include(
+          anchorX - textWidth(
+            cluster.source.name,
+            `bold ${runtime.config.cluster.nameFontSize}px ${runtime.config.plot.fontFamily}`
+          ),
+          cluster.y + 8
+        );
+        include(
+          anchorX - textWidth(
+            cluster.info.locusText,
+            `${runtime.config.cluster.lociFontSize}px ${runtime.config.plot.fontFamily}`
+          ),
+          cluster.y + 24
+        );
+      }
+      if (scene.chrome?.legend.visible) {
+        const { legend } = scene.chrome;
+        for (const item of legend.items) {
+          include(
+            legend.position.x + item.textX + textWidth(item.label, `${legend.fontSize}px ${legend.fontFamily}`),
+            legend.position.y + item.y + legend.fontSize
+          );
+        }
+      }
+      if (scene.chrome?.scaleBar.visible) {
+        const { scaleBar } = scene.chrome;
+        include(scaleBar.position.x + scaleBar.length, scaleBar.position.y + scaleBar.height + 20);
+      }
+      if (scene.chrome?.colourBar.visible) {
+        const { colourBar } = scene.chrome;
+        include(colourBar.position.x + colourBar.width, colourBar.position.y + colourBar.height + 20);
+      }
+
+      const padding = 20;
+      const scale = Math.min(
+        1.2,
+        (width - padding * 2) / (bounds.maxX - bounds.minX),
+        (height - padding * 2) / (bounds.maxY - bounds.minY)
+      );
+      const camera = {
+        x: (width - (bounds.maxX - bounds.minX) * scale) / 2 - bounds.minX * scale,
+        y: (height - (bounds.maxY - bounds.minY) * scale) / 2 - bounds.minY * scale,
+        k: scale,
+      };
+      if (canvasZoom) {
+        d3.select(canvas).call(
+          canvasZoom.transform,
+          d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+        );
+      } else {
+        setCamera(chartState, camera);
+      }
       hasInitialView = true;
     }
 
