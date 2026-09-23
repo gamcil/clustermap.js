@@ -87,21 +87,30 @@ export function queryViewportOrdered(index, viewport) {
 
 /** Return IDs whose exact bounds contain a world-space point. */
 export function queryPoint(index, point) {
-  const candidates = queryViewport(index, {
+  const candidates = pointCandidates(index, point);
+  return new Set(candidates);
+}
+
+function pointCandidates(index, point) {
+  return [...queryViewport(index, {
     minX: point.x,
     maxX: point.x,
     minY: point.y,
     maxY: point.y,
+  })].filter((id) => {
+    const bounds = index.boundsById.get(id);
+    return (
+      point.x >= bounds.minX &&
+      point.x <= bounds.maxX &&
+      point.y >= bounds.minY &&
+      point.y <= bounds.maxY
+    );
   });
-  return new Set(
-    [...candidates].filter((id) => {
-      const bounds = index.boundsById.get(id);
-      return (
-        point.x >= bounds.minX &&
-        point.x <= bounds.maxX &&
-        point.y >= bounds.minY &&
-        point.y <= bounds.maxY
-      );
-    })
+}
+
+/** Return point candidates in the order they were added to the index. */
+export function queryPointOrdered(index, point) {
+  return pointCandidates(index, point).sort(
+    (left, right) => index.orderById.get(left) - index.orderById.get(right)
   );
 }

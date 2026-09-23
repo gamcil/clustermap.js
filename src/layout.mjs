@@ -40,6 +40,20 @@ function boundsFromLinkAnchors(anchors) {
   };
 }
 
+function boundsFromRegions(regions) {
+  if (!regions.length) return null;
+  return {
+    minX: Math.min(...regions.map((region) => region.x)),
+    maxX: Math.max(...regions.map((region) => region.x + region.width)),
+    minY: Math.min(...regions.map((region) => region.y)),
+    maxY: Math.max(...regions.map((region) => region.y + region.height)),
+  };
+}
+
+export function clusterPairKey(left, right) {
+  return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
+}
+
 function formatKilobases(basePairs) {
   return `${+(basePairs / 1000).toFixed(1)}kb`;
 }
@@ -199,6 +213,7 @@ export function buildScene(
   const loci = new Map();
   const genes = new Map();
   const links = new Map();
+  const linksByClusterPair = new Map();
   const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
   let minX = Infinity;
   let maxX = -Infinity;
@@ -248,6 +263,7 @@ export function buildScene(
           leftHandleX: start - 8,
           rightHandleX: end,
         },
+        genes: [],
       };
       loci.set(locus.uid, locusLayout);
       clusterLayout.loci.push(locusLayout);
@@ -262,7 +278,7 @@ export function buildScene(
           display.start >= state.start && display.end <= state.end + 1;
         const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
         const polygon = worldPolygon(localPolygon, worldX, y);
-        genes.set(gene.uid, {
+        const geneLayout = {
           source: gene,
           display,
           locus: locusLayout,
@@ -273,9 +289,19 @@ export function buildScene(
           label: getGeneLabelLayout(display, { scaleX, shape, label }),
           labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
           labelDy: getGeneLabelDy(label.position),
-        });
+        };
+        genes.set(gene.uid, geneLayout);
+        locusLayout.genes.push(geneLayout);
       }
     }
+    clusterLayout.bounds = clusterLayout.loci.length
+      ? {
+          minX: Math.min(...clusterLayout.loci.map((locus) => locus.bounds.minX)),
+          maxX: Math.max(...clusterLayout.loci.map((locus) => locus.bounds.maxX)),
+          minY: Math.min(...clusterLayout.loci.map((locus) => locus.bounds.minY)),
+          maxY: Math.max(...clusterLayout.loci.map((locus) => locus.bounds.maxY)),
+        }
+      : null;
   }
 
   const bounds =
@@ -292,7 +318,7 @@ export function buildScene(
     };
   }
 
-  for (const source of data.links) {
+  for (const [order, source] of data.links.entries()) {
     const query = genes.get(source.query.uid);
     const target = genes.get(source.target.uid);
     let anchors = null;
@@ -309,8 +335,9 @@ export function buildScene(
         geneMidpoint,
       });
     }
-    links.set(source.uid, {
+    const linkLayout = {
       source,
+      order,
       anchors,
       bounds: boundsFromLinkAnchors(anchors),
       path: getLinkPath(anchors, link),
@@ -322,21 +349,36 @@ export function buildScene(
         source.identity >= link.threshold &&
         query?.visible &&
         target?.visible,
-    });
+    };
+    links.set(source.uid, linkLayout);
+    if (query && target) {
+      const key = clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid);
+      const pairLinks = linksByClusterPair.get(key) || [];
+      pairLinks.push(source.uid);
+      linksByClusterPair.set(key, pairLinks);
+    }
   }
 
+  const hitRegions = buildHitRegions(loci, genes);
   return {
     clusters,
     loci,
     genes,
     links,
+    linksByClusterPair,
     bounds,
     index: {
       genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
       loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
       links: createSpatialIndex([...links].map(([uid, link]) => [uid, link.bounds])),
+      hitLoci: createSpatialIndex(
+        [...hitRegions.loci].map(([uid, regions]) => [
+          uid,
+          boundsFromRegions([regions.move, regions.trimLeft, regions.trimRight]),
+        ])
+      ),
     },
-    hitRegions: buildHitRegions(loci, genes),
+    hitRegions,
     chrome: buildChrome(bounds, genes, chrome),
   };
 }

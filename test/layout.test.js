@@ -181,6 +181,14 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.equal(trimPreview.geneVisibility.get("top-gene"), false);
   assert.deepEqual(trimPreview.clusterLabelOffsets, new Map([["top", 0], ["bottom", 0]]));
   assert.deepEqual(topLocus.track, { x1: 0, x2: 20, y: 11 });
+  assert.deepEqual(topLocus.genes.map((gene) => gene.source.uid), ["top-gene"]);
+  assert.deepEqual(scene.clusters.get("top").bounds, {
+    minX: 6,
+    maxX: 26,
+    minY: -10,
+    maxY: 32,
+  });
+  assert.deepEqual(scene.linksByClusterPair.get("bottom\u0000top"), ["link"]);
   assert.deepEqual(topLocus.hover, {
     x: 0,
     y: -10,
@@ -227,6 +235,10 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.equal(hitTest(scene, { x: 2, y: 11 }).action, "trim-locus-left");
   assert.equal(hitTest(scene, { x: 20, y: 11 }).action, "move-locus");
   assert.equal(hitTest(scene, { x: 9, y: 11 }).geneUid, "top-gene");
+  assert.equal(
+    hitTest({ ...scene, hitRegions: { ...scene.hitRegions, all: [] } }, { x: 2, y: 11 }).action,
+    "trim-locus-left"
+  );
   assert.equal(hitTest(scene, { x: 200, y: 200 }), null);
   assert.deepEqual(scene.links.get("link").anchors, [8, 14, 11, 28, 22, 41]);
   assert.equal(scene.links.get("link").visible, true);

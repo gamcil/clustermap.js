@@ -1,6 +1,7 @@
 import { rgbaToRgb } from "./utils.js";
 import { hitTest } from "./hitTest.mjs";
 import { queryViewportOrdered } from "./spatialIndex.mjs";
+import { clusterPairKey } from "./layout.mjs";
 
 export function canvasWorldPoint(canvas, event, camera) {
   const bounds = canvas.getBoundingClientRect();
@@ -371,6 +372,58 @@ function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
   );
 }
 
+function recordsForClusterPreview(scene, preview, viewport) {
+  const clusters = [];
+  const clusterUidByOrder = new Map(
+    [...preview.clusterOrder].map(([uid, order]) => [order, uid])
+  );
+  for (const cluster of scene.clusters.values()) {
+    if (!boundsInViewport(cluster.bounds, viewport, { y: clusterOffsetForPreview(preview, cluster.source.uid) })) {
+      continue;
+    }
+    clusters.push(cluster);
+  }
+
+  const loci = [];
+  const genes = [];
+  for (const cluster of clusters) {
+    for (const locus of cluster.loci) {
+      const offsets = offsetsForLocus(preview, locus);
+      if (!boundsInViewport(locus.bounds, viewport, offsets)) continue;
+      loci.push(locus);
+      const locusGenes =
+        locus.genes ||
+        [...scene.genes.values()].filter((gene) => gene.locus.source?.uid === locus.source.uid);
+      for (const gene of locusGenes) {
+        if (
+          geneVisibleForPreview(preview, gene) &&
+          boundsInViewport(gene.bounds, viewport, offsetsForGene(preview, gene))
+        ) {
+          genes.push(gene);
+        }
+      }
+    }
+  }
+
+  const linkUids = new Set();
+  for (const cluster of clusters) {
+    const order = preview.clusterOrder.get(cluster.source.uid);
+    for (const neighbourOrder of [order - 1, order + 1]) {
+      const neighbourUid = clusterUidByOrder.get(neighbourOrder);
+      if (neighbourUid === undefined) continue;
+      for (const uid of scene.linksByClusterPair?.get(clusterPairKey(cluster.source.uid, neighbourUid)) || []) {
+        linkUids.add(uid);
+      }
+    }
+  }
+  const links = [...linkUids]
+    .map((uid) => scene.links.get(uid))
+    .filter(Boolean)
+    .sort((left, right) => left.order - right.order);
+
+  return { clusters, loci, genes, links };
+}
+
 function drawLegend(context, legend) {
   if (!legend.visible) return;
   context.save();
@@ -583,8 +636,11 @@ export function renderCanvas({
 
   const recordsFor = (records, ids) =>
     ids ? ids.map((uid) => records.get(uid)).filter(Boolean) : [...records.values()];
+  const previewRecords = clusterPreview
+    ? recordsForClusterPreview(displayScene, preview, viewport)
+    : null;
 
-  for (const link of recordsFor(displayScene.links, visible?.links)) {
+  for (const link of previewRecords?.links || recordsFor(displayScene.links, visible?.links)) {
     const geometry = linkGeometryForPreview(displayScene, link, preview, config);
     if (
       clusterPreview &&
@@ -607,7 +663,7 @@ export function renderCanvas({
     );
   }
   const drawnClusterLabels = new Set();
-  for (const locus of recordsFor(displayScene.loci, visible?.loci)) {
+  for (const locus of previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci)) {
     const cluster = displayScene.clusters.get(locus.cluster?.uid ?? locus.source.clusterUid);
     if (!cluster) continue;
     if (!drawnClusterLabels.has(cluster.source.uid)) {
@@ -632,10 +688,7 @@ export function renderCanvas({
     hoverLocusUid,
     hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
   );
-  for (const gene of recordsFor(displayScene.genes, visible?.genes)) {
-    if (clusterPreview && !boundsInViewport(gene.bounds, viewport, offsetsForGene(preview, gene))) {
-      continue;
-    }
+  for (const gene of previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes)) {
     drawGene(
       context,
       gene,
