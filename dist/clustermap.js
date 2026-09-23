@@ -1003,17 +1003,17 @@
         0
       );
       const currentIndex = order.indexOf(cluster.uid);
-      refreshLinkPreview();
-      if (targetIndex === currentIndex) return;
-
-      order.splice(currentIndex, 1);
-      order.splice(targetIndex, 0, cluster.uid);
-      order.forEach((uid, index) => {
-        if (uid === cluster.uid) return;
-        clusterSelection(uid)
-          .transition()
-          .attr("transform", `translate(${scales.offset(uid)}, ${range[index]})`);
-      });
+      if (targetIndex !== currentIndex) {
+        order.splice(currentIndex, 1);
+        order.splice(targetIndex, 0, cluster.uid);
+        order.forEach((uid, index) => {
+          if (uid === cluster.uid) return;
+          clusterSelection(uid)
+            .transition()
+            .attr("transform", `translate(${scales.offset(uid)}, ${range[index]})`);
+        });
+      }
+      refreshLinkPreview({ clusterOrder: order });
     };
 
     const ended = (_, cluster) => {
@@ -1216,11 +1216,10 @@
       const gene = lookup.gene(uid);
       return gene && { ...gene, ...interactions.getGeneState(gene) };
     };
-    const areClustersAdjacent = (one, two) => {
-      const order = interactions.getClusterOrder();
+    const areClustersAdjacent = (one, two, order) => {
       return Math.abs(order.indexOf(one) - order.indexOf(two)) === 1;
     };
-    const linkValues = (link) => {
+    const linkValues = (link, clusterOrder) => {
       if (
         !config.link.show ||
         link.identity < config.link.threshold ||
@@ -1231,7 +1230,7 @@
       }
       const anchors = getLinkAnchors(link, {
         geneForUid: displayGene,
-        areClustersAdjacent,
+        areClustersAdjacent: (one, two) => areClustersAdjacent(one, two, clusterOrder),
         scaleX: scales.x,
         horizontalOffset: (gene) =>
           scales.offset(gene.clusterUid) + matrix(plot.selectAll(`#${ids.locus({ uid: gene.locusUid })}`)).e,
@@ -1247,10 +1246,10 @@
       };
     };
 
-    return () => {
+    return ({ clusterOrder = interactions.getClusterOrder() } = {}) => {
       const values = new Map();
       const links = plot.selectAll("g.geneLinkG");
-      links.each((link) => values.set(link.uid, linkValues(link)));
+      links.each((link) => values.set(link.uid, linkValues(link, clusterOrder)));
       links.attr("opacity", (link) => (values.get(link.uid).visible ? 1 : 0));
       links
         .select("path.geneLink")

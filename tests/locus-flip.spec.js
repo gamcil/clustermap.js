@@ -85,6 +85,12 @@ async function readLinkPaths(page) {
     .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("d")));
 }
 
+async function readLinkOpacities(page) {
+  return page
+    .locator("g.geneLinkG")
+    .evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("opacity"))));
+}
+
 async function readGeneDisplays(locus) {
   return locus.locator("g.genes > g.gene").evaluateAll((nodes) =>
     Object.fromEntries(
@@ -371,6 +377,41 @@ test("dragging a cluster persists a snapped vertical order", async ({ page }, te
     secondY: await readTranslateY(second),
     thirdY: await readTranslateY(third),
   }));
+});
+
+test("cluster drag previews link adjacency", async ({ page }, testInfo) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const clusters = page.locator("g.cluster");
+  await expect(clusters).toHaveCount(3);
+  const firstInfo = clusters.nth(0).locator("g.clusterInfo");
+  const secondInfo = clusters.nth(1).locator("g.clusterInfo");
+  const thirdInfo = clusters.nth(2).locator("g.clusterInfo");
+  const [firstBox, secondBox, thirdBox] = await Promise.all([
+    firstInfo.boundingBox(),
+    secondInfo.boundingBox(),
+    thirdInfo.boundingBox(),
+  ]);
+  if (!firstBox || !secondBox || !thirdBox) {
+    throw new Error("cluster drag targets are not visible");
+  }
+
+  await expect.poll(() => readLinkOpacities(page)).toEqual([1, 1, 1]);
+  await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(thirdBox.x + thirdBox.width / 2, thirdBox.y + thirdBox.height / 2, {
+    steps: 10,
+  });
+
+  await expect.poll(() => readLinkOpacities(page)).toEqual([0, 0, 0]);
+  await captureCheckpoint(page, testInfo, "cluster-separated", () => readLinkOpacities(page));
+
+  await page.mouse.move(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height / 2, {
+    steps: 10,
+  });
+  await expect.poll(() => readLinkOpacities(page)).toEqual([1, 1, 1]);
+  await captureCheckpoint(page, testInfo, "clusters-adjacent", () => readLinkOpacities(page));
+  await page.mouse.up();
 });
 
 test("inserting an unlinked cluster hides links between separated clusters", async ({ page }, testInfo) => {
