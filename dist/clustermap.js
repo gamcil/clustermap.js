@@ -120,12 +120,27 @@
     const locusOffsets = previous?.locusOffsets || new Map();
     const camera = previous?.camera || { x: 0, y: 0, k: 1 };
     const dragging = previous?.dragging || false;
+    const preview = previous?.preview || {
+      clusterOrder: null,
+      clusterPositions: new Map(),
+      locusOffsets: new Map(),
+      loci: new Map(),
+    };
     const clusterIds = data.clusters.map((cluster) => cluster.uid);
     const clusterIdSet = new Set(clusterIds);
     const clusterOrder = [
       ...(previous?.clusterOrder || []).filter((uid) => clusterIdSet.has(uid)),
       ...clusterIds.filter((uid) => !previous?.clusterOrder?.includes(uid)),
     ];
+    if (preview.clusterOrder) {
+      preview.clusterOrder = [
+        ...preview.clusterOrder.filter((uid) => clusterIdSet.has(uid)),
+        ...clusterIds.filter((uid) => !preview.clusterOrder.includes(uid)),
+      ];
+    }
+    if (!preview.locusOffsets) preview.locusOffsets = new Map();
+    if (!preview.loci) preview.loci = new Map();
+    if (!preview.clusterPositions) preview.clusterPositions = new Map();
     const present = new Set();
     for (const cluster of data.clusters) {
       if (!clusterOffsets.has(cluster.uid)) clusterOffsets.set(cluster.uid, 0);
@@ -169,7 +184,16 @@
     for (const uid of locusOffsets.keys()) {
       if (!loci.has(uid)) locusOffsets.delete(uid);
     }
-    return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging };
+    for (const uid of preview.locusOffsets.keys()) {
+      if (!loci.has(uid)) preview.locusOffsets.delete(uid);
+    }
+    for (const uid of preview.clusterPositions.keys()) {
+      if (!clusterIdSet.has(uid)) preview.clusterPositions.delete(uid);
+    }
+    for (const uid of preview.loci.keys()) {
+      if (!loci.has(uid)) preview.loci.delete(uid);
+    }
+    return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview };
   }
 
   function isDragging(chartState) {
@@ -181,17 +205,28 @@
   }
 
   function getClusterOrder(chartState) {
-    return chartState.clusterOrder;
+    return chartState.preview.clusterOrder || chartState.clusterOrder;
   }
 
-  function moveClusterToIndex(chartState, uid, index) {
-    const order = [...chartState.clusterOrder];
-    const current = order.indexOf(uid);
-    if (current === -1) return order;
-    order.splice(current, 1);
-    order.splice(Math.max(0, Math.min(index, order.length)), 0, uid);
-    chartState.clusterOrder = order;
-    return order;
+  function setPreviewClusterOrder(chartState, order) {
+    chartState.preview.clusterOrder = [...order];
+  }
+
+  function getClusterPosition(chartState, uid, fallback) {
+    return chartState.preview.clusterPositions.get(uid) ?? fallback;
+  }
+
+  function setPreviewClusterPosition(chartState, uid, position) {
+    chartState.preview.clusterPositions.set(uid, position);
+  }
+
+  function commitPreviewClusterOrder(chartState) {
+    if (chartState.preview.clusterOrder) {
+      chartState.clusterOrder = chartState.preview.clusterOrder;
+      chartState.preview.clusterOrder = null;
+    }
+    chartState.preview.clusterPositions.clear();
+    return chartState.clusterOrder;
   }
 
   function getClusterOffset(chartState, uid) {
@@ -203,11 +238,28 @@
   }
 
   function getLocusOffset(chartState, uid) {
+    return chartState.preview.locusOffsets.get(uid) ?? getCommittedLocusOffset(chartState, uid);
+  }
+
+  function getCommittedLocusOffset(chartState, uid) {
     return chartState.locusOffsets.get(uid) ?? 0;
   }
 
   function setLocusOffset(chartState, uid, offset) {
     chartState.locusOffsets.set(uid, offset);
+  }
+
+  function setPreviewLocusOffset(chartState, uid, offset) {
+    chartState.preview.locusOffsets.set(uid, offset);
+  }
+
+  function commitPreviewLocusOffset(chartState, uid) {
+    const offset = chartState.preview.locusOffsets.get(uid);
+    if (offset !== undefined) {
+      chartState.locusOffsets.set(uid, offset);
+      chartState.preview.locusOffsets.delete(uid);
+    }
+    return getCommittedLocusOffset(chartState, uid);
   }
 
   function initializeLocusOffsets(chartState, defaults) {
@@ -225,7 +277,7 @@
   }
 
   function getLocusState(chartState, locus) {
-    return chartState.loci.get(locus.uid);
+    return chartState.preview.loci.get(locus.uid) || chartState.loci.get(locus.uid);
   }
 
   function getGeneState(chartState, gene) {
@@ -360,6 +412,21 @@
     const state = getLocusState(chartState, locus);
     if (state.end === locus.end) state.trimRight = null;
     if (state.start === locus.start) state.trimLeft = null;
+  }
+
+  function previewLocusTrim(chartState, locus, options) {
+    if (!chartState.preview.loci.has(locus.uid)) {
+      chartState.preview.loci.set(locus.uid, { ...chartState.loci.get(locus.uid) });
+    }
+    return trimLocus(chartState, locus, options);
+  }
+
+  function commitPreviewLocusState(chartState, locus) {
+    const state = chartState.preview.loci.get(locus.uid);
+    if (!state) return getLocusState(chartState, locus);
+    chartState.loci.set(locus.uid, state);
+    chartState.preview.loci.delete(locus.uid);
+    return state;
   }
 
   /**
@@ -644,78 +711,6 @@
     );
   }
 
-  function getLinkAnchors(
-    link,
-    {
-      geneForUid,
-      areClustersAdjacent,
-      scaleX,
-      horizontalOffset,
-      verticalPosition,
-      geneMidpoint,
-    }
-  ) {
-    const query = geneForUid(link.query.uid);
-    const target = geneForUid(link.target.uid);
-
-    if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
-
-    const getGeneAnchors = (gene) => {
-      const offset = horizontalOffset(gene);
-      const left = scaleX(gene.start) + offset;
-      const right = scaleX(gene.end) + offset;
-      const forward = gene.strand === 1;
-      return [
-        forward ? left : right,
-        forward ? right : left,
-        verticalPosition(gene) + geneMidpoint,
-      ];
-    };
-
-    const [ax1, ax2, ay] = getGeneAnchors(query);
-    const [bx1, bx2, by] = getGeneAnchors(target);
-
-    return ay > by
-      ? [bx1, bx2, by, ax1, ax2, ay]
-      : [ax1, ax2, ay, bx1, bx2, by];
-  }
-
-  function getLinkLabelPosition(
-    [ax1, ax2, ay, bx1, bx2, by],
-    position
-  ) {
-    const aMid = ax1 + (ax2 - ax1) / 2;
-    const bMid = bx1 + (bx2 - bx1) / 2;
-    return {
-      x: aMid + (bMid - aMid) * position,
-      y: ay + Math.abs(by - ay) * position,
-    };
-  }
-
-  function straightLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
-    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`;
-  }
-
-  function sankeyLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
-    const verticalMidpoint = ay + Math.abs(by - ay) / 2;
-    return `M${ax2},${ay}C${ax2},${verticalMidpoint},${bx2},${verticalMidpoint},${bx2},${by}L${bx1},${by}C${bx1},${verticalMidpoint},${ax1},${verticalMidpoint},${ax1},${ay}L${ax2},${ay}`;
-  }
-
-  function lineLinkPath([ax1, ax2, ay, bx1, bx2, by], straight) {
-    const aMid = ax1 + (ax2 - ax1) / 2;
-    const bMid = bx1 + (bx2 - bx1) / 2;
-    if (straight) return `M${aMid},${ay} L${bMid},${by}`;
-
-    const verticalMidpoint = (ay + by) / 2;
-    return `M${aMid},${ay}C${aMid},${verticalMidpoint},${bMid},${verticalMidpoint},${bMid},${by}`;
-  }
-
-  function getLinkPath(anchors, { asLine, straight }) {
-    if (!anchors) return "";
-    if (asLine) return lineLinkPath(anchors, straight);
-    return straight ? straightLinkPath(anchors) : sankeyLinkPath(anchors);
-  }
-
   // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
   // host, camera viewport, and interaction state that causes a redraw.
   function renderSvg({
@@ -740,15 +735,6 @@
       .data([data.clusters])
       .join("g")
       .attr("class", "clusters");
-    const refreshLinkPreview = createLinkPreview({
-      plot,
-      config,
-      scales,
-      ids,
-      lookup,
-      interactions,
-    });
-
     const clusters = clusterGroup
       .selectAll("g.cluster")
       .data(data.clusters, (d) => d.uid)
@@ -763,9 +749,7 @@
             .attr("id", ids.clusterInfo)
             .attr("class", "clusterInfo")
             .attr("transform", "translate(-10, 0)")
-            .call(
-              createClusterDrag({ plot, scales, ids, interactions, refreshLinkPreview })
-            );
+            .call(createClusterDrag({ plot, scales, ids, interactions }));
 
           info
             .append("text")
@@ -821,16 +805,7 @@
             .append("rect")
             .attr("class", "hover")
             .attr("fill", "rgba(0, 0, 0, 0.4)")
-            .call(
-              createLocusPositionDrag({
-                config,
-                plot,
-                scales,
-                ids,
-                interactions,
-                refreshLinkPreview,
-              })
-            );
+            .call(createLocusPositionDrag({ plot, interactions }));
           hover
             .append("rect")
             .attr("class", "leftHandle")
@@ -838,11 +813,8 @@
             .call(
               createLocusResizeDrag({
                 config,
-                plot,
                 scales,
-                ids,
                 interactions,
-                refreshLinkPreview,
               })
             );
           hover
@@ -851,11 +823,8 @@
             .call(
               createLocusResizeDrag({
                 config,
-                plot,
                 scales,
-                ids,
                 interactions,
-                refreshLinkPreview,
               })
             );
           hover
@@ -968,7 +937,7 @@
     return selection;
   }
 
-  function createClusterDrag({ plot, scales, ids, interactions, refreshLinkPreview }) {
+  function createClusterDrag({ plot, scales, ids, interactions }) {
     let pointerOffset;
     let range;
     let order;
@@ -989,44 +958,29 @@
     };
 
     const dragged = (event, cluster) => {
-      const subject = clusterSelection(cluster.uid);
-      subject.raise();
       const y = Math.min(
         range[range.length - 1],
         Math.max(range[0], pointerOffset + event.y)
       );
-      subject.attr("transform", `translate(${scales.offset(cluster.uid)}, ${y})`);
-
       const targetIndex = range.reduce(
         (closest, position, index) =>
           Math.abs(position - y) < Math.abs(range[closest] - y) ? index : closest,
         0
       );
       const currentIndex = order.indexOf(cluster.uid);
+      let nextOrder = null;
       if (targetIndex !== currentIndex) {
         order.splice(currentIndex, 1);
         order.splice(targetIndex, 0, cluster.uid);
-        order.forEach((uid, index) => {
-          if (uid === cluster.uid) return;
-          clusterSelection(uid)
-            .transition()
-            .attr("transform", `translate(${scales.offset(uid)}, ${range[index]})`);
-        });
+        nextOrder = order;
       }
-      refreshLinkPreview({ clusterOrder: order });
+      interactions.previewClusterDrag(cluster.uid, y, nextOrder);
     };
 
     const ended = (_, cluster) => {
       interactions.setDragging(false);
-      interactions.moveClusterToIndex(cluster.uid, order.indexOf(cluster.uid));
-      order.forEach((uid, index) => {
-        clusterSelection(uid)
-          .interrupt()
-          .classed("active", false)
-          .attr("cursor", null)
-          .attr("transform", `translate(${scales.offset(uid)}, ${range[index]})`);
-      });
-      refreshLinkPreview();
+      clusterSelection(cluster.uid).classed("active", false).attr("cursor", null);
+      interactions.commitClusterOrder();
     };
 
     return d3
@@ -1039,234 +993,55 @@
       .on("end", ended);
   }
 
-  function createLocusPositionDrag({
-    config,
-    plot,
-    scales,
-    ids,
-    interactions,
-    refreshLinkPreview,
-  }) {
-    let minPos;
-    let maxPos;
+  function createLocusPositionDrag({ plot, interactions }) {
     let pointerStart;
-    let value;
-
-    const locusSelection = (uid) => plot.selectAll(`#${ids.locus({ uid })}`);
+    let initialValue;
 
     const started = (event, locus) => {
-      [minPos, maxPos] = interactions.getLocusMoveBounds(locus.uid);
       pointerStart = event.x;
-      value = interactions.getLocusOffset(locus.uid);
+      initialValue = interactions.getLocusOffset(locus.uid);
       interactions.setDragging(true);
     };
 
     const dragged = (event, locus) => {
-      value += event.x - pointerStart;
-      const subject = locusSelection(locus.uid);
-      subject.attr("transform", `translate(${value}, 0)`);
-      refreshLinkPreview();
-
-      const state = interactions.getLocusState(locus);
-      const locusStart = scales.x(state.start);
-      if (config.cluster.alignLabels) {
-        const locusMin = value + scales.offset(locus.clusterUid) + locusStart;
-        const newMin = Math.min(locusMin, minPos) - 10;
-        plot.selectAll("g.clusterInfo").attr(
-          "transform",
-          (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
-        );
-      } else {
-        plot.selectAll(`#${ids.clusterInfo({ uid: locus.clusterUid })}`).attr(
-          "transform",
-          `translate(${value + locusStart - 10}, 0)`
-        );
-      }
-
-      const locusEnd = scales.x(state.end);
-      const newMax = Math.max(value + scales.offset(locus.clusterUid) + locusEnd, maxPos) + 20;
-      plot.selectAll("g.legend").attr("transform", `translate(${newMax}, 0)`);
+      interactions.previewLocusOffset(locus.uid, initialValue + event.x - pointerStart);
     };
 
     const ended = (_, locus) => {
       interactions.setDragging(false);
-      interactions.setLocusOffset(locus.uid, value);
-      interactions.redraw({ animate: false });
+      interactions.commitLocusOffset(locus.uid);
     };
 
-    return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
+    return d3
+      .drag()
+      .container(() => plot.node())
+      .on("start", started)
+      .on("drag", dragged)
+      .on("end", ended);
   }
 
   // Resize changes chart state through the controller, while this renderer-owned
   // adapter supplies immediate SVG feedback until the final redraw.
-  function createLocusResizeDrag({
-    config,
-    plot,
-    scales,
-    ids,
-    interactions,
-    refreshLinkPreview,
-  }) {
-    let minPos;
-    let maxPos;
-
-    const locusSelection = (uid) => plot.selectAll(`#${ids.locus({ uid })}`);
-    const realLength = (state) => scales.x(state.end) - scales.x(state.start);
-    const updateTrackBar = (selection, state) => {
-      const y = config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2;
-      selection
-        .selectAll("line.trackBar")
-        .interrupt()
-        .attr("x1", scales.x(state.start))
-        .attr("x2", scales.x(state.end))
-        .attr("y1", y)
-        .attr("y2", y);
-    };
-    const updateVisibleGenes = (selection, state) => {
-      selection.selectAll("g.genes").selectAll("g.gene").attr("display", (gene) => {
-        const display = interactions.getGeneState(gene);
-        return display.start >= state.start && display.end <= state.end + 1
-          ? "inline"
-          : "none";
-      });
-    };
-    const started = (_, locus) => {
-      [minPos, maxPos] = interactions.getLocusMoveBounds(locus.uid);
-      interactions.setDragging(true);
-    };
-
-    const dragLeft = (event, locus, handle) => {
-      const { state, coordinate } = interactions.trimLocus(locus, {
-        edge: "left",
+  function createLocusResizeDrag({ config, scales, interactions }) {
+    const started = () => interactions.setDragging(true);
+    const trim = (event, locus, edge) =>
+      interactions.previewLocusTrim(locus, {
+        edge,
         position: event.x,
         coordinateFor: scales.x,
         scaleGenes: config.plot.scaleGenes,
       });
-      const subject = locusSelection(locus.uid);
-      handle.attr("x", coordinate - 8);
-      subject
-        .selectAll("rect.hover")
-        .attr("x", coordinate)
-        .attr("width", realLength(state));
-      updateVisibleGenes(subject, state);
-      updateTrackBar(subject, state);
-      refreshLinkPreview();
-
-      if (config.cluster.alignLabels) {
-        const offset = scales.offset(locus.clusterUid) + scales.locus(locus.uid);
-        const newMin = Math.min(coordinate + offset, minPos) - 10;
-        plot.selectAll("g.clusterInfo").attr(
-          "transform",
-          (cluster) => `translate(${newMin - scales.offset(cluster.uid)}, 0)`
-        );
-      } else {
-        plot.selectAll(`#${ids.clusterInfo({ uid: locus.clusterUid })}`).attr(
-          "transform",
-          `translate(${scales.locus(locus.uid) + scales.x(state.start) - 10}, 0)`
-        );
-      }
-    };
-
-    const dragRight = (event, locus, handle) => {
-      const { state, coordinate } = interactions.trimLocus(locus, {
-        edge: "right",
-        position: event.x,
-        coordinateFor: scales.x,
-        scaleGenes: config.plot.scaleGenes,
-      });
-      const subject = locusSelection(locus.uid);
-      handle.attr("x", coordinate);
-      subject.selectAll("rect.hover").attr("width", realLength(state));
-      updateVisibleGenes(subject, state);
-      updateTrackBar(subject, state);
-      refreshLinkPreview();
-
-      const locusEnd = scales.x(state.end);
-      const newMax = Math.max(
-        scales.offset(locus.clusterUid) + scales.locus(locus.uid) + locusEnd,
-        maxPos
-      ) + config.legend.marginLeft;
-      plot.selectAll("g.legend").attr("transform", `translate(${newMax}, 0)`);
-    };
 
     const dragged = function (event, locus) {
-      const handle = d3.select(this);
-      if (handle.classed("leftHandle")) dragLeft(event, locus, handle);
-      else dragRight(event, locus, handle);
+      trim(event, locus, d3.select(this).classed("leftHandle") ? "left" : "right");
     };
 
     const ended = (_, locus) => {
       interactions.setDragging(false);
-      interactions.finalizeLocusTrim(locus);
-      locusSelection(locus.uid).select("g.hover").transition().attr("opacity", 0);
-      interactions.redraw({ animate: false });
+      interactions.commitLocusTrim(locus);
     };
 
     return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
-  }
-
-  function createLinkPreview({ plot, config, scales, ids, lookup, interactions }) {
-    const matrix = (selection) => {
-      const transform = selection.node().transform.baseVal;
-      return transform.numberOfItems ? transform.getItem(0).matrix : { e: 0, f: 0 };
-    };
-    const geneIsVisible = (uid) =>
-      plot.selectAll(`#${ids.gene({ uid })}`).attr("display") !== "none";
-    const displayGene = (uid) => {
-      const gene = lookup.gene(uid);
-      return gene && { ...gene, ...interactions.getGeneState(gene) };
-    };
-    const areClustersAdjacent = (one, two, order) => {
-      return Math.abs(order.indexOf(one) - order.indexOf(two)) === 1;
-    };
-    const linkValues = (link, clusterOrder) => {
-      if (
-        !config.link.show ||
-        link.identity < config.link.threshold ||
-        !geneIsVisible(link.query.uid) ||
-        !geneIsVisible(link.target.uid)
-      ) {
-        return { anchors: null, visible: false, labelPosition: null };
-      }
-      const anchors = getLinkAnchors(link, {
-        geneForUid: displayGene,
-        areClustersAdjacent: (one, two) => areClustersAdjacent(one, two, clusterOrder),
-        scaleX: scales.x,
-        horizontalOffset: (gene) =>
-          scales.offset(gene.clusterUid) + matrix(plot.selectAll(`#${ids.locus({ uid: gene.locusUid })}`)).e,
-        verticalPosition: (gene) => matrix(plot.selectAll(`#${ids.cluster({ uid: gene.clusterUid })}`)).f,
-        geneMidpoint: config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2,
-      });
-      return {
-        anchors,
-        visible: Boolean(anchors),
-        labelPosition: anchors
-          ? getLinkLabelPosition(anchors, config.link.label.position)
-          : null,
-      };
-    };
-
-    return ({ clusterOrder = interactions.getClusterOrder() } = {}) => {
-      const values = new Map();
-      const links = plot.selectAll("g.geneLinkG");
-      links.each((link) => values.set(link.uid, linkValues(link, clusterOrder)));
-      links.attr("opacity", (link) => (values.get(link.uid).visible ? 1 : 0));
-      links
-        .select("path.geneLink")
-        .attr("d", (link) =>
-          getLinkPath(values.get(link.uid).anchors, {
-            asLine: config.link.asLine,
-            straight: config.link.straight,
-          })
-        );
-      links
-        .select("text.geneLinkLabel")
-        .attr("opacity", (link) =>
-          config.link.label.show && values.get(link.uid).visible ? 1 : 0
-        )
-        .attr("x", (link) => values.get(link.uid).labelPosition?.x)
-        .attr("y", (link) => values.get(link.uid).labelPosition?.y);
-    };
   }
 
   function updateLoci(selection, scene, config) {
@@ -1744,6 +1519,78 @@
     }
   }
 
+  function getLinkAnchors(
+    link,
+    {
+      geneForUid,
+      areClustersAdjacent,
+      scaleX,
+      horizontalOffset,
+      verticalPosition,
+      geneMidpoint,
+    }
+  ) {
+    const query = geneForUid(link.query.uid);
+    const target = geneForUid(link.target.uid);
+
+    if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
+
+    const getGeneAnchors = (gene) => {
+      const offset = horizontalOffset(gene);
+      const left = scaleX(gene.start) + offset;
+      const right = scaleX(gene.end) + offset;
+      const forward = gene.strand === 1;
+      return [
+        forward ? left : right,
+        forward ? right : left,
+        verticalPosition(gene) + geneMidpoint,
+      ];
+    };
+
+    const [ax1, ax2, ay] = getGeneAnchors(query);
+    const [bx1, bx2, by] = getGeneAnchors(target);
+
+    return ay > by
+      ? [bx1, bx2, by, ax1, ax2, ay]
+      : [ax1, ax2, ay, bx1, bx2, by];
+  }
+
+  function getLinkLabelPosition(
+    [ax1, ax2, ay, bx1, bx2, by],
+    position
+  ) {
+    const aMid = ax1 + (ax2 - ax1) / 2;
+    const bMid = bx1 + (bx2 - bx1) / 2;
+    return {
+      x: aMid + (bMid - aMid) * position,
+      y: ay + Math.abs(by - ay) * position,
+    };
+  }
+
+  function straightLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
+    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`;
+  }
+
+  function sankeyLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
+    const verticalMidpoint = ay + Math.abs(by - ay) / 2;
+    return `M${ax2},${ay}C${ax2},${verticalMidpoint},${bx2},${verticalMidpoint},${bx2},${by}L${bx1},${by}C${bx1},${verticalMidpoint},${ax1},${verticalMidpoint},${ax1},${ay}L${ax2},${ay}`;
+  }
+
+  function lineLinkPath([ax1, ax2, ay, bx1, bx2, by], straight) {
+    const aMid = ax1 + (ax2 - ax1) / 2;
+    const bMid = bx1 + (bx2 - bx1) / 2;
+    if (straight) return `M${aMid},${ay} L${bMid},${by}`;
+
+    const verticalMidpoint = (ay + by) / 2;
+    return `M${aMid},${ay}C${aMid},${verticalMidpoint},${bMid},${verticalMidpoint},${bMid},${by}`;
+  }
+
+  function getLinkPath(anchors, { asLine, straight }) {
+    if (!anchors) return "";
+    if (asLine) return lineLinkPath(anchors, straight);
+    return straight ? straightLinkPath(anchors) : sankeyLinkPath(anchors);
+  }
+
   function worldPolygon(points, x, y) {
     return points.map((point, index) => point + (index % 2 === 0 ? x : y));
   }
@@ -1835,6 +1682,7 @@
     {
       scaleX,
       scaleY,
+      clusterPosition = scaleY,
       clusterOffset,
       locusOffset,
       getLocusState,
@@ -1860,7 +1708,7 @@
 
     for (const cluster of data.clusters) {
       const x = clusterOffset(cluster.uid);
-      const y = scaleY(cluster.uid);
+      const y = clusterPosition(cluster.uid);
       const clusterLayout = { source: cluster, x, y, loci: [] };
       clusters.set(cluster.uid, clusterLayout);
 
@@ -2013,7 +1861,7 @@
     setLocusOffset(
       chartState,
       locus.uid,
-      getLocusOffset(chartState, locus.uid) +
+      getCommittedLocusOffset(chartState, locus.uid) +
         xDistance(scales.x, locusState(locus).start, oldStart)
     );
     refreshLocusOffsetScale();
@@ -2093,6 +1941,7 @@
       currentScene = buildScene(data, {
         scaleX: scales.x,
         scaleY: scales.y,
+        clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
         clusterOffset: scales.offset,
         locusOffset: scales.locus,
         getLocusState: locusState,
@@ -2352,7 +2201,7 @@
       });
     }
 
-    function update(data, { animate = true } = {}) {
+    function update(data, { animate = true, synchronize = true } = {}) {
       data = normalizeChartData(data);
       const chartIndex = createChartIndex(data);
       chartState = createChartState(data, chartState);
@@ -2464,7 +2313,7 @@
       applyCamera(svg.select("g.clusterMapViewport"));
 
       runtime.scale.update(data);
-      runtime.synchronizeLocusLayoutStates(data);
+      if (synchronize) runtime.synchronizeLocusLayoutStates(data);
 
       // Only disable grouping if explicitly defined false
       if (data.config && data.config.updateGroups === false) {
@@ -2491,27 +2340,33 @@
           isDragging: () => isDragging(chartState),
           setDragging: (dragging) => setDragging(chartState, dragging),
           getClusterOrder: () => getClusterOrder(chartState),
-          moveClusterToIndex: (uid, index) =>
-            moveClusterToIndex(chartState, uid, index),
-          redraw: (options) => runtime.plot.update(options),
+          previewClusterDrag: (uid, position, order) => {
+            setPreviewClusterPosition(chartState, uid, position);
+            if (order) setPreviewClusterOrder(chartState, order);
+            runtime.plot.update({ animate: false });
+          },
+          commitClusterOrder: () => {
+            commitPreviewClusterOrder(chartState);
+            runtime.plot.update({ animate: false });
+          },
           getLocusOffset: (uid) => getLocusOffset(chartState, uid),
-          getLocusState: (locus) => getLocusState(chartState, locus),
-          getGeneState: (gene) => getGeneState(chartState, gene),
-          setLocusOffset: (uid, offset) => setLocusOffset(chartState, uid, offset),
-          trimLocus: (locus, options) => trimLocus(chartState, locus, options),
-          finalizeLocusTrim: (locus) => finalizeLocusTrim(chartState, locus),
-          getLocusMoveBounds: (locusUid) => {
-            const otherLoci = [...scene.loci.values()].filter(
-              (locus) => locus.source.uid !== locusUid
-            );
-            const currentLocus = scene.loci.get(locusUid);
-            if (!otherLoci.length) {
-              return [currentLocus.worldStart, currentLocus.worldEnd];
-            }
-            return [
-              Math.min(...otherLoci.map((locus) => locus.worldStart)),
-              Math.max(...otherLoci.map((locus) => locus.worldEnd)),
-            ];
+          previewLocusOffset: (uid, offset) => {
+            setPreviewLocusOffset(chartState, uid, offset);
+            runtime.plot.update({ animate: false });
+          },
+          commitLocusOffset: (uid) => {
+            commitPreviewLocusOffset(chartState, uid);
+            runtime.plot.update({ animate: false });
+          },
+          previewLocusTrim: (locus, options) => {
+            const result = previewLocusTrim(chartState, locus, options);
+            runtime.plot.update({ animate: false, synchronize: false });
+            return result;
+          },
+          commitLocusTrim: (locus) => {
+            finalizeLocusTrim(chartState, locus);
+            commitPreviewLocusState(chartState, locus);
+            runtime.plot.update({ animate: false });
           },
           flipLocus: (locus) => {
             flipLocus(chartState, locus);

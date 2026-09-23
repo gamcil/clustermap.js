@@ -379,6 +379,35 @@ test("dragging a cluster persists a snapped vertical order", async ({ page }, te
   }));
 });
 
+test("dragging a cluster follows the pointer before it changes rows", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const clusters = page.locator("g.cluster");
+  const first = clusters.nth(0);
+  const firstInfo = first.locator("g.clusterInfo");
+  const secondInfo = clusters.nth(1).locator("g.clusterInfo");
+  const [firstBox, secondBox] = await Promise.all([
+    firstInfo.boundingBox(),
+    secondInfo.boundingBox(),
+  ]);
+  if (!firstBox || !secondBox) throw new Error("cluster drag targets are not visible");
+
+  const beforeY = await readTranslateY(first);
+  const pointerX = firstBox.x + firstBox.width / 2;
+  const pointerY = firstBox.y + firstBox.height / 2;
+  await page.mouse.move(pointerX, pointerY);
+  await page.mouse.down();
+  await page.mouse.move(pointerX, pointerY + (secondBox.y - firstBox.y) / 4);
+
+  await expect
+    .poll(async () => {
+      const y = await readTranslateY(first);
+      return y > beforeY + 1 && y < beforeY + (secondBox.y - firstBox.y) / 2;
+    })
+    .toBe(true);
+  await page.mouse.up();
+});
+
 test("cluster drag previews link adjacency", async ({ page }, testInfo) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
 
@@ -459,7 +488,18 @@ test("dragging a locus persists its horizontal position", async ({ page }, testI
 
   await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
   await page.mouse.down();
-  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2);
+  const startX = start.x + start.width / 2;
+  const endX = end.x + end.width / 2;
+  const dragY = end.y + end.height / 2;
+  await page.mouse.move(startX + (endX - startX) / 3, dragY);
+  const firstPreviewX = await readTranslateX(locus);
+  await page.mouse.move(startX + (2 * (endX - startX)) / 3, dragY);
+  const secondPreviewX = await readTranslateX(locus);
+  expect(Math.sign(firstPreviewX - before.locusX)).toBe(Math.sign(endX - startX));
+  expect(Math.abs(secondPreviewX - before.locusX)).toBeGreaterThan(
+    Math.abs(firstPreviewX - before.locusX) + 1
+  );
+  await page.mouse.move(endX, dragY, { steps: 4 });
   await expect.poll(() => readLinkPaths(page)).not.toEqual(beforePaths);
   await page.mouse.up();
   await waitForPaint(page);

@@ -100,6 +100,7 @@ export function buildScene(
   {
     scaleX,
     scaleY,
+    clusterPosition = scaleY,
     clusterOffset,
     locusOffset,
     getLocusState,
@@ -125,7 +126,7 @@ export function buildScene(
 
   for (const cluster of data.clusters) {
     const x = clusterOffset(cluster.uid);
-    const y = scaleY(cluster.uid);
+    const y = clusterPosition(cluster.uid);
     const clusterLayout = { source: cluster, x, y, loci: [] };
     clusters.set(cluster.uid, clusterLayout);
 

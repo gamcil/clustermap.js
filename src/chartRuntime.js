@@ -4,6 +4,8 @@ import { getGroupScaleValues } from "./links/groups.mjs";
 import {
   anchorGeneGroup,
   getClusterOffset,
+  getClusterPosition,
+  getCommittedLocusOffset,
   formatLocusText,
   getClusterOrder,
   getGeneState,
@@ -55,7 +57,7 @@ function synchronizeLocusLayoutState(locus) {
   setLocusOffset(
     chartState,
     locus.uid,
-    getLocusOffset(chartState, locus.uid) +
+    getCommittedLocusOffset(chartState, locus.uid) +
       xDistance(scales.x, locusState(locus).start, oldStart)
   );
   refreshLocusOffsetScale();
@@ -135,6 +137,7 @@ const scene = {
     currentScene = buildScene(data, {
       scaleX: scales.x,
       scaleY: scales.y,
+      clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
       clusterOffset: scales.offset,
       locusOffset: scales.locus,
       getLocusState: locusState,

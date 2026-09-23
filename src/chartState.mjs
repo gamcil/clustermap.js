@@ -5,12 +5,27 @@ export function createChartState(data, previous = null) {
   const locusOffsets = previous?.locusOffsets || new Map();
   const camera = previous?.camera || { x: 0, y: 0, k: 1 };
   const dragging = previous?.dragging || false;
+  const preview = previous?.preview || {
+    clusterOrder: null,
+    clusterPositions: new Map(),
+    locusOffsets: new Map(),
+    loci: new Map(),
+  };
   const clusterIds = data.clusters.map((cluster) => cluster.uid);
   const clusterIdSet = new Set(clusterIds);
   const clusterOrder = [
     ...(previous?.clusterOrder || []).filter((uid) => clusterIdSet.has(uid)),
     ...clusterIds.filter((uid) => !previous?.clusterOrder?.includes(uid)),
   ];
+  if (preview.clusterOrder) {
+    preview.clusterOrder = [
+      ...preview.clusterOrder.filter((uid) => clusterIdSet.has(uid)),
+      ...clusterIds.filter((uid) => !preview.clusterOrder.includes(uid)),
+    ];
+  }
+  if (!preview.locusOffsets) preview.locusOffsets = new Map();
+  if (!preview.loci) preview.loci = new Map();
+  if (!preview.clusterPositions) preview.clusterPositions = new Map();
   const present = new Set();
   for (const cluster of data.clusters) {
     if (!clusterOffsets.has(cluster.uid)) clusterOffsets.set(cluster.uid, 0);
@@ -54,7 +69,16 @@ export function createChartState(data, previous = null) {
   for (const uid of locusOffsets.keys()) {
     if (!loci.has(uid)) locusOffsets.delete(uid);
   }
-  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging };
+  for (const uid of preview.locusOffsets.keys()) {
+    if (!loci.has(uid)) preview.locusOffsets.delete(uid);
+  }
+  for (const uid of preview.clusterPositions.keys()) {
+    if (!clusterIdSet.has(uid)) preview.clusterPositions.delete(uid);
+  }
+  for (const uid of preview.loci.keys()) {
+    if (!loci.has(uid)) preview.loci.delete(uid);
+  }
+  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview };
 }
 
 export function isDragging(chartState) {
@@ -66,11 +90,32 @@ export function setDragging(chartState, dragging) {
 }
 
 export function getClusterOrder(chartState) {
-  return chartState.clusterOrder;
+  return chartState.preview.clusterOrder || chartState.clusterOrder;
 }
 
 export function setClusterOrder(chartState, order) {
   chartState.clusterOrder = [...order];
+}
+
+export function setPreviewClusterOrder(chartState, order) {
+  chartState.preview.clusterOrder = [...order];
+}
+
+export function getClusterPosition(chartState, uid, fallback) {
+  return chartState.preview.clusterPositions.get(uid) ?? fallback;
+}
+
+export function setPreviewClusterPosition(chartState, uid, position) {
+  chartState.preview.clusterPositions.set(uid, position);
+}
+
+export function commitPreviewClusterOrder(chartState) {
+  if (chartState.preview.clusterOrder) {
+    chartState.clusterOrder = chartState.preview.clusterOrder;
+    chartState.preview.clusterOrder = null;
+  }
+  chartState.preview.clusterPositions.clear();
+  return chartState.clusterOrder;
 }
 
 export function moveClusterToIndex(chartState, uid, index) {
@@ -92,11 +137,28 @@ export function setClusterOffset(chartState, uid, offset) {
 }
 
 export function getLocusOffset(chartState, uid) {
+  return chartState.preview.locusOffsets.get(uid) ?? getCommittedLocusOffset(chartState, uid);
+}
+
+export function getCommittedLocusOffset(chartState, uid) {
   return chartState.locusOffsets.get(uid) ?? 0;
 }
 
 export function setLocusOffset(chartState, uid, offset) {
   chartState.locusOffsets.set(uid, offset);
+}
+
+export function setPreviewLocusOffset(chartState, uid, offset) {
+  chartState.preview.locusOffsets.set(uid, offset);
+}
+
+export function commitPreviewLocusOffset(chartState, uid) {
+  const offset = chartState.preview.locusOffsets.get(uid);
+  if (offset !== undefined) {
+    chartState.locusOffsets.set(uid, offset);
+    chartState.preview.locusOffsets.delete(uid);
+  }
+  return getCommittedLocusOffset(chartState, uid);
 }
 
 export function initializeLocusOffsets(chartState, defaults) {
@@ -114,7 +176,7 @@ export function setCamera(chartState, { x, y, k }) {
 }
 
 export function getLocusState(chartState, locus) {
-  return chartState.loci.get(locus.uid);
+  return chartState.preview.loci.get(locus.uid) || chartState.loci.get(locus.uid);
 }
 
 export function getGeneState(chartState, gene) {
@@ -249,6 +311,21 @@ export function finalizeLocusTrim(chartState, locus) {
   const state = getLocusState(chartState, locus);
   if (state.end === locus.end) state.trimRight = null;
   if (state.start === locus.start) state.trimLeft = null;
+}
+
+export function previewLocusTrim(chartState, locus, options) {
+  if (!chartState.preview.loci.has(locus.uid)) {
+    chartState.preview.loci.set(locus.uid, { ...chartState.loci.get(locus.uid) });
+  }
+  return trimLocus(chartState, locus, options);
+}
+
+export function commitPreviewLocusState(chartState, locus) {
+  const state = chartState.preview.loci.get(locus.uid);
+  if (!state) return getLocusState(chartState, locus);
+  chartState.loci.set(locus.uid, state);
+  chartState.preview.loci.delete(locus.uid);
+  return state;
 }
 
 /**

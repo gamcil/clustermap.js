@@ -1,19 +1,21 @@
 import { createLinkGroups } from "./links/groups.mjs";
 import {
   createChartState,
+  commitPreviewClusterOrder,
+  commitPreviewLocusOffset,
+  commitPreviewLocusState,
   getCamera,
   getClusterOrder,
-  getGeneState,
   getLocusOffset,
-  getLocusState,
   isDragging,
   finalizeLocusTrim,
   flipLocus,
-  moveClusterToIndex,
   setCamera,
   setDragging,
-  setLocusOffset,
-  trimLocus,
+  setPreviewLocusOffset,
+  setPreviewClusterOrder,
+  setPreviewClusterPosition,
+  previewLocusTrim,
 } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
@@ -42,7 +44,7 @@ export default function clusterMap() {
     });
   }
 
-  function update(data, { animate = true } = {}) {
+  function update(data, { animate = true, synchronize = true } = {}) {
     data = normalizeChartData(data);
     const chartIndex = createChartIndex(data);
     chartState = createChartState(data, chartState);
@@ -154,7 +156,7 @@ export default function clusterMap() {
     applyCamera(svg.select("g.clusterMapViewport"));
 
     runtime.scale.update(data);
-    runtime.synchronizeLocusLayoutStates(data);
+    if (synchronize) runtime.synchronizeLocusLayoutStates(data);
 
     // Only disable grouping if explicitly defined false
     if (data.config && data.config.updateGroups === false) {
@@ -181,27 +183,33 @@ export default function clusterMap() {
         isDragging: () => isDragging(chartState),
         setDragging: (dragging) => setDragging(chartState, dragging),
         getClusterOrder: () => getClusterOrder(chartState),
-        moveClusterToIndex: (uid, index) =>
-          moveClusterToIndex(chartState, uid, index),
-        redraw: (options) => runtime.plot.update(options),
+        previewClusterDrag: (uid, position, order) => {
+          setPreviewClusterPosition(chartState, uid, position);
+          if (order) setPreviewClusterOrder(chartState, order);
+          runtime.plot.update({ animate: false });
+        },
+        commitClusterOrder: () => {
+          commitPreviewClusterOrder(chartState);
+          runtime.plot.update({ animate: false });
+        },
         getLocusOffset: (uid) => getLocusOffset(chartState, uid),
-        getLocusState: (locus) => getLocusState(chartState, locus),
-        getGeneState: (gene) => getGeneState(chartState, gene),
-        setLocusOffset: (uid, offset) => setLocusOffset(chartState, uid, offset),
-        trimLocus: (locus, options) => trimLocus(chartState, locus, options),
-        finalizeLocusTrim: (locus) => finalizeLocusTrim(chartState, locus),
-        getLocusMoveBounds: (locusUid) => {
-          const otherLoci = [...scene.loci.values()].filter(
-            (locus) => locus.source.uid !== locusUid
-          );
-          const currentLocus = scene.loci.get(locusUid);
-          if (!otherLoci.length) {
-            return [currentLocus.worldStart, currentLocus.worldEnd];
-          }
-          return [
-            Math.min(...otherLoci.map((locus) => locus.worldStart)),
-            Math.max(...otherLoci.map((locus) => locus.worldEnd)),
-          ];
+        previewLocusOffset: (uid, offset) => {
+          setPreviewLocusOffset(chartState, uid, offset);
+          runtime.plot.update({ animate: false });
+        },
+        commitLocusOffset: (uid) => {
+          commitPreviewLocusOffset(chartState, uid);
+          runtime.plot.update({ animate: false });
+        },
+        previewLocusTrim: (locus, options) => {
+          const result = previewLocusTrim(chartState, locus, options);
+          runtime.plot.update({ animate: false, synchronize: false });
+          return result;
+        },
+        commitLocusTrim: (locus) => {
+          finalizeLocusTrim(chartState, locus);
+          commitPreviewLocusState(chartState, locus);
+          runtime.plot.update({ animate: false });
         },
         flipLocus: (locus) => {
           flipLocus(chartState, locus);

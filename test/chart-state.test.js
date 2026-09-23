@@ -36,6 +36,50 @@ test("chart state moves a cluster to a requested row", async () => {
   assert.deepEqual(getClusterOrder(state), ["c", "b", "a"]);
 });
 
+test("chart state previews a cluster order before committing it", async () => {
+  const {
+    commitPreviewClusterOrder,
+    createChartState,
+    getClusterOrder,
+    getClusterPosition,
+    setPreviewClusterPosition,
+    setPreviewClusterOrder,
+  } = await import("../src/chartState.mjs");
+  const state = createChartState(dataFor("a", "b", "c"));
+
+  setPreviewClusterOrder(state, ["b", "c", "a"]);
+  setPreviewClusterPosition(state, "a", 21);
+  assert.deepEqual(getClusterOrder(state), ["b", "c", "a"]);
+  assert.deepEqual(state.clusterOrder, ["a", "b", "c"]);
+  assert.equal(getClusterPosition(state, "a", 0), 21);
+
+  commitPreviewClusterOrder(state);
+  assert.deepEqual(getClusterOrder(state), ["b", "c", "a"]);
+  assert.deepEqual(state.clusterOrder, ["b", "c", "a"]);
+  assert.equal(getClusterPosition(state, "a", 0), 0);
+});
+
+test("chart state previews a locus offset before committing it", async () => {
+  const {
+    commitPreviewLocusOffset,
+    createChartState,
+    getCommittedLocusOffset,
+    getLocusOffset,
+    setPreviewLocusOffset,
+  } = await import("../src/chartState.mjs");
+  const state = createChartState({
+    clusters: [{ uid: "a", loci: [{ uid: "a-locus", start: 0, end: 10, genes: [] }] }],
+  });
+
+  setPreviewLocusOffset(state, "a-locus", 42);
+  assert.equal(getLocusOffset(state, "a-locus"), 42);
+  assert.equal(getCommittedLocusOffset(state, "a-locus"), 0);
+
+  commitPreviewLocusOffset(state, "a-locus");
+  assert.equal(getLocusOffset(state, "a-locus"), 42);
+  assert.equal(state.locusOffsets.get("a-locus"), 42);
+});
+
 test("chart state persists horizontal offsets across data refreshes", async () => {
   const {
     createChartState,

@@ -121,6 +121,29 @@ test("trimming selects display-side gene boundaries without renderer state", asy
   assert.equal(state.loci.get(locus.uid).trimRight, locus.genes[1]);
 });
 
+test("trimming previews bounds without changing committed locus state", async () => {
+  const {
+    commitPreviewLocusState,
+    createChartState,
+    getLocusState,
+    previewLocusTrim,
+  } = await import("../src/chartState.mjs");
+  const locus = createLocus();
+  const state = createChartState({ clusters: [{ loci: [locus] }] });
+
+  previewLocusTrim(state, locus, {
+    edge: "left",
+    position: 2400,
+    coordinateFor: (value) => value,
+    scaleGenes: true,
+  });
+  assert.equal(getLocusState(state, locus).start, 2500);
+  assert.equal(state.loci.get(locus.uid).start, 0);
+
+  commitPreviewLocusState(state, locus);
+  assert.equal(state.loci.get(locus.uid).start, 2500);
+});
+
 test("locus labels show trimmed and reversed coordinates", async () => {
   const { createChartState, formatLocusText } = await import("../src/chartState.mjs");
   const locus = createLocus();
