@@ -3,11 +3,13 @@
 export function createHtmlOverlay({ tooltip, scales, actions }) {
   const show = (event, contents) => {
     tooltip.html("").append(() => contents.node());
-    const rect = event.target.getBoundingClientRect();
     const bounds = tooltip.node().getBoundingClientRect();
+    const rect = event.target?.getBoundingClientRect?.();
+    const x = event.clientX ?? (rect ? rect.x + rect.width / 2 : 0);
+    const y = event.clientY ?? (rect ? rect.y + rect.height : 0);
     tooltip
-      .style("left", `${rect.x + rect.width / 2 - bounds.width / 2}px`)
-      .style("top", `${rect.y + rect.height * 1.2}px`)
+      .style("left", `${x - bounds.width / 2}px`)
+      .style("top", `${y + 12}px`)
       .transition()
       .duration(100)
       .style("opacity", 1)

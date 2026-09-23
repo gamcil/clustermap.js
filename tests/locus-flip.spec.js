@@ -675,6 +675,42 @@ test("canvas renderer forwards locus double-clicks to the shared controller", as
   await expect(page.locator("g.clusterInfo text.locusText").first()).toContainText("(reversed)");
 });
 
+test("canvas renderer opens the shared gene menu at the pointer", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({ plot: { transitionDuration: 0 } });
+    window.__canvasMenuTest = { chart, data, host };
+    d3.select(host).datum(data).call(chart);
+  });
+  const gene = page.locator("g.gene").first().locator("polygon.genePolygon");
+  const geneBox = await gene.boundingBox();
+  expect(geneBox).not.toBeNull();
+
+  await page.evaluate(() => {
+    const { chart, data, host } = window.__canvasMenuTest;
+    chart.config({ plot: { renderer: "canvas" } });
+    d3.select(host).datum(data).call(chart);
+  });
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  await expect(canvas).toBeVisible();
+  await page.mouse.click(geneBox.x + geneBox.width / 2, geneBox.y + geneBox.height / 2, {
+    button: "right",
+  });
+
+  const menu = page.locator("div.tooltip");
+  await expect(menu.locator("#gene-label-input")).toBeVisible();
+  await expect(menu).toHaveCSS("opacity", "1");
+  const menuBox = await menu.boundingBox();
+  expect(menuBox).not.toBeNull();
+  expect(menuBox.x).toBeGreaterThan(geneBox.x - menuBox.width / 2 - 2);
+});
+
 test("Space-drag pans Canvas even when it starts over a locus", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
   const track = page.locator("g.locus").first().locator("line.trackBar");
