@@ -1400,8 +1400,11 @@
           },
           transform: { x: localX, y: 0 },
           track: {
-            x1: start,
-            x2: end,
+            // The physical extent is unchanged by a flip, but retaining the
+            // endpoint orientation lets renderers animate the bar collapsing
+            // through its midpoint and growing out in the reversed direction.
+            x1: state.flipped ? end : start,
+            x2: state.flipped ? start : end,
             y: geneMidpoint,
           },
           hover: {
@@ -1669,6 +1672,31 @@
   }
 
   /**
+   * Describe the first frames of a locus flip without re-projecting the chart.
+   *
+   * A flip is a reflection in the locus's untrimmed display extent.  Keeping
+   * that fact in a small patch lets Canvas acknowledge the double-click before
+   * the authoritative data-to-scene update has completed.
+   */
+  function createLocusFlipPreview(scene, locusUid, { scaleX, progress = 0 }) {
+    const locus = scene.loci.get(locusUid);
+    if (!locus) return null;
+
+    // Source loci normally retain their biological extent. The state fallback
+    // also keeps this helper usable with compact renderer test scenes.
+    const length =
+      (locus.source.end ?? locus.state.end) - (locus.source.start ?? locus.state.start);
+    const left = locus.x + scaleX(0);
+    const right = locus.x + scaleX(length);
+    return {
+      type: "locus-flip",
+      locusUid,
+      progress,
+      axes: new Map([[locusUid, (left + right) / 2]]),
+    };
+  }
+
+  /**
    * Describe the temporary rows of a cluster drag relative to an existing
    * scene. The active cluster follows the pointer; every other cluster snaps to
    * its row in the preview order.
@@ -1876,12 +1904,13 @@
     config,
     scales,
     { x: offsetX = 0, y: offsetY = 0 } = {},
-    visible = gene.visible
+    visible = gene.visible,
+    geometry = {}
   ) {
     if (!visible) return;
     context.save();
     context.translate(offsetX, offsetY);
-    polygon(context, gene.polygon);
+    polygon(context, geometry.polygon || gene.polygon);
     const group = scales.group(gene.source.uid);
     context.fillStyle = gene.source.colour || scales.colour(group);
     context.strokeStyle = config.gene.shape.stroke;
@@ -1894,8 +1923,9 @@
       return;
     }
     const { x, y, rotation } = gene.label;
+    const labelX = geometry.labelX ?? gene.locus.x + x;
     context.save();
-    context.translate(gene.locus.x + x, gene.locus.y + y);
+    context.translate(labelX, gene.locus.y + y);
     context.rotate((rotation * Math.PI) / 180);
     context.fillStyle = "black";
     context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
@@ -1926,10 +1956,14 @@
   function drawLocusTrack(context, locus, viewport, config, geometry = {}) {
     const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
     const track = geometry.track || locus.track;
-    const worldStart = geometry.worldStart ?? locus.worldStart + offsetX;
-    const worldEnd = geometry.worldEnd ?? locus.worldEnd + offsetX;
-    const start = viewport ? Math.max(worldStart, viewport.minX) : worldStart;
-    const end = viewport ? Math.min(worldEnd, viewport.maxX) : worldEnd;
+    // Compact test scenes and third-party scene consumers may only provide the
+    // physical locus extent. Production scenes retain oriented track endpoints.
+    const worldStart =
+      track.x1 === undefined ? geometry.worldStart ?? locus.worldStart + offsetX : locus.x + track.x1 + offsetX;
+    const worldEnd =
+      track.x2 === undefined ? geometry.worldEnd ?? locus.worldEnd + offsetX : locus.x + track.x2 + offsetX;
+    const start = viewport ? Math.max(Math.min(worldStart, worldEnd), viewport.minX) : worldStart;
+    const end = viewport ? Math.min(Math.max(worldStart, worldEnd), viewport.maxX) : worldEnd;
     if (end < start) return;
     context.beginPath();
     context.moveTo(start, locus.y + track.y + offsetY);
@@ -1967,6 +2001,35 @@
   }
 
   function locusGeometryForPreview(preview, locus) {
+    if (preview?.type === "locus-flip") {
+      const axis = preview.axes?.get(locus.source.uid);
+      if (axis !== undefined) {
+        const flip = (x) => x + (axis * 2 - x - x) * preview.progress;
+        const start = flip(locus.worldStart);
+        const end = flip(locus.worldEnd);
+        const hoverStart = flip(locus.x + locus.hover.x);
+        const hoverEnd = flip(locus.x + locus.hover.x + locus.hover.width);
+        const left = Math.min(start, end);
+        const right = Math.max(start, end);
+        return {
+          offsets: offsetsForLocus(preview, locus),
+          worldStart: left,
+          worldEnd: right,
+          track: {
+            ...locus.track,
+            x1: flip(locus.x + locus.track.x1) - locus.x,
+            x2: flip(locus.x + locus.track.x2) - locus.x,
+          },
+          hover: {
+            ...locus.hover,
+            x: Math.min(hoverStart, hoverEnd) - locus.x,
+            width: Math.abs(hoverEnd - hoverStart),
+            leftHandleX: left - locus.x - 8,
+            rightHandleX: right - locus.x,
+          },
+        };
+      }
+    }
     const trimmed = preview?.loci?.get(locus.source.uid);
     return {
       offsets: offsetsForLocus(preview, locus),
@@ -1976,6 +2039,23 @@
 
   function geneVisibleForPreview(preview, gene) {
     return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
+  }
+
+  function flipAxisForGene(preview, gene) {
+    return preview?.type === "locus-flip"
+      ? preview.axes?.get(gene?.locus?.source?.uid)
+      : undefined;
+  }
+
+  function geneGeometryForPreview(preview, gene) {
+    const axis = flipAxisForGene(preview, gene);
+    if (axis === undefined) return {};
+    const progress = preview.progress;
+    const flip = (x) => x + (axis * 2 - x - x) * progress;
+    return {
+      polygon: gene.polygon.map((value, index) => (index % 2 ? value : flip(value))),
+      labelX: flip(gene.locus.x + gene.label.x),
+    };
   }
 
   function linkOffsetsForPreview(scene, link, preview) {
@@ -2005,9 +2085,22 @@
         maxX = Math.max(maxX, gene.polygon[index] + offsets.x);
       }
       const forward = gene.display.strand === 1;
+      const axis = flipAxisForGene(preview, gene);
+      if (axis === undefined) {
+        return [
+          forward ? minX : maxX,
+          forward ? maxX : minX,
+          gene.locus.y + gene.locus.track.y + offsets.y,
+        ];
+      }
+      const progress = preview.progress;
+      const targetMin = axis * 2 - maxX;
+      const targetMax = axis * 2 - minX;
+      const from = forward ? [minX, maxX] : [maxX, minX];
+      const to = forward ? [targetMax, targetMin] : [targetMin, targetMax];
       return [
-        forward ? minX : maxX,
-        forward ? maxX : minX,
+        from[0] + (to[0] - from[0]) * progress,
+        from[1] + (to[1] - from[1]) * progress,
         gene.locus.y + gene.locus.track.y + offsets.y,
       ];
     };
@@ -2019,6 +2112,17 @@
   }
 
   function linkGeometryForPreview(scene, link, preview, config) {
+    if (preview?.type === "locus-flip") {
+      const query = scene.genes.get(link.source.query.uid);
+      const target = scene.genes.get(link.source.target.uid);
+      return {
+        visible:
+          link.visible &&
+          geneVisibleForPreview(preview, query) &&
+          geneVisibleForPreview(preview, target),
+        anchors: previewLinkAnchors(scene, link, preview),
+      };
+    }
     if (preview?.type !== "cluster-drag") {
       const query = scene.genes.get(link.source.query.uid);
       const target = scene.genes.get(link.source.target.uid);
@@ -2191,6 +2295,9 @@
 
   function interpolateLocus(from, to, amount) {
     if (!from) return to;
+    const trackX = (locus, side) =>
+      locus.track[side] ??
+      locus[side === "x1" ? "worldStart" : "worldEnd"] - locus.x;
     return {
       ...to,
       x: interpolateNumber(from.x, to.x, amount),
@@ -2200,6 +2307,8 @@
       transform: interpolatePosition(from.transform, to.transform, amount),
       track: {
         ...to.track,
+        x1: interpolateNumber(trackX(from, "x1"), trackX(to, "x1"), amount),
+        x2: interpolateNumber(trackX(from, "x2"), trackX(to, "x2"), amount),
         y: interpolateNumber(from.track.y, to.track.y, amount),
       },
       hover: from.hover && to.hover
@@ -2378,7 +2487,8 @@
         config,
         scales,
         offsetsForGene(preview, gene),
-        geneVisibleForPreview(preview, gene)
+        geneVisibleForPreview(preview, gene),
+        geneGeometryForPreview(preview, gene)
       );
     }
     if (displayScene.chrome) {
@@ -3426,6 +3536,8 @@
     let canvasAnimation = null;
     let canvasPreview = null;
     let canvasPaintFrame = null;
+    let canvasFlipBuildFrame = null;
+    let canvasFlipAnimationProgress = null;
     let paintCanvasFrame = null;
     let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
@@ -3502,6 +3614,26 @@
       },
       flipLocus: (locus) => {
         flipLocus(chartState, locus);
+        if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+          const previewProgress = 0.12;
+          canvasPreview = createLocusFlipPreview(runtime.scene.get(), locus.uid, {
+            scaleX: runtime.scales.x,
+            progress: previewProgress,
+          });
+          canvasFlipAnimationProgress = previewProgress;
+          scheduleCanvasPreview();
+          if (canvasFlipBuildFrame !== null) cancelAnimationFrame(canvasFlipBuildFrame);
+          // Schedule from an animation frame so the sparse preview is presented
+          // before the committed scene build can occupy the main thread.
+          canvasFlipBuildFrame = requestAnimationFrame(() => {
+            canvasFlipBuildFrame = requestAnimationFrame(() => {
+              canvasFlipBuildFrame = null;
+              canvasPreview = null;
+              runtime.plot.update();
+            });
+          });
+          return;
+        }
         runtime.plot.update();
       },
     });
@@ -3511,8 +3643,22 @@
 
     function clearCanvasPreview() {
       if (canvasPaintFrame !== null) cancelAnimationFrame(canvasPaintFrame);
+      if (canvasFlipBuildFrame !== null) cancelAnimationFrame(canvasFlipBuildFrame);
       canvasPreview = null;
       canvasPaintFrame = null;
+      canvasFlipBuildFrame = null;
+      canvasFlipAnimationProgress = null;
+    }
+
+    function flushCanvasFlip() {
+      if (canvasFlipBuildFrame === null) return;
+      cancelAnimationFrame(canvasFlipBuildFrame);
+      canvasFlipBuildFrame = null;
+      canvasPreview = null;
+      canvasFlipAnimationProgress = null;
+      // An export is a synchronous view of the current state, not a snapshot of
+      // an in-flight Canvas affordance. Build its authoritative scene now.
+      runtime.plot.update({ animate: false });
     }
 
     function scheduleCanvasPaint() {
@@ -3694,21 +3840,25 @@
       const animateCanvas = (canvasNode, scene, animate) => {
         stopCanvasAnimation();
         if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
+          canvasFlipAnimationProgress = null;
           canvasScene = scene;
           paintCanvas(canvasNode);
           return;
         }
         const previousScene = canvasScene;
         const duration = runtime.config.plot.transitionDuration;
+        const initialProgress = canvasFlipAnimationProgress ?? 0;
+        canvasFlipAnimationProgress = null;
         const startedAt = performance.now();
         const frame = (now) => {
           const elapsed = Math.min(1, (now - startedAt) / duration);
           // Matches D3's default cubic-in-out transition closely enough that
           // the two renderers retain the same interaction feel.
-          const progress =
+          const eased =
             elapsed < 0.5
               ? 4 * elapsed * elapsed * elapsed
               : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+          const progress = initialProgress + (1 - initialProgress) * eased;
           canvasAnimation = { previousScene, scene, progress, frame: null };
           paintCanvas(canvasNode);
           if (elapsed < 1) {
@@ -4052,6 +4202,7 @@
       return my;
     };
     my.exportSvg = ({ padding = 20 } = {}) => {
+      flushCanvasFlip();
       const scene = runtime.scene.get();
       if (!scene) throw new Error("Cannot export an SVG before the chart has rendered.");
       const namespace = "http://www.w3.org/2000/svg";

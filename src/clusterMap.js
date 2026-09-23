@@ -24,6 +24,7 @@ import { createInteractionController } from "./interactionController.mjs";
 import { canvasWorldPoint, hitTestCanvas, renderCanvas } from "./canvasRenderer.js";
 import {
   createClusterDragPreview,
+  createLocusFlipPreview,
   createLocusOffsetPreview,
   createLocusTrimPreview,
 } from "./layout.mjs";
@@ -48,6 +49,8 @@ export default function clusterMap() {
   let canvasAnimation = null;
   let canvasPreview = null;
   let canvasPaintFrame = null;
+  let canvasFlipBuildFrame = null;
+  let canvasFlipAnimationProgress = null;
   let paintCanvasFrame = null;
   let currentData = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
@@ -124,6 +127,26 @@ export default function clusterMap() {
     },
     flipLocus: (locus) => {
       flipLocus(chartState, locus);
+      if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+        const previewProgress = 0.12;
+        canvasPreview = createLocusFlipPreview(runtime.scene.get(), locus.uid, {
+          scaleX: runtime.scales.x,
+          progress: previewProgress,
+        });
+        canvasFlipAnimationProgress = previewProgress;
+        scheduleCanvasPreview();
+        if (canvasFlipBuildFrame !== null) cancelAnimationFrame(canvasFlipBuildFrame);
+        // Schedule from an animation frame so the sparse preview is presented
+        // before the committed scene build can occupy the main thread.
+        canvasFlipBuildFrame = requestAnimationFrame(() => {
+          canvasFlipBuildFrame = requestAnimationFrame(() => {
+            canvasFlipBuildFrame = null;
+            canvasPreview = null;
+            runtime.plot.update();
+          });
+        });
+        return;
+      }
       runtime.plot.update();
     },
   });
@@ -133,8 +156,22 @@ export default function clusterMap() {
 
   function clearCanvasPreview() {
     if (canvasPaintFrame !== null) cancelAnimationFrame(canvasPaintFrame);
+    if (canvasFlipBuildFrame !== null) cancelAnimationFrame(canvasFlipBuildFrame);
     canvasPreview = null;
     canvasPaintFrame = null;
+    canvasFlipBuildFrame = null;
+    canvasFlipAnimationProgress = null;
+  }
+
+  function flushCanvasFlip() {
+    if (canvasFlipBuildFrame === null) return;
+    cancelAnimationFrame(canvasFlipBuildFrame);
+    canvasFlipBuildFrame = null;
+    canvasPreview = null;
+    canvasFlipAnimationProgress = null;
+    // An export is a synchronous view of the current state, not a snapshot of
+    // an in-flight Canvas affordance. Build its authoritative scene now.
+    runtime.plot.update({ animate: false });
   }
 
   function scheduleCanvasPaint() {
@@ -316,21 +353,25 @@ export default function clusterMap() {
     const animateCanvas = (canvasNode, scene, animate) => {
       stopCanvasAnimation();
       if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
+        canvasFlipAnimationProgress = null;
         canvasScene = scene;
         paintCanvas(canvasNode);
         return;
       }
       const previousScene = canvasScene;
       const duration = runtime.config.plot.transitionDuration;
+      const initialProgress = canvasFlipAnimationProgress ?? 0;
+      canvasFlipAnimationProgress = null;
       const startedAt = performance.now();
       const frame = (now) => {
         const elapsed = Math.min(1, (now - startedAt) / duration);
         // Matches D3's default cubic-in-out transition closely enough that
         // the two renderers retain the same interaction feel.
-        const progress =
+        const eased =
           elapsed < 0.5
             ? 4 * elapsed * elapsed * elapsed
             : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+        const progress = initialProgress + (1 - initialProgress) * eased;
         canvasAnimation = { previousScene, scene, progress, frame: null };
         paintCanvas(canvasNode);
         if (elapsed < 1) {
@@ -674,6 +715,7 @@ export default function clusterMap() {
     return my;
   };
   my.exportSvg = ({ padding = 20 } = {}) => {
+    flushCanvasFlip();
     const scene = runtime.scene.get();
     if (!scene) throw new Error("Cannot export an SVG before the chart has rendered.");
     const namespace = "http://www.w3.org/2000/svg";

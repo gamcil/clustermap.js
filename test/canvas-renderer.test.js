@@ -258,4 +258,15 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   assert.equal(midway.clusters.get("cluster").x, 2.5);
   assert.equal(midway.loci.get("locus").worldStart, 2.5);
   assert.deepEqual(midway.genes.get("gene").polygon, [2.5, 10, 7.5, 10, 7.5, 15, 2.5, 15]);
+
+  const trackBefore = {
+    ...scene,
+    loci: new Map([["locus", { ...cluster.loci[0], track: { x1: 0, x2: 10, y: 11 } }]]),
+  };
+  const trackAfter = {
+    ...scene,
+    loci: new Map([["locus", { ...cluster.loci[0], track: { x1: 10, x2: 0, y: 11 } }]]),
+  };
+  const collapsedTrack = interpolateCanvasScene(trackBefore, trackAfter, 0.5);
+  assert.deepEqual(collapsedTrack.loci.get("locus").track, { x1: 5, x2: 5, y: 11 });
 });

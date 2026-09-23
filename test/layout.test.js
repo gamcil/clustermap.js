@@ -5,6 +5,7 @@ test("scene derives world-space geometry without DOM state", async () => {
   const {
     buildScene,
     createClusterDragPreview,
+    createLocusFlipPreview,
     createLocusOffsetPreview,
     createLocusTrimPreview,
   } = await import("../src/layout.mjs");
@@ -116,6 +117,19 @@ test("scene derives world-space geometry without DOM state", async () => {
     ]),
   });
   assert.equal(createLocusOffsetPreview(scene, "unknown", 14, { alignLabels: true }), null);
+  assert.deepEqual(
+    createLocusFlipPreview(scene, "top-locus", { scaleX: (value) => value, progress: 0.12 }),
+    {
+      type: "locus-flip",
+      locusUid: "top-locus",
+      progress: 0.12,
+      axes: new Map([["top-locus", 16]]),
+    }
+  );
+  assert.equal(
+    createLocusFlipPreview(scene, "unknown", { scaleX: (value) => value }),
+    null
+  );
   // The initial loci share the same left coordinate, but `alignLabels: false`
   // must still keep the preview change local to the dragged cluster.
   assert.deepEqual(

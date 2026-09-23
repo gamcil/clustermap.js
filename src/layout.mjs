@@ -251,8 +251,11 @@ export function buildScene(
         },
         transform: { x: localX, y: 0 },
         track: {
-          x1: start,
-          x2: end,
+          // The physical extent is unchanged by a flip, but retaining the
+          // endpoint orientation lets renderers animate the bar collapsing
+          // through its midpoint and growing out in the reversed direction.
+          x1: state.flipped ? end : start,
+          x2: state.flipped ? start : end,
           y: geneMidpoint,
         },
         hover: {
@@ -516,6 +519,31 @@ export function createLocusTrimPreview(
     geneVisibility,
     clusterLabelOffsets,
     chrome,
+  };
+}
+
+/**
+ * Describe the first frames of a locus flip without re-projecting the chart.
+ *
+ * A flip is a reflection in the locus's untrimmed display extent.  Keeping
+ * that fact in a small patch lets Canvas acknowledge the double-click before
+ * the authoritative data-to-scene update has completed.
+ */
+export function createLocusFlipPreview(scene, locusUid, { scaleX, progress = 0 }) {
+  const locus = scene.loci.get(locusUid);
+  if (!locus) return null;
+
+  // Source loci normally retain their biological extent. The state fallback
+  // also keeps this helper usable with compact renderer test scenes.
+  const length =
+    (locus.source.end ?? locus.state.end) - (locus.source.start ?? locus.state.start);
+  const left = locus.x + scaleX(0);
+  const right = locus.x + scaleX(length);
+  return {
+    type: "locus-flip",
+    locusUid,
+    progress,
+    axes: new Map([[locusUid, (left + right) / 2]]),
   };
 }
 

@@ -193,12 +193,13 @@ function drawGene(
   config,
   scales,
   { x: offsetX = 0, y: offsetY = 0 } = {},
-  visible = gene.visible
+  visible = gene.visible,
+  geometry = {}
 ) {
   if (!visible) return;
   context.save();
   context.translate(offsetX, offsetY);
-  polygon(context, gene.polygon);
+  polygon(context, geometry.polygon || gene.polygon);
   const group = scales.group(gene.source.uid);
   context.fillStyle = gene.source.colour || scales.colour(group);
   context.strokeStyle = config.gene.shape.stroke;
@@ -211,8 +212,9 @@ function drawGene(
     return;
   }
   const { x, y, rotation } = gene.label;
+  const labelX = geometry.labelX ?? gene.locus.x + x;
   context.save();
-  context.translate(gene.locus.x + x, gene.locus.y + y);
+  context.translate(labelX, gene.locus.y + y);
   context.rotate((rotation * Math.PI) / 180);
   context.fillStyle = "black";
   context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
@@ -243,10 +245,14 @@ function drawLocusHover(context, scene, locusUid, geometry = {}) {
 function drawLocusTrack(context, locus, viewport, config, geometry = {}) {
   const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
   const track = geometry.track || locus.track;
-  const worldStart = geometry.worldStart ?? locus.worldStart + offsetX;
-  const worldEnd = geometry.worldEnd ?? locus.worldEnd + offsetX;
-  const start = viewport ? Math.max(worldStart, viewport.minX) : worldStart;
-  const end = viewport ? Math.min(worldEnd, viewport.maxX) : worldEnd;
+  // Compact test scenes and third-party scene consumers may only provide the
+  // physical locus extent. Production scenes retain oriented track endpoints.
+  const worldStart =
+    track.x1 === undefined ? geometry.worldStart ?? locus.worldStart + offsetX : locus.x + track.x1 + offsetX;
+  const worldEnd =
+    track.x2 === undefined ? geometry.worldEnd ?? locus.worldEnd + offsetX : locus.x + track.x2 + offsetX;
+  const start = viewport ? Math.max(Math.min(worldStart, worldEnd), viewport.minX) : worldStart;
+  const end = viewport ? Math.min(Math.max(worldStart, worldEnd), viewport.maxX) : worldEnd;
   if (end < start) return;
   context.beginPath();
   context.moveTo(start, locus.y + track.y + offsetY);
@@ -284,6 +290,35 @@ function offsetsForGene(preview, gene) {
 }
 
 function locusGeometryForPreview(preview, locus) {
+  if (preview?.type === "locus-flip") {
+    const axis = preview.axes?.get(locus.source.uid);
+    if (axis !== undefined) {
+      const flip = (x) => x + (axis * 2 - x - x) * preview.progress;
+      const start = flip(locus.worldStart);
+      const end = flip(locus.worldEnd);
+      const hoverStart = flip(locus.x + locus.hover.x);
+      const hoverEnd = flip(locus.x + locus.hover.x + locus.hover.width);
+      const left = Math.min(start, end);
+      const right = Math.max(start, end);
+      return {
+        offsets: offsetsForLocus(preview, locus),
+        worldStart: left,
+        worldEnd: right,
+        track: {
+          ...locus.track,
+          x1: flip(locus.x + locus.track.x1) - locus.x,
+          x2: flip(locus.x + locus.track.x2) - locus.x,
+        },
+        hover: {
+          ...locus.hover,
+          x: Math.min(hoverStart, hoverEnd) - locus.x,
+          width: Math.abs(hoverEnd - hoverStart),
+          leftHandleX: left - locus.x - 8,
+          rightHandleX: right - locus.x,
+        },
+      };
+    }
+  }
   const trimmed = preview?.loci?.get(locus.source.uid);
   return {
     offsets: offsetsForLocus(preview, locus),
@@ -293,6 +328,23 @@ function locusGeometryForPreview(preview, locus) {
 
 function geneVisibleForPreview(preview, gene) {
   return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
+}
+
+function flipAxisForGene(preview, gene) {
+  return preview?.type === "locus-flip"
+    ? preview.axes?.get(gene?.locus?.source?.uid)
+    : undefined;
+}
+
+function geneGeometryForPreview(preview, gene) {
+  const axis = flipAxisForGene(preview, gene);
+  if (axis === undefined) return {};
+  const progress = preview.progress;
+  const flip = (x) => x + (axis * 2 - x - x) * progress;
+  return {
+    polygon: gene.polygon.map((value, index) => (index % 2 ? value : flip(value))),
+    labelX: flip(gene.locus.x + gene.label.x),
+  };
 }
 
 function linkOffsetsForPreview(scene, link, preview) {
@@ -322,9 +374,22 @@ function previewLinkAnchors(scene, link, preview) {
       maxX = Math.max(maxX, gene.polygon[index] + offsets.x);
     }
     const forward = gene.display.strand === 1;
+    const axis = flipAxisForGene(preview, gene);
+    if (axis === undefined) {
+      return [
+        forward ? minX : maxX,
+        forward ? maxX : minX,
+        gene.locus.y + gene.locus.track.y + offsets.y,
+      ];
+    }
+    const progress = preview.progress;
+    const targetMin = axis * 2 - maxX;
+    const targetMax = axis * 2 - minX;
+    const from = forward ? [minX, maxX] : [maxX, minX];
+    const to = forward ? [targetMax, targetMin] : [targetMin, targetMax];
     return [
-      forward ? minX : maxX,
-      forward ? maxX : minX,
+      from[0] + (to[0] - from[0]) * progress,
+      from[1] + (to[1] - from[1]) * progress,
       gene.locus.y + gene.locus.track.y + offsets.y,
     ];
   };
@@ -336,6 +401,17 @@ function previewLinkAnchors(scene, link, preview) {
 }
 
 function linkGeometryForPreview(scene, link, preview, config) {
+  if (preview?.type === "locus-flip") {
+    const query = scene.genes.get(link.source.query.uid);
+    const target = scene.genes.get(link.source.target.uid);
+    return {
+      visible:
+        link.visible &&
+        geneVisibleForPreview(preview, query) &&
+        geneVisibleForPreview(preview, target),
+      anchors: previewLinkAnchors(scene, link, preview),
+    };
+  }
   if (preview?.type !== "cluster-drag") {
     const query = scene.genes.get(link.source.query.uid);
     const target = scene.genes.get(link.source.target.uid);
@@ -508,6 +584,9 @@ function interpolateArray(from, to, amount) {
 
 function interpolateLocus(from, to, amount) {
   if (!from) return to;
+  const trackX = (locus, side) =>
+    locus.track[side] ??
+    locus[side === "x1" ? "worldStart" : "worldEnd"] - locus.x;
   return {
     ...to,
     x: interpolateNumber(from.x, to.x, amount),
@@ -517,6 +596,8 @@ function interpolateLocus(from, to, amount) {
     transform: interpolatePosition(from.transform, to.transform, amount),
     track: {
       ...to.track,
+      x1: interpolateNumber(trackX(from, "x1"), trackX(to, "x1"), amount),
+      x2: interpolateNumber(trackX(from, "x2"), trackX(to, "x2"), amount),
       y: interpolateNumber(from.track.y, to.track.y, amount),
     },
     hover: from.hover && to.hover
@@ -695,7 +776,8 @@ export function renderCanvas({
       config,
       scales,
       offsetsForGene(preview, gene),
-      geneVisibleForPreview(preview, gene)
+      geneVisibleForPreview(preview, gene),
+      geneGeometryForPreview(preview, gene)
     );
   }
   if (displayScene.chrome) {
