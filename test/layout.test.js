@@ -2,8 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 test("scene derives world-space geometry without DOM state", async () => {
-  const { buildScene } = await import("../src/layout.mjs");
+  const { buildScene, createLocusOffsetPreview } = await import("../src/layout.mjs");
   const { hitTest } = await import("../src/hitTest.mjs");
+  const { queryViewport } = await import("../src/spatialIndex.mjs");
   const data = {
     clusters: [
       {
@@ -97,8 +98,37 @@ test("scene derives world-space geometry without DOM state", async () => {
   const topGene = scene.genes.get("top-gene");
   assert.equal(topGene.visible, true);
   assert.deepEqual(topGene.polygon.slice(0, 2), [6 + 2, 5]);
+  assert.deepEqual(topGene.bounds, { minX: 8, maxX: 14, minY: 0, maxY: 22 });
   const topLocus = scene.loci.get("top-locus");
   assert.equal(topLocus.worldStart, 6);
+  assert.deepEqual(createLocusOffsetPreview(scene, "top-locus", 14, { alignLabels: true }), {
+    type: "locus-offset",
+    locusUid: "top-locus",
+    offsetX: 13,
+    clusterLabelOffsets: new Map([
+      ["top", 6],
+      ["bottom", 6],
+    ]),
+  });
+  assert.equal(createLocusOffsetPreview(scene, "unknown", 14, { alignLabels: true }), null);
+  // The initial loci share the same left coordinate, but `alignLabels: false`
+  // must still keep the preview change local to the dragged cluster.
+  assert.deepEqual(
+    createLocusOffsetPreview(scene, "top-locus", 14, { alignLabels: false }).clusterLabelOffsets,
+    new Map([["top", 13]])
+  );
+  const unalignedScene = {
+    ...scene,
+    clusters: new Map([
+      ["top", { ...scene.clusters.get("top"), info: { x: -10 }, loci: [topLocus] }],
+      ["bottom", { ...scene.clusters.get("bottom"), info: { x: -10 }, loci: [scene.loci.get("bottom-locus")] }],
+    ]),
+  };
+  assert.deepEqual(
+    createLocusOffsetPreview(unalignedScene, "top-locus", 14, { alignLabels: false })
+      .clusterLabelOffsets,
+    new Map([["top", 13]])
+  );
   assert.deepEqual(topLocus.track, { x1: 0, x2: 20, y: 11 });
   assert.deepEqual(topLocus.hover, {
     x: 0,
@@ -149,6 +179,9 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.equal(hitTest(scene, { x: 200, y: 200 }), null);
   assert.deepEqual(scene.links.get("link").anchors, [8, 14, 11, 28, 22, 41]);
   assert.equal(scene.links.get("link").visible, true);
+  assert.deepEqual([...queryViewport(scene.index.genes, { minX: 7, maxX: 15, minY: 0, maxY: 22 })], [
+    "top-gene",
+  ]);
   assert.deepEqual(scene.bounds, { minX: 6, maxX: 32, minY: 0, maxY: 52 });
   assert.deepEqual(scene.chrome.legend.position, { x: 52, y: 0 });
   assert.deepEqual(scene.chrome.legend.items[0], {

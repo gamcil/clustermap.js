@@ -22,6 +22,7 @@ import { normalizeChartData } from "./data/normalize.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
 import { canvasWorldPoint, hitTestCanvas, renderCanvas } from "./canvasRenderer.js";
+import { createLocusOffsetPreview } from "./layout.mjs";
 import { renderSvg } from "./svgRenderer.js";
 import { createChartRuntime } from "./chartRuntime.js";
 
@@ -38,8 +39,12 @@ export default function clusterMap() {
   let chartState = null;
   let canvasGesture = null;
   let canvasHoverLocusUid = null;
+  let canvasPanMode = false;
   let canvasScene = null;
   let canvasAnimation = null;
+  let canvasPreview = null;
+  let canvasPreviewFrame = null;
+  let paintCanvasPreview = null;
   let currentData = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const interactionController = createInteractionController({
@@ -59,10 +64,18 @@ export default function clusterMap() {
     },
     previewLocusOffset: (uid, offset) => {
       setPreviewLocusOffset(chartState, uid, offset);
+      if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+        canvasPreview = createLocusOffsetPreview(runtime.scene.get(), uid, offset, {
+          alignLabels: runtime.config.cluster.alignLabels,
+        });
+        scheduleCanvasPreview();
+        return;
+      }
       runtime.plot.update({ animate: false });
     },
     commitLocusOffset: (uid) => {
       commitPreviewLocusOffset(chartState, uid);
+      clearCanvasPreview();
       runtime.plot.update({ animate: false });
     },
     previewLocusTrim: (locus, edge, position) => {
@@ -89,6 +102,20 @@ export default function clusterMap() {
   runtime.plot.update = (options) => container.call(my, options);
   runtime.plot.data = (data) => my.data(data);
 
+  function clearCanvasPreview() {
+    if (canvasPreviewFrame !== null) cancelAnimationFrame(canvasPreviewFrame);
+    canvasPreview = null;
+    canvasPreviewFrame = null;
+  }
+
+  function scheduleCanvasPreview() {
+    if (canvasPreviewFrame !== null || !paintCanvasPreview) return;
+    canvasPreviewFrame = requestAnimationFrame(() => {
+      canvasPreviewFrame = null;
+      paintCanvasPreview();
+    });
+  }
+
   function my(selection, options) {
     selection.each(function (data) {
       update.call(this, data, options);
@@ -109,6 +136,7 @@ export default function clusterMap() {
     // Set up the shared transition
     transition = d3.transition().duration(runtime.config.plot.transitionDuration);
     const useCanvas = runtime.config.plot.renderer === "canvas";
+    if (!useCanvas) clearCanvasPreview();
 
     // Build the figure
     const svg = container
@@ -197,9 +225,12 @@ export default function clusterMap() {
           .append("canvas")
           .attr("class", "clusterMapCanvas")
           .attr("cursor", "grab")
+          .attr("tabindex", 0)
+          .attr("aria-label", "Cluster map")
           .style("display", "block")
           .style("width", "100%")
-          .style("height", "100%");
+          .style("height", "100%")
+          .style("outline", "none");
         canvasZoom = d3
           .zoom()
           .scaleExtent([0, 8])
@@ -244,7 +275,9 @@ export default function clusterMap() {
         config: runtime.config,
         scales: runtime.scales,
         hoverLocusUid: canvasHoverLocusUid,
+        preview: canvasPreview,
       });
+    paintCanvasPreview = useCanvas ? () => paintCanvas(canvas.node()) : null;
     const stopCanvasAnimation = () => {
       if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
       canvasAnimation = null;
@@ -320,13 +353,31 @@ export default function clusterMap() {
         d3.select(canvasNode).style("cursor", cursorForTarget(target));
       };
       canvasZoom.filter(function (event) {
+        if (canvasPanMode) return event.type === "wheel" || event.button === 0;
         if (event.type === "wheel") return true;
         if (event.ctrlKey || event.button) return false;
         return !targetForEvent(this, event);
       });
       canvas
+        .on("pointerenter.canvasKeyboard", function () {
+          this.focus({ preventScroll: true });
+        })
+        .on("keydown.canvasKeyboard", function (event) {
+          if (event.code !== "Space") return;
+          canvasPanMode = true;
+          event.preventDefault();
+          d3.select(this).style("cursor", "grab");
+        })
+        .on("keyup.canvasKeyboard", function (event) {
+          if (event.code !== "Space") return;
+          canvasPanMode = false;
+          d3.select(this).style("cursor", "grab");
+        })
+        .on("blur.canvasKeyboard", function () {
+          canvasPanMode = false;
+        })
         .on("pointerdown.canvasInteraction", function (event) {
-          if (event.button) return;
+          if (canvasPanMode || event.button) return;
           const target = targetForEvent(this, event);
           if (!target) return;
           const point = canvasWorldPoint(this, event, getCamera(chartState));
@@ -361,6 +412,7 @@ export default function clusterMap() {
           event.preventDefault();
         })
         .on("pointermove.canvasInteraction", function (event) {
+          if (canvasPanMode) return;
           if (!canvasGesture) {
             updateCanvasAffordance(this, targetForEvent(this, event));
             return;
@@ -379,7 +431,7 @@ export default function clusterMap() {
           }
         })
         .on("pointerleave.canvasInteraction", function () {
-          if (!canvasGesture) updateCanvasAffordance(this, null);
+          if (!canvasGesture && !canvasPanMode) updateCanvasAffordance(this, null);
         })
         .on("pointerup.canvasInteraction pointercancel.canvasInteraction", function (event) {
           if (!canvasGesture) return;
@@ -544,14 +596,24 @@ export default function clusterMap() {
     }
 
     const padding = 20;
-    const scale = Math.min(
+    const fitScale = Math.min(
       1.2,
       (width - padding * 2) / (bounds.maxX - bounds.minX),
       (height - padding * 2) / (bounds.maxY - bounds.minY)
     );
+    // A fit smaller than the default camera scale defeats Canvas culling and
+    // leaves an impractically dense interaction surface. Keep a readable
+    // scale in that case, showing the top-left of the figure (including the
+    // cluster labels). Ordinary figures retain the existing fit-to-view.
+    const cropped = fitScale < 1;
+    const scale = cropped ? 1 : fitScale;
     const camera = {
-      x: (width - (bounds.maxX - bounds.minX) * scale) / 2 - bounds.minX * scale,
-      y: (height - (bounds.maxY - bounds.minY) * scale) / 2 - bounds.minY * scale,
+      x: cropped
+        ? padding - bounds.minX * scale
+        : (width - (bounds.maxX - bounds.minX) * scale) / 2 - bounds.minX * scale,
+      y: cropped
+        ? padding - bounds.minY * scale
+        : (height - (bounds.maxY - bounds.minY) * scale) / 2 - bounds.minY * scale,
       k: scale,
     };
     if (canvasZoom) {

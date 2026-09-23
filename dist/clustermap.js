@@ -865,11 +865,98 @@
     return null;
   }
 
+  const DEFAULT_CELL_WIDTH = 100;
+  const DEFAULT_CELL_HEIGHT = 50;
+
+  function cellKey(x, y) {
+    return `${x},${y}`;
+  }
+
+  function validBounds(bounds) {
+    return (
+      bounds &&
+      Number.isFinite(bounds.minX) &&
+      Number.isFinite(bounds.maxX) &&
+      Number.isFinite(bounds.minY) &&
+      Number.isFinite(bounds.maxY)
+    );
+  }
+
+  function intersects(one, two) {
+    return (
+      one.minX <= two.maxX &&
+      one.maxX >= two.minX &&
+      one.minY <= two.maxY &&
+      one.maxY >= two.minY
+    );
+  }
+
+  /**
+   * Index world-space rectangular extents in a uniform grid. The index stores
+   * IDs only; callers retain ownership of the scene records and draw order.
+   */
+  function createSpatialIndex(
+    records,
+    { cellWidth = DEFAULT_CELL_WIDTH, cellHeight = DEFAULT_CELL_HEIGHT } = {}
+  ) {
+    const cells = new Map();
+    const boundsById = new Map();
+    for (const [id, bounds] of records) {
+      if (!validBounds(bounds)) continue;
+      boundsById.set(id, bounds);
+      const minColumn = Math.floor(bounds.minX / cellWidth);
+      const maxColumn = Math.floor(bounds.maxX / cellWidth);
+      const minRow = Math.floor(bounds.minY / cellHeight);
+      const maxRow = Math.floor(bounds.maxY / cellHeight);
+      for (let column = minColumn; column <= maxColumn; column += 1) {
+        for (let row = minRow; row <= maxRow; row += 1) {
+          const key = cellKey(column, row);
+          if (!cells.has(key)) cells.set(key, new Set());
+          cells.get(key).add(id);
+        }
+      }
+    }
+    return { cells, boundsById, cellWidth, cellHeight };
+  }
+
+  /** Return candidate IDs whose exact bounds intersect a world-space viewport. */
+  function queryViewport(index, viewport) {
+    if (!validBounds(viewport)) return new Set();
+    const matches = new Set();
+    const minColumn = Math.floor(viewport.minX / index.cellWidth);
+    const maxColumn = Math.floor(viewport.maxX / index.cellWidth);
+    const minRow = Math.floor(viewport.minY / index.cellHeight);
+    const maxRow = Math.floor(viewport.maxY / index.cellHeight);
+    for (let column = minColumn; column <= maxColumn; column += 1) {
+      for (let row = minRow; row <= maxRow; row += 1) {
+        for (const id of index.cells.get(cellKey(column, row)) || []) {
+          if (intersects(index.boundsById.get(id), viewport)) matches.add(id);
+        }
+      }
+    }
+    return matches;
+  }
+
   function canvasWorldPoint(canvas, event, camera) {
     const bounds = canvas.getBoundingClientRect();
     return {
       x: (event.clientX - bounds.left - camera.x) / camera.k,
       y: (event.clientY - bounds.top - camera.y) / camera.k,
+    };
+  }
+
+  /**
+   * Return the portion of chart-world space covered by a Canvas. A small
+   * screen-space margin prevents records from popping at its edge while panning.
+   */
+  function canvasWorldViewport(canvas, camera, overscan = 20) {
+    const bounds = canvas.getBoundingClientRect();
+    const margin = overscan / camera.k;
+    return {
+      minX: -camera.x / camera.k - margin,
+      maxX: (bounds.width - camera.x) / camera.k + margin,
+      minY: -camera.y / camera.k - margin,
+      maxY: (bounds.height - camera.y) / camera.k + margin,
     };
   }
 
@@ -964,9 +1051,13 @@
     context.closePath();
   }
 
-  function drawLink(context, layout, source, config, scales) {
+  function drawLink(context, layout, source, config, scales, offsets = {}) {
     if (!layout.visible || !layout.anchors) return;
-    const [ax1, ax2, ay, bx1, bx2, by] = layout.anchors;
+    let [ax1, ax2, ay, bx1, bx2, by] = layout.anchors;
+    ax1 += offsets.a || 0;
+    ax2 += offsets.a || 0;
+    bx1 += offsets.b || 0;
+    bx2 += offsets.b || 0;
     const aMid = (ax1 + ax2) / 2;
     const bMid = (bx1 + bx2) / 2;
     const group = scales.group(source.query.uid);
@@ -1011,9 +1102,9 @@
     }
   }
 
-  function drawClusterInfo(context, cluster, config) {
+  function drawClusterInfo(context, cluster, config, offsetX = 0) {
     const { x, y } = cluster;
-    const anchorX = x + cluster.info.x;
+    const anchorX = x + cluster.info.x + offsetX;
     context.fillStyle = "black";
     context.textAlign = "end";
     context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
@@ -1024,8 +1115,10 @@
     context.fillText(cluster.info.locusText, anchorX, y + 12);
   }
 
-  function drawGene(context, gene, config, scales) {
+  function drawGene(context, gene, config, scales, offsetX = 0) {
     if (!gene.visible) return;
+    context.save();
+    context.translate(offsetX, 0);
     polygon(context, gene.polygon);
     const group = scales.group(gene.source.uid);
     context.fillStyle = gene.source.colour || scales.colour(group);
@@ -1034,7 +1127,10 @@
     context.fill();
     context.stroke();
 
-    if (!config.gene.label.show) return;
+    if (!config.gene.label.show) {
+      context.restore();
+      return;
+    }
     const { x, y, rotation } = gene.label;
     context.save();
     context.translate(gene.locus.x + x, gene.locus.y + y);
@@ -1045,21 +1141,60 @@
     context.textBaseline = "alphabetic";
     context.fillText(gene.source.label || gene.source.uid, 0, 0);
     context.restore();
+    context.restore();
   }
 
-  function drawLocusHover(context, scene, locusUid) {
+  function drawLocusHover(context, scene, locusUid, offsetX = 0) {
     if (!locusUid) return;
     const locus = scene.loci.get(locusUid);
     if (!locus) return;
 
     const { hover } = locus;
-    const x = locus.x + hover.x;
+    const x = locus.x + hover.x + offsetX;
     const y = locus.y + hover.y;
     context.fillStyle = "rgba(0, 0, 0, 0.4)";
     context.fillRect(x, y, hover.width, hover.height);
     context.fillStyle = "black";
-    context.fillRect(locus.x + hover.leftHandleX, y, 8, hover.height);
-    context.fillRect(locus.x + hover.rightHandleX, y, 8, hover.height);
+    context.fillRect(locus.x + hover.leftHandleX + offsetX, y, 8, hover.height);
+    context.fillRect(locus.x + hover.rightHandleX + offsetX, y, 8, hover.height);
+  }
+
+  function drawLocusTrack(context, locus, viewport, config, offsetX = 0) {
+    const worldStart = locus.worldStart + offsetX;
+    const worldEnd = locus.worldEnd + offsetX;
+    const start = viewport ? Math.max(worldStart, viewport.minX) : worldStart;
+    const end = viewport ? Math.min(worldEnd, viewport.maxX) : worldEnd;
+    if (end < start) return;
+    context.beginPath();
+    context.moveTo(start, locus.y + locus.track.y);
+    context.lineTo(end, locus.y + locus.track.y);
+    context.strokeStyle = config.locus.trackBar.colour;
+    context.lineWidth = config.locus.trackBar.stroke;
+    context.stroke();
+  }
+
+  function locusOffsetForPreview(preview, locusUid) {
+    return preview?.type === "locus-offset" && preview.locusUid === locusUid
+      ? preview.offsetX
+      : 0;
+  }
+
+  function clusterLabelOffsetForPreview(preview, clusterUid) {
+    return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
+  }
+
+  function linkOffsetsForPreview(scene, link, preview) {
+    const query = scene.genes.get(link.source.query.uid);
+    const target = scene.genes.get(link.source.target.uid);
+    const offsetForGene = (gene) =>
+      locusOffsetForPreview(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
+    const queryOffset = offsetForGene(query);
+    const targetOffset = offsetForGene(target);
+    // Link anchors are ordered from the upper locus to the lower one, not from
+    // source.query to source.target.
+    return query?.locus?.y <= target?.locus?.y
+      ? { a: queryOffset, b: targetOffset }
+      : { a: targetOffset, b: queryOffset };
   }
 
   function drawLegend(context, legend) {
@@ -1238,6 +1373,7 @@
     config,
     scales,
     hoverLocusUid = null,
+    preview = null,
   }) {
     const displayScene = interpolateCanvasScene(previousScene, scene, progress);
     const context = canvas.getContext("2d");
@@ -1258,22 +1394,66 @@
     context.translate(camera.x, camera.y);
     context.scale(camera.k, camera.k);
 
+    // During an animation, geometry is between the previous and target scenes,
+    // while the index describes only the target scene. Draw the full frame then
+    // so an in-flight record cannot be incorrectly culled.
+    const viewport = previousScene ? null : canvasWorldViewport(canvas, camera);
+    const visible = viewport && displayScene.index
+      ? {
+          links: queryViewport(displayScene.index.links, viewport),
+          loci: queryViewport(displayScene.index.loci, viewport),
+          genes: queryViewport(displayScene.index.genes, viewport),
+        }
+      : null;
+
     for (const link of displayScene.links.values()) {
-      drawLink(context, link, link.source, config, scales);
+      if (visible && !visible.links.has(link.source.uid)) continue;
+      drawLink(
+        context,
+        link,
+        link.source,
+        config,
+        scales,
+        linkOffsetsForPreview(displayScene, link, preview)
+      );
     }
     for (const cluster of displayScene.clusters.values()) {
-      drawClusterInfo(context, cluster, config);
-      for (const locus of cluster.loci) {
-        context.beginPath();
-        context.moveTo(locus.worldStart, locus.y + locus.track.y);
-        context.lineTo(locus.worldEnd, locus.y + locus.track.y);
-        context.strokeStyle = config.locus.trackBar.colour;
-        context.lineWidth = config.locus.trackBar.stroke;
-        context.stroke();
+      const loci = visible
+        ? cluster.loci.filter((locus) => visible.loci.has(locus.source.uid))
+        : cluster.loci;
+      if (!loci.length) continue;
+      drawClusterInfo(
+        context,
+        cluster,
+        config,
+        clusterLabelOffsetForPreview(preview, cluster.source.uid)
+      );
+      for (const locus of loci) {
+        drawLocusTrack(
+          context,
+          locus,
+          viewport,
+          config,
+          locusOffsetForPreview(preview, locus.source.uid)
+        );
       }
     }
-    drawLocusHover(context, displayScene, hoverLocusUid);
-    for (const gene of displayScene.genes.values()) drawGene(context, gene, config, scales);
+    drawLocusHover(
+      context,
+      displayScene,
+      hoverLocusUid,
+      locusOffsetForPreview(preview, hoverLocusUid)
+    );
+    for (const gene of displayScene.genes.values()) {
+      if (visible && !visible.genes.has(gene.source.uid)) continue;
+      drawGene(
+        context,
+        gene,
+        config,
+        scales,
+        locusOffsetForPreview(preview, gene.locus?.source?.uid ?? gene.source.locusUid)
+      );
+    }
     if (displayScene.chrome) {
       drawLegend(context, displayScene.chrome.legend);
       drawScaleBar(context, displayScene.chrome.scaleBar);
@@ -1281,6 +1461,545 @@
     }
     context.restore();
     return { width, height, pixelRatio };
+  }
+
+  function getGenePolygonCoordinates(gene, { scaleX, shape }) {
+    const scaledStart = scaleX(gene.start);
+    const scaledEnd = scaleX(gene.end);
+    const geneLength = scaledEnd - scaledStart;
+    const bottom = shape.tipHeight * 2 + shape.bodyHeight;
+    const midpoint = bottom / 2;
+    const third = shape.tipHeight + shape.bodyHeight;
+    let points;
+
+    if (gene.strand === 1) {
+      const shaft = scaledEnd - shape.tipLength;
+      points = [
+        scaledStart,
+        shape.tipHeight,
+        shaft,
+        shape.tipHeight,
+        shaft,
+        0,
+        scaledEnd,
+        midpoint,
+        shaft,
+        bottom,
+        shaft,
+        third,
+        scaledStart,
+        third,
+      ];
+      if (geneLength < shape.tipLength) {
+        [2, 4, 8, 10].forEach((index) => (points[index] = scaledStart));
+      }
+    } else {
+      const shaft = scaledStart + shape.tipLength;
+      points = [
+        scaledEnd,
+        shape.tipHeight,
+        shaft,
+        shape.tipHeight,
+        shaft,
+        0,
+        scaledStart,
+        midpoint,
+        shaft,
+        bottom,
+        shaft,
+        third,
+        scaledEnd,
+        third,
+      ];
+      if (geneLength < shape.tipLength) {
+        [2, 4, 8, 10].forEach((index) => (points[index] = scaledEnd));
+      }
+    }
+
+    return points;
+  }
+
+  function getGeneLabelLayout(gene, { scaleX, shape, label }) {
+    const scaledLength = scaleX(gene.end) - scaleX(gene.start);
+    const x = scaleX(gene.start) + scaledLength * label.start;
+    let y;
+
+    if (label.position === "middle") {
+      y = shape.tipHeight + shape.bodyHeight / 2;
+    } else if (label.position === "bottom") {
+      y = 2 * shape.tipHeight + shape.bodyHeight + label.spacing;
+    } else {
+      y = -label.spacing;
+    }
+
+    return {
+      x,
+      y,
+      rotation: ["start", "middle"].includes(label.anchor)
+        ? -label.rotation
+        : label.rotation,
+    };
+  }
+
+  function getGeneLabelTransform(gene, options) {
+    const { x, y, rotation } = getGeneLabelLayout(gene, options);
+    return `translate(${x}, ${y}) rotate(${rotation})`;
+  }
+
+  function getGeneLabelDy(position) {
+    switch (position) {
+      case "top":
+        return "-0.4em";
+      case "middle":
+        return "0.4em";
+      case "bottom":
+        return "0.8em";
+      default:
+        return undefined;
+    }
+  }
+
+  function getLinkAnchors(
+    link,
+    {
+      geneForUid,
+      areClustersAdjacent,
+      scaleX,
+      horizontalOffset,
+      verticalPosition,
+      geneMidpoint,
+    }
+  ) {
+    const query = geneForUid(link.query.uid);
+    const target = geneForUid(link.target.uid);
+
+    if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
+
+    const getGeneAnchors = (gene) => {
+      const offset = horizontalOffset(gene);
+      const left = scaleX(gene.start) + offset;
+      const right = scaleX(gene.end) + offset;
+      const forward = gene.strand === 1;
+      return [
+        forward ? left : right,
+        forward ? right : left,
+        verticalPosition(gene) + geneMidpoint,
+      ];
+    };
+
+    const [ax1, ax2, ay] = getGeneAnchors(query);
+    const [bx1, bx2, by] = getGeneAnchors(target);
+
+    return ay > by
+      ? [bx1, bx2, by, ax1, ax2, ay]
+      : [ax1, ax2, ay, bx1, bx2, by];
+  }
+
+  function getLinkLabelPosition(
+    [ax1, ax2, ay, bx1, bx2, by],
+    position
+  ) {
+    const aMid = ax1 + (ax2 - ax1) / 2;
+    const bMid = bx1 + (bx2 - bx1) / 2;
+    return {
+      x: aMid + (bMid - aMid) * position,
+      y: ay + Math.abs(by - ay) * position,
+    };
+  }
+
+  function straightLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
+    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`;
+  }
+
+  function sankeyLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
+    const verticalMidpoint = ay + Math.abs(by - ay) / 2;
+    return `M${ax2},${ay}C${ax2},${verticalMidpoint},${bx2},${verticalMidpoint},${bx2},${by}L${bx1},${by}C${bx1},${verticalMidpoint},${ax1},${verticalMidpoint},${ax1},${ay}L${ax2},${ay}`;
+  }
+
+  function lineLinkPath([ax1, ax2, ay, bx1, bx2, by], straight) {
+    const aMid = ax1 + (ax2 - ax1) / 2;
+    const bMid = bx1 + (bx2 - bx1) / 2;
+    if (straight) return `M${aMid},${ay} L${bMid},${by}`;
+
+    const verticalMidpoint = (ay + by) / 2;
+    return `M${aMid},${ay}C${aMid},${verticalMidpoint},${bMid},${verticalMidpoint},${bMid},${by}`;
+  }
+
+  function getLinkPath(anchors, { asLine, straight }) {
+    if (!anchors) return "";
+    if (asLine) return lineLinkPath(anchors, straight);
+    return straight ? straightLinkPath(anchors) : sankeyLinkPath(anchors);
+  }
+
+  function worldPolygon(points, x, y) {
+    return points.map((point, index) => point + (index % 2 === 0 ? x : y));
+  }
+
+  function boundsFromPoints(points) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let index = 0; index < points.length; index += 2) {
+      minX = Math.min(minX, points[index]);
+      maxX = Math.max(maxX, points[index]);
+      minY = Math.min(minY, points[index + 1]);
+      maxY = Math.max(maxY, points[index + 1]);
+    }
+    return { minX, maxX, minY, maxY };
+  }
+
+  function boundsFromLinkAnchors(anchors) {
+    if (!anchors) return null;
+    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+    return {
+      minX: Math.min(ax1, ax2, bx1, bx2),
+      maxX: Math.max(ax1, ax2, bx1, bx2),
+      minY: Math.min(ay, by),
+      maxY: Math.max(ay, by),
+    };
+  }
+
+  function formatKilobases(basePairs) {
+    return `${+(basePairs / 1000).toFixed(1)}kb`;
+  }
+
+  function buildChrome(bounds, genes, chrome) {
+    if (!bounds || !chrome) return null;
+
+    const visibleGroupIds = new Set();
+    for (const gene of genes.values()) {
+      if (!gene.visible) continue;
+      const groupUid = chrome.legend.groupForGene(gene.source.uid);
+      if (groupUid !== null) visibleGroupIds.add(groupUid);
+    }
+
+    const groups = chrome.legend.groups.filter(
+      (group) => !group.hidden && visibleGroupIds.has(group.uid)
+    );
+    const totalHeight = chrome.legend.entryHeight * groups.length;
+    const step = groups.length > 1 ? totalHeight / (groups.length - 0.5) : totalHeight;
+    const radius = step / 4;
+    const legend = {
+      visible: chrome.legend.show,
+      position: { x: bounds.maxX + chrome.legend.marginLeft, y: 0 },
+      fontSize: chrome.legend.fontSize,
+      fontFamily: chrome.legend.fontFamily,
+      items: groups.map((group, index) => ({
+        uid: group.uid,
+        source: group,
+        label: group.label,
+        colour: chrome.legend.colourForGroup(group.uid),
+        x: 0,
+        y: index * step,
+        radius,
+        circleY: radius,
+        textX: radius + 6,
+        textY: radius + 1,
+      })),
+    };
+
+    const scaleBarLength = chrome.scaleBar.coordinateFor(chrome.scaleBar.basePair);
+    const scaleBar = {
+      visible: chrome.scaleBar.show,
+      position: {
+        x: chrome.scaleBar.x,
+        y: bounds.maxY + chrome.scaleBar.marginTop,
+      },
+      length: scaleBarLength,
+      basePair: chrome.scaleBar.basePair,
+      height: chrome.scaleBar.height,
+      middle: chrome.scaleBar.height / 2,
+      label: formatKilobases(chrome.scaleBar.basePair),
+      colour: chrome.scaleBar.colour,
+      strokeWidth: chrome.scaleBar.strokeWidth,
+      fontSize: chrome.scaleBar.fontSize,
+      fontFamily: chrome.scaleBar.fontFamily,
+    };
+
+    const colourBar = {
+      visible: chrome.colourBar.show && !chrome.link.groupColour && chrome.link.show,
+      position: {
+        x: chrome.colourBar.x,
+        y: bounds.maxY + chrome.colourBar.marginTop,
+      },
+      width: chrome.colourBar.width,
+      height: chrome.colourBar.height,
+      fontSize: chrome.colourBar.fontSize,
+      fontFamily: chrome.colourBar.fontFamily,
+      startColour: chrome.colourBar.scoreColour(0),
+      endColour: chrome.colourBar.scoreColour(1),
+      label: "Identity (%)",
+      startLabel: "0",
+      endLabel: "100",
+    };
+
+    return { legend, scaleBar, colourBar };
+  }
+
+  function buildHitRegions(loci, genes) {
+    const locusRegions = new Map();
+    const geneRegions = new Map();
+    const all = [];
+
+    for (const locus of loci.values()) {
+      const { source, worldStart, worldEnd, y, hover } = locus;
+      const move = {
+        type: "rect",
+        action: "move-locus",
+        locusUid: source.uid,
+        x: worldStart,
+        y: y + hover.y,
+        width: worldEnd - worldStart,
+        height: hover.height,
+      };
+      const trimLeft = {
+        type: "rect",
+        action: "trim-locus-left",
+        locusUid: source.uid,
+        x: worldStart + hover.leftHandleX - hover.x,
+        y: y + hover.y,
+        width: hover.x - hover.leftHandleX,
+        height: hover.height,
+      };
+      const trimRight = {
+        type: "rect",
+        action: "trim-locus-right",
+        locusUid: source.uid,
+        x: worldEnd,
+        y: y + hover.y,
+        width: 8,
+        height: hover.height,
+      };
+      const regions = { move, trimLeft, trimRight };
+      locusRegions.set(source.uid, regions);
+      all.push(move, trimLeft, trimRight);
+    }
+
+    for (const gene of genes.values()) {
+      if (!gene.visible) continue;
+      const region = {
+        type: "polygon",
+        action: "gene",
+        geneUid: gene.source.uid,
+        points: gene.polygon,
+      };
+      geneRegions.set(gene.source.uid, region);
+      all.push(region);
+    }
+
+    return { all, loci: locusRegions, genes: geneRegions };
+  }
+
+  /**
+   * Derive renderer-neutral, world-space geometry from chart data and state.
+   * The returned records contain no DOM selections and can be consumed by SVG,
+   * Canvas, or an SVG export renderer.
+   */
+  function buildScene(
+    data,
+    {
+      scaleX,
+      scaleY,
+      clusterPosition = scaleY,
+      clusterOffset,
+      locusOffset,
+      getLocusState,
+      getGeneState,
+      areClustersAdjacent,
+      shape,
+      label,
+      link,
+      clusterLabel = () => "",
+      alignLabels = true,
+      chrome = null,
+    }
+  ) {
+    const clusters = new Map();
+    const loci = new Map();
+    const genes = new Map();
+    const links = new Map();
+    const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    for (const cluster of data.clusters) {
+      const x = clusterOffset(cluster.uid);
+      const y = clusterPosition(cluster.uid);
+      const clusterLayout = { source: cluster, x, y, loci: [] };
+      clusters.set(cluster.uid, clusterLayout);
+
+      for (const locus of cluster.loci) {
+        const state = getLocusState(locus);
+        const localX = locusOffset(locus.uid);
+        const start = scaleX(state.start);
+        const end = scaleX(state.end);
+        const worldX = x + localX;
+        const locusLayout = {
+          source: locus,
+          cluster,
+          state,
+          localX,
+          x: worldX,
+          y,
+          start,
+          end,
+          worldStart: worldX + start,
+          worldEnd: worldX + end,
+          bounds: {
+            minX: worldX + start,
+            maxX: worldX + end,
+            minY: y - 10,
+            maxY: y + shape.tipHeight * 2 + shape.bodyHeight + 10,
+          },
+          transform: { x: localX, y: 0 },
+          track: {
+            x1: start,
+            x2: end,
+            y: geneMidpoint,
+          },
+          hover: {
+            x: start,
+            y: -10,
+            width: end - start,
+            height: shape.tipHeight * 2 + shape.bodyHeight + 20,
+            leftHandleX: start - 8,
+            rightHandleX: end,
+          },
+        };
+        loci.set(locus.uid, locusLayout);
+        clusterLayout.loci.push(locusLayout);
+        minX = Math.min(minX, locusLayout.worldStart);
+        maxX = Math.max(maxX, locusLayout.worldEnd);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y + shape.tipHeight * 2 + shape.bodyHeight);
+
+        for (const gene of locus.genes) {
+          const display = { ...gene, ...getGeneState(gene) };
+          const visible =
+            display.start >= state.start && display.end <= state.end + 1;
+          const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
+          const polygon = worldPolygon(localPolygon, worldX, y);
+          genes.set(gene.uid, {
+            source: gene,
+            display,
+            locus: locusLayout,
+            visible,
+            localPolygon,
+            polygon,
+            bounds: boundsFromPoints(polygon),
+            label: getGeneLabelLayout(display, { scaleX, shape, label }),
+            labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
+            labelDy: getGeneLabelDy(label.position),
+          });
+        }
+      }
+    }
+
+    const bounds =
+      minX === Infinity ? null : { minX, maxX, minY, maxY };
+    for (const cluster of clusters.values()) {
+      const clusterMinX = cluster.loci.length
+        ? Math.min(...cluster.loci.map((locus) => locus.worldStart))
+        : cluster.x;
+      const labelX = (alignLabels && bounds ? bounds.minX : clusterMinX) - cluster.x - 10;
+      cluster.info = {
+        x: labelX,
+        y: 0,
+        locusText: clusterLabel(cluster.source),
+      };
+    }
+
+    for (const source of data.links) {
+      const query = genes.get(source.query.uid);
+      const target = genes.get(source.target.uid);
+      let anchors = null;
+      if (query && target) {
+        anchors = getLinkAnchors(source, {
+          geneForUid: (uid) => genes.get(uid)?.display,
+          areClustersAdjacent,
+          scaleX,
+          horizontalOffset: (gene) => {
+            const locus = loci.get(gene.locusUid);
+            return locus ? locus.x : 0;
+          },
+          verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
+          geneMidpoint,
+        });
+      }
+      links.set(source.uid, {
+        source,
+        anchors,
+        bounds: boundsFromLinkAnchors(anchors),
+        path: getLinkPath(anchors, link),
+        labelPosition: anchors
+          ? getLinkLabelPosition(anchors, link.labelPosition)
+          : null,
+        visible:
+          Boolean(anchors) &&
+          source.identity >= link.threshold &&
+          query?.visible &&
+          target?.visible,
+      });
+    }
+
+    return {
+      clusters,
+      loci,
+      genes,
+      links,
+      bounds,
+      index: {
+        genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
+        loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
+        links: createSpatialIndex([...links].map(([uid, link]) => [uid, link.bounds])),
+      },
+      hitRegions: buildHitRegions(loci, genes),
+      chrome: buildChrome(bounds, genes, chrome),
+    };
+  }
+
+  /**
+   * Describe a transient locus translation relative to an already projected
+   * scene. This is deliberately a sparse, renderer-neutral patch: it avoids
+   * rebuilding the scene while a drag is in progress.
+   */
+  function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels }) {
+    const locus = scene.loci.get(locusUid);
+    if (!locus) return null;
+    const offsetX = offset - locus.localX;
+    const clusters = [...scene.clusters.values()];
+    const minStart = (loci) => Math.min(...loci.map((candidate) => candidate.worldStart));
+    const clusterLabelOffsets = new Map();
+
+    if (alignLabels) {
+      const oldStart = minStart([...scene.loci.values()]);
+      const newStart = Math.min(
+        ...[...scene.loci.values()].map((candidate) =>
+          candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart
+        )
+      );
+      const labelOffset = newStart - oldStart;
+      for (const cluster of clusters) clusterLabelOffsets.set(cluster.source.uid, labelOffset);
+    } else {
+      const cluster = scene.clusters.get(locus.cluster.uid);
+      const oldStart = minStart(cluster.loci);
+      const newStart = Math.min(
+        ...cluster.loci.map((candidate) =>
+          candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart
+        )
+      );
+      clusterLabelOffsets.set(cluster.source.uid, newStart - oldStart);
+    }
+
+    return {
+      type: "locus-offset",
+      locusUid,
+      offsetX,
+      clusterLabelOffsets,
+    };
   }
 
   // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
@@ -1946,465 +2665,6 @@
     return { domain, range };
   }
 
-  function getGenePolygonCoordinates(gene, { scaleX, shape }) {
-    const scaledStart = scaleX(gene.start);
-    const scaledEnd = scaleX(gene.end);
-    const geneLength = scaledEnd - scaledStart;
-    const bottom = shape.tipHeight * 2 + shape.bodyHeight;
-    const midpoint = bottom / 2;
-    const third = shape.tipHeight + shape.bodyHeight;
-    let points;
-
-    if (gene.strand === 1) {
-      const shaft = scaledEnd - shape.tipLength;
-      points = [
-        scaledStart,
-        shape.tipHeight,
-        shaft,
-        shape.tipHeight,
-        shaft,
-        0,
-        scaledEnd,
-        midpoint,
-        shaft,
-        bottom,
-        shaft,
-        third,
-        scaledStart,
-        third,
-      ];
-      if (geneLength < shape.tipLength) {
-        [2, 4, 8, 10].forEach((index) => (points[index] = scaledStart));
-      }
-    } else {
-      const shaft = scaledStart + shape.tipLength;
-      points = [
-        scaledEnd,
-        shape.tipHeight,
-        shaft,
-        shape.tipHeight,
-        shaft,
-        0,
-        scaledStart,
-        midpoint,
-        shaft,
-        bottom,
-        shaft,
-        third,
-        scaledEnd,
-        third,
-      ];
-      if (geneLength < shape.tipLength) {
-        [2, 4, 8, 10].forEach((index) => (points[index] = scaledEnd));
-      }
-    }
-
-    return points;
-  }
-
-  function getGeneLabelLayout(gene, { scaleX, shape, label }) {
-    const scaledLength = scaleX(gene.end) - scaleX(gene.start);
-    const x = scaleX(gene.start) + scaledLength * label.start;
-    let y;
-
-    if (label.position === "middle") {
-      y = shape.tipHeight + shape.bodyHeight / 2;
-    } else if (label.position === "bottom") {
-      y = 2 * shape.tipHeight + shape.bodyHeight + label.spacing;
-    } else {
-      y = -label.spacing;
-    }
-
-    return {
-      x,
-      y,
-      rotation: ["start", "middle"].includes(label.anchor)
-        ? -label.rotation
-        : label.rotation,
-    };
-  }
-
-  function getGeneLabelTransform(gene, options) {
-    const { x, y, rotation } = getGeneLabelLayout(gene, options);
-    return `translate(${x}, ${y}) rotate(${rotation})`;
-  }
-
-  function getGeneLabelDy(position) {
-    switch (position) {
-      case "top":
-        return "-0.4em";
-      case "middle":
-        return "0.4em";
-      case "bottom":
-        return "0.8em";
-      default:
-        return undefined;
-    }
-  }
-
-  function getLinkAnchors(
-    link,
-    {
-      geneForUid,
-      areClustersAdjacent,
-      scaleX,
-      horizontalOffset,
-      verticalPosition,
-      geneMidpoint,
-    }
-  ) {
-    const query = geneForUid(link.query.uid);
-    const target = geneForUid(link.target.uid);
-
-    if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
-
-    const getGeneAnchors = (gene) => {
-      const offset = horizontalOffset(gene);
-      const left = scaleX(gene.start) + offset;
-      const right = scaleX(gene.end) + offset;
-      const forward = gene.strand === 1;
-      return [
-        forward ? left : right,
-        forward ? right : left,
-        verticalPosition(gene) + geneMidpoint,
-      ];
-    };
-
-    const [ax1, ax2, ay] = getGeneAnchors(query);
-    const [bx1, bx2, by] = getGeneAnchors(target);
-
-    return ay > by
-      ? [bx1, bx2, by, ax1, ax2, ay]
-      : [ax1, ax2, ay, bx1, bx2, by];
-  }
-
-  function getLinkLabelPosition(
-    [ax1, ax2, ay, bx1, bx2, by],
-    position
-  ) {
-    const aMid = ax1 + (ax2 - ax1) / 2;
-    const bMid = bx1 + (bx2 - bx1) / 2;
-    return {
-      x: aMid + (bMid - aMid) * position,
-      y: ay + Math.abs(by - ay) * position,
-    };
-  }
-
-  function straightLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
-    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`;
-  }
-
-  function sankeyLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
-    const verticalMidpoint = ay + Math.abs(by - ay) / 2;
-    return `M${ax2},${ay}C${ax2},${verticalMidpoint},${bx2},${verticalMidpoint},${bx2},${by}L${bx1},${by}C${bx1},${verticalMidpoint},${ax1},${verticalMidpoint},${ax1},${ay}L${ax2},${ay}`;
-  }
-
-  function lineLinkPath([ax1, ax2, ay, bx1, bx2, by], straight) {
-    const aMid = ax1 + (ax2 - ax1) / 2;
-    const bMid = bx1 + (bx2 - bx1) / 2;
-    if (straight) return `M${aMid},${ay} L${bMid},${by}`;
-
-    const verticalMidpoint = (ay + by) / 2;
-    return `M${aMid},${ay}C${aMid},${verticalMidpoint},${bMid},${verticalMidpoint},${bMid},${by}`;
-  }
-
-  function getLinkPath(anchors, { asLine, straight }) {
-    if (!anchors) return "";
-    if (asLine) return lineLinkPath(anchors, straight);
-    return straight ? straightLinkPath(anchors) : sankeyLinkPath(anchors);
-  }
-
-  function worldPolygon(points, x, y) {
-    return points.map((point, index) => point + (index % 2 === 0 ? x : y));
-  }
-
-  function formatKilobases(basePairs) {
-    return `${+(basePairs / 1000).toFixed(1)}kb`;
-  }
-
-  function buildChrome(bounds, genes, chrome) {
-    if (!bounds || !chrome) return null;
-
-    const visibleGroupIds = new Set();
-    for (const gene of genes.values()) {
-      if (!gene.visible) continue;
-      const groupUid = chrome.legend.groupForGene(gene.source.uid);
-      if (groupUid !== null) visibleGroupIds.add(groupUid);
-    }
-
-    const groups = chrome.legend.groups.filter(
-      (group) => !group.hidden && visibleGroupIds.has(group.uid)
-    );
-    const totalHeight = chrome.legend.entryHeight * groups.length;
-    const step = groups.length > 1 ? totalHeight / (groups.length - 0.5) : totalHeight;
-    const radius = step / 4;
-    const legend = {
-      visible: chrome.legend.show,
-      position: { x: bounds.maxX + chrome.legend.marginLeft, y: 0 },
-      fontSize: chrome.legend.fontSize,
-      fontFamily: chrome.legend.fontFamily,
-      items: groups.map((group, index) => ({
-        uid: group.uid,
-        source: group,
-        label: group.label,
-        colour: chrome.legend.colourForGroup(group.uid),
-        x: 0,
-        y: index * step,
-        radius,
-        circleY: radius,
-        textX: radius + 6,
-        textY: radius + 1,
-      })),
-    };
-
-    const scaleBarLength = chrome.scaleBar.coordinateFor(chrome.scaleBar.basePair);
-    const scaleBar = {
-      visible: chrome.scaleBar.show,
-      position: {
-        x: chrome.scaleBar.x,
-        y: bounds.maxY + chrome.scaleBar.marginTop,
-      },
-      length: scaleBarLength,
-      basePair: chrome.scaleBar.basePair,
-      height: chrome.scaleBar.height,
-      middle: chrome.scaleBar.height / 2,
-      label: formatKilobases(chrome.scaleBar.basePair),
-      colour: chrome.scaleBar.colour,
-      strokeWidth: chrome.scaleBar.strokeWidth,
-      fontSize: chrome.scaleBar.fontSize,
-      fontFamily: chrome.scaleBar.fontFamily,
-    };
-
-    const colourBar = {
-      visible: chrome.colourBar.show && !chrome.link.groupColour && chrome.link.show,
-      position: {
-        x: chrome.colourBar.x,
-        y: bounds.maxY + chrome.colourBar.marginTop,
-      },
-      width: chrome.colourBar.width,
-      height: chrome.colourBar.height,
-      fontSize: chrome.colourBar.fontSize,
-      fontFamily: chrome.colourBar.fontFamily,
-      startColour: chrome.colourBar.scoreColour(0),
-      endColour: chrome.colourBar.scoreColour(1),
-      label: "Identity (%)",
-      startLabel: "0",
-      endLabel: "100",
-    };
-
-    return { legend, scaleBar, colourBar };
-  }
-
-  function buildHitRegions(loci, genes) {
-    const locusRegions = new Map();
-    const geneRegions = new Map();
-    const all = [];
-
-    for (const locus of loci.values()) {
-      const { source, worldStart, worldEnd, y, hover } = locus;
-      const move = {
-        type: "rect",
-        action: "move-locus",
-        locusUid: source.uid,
-        x: worldStart,
-        y: y + hover.y,
-        width: worldEnd - worldStart,
-        height: hover.height,
-      };
-      const trimLeft = {
-        type: "rect",
-        action: "trim-locus-left",
-        locusUid: source.uid,
-        x: worldStart + hover.leftHandleX - hover.x,
-        y: y + hover.y,
-        width: hover.x - hover.leftHandleX,
-        height: hover.height,
-      };
-      const trimRight = {
-        type: "rect",
-        action: "trim-locus-right",
-        locusUid: source.uid,
-        x: worldEnd,
-        y: y + hover.y,
-        width: 8,
-        height: hover.height,
-      };
-      const regions = { move, trimLeft, trimRight };
-      locusRegions.set(source.uid, regions);
-      all.push(move, trimLeft, trimRight);
-    }
-
-    for (const gene of genes.values()) {
-      if (!gene.visible) continue;
-      const region = {
-        type: "polygon",
-        action: "gene",
-        geneUid: gene.source.uid,
-        points: gene.polygon,
-      };
-      geneRegions.set(gene.source.uid, region);
-      all.push(region);
-    }
-
-    return { all, loci: locusRegions, genes: geneRegions };
-  }
-
-  /**
-   * Derive renderer-neutral, world-space geometry from chart data and state.
-   * The returned records contain no DOM selections and can be consumed by SVG,
-   * Canvas, or an SVG export renderer.
-   */
-  function buildScene(
-    data,
-    {
-      scaleX,
-      scaleY,
-      clusterPosition = scaleY,
-      clusterOffset,
-      locusOffset,
-      getLocusState,
-      getGeneState,
-      areClustersAdjacent,
-      shape,
-      label,
-      link,
-      clusterLabel = () => "",
-      alignLabels = true,
-      chrome = null,
-    }
-  ) {
-    const clusters = new Map();
-    const loci = new Map();
-    const genes = new Map();
-    const links = new Map();
-    const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    for (const cluster of data.clusters) {
-      const x = clusterOffset(cluster.uid);
-      const y = clusterPosition(cluster.uid);
-      const clusterLayout = { source: cluster, x, y, loci: [] };
-      clusters.set(cluster.uid, clusterLayout);
-
-      for (const locus of cluster.loci) {
-        const state = getLocusState(locus);
-        const localX = locusOffset(locus.uid);
-        const start = scaleX(state.start);
-        const end = scaleX(state.end);
-        const worldX = x + localX;
-        const locusLayout = {
-          source: locus,
-          cluster,
-          state,
-          localX,
-          x: worldX,
-          y,
-          start,
-          end,
-          worldStart: worldX + start,
-          worldEnd: worldX + end,
-          transform: { x: localX, y: 0 },
-          track: {
-            x1: start,
-            x2: end,
-            y: geneMidpoint,
-          },
-          hover: {
-            x: start,
-            y: -10,
-            width: end - start,
-            height: shape.tipHeight * 2 + shape.bodyHeight + 20,
-            leftHandleX: start - 8,
-            rightHandleX: end,
-          },
-        };
-        loci.set(locus.uid, locusLayout);
-        clusterLayout.loci.push(locusLayout);
-        minX = Math.min(minX, locusLayout.worldStart);
-        maxX = Math.max(maxX, locusLayout.worldEnd);
-        minY = Math.min(minY, y);
-        maxY = Math.max(maxY, y + shape.tipHeight * 2 + shape.bodyHeight);
-
-        for (const gene of locus.genes) {
-          const display = { ...gene, ...getGeneState(gene) };
-          const visible =
-            display.start >= state.start && display.end <= state.end + 1;
-          const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
-          genes.set(gene.uid, {
-            source: gene,
-            display,
-            locus: locusLayout,
-            visible,
-            localPolygon,
-            polygon: worldPolygon(localPolygon, worldX, y),
-            label: getGeneLabelLayout(display, { scaleX, shape, label }),
-            labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
-            labelDy: getGeneLabelDy(label.position),
-          });
-        }
-      }
-    }
-
-    const bounds =
-      minX === Infinity ? null : { minX, maxX, minY, maxY };
-    for (const cluster of clusters.values()) {
-      const clusterMinX = cluster.loci.length
-        ? Math.min(...cluster.loci.map((locus) => locus.worldStart))
-        : cluster.x;
-      const labelX = (alignLabels && bounds ? bounds.minX : clusterMinX) - cluster.x - 10;
-      cluster.info = {
-        x: labelX,
-        y: 0,
-        locusText: clusterLabel(cluster.source),
-      };
-    }
-
-    for (const source of data.links) {
-      const query = genes.get(source.query.uid);
-      const target = genes.get(source.target.uid);
-      let anchors = null;
-      if (query && target) {
-        anchors = getLinkAnchors(source, {
-          geneForUid: (uid) => genes.get(uid)?.display,
-          areClustersAdjacent,
-          scaleX,
-          horizontalOffset: (gene) => {
-            const locus = loci.get(gene.locusUid);
-            return locus ? locus.x : 0;
-          },
-          verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
-          geneMidpoint,
-        });
-      }
-      links.set(source.uid, {
-        source,
-        anchors,
-        path: getLinkPath(anchors, link),
-        labelPosition: anchors
-          ? getLinkLabelPosition(anchors, link.labelPosition)
-          : null,
-        visible:
-          Boolean(anchors) &&
-          source.identity >= link.threshold &&
-          query?.visible &&
-          target?.visible,
-      });
-    }
-
-    return {
-      clusters,
-      loci,
-      genes,
-      links,
-      bounds,
-      hitRegions: buildHitRegions(loci, genes),
-      chrome: buildChrome(bounds, genes, chrome),
-    };
-  }
-
   // This is deliberately one factory per chart, not a collection of tiny API
   // factories: configuration, scales, indexes, and mutable scene state must not
   // leak between independently mounted maps.
@@ -2772,8 +3032,12 @@
     let chartState = null;
     let canvasGesture = null;
     let canvasHoverLocusUid = null;
+    let canvasPanMode = false;
     let canvasScene = null;
     let canvasAnimation = null;
+    let canvasPreview = null;
+    let canvasPreviewFrame = null;
+    let paintCanvasPreview = null;
     let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
     const interactionController = createInteractionController({
@@ -2793,10 +3057,18 @@
       },
       previewLocusOffset: (uid, offset) => {
         setPreviewLocusOffset(chartState, uid, offset);
+        if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+          canvasPreview = createLocusOffsetPreview(runtime.scene.get(), uid, offset, {
+            alignLabels: runtime.config.cluster.alignLabels,
+          });
+          scheduleCanvasPreview();
+          return;
+        }
         runtime.plot.update({ animate: false });
       },
       commitLocusOffset: (uid) => {
         commitPreviewLocusOffset(chartState, uid);
+        clearCanvasPreview();
         runtime.plot.update({ animate: false });
       },
       previewLocusTrim: (locus, edge, position) => {
@@ -2823,6 +3095,20 @@
     runtime.plot.update = (options) => container.call(my, options);
     runtime.plot.data = (data) => my.data(data);
 
+    function clearCanvasPreview() {
+      if (canvasPreviewFrame !== null) cancelAnimationFrame(canvasPreviewFrame);
+      canvasPreview = null;
+      canvasPreviewFrame = null;
+    }
+
+    function scheduleCanvasPreview() {
+      if (canvasPreviewFrame !== null || !paintCanvasPreview) return;
+      canvasPreviewFrame = requestAnimationFrame(() => {
+        canvasPreviewFrame = null;
+        paintCanvasPreview();
+      });
+    }
+
     function my(selection, options) {
       selection.each(function (data) {
         update.call(this, data, options);
@@ -2843,6 +3129,7 @@
       // Set up the shared transition
       transition = d3.transition().duration(runtime.config.plot.transitionDuration);
       const useCanvas = runtime.config.plot.renderer === "canvas";
+      if (!useCanvas) clearCanvasPreview();
 
       // Build the figure
       const svg = container
@@ -2931,9 +3218,12 @@
             .append("canvas")
             .attr("class", "clusterMapCanvas")
             .attr("cursor", "grab")
+            .attr("tabindex", 0)
+            .attr("aria-label", "Cluster map")
             .style("display", "block")
             .style("width", "100%")
-            .style("height", "100%");
+            .style("height", "100%")
+            .style("outline", "none");
           canvasZoom = d3
             .zoom()
             .scaleExtent([0, 8])
@@ -2978,7 +3268,9 @@
           config: runtime.config,
           scales: runtime.scales,
           hoverLocusUid: canvasHoverLocusUid,
+          preview: canvasPreview,
         });
+      paintCanvasPreview = useCanvas ? () => paintCanvas(canvas.node()) : null;
       const stopCanvasAnimation = () => {
         if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
         canvasAnimation = null;
@@ -3054,13 +3346,31 @@
           d3.select(canvasNode).style("cursor", cursorForTarget(target));
         };
         canvasZoom.filter(function (event) {
+          if (canvasPanMode) return event.type === "wheel" || event.button === 0;
           if (event.type === "wheel") return true;
           if (event.ctrlKey || event.button) return false;
           return !targetForEvent(this, event);
         });
         canvas
+          .on("pointerenter.canvasKeyboard", function () {
+            this.focus({ preventScroll: true });
+          })
+          .on("keydown.canvasKeyboard", function (event) {
+            if (event.code !== "Space") return;
+            canvasPanMode = true;
+            event.preventDefault();
+            d3.select(this).style("cursor", "grab");
+          })
+          .on("keyup.canvasKeyboard", function (event) {
+            if (event.code !== "Space") return;
+            canvasPanMode = false;
+            d3.select(this).style("cursor", "grab");
+          })
+          .on("blur.canvasKeyboard", function () {
+            canvasPanMode = false;
+          })
           .on("pointerdown.canvasInteraction", function (event) {
-            if (event.button) return;
+            if (canvasPanMode || event.button) return;
             const target = targetForEvent(this, event);
             if (!target) return;
             const point = canvasWorldPoint(this, event, getCamera(chartState));
@@ -3095,6 +3405,7 @@
             event.preventDefault();
           })
           .on("pointermove.canvasInteraction", function (event) {
+            if (canvasPanMode) return;
             if (!canvasGesture) {
               updateCanvasAffordance(this, targetForEvent(this, event));
               return;
@@ -3113,7 +3424,7 @@
             }
           })
           .on("pointerleave.canvasInteraction", function () {
-            if (!canvasGesture) updateCanvasAffordance(this, null);
+            if (!canvasGesture && !canvasPanMode) updateCanvasAffordance(this, null);
           })
           .on("pointerup.canvasInteraction pointercancel.canvasInteraction", function (event) {
             if (!canvasGesture) return;
@@ -3278,14 +3589,24 @@
       }
 
       const padding = 20;
-      const scale = Math.min(
+      const fitScale = Math.min(
         1.2,
         (width - padding * 2) / (bounds.maxX - bounds.minX),
         (height - padding * 2) / (bounds.maxY - bounds.minY)
       );
+      // A fit smaller than the default camera scale defeats Canvas culling and
+      // leaves an impractically dense interaction surface. Keep a readable
+      // scale in that case, showing the top-left of the figure (including the
+      // cluster labels). Ordinary figures retain the existing fit-to-view.
+      const cropped = fitScale < 1;
+      const scale = cropped ? 1 : fitScale;
       const camera = {
-        x: (width - (bounds.maxX - bounds.minX) * scale) / 2 - bounds.minX * scale,
-        y: (height - (bounds.maxY - bounds.minY) * scale) / 2 - bounds.minY * scale,
+        x: cropped
+          ? padding - bounds.minX * scale
+          : (width - (bounds.maxX - bounds.minX) * scale) / 2 - bounds.minX * scale,
+        y: cropped
+          ? padding - bounds.minY * scale
+          : (height - (bounds.maxY - bounds.minY) * scale) / 2 - bounds.minY * scale,
         k: scale,
       };
       if (canvasZoom) {

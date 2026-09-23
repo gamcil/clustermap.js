@@ -1,11 +1,27 @@
 import { rgbaToRgb } from "./utils.js";
 import { hitTest } from "./hitTest.mjs";
+import { queryViewport } from "./spatialIndex.mjs";
 
 export function canvasWorldPoint(canvas, event, camera) {
   const bounds = canvas.getBoundingClientRect();
   return {
     x: (event.clientX - bounds.left - camera.x) / camera.k,
     y: (event.clientY - bounds.top - camera.y) / camera.k,
+  };
+}
+
+/**
+ * Return the portion of chart-world space covered by a Canvas. A small
+ * screen-space margin prevents records from popping at its edge while panning.
+ */
+export function canvasWorldViewport(canvas, camera, overscan = 20) {
+  const bounds = canvas.getBoundingClientRect();
+  const margin = overscan / camera.k;
+  return {
+    minX: -camera.x / camera.k - margin,
+    maxX: (bounds.width - camera.x) / camera.k + margin,
+    minY: -camera.y / camera.k - margin,
+    maxY: (bounds.height - camera.y) / camera.k + margin,
   };
 }
 
@@ -100,9 +116,13 @@ function polygon(context, points) {
   context.closePath();
 }
 
-function drawLink(context, layout, source, config, scales) {
+function drawLink(context, layout, source, config, scales, offsets = {}) {
   if (!layout.visible || !layout.anchors) return;
-  const [ax1, ax2, ay, bx1, bx2, by] = layout.anchors;
+  let [ax1, ax2, ay, bx1, bx2, by] = layout.anchors;
+  ax1 += offsets.a || 0;
+  ax2 += offsets.a || 0;
+  bx1 += offsets.b || 0;
+  bx2 += offsets.b || 0;
   const aMid = (ax1 + ax2) / 2;
   const bMid = (bx1 + bx2) / 2;
   const group = scales.group(source.query.uid);
@@ -147,9 +167,9 @@ function drawLink(context, layout, source, config, scales) {
   }
 }
 
-function drawClusterInfo(context, cluster, config) {
+function drawClusterInfo(context, cluster, config, offsetX = 0) {
   const { x, y } = cluster;
-  const anchorX = x + cluster.info.x;
+  const anchorX = x + cluster.info.x + offsetX;
   context.fillStyle = "black";
   context.textAlign = "end";
   context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
@@ -160,8 +180,10 @@ function drawClusterInfo(context, cluster, config) {
   context.fillText(cluster.info.locusText, anchorX, y + 12);
 }
 
-function drawGene(context, gene, config, scales) {
+function drawGene(context, gene, config, scales, offsetX = 0) {
   if (!gene.visible) return;
+  context.save();
+  context.translate(offsetX, 0);
   polygon(context, gene.polygon);
   const group = scales.group(gene.source.uid);
   context.fillStyle = gene.source.colour || scales.colour(group);
@@ -170,7 +192,10 @@ function drawGene(context, gene, config, scales) {
   context.fill();
   context.stroke();
 
-  if (!config.gene.label.show) return;
+  if (!config.gene.label.show) {
+    context.restore();
+    return;
+  }
   const { x, y, rotation } = gene.label;
   context.save();
   context.translate(gene.locus.x + x, gene.locus.y + y);
@@ -181,21 +206,60 @@ function drawGene(context, gene, config, scales) {
   context.textBaseline = "alphabetic";
   context.fillText(gene.source.label || gene.source.uid, 0, 0);
   context.restore();
+  context.restore();
 }
 
-function drawLocusHover(context, scene, locusUid) {
+function drawLocusHover(context, scene, locusUid, offsetX = 0) {
   if (!locusUid) return;
   const locus = scene.loci.get(locusUid);
   if (!locus) return;
 
   const { hover } = locus;
-  const x = locus.x + hover.x;
+  const x = locus.x + hover.x + offsetX;
   const y = locus.y + hover.y;
   context.fillStyle = "rgba(0, 0, 0, 0.4)";
   context.fillRect(x, y, hover.width, hover.height);
   context.fillStyle = "black";
-  context.fillRect(locus.x + hover.leftHandleX, y, 8, hover.height);
-  context.fillRect(locus.x + hover.rightHandleX, y, 8, hover.height);
+  context.fillRect(locus.x + hover.leftHandleX + offsetX, y, 8, hover.height);
+  context.fillRect(locus.x + hover.rightHandleX + offsetX, y, 8, hover.height);
+}
+
+function drawLocusTrack(context, locus, viewport, config, offsetX = 0) {
+  const worldStart = locus.worldStart + offsetX;
+  const worldEnd = locus.worldEnd + offsetX;
+  const start = viewport ? Math.max(worldStart, viewport.minX) : worldStart;
+  const end = viewport ? Math.min(worldEnd, viewport.maxX) : worldEnd;
+  if (end < start) return;
+  context.beginPath();
+  context.moveTo(start, locus.y + locus.track.y);
+  context.lineTo(end, locus.y + locus.track.y);
+  context.strokeStyle = config.locus.trackBar.colour;
+  context.lineWidth = config.locus.trackBar.stroke;
+  context.stroke();
+}
+
+function locusOffsetForPreview(preview, locusUid) {
+  return preview?.type === "locus-offset" && preview.locusUid === locusUid
+    ? preview.offsetX
+    : 0;
+}
+
+function clusterLabelOffsetForPreview(preview, clusterUid) {
+  return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
+}
+
+function linkOffsetsForPreview(scene, link, preview) {
+  const query = scene.genes.get(link.source.query.uid);
+  const target = scene.genes.get(link.source.target.uid);
+  const offsetForGene = (gene) =>
+    locusOffsetForPreview(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
+  const queryOffset = offsetForGene(query);
+  const targetOffset = offsetForGene(target);
+  // Link anchors are ordered from the upper locus to the lower one, not from
+  // source.query to source.target.
+  return query?.locus?.y <= target?.locus?.y
+    ? { a: queryOffset, b: targetOffset }
+    : { a: targetOffset, b: queryOffset };
 }
 
 function drawLegend(context, legend) {
@@ -374,6 +438,7 @@ export function renderCanvas({
   config,
   scales,
   hoverLocusUid = null,
+  preview = null,
 }) {
   const displayScene = interpolateCanvasScene(previousScene, scene, progress);
   const context = canvas.getContext("2d");
@@ -394,22 +459,66 @@ export function renderCanvas({
   context.translate(camera.x, camera.y);
   context.scale(camera.k, camera.k);
 
+  // During an animation, geometry is between the previous and target scenes,
+  // while the index describes only the target scene. Draw the full frame then
+  // so an in-flight record cannot be incorrectly culled.
+  const viewport = previousScene ? null : canvasWorldViewport(canvas, camera);
+  const visible = viewport && displayScene.index
+    ? {
+        links: queryViewport(displayScene.index.links, viewport),
+        loci: queryViewport(displayScene.index.loci, viewport),
+        genes: queryViewport(displayScene.index.genes, viewport),
+      }
+    : null;
+
   for (const link of displayScene.links.values()) {
-    drawLink(context, link, link.source, config, scales);
+    if (visible && !visible.links.has(link.source.uid)) continue;
+    drawLink(
+      context,
+      link,
+      link.source,
+      config,
+      scales,
+      linkOffsetsForPreview(displayScene, link, preview)
+    );
   }
   for (const cluster of displayScene.clusters.values()) {
-    drawClusterInfo(context, cluster, config);
-    for (const locus of cluster.loci) {
-      context.beginPath();
-      context.moveTo(locus.worldStart, locus.y + locus.track.y);
-      context.lineTo(locus.worldEnd, locus.y + locus.track.y);
-      context.strokeStyle = config.locus.trackBar.colour;
-      context.lineWidth = config.locus.trackBar.stroke;
-      context.stroke();
+    const loci = visible
+      ? cluster.loci.filter((locus) => visible.loci.has(locus.source.uid))
+      : cluster.loci;
+    if (!loci.length) continue;
+    drawClusterInfo(
+      context,
+      cluster,
+      config,
+      clusterLabelOffsetForPreview(preview, cluster.source.uid)
+    );
+    for (const locus of loci) {
+      drawLocusTrack(
+        context,
+        locus,
+        viewport,
+        config,
+        locusOffsetForPreview(preview, locus.source.uid)
+      );
     }
   }
-  drawLocusHover(context, displayScene, hoverLocusUid);
-  for (const gene of displayScene.genes.values()) drawGene(context, gene, config, scales);
+  drawLocusHover(
+    context,
+    displayScene,
+    hoverLocusUid,
+    locusOffsetForPreview(preview, hoverLocusUid)
+  );
+  for (const gene of displayScene.genes.values()) {
+    if (visible && !visible.genes.has(gene.source.uid)) continue;
+    drawGene(
+      context,
+      gene,
+      config,
+      scales,
+      locusOffsetForPreview(preview, gene.locus?.source?.uid ?? gene.source.locusUid)
+    );
+  }
   if (displayScene.chrome) {
     drawLegend(context, displayScene.chrome.legend);
     drawScaleBar(context, displayScene.chrome.scaleBar);

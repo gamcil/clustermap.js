@@ -2,7 +2,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 test("canvas renderer draws world-space scene geometry through the camera", async () => {
-  const { hitTestCanvas, interpolateCanvasScene, renderCanvas } = await import("../src/canvasRenderer.js");
+  const {
+    canvasWorldViewport,
+    hitTestCanvas,
+    interpolateCanvasScene,
+    renderCanvas,
+  } = await import("../src/canvasRenderer.js");
+  const { createSpatialIndex } = await import("../src/spatialIndex.mjs");
   const calls = [];
   const context = new Proxy(
     {
@@ -28,7 +34,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }),
   };
   const cluster = {
-    source: { name: "cluster" },
+    source: { uid: "cluster", name: "cluster" },
     x: 5,
     y: 10,
     info: { x: -10, locusText: "locus:1-10" },
@@ -53,7 +59,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
         "gene",
         {
           visible: true,
-          source: { uid: "gene", label: "gene" },
+          source: { uid: "gene", label: "gene", locusUid: "locus" },
           polygon: [5, 15, 10, 15, 10, 20, 5, 20],
           locus: { x: 5, y: 10 },
           label: { x: 0, y: 0, rotation: 0 },
@@ -97,6 +103,23 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
       ],
     },
   };
+  const distantGene = {
+    visible: true,
+    source: { uid: "distant", label: "distant" },
+    polygon: [1000, 15, 1005, 15, 1005, 20, 1000, 20],
+    locus: { x: 1000, y: 10 },
+    label: { x: 0, y: 0, rotation: 0 },
+    bounds: { minX: 1000, maxX: 1005, minY: 15, maxY: 20 },
+  };
+  scene.genes.set("distant", distantGene);
+  scene.index = {
+    genes: createSpatialIndex([
+      ["gene", { minX: 5, maxX: 10, minY: 15, maxY: 20 }],
+      ["distant", distantGene.bounds],
+    ]),
+    loci: createSpatialIndex([["locus", { minX: 5, maxX: 15, minY: 0, maxY: 30 }]]),
+    links: createSpatialIndex([]),
+  };
   const config = {
     plot: { fontFamily: "sans-serif" },
     cluster: { nameFontSize: 12, lociFontSize: 10 },
@@ -127,6 +150,60 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   assert.ok(calls.some((call) => call[0] === "fillRect" && call[1] === 5 && call[2] === 0));
   assert.ok(calls.some((call) => call[0] === "set" && call[1] === "textAlign" && call[2] === "center"));
   assert.ok(calls.some((call) => call[0] === "fillText" && call[1] === "group" && call[3] === 24));
+  assert.ok(!calls.some((call) => call[0] === "moveTo" && call[1] === 1000));
+  assert.deepEqual(
+    canvasWorldViewport(canvas, { x: 20, y: 30, k: 2 }, 0),
+    { minX: -10, maxX: 90, minY: -15, maxY: 35 }
+  );
+
+  const wideLocus = {
+    ...cluster.loci[0],
+    worldStart: -100,
+    worldEnd: 300,
+    bounds: { minX: -100, maxX: 300, minY: 0, maxY: 30 },
+  };
+  const wideScene = {
+    ...scene,
+    clusters: new Map([[
+      "cluster",
+      { ...cluster, loci: [wideLocus] },
+    ]]),
+    loci: new Map([["locus", wideLocus]]),
+    index: {
+      ...scene.index,
+      loci: createSpatialIndex([["locus", wideLocus.bounds]]),
+    },
+  };
+  calls.length = 0;
+  renderCanvas({
+    canvas,
+    scene: wideScene,
+    camera: { x: 0, y: 0, k: 1 },
+    config,
+    scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
+  });
+  assert.ok(calls.some((call) => call[0] === "moveTo" && call[1] === -20));
+  assert.ok(calls.some((call) => call[0] === "lineTo" && call[1] === 220));
+  assert.ok(!calls.some((call) => call[0] === "lineTo" && call[1] === 300));
+
+  calls.length = 0;
+  renderCanvas({
+    canvas,
+    scene,
+    camera: { x: 0, y: 0, k: 1 },
+    config,
+    scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
+    hoverLocusUid: "locus",
+    preview: {
+      type: "locus-offset",
+      locusUid: "locus",
+      offsetX: 20,
+      clusterLabelOffsets: new Map([["cluster", 20]]),
+    },
+  });
+  assert.ok(calls.some((call) => call[0] === "moveTo" && call[1] === 25));
+  assert.ok(calls.some((call) => call[0] === "translate" && call[1] === 20 && call[2] === 0));
+  assert.ok(calls.some((call) => call[0] === "fillText" && call[1] === "cluster" && call[2] === 15));
   assert.deepEqual(
     hitTestCanvas({
       canvas,

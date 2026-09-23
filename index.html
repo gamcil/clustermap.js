@@ -25,9 +25,11 @@
 	</body>
 	<script type="module">
 		import clusterMap from "./src/clusterMap.js"
+		import { createLargeTestingData } from "./largeTestingData.mjs"
 		const params = new URLSearchParams(window.location.search)
 		const testMode = params.has("test")
-		const renderer = params.get("renderer") || "svg"
+		const fixture = params.get("fixture")
+		const renderer = params.get("renderer") || (fixture === "large" ? "canvas" : "svg")
 
 		function download(blob, filename) {
 			/* Downloads a given blob to filename.
@@ -67,7 +69,11 @@
 				}
 			})
 
-		d3.json("testing.json")
+		const data = fixture === "large"
+			? Promise.resolve(createLargeTestingData())
+			: d3.json("testing.json")
+
+		data
 			.then(data => {
 				div.selectAll("div")
 					.data([data])

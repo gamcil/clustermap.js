@@ -675,6 +675,84 @@ test("canvas renderer forwards locus double-clicks to the shared controller", as
   await expect(page.locator("g.clusterInfo text.locusText").first()).toContainText("(reversed)");
 });
 
+test("Space-drag pans Canvas even when it starts over a locus", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  const track = page.locator("g.locus").first().locator("line.trackBar");
+  const trackBox = await track.boundingBox();
+  expect(trackBox).not.toBeNull();
+
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({ plot: { transitionDuration: 0, renderer: "canvas" } });
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  await expect(canvas).toBeVisible();
+  const hash = () =>
+    canvas.evaluate((node) => {
+      const { data, width, height } = node.getContext("2d").getImageData(0, 0, node.width, node.height);
+      let value = 0;
+      for (let index = 0; index < data.length; index += Math.max(1, Math.floor(data.length / 10000))) {
+        value = (value * 31 + data[index]) >>> 0;
+      }
+      return { value, width, height };
+  });
+
+  const before = await hash();
+  await page.mouse.move(trackBox.x + 20, trackBox.y + 5);
+  await page.keyboard.down("Space");
+  await page.mouse.move(trackBox.x + 20, trackBox.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(trackBox.x + 80, trackBox.y + 45);
+  await page.mouse.up();
+  await page.keyboard.up("Space");
+
+  await expect.poll(hash).not.toEqual(before);
+});
+
+test("Canvas previews a locus drag before its state is committed", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  const track = page.locator("g.locus").first().locator("line.trackBar");
+  const trackBox = await track.boundingBox();
+  expect(trackBox).not.toBeNull();
+
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({ plot: { transitionDuration: 0, renderer: "canvas" } });
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  await expect(canvas).toBeVisible();
+  const hash = () =>
+    canvas.evaluate((node) => {
+      const { data } = node.getContext("2d").getImageData(0, 0, node.width, node.height);
+      let value = 0;
+      for (let index = 0; index < data.length; index += Math.max(1, Math.floor(data.length / 10000))) {
+        value = (value * 31 + data[index]) >>> 0;
+      }
+      return value;
+    });
+
+  const before = await hash();
+  await page.mouse.move(trackBox.x + trackBox.width / 2, trackBox.y - 5);
+  await page.mouse.down();
+  await page.mouse.move(trackBox.x + trackBox.width / 2 + 60, trackBox.y - 5);
+  await expect.poll(hash).not.toEqual(before);
+  await page.mouse.up();
+});
+
 test("canvas renderer animates a locus flip between scene snapshots", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {

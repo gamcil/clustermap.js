@@ -9,9 +9,35 @@ import {
   getLinkLabelPosition,
   getLinkPath,
 } from "./links/layout.mjs";
+import { createSpatialIndex } from "./spatialIndex.mjs";
 
 function worldPolygon(points, x, y) {
   return points.map((point, index) => point + (index % 2 === 0 ? x : y));
+}
+
+function boundsFromPoints(points) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let index = 0; index < points.length; index += 2) {
+    minX = Math.min(minX, points[index]);
+    maxX = Math.max(maxX, points[index]);
+    minY = Math.min(minY, points[index + 1]);
+    maxY = Math.max(maxY, points[index + 1]);
+  }
+  return { minX, maxX, minY, maxY };
+}
+
+function boundsFromLinkAnchors(anchors) {
+  if (!anchors) return null;
+  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+  return {
+    minX: Math.min(ax1, ax2, bx1, bx2),
+    maxX: Math.max(ax1, ax2, bx1, bx2),
+    minY: Math.min(ay, by),
+    maxY: Math.max(ay, by),
+  };
 }
 
 function formatKilobases(basePairs) {
@@ -202,6 +228,12 @@ export function buildScene(
         end,
         worldStart: worldX + start,
         worldEnd: worldX + end,
+        bounds: {
+          minX: worldX + start,
+          maxX: worldX + end,
+          minY: y - 10,
+          maxY: y + shape.tipHeight * 2 + shape.bodyHeight + 10,
+        },
         transform: { x: localX, y: 0 },
         track: {
           x1: start,
@@ -229,13 +261,15 @@ export function buildScene(
         const visible =
           display.start >= state.start && display.end <= state.end + 1;
         const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
+        const polygon = worldPolygon(localPolygon, worldX, y);
         genes.set(gene.uid, {
           source: gene,
           display,
           locus: locusLayout,
           visible,
           localPolygon,
-          polygon: worldPolygon(localPolygon, worldX, y),
+          polygon,
+          bounds: boundsFromPoints(polygon),
           label: getGeneLabelLayout(display, { scaleX, shape, label }),
           labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
           labelDy: getGeneLabelDy(label.position),
@@ -278,6 +312,7 @@ export function buildScene(
     links.set(source.uid, {
       source,
       anchors,
+      bounds: boundsFromLinkAnchors(anchors),
       path: getLinkPath(anchors, link),
       labelPosition: anchors
         ? getLinkLabelPosition(anchors, link.labelPosition)
@@ -296,8 +331,54 @@ export function buildScene(
     genes,
     links,
     bounds,
+    index: {
+      genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
+      loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
+      links: createSpatialIndex([...links].map(([uid, link]) => [uid, link.bounds])),
+    },
     hitRegions: buildHitRegions(loci, genes),
     chrome: buildChrome(bounds, genes, chrome),
+  };
+}
+
+/**
+ * Describe a transient locus translation relative to an already projected
+ * scene. This is deliberately a sparse, renderer-neutral patch: it avoids
+ * rebuilding the scene while a drag is in progress.
+ */
+export function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels }) {
+  const locus = scene.loci.get(locusUid);
+  if (!locus) return null;
+  const offsetX = offset - locus.localX;
+  const clusters = [...scene.clusters.values()];
+  const minStart = (loci) => Math.min(...loci.map((candidate) => candidate.worldStart));
+  const clusterLabelOffsets = new Map();
+
+  if (alignLabels) {
+    const oldStart = minStart([...scene.loci.values()]);
+    const newStart = Math.min(
+      ...[...scene.loci.values()].map((candidate) =>
+        candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart
+      )
+    );
+    const labelOffset = newStart - oldStart;
+    for (const cluster of clusters) clusterLabelOffsets.set(cluster.source.uid, labelOffset);
+  } else {
+    const cluster = scene.clusters.get(locus.cluster.uid);
+    const oldStart = minStart(cluster.loci);
+    const newStart = Math.min(
+      ...cluster.loci.map((candidate) =>
+        candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart
+      )
+    );
+    clusterLabelOffsets.set(cluster.source.uid, newStart - oldStart);
+  }
+
+  return {
+    type: "locus-offset",
+    locusUid,
+    offsetX,
+    clusterLabelOffsets,
   };
 }
 
