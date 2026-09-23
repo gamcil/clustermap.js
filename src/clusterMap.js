@@ -22,7 +22,11 @@ import { normalizeChartData } from "./data/normalize.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
 import { canvasWorldPoint, hitTestCanvas, renderCanvas } from "./canvasRenderer.js";
-import { createClusterDragPreview, createLocusOffsetPreview } from "./layout.mjs";
+import {
+  createClusterDragPreview,
+  createLocusOffsetPreview,
+  createLocusTrimPreview,
+} from "./layout.mjs";
 import { renderSvg } from "./svgRenderer.js";
 import { createChartRuntime } from "./chartRuntime.js";
 
@@ -96,12 +100,26 @@ export default function clusterMap() {
         coordinateFor: runtime.scales.x,
         scaleGenes: runtime.config.plot.scaleGenes,
       });
+      if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+        // Updating scales is inexpensive and gives the sparse projection the
+        // packed x offsets for this temporary locus state. Deliberately avoid
+        // rebuilding data, indexes, or the complete scene until release.
+        runtime.scale.update(currentData);
+        canvasPreview = createLocusTrimPreview(runtime.scene.get(), locus.uid, result.state, {
+          localXFor: runtime.scales.locus,
+          scaleX: runtime.scales.x,
+          alignLabels: runtime.config.cluster.alignLabels,
+        });
+        scheduleCanvasPreview();
+        return result;
+      }
       runtime.plot.update({ animate: false, synchronize: false });
       return result;
     },
     commitLocusTrim: (locus) => {
       finalizeLocusTrim(chartState, locus);
       commitPreviewLocusState(chartState, locus);
+      clearCanvasPreview();
       runtime.plot.update({ animate: false });
     },
     flipLocus: (locus) => {

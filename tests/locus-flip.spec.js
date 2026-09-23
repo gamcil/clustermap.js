@@ -753,6 +753,69 @@ test("Canvas previews a locus drag before its state is committed", async ({ page
   await page.mouse.up();
 });
 
+test("Canvas previews a trimmed locus track before its state is committed", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({ plot: { transitionDuration: 0 } });
+    window.__canvasTrimTest = { chart, data, host };
+    d3.select(host).datum(data).call(chart);
+  });
+  const track = page.locator("g.locus").first().locator("line.trackBar");
+  const handle = page.locator("rect.rightHandle").first();
+  const gene = page.locator("g.locus").first().locator('[id$="gene_3"] polygon.genePolygon');
+  const [trackBox, handleBox, geneBox] = await Promise.all([
+    track.boundingBox(),
+    handle.boundingBox(),
+    gene.boundingBox(),
+  ]);
+  if (!trackBox || !handleBox || !geneBox) throw new Error("trim preview targets are not visible");
+
+  await page.evaluate(() => {
+    const { chart, data, host } = window.__canvasTrimTest;
+    chart.config({ plot: { renderer: "canvas" } });
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  await expect(canvas).toBeVisible();
+  const sample = {
+    x: (geneBox.x + geneBox.width + trackBox.x + trackBox.width) / 2,
+    y: trackBox.y + trackBox.height / 2,
+  };
+  const darkest = () =>
+    canvas.evaluate((node, point) => {
+      const bounds = node.getBoundingClientRect();
+      const ratioX = node.width / bounds.width;
+      const ratioY = node.height / bounds.height;
+      const x = Math.round((point.x - bounds.left) * ratioX);
+      const y = Math.round((point.y - bounds.top) * ratioY);
+      const pixels = node.getContext("2d").getImageData(x - 2, y - 2, 5, 5).data;
+      let value = 255;
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (pixels[index + 3]) value = Math.min(value, pixels[index], pixels[index + 1], pixels[index + 2]);
+      }
+      return value;
+    }, sample);
+
+  await expect.poll(darkest).toBeLessThan(80);
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(geneBox.x + geneBox.width - 1, handleBox.y + handleBox.height / 2, {
+    steps: 8,
+  });
+  await expect.poll(darkest).toBeGreaterThan(180);
+  expect(pageErrors).toEqual([]);
+  await page.mouse.up();
+});
+
 test("Canvas previews a cluster drag before its order is committed", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
   const clusterInfo = page.locator("g.clusterInfo").first();

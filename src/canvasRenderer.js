@@ -186,8 +186,15 @@ function drawClusterInfo(context, cluster, config, { x: offsetX = 0, y: offsetY 
   context.fillText(cluster.info.locusText, anchorX, y + offsetY + 12);
 }
 
-function drawGene(context, gene, config, scales, { x: offsetX = 0, y: offsetY = 0 } = {}) {
-  if (!gene.visible) return;
+function drawGene(
+  context,
+  gene,
+  config,
+  scales,
+  { x: offsetX = 0, y: offsetY = 0 } = {},
+  visible = gene.visible
+) {
+  if (!visible) return;
   context.save();
   context.translate(offsetX, offsetY);
   polygon(context, gene.polygon);
@@ -215,14 +222,16 @@ function drawGene(context, gene, config, scales, { x: offsetX = 0, y: offsetY = 
   context.restore();
 }
 
-function drawLocusHover(context, scene, locusUid, offsets = {}) {
+function drawLocusHover(context, scene, locusUid, geometry = {}) {
   if (!locusUid) return;
   const locus = scene.loci.get(locusUid);
   if (!locus) return;
 
-  const { hover } = locus;
-  const x = locus.x + hover.x + (offsets?.x || 0);
-  const y = locus.y + hover.y + (offsets?.y || 0);
+  geometry ||= {};
+  const hover = geometry.hover || locus.hover;
+  const offsets = geometry.offsets || {};
+  const x = locus.x + hover.x + (offsets.x || 0);
+  const y = locus.y + hover.y + (offsets.y || 0);
   context.fillStyle = "rgba(0, 0, 0, 0.4)";
   context.fillRect(x, y, hover.width, hover.height);
   context.fillStyle = "black";
@@ -230,21 +239,24 @@ function drawLocusHover(context, scene, locusUid, offsets = {}) {
   context.fillRect(locus.x + hover.rightHandleX + (offsets?.x || 0), y, 8, hover.height);
 }
 
-function drawLocusTrack(context, locus, viewport, config, { x: offsetX = 0, y: offsetY = 0 } = {}) {
-  const worldStart = locus.worldStart + offsetX;
-  const worldEnd = locus.worldEnd + offsetX;
+function drawLocusTrack(context, locus, viewport, config, geometry = {}) {
+  const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
+  const track = geometry.track || locus.track;
+  const worldStart = geometry.worldStart ?? locus.worldStart + offsetX;
+  const worldEnd = geometry.worldEnd ?? locus.worldEnd + offsetX;
   const start = viewport ? Math.max(worldStart, viewport.minX) : worldStart;
   const end = viewport ? Math.min(worldEnd, viewport.maxX) : worldEnd;
   if (end < start) return;
   context.beginPath();
-  context.moveTo(start, locus.y + locus.track.y + offsetY);
-  context.lineTo(end, locus.y + locus.track.y + offsetY);
+  context.moveTo(start, locus.y + track.y + offsetY);
+  context.lineTo(end, locus.y + track.y + offsetY);
   context.strokeStyle = config.locus.trackBar.colour;
   context.lineWidth = config.locus.trackBar.stroke;
   context.stroke();
 }
 
 function locusOffsetForPreview(preview, locusUid) {
+  if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
   return preview?.type === "locus-offset" && preview.locusUid === locusUid
     ? preview.offsetX
     : 0;
@@ -268,6 +280,18 @@ function offsetsForLocus(preview, locus) {
 
 function offsetsForGene(preview, gene) {
   return offsetsForLocus(preview, gene.locus);
+}
+
+function locusGeometryForPreview(preview, locus) {
+  const trimmed = preview?.loci?.get(locus.source.uid);
+  return {
+    offsets: offsetsForLocus(preview, locus),
+    ...(trimmed || {}),
+  };
+}
+
+function geneVisibleForPreview(preview, gene) {
+  return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
 }
 
 function linkOffsetsForPreview(scene, link, preview) {
@@ -312,7 +336,15 @@ function previewLinkAnchors(scene, link, preview) {
 
 function linkGeometryForPreview(scene, link, preview, config) {
   if (preview?.type !== "cluster-drag") {
-    return linkOffsetsForPreview(scene, link, preview);
+    const query = scene.genes.get(link.source.query.uid);
+    const target = scene.genes.get(link.source.target.uid);
+    return {
+      ...linkOffsetsForPreview(scene, link, preview),
+      visible:
+        link.visible &&
+        geneVisibleForPreview(preview, query) &&
+        geneVisibleForPreview(preview, target),
+    };
   }
   const query = scene.genes.get(link.source.query.uid);
   const target = scene.genes.get(link.source.target.uid);
@@ -592,15 +624,16 @@ export function renderCanvas({
         locus,
         viewport,
         config,
-        offsetsForLocus(preview, locus)
+        locusGeometryForPreview(preview, locus)
       );
     }
   }
+  const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
   drawLocusHover(
     context,
     displayScene,
     hoverLocusUid,
-    hoverLocusUid ? offsetsForLocus(preview, displayScene.loci.get(hoverLocusUid)) : null
+    hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
   );
   for (const gene of displayScene.genes.values()) {
     if (visible && !visible.genes.has(gene.source.uid)) continue;
@@ -612,13 +645,15 @@ export function renderCanvas({
       gene,
       config,
       scales,
-      offsetsForGene(preview, gene)
+      offsetsForGene(preview, gene),
+      geneVisibleForPreview(preview, gene)
     );
   }
   if (displayScene.chrome) {
-    drawLegend(context, displayScene.chrome.legend);
-    drawScaleBar(context, displayScene.chrome.scaleBar);
-    drawColourBar(context, displayScene.chrome.colourBar);
+    const chrome = preview?.chrome || displayScene.chrome;
+    drawLegend(context, chrome.legend);
+    drawScaleBar(context, chrome.scaleBar);
+    drawColourBar(context, chrome.colourBar);
   }
   context.restore();
   return { width, height, pixelRatio };

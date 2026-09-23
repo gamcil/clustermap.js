@@ -1121,8 +1121,15 @@
     context.fillText(cluster.info.locusText, anchorX, y + offsetY + 12);
   }
 
-  function drawGene(context, gene, config, scales, { x: offsetX = 0, y: offsetY = 0 } = {}) {
-    if (!gene.visible) return;
+  function drawGene(
+    context,
+    gene,
+    config,
+    scales,
+    { x: offsetX = 0, y: offsetY = 0 } = {},
+    visible = gene.visible
+  ) {
+    if (!visible) return;
     context.save();
     context.translate(offsetX, offsetY);
     polygon(context, gene.polygon);
@@ -1150,14 +1157,16 @@
     context.restore();
   }
 
-  function drawLocusHover(context, scene, locusUid, offsets = {}) {
+  function drawLocusHover(context, scene, locusUid, geometry = {}) {
     if (!locusUid) return;
     const locus = scene.loci.get(locusUid);
     if (!locus) return;
 
-    const { hover } = locus;
-    const x = locus.x + hover.x + (offsets?.x || 0);
-    const y = locus.y + hover.y + (offsets?.y || 0);
+    geometry ||= {};
+    const hover = geometry.hover || locus.hover;
+    const offsets = geometry.offsets || {};
+    const x = locus.x + hover.x + (offsets.x || 0);
+    const y = locus.y + hover.y + (offsets.y || 0);
     context.fillStyle = "rgba(0, 0, 0, 0.4)";
     context.fillRect(x, y, hover.width, hover.height);
     context.fillStyle = "black";
@@ -1165,21 +1174,24 @@
     context.fillRect(locus.x + hover.rightHandleX + (offsets?.x || 0), y, 8, hover.height);
   }
 
-  function drawLocusTrack(context, locus, viewport, config, { x: offsetX = 0, y: offsetY = 0 } = {}) {
-    const worldStart = locus.worldStart + offsetX;
-    const worldEnd = locus.worldEnd + offsetX;
+  function drawLocusTrack(context, locus, viewport, config, geometry = {}) {
+    const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
+    const track = geometry.track || locus.track;
+    const worldStart = geometry.worldStart ?? locus.worldStart + offsetX;
+    const worldEnd = geometry.worldEnd ?? locus.worldEnd + offsetX;
     const start = viewport ? Math.max(worldStart, viewport.minX) : worldStart;
     const end = viewport ? Math.min(worldEnd, viewport.maxX) : worldEnd;
     if (end < start) return;
     context.beginPath();
-    context.moveTo(start, locus.y + locus.track.y + offsetY);
-    context.lineTo(end, locus.y + locus.track.y + offsetY);
+    context.moveTo(start, locus.y + track.y + offsetY);
+    context.lineTo(end, locus.y + track.y + offsetY);
     context.strokeStyle = config.locus.trackBar.colour;
     context.lineWidth = config.locus.trackBar.stroke;
     context.stroke();
   }
 
   function locusOffsetForPreview(preview, locusUid) {
+    if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
     return preview?.type === "locus-offset" && preview.locusUid === locusUid
       ? preview.offsetX
       : 0;
@@ -1203,6 +1215,18 @@
 
   function offsetsForGene(preview, gene) {
     return offsetsForLocus(preview, gene.locus);
+  }
+
+  function locusGeometryForPreview(preview, locus) {
+    const trimmed = preview?.loci?.get(locus.source.uid);
+    return {
+      offsets: offsetsForLocus(preview, locus),
+      ...(trimmed || {}),
+    };
+  }
+
+  function geneVisibleForPreview(preview, gene) {
+    return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
   }
 
   function linkOffsetsForPreview(scene, link, preview) {
@@ -1247,7 +1271,15 @@
 
   function linkGeometryForPreview(scene, link, preview, config) {
     if (preview?.type !== "cluster-drag") {
-      return linkOffsetsForPreview(scene, link, preview);
+      const query = scene.genes.get(link.source.query.uid);
+      const target = scene.genes.get(link.source.target.uid);
+      return {
+        ...linkOffsetsForPreview(scene, link, preview),
+        visible:
+          link.visible &&
+          geneVisibleForPreview(preview, query) &&
+          geneVisibleForPreview(preview, target),
+      };
     }
     const query = scene.genes.get(link.source.query.uid);
     const target = scene.genes.get(link.source.target.uid);
@@ -1527,15 +1559,16 @@
           locus,
           viewport,
           config,
-          offsetsForLocus(preview, locus)
+          locusGeometryForPreview(preview, locus)
         );
       }
     }
+    const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
     drawLocusHover(
       context,
       displayScene,
       hoverLocusUid,
-      hoverLocusUid ? offsetsForLocus(preview, displayScene.loci.get(hoverLocusUid)) : null
+      hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
     );
     for (const gene of displayScene.genes.values()) {
       if (visible && !visible.genes.has(gene.source.uid)) continue;
@@ -1547,13 +1580,15 @@
         gene,
         config,
         scales,
-        offsetsForGene(preview, gene)
+        offsetsForGene(preview, gene),
+        geneVisibleForPreview(preview, gene)
       );
     }
     if (displayScene.chrome) {
-      drawLegend(context, displayScene.chrome.legend);
-      drawScaleBar(context, displayScene.chrome.scaleBar);
-      drawColourBar(context, displayScene.chrome.colourBar);
+      const chrome = preview?.chrome || displayScene.chrome;
+      drawLegend(context, chrome.legend);
+      drawScaleBar(context, chrome.scaleBar);
+      drawColourBar(context, chrome.colourBar);
     }
     context.restore();
     return { width, height, pixelRatio };
@@ -2095,6 +2130,101 @@
       locusUid,
       offsetX,
       clusterLabelOffsets,
+    };
+  }
+
+  /**
+   * Describe a transient trim using the current scene and updated locus-scale
+   * offsets. The controller updates scales (but not the scene) before calling
+   * this, so sibling loci retain their correct packed positions without a full
+   * data-to-scene projection for every pointer event.
+   */
+  function createLocusTrimPreview(
+    scene,
+    locusUid,
+    state,
+    { localXFor, scaleX, alignLabels }
+  ) {
+    const locus = scene.loci.get(locusUid);
+    if (!locus) return null;
+
+    const locusOffsets = new Map();
+    for (const candidate of scene.loci.values()) {
+      locusOffsets.set(candidate.source.uid, localXFor(candidate.source.uid) - candidate.localX);
+    }
+    const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
+    const trimmed = {
+      worldStart: locus.x + offsetFor(locus) + scaleX(state.start),
+      worldEnd: locus.x + offsetFor(locus) + scaleX(state.end),
+      track: {
+        ...locus.track,
+        x1: scaleX(state.start),
+        x2: scaleX(state.end),
+      },
+      hover: {
+        ...locus.hover,
+        x: scaleX(state.start),
+        width: scaleX(state.end) - scaleX(state.start),
+        leftHandleX: scaleX(state.start) - 8,
+        rightHandleX: scaleX(state.end),
+      },
+    };
+    const locusGeometry = new Map([[locusUid, trimmed]]);
+    const startFor = (candidate) =>
+      candidate.source.uid === locusUid
+        ? trimmed.worldStart
+        : candidate.worldStart + offsetFor(candidate);
+    const endFor = (candidate) =>
+      candidate.source.uid === locusUid
+        ? trimmed.worldEnd
+        : candidate.worldEnd + offsetFor(candidate);
+    const geneVisibility = new Map();
+    for (const gene of scene.genes.values()) {
+      if (gene.locus.source.uid !== locusUid) continue;
+      geneVisibility.set(
+        gene.source.uid,
+        gene.display.start >= state.start && gene.display.end <= state.end + 1
+      );
+    }
+
+    const clusterLabelOffsets = new Map();
+    const minStart = (loci, start = (candidate) => candidate.worldStart) =>
+      Math.min(...loci.map(start));
+    if (alignLabels) {
+      const oldStart = minStart([...scene.loci.values()]);
+      const newStart = minStart([...scene.loci.values()], startFor);
+      for (const cluster of scene.clusters.values()) {
+        clusterLabelOffsets.set(cluster.source.uid, newStart - oldStart);
+      }
+    } else {
+      for (const cluster of scene.clusters.values()) {
+        const oldStart = minStart(cluster.loci);
+        const newStart = minStart(cluster.loci, startFor);
+        clusterLabelOffsets.set(cluster.source.uid, newStart - oldStart);
+      }
+    }
+
+    const maxX = Math.max(...[...scene.loci.values()].map(endFor));
+    const chrome = scene.chrome
+      ? {
+          ...scene.chrome,
+          legend: {
+            ...scene.chrome.legend,
+            position: {
+              ...scene.chrome.legend.position,
+              x: scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
+            },
+          },
+        }
+      : null;
+    return {
+      type: "locus-trim",
+      locusUid,
+      locusOffsets,
+      loci: locusGeometry,
+      geneVisibility,
+      clusterLabelOffsets,
+      chrome,
     };
   }
 
@@ -3203,12 +3333,26 @@
           coordinateFor: runtime.scales.x,
           scaleGenes: runtime.config.plot.scaleGenes,
         });
+        if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+          // Updating scales is inexpensive and gives the sparse projection the
+          // packed x offsets for this temporary locus state. Deliberately avoid
+          // rebuilding data, indexes, or the complete scene until release.
+          runtime.scale.update(currentData);
+          canvasPreview = createLocusTrimPreview(runtime.scene.get(), locus.uid, result.state, {
+            localXFor: runtime.scales.locus,
+            scaleX: runtime.scales.x,
+            alignLabels: runtime.config.cluster.alignLabels,
+          });
+          scheduleCanvasPreview();
+          return result;
+        }
         runtime.plot.update({ animate: false, synchronize: false });
         return result;
       },
       commitLocusTrim: (locus) => {
         finalizeLocusTrim(chartState, locus);
         commitPreviewLocusState(chartState, locus);
+        clearCanvasPreview();
         runtime.plot.update({ animate: false });
       },
       flipLocus: (locus) => {

@@ -383,6 +383,101 @@ export function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels 
 }
 
 /**
+ * Describe a transient trim using the current scene and updated locus-scale
+ * offsets. The controller updates scales (but not the scene) before calling
+ * this, so sibling loci retain their correct packed positions without a full
+ * data-to-scene projection for every pointer event.
+ */
+export function createLocusTrimPreview(
+  scene,
+  locusUid,
+  state,
+  { localXFor, scaleX, alignLabels }
+) {
+  const locus = scene.loci.get(locusUid);
+  if (!locus) return null;
+
+  const locusOffsets = new Map();
+  for (const candidate of scene.loci.values()) {
+    locusOffsets.set(candidate.source.uid, localXFor(candidate.source.uid) - candidate.localX);
+  }
+  const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
+  const trimmed = {
+    worldStart: locus.x + offsetFor(locus) + scaleX(state.start),
+    worldEnd: locus.x + offsetFor(locus) + scaleX(state.end),
+    track: {
+      ...locus.track,
+      x1: scaleX(state.start),
+      x2: scaleX(state.end),
+    },
+    hover: {
+      ...locus.hover,
+      x: scaleX(state.start),
+      width: scaleX(state.end) - scaleX(state.start),
+      leftHandleX: scaleX(state.start) - 8,
+      rightHandleX: scaleX(state.end),
+    },
+  };
+  const locusGeometry = new Map([[locusUid, trimmed]]);
+  const startFor = (candidate) =>
+    candidate.source.uid === locusUid
+      ? trimmed.worldStart
+      : candidate.worldStart + offsetFor(candidate);
+  const endFor = (candidate) =>
+    candidate.source.uid === locusUid
+      ? trimmed.worldEnd
+      : candidate.worldEnd + offsetFor(candidate);
+  const geneVisibility = new Map();
+  for (const gene of scene.genes.values()) {
+    if (gene.locus.source.uid !== locusUid) continue;
+    geneVisibility.set(
+      gene.source.uid,
+      gene.display.start >= state.start && gene.display.end <= state.end + 1
+    );
+  }
+
+  const clusterLabelOffsets = new Map();
+  const minStart = (loci, start = (candidate) => candidate.worldStart) =>
+    Math.min(...loci.map(start));
+  if (alignLabels) {
+    const oldStart = minStart([...scene.loci.values()]);
+    const newStart = minStart([...scene.loci.values()], startFor);
+    for (const cluster of scene.clusters.values()) {
+      clusterLabelOffsets.set(cluster.source.uid, newStart - oldStart);
+    }
+  } else {
+    for (const cluster of scene.clusters.values()) {
+      const oldStart = minStart(cluster.loci);
+      const newStart = minStart(cluster.loci, startFor);
+      clusterLabelOffsets.set(cluster.source.uid, newStart - oldStart);
+    }
+  }
+
+  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
+  const chrome = scene.chrome
+    ? {
+        ...scene.chrome,
+        legend: {
+          ...scene.chrome.legend,
+          position: {
+            ...scene.chrome.legend.position,
+            x: scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
+          },
+        },
+      }
+    : null;
+  return {
+    type: "locus-trim",
+    locusUid,
+    locusOffsets,
+    loci: locusGeometry,
+    geneVisibility,
+    clusterLabelOffsets,
+    chrome,
+  };
+}
+
+/**
  * Describe the temporary rows of a cluster drag relative to an existing
  * scene. The active cluster follows the pointer; every other cluster snaps to
  * its row in the preview order.
