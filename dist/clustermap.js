@@ -2774,6 +2774,7 @@
     let canvasHoverLocusUid = null;
     let canvasScene = null;
     let canvasAnimation = null;
+    let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
     const interactionController = createInteractionController({
       clusterRows: () => runtime.scales.y.range(),
@@ -2830,6 +2831,7 @@
 
     function update(data, { animate = true, synchronize = true } = {}) {
       data = normalizeChartData(data);
+      currentData = data;
       const chartIndex = createChartIndex(data);
       chartState = createChartState(data, chartState);
       runtime.setChartIndex(chartIndex);
@@ -3311,6 +3313,74 @@
       if (!data) return container.select("svg.clusterMap").datum();
       container.datum(data).call(my);
       return my;
+    };
+    my.exportSvg = ({ padding = 20 } = {}) => {
+      const scene = runtime.scene.get();
+      if (!scene) throw new Error("Cannot export an SVG before the chart has rendered.");
+      const namespace = "http://www.w3.org/2000/svg";
+      const svgNode = document.createElementNS(namespace, "svg");
+      const defs = d3.select(svgNode).append("defs");
+      const filter = defs
+        .append("filter")
+        .attr("id", "filter_solid")
+        .attr("x", 0)
+        .attr("y", 0)
+        .attr("width", 1)
+        .attr("height", 1);
+      filter.append("feFlood").attr("flood-color", "rgba(0, 0, 0, 0.8)");
+      filter.append("feComposite").attr("in", "SourceGraphic").attr("in2", "");
+      const plot = d3.select(svgNode).append("g").attr("class", "clusterMapG");
+      const exportIds = { ...runtime.ids, filter: "filter_solid", colourGradient: "colour-gradient" };
+      const noop = () => {};
+      renderSvg({
+        plot,
+        data: currentData,
+        scene,
+        transition: d3.transition().duration(0),
+        animate: false,
+        config: runtime.config,
+        scales: runtime.scales,
+        ids: exportIds,
+        lookup: { gene: runtime.get.geneData },
+        interactions: {
+          isDragging: () => false,
+          beginClusterDrag: noop,
+          moveClusterDrag: noop,
+          endClusterDrag: noop,
+          beginLocusDrag: noop,
+          moveLocusDrag: noop,
+          endLocusDrag: noop,
+          beginLocusTrim: noop,
+          moveLocusTrim: noop,
+          endLocusTrim: noop,
+          flipLocus: noop,
+          onGeneClick: null,
+          showGeneMenu: noop,
+          showGroupMenu: noop,
+          setScaleBarLength: noop,
+          chooseLegendColour: noop,
+        },
+      });
+      // Event listeners are not serialized, and interaction-only hover handles
+      // should not be included in a publication figure.
+      plot.selectAll("g.hover").remove();
+
+      d3.select(document.body)
+        .append(() => svgNode)
+        .style("position", "fixed")
+        .style("visibility", "hidden")
+        .style("pointer-events", "none");
+      const bounds = plot.node().getBBox();
+      svgNode.remove();
+      svgNode.removeAttribute("style");
+      svgNode.setAttribute(
+        "viewBox",
+        `${bounds.x - padding} ${bounds.y - padding} ${bounds.width + padding * 2} ${bounds.height + padding * 2}`
+      );
+      svgNode.setAttribute("width", bounds.width + padding * 2);
+      svgNode.setAttribute("height", bounds.height + padding * 2);
+      svgNode.setAttribute("xmlns", namespace);
+      return new XMLSerializer().serializeToString(svgNode);
     };
 
     return my;

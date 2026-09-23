@@ -660,6 +660,13 @@ test("canvas renderer forwards locus double-clicks to the shared controller", as
 
   await page.mouse.dblclick(trackBox.x + trackBox.width / 2, trackBox.y + trackBox.height / 2);
 
+  const exported = await page.evaluate(() => window.__canvasInteractionTest.chart.exportSvg());
+  expect(exported).toContain("input_locus (reversed):10000-1");
+  expect(exported).toContain('xmlns="http://www.w3.org/2000/svg"');
+  expect(exported).toContain('class="legend"');
+  expect(exported).not.toContain('class="hover');
+  expect(exported).not.toContain("visibility: hidden");
+
   await page.evaluate(() => {
     const { chart, data, host } = window.__canvasInteractionTest;
     chart.config({ plot: { renderer: "svg" } });
