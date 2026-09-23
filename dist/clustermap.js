@@ -3425,8 +3425,8 @@
     let canvasScene = null;
     let canvasAnimation = null;
     let canvasPreview = null;
-    let canvasPreviewFrame = null;
-    let paintCanvasPreview = null;
+    let canvasPaintFrame = null;
+    let paintCanvasFrame = null;
     let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
     const interactionController = createInteractionController({
@@ -3510,18 +3510,20 @@
     runtime.plot.data = (data) => my.data(data);
 
     function clearCanvasPreview() {
-      if (canvasPreviewFrame !== null) cancelAnimationFrame(canvasPreviewFrame);
+      if (canvasPaintFrame !== null) cancelAnimationFrame(canvasPaintFrame);
       canvasPreview = null;
-      canvasPreviewFrame = null;
+      canvasPaintFrame = null;
     }
 
-    function scheduleCanvasPreview() {
-      if (canvasPreviewFrame !== null || !paintCanvasPreview) return;
-      canvasPreviewFrame = requestAnimationFrame(() => {
-        canvasPreviewFrame = null;
-        paintCanvasPreview();
+    function scheduleCanvasPaint() {
+      if (canvasPaintFrame !== null || !paintCanvasFrame) return;
+      canvasPaintFrame = requestAnimationFrame(() => {
+        canvasPaintFrame = null;
+        paintCanvasFrame();
       });
     }
+
+    const scheduleCanvasPreview = scheduleCanvasPaint;
 
     function my(selection, options) {
       selection.each(function (data) {
@@ -3643,7 +3645,7 @@
             .scaleExtent([0, 8])
             .on("zoom", function (event) {
               setCamera(chartState, event.transform);
-              paintCanvas(this);
+              scheduleCanvasPaint();
             })
             .on("start", function () {
               d3.select(this).style("cursor", "grabbing");
@@ -3684,7 +3686,7 @@
           hoverLocusUid: canvasHoverLocusUid,
           preview: canvasPreview,
         });
-      paintCanvasPreview = useCanvas ? () => paintCanvas(canvas.node()) : null;
+      paintCanvasFrame = useCanvas ? () => paintCanvas(canvas.node()) : null;
       const stopCanvasAnimation = () => {
         if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
         canvasAnimation = null;
@@ -3755,7 +3757,7 @@
           const locusUid = locusForTarget(target);
           if (canvasHoverLocusUid !== locusUid) {
             canvasHoverLocusUid = locusUid;
-            paintCanvas(canvasNode);
+            scheduleCanvasPaint();
           }
           d3.select(canvasNode).style("cursor", cursorForTarget(target));
         };
