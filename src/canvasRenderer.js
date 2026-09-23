@@ -681,6 +681,7 @@ export function renderCanvas({
   config,
   scales,
   hoverLocusUid = null,
+  suppressLocusHover = false,
   preview = null,
 }) {
   const displayScene = interpolateCanvasScene(previousScene, scene, progress);
@@ -762,13 +763,15 @@ export function renderCanvas({
       locusGeometryForPreview(preview, locus)
     );
   }
-  const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
-  drawLocusHover(
-    context,
-    displayScene,
-    hoverLocusUid,
-    hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
-  );
+  if (!suppressLocusHover) {
+    const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
+    drawLocusHover(
+      context,
+      displayScene,
+      hoverLocusUid,
+      hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
+    );
+  }
   for (const gene of previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes)) {
     drawGene(
       context,

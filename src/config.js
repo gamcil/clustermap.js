@@ -1,4 +1,4 @@
-export default {
+const defaultConfig = {
   plot: {
     transitionDuration: 250,
     renderer: "svg",
@@ -81,3 +81,19 @@ export default {
     },
   },
 };
+
+function cloneConfig(value) {
+  if (Array.isArray(value)) return value.map(cloneConfig);
+  if (value && value.constructor === Object) {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, cloneConfig(child)]));
+  }
+  // Functions and primitive values are immutable configuration leaves.
+  return value;
+}
+
+/** Return independent, recursively cloned defaults for one chart instance. */
+export function createDefaultConfig() {
+  return cloneConfig(defaultConfig);
+}
+
+export default defaultConfig;

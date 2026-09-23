@@ -2392,6 +2392,7 @@
     config,
     scales,
     hoverLocusUid = null,
+    suppressLocusHover = false,
     preview = null,
   }) {
     const displayScene = interpolateCanvasScene(previousScene, scene, progress);
@@ -2473,13 +2474,15 @@
         locusGeometryForPreview(preview, locus)
       );
     }
-    const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
-    drawLocusHover(
-      context,
-      displayScene,
-      hoverLocusUid,
-      hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
-    );
+    if (!suppressLocusHover) {
+      const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
+      drawLocusHover(
+        context,
+        displayScene,
+        hoverLocusUid,
+        hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
+      );
+    }
     for (const gene of previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes)) {
       drawGene(
         context,
@@ -2620,7 +2623,25 @@
                 d3.select(event.target).select("g.hover").transition().attr("opacity", 0);
               }
             })
-            .on("dblclick", (_, locus) => interactions.flipLocus(locus));
+            .on("dblclick", (event, locus) => {
+              // The hover rectangle describes pointer affordances, not locus
+              // geometry. It would otherwise remain visible while the locus
+              // itself animates through a flip.
+              const locusNode = event.currentTarget;
+              const hover = d3.select(locusNode).select("g.hover").interrupt().attr("opacity", 0);
+              // Restore the affordance only if this locus is still under the
+              // pointer after its geometry transition completes.
+              if (animate && config.plot.transitionDuration) {
+                hover
+                  .transition()
+                  .delay(config.plot.transitionDuration)
+                  .duration(0)
+                  .on("end", function () {
+                    if (locusNode.matches(":hover")) d3.select(this).attr("opacity", 1);
+                  });
+              }
+              interactions.flipLocus(locus);
+            });
           return updateLoci(enter, scene, config);
         },
         (update) =>
@@ -3043,7 +3064,7 @@
       .style("dominant-baseline", "hanging");
   }
 
-  var defaultConfig = {
+  const defaultConfig = {
     plot: {
       transitionDuration: 250,
       renderer: "svg",
@@ -3126,6 +3147,20 @@
       },
     },
   };
+
+  function cloneConfig(value) {
+    if (Array.isArray(value)) return value.map(cloneConfig);
+    if (value && value.constructor === Object) {
+      return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, cloneConfig(child)]));
+    }
+    // Functions and primitive values are immutable configuration leaves.
+    return value;
+  }
+
+  /** Return independent, recursively cloned defaults for one chart instance. */
+  function createDefaultConfig() {
+    return cloneConfig(defaultConfig);
+  }
 
   function xDistance(scaleX, start, end) {
     return scaleX(end) - scaleX(start);
@@ -3211,7 +3246,7 @@
     );
   }
 
-  const config = Object.assign({}, defaultConfig);
+  const config = createDefaultConfig();
   let chartIndex = null;
   let chartState = null;
   let currentScene = null;
@@ -3638,7 +3673,9 @@
       },
     });
 
-    runtime.plot.update = (options) => container.call(my, options);
+    // Internal state actions redraw the retained normalized data. Only an
+    // external selection/data call enters the normalization and indexing path.
+    runtime.plot.update = (options) => redraw(options);
     runtime.plot.data = (data) => my.data(data);
 
     function clearCanvasPreview() {
@@ -3673,20 +3710,23 @@
 
     function my(selection, options) {
       selection.each(function (data) {
-        update.call(this, data, options);
+        container = d3.select(this).attr("width", "100%").attr("height", "100%");
+        loadData(data);
+        redraw(options);
       });
     }
 
-    function update(data, { animate = true, synchronize = true } = {}) {
-      data = normalizeChartData(data);
-      currentData = data;
-      const chartIndex = createChartIndex(data);
-      chartState = createChartState(data, chartState);
+    function loadData(data) {
+      currentData = normalizeChartData(data);
+      const chartIndex = createChartIndex(currentData);
+      chartState = createChartState(currentData, chartState);
       runtime.setChartIndex(chartIndex);
       runtime.setChartState(chartState);
+    }
 
-      // Save the container for later updates
-      container = d3.select(this).attr("width", "100%").attr("height", "100%");
+    function redraw({ animate = true, synchronize = true } = {}) {
+      if (!currentData || !container) return;
+      const data = currentData;
 
       // Set up the shared transition
       transition = d3.transition().duration(runtime.config.plot.transitionDuration);
@@ -3830,6 +3870,8 @@
           config: runtime.config,
           scales: runtime.scales,
           hoverLocusUid: canvasHoverLocusUid,
+          suppressLocusHover:
+            canvasPreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
           preview: canvasPreview,
         });
       paintCanvasFrame = useCanvas ? () => paintCanvas(canvas.node()) : null;
@@ -3848,6 +3890,7 @@
         const previousScene = canvasScene;
         const duration = runtime.config.plot.transitionDuration;
         const initialProgress = canvasFlipAnimationProgress ?? 0;
+        const suppressLocusHover = canvasFlipAnimationProgress !== null;
         canvasFlipAnimationProgress = null;
         const startedAt = performance.now();
         const frame = (now) => {
@@ -3859,13 +3902,17 @@
               ? 4 * elapsed * elapsed * elapsed
               : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
           const progress = initialProgress + (1 - initialProgress) * eased;
-          canvasAnimation = { previousScene, scene, progress, frame: null };
+          canvasAnimation = { previousScene, scene, progress, frame: null, suppressLocusHover };
           paintCanvas(canvasNode);
           if (elapsed < 1) {
             canvasAnimation.frame = requestAnimationFrame(frame);
           } else {
             canvasAnimation = null;
             canvasScene = scene;
+            // The final animation frame intentionally hid the stale hover
+            // affordance. Repaint once with the settled scene so it returns
+            // when the pointer is still over the locus.
+            paintCanvas(canvasNode);
           }
         };
         canvasAnimation = { previousScene, scene, progress: 0, frame: requestAnimationFrame(frame) };
@@ -4197,7 +4244,7 @@
       return my;
     };
     my.data = (data) => {
-      if (!data) return container.select("svg.clusterMap").datum();
+      if (!data) return currentData;
       container.datum(data).call(my);
       return my;
     };

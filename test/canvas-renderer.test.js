@@ -149,6 +149,21 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   assert.ok(calls.some((call) => call[0] === "fill"));
   assert.ok(calls.some((call) => call[0] === "fillRect" && call[1] === 5 && call[2] === 0));
 
+  const callsBeforeSuppressedHover = calls.length;
+  renderCanvas({
+    canvas,
+    scene,
+    camera: { x: 20, y: 30, k: 2 },
+    config,
+    scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
+    hoverLocusUid: "locus",
+    suppressLocusHover: true,
+  });
+  assert.ok(
+    !calls.slice(callsBeforeSuppressedHover).some((call) => call[0] === "fillRect"),
+    "suppressed hover does not draw the selection rectangle or resize handles"
+  );
+
   renderCanvas({
     canvas,
     scene,

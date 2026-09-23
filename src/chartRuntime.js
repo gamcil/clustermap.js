@@ -1,5 +1,5 @@
 import { renameText, updateConfig } from "./utils.js";
-import defaultConfig from "./config.js";
+import { createDefaultConfig } from "./config.js";
 import { getGroupScaleValues } from "./links/groups.mjs";
 import {
   anchorGeneGroup,
@@ -69,7 +69,7 @@ function synchronizeLocusLayoutStates(data) {
   );
 }
 
-const config = Object.assign({}, defaultConfig);
+const config = createDefaultConfig();
 let chartIndex = null;
 let chartState = null;
 let currentScene = null;

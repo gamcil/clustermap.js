@@ -120,7 +120,25 @@ export function renderSvg({
               d3.select(event.target).select("g.hover").transition().attr("opacity", 0);
             }
           })
-          .on("dblclick", (_, locus) => interactions.flipLocus(locus));
+          .on("dblclick", (event, locus) => {
+            // The hover rectangle describes pointer affordances, not locus
+            // geometry. It would otherwise remain visible while the locus
+            // itself animates through a flip.
+            const locusNode = event.currentTarget;
+            const hover = d3.select(locusNode).select("g.hover").interrupt().attr("opacity", 0);
+            // Restore the affordance only if this locus is still under the
+            // pointer after its geometry transition completes.
+            if (animate && config.plot.transitionDuration) {
+              hover
+                .transition()
+                .delay(config.plot.transitionDuration)
+                .duration(0)
+                .on("end", function () {
+                  if (locusNode.matches(":hover")) d3.select(this).attr("opacity", 1);
+                });
+            }
+            interactions.flipLocus(locus);
+          });
         return updateLoci(enter, scene, config);
       },
       (update) =>
