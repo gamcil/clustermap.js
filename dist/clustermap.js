@@ -1749,7 +1749,7 @@
       };
       const regions = { move, trimLeft, trimRight };
       locusRegions.set(source.uid, regions);
-      all.push(trimLeft, trimRight, move);
+      all.push(move, trimLeft, trimRight);
     }
 
     for (const gene of genes.values()) {

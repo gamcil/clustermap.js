@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 test("scene derives world-space geometry without DOM state", async () => {
   const { buildScene } = await import("../src/layout.mjs");
+  const { hitTest } = await import("../src/hitTest.mjs");
   const data = {
     clusters: [
       {
@@ -142,6 +143,10 @@ test("scene derives world-space geometry without DOM state", async () => {
     geneUid: "top-gene",
     points: topGene.polygon,
   });
+  assert.equal(hitTest(scene, { x: 2, y: 11 }).action, "trim-locus-left");
+  assert.equal(hitTest(scene, { x: 20, y: 11 }).action, "move-locus");
+  assert.equal(hitTest(scene, { x: 9, y: 11 }).geneUid, "top-gene");
+  assert.equal(hitTest(scene, { x: 200, y: 200 }), null);
   assert.deepEqual(scene.links.get("link").anchors, [8, 14, 11, 28, 22, 41]);
   assert.equal(scene.links.get("link").visible, true);
   assert.deepEqual(scene.bounds, { minX: 6, maxX: 32, minY: 0, maxY: 52 });
