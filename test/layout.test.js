@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 test("scene derives world-space geometry without DOM state", async () => {
-  const { buildScene, createLocusOffsetPreview } = await import("../src/layout.mjs");
+  const { buildScene, createClusterDragPreview, createLocusOffsetPreview } = await import("../src/layout.mjs");
   const { hitTest } = await import("../src/hitTest.mjs");
   const { queryViewport } = await import("../src/spatialIndex.mjs");
   const data = {
@@ -128,6 +128,26 @@ test("scene derives world-space geometry without DOM state", async () => {
     createLocusOffsetPreview(unalignedScene, "top-locus", 14, { alignLabels: false })
       .clusterLabelOffsets,
     new Map([["top", 13]])
+  );
+  assert.deepEqual(
+    createClusterDragPreview(scene, {
+      clusterUid: "top",
+      position: 45,
+      order: ["bottom", "top"],
+      rows: [0, 30],
+    }),
+    {
+      type: "cluster-drag",
+      clusterUid: "top",
+      clusterOffsets: new Map([
+        ["bottom", -30],
+        ["top", 45],
+      ]),
+      clusterOrder: new Map([
+        ["bottom", 0],
+        ["top", 1],
+      ]),
+    }
   );
   assert.deepEqual(topLocus.track, { x1: 0, x2: 20, y: 11 });
   assert.deepEqual(topLocus.hover, {

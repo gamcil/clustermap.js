@@ -40,7 +40,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     info: { x: -10, locusText: "locus:1-10" },
     loci: [
       {
-        source: { uid: "locus" },
+        source: { uid: "locus", clusterUid: "cluster" },
         x: 5,
         worldStart: 5,
         worldEnd: 15,
@@ -61,7 +61,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
           visible: true,
           source: { uid: "gene", label: "gene", locusUid: "locus" },
           polygon: [5, 15, 10, 15, 10, 20, 5, 20],
-          locus: { x: 5, y: 10 },
+          locus: cluster.loci[0],
           label: { x: 0, y: 0, rotation: 0 },
         },
       ],
@@ -148,6 +148,21 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   assert.ok(calls.some((call) => call[0] === "lineTo" && call[1] === 15));
   assert.ok(calls.some((call) => call[0] === "fill"));
   assert.ok(calls.some((call) => call[0] === "fillRect" && call[1] === 5 && call[2] === 0));
+
+  renderCanvas({
+    canvas,
+    scene,
+    camera: { x: 20, y: 30, k: 2 },
+    config,
+    scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
+    preview: {
+      type: "cluster-drag",
+      clusterUid: "cluster",
+      clusterOffsets: new Map([["cluster", 20]]),
+      clusterOrder: new Map([["cluster", 0]]),
+    },
+  });
+  assert.ok(calls.some((call) => call[0] === "translate" && call[1] === 0 && call[2] === 20));
   assert.ok(calls.some((call) => call[0] === "set" && call[1] === "textAlign" && call[2] === "center"));
   assert.ok(calls.some((call) => call[0] === "fillText" && call[1] === "group" && call[3] === 24));
   assert.ok(!calls.some((call) => call[0] === "moveTo" && call[1] === 1000));

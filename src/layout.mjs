@@ -382,5 +382,23 @@ export function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels 
   };
 }
 
+/**
+ * Describe the temporary rows of a cluster drag relative to an existing
+ * scene. The active cluster follows the pointer; every other cluster snaps to
+ * its row in the preview order.
+ */
+export function createClusterDragPreview(scene, { clusterUid, position, order, rows }) {
+  const clusterOffsets = new Map();
+  const clusterOrder = new Map();
+  for (const [index, uid] of order.entries()) {
+    const cluster = scene.clusters.get(uid);
+    if (!cluster) continue;
+    const y = uid === clusterUid ? position : rows[index];
+    clusterOffsets.set(uid, y - cluster.y);
+    clusterOrder.set(uid, index);
+  }
+  return { type: "cluster-drag", clusterUid, clusterOffsets, clusterOrder };
+}
+
 // Kept as a compatibility alias while callers adopt the scene terminology.
 export const createLayoutProjection = buildScene;

@@ -22,7 +22,7 @@ import { normalizeChartData } from "./data/normalize.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
 import { canvasWorldPoint, hitTestCanvas, renderCanvas } from "./canvasRenderer.js";
-import { createLocusOffsetPreview } from "./layout.mjs";
+import { createClusterDragPreview, createLocusOffsetPreview } from "./layout.mjs";
 import { renderSvg } from "./svgRenderer.js";
 import { createChartRuntime } from "./chartRuntime.js";
 
@@ -56,10 +56,21 @@ export default function clusterMap() {
     previewClusterDrag: (uid, position, order) => {
       setPreviewClusterPosition(chartState, uid, position);
       if (order) setPreviewClusterOrder(chartState, order);
+      if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+        canvasPreview = createClusterDragPreview(runtime.scene.get(), {
+          clusterUid: uid,
+          position,
+          order: getClusterOrder(chartState),
+          rows: runtime.scales.y.range(),
+        });
+        scheduleCanvasPreview();
+        return;
+      }
       runtime.plot.update({ animate: false });
     },
     commitClusterOrder: () => {
       commitPreviewClusterOrder(chartState);
+      clearCanvasPreview();
       runtime.plot.update({ animate: false });
     },
     previewLocusOffset: (uid, offset) => {
