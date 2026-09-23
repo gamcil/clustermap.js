@@ -901,9 +901,13 @@
   ) {
     const cells = new Map();
     const boundsById = new Map();
+    const orderById = new Map();
+    let order = 0;
     for (const [id, bounds] of records) {
       if (!validBounds(bounds)) continue;
       boundsById.set(id, bounds);
+      orderById.set(id, order);
+      order += 1;
       const minColumn = Math.floor(bounds.minX / cellWidth);
       const maxColumn = Math.floor(bounds.maxX / cellWidth);
       const minRow = Math.floor(bounds.minY / cellHeight);
@@ -916,7 +920,7 @@
         }
       }
     }
-    return { cells, boundsById, cellWidth, cellHeight };
+    return { cells, boundsById, orderById, cellWidth, cellHeight };
   }
 
   /** Return candidate IDs whose exact bounds intersect a world-space viewport. */
@@ -935,6 +939,17 @@
       }
     }
     return matches;
+  }
+
+  /**
+   * Return viewport candidates in the order they were added to the index. This
+   * preserves deterministic painter order while allowing a renderer to visit
+   * only visible records.
+   */
+  function queryViewportOrdered(index, viewport) {
+    return [...queryViewport(index, viewport)].sort(
+      (left, right) => index.orderById.get(left) - index.orderById.get(right)
+    );
   }
 
   function canvasWorldPoint(canvas, event, camera) {
@@ -1510,14 +1525,16 @@
     const clusterPreview = preview?.type === "cluster-drag";
     const visible = !clusterPreview && viewport && displayScene.index
       ? {
-          links: queryViewport(displayScene.index.links, viewport),
-          loci: queryViewport(displayScene.index.loci, viewport),
-          genes: queryViewport(displayScene.index.genes, viewport),
+          links: queryViewportOrdered(displayScene.index.links, viewport),
+          loci: queryViewportOrdered(displayScene.index.loci, viewport),
+          genes: queryViewportOrdered(displayScene.index.genes, viewport),
         }
       : null;
 
-    for (const link of displayScene.links.values()) {
-      if (visible && !visible.links.has(link.source.uid)) continue;
+    const recordsFor = (records, ids) =>
+      ids ? ids.map((uid) => records.get(uid)).filter(Boolean) : [...records.values()];
+
+    for (const link of recordsFor(displayScene.links, visible?.links)) {
       const geometry = linkGeometryForPreview(displayScene, link, preview, config);
       if (
         clusterPreview &&
@@ -1539,29 +1556,24 @@
         geometry
       );
     }
-    for (const cluster of displayScene.clusters.values()) {
-      const loci = visible
-        ? cluster.loci.filter((locus) => visible.loci.has(locus.source.uid))
-        : cluster.loci;
-      if (!loci.length) continue;
-      drawClusterInfo(
-        context,
-        cluster,
-        config,
-        {
+    const drawnClusterLabels = new Set();
+    for (const locus of recordsFor(displayScene.loci, visible?.loci)) {
+      const cluster = displayScene.clusters.get(locus.cluster?.uid ?? locus.source.clusterUid);
+      if (!cluster) continue;
+      if (!drawnClusterLabels.has(cluster.source.uid)) {
+        drawnClusterLabels.add(cluster.source.uid);
+        drawClusterInfo(context, cluster, config, {
           x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
           y: clusterOffsetForPreview(preview, cluster.source.uid),
-        }
-      );
-      for (const locus of loci) {
-        drawLocusTrack(
-          context,
-          locus,
-          viewport,
-          config,
-          locusGeometryForPreview(preview, locus)
-        );
+        });
       }
+      drawLocusTrack(
+        context,
+        locus,
+        viewport,
+        config,
+        locusGeometryForPreview(preview, locus)
+      );
     }
     const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
     drawLocusHover(
@@ -1570,8 +1582,7 @@
       hoverLocusUid,
       hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
     );
-    for (const gene of displayScene.genes.values()) {
-      if (visible && !visible.genes.has(gene.source.uid)) continue;
+    for (const gene of recordsFor(displayScene.genes, visible?.genes)) {
       if (clusterPreview && !boundsInViewport(gene.bounds, viewport, offsetsForGene(preview, gene))) {
         continue;
       }

@@ -1,6 +1,6 @@
 import { rgbaToRgb } from "./utils.js";
 import { hitTest } from "./hitTest.mjs";
-import { queryViewport } from "./spatialIndex.mjs";
+import { queryViewportOrdered } from "./spatialIndex.mjs";
 
 export function canvasWorldPoint(canvas, event, camera) {
   const bounds = canvas.getBoundingClientRect();
@@ -575,14 +575,16 @@ export function renderCanvas({
   const clusterPreview = preview?.type === "cluster-drag";
   const visible = !clusterPreview && viewport && displayScene.index
     ? {
-        links: queryViewport(displayScene.index.links, viewport),
-        loci: queryViewport(displayScene.index.loci, viewport),
-        genes: queryViewport(displayScene.index.genes, viewport),
+        links: queryViewportOrdered(displayScene.index.links, viewport),
+        loci: queryViewportOrdered(displayScene.index.loci, viewport),
+        genes: queryViewportOrdered(displayScene.index.genes, viewport),
       }
     : null;
 
-  for (const link of displayScene.links.values()) {
-    if (visible && !visible.links.has(link.source.uid)) continue;
+  const recordsFor = (records, ids) =>
+    ids ? ids.map((uid) => records.get(uid)).filter(Boolean) : [...records.values()];
+
+  for (const link of recordsFor(displayScene.links, visible?.links)) {
     const geometry = linkGeometryForPreview(displayScene, link, preview, config);
     if (
       clusterPreview &&
@@ -604,29 +606,24 @@ export function renderCanvas({
       geometry
     );
   }
-  for (const cluster of displayScene.clusters.values()) {
-    const loci = visible
-      ? cluster.loci.filter((locus) => visible.loci.has(locus.source.uid))
-      : cluster.loci;
-    if (!loci.length) continue;
-    drawClusterInfo(
-      context,
-      cluster,
-      config,
-      {
+  const drawnClusterLabels = new Set();
+  for (const locus of recordsFor(displayScene.loci, visible?.loci)) {
+    const cluster = displayScene.clusters.get(locus.cluster?.uid ?? locus.source.clusterUid);
+    if (!cluster) continue;
+    if (!drawnClusterLabels.has(cluster.source.uid)) {
+      drawnClusterLabels.add(cluster.source.uid);
+      drawClusterInfo(context, cluster, config, {
         x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
         y: clusterOffsetForPreview(preview, cluster.source.uid),
-      }
-    );
-    for (const locus of loci) {
-      drawLocusTrack(
-        context,
-        locus,
-        viewport,
-        config,
-        locusGeometryForPreview(preview, locus)
-      );
+      });
     }
+    drawLocusTrack(
+      context,
+      locus,
+      viewport,
+      config,
+      locusGeometryForPreview(preview, locus)
+    );
   }
   const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
   drawLocusHover(
@@ -635,8 +632,7 @@ export function renderCanvas({
     hoverLocusUid,
     hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
   );
-  for (const gene of displayScene.genes.values()) {
-    if (visible && !visible.genes.has(gene.source.uid)) continue;
+  for (const gene of recordsFor(displayScene.genes, visible?.genes)) {
     if (clusterPreview && !boundsInViewport(gene.bounds, viewport, offsetsForGene(preview, gene))) {
       continue;
     }

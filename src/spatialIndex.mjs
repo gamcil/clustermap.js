@@ -34,9 +34,13 @@ export function createSpatialIndex(
 ) {
   const cells = new Map();
   const boundsById = new Map();
+  const orderById = new Map();
+  let order = 0;
   for (const [id, bounds] of records) {
     if (!validBounds(bounds)) continue;
     boundsById.set(id, bounds);
+    orderById.set(id, order);
+    order += 1;
     const minColumn = Math.floor(bounds.minX / cellWidth);
     const maxColumn = Math.floor(bounds.maxX / cellWidth);
     const minRow = Math.floor(bounds.minY / cellHeight);
@@ -49,7 +53,7 @@ export function createSpatialIndex(
       }
     }
   }
-  return { cells, boundsById, cellWidth, cellHeight };
+  return { cells, boundsById, orderById, cellWidth, cellHeight };
 }
 
 /** Return candidate IDs whose exact bounds intersect a world-space viewport. */
@@ -68,6 +72,17 @@ export function queryViewport(index, viewport) {
     }
   }
   return matches;
+}
+
+/**
+ * Return viewport candidates in the order they were added to the index. This
+ * preserves deterministic painter order while allowing a renderer to visit
+ * only visible records.
+ */
+export function queryViewportOrdered(index, viewport) {
+  return [...queryViewport(index, viewport)].sort(
+    (left, right) => index.orderById.get(left) - index.orderById.get(right)
+  );
 }
 
 /** Return IDs whose exact bounds contain a world-space point. */
