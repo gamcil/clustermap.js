@@ -82,6 +82,7 @@ export default function clusterMap() {
   let clusterCommitFrame = null;
   let webgpuClusterCommit = null;
   let webgpuAnchorCommit = null;
+  let anchorSceneCommit = null;
   let scheduleMinimapBase = () => {};
   let prepareCanvasFlipBase = () => {};
   let warmCanvasFlipBase = () => {};
@@ -90,11 +91,10 @@ export default function clusterMap() {
   runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
     const sourceScene = runtime.scene.get();
     // Anchoring changes cluster origins and, when strands disagree, a small
-    // set of loci. The GPU renderer can retain everything else.
-    if (
-      runtime.config.plot.renderer !== "webgpu" ||
-      !sourceScene
-    ) return;
+    // set of loci. The scene patch retains everything else for every backend.
+    if (!sourceScene || (!changes.length && !flippedLoci.size)) return;
+    anchorSceneCommit = { sourceScene, changes, flippedLoci };
+    if (runtime.config.plot.renderer !== "webgpu") return;
     const offsets = new Map(
       changes
         .filter(({ offset }) => offset)
@@ -523,6 +523,7 @@ export default function clusterMap() {
       webgpuPendingScene = null;
       webgpuClusterCommit = null;
       webgpuAnchorCommit = null;
+      anchorSceneCommit = null;
     }
     const minimapOptions = runtime.config.plot.minimap || {};
     const showMinimap = useCanvas && minimapOptions.show;
@@ -1445,7 +1446,15 @@ export default function clusterMap() {
 
     runtime.link.updateGroups(data.groups);
 
-    const scene = runtime.scene.build(data);
+    const committedAnchor = anchorSceneCommit;
+    anchorSceneCommit = null;
+    const scene = committedAnchor
+      ? runtime.scene.patchGeneAnchor(
+          committedAnchor.sourceScene,
+          committedAnchor.changes,
+          committedAnchor.flippedLoci
+        )
+      : runtime.scene.build(data);
 
     if (useCanvas) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);

@@ -20,7 +20,11 @@ import {
   getLocusScaleValues,
   xDistance,
 } from "./loci/layout.mjs";
-import { buildScene, patchFlippedLocusScene } from "./layout.mjs";
+import {
+  buildScene,
+  patchAnchoredGeneScene,
+  patchFlippedLocusScene,
+} from "./layout.mjs";
 
 // This is deliberately one factory per chart, not a collection of tiny API
 // factories: configuration, scales, indexes, and mutable scene state must not
@@ -145,6 +149,7 @@ const scene = {
       getLocusState: locusState,
       getGeneState: (gene) => getGeneState(chartState, gene),
       areClustersAdjacent: cluster.adjacent,
+      clusterOrder: getClusterOrder(chartState),
       shape: config.gene.shape,
       label: config.gene.label,
       link: {
@@ -203,6 +208,31 @@ const scene = {
       getLocusState: locusState,
       getGeneState: (gene) => getGeneState(chartState, gene),
       areClustersAdjacent: cluster.adjacent,
+      shape: config.gene.shape,
+      label: config.gene.label,
+      link: {
+        asLine: config.link.asLine,
+        straight: config.link.straight,
+        threshold: config.link.threshold,
+        labelPosition: config.link.label.position,
+      },
+      clusterLabel: cluster.locusText,
+      alignLabels: config.cluster.alignLabels,
+      linksForGene: get.linksForGene,
+    });
+    return currentScene;
+  },
+  patchGeneAnchor: (previousScene, changes, flippedLoci) => {
+    const clusterOrderIndex = new Map(
+      getClusterOrder(chartState).map((uid, index) => [uid, index])
+    );
+    currentScene = patchAnchoredGeneScene(previousScene, { changes, flippedLoci }, {
+      scaleX: scales.x,
+      locusOffset: scales.locus,
+      getLocusState: locusState,
+      getGeneState: (gene) => getGeneState(chartState, gene),
+      areClustersAdjacent: (one, two) =>
+        Math.abs(clusterOrderIndex.get(one) - clusterOrderIndex.get(two)) === 1,
       shape: config.gene.shape,
       label: config.gene.label,
       link: {

@@ -8,6 +8,7 @@ test("scene derives world-space geometry without DOM state", async () => {
     createLocusFlipPreview,
     createLocusOffsetPreview,
     createLocusTrimPreview,
+    patchAnchoredGeneScene,
     patchFlippedLocusScene,
   } = await import("../src/layout.mjs");
   const { hitTest } = await import("../src/hitTest.mjs");
@@ -280,6 +281,40 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.equal(scene.chrome.colourBar.position.y, 72);
   assert.equal(scene.chrome.colourBar.startColour, "white");
   assert.equal(scene.chrome.colourBar.endColour, "black");
+
+  const anchored = patchAnchoredGeneScene(
+    scene,
+    { changes: [{ clusterUid: "bottom", offset: 7 }], flippedLoci: new Set() },
+    {
+      scaleX: (value) => value,
+      locusOffset: (uid) => (uid === "top-locus" ? 1 : 2),
+      getLocusState: (locus) => locusStates.get(locus.uid),
+      getGeneState: (gene) => geneStates.get(gene.uid),
+      areClustersAdjacent: () => true,
+      shape: { tipHeight: 5, bodyHeight: 12, tipLength: 4 },
+      label: { start: 0.5, position: "middle", anchor: "middle", rotation: 0 },
+      link: { asLine: false, straight: true, threshold: 0.3, labelPosition: 0.5 },
+      clusterLabel: () => "anchored",
+      alignLabels: true,
+      linksForGene: () => data.links,
+    }
+  );
+  assert.equal(anchored.clusters.get("bottom").x, 17);
+  assert.equal(anchored.loci.get("bottom-locus").worldStart, 19);
+  assert.deepEqual(
+    anchored.genes.get("bottom-gene").polygon,
+    scene.genes.get("bottom-gene").polygon.map((point, index) =>
+      index % 2 === 0 ? point + 7 : point
+    )
+  );
+  assert.deepEqual(anchored.links.get("link").anchors, [8, 14, 11, 35, 29, 41]);
+  assert.equal(anchored.clusters.get("bottom").info.x, -21);
+  assert.equal(anchored.chrome.legend.position.x, 59);
+  assert.equal(hitTest(anchored, { x: 30, y: 41 }).geneUid, "bottom-gene");
+  assert.deepEqual(
+    [...queryViewport(anchored.index.genes, { minX: 27, maxX: 33, minY: 30, maxY: 52 })],
+    ["bottom-gene"]
+  );
 
   const flippedLocusStates = new Map(
     [...locusStates].map(([uid, state]) => [uid, { ...state }])
