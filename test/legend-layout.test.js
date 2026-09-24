@@ -79,6 +79,7 @@ test("bottom legends stack below lower chart chrome", async () => {
   assert.equal(scene.chrome.legend.columns, 2);
   assert.equal(scene.chrome.legend.bottomOffset, 50);
   assert.deepEqual(scene.chrome.legend.position, { x: 0, y: 92 });
+  assert.deepEqual(scene.figureBounds, { minX: -6, maxX: 200, minY: 0, maxY: 130 });
   assert.deepEqual(
     scene.chrome.legend.items.map(({ uid, x, y }) => ({ uid, x, y })),
     [

@@ -70,6 +70,57 @@ function legendPositionForBounds(bounds, legend) {
   return { x: bounds.maxX + legend.marginLeft, y: 0 };
 }
 
+function extendBounds(bounds, minX, maxX, minY, maxY) {
+  return {
+    minX: Math.min(bounds.minX, minX),
+    maxX: Math.max(bounds.maxX, maxX),
+    minY: Math.min(bounds.minY, minY),
+    maxY: Math.max(bounds.maxY, maxY),
+  };
+}
+
+// This deliberately excludes text-width measurement: Canvas supplies exact
+// glyph metrics while fitting, and SVG uses its native bounding box. The scene
+// still records the chrome's structural footprint for renderer-neutral camera
+// and minimap work.
+function figureBoundsForChrome(bounds, chrome) {
+  if (!bounds || !chrome) return bounds;
+  let figureBounds = { ...bounds };
+  const { legend, scaleBar, colourBar } = chrome;
+  if (legend?.visible) {
+    for (const item of legend.items) {
+      const x = legend.position.x + item.x;
+      const y = legend.position.y + item.y;
+      figureBounds = extendBounds(
+        figureBounds,
+        x - item.radius,
+        x + legend.columnWidth,
+        y,
+        y + legend.fontSize
+      );
+    }
+  }
+  if (scaleBar?.visible) {
+    figureBounds = extendBounds(
+      figureBounds,
+      scaleBar.position.x,
+      scaleBar.position.x + scaleBar.length,
+      scaleBar.position.y,
+      scaleBar.position.y + scaleBar.height + scaleBar.fontSize + 5
+    );
+  }
+  if (colourBar?.visible) {
+    figureBounds = extendBounds(
+      figureBounds,
+      colourBar.position.x,
+      colourBar.position.x + colourBar.width,
+      colourBar.position.y,
+      colourBar.position.y + colourBar.height + colourBar.fontSize + 5
+    );
+  }
+  return figureBounds;
+}
+
 function buildChrome(bounds, genes, chrome) {
   if (!bounds || !chrome) return null;
 
@@ -463,6 +514,7 @@ export function buildScene(
   }
 
   const hitRegions = buildHitRegions(loci, genes);
+  const chromeLayout = buildChrome(bounds, genes, chrome);
   return {
     clusters,
     loci,
@@ -470,6 +522,7 @@ export function buildScene(
     links,
     linksByClusterPair,
     bounds,
+    figureBounds: figureBoundsForChrome(bounds, chromeLayout),
     index: {
       genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
       loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
@@ -482,7 +535,7 @@ export function buildScene(
       ),
     },
     hitRegions,
-    chrome: buildChrome(bounds, genes, chrome),
+    chrome: chromeLayout,
   };
 }
 
@@ -832,6 +885,7 @@ export function patchAnchoredGeneScene(
     genes,
     links,
     bounds,
+    figureBounds: figureBoundsForChrome(bounds, chrome),
     index: {
       ...patched.index,
       genes: updateSpatialIndex(

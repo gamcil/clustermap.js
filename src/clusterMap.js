@@ -1060,7 +1060,7 @@ export default function clusterMap() {
     };
     const minimapProjection = (scene = runtime.scene.get()) =>
       createMinimapProjection({
-        bounds: scene?.bounds,
+        bounds: scene?.figureBounds || scene?.bounds,
         width: minimapOptions.width,
         height: minimapOptions.height,
       });
@@ -1513,7 +1513,7 @@ export default function clusterMap() {
       ? document.createElement("canvas")
       : canvas;
     const context = measurementCanvas.getContext("2d");
-    const bounds = { ...scene.bounds };
+    const bounds = { ...(scene.figureBounds || scene.bounds) };
     const include = (x, y) => {
       bounds.minX = Math.min(bounds.minX, x);
       bounds.maxX = Math.max(bounds.maxX, x);
