@@ -4357,6 +4357,30 @@
   };
   }
 
+  // The Canvas backend owns the retained scene used by ordinary full-surface
+  // paints. Canvas-only composition (the flip bitmap and minimap) remains a
+  // controller concern because it deliberately paints partial surfaces.
+  function createCanvasBackend({ render = renderCanvas } = {}) {
+    let pendingScene = null;
+
+    return {
+      get pendingScene() {
+        return pendingScene;
+      },
+      setScene: (scene) => {
+        pendingScene = scene;
+      },
+      paint: ({ canvas, scene, ...options }) => {
+        if (scene) pendingScene = scene;
+        if (!canvas || !pendingScene) return null;
+        return render({ canvas, scene: pendingScene, ...options });
+      },
+      destroy: () => {
+        pendingScene = null;
+      },
+    };
+  }
+
   // Deliberately small, direct WebGPU renderer for the renderer-neutral scene.
 
   const shader = /* wgsl */ `
@@ -5618,6 +5642,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let warmCanvasFlipBase = () => {};
     let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+    const canvasBackend = createCanvasBackend();
     const webgpuBackend = createWebGpuBackend();
     runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
       const sourceScene = runtime.scene.get();
@@ -6050,6 +6075,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         webgpuAnchorCommit = null;
         anchorSceneCommit = null;
       }
+      if (!useCanvas) canvasBackend.destroy();
       const minimapOptions = runtime.config.plot.minimap || {};
       const showMinimap = useCanvas && minimapOptions.show;
       if (!useCanvas) clearCanvasPreview();
@@ -6312,9 +6338,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           paintMinimap();
           return canvasFlipDirtyFrame;
         }
-        const result = renderCanvas({
+        const result = canvasBackend.paint({
           canvas: canvasNode,
-          scene: canvasAnimation?.scene || canvasPreviewScene || runtime.scene.get(),
+          scene:
+            canvasAnimation?.scene ||
+            canvasPreviewScene ||
+            canvasBackend.pendingScene ||
+            runtime.scene.get(),
           previousScene: canvasAnimation?.previousScene,
           progress: canvasAnimation?.progress,
           camera: getCamera(chartState),
@@ -6945,6 +6975,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
       if (useCanvas) {
         if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
+        canvasBackend.setScene(scene);
         scheduleMinimapBase(scene);
         animateCanvas(canvas.node(), scene, hasInitialView && animate);
       } else if (useWebGpu) {

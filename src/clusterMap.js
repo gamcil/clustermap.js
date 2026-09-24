@@ -38,6 +38,7 @@ import {
 } from "./layout.mjs";
 import { renderSvg } from "./svgRenderer.js";
 import { createChartRuntime } from "./chartRuntime.js";
+import { createCanvasBackend } from "./canvasBackend.mjs";
 import { createWebGpuBackend } from "./webgpuBackend.mjs";
 
 let nextChartInstance = 0;
@@ -82,6 +83,7 @@ export default function clusterMap() {
   let warmCanvasFlipBase = () => {};
   let currentData = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+  const canvasBackend = createCanvasBackend();
   const webgpuBackend = createWebGpuBackend();
   runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
     const sourceScene = runtime.scene.get();
@@ -514,6 +516,7 @@ export default function clusterMap() {
       webgpuAnchorCommit = null;
       anchorSceneCommit = null;
     }
+    if (!useCanvas) canvasBackend.destroy();
     const minimapOptions = runtime.config.plot.minimap || {};
     const showMinimap = useCanvas && minimapOptions.show;
     if (!useCanvas) clearCanvasPreview();
@@ -776,9 +779,13 @@ export default function clusterMap() {
         paintMinimap();
         return canvasFlipDirtyFrame;
       }
-      const result = renderCanvas({
+      const result = canvasBackend.paint({
         canvas: canvasNode,
-        scene: canvasAnimation?.scene || canvasPreviewScene || runtime.scene.get(),
+        scene:
+          canvasAnimation?.scene ||
+          canvasPreviewScene ||
+          canvasBackend.pendingScene ||
+          runtime.scene.get(),
         previousScene: canvasAnimation?.previousScene,
         progress: canvasAnimation?.progress,
         camera: getCamera(chartState),
@@ -1409,6 +1416,7 @@ export default function clusterMap() {
 
     if (useCanvas) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
+      canvasBackend.setScene(scene);
       scheduleMinimapBase(scene);
       animateCanvas(canvas.node(), scene, hasInitialView && animate);
     } else if (useWebGpu) {
