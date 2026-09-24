@@ -24,6 +24,19 @@ function intersects(one, two) {
   );
 }
 
+function cellsForBounds(bounds, { cellWidth, cellHeight }) {
+  if (!validBounds(bounds)) return [];
+  const cells = [];
+  const minColumn = Math.floor(bounds.minX / cellWidth);
+  const maxColumn = Math.floor(bounds.maxX / cellWidth);
+  const minRow = Math.floor(bounds.minY / cellHeight);
+  const maxRow = Math.floor(bounds.maxY / cellHeight);
+  for (let column = minColumn; column <= maxColumn; column += 1) {
+    for (let row = minRow; row <= maxRow; row += 1) cells.push(cellKey(column, row));
+  }
+  return cells;
+}
+
 /**
  * Index world-space rectangular extents in a uniform grid. The index stores
  * IDs only; callers retain ownership of the scene records and draw order.
@@ -41,19 +54,50 @@ export function createSpatialIndex(
     boundsById.set(id, bounds);
     orderById.set(id, order);
     order += 1;
-    const minColumn = Math.floor(bounds.minX / cellWidth);
-    const maxColumn = Math.floor(bounds.maxX / cellWidth);
-    const minRow = Math.floor(bounds.minY / cellHeight);
-    const maxRow = Math.floor(bounds.maxY / cellHeight);
-    for (let column = minColumn; column <= maxColumn; column += 1) {
-      for (let row = minRow; row <= maxRow; row += 1) {
-        const key = cellKey(column, row);
-        if (!cells.has(key)) cells.set(key, new Set());
-        cells.get(key).add(id);
-      }
+    for (const key of cellsForBounds(bounds, { cellWidth, cellHeight })) {
+      if (!cells.has(key)) cells.set(key, new Set());
+      cells.get(key).add(id);
     }
   }
   return { cells, boundsById, orderById, cellWidth, cellHeight };
+}
+
+/**
+ * Return a copy of an index with a small set of existing records moved or
+ * removed. Scene patches use this to retain spatial lookup for untouched
+ * records instead of rebuilding an index for the entire chart.
+ */
+export function patchSpatialIndex(index, entries) {
+  if (!index || !entries?.length) return index;
+  const cells = new Map(index.cells);
+  const boundsById = new Map(index.boundsById);
+  const changedCells = new Set();
+  const mutableCell = (key) => {
+    if (!changedCells.has(key) || !cells.has(key)) {
+      cells.set(key, new Set(cells.get(key)));
+      changedCells.add(key);
+    }
+    return cells.get(key);
+  };
+
+  for (const [id, bounds] of entries) {
+    const oldBounds = boundsById.get(id);
+    for (const key of cellsForBounds(oldBounds, index)) {
+      const cell = mutableCell(key);
+      cell.delete(id);
+      if (cell.size === 0) cells.delete(key);
+    }
+    if (!validBounds(bounds)) {
+      boundsById.delete(id);
+      continue;
+    }
+    boundsById.set(id, bounds);
+    for (const key of cellsForBounds(bounds, index)) {
+      const cell = mutableCell(key);
+      cell.add(id);
+    }
+  }
+  return { ...index, cells, boundsById };
 }
 
 /** Return candidate IDs whose exact bounds intersect a world-space viewport. */

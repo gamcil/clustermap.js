@@ -8,6 +8,7 @@ test("scene derives world-space geometry without DOM state", async () => {
     createLocusFlipPreview,
     createLocusOffsetPreview,
     createLocusTrimPreview,
+    patchFlippedLocusScene,
   } = await import("../src/layout.mjs");
   const { hitTest } = await import("../src/hitTest.mjs");
   const { queryViewport } = await import("../src/spatialIndex.mjs");
@@ -279,5 +280,44 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.equal(scene.chrome.colourBar.position.y, 72);
   assert.equal(scene.chrome.colourBar.startColour, "white");
   assert.equal(scene.chrome.colourBar.endColour, "black");
+
+  const flippedLocusStates = new Map(
+    [...locusStates].map(([uid, state]) => [uid, { ...state }])
+  );
+  const flippedGeneStates = new Map(
+    [...geneStates].map(([uid, state]) => [uid, { ...state }])
+  );
+  flippedLocusStates.get("top-locus").flipped = true;
+  flippedGeneStates.set("top-gene", { start: 12, end: 18, strand: -1 });
+  const patched = patchFlippedLocusScene(scene, data.clusters[0].loci[0], {
+    scaleX: (value) => value,
+    locusOffset: (uid) => (uid === "top-locus" ? 1 : 2),
+    getLocusState: (locus) => flippedLocusStates.get(locus.uid),
+    getGeneState: (gene) => flippedGeneStates.get(gene.uid),
+    areClustersAdjacent: () => true,
+    shape: { tipHeight: 5, bodyHeight: 12, tipLength: 4 },
+    label: { start: 0.5, position: "middle", anchor: "middle", rotation: 0 },
+    link: { asLine: false, straight: true, threshold: 0.3, labelPosition: 0.5 },
+    clusterLabel: () => "flipped",
+    linksForGene: (uid) => data.links.filter(
+      (source) => source.query.uid === uid || source.target.uid === uid
+    ),
+  });
+  assert.notEqual(patched, scene);
+  assert.notEqual(patched.loci.get("top-locus"), scene.loci.get("top-locus"));
+  assert.equal(patched.loci.get("bottom-locus"), scene.loci.get("bottom-locus"));
+  assert.notEqual(patched.genes.get("top-gene"), scene.genes.get("top-gene"));
+  assert.equal(patched.genes.get("bottom-gene"), scene.genes.get("bottom-gene"));
+  assert.notDeepEqual(patched.links.get("link").anchors, scene.links.get("link").anchors);
+  assert.equal(patched.clusters.get("top").info.locusText, "flipped");
+  assert.equal(hitTest(patched, { x: 18, y: 11 }).geneUid, "top-gene");
+  assert.deepEqual(
+    [...queryViewport(patched.index.genes, { minX: 7, maxX: 11, minY: 0, maxY: 22 })],
+    []
+  );
+  assert.deepEqual(
+    [...queryViewport(patched.index.genes, { minX: 16, maxX: 20, minY: 0, maxY: 22 })],
+    ["top-gene"]
+  );
   assert.deepEqual({ data, locusStates, geneStates }, before);
 });

@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "rollup --config",
+    "import:clinker": "node scripts/import-clinker-render.mjs",
     "test": "node --test test/*.test.js",
     "test:baseline": "node --test test/baseline.test.js"
   },

@@ -135,8 +135,8 @@ export function canvasWorldPoint(canvas, event, camera) {
  * Return the portion of chart-world space covered by a Canvas. A small
  * screen-space margin prevents records from popping at its edge while panning.
  */
-export function canvasWorldViewport(canvas, camera, overscan = 20) {
-  const bounds = canvas.getBoundingClientRect();
+export function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
+  const bounds = dimensions || canvas.getBoundingClientRect();
   const margin = overscan / camera.k;
   return {
     minX: -camera.x / camera.k - margin,
@@ -319,13 +319,25 @@ function drawGene(
   if (!visible) return;
   context.save();
   context.translate(offsetX, offsetY);
-  polygon(context, geometry.polygon || gene.polygon);
+  if (geometry.flipAxis !== undefined) {
+    // A flip preview is a uniform affine transform about the locus axis:
+    // x' = axis + (x - axis) * (1 - 2p). Applying it to the context avoids
+    // allocating a reflected polygon for every gene on every animation frame.
+    context.save();
+    context.translate(geometry.flipAxis, 0);
+    context.scale(geometry.flipScale, 1);
+    context.translate(-geometry.flipAxis, 0);
+    polygon(context, gene.polygon);
+  } else {
+    polygon(context, gene.polygon);
+  }
   const group = scales.group(gene.source.uid);
   context.fillStyle = gene.source.colour || scales.colour(group);
   context.strokeStyle = config.gene.shape.stroke;
   context.lineWidth = config.gene.shape.strokeWidth;
   context.fill();
   context.stroke();
+  if (geometry.flipAxis !== undefined) context.restore();
 
   if (!config.gene.label.show) {
     context.restore();
@@ -340,7 +352,7 @@ function drawGene(
   context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
   context.textAlign = config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor;
   context.textBaseline = "alphabetic";
-  context.fillText(gene.source.label || gene.source.uid, 0, 0);
+  context.fillText(gene.source.label || gene.source.name || gene.source.uid, 0, 0);
   context.restore();
   context.restore();
 }
@@ -409,7 +421,7 @@ function offsetsForGene(preview, gene) {
   return offsetsForLocus(preview, gene.locus);
 }
 
-function locusGeometryForPreview(preview, locus) {
+export function locusGeometryForPreview(preview, locus) {
   if (preview?.type === "locus-flip") {
     const axis = preview.axes?.get(locus.source.uid);
     if (axis !== undefined) {
@@ -460,9 +472,11 @@ function geneGeometryForPreview(preview, gene) {
   const axis = flipAxisForGene(preview, gene);
   if (axis === undefined) return {};
   const progress = preview.progress;
-  const flip = (x) => x + (axis * 2 - x - x) * progress;
+  const flipScale = 1 - 2 * progress;
+  const flip = (x) => axis + (x - axis) * flipScale;
   return {
-    polygon: gene.polygon.map((value, index) => (index % 2 ? value : flip(value))),
+    flipAxis: axis,
+    flipScale,
     labelX: flip(gene.locus.x + gene.label.x),
   };
 }
@@ -487,12 +501,23 @@ function previewLinkAnchors(scene, link, preview) {
   if (!query || !target) return null;
   const anchorForGene = (gene) => {
     const offsets = offsetsForGene(preview, gene);
-    let minX = Infinity;
-    let maxX = -Infinity;
-    for (let index = 0; index < gene.polygon.length; index += 2) {
-      minX = Math.min(minX, gene.polygon[index] + offsets.x);
-      maxX = Math.max(maxX, gene.polygon[index] + offsets.x);
+    // Bounds are calculated when the retained scene is built and equal the
+    // polygon's horizontal extent. Reusing them avoids a vertex scan for each
+    // animated link endpoint on every frame.
+    let minX = gene.bounds?.minX;
+    let maxX = gene.bounds?.maxX;
+    // Retain support for compact third-party scenes that only expose a
+    // polygon. Production scenes always take the cached-bounds path above.
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+      minX = Infinity;
+      maxX = -Infinity;
+      for (let index = 0; index < gene.polygon.length; index += 2) {
+        minX = Math.min(minX, gene.polygon[index]);
+        maxX = Math.max(maxX, gene.polygon[index]);
+      }
     }
+    minX += offsets.x;
+    maxX += offsets.x;
     const forward = gene.display.strand === 1;
     const axis = flipAxisForGene(preview, gene);
     if (axis === undefined) {
@@ -524,12 +549,18 @@ function linkGeometryForPreview(scene, link, preview, config) {
   if (preview?.type === "locus-flip") {
     const query = scene.genes.get(link.source.query.uid);
     const target = scene.genes.get(link.source.target.uid);
+    const affected =
+      query?.locus?.source?.uid === preview.locusUid ||
+      target?.locus?.source?.uid === preview.locusUid;
     return {
       visible:
         link.visible &&
         geneVisibleForPreview(preview, query) &&
         geneVisibleForPreview(preview, target),
-      anchors: previewLinkAnchors(scene, link, preview),
+      // Most visible links do not touch the locus being reflected. Reusing
+      // their retained anchors keeps a flip frame proportional to affected
+      // links instead of recalculating every link in the viewport.
+      anchors: affected ? previewLinkAnchors(scene, link, preview) : link.anchors,
     };
   }
   if (preview?.type !== "cluster-drag") {
@@ -568,7 +599,12 @@ function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
   );
 }
 
-function recordsForClusterPreview(scene, preview, viewport) {
+function recordsForClusterPreview(
+  scene,
+  preview,
+  viewport,
+  { includeLinks = true, includeGenes = true } = {}
+) {
   const clusters = [];
   const clusterUidByOrder = new Map(
     [...preview.clusterOrder].map(([uid, order]) => [order, uid])
@@ -587,6 +623,7 @@ function recordsForClusterPreview(scene, preview, viewport) {
       const offsets = offsetsForLocus(preview, locus);
       if (!boundsInViewport(locus.bounds, viewport, offsets)) continue;
       loci.push(locus);
+      if (!includeGenes) continue;
       const locusGenes =
         locus.genes ||
         [...scene.genes.values()].filter((gene) => gene.locus.source?.uid === locus.source.uid);
@@ -602,13 +639,15 @@ function recordsForClusterPreview(scene, preview, viewport) {
   }
 
   const linkUids = new Set();
-  for (const cluster of clusters) {
-    const order = preview.clusterOrder.get(cluster.source.uid);
-    for (const neighbourOrder of [order - 1, order + 1]) {
-      const neighbourUid = clusterUidByOrder.get(neighbourOrder);
-      if (neighbourUid === undefined) continue;
-      for (const uid of scene.linksByClusterPair?.get(clusterPairKey(cluster.source.uid, neighbourUid)) || []) {
-        linkUids.add(uid);
+  if (includeLinks) {
+    for (const cluster of clusters) {
+      const order = preview.clusterOrder.get(cluster.source.uid);
+      for (const neighbourOrder of [order - 1, order + 1]) {
+        const neighbourUid = clusterUidByOrder.get(neighbourOrder);
+        if (neighbourUid === undefined) continue;
+        for (const uid of scene.linksByClusterPair?.get(clusterPairKey(cluster.source.uid, neighbourUid)) || []) {
+          linkUids.add(uid);
+        }
       }
     }
   }
@@ -806,6 +845,17 @@ export function renderCanvas({
   dimensions = null,
   fullScene = false,
   preview = null,
+  backgroundCanvas = null,
+  backgroundCanvases = [],
+  clear = true,
+  include = null,
+  omit = null,
+  showLinks = true,
+  showLoci = true,
+  showLocusTracks = true,
+  showGenes = true,
+  showClusterLabels = true,
+  showChrome = true,
 }) {
   const displayScene = interpolateCanvasScene(previousScene, scene, progress);
   const context = canvas.getContext("2d");
@@ -821,7 +871,12 @@ export function renderCanvas({
   }
 
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  context.clearRect(0, 0, width, height);
+  if (clear) {
+    context.clearRect(0, 0, width, height);
+    for (const background of [backgroundCanvas, ...backgroundCanvases]) {
+      if (background) context.drawImage(background, 0, 0, width, height);
+    }
+  }
   context.save();
   context.translate(camera.x, camera.y);
   context.scale(camera.k, camera.k);
@@ -829,7 +884,9 @@ export function renderCanvas({
   // During an animation, geometry is between the previous and target scenes,
   // while the index describes only the target scene. Draw the full frame then
   // so an in-flight record cannot be incorrectly culled.
-  const viewport = previousScene || fullScene ? null : canvasWorldViewport(canvas, camera);
+  const viewport = previousScene || fullScene
+    ? null
+    : canvasWorldViewport(canvas, camera, 20, dimensions);
   const clusterPreview = preview?.type === "cluster-drag";
   const visible = !clusterPreview && viewport && displayScene.index
     ? {
@@ -839,13 +896,25 @@ export function renderCanvas({
       }
     : null;
 
-  const recordsFor = (records, ids) =>
-    ids ? ids.map((uid) => records.get(uid)).filter(Boolean) : [...records.values()];
+  const recordsFor = (records, ids, type, { ignoreOmit = false } = {}) => {
+    const included = include?.[type];
+    const omitted = ignoreOmit ? null : omit?.[type];
+    const recordIds = ids || [...records.keys()];
+    return recordIds
+      .filter((uid) => (!included || included.has(uid)) && !omitted?.has(uid))
+      .map((uid) => records.get(uid))
+      .filter(Boolean);
+  };
   const previewRecords = clusterPreview
-    ? recordsForClusterPreview(displayScene, preview, viewport)
+    ? recordsForClusterPreview(displayScene, preview, viewport, {
+        includeLinks: showLinks,
+        includeGenes: showGenes,
+      })
     : null;
 
-  for (const link of previewRecords?.links || recordsFor(displayScene.links, visible?.links)) {
+  for (const link of showLinks
+    ? previewRecords?.links || recordsFor(displayScene.links, visible?.links, "links")
+    : []) {
     const geometry = linkGeometryForPreview(displayScene, link, preview, config);
     if (
       clusterPreview &&
@@ -867,8 +936,14 @@ export function renderCanvas({
       geometry
     );
   }
+  const loci = showLoci
+    ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci")
+    : [];
+  const labelLoci = showLoci && showClusterLabels
+    ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci", { ignoreOmit: true })
+    : [];
   const drawnClusterLabels = new Set();
-  for (const locus of previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci)) {
+  for (const locus of labelLoci) {
     const cluster = displayScene.clusters.get(locus.cluster?.uid ?? locus.source.clusterUid);
     if (!cluster) continue;
     if (!drawnClusterLabels.has(cluster.source.uid)) {
@@ -878,13 +953,17 @@ export function renderCanvas({
         y: clusterOffsetForPreview(preview, cluster.source.uid),
       });
     }
-    drawLocusTrack(
-      context,
-      locus,
-      viewport,
-      config,
-      locusGeometryForPreview(preview, locus)
-    );
+  }
+  if (showLocusTracks) {
+    for (const locus of loci) {
+      drawLocusTrack(
+        context,
+        locus,
+        viewport,
+        config,
+        locusGeometryForPreview(preview, locus)
+      );
+    }
   }
   if (!suppressLocusHover) {
     const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
@@ -895,7 +974,9 @@ export function renderCanvas({
       hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
     );
   }
-  for (const gene of previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes)) {
+  for (const gene of showGenes
+    ? previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes, "genes")
+    : []) {
     drawGene(
       context,
       gene,
@@ -906,7 +987,7 @@ export function renderCanvas({
       geneGeometryForPreview(preview, gene)
     );
   }
-  if (displayScene.chrome) {
+  if (showChrome && displayScene.chrome) {
     const chrome = preview?.chrome || displayScene.chrome;
     drawLegend(context, chrome.legend);
     drawScaleBar(context, chrome.scaleBar);

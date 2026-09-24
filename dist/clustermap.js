@@ -738,6 +738,12 @@
         commitClusterOrder();
       },
 
+      cancelClusterDrag() {
+        if (!clusterDrag) return;
+        clusterDrag = null;
+        setDragging(false);
+      },
+
       beginLocusDrag(uid, pointerX) {
         locusDrag = {
           uid,
@@ -763,6 +769,12 @@
         commitLocusOffset(uid);
       },
 
+      cancelLocusDrag() {
+        if (!locusDrag) return;
+        locusDrag = null;
+        setDragging(false);
+      },
+
       beginLocusTrim() {
         setDragging(true);
       },
@@ -774,6 +786,10 @@
       endLocusTrim(locus) {
         setDragging(false);
         commitLocusTrim(locus);
+      },
+
+      cancelLocusTrim() {
+        setDragging(false);
       },
 
       flipLocus,
@@ -838,6 +854,19 @@
     );
   }
 
+  function cellsForBounds(bounds, { cellWidth, cellHeight }) {
+    if (!validBounds(bounds)) return [];
+    const cells = [];
+    const minColumn = Math.floor(bounds.minX / cellWidth);
+    const maxColumn = Math.floor(bounds.maxX / cellWidth);
+    const minRow = Math.floor(bounds.minY / cellHeight);
+    const maxRow = Math.floor(bounds.maxY / cellHeight);
+    for (let column = minColumn; column <= maxColumn; column += 1) {
+      for (let row = minRow; row <= maxRow; row += 1) cells.push(cellKey(column, row));
+    }
+    return cells;
+  }
+
   /**
    * Index world-space rectangular extents in a uniform grid. The index stores
    * IDs only; callers retain ownership of the scene records and draw order.
@@ -855,19 +884,50 @@
       boundsById.set(id, bounds);
       orderById.set(id, order);
       order += 1;
-      const minColumn = Math.floor(bounds.minX / cellWidth);
-      const maxColumn = Math.floor(bounds.maxX / cellWidth);
-      const minRow = Math.floor(bounds.minY / cellHeight);
-      const maxRow = Math.floor(bounds.maxY / cellHeight);
-      for (let column = minColumn; column <= maxColumn; column += 1) {
-        for (let row = minRow; row <= maxRow; row += 1) {
-          const key = cellKey(column, row);
-          if (!cells.has(key)) cells.set(key, new Set());
-          cells.get(key).add(id);
-        }
+      for (const key of cellsForBounds(bounds, { cellWidth, cellHeight })) {
+        if (!cells.has(key)) cells.set(key, new Set());
+        cells.get(key).add(id);
       }
     }
     return { cells, boundsById, orderById, cellWidth, cellHeight };
+  }
+
+  /**
+   * Return a copy of an index with a small set of existing records moved or
+   * removed. Scene patches use this to retain spatial lookup for untouched
+   * records instead of rebuilding an index for the entire chart.
+   */
+  function patchSpatialIndex(index, entries) {
+    if (!index || !entries?.length) return index;
+    const cells = new Map(index.cells);
+    const boundsById = new Map(index.boundsById);
+    const changedCells = new Set();
+    const mutableCell = (key) => {
+      if (!changedCells.has(key) || !cells.has(key)) {
+        cells.set(key, new Set(cells.get(key)));
+        changedCells.add(key);
+      }
+      return cells.get(key);
+    };
+
+    for (const [id, bounds] of entries) {
+      const oldBounds = boundsById.get(id);
+      for (const key of cellsForBounds(oldBounds, index)) {
+        const cell = mutableCell(key);
+        cell.delete(id);
+        if (cell.size === 0) cells.delete(key);
+      }
+      if (!validBounds(bounds)) {
+        boundsById.delete(id);
+        continue;
+      }
+      boundsById.set(id, bounds);
+      for (const key of cellsForBounds(bounds, index)) {
+        const cell = mutableCell(key);
+        cell.add(id);
+      }
+    }
+    return { ...index, cells, boundsById };
   }
 
   /** Return candidate IDs whose exact bounds intersect a world-space viewport. */
@@ -1280,53 +1340,164 @@
     return { legend, scaleBar, colourBar };
   }
 
+  function createLocusLayout(locus, clusterLayout, {
+    scaleX,
+    getLocusState,
+    locusOffset,
+    shape,
+    geneMidpoint,
+  }) {
+    const state = getLocusState(locus);
+    const localX = locusOffset(locus.uid);
+    const start = scaleX(state.start);
+    const end = scaleX(state.end);
+    const worldX = clusterLayout.x + localX;
+    return {
+      source: locus,
+      cluster: clusterLayout.source,
+      state,
+      localX,
+      x: worldX,
+      y: clusterLayout.y,
+      start,
+      end,
+      worldStart: worldX + start,
+      worldEnd: worldX + end,
+      bounds: {
+        minX: worldX + start,
+        maxX: worldX + end,
+        minY: clusterLayout.y - 10,
+        maxY: clusterLayout.y + shape.tipHeight * 2 + shape.bodyHeight + 10,
+      },
+      transform: { x: localX, y: 0 },
+      track: {
+        // The physical extent is unchanged by a flip, but retaining the
+        // endpoint orientation lets renderers animate the bar collapsing
+        // through its midpoint and growing out in the reversed direction.
+        x1: state.flipped ? end : start,
+        x2: state.flipped ? start : end,
+        y: geneMidpoint,
+      },
+      hover: {
+        x: start,
+        y: -10,
+        width: end - start,
+        height: shape.tipHeight * 2 + shape.bodyHeight + 20,
+        leftHandleX: start - 8,
+        rightHandleX: end,
+      },
+      genes: [],
+    };
+  }
+
+  function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, label }) {
+    const display = { ...gene, ...getGeneState(gene) };
+    const visible =
+      display.start >= locusLayout.state.start && display.end <= locusLayout.state.end + 1;
+    const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
+    const polygon = worldPolygon(localPolygon, locusLayout.x, locusLayout.y);
+    return {
+      source: gene,
+      display,
+      locus: locusLayout,
+      visible,
+      localPolygon,
+      polygon,
+      bounds: boundsFromPoints(polygon),
+      label: getGeneLabelLayout(display, { scaleX, shape, label }),
+      labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
+      labelDy: getGeneLabelDy(label.position),
+    };
+  }
+
+  function createLinkLayout(source, order, { genes, loci, clusters, areClustersAdjacent, scaleX, link, geneMidpoint }) {
+    const query = genes.get(source.query.uid);
+    const target = genes.get(source.target.uid);
+    let anchors = null;
+    if (query && target) {
+      anchors = getLinkAnchors(source, {
+        geneForUid: (uid) => genes.get(uid)?.display,
+        areClustersAdjacent,
+        scaleX,
+        horizontalOffset: (gene) => {
+          const locus = loci.get(gene.locusUid);
+          return locus ? locus.x : 0;
+        },
+        verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
+        geneMidpoint,
+      });
+    }
+    return {
+      source,
+      order,
+      anchors,
+      bounds: boundsFromLinkAnchors(anchors),
+      path: getLinkPath(anchors, link),
+      labelPosition: anchors ? getLinkLabelPosition(anchors, link.labelPosition) : null,
+      visible:
+        Boolean(anchors) &&
+        source.identity >= link.threshold &&
+        query?.visible &&
+        target?.visible,
+    };
+  }
+
+  function createLocusHitRegions(locus) {
+    const { source, worldStart, worldEnd, y, hover } = locus;
+    const move = {
+      type: "rect",
+      action: "move-locus",
+      locusUid: source.uid,
+      x: worldStart,
+      y: y + hover.y,
+      width: worldEnd - worldStart,
+      height: hover.height,
+    };
+    const trimLeft = {
+      type: "rect",
+      action: "trim-locus-left",
+      locusUid: source.uid,
+      x: worldStart + hover.leftHandleX - hover.x,
+      y: y + hover.y,
+      width: hover.x - hover.leftHandleX,
+      height: hover.height,
+    };
+    const trimRight = {
+      type: "rect",
+      action: "trim-locus-right",
+      locusUid: source.uid,
+      x: worldEnd,
+      y: y + hover.y,
+      width: 8,
+      height: hover.height,
+    };
+    return { move, trimLeft, trimRight };
+  }
+
+  function createGeneHitRegion(gene) {
+    if (!gene.visible) return null;
+    return {
+      type: "polygon",
+      action: "gene",
+      geneUid: gene.source.uid,
+      points: gene.polygon,
+    };
+  }
+
   function buildHitRegions(loci, genes) {
     const locusRegions = new Map();
     const geneRegions = new Map();
     const all = [];
 
     for (const locus of loci.values()) {
-      const { source, worldStart, worldEnd, y, hover } = locus;
-      const move = {
-        type: "rect",
-        action: "move-locus",
-        locusUid: source.uid,
-        x: worldStart,
-        y: y + hover.y,
-        width: worldEnd - worldStart,
-        height: hover.height,
-      };
-      const trimLeft = {
-        type: "rect",
-        action: "trim-locus-left",
-        locusUid: source.uid,
-        x: worldStart + hover.leftHandleX - hover.x,
-        y: y + hover.y,
-        width: hover.x - hover.leftHandleX,
-        height: hover.height,
-      };
-      const trimRight = {
-        type: "rect",
-        action: "trim-locus-right",
-        locusUid: source.uid,
-        x: worldEnd,
-        y: y + hover.y,
-        width: 8,
-        height: hover.height,
-      };
-      const regions = { move, trimLeft, trimRight };
-      locusRegions.set(source.uid, regions);
-      all.push(move, trimLeft, trimRight);
+      const regions = createLocusHitRegions(locus);
+      locusRegions.set(locus.source.uid, regions);
+      all.push(regions.move, regions.trimLeft, regions.trimRight);
     }
 
     for (const gene of genes.values()) {
-      if (!gene.visible) continue;
-      const region = {
-        type: "polygon",
-        action: "gene",
-        geneUid: gene.source.uid,
-        points: gene.polygon,
-      };
+      const region = createGeneHitRegion(gene);
+      if (!region) continue;
       geneRegions.set(gene.source.uid, region);
       all.push(region);
     }
@@ -1376,47 +1547,13 @@
       clusters.set(cluster.uid, clusterLayout);
 
       for (const locus of cluster.loci) {
-        const state = getLocusState(locus);
-        const localX = locusOffset(locus.uid);
-        const start = scaleX(state.start);
-        const end = scaleX(state.end);
-        const worldX = x + localX;
-        const locusLayout = {
-          source: locus,
-          cluster,
-          state,
-          localX,
-          x: worldX,
-          y,
-          start,
-          end,
-          worldStart: worldX + start,
-          worldEnd: worldX + end,
-          bounds: {
-            minX: worldX + start,
-            maxX: worldX + end,
-            minY: y - 10,
-            maxY: y + shape.tipHeight * 2 + shape.bodyHeight + 10,
-          },
-          transform: { x: localX, y: 0 },
-          track: {
-            // The physical extent is unchanged by a flip, but retaining the
-            // endpoint orientation lets renderers animate the bar collapsing
-            // through its midpoint and growing out in the reversed direction.
-            x1: state.flipped ? end : start,
-            x2: state.flipped ? start : end,
-            y: geneMidpoint,
-          },
-          hover: {
-            x: start,
-            y: -10,
-            width: end - start,
-            height: shape.tipHeight * 2 + shape.bodyHeight + 20,
-            leftHandleX: start - 8,
-            rightHandleX: end,
-          },
-          genes: [],
-        };
+        const locusLayout = createLocusLayout(locus, clusterLayout, {
+          scaleX,
+          getLocusState,
+          locusOffset,
+          shape,
+          geneMidpoint,
+        });
         loci.set(locus.uid, locusLayout);
         clusterLayout.loci.push(locusLayout);
         minX = Math.min(minX, locusLayout.worldStart);
@@ -1425,23 +1562,12 @@
         maxY = Math.max(maxY, y + shape.tipHeight * 2 + shape.bodyHeight);
 
         for (const gene of locus.genes) {
-          const display = { ...gene, ...getGeneState(gene) };
-          const visible =
-            display.start >= state.start && display.end <= state.end + 1;
-          const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
-          const polygon = worldPolygon(localPolygon, worldX, y);
-          const geneLayout = {
-            source: gene,
-            display,
-            locus: locusLayout,
-            visible,
-            localPolygon,
-            polygon,
-            bounds: boundsFromPoints(polygon),
-            label: getGeneLabelLayout(display, { scaleX, shape, label }),
-            labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
-            labelDy: getGeneLabelDy(label.position),
-          };
+          const geneLayout = createGeneLayout(gene, locusLayout, {
+            scaleX,
+            getGeneState,
+            shape,
+            label,
+          });
           genes.set(gene.uid, geneLayout);
           locusLayout.genes.push(geneLayout);
         }
@@ -1471,38 +1597,18 @@
     }
 
     for (const [order, source] of data.links.entries()) {
+      const linkLayout = createLinkLayout(source, order, {
+        genes,
+        loci,
+        clusters,
+        areClustersAdjacent,
+        scaleX,
+        link,
+        geneMidpoint,
+      });
+      links.set(source.uid, linkLayout);
       const query = genes.get(source.query.uid);
       const target = genes.get(source.target.uid);
-      let anchors = null;
-      if (query && target) {
-        anchors = getLinkAnchors(source, {
-          geneForUid: (uid) => genes.get(uid)?.display,
-          areClustersAdjacent,
-          scaleX,
-          horizontalOffset: (gene) => {
-            const locus = loci.get(gene.locusUid);
-            return locus ? locus.x : 0;
-          },
-          verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
-          geneMidpoint,
-        });
-      }
-      const linkLayout = {
-        source,
-        order,
-        anchors,
-        bounds: boundsFromLinkAnchors(anchors),
-        path: getLinkPath(anchors, link),
-        labelPosition: anchors
-          ? getLinkLabelPosition(anchors, link.labelPosition)
-          : null,
-        visible:
-          Boolean(anchors) &&
-          source.identity >= link.threshold &&
-          query?.visible &&
-          target?.visible,
-      };
-      links.set(source.uid, linkLayout);
       if (query && target) {
         const key = clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid);
         const pairLinks = linksByClusterPair.get(key) || [];
@@ -1532,6 +1638,152 @@
       },
       hitRegions,
       chrome: buildChrome(bounds, genes, chrome),
+    };
+  }
+
+  /**
+   * Apply the geometry consequences of one committed locus flip to a retained
+   * scene. Clusters outside the locus and links not incident to one of its
+   * genes are structurally shared with the prior scene.
+   */
+  function patchFlippedLocusScene(
+    scene,
+    locus,
+    {
+      scaleX,
+      locusOffset,
+      getLocusState,
+      getGeneState,
+      areClustersAdjacent,
+      shape,
+      label,
+      link,
+      clusterLabel = () => "",
+      alignLabels = true,
+      linksForGene = () => [],
+    }
+  ) {
+    const previousLocus = scene.loci.get(locus.uid);
+    if (!previousLocus) return scene;
+    const previousCluster = scene.clusters.get(previousLocus.cluster.uid);
+    if (!previousCluster) return scene;
+
+    const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
+    const clusters = new Map(scene.clusters);
+    const cluster = { ...previousCluster, loci: [...previousCluster.loci] };
+    clusters.set(cluster.source.uid, cluster);
+    const replacement = createLocusLayout(locus, cluster, {
+      scaleX,
+      getLocusState,
+      locusOffset,
+      shape,
+      geneMidpoint,
+    });
+    const locusIndex = cluster.loci.findIndex((candidate) => candidate.source.uid === locus.uid);
+    cluster.loci[locusIndex] = replacement;
+    cluster.bounds = {
+      minX: Math.min(...cluster.loci.map((candidate) => candidate.bounds.minX)),
+      maxX: Math.max(...cluster.loci.map((candidate) => candidate.bounds.maxX)),
+      minY: Math.min(...cluster.loci.map((candidate) => candidate.bounds.minY)),
+      maxY: Math.max(...cluster.loci.map((candidate) => candidate.bounds.maxY)),
+    };
+    const clusterStart = Math.min(...cluster.loci.map((candidate) => candidate.worldStart));
+    cluster.info = {
+      x: (alignLabels && scene.bounds ? scene.bounds.minX : clusterStart) - cluster.x - 10,
+      y: 0,
+      locusText: clusterLabel(cluster.source),
+    };
+
+    const loci = new Map(scene.loci);
+    loci.set(locus.uid, replacement);
+    const genes = new Map(scene.genes);
+    const changedGenes = [];
+    for (const gene of locus.genes) {
+      const layout = createGeneLayout(gene, replacement, {
+        scaleX,
+        getGeneState,
+        shape,
+        label,
+      });
+      genes.set(gene.uid, layout);
+      replacement.genes.push(layout);
+      changedGenes.push([gene.uid, layout]);
+    }
+
+    const links = new Map(scene.links);
+    const changedSources = new Map();
+    for (const gene of locus.genes) {
+      for (const source of linksForGene(gene.uid)) changedSources.set(source.uid, source);
+    }
+    const changedLinks = [];
+    for (const source of changedSources.values()) {
+      const previous = links.get(source.uid);
+      if (!previous) continue;
+      const layout = createLinkLayout(source, previous.order, {
+        genes,
+        loci,
+        clusters,
+        areClustersAdjacent,
+        scaleX,
+        link,
+        geneMidpoint,
+      });
+      links.set(source.uid, layout);
+      changedLinks.push([source.uid, layout]);
+    }
+
+    const locusRegions = new Map(scene.hitRegions.loci);
+    const replacementLocusRegions = createLocusHitRegions(replacement);
+    locusRegions.set(locus.uid, replacementLocusRegions);
+    const geneRegions = new Map(scene.hitRegions.genes);
+    for (const [uid, gene] of changedGenes) {
+      const region = createGeneHitRegion(gene);
+      if (region) geneRegions.set(uid, region);
+      else geneRegions.delete(uid);
+    }
+    const changedGeneIds = new Set(changedGenes.map(([uid]) => uid));
+    const all = scene.hitRegions.all.filter(
+      (region) => region.locusUid !== locus.uid && !changedGeneIds.has(region.geneUid)
+    );
+    all.push(
+      replacementLocusRegions.move,
+      replacementLocusRegions.trimLeft,
+      replacementLocusRegions.trimRight,
+      ...changedGenes
+        .map(([uid]) => geneRegions.get(uid))
+        .filter(Boolean)
+    );
+    const hitRegions = { all, loci: locusRegions, genes: geneRegions };
+
+    return {
+      ...scene,
+      clusters,
+      loci,
+      genes,
+      links,
+      index: {
+        ...scene.index,
+        genes: patchSpatialIndex(
+          scene.index.genes,
+          changedGenes.map(([uid, gene]) => [uid, gene.bounds])
+        ),
+        loci: patchSpatialIndex(scene.index.loci, [[locus.uid, replacement.bounds]]),
+        links: patchSpatialIndex(
+          scene.index.links,
+          changedLinks.map(([uid, layout]) => [uid, layout.bounds])
+        ),
+        hitLoci: patchSpatialIndex(scene.index.hitLoci, [
+          [
+            locus.uid,
+            boundsFromRegions([
+              replacementLocusRegions.move,
+              replacementLocusRegions.trimLeft,
+              replacementLocusRegions.trimRight,
+            ]),
+          ],
+        ]),
+      },
+      hitRegions,
     };
   }
 
@@ -1672,11 +1924,11 @@
   }
 
   /**
-   * Describe the first frames of a locus flip without re-projecting the chart.
+   * Describe flip frames without re-projecting the chart.
    *
    * A flip is a reflection in the locus's untrimmed display extent.  Keeping
-   * that fact in a small patch lets Canvas acknowledge the double-click before
-   * the authoritative data-to-scene update has completed.
+   * that fact in a small patch lets Canvas animate only the changed locus while
+   * retained scene geometry and spatial culling handle everything else.
    */
   function createLocusFlipPreview(scene, locusUid, { scaleX, progress = 0 }) {
     const locus = scene.loci.get(locusUid);
@@ -1846,8 +2098,8 @@
    * Return the portion of chart-world space covered by a Canvas. A small
    * screen-space margin prevents records from popping at its edge while panning.
    */
-  function canvasWorldViewport(canvas, camera, overscan = 20) {
-    const bounds = canvas.getBoundingClientRect();
+  function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
+    const bounds = dimensions || canvas.getBoundingClientRect();
     const margin = overscan / camera.k;
     return {
       minX: -camera.x / camera.k - margin,
@@ -2030,13 +2282,25 @@
     if (!visible) return;
     context.save();
     context.translate(offsetX, offsetY);
-    polygon(context, geometry.polygon || gene.polygon);
+    if (geometry.flipAxis !== undefined) {
+      // A flip preview is a uniform affine transform about the locus axis:
+      // x' = axis + (x - axis) * (1 - 2p). Applying it to the context avoids
+      // allocating a reflected polygon for every gene on every animation frame.
+      context.save();
+      context.translate(geometry.flipAxis, 0);
+      context.scale(geometry.flipScale, 1);
+      context.translate(-geometry.flipAxis, 0);
+      polygon(context, gene.polygon);
+    } else {
+      polygon(context, gene.polygon);
+    }
     const group = scales.group(gene.source.uid);
     context.fillStyle = gene.source.colour || scales.colour(group);
     context.strokeStyle = config.gene.shape.stroke;
     context.lineWidth = config.gene.shape.strokeWidth;
     context.fill();
     context.stroke();
+    if (geometry.flipAxis !== undefined) context.restore();
 
     if (!config.gene.label.show) {
       context.restore();
@@ -2051,7 +2315,7 @@
     context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
     context.textAlign = config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor;
     context.textBaseline = "alphabetic";
-    context.fillText(gene.source.label || gene.source.uid, 0, 0);
+    context.fillText(gene.source.label || gene.source.name || gene.source.uid, 0, 0);
     context.restore();
     context.restore();
   }
@@ -2093,7 +2357,7 @@
     context.stroke();
   }
 
-  function locusOffsetForPreview(preview, locusUid) {
+  function locusOffsetForPreview$1(preview, locusUid) {
     if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
     return preview?.type === "locus-offset" && preview.locusUid === locusUid
       ? preview.offsetX
@@ -2104,20 +2368,20 @@
     return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
   }
 
-  function clusterOffsetForPreview(preview, clusterUid) {
+  function clusterOffsetForPreview$1(preview, clusterUid) {
     return preview?.clusterOffsets?.get(clusterUid) || 0;
   }
 
-  function offsetsForLocus(preview, locus) {
+  function offsetsForLocus$1(preview, locus) {
     if (!preview || !locus) return { x: 0, y: 0 };
     return {
-      x: locusOffsetForPreview(preview, locus.source?.uid),
-      y: clusterOffsetForPreview(preview, locus.cluster?.uid ?? locus.source?.clusterUid),
+      x: locusOffsetForPreview$1(preview, locus.source?.uid),
+      y: clusterOffsetForPreview$1(preview, locus.cluster?.uid ?? locus.source?.clusterUid),
     };
   }
 
   function offsetsForGene(preview, gene) {
-    return offsetsForLocus(preview, gene.locus);
+    return offsetsForLocus$1(preview, gene.locus);
   }
 
   function locusGeometryForPreview(preview, locus) {
@@ -2132,7 +2396,7 @@
         const left = Math.min(start, end);
         const right = Math.max(start, end);
         return {
-          offsets: offsetsForLocus(preview, locus),
+          offsets: offsetsForLocus$1(preview, locus),
           worldStart: left,
           worldEnd: right,
           track: {
@@ -2152,12 +2416,12 @@
     }
     const trimmed = preview?.loci?.get(locus.source.uid);
     return {
-      offsets: offsetsForLocus(preview, locus),
+      offsets: offsetsForLocus$1(preview, locus),
       ...(trimmed || {}),
     };
   }
 
-  function geneVisibleForPreview(preview, gene) {
+  function geneVisibleForPreview$1(preview, gene) {
     return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
   }
 
@@ -2171,9 +2435,11 @@
     const axis = flipAxisForGene(preview, gene);
     if (axis === undefined) return {};
     const progress = preview.progress;
-    const flip = (x) => x + (axis * 2 - x - x) * progress;
+    const flipScale = 1 - 2 * progress;
+    const flip = (x) => axis + (x - axis) * flipScale;
     return {
-      polygon: gene.polygon.map((value, index) => (index % 2 ? value : flip(value))),
+      flipAxis: axis,
+      flipScale,
       labelX: flip(gene.locus.x + gene.label.x),
     };
   }
@@ -2182,7 +2448,7 @@
     const query = scene.genes.get(link.source.query.uid);
     const target = scene.genes.get(link.source.target.uid);
     const offsetForGene = (gene) =>
-      locusOffsetForPreview(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
+      locusOffsetForPreview$1(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
     const queryOffset = offsetForGene(query);
     const targetOffset = offsetForGene(target);
     // Link anchors are ordered from the upper locus to the lower one, not from
@@ -2198,12 +2464,23 @@
     if (!query || !target) return null;
     const anchorForGene = (gene) => {
       const offsets = offsetsForGene(preview, gene);
-      let minX = Infinity;
-      let maxX = -Infinity;
-      for (let index = 0; index < gene.polygon.length; index += 2) {
-        minX = Math.min(minX, gene.polygon[index] + offsets.x);
-        maxX = Math.max(maxX, gene.polygon[index] + offsets.x);
+      // Bounds are calculated when the retained scene is built and equal the
+      // polygon's horizontal extent. Reusing them avoids a vertex scan for each
+      // animated link endpoint on every frame.
+      let minX = gene.bounds?.minX;
+      let maxX = gene.bounds?.maxX;
+      // Retain support for compact third-party scenes that only expose a
+      // polygon. Production scenes always take the cached-bounds path above.
+      if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+        minX = Infinity;
+        maxX = -Infinity;
+        for (let index = 0; index < gene.polygon.length; index += 2) {
+          minX = Math.min(minX, gene.polygon[index]);
+          maxX = Math.max(maxX, gene.polygon[index]);
+        }
       }
+      minX += offsets.x;
+      maxX += offsets.x;
       const forward = gene.display.strand === 1;
       const axis = flipAxisForGene(preview, gene);
       if (axis === undefined) {
@@ -2235,12 +2512,18 @@
     if (preview?.type === "locus-flip") {
       const query = scene.genes.get(link.source.query.uid);
       const target = scene.genes.get(link.source.target.uid);
+      const affected =
+        query?.locus?.source?.uid === preview.locusUid ||
+        target?.locus?.source?.uid === preview.locusUid;
       return {
         visible:
           link.visible &&
-          geneVisibleForPreview(preview, query) &&
-          geneVisibleForPreview(preview, target),
-        anchors: previewLinkAnchors(scene, link, preview),
+          geneVisibleForPreview$1(preview, query) &&
+          geneVisibleForPreview$1(preview, target),
+        // Most visible links do not touch the locus being reflected. Reusing
+        // their retained anchors keeps a flip frame proportional to affected
+        // links instead of recalculating every link in the viewport.
+        anchors: affected ? previewLinkAnchors(scene, link, preview) : link.anchors,
       };
     }
     if (preview?.type !== "cluster-drag") {
@@ -2250,8 +2533,8 @@
         ...linkOffsetsForPreview(scene, link, preview),
         visible:
           link.visible &&
-          geneVisibleForPreview(preview, query) &&
-          geneVisibleForPreview(preview, target),
+          geneVisibleForPreview$1(preview, query) &&
+          geneVisibleForPreview$1(preview, target),
       };
     }
     const query = scene.genes.get(link.source.query.uid);
@@ -2268,7 +2551,7 @@
     return { visible, anchors: visible ? previewLinkAnchors(scene, link, preview) : null };
   }
 
-  function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
+  function boundsInViewport$1(bounds, viewport, { x = 0, y = 0 } = {}) {
     return (
       !viewport ||
       !bounds ||
@@ -2279,13 +2562,18 @@
     );
   }
 
-  function recordsForClusterPreview(scene, preview, viewport) {
+  function recordsForClusterPreview(
+    scene,
+    preview,
+    viewport,
+    { includeLinks = true, includeGenes = true } = {}
+  ) {
     const clusters = [];
     const clusterUidByOrder = new Map(
       [...preview.clusterOrder].map(([uid, order]) => [order, uid])
     );
     for (const cluster of scene.clusters.values()) {
-      if (!boundsInViewport(cluster.bounds, viewport, { y: clusterOffsetForPreview(preview, cluster.source.uid) })) {
+      if (!boundsInViewport$1(cluster.bounds, viewport, { y: clusterOffsetForPreview$1(preview, cluster.source.uid) })) {
         continue;
       }
       clusters.push(cluster);
@@ -2295,16 +2583,17 @@
     const genes = [];
     for (const cluster of clusters) {
       for (const locus of cluster.loci) {
-        const offsets = offsetsForLocus(preview, locus);
-        if (!boundsInViewport(locus.bounds, viewport, offsets)) continue;
+        const offsets = offsetsForLocus$1(preview, locus);
+        if (!boundsInViewport$1(locus.bounds, viewport, offsets)) continue;
         loci.push(locus);
+        if (!includeGenes) continue;
         const locusGenes =
           locus.genes ||
           [...scene.genes.values()].filter((gene) => gene.locus.source?.uid === locus.source.uid);
         for (const gene of locusGenes) {
           if (
-            geneVisibleForPreview(preview, gene) &&
-            boundsInViewport(gene.bounds, viewport, offsetsForGene(preview, gene))
+            geneVisibleForPreview$1(preview, gene) &&
+            boundsInViewport$1(gene.bounds, viewport, offsetsForGene(preview, gene))
           ) {
             genes.push(gene);
           }
@@ -2313,13 +2602,15 @@
     }
 
     const linkUids = new Set();
-    for (const cluster of clusters) {
-      const order = preview.clusterOrder.get(cluster.source.uid);
-      for (const neighbourOrder of [order - 1, order + 1]) {
-        const neighbourUid = clusterUidByOrder.get(neighbourOrder);
-        if (neighbourUid === undefined) continue;
-        for (const uid of scene.linksByClusterPair?.get(clusterPairKey(cluster.source.uid, neighbourUid)) || []) {
-          linkUids.add(uid);
+    if (includeLinks) {
+      for (const cluster of clusters) {
+        const order = preview.clusterOrder.get(cluster.source.uid);
+        for (const neighbourOrder of [order - 1, order + 1]) {
+          const neighbourUid = clusterUidByOrder.get(neighbourOrder);
+          if (neighbourUid === undefined) continue;
+          for (const uid of scene.linksByClusterPair?.get(clusterPairKey(cluster.source.uid, neighbourUid)) || []) {
+            linkUids.add(uid);
+          }
         }
       }
     }
@@ -2517,6 +2808,17 @@
     dimensions = null,
     fullScene = false,
     preview = null,
+    backgroundCanvas = null,
+    backgroundCanvases = [],
+    clear = true,
+    include = null,
+    omit = null,
+    showLinks = true,
+    showLoci = true,
+    showLocusTracks = true,
+    showGenes = true,
+    showClusterLabels = true,
+    showChrome = true,
   }) {
     const displayScene = interpolateCanvasScene(previousScene, scene, progress);
     const context = canvas.getContext("2d");
@@ -2532,7 +2834,12 @@
     }
 
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    context.clearRect(0, 0, width, height);
+    if (clear) {
+      context.clearRect(0, 0, width, height);
+      for (const background of [backgroundCanvas, ...backgroundCanvases]) {
+        if (background) context.drawImage(background, 0, 0, width, height);
+      }
+    }
     context.save();
     context.translate(camera.x, camera.y);
     context.scale(camera.k, camera.k);
@@ -2540,7 +2847,9 @@
     // During an animation, geometry is between the previous and target scenes,
     // while the index describes only the target scene. Draw the full frame then
     // so an in-flight record cannot be incorrectly culled.
-    const viewport = previousScene || fullScene ? null : canvasWorldViewport(canvas, camera);
+    const viewport = previousScene || fullScene
+      ? null
+      : canvasWorldViewport(canvas, camera, 20, dimensions);
     const clusterPreview = preview?.type === "cluster-drag";
     const visible = !clusterPreview && viewport && displayScene.index
       ? {
@@ -2550,17 +2859,29 @@
         }
       : null;
 
-    const recordsFor = (records, ids) =>
-      ids ? ids.map((uid) => records.get(uid)).filter(Boolean) : [...records.values()];
+    const recordsFor = (records, ids, type, { ignoreOmit = false } = {}) => {
+      const included = include?.[type];
+      const omitted = ignoreOmit ? null : omit?.[type];
+      const recordIds = ids || [...records.keys()];
+      return recordIds
+        .filter((uid) => (!included || included.has(uid)) && !omitted?.has(uid))
+        .map((uid) => records.get(uid))
+        .filter(Boolean);
+    };
     const previewRecords = clusterPreview
-      ? recordsForClusterPreview(displayScene, preview, viewport)
+      ? recordsForClusterPreview(displayScene, preview, viewport, {
+          includeLinks: showLinks,
+          includeGenes: showGenes,
+        })
       : null;
 
-    for (const link of previewRecords?.links || recordsFor(displayScene.links, visible?.links)) {
+    for (const link of showLinks
+      ? previewRecords?.links || recordsFor(displayScene.links, visible?.links, "links")
+      : []) {
       const geometry = linkGeometryForPreview(displayScene, link, preview, config);
       if (
         clusterPreview &&
-        (!geometry.visible || !boundsInViewport({
+        (!geometry.visible || !boundsInViewport$1({
           minX: Math.min(geometry.anchors[0], geometry.anchors[1], geometry.anchors[3], geometry.anchors[4]),
           maxX: Math.max(geometry.anchors[0], geometry.anchors[1], geometry.anchors[3], geometry.anchors[4]),
           minY: Math.min(geometry.anchors[2], geometry.anchors[5]),
@@ -2578,24 +2899,34 @@
         geometry
       );
     }
+    const loci = showLoci
+      ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci")
+      : [];
+    const labelLoci = showLoci && showClusterLabels
+      ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci", { ignoreOmit: true })
+      : [];
     const drawnClusterLabels = new Set();
-    for (const locus of previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci)) {
+    for (const locus of labelLoci) {
       const cluster = displayScene.clusters.get(locus.cluster?.uid ?? locus.source.clusterUid);
       if (!cluster) continue;
       if (!drawnClusterLabels.has(cluster.source.uid)) {
         drawnClusterLabels.add(cluster.source.uid);
         drawClusterInfo(context, cluster, config, {
           x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
-          y: clusterOffsetForPreview(preview, cluster.source.uid),
+          y: clusterOffsetForPreview$1(preview, cluster.source.uid),
         });
       }
-      drawLocusTrack(
-        context,
-        locus,
-        viewport,
-        config,
-        locusGeometryForPreview(preview, locus)
-      );
+    }
+    if (showLocusTracks) {
+      for (const locus of loci) {
+        drawLocusTrack(
+          context,
+          locus,
+          viewport,
+          config,
+          locusGeometryForPreview(preview, locus)
+        );
+      }
     }
     if (!suppressLocusHover) {
       const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
@@ -2606,18 +2937,20 @@
         hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
       );
     }
-    for (const gene of previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes)) {
+    for (const gene of showGenes
+      ? previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes, "genes")
+      : []) {
       drawGene(
         context,
         gene,
         config,
         scales,
         offsetsForGene(preview, gene),
-        geneVisibleForPreview(preview, gene),
+        geneVisibleForPreview$1(preview, gene),
         geneGeometryForPreview(preview, gene)
       );
     }
-    if (displayScene.chrome) {
+    if (showChrome && displayScene.chrome) {
       const chrome = preview?.chrome || displayScene.chrome;
       drawLegend(context, chrome.legend);
       drawScaleBar(context, chrome.scaleBar);
@@ -2975,7 +3308,7 @@
       .style("stroke-width", config.gene.shape.strokeWidth);
     selection
       .selectAll("text.geneLabel")
-      .text((gene) => gene.label || gene.uid)
+      .text((gene) => gene.label || gene.name || gene.uid)
       .attr("dy", (gene) => geneLayout(gene)?.labelDy)
       .attr("display", config.gene.label.show ? "inherit" : "none")
       .attr("transform", (gene) => geneLayout(gene)?.labelTransform)
@@ -3418,6 +3751,7 @@
     geneData: (uid) => chartIndex?.geneById.get(uid),
     locusData: (uid) => chartIndex?.locusById.get(uid),
     clusterData: (uid) => chartIndex?.clusterById.get(uid),
+    linksForGene: (uid) => chartIndex?.linksByGeneId.get(uid) || [],
   };
 
   const plot = {
@@ -3500,6 +3834,27 @@
             groupColour: config.link.groupColour,
           },
         },
+      });
+      return currentScene;
+    },
+    patchFlippedLocus: (previousScene, locus) => {
+      currentScene = patchFlippedLocusScene(previousScene, locus, {
+        scaleX: scales.x,
+        locusOffset: scales.locus,
+        getLocusState: locusState,
+        getGeneState: (gene) => getGeneState(chartState, gene),
+        areClustersAdjacent: cluster.adjacent,
+        shape: config.gene.shape,
+        label: config.gene.label,
+        link: {
+          asLine: config.link.asLine,
+          straight: config.link.straight,
+          threshold: config.link.threshold,
+          labelPosition: config.link.label.position,
+        },
+        clusterLabel: cluster.locusText,
+        alignLabels: config.cluster.alignLabels,
+        linksForGene: get.linksForGene,
       });
       return currentScene;
     },
@@ -3671,6 +4026,7 @@
     config,
     get,
     ids,
+    synchronizeLocusLayoutState,
     synchronizeLocusLayoutStates,
     setChartIndex,
     setChartState,
@@ -3683,6 +4039,971 @@
     scale,
     scene,
   };
+  }
+
+  // Deliberately small, direct WebGPU renderer for the renderer-neutral scene.
+
+  const shader = /* wgsl */ `
+struct Camera {
+  transform: vec4f,
+  viewport: vec2f,
+  padding: vec2f,
+}
+@group(0) @binding(0) var<uniform> camera: Camera;
+struct ClusterOffsets {
+  values: array<f32>,
+}
+@group(0) @binding(1) var<storage, read> clusterOffsets: ClusterOffsets;
+struct LinkRecord {
+  query: vec4f,
+  mate: vec4f,
+  fill: vec4f,
+  stroke: vec4f,
+}
+struct LinkRecords {
+  values: array<LinkRecord>,
+}
+struct LinkIndices {
+  values: array<u32>,
+}
+@group(0) @binding(2) var<storage, read> linkRecords: LinkRecords;
+@group(0) @binding(3) var<storage, read> linkIndices: LinkIndices;
+
+struct VertexInput {
+  @location(0) position: vec2f,
+  @location(1) colour: vec4f,
+  @location(2) clusterSlot: f32,
+}
+struct VertexOutput {
+  @builtin(position) position: vec4f,
+  @location(0) colour: vec4f,
+}
+
+@vertex fn vertexMain(input: VertexInput) -> VertexOutput {
+  let rowOffset = clusterOffsets.values[u32(input.clusterSlot)];
+  let screen = vec2f(input.position.x, input.position.y + rowOffset)
+    * camera.transform.z + camera.transform.xy;
+  var output: VertexOutput;
+  output.position = vec4f(
+    screen.x / camera.viewport.x * 2.0 - 1.0,
+    1.0 - screen.y / camera.viewport.y * 2.0,
+    0.0,
+    1.0
+  );
+  output.colour = input.colour;
+  return output;
+}
+
+@fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
+  return input.colour;
+}
+
+fn cubic(start: f32, controlA: f32, controlB: f32, end: f32, amount: f32) -> f32 {
+  let inverse = 1.0 - amount;
+  return inverse * inverse * inverse * start +
+    3.0 * inverse * inverse * amount * controlA +
+    3.0 * inverse * amount * amount * controlB +
+    amount * amount * amount * end;
+}
+
+fn ribbonPoint(link: LinkRecord, edge: u32, amount: f32) -> vec2f {
+  let queryY = link.query.z + clusterOffsets.values[u32(link.query.w)];
+  let mateY = link.mate.z + clusterOffsets.values[u32(link.mate.w)];
+  let queryIsTop = queryY <= mateY;
+  let top = select(link.mate, link.query, queryIsTop);
+  let bottom = select(link.query, link.mate, queryIsTop);
+  let topY = select(mateY, queryY, queryIsTop);
+  let bottomY = select(queryY, mateY, queryIsTop);
+  let topX = select(top.x, top.y, edge == 0u);
+  let bottomX = select(bottom.x, bottom.y, edge == 0u);
+  let middle = topY + abs(bottomY - topY) / 2.0;
+  return vec2f(
+    cubic(topX, topX, bottomX, bottomX, amount),
+    cubic(topY, middle, middle, bottomY, amount)
+  );
+}
+
+fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
+  let screen = point * camera.transform.z + camera.transform.xy;
+  var output: VertexOutput;
+  output.position = vec4f(
+    screen.x / camera.viewport.x * 2.0 - 1.0,
+    1.0 - screen.y / camera.viewport.y * 2.0,
+    0.0,
+    1.0
+  );
+  output.colour = colour;
+  return output;
+}
+
+@vertex fn linkFillVertex(
+  @builtin(vertex_index) vertexIndex: u32,
+  @builtin(instance_index) instanceIndex: u32
+) -> VertexOutput {
+  let link = linkRecords.values[linkIndices.values[instanceIndex]];
+  let segment = vertexIndex / 6u;
+  let corner = vertexIndex % 6u;
+  let start = f32(segment) / 10.0;
+  let end = f32(segment + 1u) / 10.0;
+  var edge = 0u;
+  var amount = start;
+  if (corner == 1u || corner == 3u) {
+    amount = end;
+  } else if (corner == 4u) {
+    edge = 1u;
+    amount = end;
+  } else if (corner == 2u || corner == 5u) {
+    edge = 1u;
+  }
+  return projectWorld(ribbonPoint(link, edge, amount), link.fill);
+}
+
+@vertex fn linkEdgeVertex(
+  @builtin(vertex_index) vertexIndex: u32,
+  @builtin(instance_index) instanceIndex: u32
+) -> VertexOutput {
+  let link = linkRecords.values[linkIndices.values[instanceIndex]];
+  let line = vertexIndex / 2u;
+  let endpoint = vertexIndex % 2u;
+  var edge = 0u;
+  var amount = 0.0;
+  if (line < 10u) {
+    edge = 0u;
+    amount = f32(line + endpoint) / 10.0;
+  } else if (line < 20u) {
+    edge = 1u;
+    amount = f32(line - 10u + endpoint) / 10.0;
+  } else if (line == 20u) {
+    edge = endpoint;
+  } else {
+    edge = endpoint;
+    amount = 1.0;
+  }
+  return projectWorld(ribbonPoint(link, edge, amount), link.stroke);
+}`;
+
+  function rgba(value, fallback = [0.6, 0.6, 0.6, 1]) {
+    const colour = globalThis.d3?.color?.(value);
+    return colour
+      ? [colour.r / 255, colour.g / 255, colour.b / 255, colour.opacity ?? 1]
+      : fallback;
+  }
+
+  function pushVertex(vertices, x, y, colour, clusterSlot = 0) {
+    vertices.push(x, y, ...colour, clusterSlot);
+  }
+
+  function pushTriangle(vertices, first, second, third, colour, clusterSlot = 0) {
+    pushVertex(vertices, first[0], first[1], colour, clusterSlot);
+    pushVertex(vertices, second[0], second[1], colour, clusterSlot);
+    pushVertex(vertices, third[0], third[1], colour, clusterSlot);
+  }
+
+  function pushLine(vertices, first, second, colour, clusterSlot = 0) {
+    pushVertex(vertices, first[0], first[1], colour, clusterSlot);
+    pushVertex(vertices, second[0], second[1], colour, clusterSlot);
+  }
+
+  function pushGene(
+    vertices,
+    edges,
+    gene,
+    colour,
+    points = gene.polygon,
+    stroke = [0, 0, 0, 1],
+    clusterSlot = 0
+  ) {
+    if (points.length !== 14) return;
+    const point = (index) => [points[index * 2], points[index * 2 + 1]];
+    // The seven-point gene arrow is concave at its shaft/arrow junction. This
+    // fixed triangulation matches the Canvas/SVG polygon without a general
+    // triangulation dependency.
+    for (const triangle of [[0, 1, 6], [1, 5, 6], [1, 2, 5], [2, 4, 5], [2, 3, 4]]) {
+      pushTriangle(vertices, point(triangle[0]), point(triangle[1]), point(triangle[2]), colour, clusterSlot);
+    }
+    for (let index = 0; index < 7; index += 1) {
+      pushLine(edges, point(index), point((index + 1) % 7), stroke, clusterSlot);
+    }
+  }
+
+  function cubic(start, controlA, controlB, end, amount) {
+    const inverse = 1 - amount;
+    return (
+      inverse * inverse * inverse * start +
+      3 * inverse * inverse * amount * controlA +
+      3 * inverse * amount * amount * controlB +
+      amount * amount * amount * end
+    );
+  }
+
+  function pushLink(vertices, edges, link, colour, stroke, {
+    visible = link.visible,
+    anchors = link.anchors,
+    segments = 10,
+  } = {}) {
+    if (!visible || !anchors) return;
+    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+    const middle = ay + Math.abs(by - ay) / 2;
+    const upper = [];
+    const lower = [];
+    for (let index = 0; index <= segments; index += 1) {
+      const amount = index / segments;
+      upper.push([cubic(ax2, ax2, bx2, bx2, amount), cubic(ay, middle, middle, by, amount)]);
+      lower.push([cubic(ax1, ax1, bx1, bx1, amount), cubic(ay, middle, middle, by, amount)]);
+    }
+    for (let index = 0; index < segments; index += 1) {
+      pushTriangle(vertices, upper[index], upper[index + 1], lower[index], colour);
+      pushTriangle(vertices, upper[index + 1], lower[index + 1], lower[index], colour);
+      pushLine(edges, upper[index], upper[index + 1], stroke);
+      pushLine(edges, lower[index], lower[index + 1], stroke);
+    }
+    pushLine(edges, upper[0], lower[0], stroke);
+    pushLine(edges, upper[segments], lower[segments], stroke);
+  }
+
+  function locusOffsetForPreview(preview, locusUid) {
+    if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
+    return preview?.type === "locus-offset" && preview.locusUid === locusUid
+      ? preview.offsetX
+      : 0;
+  }
+
+  function clusterOffsetForPreview(preview, clusterUid) {
+    return preview?.clusterOffsets?.get(clusterUid) || 0;
+  }
+
+  function offsetsForLocus(preview, locus) {
+    return {
+      x: locusOffsetForPreview(preview, locus.source.uid),
+      y: clusterOffsetForPreview(preview, locus.cluster.uid),
+    };
+  }
+
+  function geneVisibleForPreview(preview, gene) {
+    return preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible;
+  }
+
+  function polygonForPreview(preview, gene) {
+    const { x, y } = offsetsForLocus(preview, gene.locus);
+    // Cluster-drag offsets are applied by the vertex shader. Keep only the
+    // locus-local x adjustment in these retained gene coordinates.
+    const bakedY = preview?.type === "cluster-drag" ? 0 : y;
+    const axis = preview?.type === "locus-flip"
+      ? preview.axes?.get(gene.locus.source.uid)
+      : undefined;
+    if (!x && !y && axis === undefined) return gene.polygon;
+    const scale = axis === undefined ? 1 : 1 - 2 * preview.progress;
+    return gene.polygon.map((coordinate, index) =>
+      index % 2
+        ? coordinate + bakedY
+        : (axis === undefined ? coordinate : axis + (coordinate - axis) * scale) + x
+    );
+  }
+
+  function anchorsForPreview(scene, link, preview) {
+    if (!preview) return link.anchors;
+    const query = scene.genes.get(link.source.query.uid);
+    const target = scene.genes.get(link.source.target.uid);
+    if (!query || !target) return null;
+    const anchorForGene = (gene) => {
+      const offsets = offsetsForLocus(preview, gene.locus);
+      const forward = gene.display.strand === 1;
+      const minX = gene.bounds.minX + offsets.x;
+      const maxX = gene.bounds.maxX + offsets.x;
+      const axis = preview?.type === "locus-flip"
+        ? preview.axes?.get(gene.locus.source.uid)
+        : undefined;
+      if (axis !== undefined) {
+        const progress = preview.progress;
+        const targetMin = axis * 2 - maxX;
+        const targetMax = axis * 2 - minX;
+        const from = forward ? [minX, maxX] : [maxX, minX];
+        const to = forward ? [targetMax, targetMin] : [targetMin, targetMax];
+        return [
+          from[0] + (to[0] - from[0]) * progress,
+          from[1] + (to[1] - from[1]) * progress,
+          gene.locus.y + gene.locus.track.y + offsets.y,
+        ];
+      }
+      return [
+        forward ? minX : maxX,
+        forward ? maxX : minX,
+        gene.locus.y + gene.locus.track.y + offsets.y,
+      ];
+    };
+    const queryAnchor = anchorForGene(query);
+    const targetAnchor = anchorForGene(target);
+    return queryAnchor[2] <= targetAnchor[2]
+      ? [...queryAnchor, ...targetAnchor]
+      : [...targetAnchor, ...queryAnchor];
+  }
+
+  function linkVisibleForPreview(scene, link, preview, config) {
+    if (!preview) return link.visible;
+    const query = scene.genes.get(link.source.query.uid);
+    const target = scene.genes.get(link.source.target.uid);
+    if (!query || !target) return false;
+    if (!geneVisibleForPreview(preview, query) || !geneVisibleForPreview(preview, target)) return false;
+    if (preview?.type !== "cluster-drag") return link.visible;
+    const queryOrder = preview.clusterOrder.get(query.locus.cluster.uid);
+    const targetOrder = preview.clusterOrder.get(target.locus.cluster.uid);
+    return (
+      queryOrder !== undefined &&
+      targetOrder !== undefined &&
+      Math.abs(queryOrder - targetOrder) === 1 &&
+      link.source.identity >= config.link.threshold
+    );
+  }
+
+  function transparent(colour) {
+    return [colour[0], colour[1], colour[2], 0];
+  }
+
+  function geneVertices(gene, scales, preview = null, clusterSlot = 0) {
+    const fill = [];
+    const edge = [];
+    const visible = geneVisibleForPreview(preview, gene);
+    const colour = rgba(gene.source.colour || scales.colour(scales.group(gene.source.uid)));
+    pushGene(
+      fill,
+      edge,
+      gene,
+      visible ? colour : transparent(colour),
+      polygonForPreview(preview, gene),
+      visible ? [0, 0, 0, 1] : [0, 0, 0, 0],
+      clusterSlot
+    );
+    return { genes: new Float32Array(fill), geneEdges: new Float32Array(edge) };
+  }
+
+  function linkVertices(scene, link, scales, config, preview = null) {
+    const fill = [];
+    const edge = [];
+    const visible = linkVisibleForPreview(scene, link, preview, config);
+    const colour = rgba(
+      config.link.groupColour
+        ? scales.colour(scales.group(link.source.query.uid))
+        : scales.score(link.source.identity)
+    );
+    const stroke = rgba(
+      config.link.groupColour
+        ? scales.colour(scales.group(link.source.query.uid))
+        : "black"
+    );
+    pushLink(fill, edge, link, visible ? colour : transparent(colour), visible ? stroke : transparent(stroke), {
+      // Records with a range were visible in the retained base scene. Keeping
+      // their vertex count constant lets a preview hide them by alpha alone.
+      visible: true,
+      anchors: anchorsForPreview(scene, link, preview),
+    });
+    return { links: new Float32Array(fill), linkEdges: new Float32Array(edge) };
+  }
+
+  function linkEndpointForGpu(gene, clusterSlot) {
+    const forward = gene.display.strand === 1;
+    return [
+      forward ? gene.bounds.minX : gene.bounds.maxX,
+      forward ? gene.bounds.maxX : gene.bounds.minX,
+      gene.locus.y + gene.locus.track.y,
+      clusterSlot,
+    ];
+  }
+
+  function buildLinkRecords(scene, scales, config, clusterSlots) {
+    const values = [];
+    const indexByUid = new Map();
+    for (const link of scene.links.values()) {
+      const query = scene.genes.get(link.source.query.uid);
+      const target = scene.genes.get(link.source.target.uid);
+      if (!query || !target) continue;
+      indexByUid.set(link.source.uid, indexByUid.size);
+      const fill = rgba(
+        config.link.groupColour
+          ? scales.colour(scales.group(link.source.query.uid))
+          : scales.score(link.source.identity)
+      );
+      const stroke = rgba(
+        config.link.groupColour
+          ? scales.colour(scales.group(link.source.query.uid))
+          : "black"
+      );
+      values.push(
+        ...linkEndpointForGpu(query, clusterSlots.get(query.locus.cluster.uid)),
+        ...linkEndpointForGpu(target, clusterSlots.get(target.locus.cluster.uid)),
+        ...fill,
+        ...stroke
+      );
+    }
+    return { values: new Float32Array(values), indexByUid };
+  }
+
+  function trackVertices(locus, config, preview = null, clusterSlot = 0) {
+    const geometry = locusGeometryForPreview(preview, locus);
+    const { x, y: previewY } = geometry.offsets || { x: 0, y: 0 };
+    const y = preview?.type === "cluster-drag" ? 0 : previewY;
+    const track = geometry.track || locus.track;
+    const vertices = [];
+    pushLine(
+      vertices,
+      [locus.x + track.x1 + x, locus.y + track.y + y],
+      [locus.x + track.x2 + x, locus.y + track.y + y],
+      rgba(config.locus.trackBar.colour, [0.07, 0.07, 0.07, 1]),
+      clusterSlot
+    );
+    return new Float32Array(vertices);
+  }
+
+  function append(target, values) {
+    const range = { offset: target.length, length: values.length };
+    target.push(...values);
+    return range;
+  }
+
+  function buildGeometry(scene, scales, config, preview = null, clusterSlots = null) {
+    const links = [];
+    const genes = [];
+    const linkEdges = [];
+    const geneEdges = [];
+    const tracks = [];
+    const ranges = { links: new Map(), genes: new Map(), loci: new Map() };
+    const slots = clusterSlots || new Map(
+      [...scene.clusters.keys()].map((uid, index) => [uid, index + 1])
+    );
+    for (const link of scene.links.values()) {
+      // A preview never introduces a link that was absent from the base scene.
+      if (!link.visible) continue;
+      const vertices = linkVertices(scene, link, scales, config, preview);
+      ranges.links.set(link.source.uid, {
+        links: append(links, vertices.links),
+        linkEdges: append(linkEdges, vertices.linkEdges),
+      });
+    }
+    for (const gene of scene.genes.values()) {
+      // Trimming only hides base-visible genes, so their range is stable too.
+      if (!gene.visible) continue;
+      const vertices = geneVertices(gene, scales, preview, slots.get(gene.locus.cluster.uid));
+      ranges.genes.set(gene.source.uid, {
+        genes: append(genes, vertices.genes),
+        geneEdges: append(geneEdges, vertices.geneEdges),
+      });
+    }
+    for (const locus of scene.loci.values()) {
+      ranges.loci.set(locus.source.uid, {
+        tracks: append(tracks, trackVertices(locus, config, preview, slots.get(locus.cluster.uid))),
+      });
+    }
+    return {
+      data: {
+        links: new Float32Array(links),
+        linkEdges: new Float32Array(linkEdges),
+        tracks: new Float32Array(tracks),
+        genes: new Float32Array(genes),
+        geneEdges: new Float32Array(geneEdges),
+      },
+      ranges,
+      clusterSlots: slots,
+    };
+  }
+
+  function viewportForCamera(camera, width, height, overscan = 20) {
+    const margin = overscan / camera.k;
+    return {
+      minX: -camera.x / camera.k - margin,
+      maxX: (width - camera.x) / camera.k + margin,
+      minY: -camera.y / camera.k - margin,
+      maxY: (height - camera.y) / camera.k + margin,
+    };
+  }
+
+  function boundsInViewport(bounds, viewport, offsetY = 0) {
+    return (
+      bounds.minX <= viewport.maxX &&
+      bounds.maxX >= viewport.minX &&
+      bounds.minY + offsetY <= viewport.maxY &&
+      bounds.maxY + offsetY >= viewport.minY
+    );
+  }
+
+  function visibleClusterPreviewPairs(scene, preview, viewport) {
+    const clusters = [];
+    const clusterUidByOrder = new Map(
+      [...preview.clusterOrder].map(([uid, order]) => [order, uid])
+    );
+    for (const cluster of scene.clusters.values()) {
+      if (boundsInViewport(cluster.bounds, viewport, clusterOffsetForPreview(preview, cluster.source.uid))) {
+        clusters.push(cluster);
+      }
+    }
+    const pairs = new Set();
+    for (const cluster of clusters) {
+      const order = preview.clusterOrder.get(cluster.source.uid);
+      for (const neighbourOrder of [order - 1, order + 1]) {
+        const neighbourUid = clusterUidByOrder.get(neighbourOrder);
+        if (neighbourUid === undefined) continue;
+        pairs.add(clusterPairKey(cluster.source.uid, neighbourUid));
+      }
+    }
+    return pairs;
+  }
+
+  function recordsForPreview(scene, preview) {
+    if (!preview) return null;
+    if (preview.type === "cluster-drag") {
+      return {
+        // Genes, tracks, and instanced link ribbons all resolve their row
+        // offsets on the GPU, leaving only a compact visible-link index list to
+        // upload while the pointer moves.
+        loci: new Set(),
+        genes: new Set(),
+        links: new Set(scene.links.keys()),
+        full: false,
+        clusterOffsets: true,
+      };
+    }
+    const loci = new Set();
+    if (preview.type === "locus-offset") loci.add(preview.locusUid);
+    if (preview.type === "locus-flip") loci.add(preview.locusUid);
+    if (preview.type === "locus-trim") {
+      const trimmed = scene.loci.get(preview.locusUid);
+      const clusterUid = trimmed?.cluster.uid;
+      // getLocusScaleValues packs loci independently within each cluster. A
+      // trim can therefore shift every sibling locus even when its individual
+      // offset happens to be zero in a particular preview frame.
+      for (const locus of scene.loci.values()) {
+        if (locus.cluster.uid === clusterUid) loci.add(locus.source.uid);
+      }
+    }
+    const genes = new Set();
+    for (const gene of scene.genes.values()) {
+      if (loci.has(gene.locus.source.uid)) genes.add(gene.source.uid);
+    }
+    const links = new Set();
+    for (const link of scene.links.values()) {
+      if (genes.has(link.source.query.uid) || genes.has(link.source.target.uid)) {
+        links.add(link.source.uid);
+      }
+    }
+    return { loci, genes, links, full: false };
+  }
+
+  function bufferFor(device, existing, data) {
+    if (!data.byteLength) return null;
+    if (!existing || existing.size < data.byteLength) {
+      existing?.destroy();
+      existing = device.createBuffer({
+        size: Math.max(data.byteLength, 4),
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      });
+    }
+    device.queue.writeBuffer(existing, 0, data);
+    return existing;
+  }
+
+  /** Create an opt-in direct WebGPU renderer for dense scene geometry. */
+  async function createWebGpuRenderer(canvas) {
+    if (!globalThis.navigator?.gpu) return null;
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) return null;
+    const device = await adapter.requestDevice();
+    const context = canvas.getContext("webgpu");
+    if (!context) return null;
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    const module = device.createShaderModule({ code: shader });
+    // Browser implementations are allowed to defer WGSL validation until a
+    // pipeline is created, which otherwise produces an unhelpful “pipeline is
+    // invalid” message. Surface compiler locations and let clusterMap use its
+    // established Canvas fallback instead.
+    const diagnostics = await module.getCompilationInfo();
+    const errors = diagnostics.messages.filter((message) => message.type === "error");
+    if (errors.length) {
+      throw new Error(
+        `WebGPU shader compilation failed:\n${errors
+        .map((message) => `line ${message.lineNum}:${message.linePos} ${message.message}`)
+        .join("\n")}`
+      );
+    }
+    const vertexBuffers = [{
+      arrayStride: 28,
+      attributes: [
+        { shaderLocation: 0, offset: 0, format: "float32x2" },
+        { shaderLocation: 1, offset: 8, format: "float32x4" },
+        { shaderLocation: 2, offset: 24, format: "float32" },
+      ],
+    }];
+    const bindGroupLayout = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
+        { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+        { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+        { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+      ],
+    });
+    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
+    const target = [{
+      format,
+      blend: {
+        color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha" },
+        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha" },
+      },
+    }];
+    const createPipeline = device.createRenderPipelineAsync
+      ? (descriptor) => device.createRenderPipelineAsync(descriptor)
+      : (descriptor) => Promise.resolve(device.createRenderPipeline(descriptor));
+    const pipeline = await createPipeline({
+      layout: pipelineLayout,
+      vertex: { module, entryPoint: "vertexMain", buffers: vertexBuffers },
+      fragment: { module, entryPoint: "fragmentMain", targets: target },
+      primitive: { topology: "triangle-list" },
+    });
+    const linePipeline = await createPipeline({
+      layout: pipelineLayout,
+      vertex: { module, entryPoint: "vertexMain", buffers: vertexBuffers },
+      fragment: { module, entryPoint: "fragmentMain", targets: target },
+      primitive: { topology: "line-list" },
+    });
+    const linkPipeline = await createPipeline({
+      layout: pipelineLayout,
+      vertex: { module, entryPoint: "linkFillVertex" },
+      fragment: { module, entryPoint: "fragmentMain", targets: target },
+      primitive: { topology: "triangle-list" },
+    });
+    const linkLinePipeline = await createPipeline({
+      layout: pipelineLayout,
+      vertex: { module, entryPoint: "linkEdgeVertex" },
+      fragment: { module, entryPoint: "fragmentMain", targets: target },
+      primitive: { topology: "line-list" },
+    });
+    const uniform = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    let clusterOffsetBuffer = device.createBuffer({
+      size: 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    let clusterOffsetCapacity = 1;
+    let linkRecordBuffer = device.createBuffer({
+      size: 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    let linkRecordCapacity = 0;
+    let linkIndexBuffer = device.createBuffer({
+      size: 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    let linkIndexCapacity = 1;
+    const createBindGroup = () => device.createBindGroup({
+      layout: bindGroupLayout,
+      entries: [
+        { binding: 0, resource: { buffer: uniform } },
+        { binding: 1, resource: { buffer: clusterOffsetBuffer } },
+        { binding: 2, resource: { buffer: linkRecordBuffer } },
+        { binding: 3, resource: { buffer: linkIndexBuffer } },
+      ],
+    });
+    let bindGroup = createBindGroup();
+    let linkBuffer = null;
+    let linkEdgeBuffer = null;
+    let trackBuffer = null;
+    let geneBuffer = null;
+    let geneEdgeBuffer = null;
+    let linkCount = 0;
+    let linkEdgeCount = 0;
+    let previewLinkCount = 0;
+    let previewLinksActive = false;
+    let linkRecordIndexByUid = new Map();
+    let clusterPreviewIndexCache = new Map();
+    let trackCount = 0;
+    let geneCount = 0;
+    let geneEdgeCount = 0;
+    let scene = null;
+    let preview = null;
+    let geometry = null;
+    let patchedRecords = null;
+    let configured = false;
+
+    const resizeStorageBuffer = (buffer, capacity, values) => {
+      if (values.byteLength <= capacity * 4) return { buffer, capacity, resized: false };
+      buffer.destroy();
+      return {
+        buffer: device.createBuffer({
+          size: Math.max(values.byteLength, 4),
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        }),
+        capacity: Math.ceil(values.byteLength / 4),
+        resized: true,
+      };
+    };
+
+    const uploadLinkRecords = (records) => {
+      const resized = resizeStorageBuffer(linkRecordBuffer, linkRecordCapacity, records.values);
+      linkRecordBuffer = resized.buffer;
+      linkRecordCapacity = resized.capacity;
+      if (records.values.byteLength) device.queue.writeBuffer(linkRecordBuffer, 0, records.values);
+      linkRecordIndexByUid = records.indexByUid;
+      clusterPreviewIndexCache = new Map();
+      bindGroup = createBindGroup();
+    };
+
+    const clusterPreviewLinkIndices = (nextPreview, viewport, config) => {
+      const pairs = visibleClusterPreviewPairs(scene, nextPreview, viewport);
+      const cacheKey = `${config.link.threshold}:${[...pairs].sort().join("|")}`;
+      const cached = clusterPreviewIndexCache.get(cacheKey);
+      if (cached) return cached;
+      // Scene link iteration is already in source order. Cache the matching GPU
+      // record indices once per distinct neighbouring-pair arrangement instead
+      // of sorting and remapping a potentially huge UID list for every move.
+      const values = new Uint32Array(
+        [...scene.links.values()]
+          .filter((link) => {
+            const query = scene.genes.get(link.source.query.uid);
+            const target = scene.genes.get(link.source.target.uid);
+            return (
+              query?.visible &&
+              target?.visible &&
+              link.source.identity >= config.link.threshold &&
+              pairs.has(clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid))
+            );
+          })
+          .map((link) => linkRecordIndexByUid.get(link.source.uid))
+          .filter((index) => index !== undefined)
+      );
+      clusterPreviewIndexCache.set(cacheKey, values);
+      return values;
+    };
+
+    const uploadPreviewLinkIndices = (values) => {
+      const resized = resizeStorageBuffer(linkIndexBuffer, linkIndexCapacity, values);
+      linkIndexBuffer = resized.buffer;
+      linkIndexCapacity = resized.capacity;
+      if (values.byteLength) device.queue.writeBuffer(linkIndexBuffer, 0, values);
+      previewLinkCount = values.length;
+      // Recreating a bind group per pointer frame costs more than the tiny
+      // index upload. It is needed only if the backing buffer grew.
+      if (resized.resized) bindGroup = createBindGroup();
+    };
+
+    const updateClusterOffsets = (nextPreview) => {
+      const size = Math.max(1, geometry?.clusterSlots?.size + 1 || 1);
+      if (size > clusterOffsetCapacity) {
+        clusterOffsetBuffer.destroy();
+        clusterOffsetBuffer = device.createBuffer({
+          size: size * 4,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+        clusterOffsetCapacity = size;
+        bindGroup = createBindGroup();
+      }
+      const offsets = new Float32Array(clusterOffsetCapacity);
+      if (nextPreview?.type === "cluster-drag") {
+        for (const [uid, offset] of nextPreview.clusterOffsets) {
+          const slot = geometry?.clusterSlots?.get(uid);
+          if (slot !== undefined) offsets[slot] = offset;
+        }
+      }
+      device.queue.writeBuffer(clusterOffsetBuffer, 0, offsets);
+    };
+
+    const bufferForName = (name) => ({
+      links: linkBuffer,
+      linkEdges: linkEdgeBuffer,
+      tracks: trackBuffer,
+      genes: geneBuffer,
+      geneEdges: geneEdgeBuffer,
+    })[name];
+    const write = (name, range, values) => {
+      const buffer = bufferForName(name);
+      if (!buffer || !range || range.length !== values.length) return;
+      device.queue.writeBuffer(buffer, range.offset * 4, values.buffer, values.byteOffset, values.byteLength);
+    };
+    const writeAll = (data) => {
+      for (const name of Object.keys(data)) {
+        const buffer = bufferForName(name);
+        if (buffer && data[name].byteLength) device.queue.writeBuffer(buffer, 0, data[name]);
+      }
+    };
+    const uploadGeometry = (nextGeometry) => {
+      const { data } = nextGeometry;
+      linkBuffer = bufferFor(device, linkBuffer, data.links);
+      linkEdgeBuffer = bufferFor(device, linkEdgeBuffer, data.linkEdges);
+      trackBuffer = bufferFor(device, trackBuffer, data.tracks);
+      geneBuffer = bufferFor(device, geneBuffer, data.genes);
+      geneEdgeBuffer = bufferFor(device, geneEdgeBuffer, data.geneEdges);
+      linkCount = data.links.length / 7;
+      linkEdgeCount = data.linkEdges.length / 7;
+      trackCount = data.tracks.length / 7;
+      geneCount = data.genes.length / 7;
+      geneEdgeCount = data.geneEdges.length / 7;
+    };
+    const restorePreview = (records) => {
+      if (!records || !geometry) return;
+      if (records.full) {
+        writeAll(geometry.data);
+        return;
+      }
+      for (const uid of records.links) {
+        const ranges = geometry.ranges.links.get(uid);
+        if (!ranges) continue;
+        write("links", ranges.links, geometry.data.links.subarray(ranges.links.offset, ranges.links.offset + ranges.links.length));
+        write("linkEdges", ranges.linkEdges, geometry.data.linkEdges.subarray(ranges.linkEdges.offset, ranges.linkEdges.offset + ranges.linkEdges.length));
+      }
+      for (const uid of records.genes) {
+        const ranges = geometry.ranges.genes.get(uid);
+        if (!ranges) continue;
+        write("genes", ranges.genes, geometry.data.genes.subarray(ranges.genes.offset, ranges.genes.offset + ranges.genes.length));
+        write("geneEdges", ranges.geneEdges, geometry.data.geneEdges.subarray(ranges.geneEdges.offset, ranges.geneEdges.offset + ranges.geneEdges.length));
+      }
+      for (const uid of records.loci) {
+        const ranges = geometry.ranges.loci.get(uid);
+        if (ranges) write("tracks", ranges.tracks, geometry.data.tracks.subarray(ranges.tracks.offset, ranges.tracks.offset + ranges.tracks.length));
+      }
+    };
+    const applyPreview = (nextPreview, scales, config, viewport) => {
+      // Cluster-drag links are drawn from a temporary, viewport-limited buffer,
+      // so the retained base link buffer never needs restoring or rewriting.
+      if (!patchedRecords?.clusterOffsets) restorePreview(patchedRecords);
+      updateClusterOffsets(nextPreview);
+      patchedRecords = recordsForPreview(scene, nextPreview);
+      if (!patchedRecords || !geometry) {
+        previewLinksActive = false;
+        return;
+      }
+      if (patchedRecords.clusterOffsets) {
+        uploadPreviewLinkIndices(clusterPreviewLinkIndices(nextPreview, viewport, config));
+        previewLinksActive = true;
+        return;
+      }
+      previewLinksActive = false;
+      if (patchedRecords.full) {
+        writeAll(buildGeometry(scene, scales, config, nextPreview, geometry.clusterSlots).data);
+        return;
+      }
+      for (const uid of patchedRecords.links) {
+        const ranges = geometry.ranges.links.get(uid);
+        const link = scene.links.get(uid);
+        if (!ranges || !link) continue;
+        const vertices = linkVertices(scene, link, scales, config, nextPreview);
+        write("links", ranges.links, vertices.links);
+        write("linkEdges", ranges.linkEdges, vertices.linkEdges);
+      }
+      for (const uid of patchedRecords.genes) {
+        const ranges = geometry.ranges.genes.get(uid);
+        const gene = scene.genes.get(uid);
+        if (!ranges || !gene) continue;
+        const vertices = geneVertices(
+          gene,
+          scales,
+          nextPreview,
+          geometry.clusterSlots.get(gene.locus.cluster.uid)
+        );
+        write("genes", ranges.genes, vertices.genes);
+        write("geneEdges", ranges.geneEdges, vertices.geneEdges);
+      }
+      for (const uid of patchedRecords.loci) {
+        const ranges = geometry.ranges.loci.get(uid);
+        const locus = scene.loci.get(uid);
+        if (ranges && locus) {
+          write(
+            "tracks",
+            ranges.tracks,
+            trackVertices(locus, config, nextPreview, geometry.clusterSlots.get(locus.cluster.uid))
+          );
+        }
+      }
+    };
+
+    return {
+      render({ nextScene, preview: nextPreview = null, camera, scales, config, width, height, pixelRatio }) {
+        const pixelWidth = Math.max(1, Math.round(width * pixelRatio));
+        const pixelHeight = Math.max(1, Math.round(height * pixelRatio));
+        const resized = canvas.width !== pixelWidth || canvas.height !== pixelHeight;
+        if (resized) {
+          canvas.width = pixelWidth;
+          canvas.height = pixelHeight;
+        }
+        if (resized || !configured) {
+          context.configure({ device, format, alphaMode: "premultiplied" });
+          configured = true;
+        }
+        if (scene !== nextScene) {
+          geometry = buildGeometry(nextScene, scales, config);
+          uploadGeometry(geometry);
+          uploadLinkRecords(buildLinkRecords(nextScene, scales, config, geometry.clusterSlots));
+          updateClusterOffsets(null);
+          scene = nextScene;
+          preview = null;
+          patchedRecords = null;
+          previewLinksActive = false;
+        }
+        if (preview !== nextPreview) {
+          applyPreview(nextPreview, scales, config, viewportForCamera(camera, width, height));
+          preview = nextPreview;
+        }
+        device.queue.writeBuffer(
+          uniform,
+          0,
+          new Float32Array([camera.x, camera.y, camera.k, 0, width, height, 0, 0])
+        );
+        const encoder = device.createCommandEncoder();
+        const pass = encoder.beginRenderPass({
+          colorAttachments: [{
+            view: context.getCurrentTexture().createView(),
+            clearValue: { r: 1, g: 1, b: 1, a: 1 },
+            loadOp: "clear",
+            storeOp: "store",
+          }],
+        });
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
+        if (previewLinksActive) {
+          pass.setPipeline(linkPipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.draw(60, previewLinkCount);
+        } else if (linkBuffer) {
+          pass.setVertexBuffer(0, linkBuffer);
+          pass.draw(linkCount);
+        }
+        if (previewLinksActive) {
+          pass.setPipeline(linkLinePipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.draw(44, previewLinkCount);
+        } else if (linkEdgeBuffer) {
+          pass.setPipeline(linePipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.setVertexBuffer(0, linkEdgeBuffer);
+          pass.draw(linkEdgeCount);
+        }
+        pass.setPipeline(linePipeline);
+        pass.setBindGroup(0, bindGroup);
+        if (trackBuffer) {
+          pass.setVertexBuffer(0, trackBuffer);
+          pass.draw(trackCount);
+        }
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
+        if (geneBuffer) {
+          pass.setVertexBuffer(0, geneBuffer);
+          pass.draw(geneCount);
+        }
+        pass.setPipeline(linePipeline);
+        pass.setBindGroup(0, bindGroup);
+        if (geneEdgeBuffer) {
+          pass.setVertexBuffer(0, geneEdgeBuffer);
+          pass.draw(geneEdgeCount);
+        }
+        pass.end();
+        device.queue.submit([encoder.finish()]);
+      },
+      destroy() {
+        linkBuffer?.destroy();
+        linkEdgeBuffer?.destroy();
+        linkRecordBuffer.destroy();
+        linkIndexBuffer.destroy();
+        trackBuffer?.destroy();
+        geneBuffer?.destroy();
+        geneEdgeBuffer?.destroy();
+        clusterOffsetBuffer.destroy();
+        uniform.destroy();
+        device.destroy();
+      },
+    };
   }
 
   let nextChartInstance = 0;
@@ -3702,14 +5023,32 @@
     let canvasScene = null;
     let canvasAnimation = null;
     let canvasPreview = null;
+    let canvasPreviewScene = null;
+    let canvasFlipStaticCanvas = null;
+    let canvasFlipLocusCanvas = null;
+    let canvasFlipLocusFrame = null;
+    let canvasFlipDirtyFrame = null;
+    let canvasPreparedFlipBase = null;
+    let canvasFlipWarmFrame = null;
     let canvasPaintFrame = null;
-    let canvasFlipBuildFrame = null;
-    let canvasFlipAnimationProgress = null;
+    let canvasFlipFrame = null;
+    let canvasPendingFlip = null;
     let canvasMotion = false;
     let canvasMotionEndTimer = null;
     let minimapBaseCanvas = null;
     let minimapBaseFrame = null;
     let paintCanvasFrame = null;
+    let webgpuRenderer = null;
+    let webgpuCanvas = null;
+    let webgpuInit = null;
+    let webgpuUnavailable = false;
+    let webgpuPendingScene = null;
+    let webgpuGeneration = 0;
+    let webgpuFlipFrame = null;
+    let clusterCommitFrame = null;
+    let scheduleMinimapBase = () => {};
+    let prepareCanvasFlipBase = () => {};
+    let warmCanvasFlipBase = () => {};
     let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
     const interactionController = createInteractionController({
@@ -3719,9 +5058,13 @@
       getLocusOffset: (uid) => getLocusOffset(chartState, uid),
       setDragging: (dragging) => setDragging(chartState, dragging),
       previewClusterDrag: (uid, position, order) => {
+        if (clusterCommitFrame !== null) {
+          cancelAnimationFrame(clusterCommitFrame);
+          clusterCommitFrame = null;
+        }
         setPreviewClusterPosition(chartState, uid, position);
         if (order) setPreviewClusterOrder(chartState, order);
-        if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+        if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
           canvasPreview = createClusterDragPreview(runtime.scene.get(), {
             clusterUid: uid,
             position,
@@ -3734,13 +5077,42 @@
         runtime.plot.update({ animate: false });
       },
       commitClusterOrder: () => {
+        const sourceScene = runtime.scene.get();
+        const preview = canvasPreview?.type === "cluster-drag" ? canvasPreview : null;
+        const order = [...getClusterOrder(chartState)];
+        const rows = runtime.scales.y.range();
         commitPreviewClusterOrder(chartState);
+        if (
+          preview &&
+          sourceScene &&
+          ["canvas", "webgpu"].includes(runtime.config.plot.renderer)
+        ) {
+          // Paint the destination row once before the committed projection runs.
+          // This avoids a release-time blank/stale frame while a large chart is
+          // rebuilding its authoritative scene and indexes.
+          canvasPreview = createClusterDragPreview(sourceScene, {
+            clusterUid: preview.clusterUid,
+            position: rows[order.indexOf(preview.clusterUid)],
+            order,
+            rows,
+          });
+          scheduleCanvasPreview();
+          if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
+          clusterCommitFrame = requestAnimationFrame(() => {
+            clusterCommitFrame = requestAnimationFrame(() => {
+              clusterCommitFrame = null;
+              clearCanvasPreview();
+              runtime.plot.update({ animate: false });
+            });
+          });
+          return;
+        }
         clearCanvasPreview();
         runtime.plot.update({ animate: false });
       },
       previewLocusOffset: (uid, offset) => {
         setPreviewLocusOffset(chartState, uid, offset);
-        if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+        if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
           canvasPreview = createLocusOffsetPreview(runtime.scene.get(), uid, offset, {
             alignLabels: runtime.config.cluster.alignLabels,
           });
@@ -3761,7 +5133,7 @@
           coordinateFor: runtime.scales.x,
           scaleGenes: runtime.config.plot.scaleGenes,
         });
-        if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+        if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
           // Updating scales is inexpensive and gives the sparse projection the
           // packed x offsets for this temporary locus state. Deliberately avoid
           // rebuilding data, indexes, or the complete scene until release.
@@ -3784,25 +5156,71 @@
         runtime.plot.update({ animate: false });
       },
       flipLocus: (locus) => {
+        // A second double-click while the GPU preview is in flight must not
+        // mutate the source state underneath that preview.
+        if (runtime.config.plot.renderer === "webgpu" && webgpuFlipFrame !== null) return;
         flipLocus(chartState, locus);
         if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+          if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+          canvasAnimation = null;
+          if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
           const previewProgress = 0.12;
-          canvasPreview = createLocusFlipPreview(runtime.scene.get(), locus.uid, {
+          const sourceScene = canvasScene || runtime.scene.get();
+          const pending = createCanvasFlipPending(locus, sourceScene);
+          canvasPendingFlip = pending;
+          canvasPreviewScene = sourceScene;
+          canvasPreview = createLocusFlipPreview(sourceScene, locus.uid, {
             scaleX: runtime.scales.x,
             progress: previewProgress,
           });
-          canvasFlipAnimationProgress = previewProgress;
           scheduleCanvasPreview();
-          if (canvasFlipBuildFrame !== null) cancelAnimationFrame(canvasFlipBuildFrame);
-          // Schedule from an animation frame so the sparse preview is presented
-          // before the committed scene build can occupy the main thread.
-          canvasFlipBuildFrame = requestAnimationFrame(() => {
-            canvasFlipBuildFrame = requestAnimationFrame(() => {
-              canvasFlipBuildFrame = null;
-              canvasPreview = null;
-              runtime.plot.update();
-            });
+          // The first preview frame is retained-scene geometry plus a reflection
+          // patch. Only after it has painted do we project the changed locus and
+          // its incident links; the animation never interpolates every record.
+          // rAF callbacks all run before the browser presents a frame. Queue the
+          // expensive layer preparation from a *second* rAF so the initial
+          // retained-scene preview above is actually visible immediately rather
+          // than being held behind cache construction.
+          canvasFlipFrame = requestAnimationFrame(() => {
+            if (canvasPendingFlip !== pending) return;
+            canvasFlipFrame = requestAnimationFrame(() => startCanvasFlip(pending, previewProgress));
           });
+          return;
+        }
+        if (runtime.config.plot.renderer === "webgpu" && runtime.scene.get()) {
+          if (webgpuFlipFrame !== null) return;
+          const sourceScene = runtime.scene.get();
+          const duration = runtime.config.plot.transitionDuration;
+          const finish = () => {
+            runtime.synchronizeLocusLayoutState(locus);
+            webgpuPendingScene = runtime.scene.patchFlippedLocus(sourceScene, locus);
+            canvasPreview = null;
+            webgpuFlipFrame = null;
+            scheduleCanvasPaint();
+          };
+          if (!duration) {
+            finish();
+            return;
+          }
+          const startedAt = performance.now();
+          const frame = (now) => {
+            const elapsed = Math.min(1, (now - startedAt) / duration);
+            const eased = elapsed < 0.5
+              ? 4 * elapsed * elapsed * elapsed
+              : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+            canvasPreview = createLocusFlipPreview(sourceScene, locus.uid, {
+              scaleX: runtime.scales.x,
+              progress: eased,
+            });
+            webgpuPendingScene = sourceScene;
+            scheduleCanvasPaint();
+            if (elapsed < 1) {
+              webgpuFlipFrame = requestAnimationFrame(frame);
+              return;
+            }
+            finish();
+          };
+          webgpuFlipFrame = requestAnimationFrame(frame);
           return;
         }
         runtime.plot.update();
@@ -3816,22 +5234,96 @@
 
     function clearCanvasPreview() {
       if (canvasPaintFrame !== null) cancelAnimationFrame(canvasPaintFrame);
-      if (canvasFlipBuildFrame !== null) cancelAnimationFrame(canvasFlipBuildFrame);
+      if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
+      if (webgpuFlipFrame !== null) cancelAnimationFrame(webgpuFlipFrame);
+      if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
       canvasPreview = null;
+      canvasPreviewScene = null;
+      clearCanvasFlipBase();
+      canvasPreparedFlipBase = null;
+      if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
+      canvasFlipWarmFrame = null;
       canvasPaintFrame = null;
-      canvasFlipBuildFrame = null;
-      canvasFlipAnimationProgress = null;
+      canvasFlipFrame = null;
+      canvasPendingFlip = null;
+      webgpuFlipFrame = null;
+      clusterCommitFrame = null;
     }
 
     function flushCanvasFlip() {
-      if (canvasFlipBuildFrame === null) return;
-      cancelAnimationFrame(canvasFlipBuildFrame);
-      canvasFlipBuildFrame = null;
+      const pending = canvasPendingFlip;
+      if (!pending) return;
+      if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
+      canvasFlipFrame = null;
+      if (!pending.targetScene) {
+        runtime.synchronizeLocusLayoutState(pending.locus);
+        pending.targetScene = runtime.scene.patchFlippedLocus(pending.sourceScene, pending.locus);
+      }
+      canvasScene = pending.targetScene;
       canvasPreview = null;
-      canvasFlipAnimationProgress = null;
-      // An export is a synchronous view of the current state, not a snapshot of
-      // an in-flight Canvas affordance. Build its authoritative scene now.
-      runtime.plot.update({ animate: false });
+      canvasPreviewScene = null;
+      canvasPendingFlip = null;
+      clearCanvasFlipBase();
+      canvasPreparedFlipBase = null;
+    }
+
+    function startCanvasFlip(pending, initialProgress) {
+      if (canvasPendingFlip !== pending) return;
+      canvasFlipFrame = null;
+      runtime.synchronizeLocusLayoutState(pending.locus);
+      pending.targetScene = runtime.scene.patchFlippedLocus(pending.sourceScene, pending.locus);
+      prepareCanvasFlipBase(pending);
+      // Restore and repaint the affected canvas region before the browser can
+      // present a frame. The base image stays offscreen; the visible plot stays
+      // a single canvas throughout the animation.
+      paintCanvasFrame?.();
+      const duration = runtime.config.plot.transitionDuration;
+      if (!duration) {
+        canvasScene = pending.targetScene;
+        canvasPreview = null;
+        canvasPreviewScene = null;
+        canvasPendingFlip = null;
+        paintCanvasFrame?.();
+        clearCanvasFlipBase();
+        canvasPreparedFlipBase = null;
+        scheduleCanvasPaint();
+        scheduleMinimapBase(canvasScene);
+        return;
+      }
+      const startedAt = performance.now();
+      const frame = (now) => {
+        if (canvasPendingFlip !== pending) return;
+        const elapsed = Math.min(1, (now - startedAt) / duration);
+        const eased = elapsed < 0.5
+          ? 4 * elapsed * elapsed * elapsed
+          : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+        canvasPreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
+          scaleX: runtime.scales.x,
+          progress: initialProgress + (1 - initialProgress) * eased,
+        });
+        // The dirty region is bounded to the affected locus and its incident
+        // links, so paint it in this rAF rather than one frame later. Links and
+        // genes are drawn together in normal renderer order.
+        if (canvasPaintFrame !== null) cancelAnimationFrame(canvasPaintFrame);
+        canvasPaintFrame = null;
+        paintCanvasFrame?.();
+        if (elapsed < 1) {
+          canvasFlipFrame = requestAnimationFrame(frame);
+          return;
+        }
+        canvasFlipFrame = null;
+        canvasPreview = null;
+        canvasPreviewScene = null;
+        canvasPendingFlip = null;
+        canvasScene = pending.targetScene;
+        // Replace the final preview with the complete target scene.
+        paintCanvasFrame?.();
+        clearCanvasFlipBase();
+        canvasPreparedFlipBase = null;
+        scheduleCanvasPaint();
+        scheduleMinimapBase(canvasScene);
+      };
+      canvasFlipFrame = requestAnimationFrame(frame);
     }
 
     function scheduleCanvasPaint() {
@@ -3865,6 +5357,12 @@
     }
 
     function canvasPixelRatio() {
+      // WebGPU remains at its native backing resolution while moving. Its
+      // geometry is cheap enough to redraw without the visible text/shape-size
+      // jump that the Canvas 2D motion fallback intentionally makes.
+      if (runtime.config.plot.renderer === "webgpu") {
+        return globalThis.devicePixelRatio || 1;
+      }
       return canvasPixelRatioForCamera({
         camera: getCamera(chartState),
         moving: canvasMotion,
@@ -3881,6 +5379,44 @@
     function constrainZoom(scale) {
       const [minimum, maximum] = zoomExtent();
       return Math.max(minimum, Math.min(maximum, scale));
+    }
+
+    function createCanvasFlipPending(locus, sourceScene) {
+      const dynamicLinks = new Set();
+      const locusGenes = new Set(locus.genes.map((gene) => gene.uid));
+      const dynamicGenes = new Set(locusGenes);
+      for (const gene of locus.genes) {
+        for (const link of runtime.get.linksForGene(gene.uid)) {
+          dynamicLinks.add(link.uid);
+          // The link must remain below both endpoint gene shapes. Repaint its
+          // stationary neighbour in the same dirty canvas region as the
+          // reflected locus rather than compositing separate layers.
+          dynamicGenes.add(link.query.uid);
+          dynamicGenes.add(link.target.uid);
+        }
+      }
+      return {
+        locus,
+        sourceScene,
+        targetScene: null,
+        locusRecords: {
+          loci: new Set([locus.uid]),
+          genes: locusGenes,
+          links: new Set(),
+        },
+        dynamic: {
+          loci: new Set([locus.uid]),
+          genes: dynamicGenes,
+          links: dynamicLinks,
+        },
+      };
+    }
+
+    function clearCanvasFlipBase() {
+      canvasFlipStaticCanvas = null;
+      canvasFlipLocusCanvas = null;
+      canvasFlipLocusFrame = null;
+      canvasFlipDirtyFrame = null;
     }
 
     function my(selection, options) {
@@ -3902,10 +5438,27 @@
     function redraw({ animate = true, synchronize = true } = {}) {
       if (!currentData || !container) return;
       const data = currentData;
+      if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
+      canvasFlipWarmFrame = null;
+      canvasPreparedFlipBase = null;
 
       // Set up the shared transition
       transition = d3.transition().duration(runtime.config.plot.transitionDuration);
       const useCanvas = runtime.config.plot.renderer === "canvas";
+      const useWebGpu = runtime.config.plot.renderer === "webgpu";
+      const useRaster = useCanvas || useWebGpu;
+      if (!useWebGpu && (webgpuRenderer || webgpuCanvas || webgpuInit)) {
+        // A renderer owns the WebGPU context for its canvas. Dispose it before
+        // the chart changes backend, and invalidate any async setup that might
+        // otherwise resolve after that canvas has been removed.
+        webgpuGeneration += 1;
+        webgpuRenderer?.destroy();
+        webgpuRenderer = null;
+        webgpuCanvas = null;
+        webgpuInit = null;
+        webgpuUnavailable = false;
+        webgpuPendingScene = null;
+      }
       const minimapOptions = runtime.config.plot.minimap || {};
       const showMinimap = useCanvas && minimapOptions.show;
       if (!useCanvas) clearCanvasPreview();
@@ -3994,9 +5547,14 @@
 
       const plot = svg.select("g.clusterMapG");
       if (zoom) zoom.scaleExtent(zoomExtent());
+      // A canvas cannot change from a 2D to a WebGPU context in place.
+      container
+        .selectAll("canvas.clusterMapCanvas")
+        .filter(function () { return this.dataset.renderer && this.dataset.renderer !== runtime.config.plot.renderer; })
+        .remove();
       const canvas = container
         .selectAll("canvas.clusterMapCanvas")
-        .data(useCanvas ? [data] : [])
+        .data(useRaster ? [data] : [])
         .join((enter) => {
           const surface = enter
             .append("canvas")
@@ -4025,8 +5583,31 @@
             });
           surface.call(canvasZoom).on("dblclick.zoom", null);
           return surface;
-        });
+        })
+        .attr("data-renderer", runtime.config.plot.renderer);
+      if (useWebGpu) {
+        canvas.attr("data-webgpu", function () { return this.dataset.webgpu || "initializing"; });
+      } else {
+        canvas.attr("data-webgpu", null);
+      }
       if (canvasZoom) canvasZoom.scaleExtent(zoomExtent());
+      if (useWebGpu && globalThis.getComputedStyle(container.node()).position === "static") {
+        container.style("position", "relative");
+      }
+      const webgpuOverlay = container
+        .selectAll("canvas.clusterMapWebGpuOverlay")
+        .data(useWebGpu ? [data] : [])
+        .join((enter) =>
+          enter
+            .append("canvas")
+            .attr("class", "clusterMapWebGpuOverlay")
+            .style("position", "absolute")
+            .style("inset", "0")
+            .style("display", "block")
+            .style("width", "100%")
+            .style("height", "100%")
+            .style("pointer-events", "none")
+        );
       if (showMinimap && globalThis.getComputedStyle(container.node()).position === "static") {
         container.style("position", "relative");
       }
@@ -4052,7 +5633,7 @@
         .style("height", showMinimap ? `${minimapOptions.height}px` : null)
         .style("right", showMinimap ? `${minimapOptions.margin}px` : null)
         .style("bottom", showMinimap ? `${minimapOptions.margin}px` : null);
-      svg.style("display", useCanvas ? "none" : null);
+      svg.style("display", useRaster ? "none" : null);
       const overlay = createHtmlOverlay({
         tooltip: container.select("div.tooltip"),
         scales: runtime.scales,
@@ -4071,9 +5652,78 @@
         .on("mouseenter", overlay.enter)
         .on("mouseleave", overlay.leave);
       const paintCanvas = (canvasNode) => {
+        const flipLayer =
+          canvasPreview?.type === "locus-flip" &&
+          canvasPendingFlip &&
+          canvasPreviewScene === canvasPendingFlip.sourceScene &&
+          canvasFlipStaticCanvas &&
+          canvasFlipLocusCanvas &&
+          canvasFlipLocusFrame &&
+          canvasFlipDirtyFrame;
+        if (flipLayer) {
+          restoreCanvasFlipRegion(
+            canvasNode,
+            canvasFlipStaticCanvas,
+            canvasFlipDirtyFrame,
+            canvasPixelRatio()
+          );
+          renderCanvas({
+            canvas: canvasNode,
+            scene: canvasPreviewScene,
+            camera: getCamera(chartState),
+            // Keep the normal filled-ribbon appearance throughout the flip.
+            config: {
+              ...runtime.config,
+              link: {
+                ...runtime.config.link,
+                asLine: false,
+                label: { ...runtime.config.link.label, show: false },
+              },
+            },
+            scales: runtime.scales,
+            pixelRatio: canvasPixelRatio(),
+            preview: canvasPreview,
+            include: { links: canvasPendingFlip.dynamic.links },
+            showLoci: false,
+            showGenes: false,
+            showClusterLabels: false,
+            showChrome: false,
+            suppressLocusHover: true,
+            clear: false,
+          });
+          drawCanvasFlipLocus(
+            canvasNode,
+            canvasFlipLocusCanvas,
+            canvasFlipLocusFrame,
+            canvasFlipDirtyFrame,
+            canvasPreview,
+            canvasPixelRatio()
+          );
+          const stationaryGenes = new Set(canvasPendingFlip.dynamic.genes);
+          for (const uid of canvasPendingFlip.locusRecords.genes) stationaryGenes.delete(uid);
+          if (stationaryGenes.size) {
+            renderCanvas({
+              canvas: canvasNode,
+              scene: canvasPreviewScene,
+              camera: getCamera(chartState),
+              config: runtime.config,
+              scales: runtime.scales,
+              pixelRatio: canvasPixelRatio(),
+              include: { genes: stationaryGenes },
+              showLinks: false,
+              showLoci: false,
+              showClusterLabels: false,
+              showChrome: false,
+              suppressLocusHover: true,
+              clear: false,
+            });
+          }
+          paintMinimap();
+          return canvasFlipDirtyFrame;
+        }
         const result = renderCanvas({
           canvas: canvasNode,
-          scene: canvasAnimation?.scene || runtime.scene.get(),
+          scene: canvasAnimation?.scene || canvasPreviewScene || runtime.scene.get(),
           previousScene: canvasAnimation?.previousScene,
           progress: canvasAnimation?.progress,
           camera: getCamera(chartState),
@@ -4088,7 +5738,302 @@
         paintMinimap();
         return result;
       };
-      paintCanvasFrame = useCanvas ? () => paintCanvas(canvas.node()) : null;
+      const paintWebGpu = (canvasNode, scene) => {
+        if (!canvasNode || !scene) return;
+        if (webgpuUnavailable) {
+          paintCanvas(webgpuOverlay.node());
+          return;
+        }
+        webgpuPendingScene = scene;
+        const overlayNode = webgpuOverlay.node();
+        if (overlayNode) {
+          renderCanvas({
+            canvas: overlayNode,
+            scene,
+            camera: getCamera(chartState),
+            config: runtime.config,
+            scales: runtime.scales,
+            hoverLocusUid: canvasHoverLocusUid,
+            suppressLocusHover: canvasPreview?.type === "locus-flip",
+            pixelRatio: canvasPixelRatio(),
+            preview: canvasPreview,
+            showLinks: false,
+            showLocusTracks: false,
+            showGenes: false,
+          });
+        }
+        const draw = () => {
+          const bounds = canvasNode.getBoundingClientRect();
+          webgpuRenderer?.render({
+            nextScene: webgpuPendingScene,
+            preview: canvasPreview,
+            camera: getCamera(chartState),
+            scales: runtime.scales,
+            config: runtime.config,
+            width: bounds.width,
+            height: bounds.height,
+            pixelRatio: canvasPixelRatio(),
+          });
+        };
+        if (webgpuRenderer && webgpuCanvas === canvasNode) {
+          draw();
+          return;
+        }
+        if (webgpuInit) return;
+        webgpuCanvas = canvasNode;
+        const generation = ++webgpuGeneration;
+        webgpuInit = createWebGpuRenderer(canvasNode)
+          .then((renderer) => {
+            if (generation !== webgpuGeneration || webgpuCanvas !== canvasNode) {
+              renderer?.destroy();
+              return;
+            }
+            webgpuRenderer = renderer;
+            webgpuInit = null;
+            if (renderer) {
+              d3.select(canvasNode).attr("data-webgpu", "active");
+              draw();
+            }
+            else {
+              webgpuUnavailable = true;
+              d3.select(canvasNode).attr("data-webgpu", "unavailable");
+              paintCanvas(webgpuOverlay.node());
+            }
+          })
+          .catch((error) => {
+            if (generation !== webgpuGeneration || webgpuCanvas !== canvasNode) return;
+            webgpuInit = null;
+            webgpuUnavailable = true;
+            d3.select(canvasNode).attr("data-webgpu", "error");
+            console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
+            paintCanvas(webgpuOverlay.node());
+          });
+      };
+      paintCanvasFrame = useCanvas
+        ? () => paintCanvas(canvas.node())
+        : useWebGpu
+          ? () => paintWebGpu(canvas.node(), webgpuPendingScene || runtime.scene.get())
+          : null;
+      const flipLayerMatches = (layer, pending, bounds, pixelRatio) => {
+        if (!layer || layer.sourceScene !== pending.sourceScene || layer.locusUid !== pending.locus.uid) {
+          return false;
+        }
+        const camera = getCamera(chartState);
+        return (
+          layer.width === bounds.width &&
+          layer.height === bounds.height &&
+          layer.pixelRatio === pixelRatio &&
+          layer.camera.x === camera.x &&
+          layer.camera.y === camera.y &&
+          layer.camera.k === camera.k
+        );
+      };
+      const renderFlipStaticBase = (pending, baseCanvas, bounds, pixelRatio) => {
+        const renderOptions = {
+          scene: pending.sourceScene,
+          camera: getCamera(chartState),
+          config: runtime.config,
+          scales: runtime.scales,
+          dimensions: { width: bounds.width, height: bounds.height },
+          pixelRatio,
+          suppressLocusHover: true,
+        };
+        renderCanvas({
+          canvas: baseCanvas,
+          ...renderOptions,
+          omit: {
+            links: pending.dynamic.links,
+            loci: pending.dynamic.loci,
+            genes: pending.dynamic.genes,
+          },
+          showLoci: false,
+          showGenes: false,
+          showClusterLabels: false,
+          showChrome: false,
+        });
+        renderCanvas({
+          canvas: baseCanvas,
+          ...renderOptions,
+          omit: { loci: pending.dynamic.loci, genes: pending.dynamic.genes },
+          showLinks: false,
+          clear: false,
+        });
+      };
+      const renderFlipLocusBitmap = (pending, locusCanvas, bounds, pixelRatio) => {
+        const frame = screenFrameForBounds(
+          boundsForRecords(pending.sourceScene.loci, pending.locusRecords.loci),
+          bounds
+        );
+        const camera = getCamera(chartState);
+        renderCanvas({
+          canvas: locusCanvas,
+          scene: pending.sourceScene,
+          camera: { ...camera, x: camera.x - frame.x, y: camera.y - frame.y },
+          config: {
+            ...runtime.config,
+            gene: {
+              ...runtime.config.gene,
+              // A reflected bitmap would mirror glyphs. The normal target scene
+              // redraw restores labels at the end of the brief animation.
+              label: { ...runtime.config.gene.label, show: false },
+            },
+          },
+          scales: runtime.scales,
+          dimensions: frame,
+          pixelRatio,
+          include: pending.locusRecords,
+          showLinks: false,
+          showClusterLabels: false,
+          showChrome: false,
+          suppressLocusHover: true,
+        });
+        return frame;
+      };
+      const boundsForRecords = (records, ids) => {
+        let result = null;
+        for (const uid of ids) {
+          const bounds = records.get(uid)?.bounds;
+          if (!bounds) continue;
+          result = result
+            ? {
+                minX: Math.min(result.minX, bounds.minX),
+                maxX: Math.max(result.maxX, bounds.maxX),
+                minY: Math.min(result.minY, bounds.minY),
+                maxY: Math.max(result.maxY, bounds.maxY),
+              }
+            : { ...bounds };
+        }
+        return result;
+      };
+      const screenFrameForBounds = (worldBounds, canvasBounds, padding = 12) => {
+        const camera = getCamera(chartState);
+        if (!worldBounds) return { x: 0, y: 0, width: 1, height: 1 };
+        const x = Math.max(0, camera.x + worldBounds.minX * camera.k - padding);
+        const y = Math.max(0, camera.y + worldBounds.minY * camera.k - padding);
+        const right = Math.min(
+          canvasBounds.width,
+          camera.x + worldBounds.maxX * camera.k + padding
+        );
+        const bottom = Math.min(
+          canvasBounds.height,
+          camera.y + worldBounds.maxY * camera.k + padding
+        );
+        return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
+      };
+      const flipDirtyBounds = (pending) => {
+        const locusBounds = boundsForRecords(pending.sourceScene.loci, pending.dynamic.loci);
+        const linkBounds = boundsForRecords(pending.sourceScene.links, pending.dynamic.links);
+        const geneBounds = boundsForRecords(pending.sourceScene.genes, pending.dynamic.genes);
+        return [locusBounds, linkBounds, geneBounds]
+          .filter(Boolean)
+          .reduce(
+            (result, bounds) =>
+              result
+                ? {
+                    minX: Math.min(result.minX, bounds.minX),
+                    maxX: Math.max(result.maxX, bounds.maxX),
+                    minY: Math.min(result.minY, bounds.minY),
+                    maxY: Math.max(result.maxY, bounds.maxY),
+                  }
+                : { ...bounds },
+            null
+          );
+      };
+      const restoreCanvasFlipRegion = (canvasNode, baseCanvas, frame, pixelRatio) => {
+        const context = canvasNode.getContext("2d");
+        const left = Math.max(0, Math.floor(frame.x * pixelRatio));
+        const top = Math.max(0, Math.floor(frame.y * pixelRatio));
+        const right = Math.min(baseCanvas.width, Math.ceil((frame.x + frame.width) * pixelRatio));
+        const bottom = Math.min(baseCanvas.height, Math.ceil((frame.y + frame.height) * pixelRatio));
+        const width = Math.max(1, right - left);
+        const height = Math.max(1, bottom - top);
+        const x = left / pixelRatio;
+        const y = top / pixelRatio;
+        const cssWidth = width / pixelRatio;
+        const cssHeight = height / pixelRatio;
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        context.clearRect(x, y, cssWidth, cssHeight);
+        context.drawImage(baseCanvas, left, top, width, height, x, y, cssWidth, cssHeight);
+      };
+      const drawCanvasFlipLocus = (canvasNode, locusCanvas, locusFrame, dirtyFrame, preview, pixelRatio) => {
+        const axis = preview.axes?.get(preview.locusUid);
+        if (axis === undefined) return;
+        const camera = getCamera(chartState);
+        const context = canvasNode.getContext("2d");
+        const screenAxis = camera.x + axis * camera.k;
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        context.save();
+        context.beginPath();
+        context.rect(dirtyFrame.x, dirtyFrame.y, dirtyFrame.width, dirtyFrame.height);
+        context.clip();
+        context.translate(screenAxis, 0);
+        context.scale(1 - 2 * preview.progress, 1);
+        context.translate(-screenAxis, 0);
+        context.drawImage(
+          locusCanvas,
+          0,
+          0,
+          locusCanvas.width,
+          locusCanvas.height,
+          locusFrame.x,
+          locusFrame.y,
+          locusFrame.width,
+          locusFrame.height
+        );
+        context.restore();
+      };
+      prepareCanvasFlipBase = (pending) => {
+        const canvasNode = canvas.node();
+        if (!canvasNode || !pending.sourceScene) return;
+        const bounds = canvasNode.getBoundingClientRect();
+        const pixelRatio = canvasPixelRatio();
+        if (flipLayerMatches(canvasPreparedFlipBase, pending, bounds, pixelRatio)) {
+          canvasFlipStaticCanvas = canvasPreparedFlipBase.baseCanvas;
+          canvasFlipLocusCanvas = canvasPreparedFlipBase.locusCanvas;
+          canvasFlipLocusFrame = canvasPreparedFlipBase.locusFrame;
+        } else {
+          if (!canvasFlipStaticCanvas) canvasFlipStaticCanvas = document.createElement("canvas");
+          if (!canvasFlipLocusCanvas) canvasFlipLocusCanvas = document.createElement("canvas");
+          renderFlipStaticBase(pending, canvasFlipStaticCanvas, bounds, pixelRatio);
+          canvasFlipLocusFrame = renderFlipLocusBitmap(
+            pending,
+            canvasFlipLocusCanvas,
+            bounds,
+            pixelRatio
+          );
+        }
+        canvasFlipDirtyFrame = screenFrameForBounds(flipDirtyBounds(pending), bounds);
+      };
+      warmCanvasFlipBase = (locusUid) => {
+        if (!locusUid || canvasPendingFlip) return;
+        if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
+        canvasFlipWarmFrame = requestAnimationFrame(() => {
+          canvasFlipWarmFrame = null;
+          const canvasNode = canvas.node();
+          const locus = runtime.get.locusData(locusUid);
+          const sourceScene = canvasScene || runtime.scene.get();
+          if (!canvasNode || !locus || !sourceScene || canvasPendingFlip) return;
+          const bounds = canvasNode.getBoundingClientRect();
+          const pixelRatio = canvasPixelRatio();
+          const pending = createCanvasFlipPending(locus, sourceScene);
+          if (flipLayerMatches(canvasPreparedFlipBase, pending, bounds, pixelRatio)) return;
+          const baseCanvas = document.createElement("canvas");
+          const locusCanvas = document.createElement("canvas");
+          renderFlipStaticBase(pending, baseCanvas, bounds, pixelRatio);
+          const locusFrame = renderFlipLocusBitmap(pending, locusCanvas, bounds, pixelRatio);
+          canvasPreparedFlipBase = {
+            sourceScene,
+            locusUid,
+            width: bounds.width,
+            height: bounds.height,
+            pixelRatio,
+            camera: { ...getCamera(chartState) },
+            baseCanvas,
+            locusCanvas,
+            locusFrame,
+          };
+        });
+      };
       const minimapProjection = (scene = runtime.scene.get()) =>
         createMinimapProjection({
           bounds: scene?.bounds,
@@ -4109,7 +6054,7 @@
           viewport: { width: bounds.width, height: bounds.height },
         });
       };
-      const scheduleMinimapBase = (scene) => {
+      scheduleMinimapBase = (scene) => {
         if (!showMinimap || !scene?.bounds) return;
         if (minimapBaseFrame !== null) cancelAnimationFrame(minimapBaseFrame);
         minimapBaseFrame = requestAnimationFrame(() => {
@@ -4150,16 +6095,14 @@
       const animateCanvas = (canvasNode, scene, animate) => {
         stopCanvasAnimation();
         if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
-          canvasFlipAnimationProgress = null;
           canvasScene = scene;
           paintCanvas(canvasNode);
           return;
         }
         const previousScene = canvasScene;
         const duration = runtime.config.plot.transitionDuration;
-        const initialProgress = canvasFlipAnimationProgress ?? 0;
-        const suppressLocusHover = canvasFlipAnimationProgress !== null;
-        canvasFlipAnimationProgress = null;
+        const initialProgress = 0;
+        const suppressLocusHover = false;
         const startedAt = performance.now();
         const frame = (now) => {
           const elapsed = Math.min(1, (now - startedAt) / duration);
@@ -4200,10 +6143,13 @@
         runtime.config.scaleBar.basePair = value;
         runtime.plot.update();
       };
-      if (useCanvas) {
+      if (useRaster) {
         const targetForEvent = (canvasNode, event) =>
           hitTestCanvas({
-            canvas: canvasNode,
+            // A canvas can only have one rendering context. WebGPU owns the
+            // visible surface, so use its transparent 2D text/chrome overlay
+            // for the metric-dependent portions of hit testing instead.
+            canvas: useWebGpu ? webgpuOverlay.node() : canvasNode,
             scene: runtime.scene.get(),
             camera: getCamera(chartState),
             config: runtime.config,
@@ -4223,6 +6169,7 @@
           if (canvasHoverLocusUid !== locusUid) {
             canvasHoverLocusUid = locusUid;
             scheduleCanvasPaint();
+            if (useCanvas) warmCanvasFlipBase(locusUid);
           }
           d3.select(canvasNode).style("cursor", cursorForTarget(target));
         };
@@ -4257,20 +6204,30 @@
             const point = canvasWorldPoint(this, event, getCamera(chartState));
             this.setPointerCapture(event.pointerId);
             updateCanvasAffordance(this, target);
+            if (useCanvas) warmCanvasFlipBase(locusForTarget(target));
             if (target.action === "move-cluster") {
-              beginCanvasMotion();
-              canvasGesture = { action: target.action, clusterUid: target.clusterUid };
+              canvasGesture = {
+                action: target.action,
+                clusterUid: target.clusterUid,
+                start: { x: event.clientX, y: event.clientY },
+                moved: false,
+              };
               interactionController.beginClusterDrag(target.clusterUid, point.y);
             } else if (target.action === "move-locus") {
-              beginCanvasMotion();
-              canvasGesture = { action: target.action, locusUid: target.locusUid };
+              canvasGesture = {
+                action: target.action,
+                locusUid: target.locusUid,
+                start: { x: event.clientX, y: event.clientY },
+                moved: false,
+              };
               interactionController.beginLocusDrag(target.locusUid, point.x);
             } else if (target.action.startsWith("trim-locus")) {
-              beginCanvasMotion();
               canvasGesture = {
                 action: target.action,
                 locusUid: target.locusUid,
                 edge: target.action.endsWith("left") ? "left" : "right",
+                start: { x: event.clientX, y: event.clientY },
+                moved: false,
               };
               interactionController.beginLocusTrim();
             } else if (target.action === "gene") {
@@ -4295,6 +6252,22 @@
               return;
             }
             const point = canvasWorldPoint(this, event, getCamera(chartState));
+            const draggable =
+              (canvasGesture.action === "move-cluster" ||
+                canvasGesture.action === "move-locus" ||
+                canvasGesture.edge);
+            if (draggable && !canvasGesture.moved) {
+              if (
+                Math.hypot(
+                  event.clientX - canvasGesture.start.x,
+                  event.clientY - canvasGesture.start.y
+                ) < 2
+              ) {
+                return;
+              }
+              canvasGesture.moved = true;
+              beginCanvasMotion();
+            }
             if (canvasGesture.action === "move-cluster") {
               interactionController.moveClusterDrag(point.y);
             } else if (canvasGesture.action === "move-locus") {
@@ -4315,14 +6288,19 @@
             const gesture = canvasGesture;
             canvasGesture = null;
             if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
-            if (gesture.action === "move-cluster") interactionController.endClusterDrag();
-            else if (gesture.action === "move-locus") interactionController.endLocusDrag();
-            else if (gesture.edge) {
-              interactionController.endLocusTrim(runtime.get.locusData(gesture.locusUid));
+            if (gesture.action === "move-cluster") {
+              if (gesture.moved) interactionController.endClusterDrag();
+              else interactionController.cancelClusterDrag();
+            } else if (gesture.action === "move-locus") {
+              if (gesture.moved) interactionController.endLocusDrag();
+              else interactionController.cancelLocusDrag();
+            } else if (gesture.edge) {
+              if (gesture.moved) interactionController.endLocusTrim(runtime.get.locusData(gesture.locusUid));
+              else interactionController.cancelLocusTrim();
             } else if (gesture.action === "gene" && runtime.config.gene.shape.onClick) {
               runtime.config.gene.shape.onClick(event, runtime.get.geneData(gesture.geneUid));
             }
-            if (gesture.action === "move-cluster" || gesture.action === "move-locus" || gesture.edge) {
+            if (gesture.moved) {
               endCanvasMotion();
             }
             updateCanvasAffordance(this, targetForEvent(this, event));
@@ -4408,6 +6386,10 @@
         if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
         scheduleMinimapBase(scene);
         animateCanvas(canvas.node(), scene, hasInitialView && animate);
+      } else if (useWebGpu) {
+        if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
+        webgpuPendingScene = scene;
+        paintWebGpu(canvas.node(), scene);
       } else {
         renderSvg({
           plot,
@@ -4475,7 +6457,13 @@
       const { width, height } = canvas.getBoundingClientRect();
       if (!width || !height || !scene.bounds) return;
 
-      const context = canvas.getContext("2d");
+      // Requesting a 2D context would permanently prevent a WebGPU context on
+      // the visible canvas. Text measurement has no visual side effect, so use
+      // a detached 2D canvas for the WebGPU renderer.
+      const measurementCanvas = runtime.config.plot.renderer === "webgpu"
+        ? document.createElement("canvas")
+        : canvas;
+      const context = measurementCanvas.getContext("2d");
       const bounds = { ...scene.bounds };
       const include = (x, y) => {
         bounds.minX = Math.min(bounds.minX, x);

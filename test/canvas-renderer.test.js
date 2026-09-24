@@ -247,6 +247,10 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     canvasWorldViewport(canvas, { x: 20, y: 30, k: 2 }, 0),
     { minX: -10, maxX: 90, minY: -15, maxY: 35 }
   );
+  assert.deepEqual(
+    canvasWorldViewport(canvas, { x: 20, y: 30, k: 2 }, 0, { width: 50, height: 40 }),
+    { minX: -10, maxX: 15, minY: -15, maxY: 5 }
+  );
 
   const wideLocus = {
     ...cluster.loci[0],

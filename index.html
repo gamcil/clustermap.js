@@ -29,7 +29,12 @@
 		const params = new URLSearchParams(window.location.search)
 		const testMode = params.has("test")
 		const fixture = params.get("fixture")
-		const renderer = params.get("renderer") || (fixture === "large" ? "canvas" : "svg")
+		const biologicalFixtures = {
+			mcaa: "fixtures/mcaa-neighbourhoods-173.json",
+			pks: "fixtures/pks-regions-142.json",
+		}
+		const biologicalFixture = biologicalFixtures[fixture]
+		const renderer = params.get("renderer") || (fixture === "large" || biologicalFixture ? "canvas" : "svg")
 		const minimumZoom = Number(params.get("minZoom"))
 
 		function download(blob, filename) {
@@ -66,6 +71,12 @@
 						show: false
 					}
 				},
+				legend: {
+					// The biological fixture has 1,200 homology groups. They remain
+					// available to interactions, but a 1,200-entry legend is not a
+					// useful overview of the figure.
+					show: !biologicalFixture,
+				},
 				link: {
 					threshold: 0.3,
           bestOnly: true,
@@ -74,7 +85,9 @@
 
 		const data = fixture === "large"
 			? Promise.resolve(createLargeTestingData())
-			: d3.json("testing.json")
+			: biologicalFixture
+				? d3.json(biologicalFixture)
+				: d3.json("testing.json")
 
 		data
 			.then(data => {

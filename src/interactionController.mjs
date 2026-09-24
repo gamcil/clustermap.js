@@ -55,6 +55,12 @@ export function createInteractionController({
       commitClusterOrder();
     },
 
+    cancelClusterDrag() {
+      if (!clusterDrag) return;
+      clusterDrag = null;
+      setDragging(false);
+    },
+
     beginLocusDrag(uid, pointerX) {
       locusDrag = {
         uid,
@@ -80,6 +86,12 @@ export function createInteractionController({
       commitLocusOffset(uid);
     },
 
+    cancelLocusDrag() {
+      if (!locusDrag) return;
+      locusDrag = null;
+      setDragging(false);
+    },
+
     beginLocusTrim() {
       setDragging(true);
     },
@@ -91,6 +103,10 @@ export function createInteractionController({
     endLocusTrim(locus) {
       setDragging(false);
       commitLocusTrim(locus);
+    },
+
+    cancelLocusTrim() {
+      setDragging(false);
     },
 
     flipLocus,

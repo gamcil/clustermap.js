@@ -20,7 +20,7 @@ import {
   getLocusScaleValues,
   xDistance,
 } from "./loci/layout.mjs";
-import { buildScene } from "./layout.mjs";
+import { buildScene, patchFlippedLocusScene } from "./layout.mjs";
 
 // This is deliberately one factory per chart, not a collection of tiny API
 // factories: configuration, scales, indexes, and mutable scene state must not
@@ -109,6 +109,7 @@ const get = {
   geneData: (uid) => chartIndex?.geneById.get(uid),
   locusData: (uid) => chartIndex?.locusById.get(uid),
   clusterData: (uid) => chartIndex?.clusterById.get(uid),
+  linksForGene: (uid) => chartIndex?.linksByGeneId.get(uid) || [],
 };
 
 const plot = {
@@ -191,6 +192,27 @@ const scene = {
           groupColour: config.link.groupColour,
         },
       },
+    });
+    return currentScene;
+  },
+  patchFlippedLocus: (previousScene, locus) => {
+    currentScene = patchFlippedLocusScene(previousScene, locus, {
+      scaleX: scales.x,
+      locusOffset: scales.locus,
+      getLocusState: locusState,
+      getGeneState: (gene) => getGeneState(chartState, gene),
+      areClustersAdjacent: cluster.adjacent,
+      shape: config.gene.shape,
+      label: config.gene.label,
+      link: {
+        asLine: config.link.asLine,
+        straight: config.link.straight,
+        threshold: config.link.threshold,
+        labelPosition: config.link.label.position,
+      },
+      clusterLabel: cluster.locusText,
+      alignLabels: config.cluster.alignLabels,
+      linksForGene: get.linksForGene,
     });
     return currentScene;
   },
@@ -362,6 +384,7 @@ return {
   config,
   get,
   ids,
+  synchronizeLocusLayoutState,
   synchronizeLocusLayoutStates,
   setChartIndex,
   setChartState,

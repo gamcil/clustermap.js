@@ -50,3 +50,40 @@ test("interaction controller previews and commits drag state from world coordina
     ["flip", "locus"],
   ]);
 });
+
+test("interaction controller cancels an unstarted drag without committing state", async () => {
+  const { createInteractionController } = await import(
+    "../src/interactionController.mjs"
+  );
+  const calls = [];
+  const controller = createInteractionController({
+    clusterRows: () => [0],
+    getClusterOrder: () => ["cluster"],
+    getClusterPosition: () => 0,
+    getLocusOffset: () => 0,
+    setDragging: (dragging) => calls.push(["dragging", dragging]),
+    previewClusterDrag: () => calls.push(["preview-cluster"]),
+    commitClusterOrder: () => calls.push(["commit-cluster"]),
+    previewLocusOffset: () => calls.push(["preview-locus"]),
+    commitLocusOffset: () => calls.push(["commit-locus"]),
+    previewLocusTrim: () => calls.push(["preview-trim"]),
+    commitLocusTrim: () => calls.push(["commit-trim"]),
+    flipLocus: () => {},
+  });
+
+  controller.beginClusterDrag("cluster", 0);
+  controller.cancelClusterDrag();
+  controller.beginLocusDrag("locus", 0);
+  controller.cancelLocusDrag();
+  controller.beginLocusTrim();
+  controller.cancelLocusTrim();
+
+  assert.deepEqual(calls, [
+    ["dragging", true],
+    ["dragging", false],
+    ["dragging", true],
+    ["dragging", false],
+    ["dragging", true],
+    ["dragging", false],
+  ]);
+});

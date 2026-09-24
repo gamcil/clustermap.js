@@ -106,6 +106,35 @@ async function getLocusText(page, locus) {
   return page.locator(`#${clusterInfoId} text.locusText`);
 }
 
+async function requireWebGpuCanvas(page) {
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  await expect(canvas).toBeVisible();
+  await expect.poll(() => canvas.getAttribute("data-webgpu")).not.toBe("initializing");
+  const status = await canvas.getAttribute("data-webgpu");
+  test.skip(status === "unavailable", "WebGPU adapter is unavailable in this browser");
+  expect(status).toBe("active");
+  return canvas;
+}
+
+async function canvasHasInkAt(canvas, point) {
+  return canvas.evaluate((node, { x, y }) => {
+    const bounds = node.getBoundingClientRect();
+    const sampleX = Math.round(((x - bounds.left) / bounds.width) * node.width);
+    const sampleY = Math.round(((y - bounds.top) / bounds.height) * node.height);
+    const snapshot = document.createElement("canvas");
+    snapshot.width = node.width;
+    snapshot.height = node.height;
+    const context = snapshot.getContext("2d");
+    context.drawImage(node, 0, 0);
+    const pixels = context.getImageData(sampleX - 2, sampleY - 2, 5, 5).data;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const [red, green, blue, alpha] = pixels.slice(index, index + 4);
+      if (alpha && red < 230 && green < 230 && blue < 230) return true;
+    }
+    return false;
+  }, point);
+}
+
 test("double-clicking a locus reverses its gene layout", async ({ page }, testInfo) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
 
@@ -673,6 +702,187 @@ test("canvas renderer forwards locus double-clicks to the shared controller", as
     d3.select(host).datum(data).call(chart);
   });
   await expect(page.locator("g.clusterInfo text.locusText").first()).toContainText("(reversed)");
+});
+
+test("WebGPU renderer forwards locus interactions through its Canvas overlay", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  const supported = await page.evaluate(() => Boolean(navigator.gpu));
+  test.skip(!supported, "WebGPU is unavailable in this browser");
+
+  const track = page.locator("g.locus").first().locator("line.trackBar");
+  const gene = page.locator("g.gene").first().locator("polygon.genePolygon");
+  const [trackBox, geneBox] = await Promise.all([track.boundingBox(), gene.boundingBox()]);
+  expect(trackBox).not.toBeNull();
+  expect(geneBox).not.toBeNull();
+
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({
+      plot: { renderer: "webgpu", transitionDuration: 0 },
+    });
+    window.__webgpuInteractionTest = { chart, data, host };
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const canvas = await requireWebGpuCanvas(page);
+  await expect(page.locator("canvas.clusterMapWebGpuOverlay")).toBeVisible();
+
+  const point = { x: trackBox.x + trackBox.width / 2, y: trackBox.y - 5 };
+  await page.mouse.move(point.x, point.y);
+  await expect(canvas).toHaveCSS("cursor", "move");
+  await page.mouse.click(geneBox.x + geneBox.width / 2, geneBox.y + geneBox.height / 2, {
+    button: "right",
+  });
+  await expect(page.locator("div.tooltip #gene-label-input")).toBeVisible();
+  await page.mouse.dblclick(trackBox.x + trackBox.width / 2, trackBox.y + trackBox.height / 2);
+
+  await expect.poll(() => page.evaluate(() => window.__webgpuInteractionTest.chart.exportSvg())).toContain(
+    "input_locus (reversed):10000-1"
+  );
+});
+
+test("WebGPU previews a locus drag before it is committed", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  const supported = await page.evaluate(() => Boolean(navigator.gpu));
+  test.skip(!supported, "WebGPU is unavailable in this browser");
+
+  const track = page.locator("g.locus").first().locator("line.trackBar");
+  const trackBox = await track.boundingBox();
+  expect(trackBox).not.toBeNull();
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({
+      plot: { renderer: "webgpu", transitionDuration: 0 },
+    });
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const canvas = await requireWebGpuCanvas(page);
+  const before = (await canvas.screenshot()).toString("base64");
+  const point = { x: trackBox.x + trackBox.width / 2, y: trackBox.y - 5 };
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  await page.mouse.move(point.x + 60, point.y, { steps: 4 });
+  await expect.poll(async () => (await canvas.screenshot()).toString("base64")).not.toEqual(before);
+  await page.mouse.up();
+});
+
+test("WebGPU commits an animated locus flip", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  const supported = await page.evaluate(() => Boolean(navigator.gpu));
+  test.skip(!supported, "WebGPU is unavailable in this browser");
+
+  const track = page.locator("g.locus").first().locator("line.trackBar");
+  const trackBox = await track.boundingBox();
+  expect(trackBox).not.toBeNull();
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({
+      plot: { renderer: "webgpu", transitionDuration: 180 },
+    });
+    window.__webgpuFlipTest = { chart };
+    d3.select(host).datum(data).call(chart);
+  });
+
+  await requireWebGpuCanvas(page);
+  await page.mouse.dblclick(trackBox.x + trackBox.width / 2, trackBox.y + trackBox.height / 2);
+  await expect.poll(() => page.evaluate(() => window.__webgpuFlipTest.chart.exportSvg())).toContain(
+    "input_locus (reversed):10000-1"
+  );
+});
+
+test("WebGPU previews cluster row movement before it is committed", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  const supported = await page.evaluate(() => Boolean(navigator.gpu));
+  test.skip(!supported, "WebGPU is unavailable in this browser");
+
+  const clusterInfo = page.locator("g.clusterInfo").first();
+  const clusterBox = await clusterInfo.boundingBox();
+  expect(clusterBox).not.toBeNull();
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({
+      plot: { renderer: "webgpu", transitionDuration: 0 },
+    });
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const canvas = await requireWebGpuCanvas(page);
+  const before = (await canvas.screenshot()).toString("base64");
+  const point = {
+    x: clusterBox.x + clusterBox.width / 2,
+    y: clusterBox.y + clusterBox.height / 2,
+  };
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  await page.mouse.move(point.x, point.y + 30, { steps: 4 });
+  await expect.poll(async () => (await canvas.screenshot()).toString("base64")).not.toEqual(before);
+  await page.mouse.up();
+});
+
+test("WebGPU cluster preview hides links for separated clusters", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  const supported = await page.evaluate(() => Boolean(navigator.gpu));
+  test.skip(!supported, "WebGPU is unavailable in this browser");
+
+  const clusters = page.locator("g.cluster");
+  const link = page.locator("path.geneLink").first();
+  const [firstBox, secondBox, thirdBox, linkBox] = await Promise.all([
+    clusters.nth(0).locator("g.clusterInfo").boundingBox(),
+    clusters.nth(1).locator("g.clusterInfo").boundingBox(),
+    clusters.nth(2).locator("g.clusterInfo").boundingBox(),
+    link.boundingBox(),
+  ]);
+  if (!firstBox || !secondBox || !thirdBox || !linkBox) {
+    throw new Error("cluster drag targets or link ribbon are not visible");
+  }
+  const linkPoint = { x: linkBox.x + linkBox.width / 2, y: linkBox.y + linkBox.height / 2 };
+
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    d3.select(host).datum(data).call(clusterMap().config({
+      plot: { renderer: "webgpu", transitionDuration: 0 },
+    }));
+  });
+
+  const canvas = await requireWebGpuCanvas(page);
+  await expect.poll(() => canvasHasInkAt(canvas, linkPoint)).toBe(true);
+  await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(thirdBox.x + thirdBox.width / 2, thirdBox.y + thirdBox.height / 2, {
+    steps: 10,
+  });
+  await expect.poll(() => canvasHasInkAt(canvas, linkPoint)).toBe(false);
+  await page.mouse.move(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height / 2, {
+    steps: 10,
+  });
+  await expect.poll(() => canvasHasInkAt(canvas, linkPoint)).toBe(true);
+  await page.mouse.up();
 });
 
 test("canvas renderer opens the shared gene menu at the pointer", async ({ page }) => {

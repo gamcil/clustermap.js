@@ -9,7 +9,7 @@ import {
   getLinkLabelPosition,
   getLinkPath,
 } from "./links/layout.mjs";
-import { createSpatialIndex } from "./spatialIndex.mjs";
+import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
 
 function worldPolygon(points, x, y) {
   return points.map((point, index) => point + (index % 2 === 0 ? x : y));
@@ -131,53 +131,164 @@ function buildChrome(bounds, genes, chrome) {
   return { legend, scaleBar, colourBar };
 }
 
+function createLocusLayout(locus, clusterLayout, {
+  scaleX,
+  getLocusState,
+  locusOffset,
+  shape,
+  geneMidpoint,
+}) {
+  const state = getLocusState(locus);
+  const localX = locusOffset(locus.uid);
+  const start = scaleX(state.start);
+  const end = scaleX(state.end);
+  const worldX = clusterLayout.x + localX;
+  return {
+    source: locus,
+    cluster: clusterLayout.source,
+    state,
+    localX,
+    x: worldX,
+    y: clusterLayout.y,
+    start,
+    end,
+    worldStart: worldX + start,
+    worldEnd: worldX + end,
+    bounds: {
+      minX: worldX + start,
+      maxX: worldX + end,
+      minY: clusterLayout.y - 10,
+      maxY: clusterLayout.y + shape.tipHeight * 2 + shape.bodyHeight + 10,
+    },
+    transform: { x: localX, y: 0 },
+    track: {
+      // The physical extent is unchanged by a flip, but retaining the
+      // endpoint orientation lets renderers animate the bar collapsing
+      // through its midpoint and growing out in the reversed direction.
+      x1: state.flipped ? end : start,
+      x2: state.flipped ? start : end,
+      y: geneMidpoint,
+    },
+    hover: {
+      x: start,
+      y: -10,
+      width: end - start,
+      height: shape.tipHeight * 2 + shape.bodyHeight + 20,
+      leftHandleX: start - 8,
+      rightHandleX: end,
+    },
+    genes: [],
+  };
+}
+
+function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, label }) {
+  const display = { ...gene, ...getGeneState(gene) };
+  const visible =
+    display.start >= locusLayout.state.start && display.end <= locusLayout.state.end + 1;
+  const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
+  const polygon = worldPolygon(localPolygon, locusLayout.x, locusLayout.y);
+  return {
+    source: gene,
+    display,
+    locus: locusLayout,
+    visible,
+    localPolygon,
+    polygon,
+    bounds: boundsFromPoints(polygon),
+    label: getGeneLabelLayout(display, { scaleX, shape, label }),
+    labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
+    labelDy: getGeneLabelDy(label.position),
+  };
+}
+
+function createLinkLayout(source, order, { genes, loci, clusters, areClustersAdjacent, scaleX, link, geneMidpoint }) {
+  const query = genes.get(source.query.uid);
+  const target = genes.get(source.target.uid);
+  let anchors = null;
+  if (query && target) {
+    anchors = getLinkAnchors(source, {
+      geneForUid: (uid) => genes.get(uid)?.display,
+      areClustersAdjacent,
+      scaleX,
+      horizontalOffset: (gene) => {
+        const locus = loci.get(gene.locusUid);
+        return locus ? locus.x : 0;
+      },
+      verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
+      geneMidpoint,
+    });
+  }
+  return {
+    source,
+    order,
+    anchors,
+    bounds: boundsFromLinkAnchors(anchors),
+    path: getLinkPath(anchors, link),
+    labelPosition: anchors ? getLinkLabelPosition(anchors, link.labelPosition) : null,
+    visible:
+      Boolean(anchors) &&
+      source.identity >= link.threshold &&
+      query?.visible &&
+      target?.visible,
+  };
+}
+
+function createLocusHitRegions(locus) {
+  const { source, worldStart, worldEnd, y, hover } = locus;
+  const move = {
+    type: "rect",
+    action: "move-locus",
+    locusUid: source.uid,
+    x: worldStart,
+    y: y + hover.y,
+    width: worldEnd - worldStart,
+    height: hover.height,
+  };
+  const trimLeft = {
+    type: "rect",
+    action: "trim-locus-left",
+    locusUid: source.uid,
+    x: worldStart + hover.leftHandleX - hover.x,
+    y: y + hover.y,
+    width: hover.x - hover.leftHandleX,
+    height: hover.height,
+  };
+  const trimRight = {
+    type: "rect",
+    action: "trim-locus-right",
+    locusUid: source.uid,
+    x: worldEnd,
+    y: y + hover.y,
+    width: 8,
+    height: hover.height,
+  };
+  return { move, trimLeft, trimRight };
+}
+
+function createGeneHitRegion(gene) {
+  if (!gene.visible) return null;
+  return {
+    type: "polygon",
+    action: "gene",
+    geneUid: gene.source.uid,
+    points: gene.polygon,
+  };
+}
+
 function buildHitRegions(loci, genes) {
   const locusRegions = new Map();
   const geneRegions = new Map();
   const all = [];
 
   for (const locus of loci.values()) {
-    const { source, worldStart, worldEnd, y, hover } = locus;
-    const move = {
-      type: "rect",
-      action: "move-locus",
-      locusUid: source.uid,
-      x: worldStart,
-      y: y + hover.y,
-      width: worldEnd - worldStart,
-      height: hover.height,
-    };
-    const trimLeft = {
-      type: "rect",
-      action: "trim-locus-left",
-      locusUid: source.uid,
-      x: worldStart + hover.leftHandleX - hover.x,
-      y: y + hover.y,
-      width: hover.x - hover.leftHandleX,
-      height: hover.height,
-    };
-    const trimRight = {
-      type: "rect",
-      action: "trim-locus-right",
-      locusUid: source.uid,
-      x: worldEnd,
-      y: y + hover.y,
-      width: 8,
-      height: hover.height,
-    };
-    const regions = { move, trimLeft, trimRight };
-    locusRegions.set(source.uid, regions);
-    all.push(move, trimLeft, trimRight);
+    const regions = createLocusHitRegions(locus);
+    locusRegions.set(locus.source.uid, regions);
+    all.push(regions.move, regions.trimLeft, regions.trimRight);
   }
 
   for (const gene of genes.values()) {
-    if (!gene.visible) continue;
-    const region = {
-      type: "polygon",
-      action: "gene",
-      geneUid: gene.source.uid,
-      points: gene.polygon,
-    };
+    const region = createGeneHitRegion(gene);
+    if (!region) continue;
     geneRegions.set(gene.source.uid, region);
     all.push(region);
   }
@@ -227,47 +338,13 @@ export function buildScene(
     clusters.set(cluster.uid, clusterLayout);
 
     for (const locus of cluster.loci) {
-      const state = getLocusState(locus);
-      const localX = locusOffset(locus.uid);
-      const start = scaleX(state.start);
-      const end = scaleX(state.end);
-      const worldX = x + localX;
-      const locusLayout = {
-        source: locus,
-        cluster,
-        state,
-        localX,
-        x: worldX,
-        y,
-        start,
-        end,
-        worldStart: worldX + start,
-        worldEnd: worldX + end,
-        bounds: {
-          minX: worldX + start,
-          maxX: worldX + end,
-          minY: y - 10,
-          maxY: y + shape.tipHeight * 2 + shape.bodyHeight + 10,
-        },
-        transform: { x: localX, y: 0 },
-        track: {
-          // The physical extent is unchanged by a flip, but retaining the
-          // endpoint orientation lets renderers animate the bar collapsing
-          // through its midpoint and growing out in the reversed direction.
-          x1: state.flipped ? end : start,
-          x2: state.flipped ? start : end,
-          y: geneMidpoint,
-        },
-        hover: {
-          x: start,
-          y: -10,
-          width: end - start,
-          height: shape.tipHeight * 2 + shape.bodyHeight + 20,
-          leftHandleX: start - 8,
-          rightHandleX: end,
-        },
-        genes: [],
-      };
+      const locusLayout = createLocusLayout(locus, clusterLayout, {
+        scaleX,
+        getLocusState,
+        locusOffset,
+        shape,
+        geneMidpoint,
+      });
       loci.set(locus.uid, locusLayout);
       clusterLayout.loci.push(locusLayout);
       minX = Math.min(minX, locusLayout.worldStart);
@@ -276,23 +353,12 @@ export function buildScene(
       maxY = Math.max(maxY, y + shape.tipHeight * 2 + shape.bodyHeight);
 
       for (const gene of locus.genes) {
-        const display = { ...gene, ...getGeneState(gene) };
-        const visible =
-          display.start >= state.start && display.end <= state.end + 1;
-        const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
-        const polygon = worldPolygon(localPolygon, worldX, y);
-        const geneLayout = {
-          source: gene,
-          display,
-          locus: locusLayout,
-          visible,
-          localPolygon,
-          polygon,
-          bounds: boundsFromPoints(polygon),
-          label: getGeneLabelLayout(display, { scaleX, shape, label }),
-          labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
-          labelDy: getGeneLabelDy(label.position),
-        };
+        const geneLayout = createGeneLayout(gene, locusLayout, {
+          scaleX,
+          getGeneState,
+          shape,
+          label,
+        });
         genes.set(gene.uid, geneLayout);
         locusLayout.genes.push(geneLayout);
       }
@@ -322,38 +388,18 @@ export function buildScene(
   }
 
   for (const [order, source] of data.links.entries()) {
+    const linkLayout = createLinkLayout(source, order, {
+      genes,
+      loci,
+      clusters,
+      areClustersAdjacent,
+      scaleX,
+      link,
+      geneMidpoint,
+    });
+    links.set(source.uid, linkLayout);
     const query = genes.get(source.query.uid);
     const target = genes.get(source.target.uid);
-    let anchors = null;
-    if (query && target) {
-      anchors = getLinkAnchors(source, {
-        geneForUid: (uid) => genes.get(uid)?.display,
-        areClustersAdjacent,
-        scaleX,
-        horizontalOffset: (gene) => {
-          const locus = loci.get(gene.locusUid);
-          return locus ? locus.x : 0;
-        },
-        verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
-        geneMidpoint,
-      });
-    }
-    const linkLayout = {
-      source,
-      order,
-      anchors,
-      bounds: boundsFromLinkAnchors(anchors),
-      path: getLinkPath(anchors, link),
-      labelPosition: anchors
-        ? getLinkLabelPosition(anchors, link.labelPosition)
-        : null,
-      visible:
-        Boolean(anchors) &&
-        source.identity >= link.threshold &&
-        query?.visible &&
-        target?.visible,
-    };
-    links.set(source.uid, linkLayout);
     if (query && target) {
       const key = clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid);
       const pairLinks = linksByClusterPair.get(key) || [];
@@ -383,6 +429,152 @@ export function buildScene(
     },
     hitRegions,
     chrome: buildChrome(bounds, genes, chrome),
+  };
+}
+
+/**
+ * Apply the geometry consequences of one committed locus flip to a retained
+ * scene. Clusters outside the locus and links not incident to one of its
+ * genes are structurally shared with the prior scene.
+ */
+export function patchFlippedLocusScene(
+  scene,
+  locus,
+  {
+    scaleX,
+    locusOffset,
+    getLocusState,
+    getGeneState,
+    areClustersAdjacent,
+    shape,
+    label,
+    link,
+    clusterLabel = () => "",
+    alignLabels = true,
+    linksForGene = () => [],
+  }
+) {
+  const previousLocus = scene.loci.get(locus.uid);
+  if (!previousLocus) return scene;
+  const previousCluster = scene.clusters.get(previousLocus.cluster.uid);
+  if (!previousCluster) return scene;
+
+  const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
+  const clusters = new Map(scene.clusters);
+  const cluster = { ...previousCluster, loci: [...previousCluster.loci] };
+  clusters.set(cluster.source.uid, cluster);
+  const replacement = createLocusLayout(locus, cluster, {
+    scaleX,
+    getLocusState,
+    locusOffset,
+    shape,
+    geneMidpoint,
+  });
+  const locusIndex = cluster.loci.findIndex((candidate) => candidate.source.uid === locus.uid);
+  cluster.loci[locusIndex] = replacement;
+  cluster.bounds = {
+    minX: Math.min(...cluster.loci.map((candidate) => candidate.bounds.minX)),
+    maxX: Math.max(...cluster.loci.map((candidate) => candidate.bounds.maxX)),
+    minY: Math.min(...cluster.loci.map((candidate) => candidate.bounds.minY)),
+    maxY: Math.max(...cluster.loci.map((candidate) => candidate.bounds.maxY)),
+  };
+  const clusterStart = Math.min(...cluster.loci.map((candidate) => candidate.worldStart));
+  cluster.info = {
+    x: (alignLabels && scene.bounds ? scene.bounds.minX : clusterStart) - cluster.x - 10,
+    y: 0,
+    locusText: clusterLabel(cluster.source),
+  };
+
+  const loci = new Map(scene.loci);
+  loci.set(locus.uid, replacement);
+  const genes = new Map(scene.genes);
+  const changedGenes = [];
+  for (const gene of locus.genes) {
+    const layout = createGeneLayout(gene, replacement, {
+      scaleX,
+      getGeneState,
+      shape,
+      label,
+    });
+    genes.set(gene.uid, layout);
+    replacement.genes.push(layout);
+    changedGenes.push([gene.uid, layout]);
+  }
+
+  const links = new Map(scene.links);
+  const changedSources = new Map();
+  for (const gene of locus.genes) {
+    for (const source of linksForGene(gene.uid)) changedSources.set(source.uid, source);
+  }
+  const changedLinks = [];
+  for (const source of changedSources.values()) {
+    const previous = links.get(source.uid);
+    if (!previous) continue;
+    const layout = createLinkLayout(source, previous.order, {
+      genes,
+      loci,
+      clusters,
+      areClustersAdjacent,
+      scaleX,
+      link,
+      geneMidpoint,
+    });
+    links.set(source.uid, layout);
+    changedLinks.push([source.uid, layout]);
+  }
+
+  const locusRegions = new Map(scene.hitRegions.loci);
+  const replacementLocusRegions = createLocusHitRegions(replacement);
+  locusRegions.set(locus.uid, replacementLocusRegions);
+  const geneRegions = new Map(scene.hitRegions.genes);
+  for (const [uid, gene] of changedGenes) {
+    const region = createGeneHitRegion(gene);
+    if (region) geneRegions.set(uid, region);
+    else geneRegions.delete(uid);
+  }
+  const changedGeneIds = new Set(changedGenes.map(([uid]) => uid));
+  const all = scene.hitRegions.all.filter(
+    (region) => region.locusUid !== locus.uid && !changedGeneIds.has(region.geneUid)
+  );
+  all.push(
+    replacementLocusRegions.move,
+    replacementLocusRegions.trimLeft,
+    replacementLocusRegions.trimRight,
+    ...changedGenes
+      .map(([uid]) => geneRegions.get(uid))
+      .filter(Boolean)
+  );
+  const hitRegions = { all, loci: locusRegions, genes: geneRegions };
+
+  return {
+    ...scene,
+    clusters,
+    loci,
+    genes,
+    links,
+    index: {
+      ...scene.index,
+      genes: patchSpatialIndex(
+        scene.index.genes,
+        changedGenes.map(([uid, gene]) => [uid, gene.bounds])
+      ),
+      loci: patchSpatialIndex(scene.index.loci, [[locus.uid, replacement.bounds]]),
+      links: patchSpatialIndex(
+        scene.index.links,
+        changedLinks.map(([uid, layout]) => [uid, layout.bounds])
+      ),
+      hitLoci: patchSpatialIndex(scene.index.hitLoci, [
+        [
+          locus.uid,
+          boundsFromRegions([
+            replacementLocusRegions.move,
+            replacementLocusRegions.trimLeft,
+            replacementLocusRegions.trimRight,
+          ]),
+        ],
+      ]),
+    },
+    hitRegions,
   };
 }
 
@@ -523,11 +715,11 @@ export function createLocusTrimPreview(
 }
 
 /**
- * Describe the first frames of a locus flip without re-projecting the chart.
+ * Describe flip frames without re-projecting the chart.
  *
  * A flip is a reflection in the locus's untrimmed display extent.  Keeping
- * that fact in a small patch lets Canvas acknowledge the double-click before
- * the authoritative data-to-scene update has completed.
+ * that fact in a small patch lets Canvas animate only the changed locus while
+ * retained scene geometry and spatial culling handle everything else.
  */
 export function createLocusFlipPreview(scene, locusUid, { scaleX, progress = 0 }) {
   const locus = scene.loci.get(locusUid);

@@ -59,6 +59,34 @@ The clustermap chart expects data in the following format:
 }
 ```
 
+Gene coordinates must be relative to their containing locus. In other words, a
+locus with `start: 0` and `end: 50000` contains genes whose coordinates are in
+that same `0..50000` range. Importers may preserve original genomic
+coordinates separately in a `bio` field.
+
+## Biological fixture
+
+`fixtures/mcaa-neighbourhoods-173.json` and
+`fixtures/pks-regions-142.json` are canonical, browser-loadable fixtures
+derived from Clinker render exports. The former contains 173 clusters, 7,511
+genes, 11,489 links, and 1,200 groups. The latter is a deliberately heavier
+stress case with 142 clusters, 7,359 genes, 112,320 links, and 726 groups.
+View either with the Canvas renderer:
+
+```
+http://127.0.0.1:8080/?fixture=mcaa&minimap=1&minZoom=0.8
+http://127.0.0.1:8080/?fixture=pks&minimap=1&minZoom=0.8
+```
+
+Regenerate a canonical fixture from a compact Clinker `clv_render` sidecar:
+
+```
+npm run import:clinker -- path/to/clv_render.json.gz fixtures/output.json
+```
+
+The importer preserves the export's cluster order, maps compact link fields to
+the public link schema, and rejects dangling gene references.
+
 ## Example usage
 
 1. Import d3 v6

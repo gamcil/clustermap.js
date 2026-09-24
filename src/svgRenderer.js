@@ -349,7 +349,7 @@ function updateGenes(selection, scene, config, scales) {
     .style("stroke-width", config.gene.shape.strokeWidth);
   selection
     .selectAll("text.geneLabel")
-    .text((gene) => gene.label || gene.uid)
+    .text((gene) => gene.label || gene.name || gene.uid)
     .attr("dy", (gene) => geneLayout(gene)?.labelDy)
     .attr("display", config.gene.label.show ? "inherit" : "none")
     .attr("transform", (gene) => geneLayout(gene)?.labelTransform)

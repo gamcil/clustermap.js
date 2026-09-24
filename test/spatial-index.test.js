@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 test("spatial index finds viewport overlaps and point candidates by extent", async () => {
   const {
     createSpatialIndex,
+    patchSpatialIndex,
     queryPoint,
     queryPointOrdered,
     queryViewport,
@@ -31,4 +32,15 @@ test("spatial index finds viewport overlaps and point candidates by extent", asy
     queryViewportOrdered(index, { minX: 0, maxX: 230, minY: 0, maxY: 40 }),
     ["left", "right", "wide-link", "front"]
   );
+  const patched = patchSpatialIndex(index, [
+    ["right", { minX: 30, maxX: 40, minY: 0, maxY: 10 }],
+    ["wide-link", null],
+  ]);
+  assert.deepEqual(queryPoint(patched, { x: 115, y: 5 }), new Set());
+  assert.deepEqual(queryPoint(patched, { x: 35, y: 5 }), new Set(["right"]));
+  assert.deepEqual(
+    queryViewportOrdered(patched, { minX: 0, maxX: 230, minY: 0, maxY: 40 }),
+    ["left", "right", "front"]
+  );
+  assert.deepEqual(queryPoint(index, { x: 115, y: 5 }), new Set(["right"]));
 });

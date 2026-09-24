@@ -38,6 +38,7 @@ import {
 } from "./layout.mjs";
 import { renderSvg } from "./svgRenderer.js";
 import { createChartRuntime } from "./chartRuntime.js";
+import { createWebGpuRenderer } from "./webgpuRenderer.js";
 
 let nextChartInstance = 0;
 
@@ -56,14 +57,32 @@ export default function clusterMap() {
   let canvasScene = null;
   let canvasAnimation = null;
   let canvasPreview = null;
+  let canvasPreviewScene = null;
+  let canvasFlipStaticCanvas = null;
+  let canvasFlipLocusCanvas = null;
+  let canvasFlipLocusFrame = null;
+  let canvasFlipDirtyFrame = null;
+  let canvasPreparedFlipBase = null;
+  let canvasFlipWarmFrame = null;
   let canvasPaintFrame = null;
-  let canvasFlipBuildFrame = null;
-  let canvasFlipAnimationProgress = null;
+  let canvasFlipFrame = null;
+  let canvasPendingFlip = null;
   let canvasMotion = false;
   let canvasMotionEndTimer = null;
   let minimapBaseCanvas = null;
   let minimapBaseFrame = null;
   let paintCanvasFrame = null;
+  let webgpuRenderer = null;
+  let webgpuCanvas = null;
+  let webgpuInit = null;
+  let webgpuUnavailable = false;
+  let webgpuPendingScene = null;
+  let webgpuGeneration = 0;
+  let webgpuFlipFrame = null;
+  let clusterCommitFrame = null;
+  let scheduleMinimapBase = () => {};
+  let prepareCanvasFlipBase = () => {};
+  let warmCanvasFlipBase = () => {};
   let currentData = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const interactionController = createInteractionController({
@@ -73,9 +92,13 @@ export default function clusterMap() {
     getLocusOffset: (uid) => getLocusOffset(chartState, uid),
     setDragging: (dragging) => setDragging(chartState, dragging),
     previewClusterDrag: (uid, position, order) => {
+      if (clusterCommitFrame !== null) {
+        cancelAnimationFrame(clusterCommitFrame);
+        clusterCommitFrame = null;
+      }
       setPreviewClusterPosition(chartState, uid, position);
       if (order) setPreviewClusterOrder(chartState, order);
-      if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+      if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
         canvasPreview = createClusterDragPreview(runtime.scene.get(), {
           clusterUid: uid,
           position,
@@ -88,13 +111,42 @@ export default function clusterMap() {
       runtime.plot.update({ animate: false });
     },
     commitClusterOrder: () => {
+      const sourceScene = runtime.scene.get();
+      const preview = canvasPreview?.type === "cluster-drag" ? canvasPreview : null;
+      const order = [...getClusterOrder(chartState)];
+      const rows = runtime.scales.y.range();
       commitPreviewClusterOrder(chartState);
+      if (
+        preview &&
+        sourceScene &&
+        ["canvas", "webgpu"].includes(runtime.config.plot.renderer)
+      ) {
+        // Paint the destination row once before the committed projection runs.
+        // This avoids a release-time blank/stale frame while a large chart is
+        // rebuilding its authoritative scene and indexes.
+        canvasPreview = createClusterDragPreview(sourceScene, {
+          clusterUid: preview.clusterUid,
+          position: rows[order.indexOf(preview.clusterUid)],
+          order,
+          rows,
+        });
+        scheduleCanvasPreview();
+        if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
+        clusterCommitFrame = requestAnimationFrame(() => {
+          clusterCommitFrame = requestAnimationFrame(() => {
+            clusterCommitFrame = null;
+            clearCanvasPreview();
+            runtime.plot.update({ animate: false });
+          });
+        });
+        return;
+      }
       clearCanvasPreview();
       runtime.plot.update({ animate: false });
     },
     previewLocusOffset: (uid, offset) => {
       setPreviewLocusOffset(chartState, uid, offset);
-      if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+      if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
         canvasPreview = createLocusOffsetPreview(runtime.scene.get(), uid, offset, {
           alignLabels: runtime.config.cluster.alignLabels,
         });
@@ -115,7 +167,7 @@ export default function clusterMap() {
         coordinateFor: runtime.scales.x,
         scaleGenes: runtime.config.plot.scaleGenes,
       });
-      if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+      if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
         // Updating scales is inexpensive and gives the sparse projection the
         // packed x offsets for this temporary locus state. Deliberately avoid
         // rebuilding data, indexes, or the complete scene until release.
@@ -138,25 +190,71 @@ export default function clusterMap() {
       runtime.plot.update({ animate: false });
     },
     flipLocus: (locus) => {
+      // A second double-click while the GPU preview is in flight must not
+      // mutate the source state underneath that preview.
+      if (runtime.config.plot.renderer === "webgpu" && webgpuFlipFrame !== null) return;
       flipLocus(chartState, locus);
       if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+        if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+        canvasAnimation = null;
+        if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
         const previewProgress = 0.12;
-        canvasPreview = createLocusFlipPreview(runtime.scene.get(), locus.uid, {
+        const sourceScene = canvasScene || runtime.scene.get();
+        const pending = createCanvasFlipPending(locus, sourceScene);
+        canvasPendingFlip = pending;
+        canvasPreviewScene = sourceScene;
+        canvasPreview = createLocusFlipPreview(sourceScene, locus.uid, {
           scaleX: runtime.scales.x,
           progress: previewProgress,
         });
-        canvasFlipAnimationProgress = previewProgress;
         scheduleCanvasPreview();
-        if (canvasFlipBuildFrame !== null) cancelAnimationFrame(canvasFlipBuildFrame);
-        // Schedule from an animation frame so the sparse preview is presented
-        // before the committed scene build can occupy the main thread.
-        canvasFlipBuildFrame = requestAnimationFrame(() => {
-          canvasFlipBuildFrame = requestAnimationFrame(() => {
-            canvasFlipBuildFrame = null;
-            canvasPreview = null;
-            runtime.plot.update();
-          });
+        // The first preview frame is retained-scene geometry plus a reflection
+        // patch. Only after it has painted do we project the changed locus and
+        // its incident links; the animation never interpolates every record.
+        // rAF callbacks all run before the browser presents a frame. Queue the
+        // expensive layer preparation from a *second* rAF so the initial
+        // retained-scene preview above is actually visible immediately rather
+        // than being held behind cache construction.
+        canvasFlipFrame = requestAnimationFrame(() => {
+          if (canvasPendingFlip !== pending) return;
+          canvasFlipFrame = requestAnimationFrame(() => startCanvasFlip(pending, previewProgress));
         });
+        return;
+      }
+      if (runtime.config.plot.renderer === "webgpu" && runtime.scene.get()) {
+        if (webgpuFlipFrame !== null) return;
+        const sourceScene = runtime.scene.get();
+        const duration = runtime.config.plot.transitionDuration;
+        const finish = () => {
+          runtime.synchronizeLocusLayoutState(locus);
+          webgpuPendingScene = runtime.scene.patchFlippedLocus(sourceScene, locus);
+          canvasPreview = null;
+          webgpuFlipFrame = null;
+          scheduleCanvasPaint();
+        };
+        if (!duration) {
+          finish();
+          return;
+        }
+        const startedAt = performance.now();
+        const frame = (now) => {
+          const elapsed = Math.min(1, (now - startedAt) / duration);
+          const eased = elapsed < 0.5
+            ? 4 * elapsed * elapsed * elapsed
+            : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+          canvasPreview = createLocusFlipPreview(sourceScene, locus.uid, {
+            scaleX: runtime.scales.x,
+            progress: eased,
+          });
+          webgpuPendingScene = sourceScene;
+          scheduleCanvasPaint();
+          if (elapsed < 1) {
+            webgpuFlipFrame = requestAnimationFrame(frame);
+            return;
+          }
+          finish();
+        };
+        webgpuFlipFrame = requestAnimationFrame(frame);
         return;
       }
       runtime.plot.update();
@@ -170,22 +268,96 @@ export default function clusterMap() {
 
   function clearCanvasPreview() {
     if (canvasPaintFrame !== null) cancelAnimationFrame(canvasPaintFrame);
-    if (canvasFlipBuildFrame !== null) cancelAnimationFrame(canvasFlipBuildFrame);
+    if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
+    if (webgpuFlipFrame !== null) cancelAnimationFrame(webgpuFlipFrame);
+    if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
     canvasPreview = null;
+    canvasPreviewScene = null;
+    clearCanvasFlipBase();
+    canvasPreparedFlipBase = null;
+    if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
+    canvasFlipWarmFrame = null;
     canvasPaintFrame = null;
-    canvasFlipBuildFrame = null;
-    canvasFlipAnimationProgress = null;
+    canvasFlipFrame = null;
+    canvasPendingFlip = null;
+    webgpuFlipFrame = null;
+    clusterCommitFrame = null;
   }
 
   function flushCanvasFlip() {
-    if (canvasFlipBuildFrame === null) return;
-    cancelAnimationFrame(canvasFlipBuildFrame);
-    canvasFlipBuildFrame = null;
+    const pending = canvasPendingFlip;
+    if (!pending) return;
+    if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
+    canvasFlipFrame = null;
+    if (!pending.targetScene) {
+      runtime.synchronizeLocusLayoutState(pending.locus);
+      pending.targetScene = runtime.scene.patchFlippedLocus(pending.sourceScene, pending.locus);
+    }
+    canvasScene = pending.targetScene;
     canvasPreview = null;
-    canvasFlipAnimationProgress = null;
-    // An export is a synchronous view of the current state, not a snapshot of
-    // an in-flight Canvas affordance. Build its authoritative scene now.
-    runtime.plot.update({ animate: false });
+    canvasPreviewScene = null;
+    canvasPendingFlip = null;
+    clearCanvasFlipBase();
+    canvasPreparedFlipBase = null;
+  }
+
+  function startCanvasFlip(pending, initialProgress) {
+    if (canvasPendingFlip !== pending) return;
+    canvasFlipFrame = null;
+    runtime.synchronizeLocusLayoutState(pending.locus);
+    pending.targetScene = runtime.scene.patchFlippedLocus(pending.sourceScene, pending.locus);
+    prepareCanvasFlipBase(pending);
+    // Restore and repaint the affected canvas region before the browser can
+    // present a frame. The base image stays offscreen; the visible plot stays
+    // a single canvas throughout the animation.
+    paintCanvasFrame?.();
+    const duration = runtime.config.plot.transitionDuration;
+    if (!duration) {
+      canvasScene = pending.targetScene;
+      canvasPreview = null;
+      canvasPreviewScene = null;
+      canvasPendingFlip = null;
+      paintCanvasFrame?.();
+      clearCanvasFlipBase();
+      canvasPreparedFlipBase = null;
+      scheduleCanvasPaint();
+      scheduleMinimapBase(canvasScene);
+      return;
+    }
+    const startedAt = performance.now();
+    const frame = (now) => {
+      if (canvasPendingFlip !== pending) return;
+      const elapsed = Math.min(1, (now - startedAt) / duration);
+      const eased = elapsed < 0.5
+        ? 4 * elapsed * elapsed * elapsed
+        : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+      canvasPreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
+        scaleX: runtime.scales.x,
+        progress: initialProgress + (1 - initialProgress) * eased,
+      });
+      // The dirty region is bounded to the affected locus and its incident
+      // links, so paint it in this rAF rather than one frame later. Links and
+      // genes are drawn together in normal renderer order.
+      if (canvasPaintFrame !== null) cancelAnimationFrame(canvasPaintFrame);
+      canvasPaintFrame = null;
+      paintCanvasFrame?.();
+      if (elapsed < 1) {
+        canvasFlipFrame = requestAnimationFrame(frame);
+        return;
+      }
+      canvasFlipFrame = null;
+      canvasPreview = null;
+      canvasPreviewScene = null;
+      canvasPendingFlip = null;
+      canvasScene = pending.targetScene;
+      // Replace the final preview with the complete target scene.
+      paintCanvasFrame?.();
+      clearCanvasFlipBase();
+      canvasPreparedFlipBase = null;
+      scheduleCanvasPaint();
+      scheduleMinimapBase(canvasScene);
+    };
+    canvasFlipFrame = requestAnimationFrame(frame);
   }
 
   function scheduleCanvasPaint() {
@@ -219,6 +391,12 @@ export default function clusterMap() {
   }
 
   function canvasPixelRatio() {
+    // WebGPU remains at its native backing resolution while moving. Its
+    // geometry is cheap enough to redraw without the visible text/shape-size
+    // jump that the Canvas 2D motion fallback intentionally makes.
+    if (runtime.config.plot.renderer === "webgpu") {
+      return globalThis.devicePixelRatio || 1;
+    }
     return canvasPixelRatioForCamera({
       camera: getCamera(chartState),
       moving: canvasMotion,
@@ -235,6 +413,44 @@ export default function clusterMap() {
   function constrainZoom(scale) {
     const [minimum, maximum] = zoomExtent();
     return Math.max(minimum, Math.min(maximum, scale));
+  }
+
+  function createCanvasFlipPending(locus, sourceScene) {
+    const dynamicLinks = new Set();
+    const locusGenes = new Set(locus.genes.map((gene) => gene.uid));
+    const dynamicGenes = new Set(locusGenes);
+    for (const gene of locus.genes) {
+      for (const link of runtime.get.linksForGene(gene.uid)) {
+        dynamicLinks.add(link.uid);
+        // The link must remain below both endpoint gene shapes. Repaint its
+        // stationary neighbour in the same dirty canvas region as the
+        // reflected locus rather than compositing separate layers.
+        dynamicGenes.add(link.query.uid);
+        dynamicGenes.add(link.target.uid);
+      }
+    }
+    return {
+      locus,
+      sourceScene,
+      targetScene: null,
+      locusRecords: {
+        loci: new Set([locus.uid]),
+        genes: locusGenes,
+        links: new Set(),
+      },
+      dynamic: {
+        loci: new Set([locus.uid]),
+        genes: dynamicGenes,
+        links: dynamicLinks,
+      },
+    };
+  }
+
+  function clearCanvasFlipBase() {
+    canvasFlipStaticCanvas = null;
+    canvasFlipLocusCanvas = null;
+    canvasFlipLocusFrame = null;
+    canvasFlipDirtyFrame = null;
   }
 
   function my(selection, options) {
@@ -256,10 +472,27 @@ export default function clusterMap() {
   function redraw({ animate = true, synchronize = true } = {}) {
     if (!currentData || !container) return;
     const data = currentData;
+    if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
+    canvasFlipWarmFrame = null;
+    canvasPreparedFlipBase = null;
 
     // Set up the shared transition
     transition = d3.transition().duration(runtime.config.plot.transitionDuration);
     const useCanvas = runtime.config.plot.renderer === "canvas";
+    const useWebGpu = runtime.config.plot.renderer === "webgpu";
+    const useRaster = useCanvas || useWebGpu;
+    if (!useWebGpu && (webgpuRenderer || webgpuCanvas || webgpuInit)) {
+      // A renderer owns the WebGPU context for its canvas. Dispose it before
+      // the chart changes backend, and invalidate any async setup that might
+      // otherwise resolve after that canvas has been removed.
+      webgpuGeneration += 1;
+      webgpuRenderer?.destroy();
+      webgpuRenderer = null;
+      webgpuCanvas = null;
+      webgpuInit = null;
+      webgpuUnavailable = false;
+      webgpuPendingScene = null;
+    }
     const minimapOptions = runtime.config.plot.minimap || {};
     const showMinimap = useCanvas && minimapOptions.show;
     if (!useCanvas) clearCanvasPreview();
@@ -348,9 +581,14 @@ export default function clusterMap() {
 
     const plot = svg.select("g.clusterMapG");
     if (zoom) zoom.scaleExtent(zoomExtent());
+    // A canvas cannot change from a 2D to a WebGPU context in place.
+    container
+      .selectAll("canvas.clusterMapCanvas")
+      .filter(function () { return this.dataset.renderer && this.dataset.renderer !== runtime.config.plot.renderer; })
+      .remove();
     const canvas = container
       .selectAll("canvas.clusterMapCanvas")
-      .data(useCanvas ? [data] : [])
+      .data(useRaster ? [data] : [])
       .join((enter) => {
         const surface = enter
           .append("canvas")
@@ -379,8 +617,31 @@ export default function clusterMap() {
           });
         surface.call(canvasZoom).on("dblclick.zoom", null);
         return surface;
-      });
+      })
+      .attr("data-renderer", runtime.config.plot.renderer);
+    if (useWebGpu) {
+      canvas.attr("data-webgpu", function () { return this.dataset.webgpu || "initializing"; });
+    } else {
+      canvas.attr("data-webgpu", null);
+    }
     if (canvasZoom) canvasZoom.scaleExtent(zoomExtent());
+    if (useWebGpu && globalThis.getComputedStyle(container.node()).position === "static") {
+      container.style("position", "relative");
+    }
+    const webgpuOverlay = container
+      .selectAll("canvas.clusterMapWebGpuOverlay")
+      .data(useWebGpu ? [data] : [])
+      .join((enter) =>
+        enter
+          .append("canvas")
+          .attr("class", "clusterMapWebGpuOverlay")
+          .style("position", "absolute")
+          .style("inset", "0")
+          .style("display", "block")
+          .style("width", "100%")
+          .style("height", "100%")
+          .style("pointer-events", "none")
+      );
     if (showMinimap && globalThis.getComputedStyle(container.node()).position === "static") {
       container.style("position", "relative");
     }
@@ -406,7 +667,7 @@ export default function clusterMap() {
       .style("height", showMinimap ? `${minimapOptions.height}px` : null)
       .style("right", showMinimap ? `${minimapOptions.margin}px` : null)
       .style("bottom", showMinimap ? `${minimapOptions.margin}px` : null);
-    svg.style("display", useCanvas ? "none" : null);
+    svg.style("display", useRaster ? "none" : null);
     const overlay = createHtmlOverlay({
       tooltip: container.select("div.tooltip"),
       scales: runtime.scales,
@@ -425,9 +686,78 @@ export default function clusterMap() {
       .on("mouseenter", overlay.enter)
       .on("mouseleave", overlay.leave);
     const paintCanvas = (canvasNode) => {
+      const flipLayer =
+        canvasPreview?.type === "locus-flip" &&
+        canvasPendingFlip &&
+        canvasPreviewScene === canvasPendingFlip.sourceScene &&
+        canvasFlipStaticCanvas &&
+        canvasFlipLocusCanvas &&
+        canvasFlipLocusFrame &&
+        canvasFlipDirtyFrame;
+      if (flipLayer) {
+        restoreCanvasFlipRegion(
+          canvasNode,
+          canvasFlipStaticCanvas,
+          canvasFlipDirtyFrame,
+          canvasPixelRatio()
+        );
+        renderCanvas({
+          canvas: canvasNode,
+          scene: canvasPreviewScene,
+          camera: getCamera(chartState),
+          // Keep the normal filled-ribbon appearance throughout the flip.
+          config: {
+            ...runtime.config,
+            link: {
+              ...runtime.config.link,
+              asLine: false,
+              label: { ...runtime.config.link.label, show: false },
+            },
+          },
+          scales: runtime.scales,
+          pixelRatio: canvasPixelRatio(),
+          preview: canvasPreview,
+          include: { links: canvasPendingFlip.dynamic.links },
+          showLoci: false,
+          showGenes: false,
+          showClusterLabels: false,
+          showChrome: false,
+          suppressLocusHover: true,
+          clear: false,
+        });
+        drawCanvasFlipLocus(
+          canvasNode,
+          canvasFlipLocusCanvas,
+          canvasFlipLocusFrame,
+          canvasFlipDirtyFrame,
+          canvasPreview,
+          canvasPixelRatio()
+        );
+        const stationaryGenes = new Set(canvasPendingFlip.dynamic.genes);
+        for (const uid of canvasPendingFlip.locusRecords.genes) stationaryGenes.delete(uid);
+        if (stationaryGenes.size) {
+          renderCanvas({
+            canvas: canvasNode,
+            scene: canvasPreviewScene,
+            camera: getCamera(chartState),
+            config: runtime.config,
+            scales: runtime.scales,
+            pixelRatio: canvasPixelRatio(),
+            include: { genes: stationaryGenes },
+            showLinks: false,
+            showLoci: false,
+            showClusterLabels: false,
+            showChrome: false,
+            suppressLocusHover: true,
+            clear: false,
+          });
+        }
+        paintMinimap();
+        return canvasFlipDirtyFrame;
+      }
       const result = renderCanvas({
         canvas: canvasNode,
-        scene: canvasAnimation?.scene || runtime.scene.get(),
+        scene: canvasAnimation?.scene || canvasPreviewScene || runtime.scene.get(),
         previousScene: canvasAnimation?.previousScene,
         progress: canvasAnimation?.progress,
         camera: getCamera(chartState),
@@ -442,7 +772,302 @@ export default function clusterMap() {
       paintMinimap();
       return result;
     };
-    paintCanvasFrame = useCanvas ? () => paintCanvas(canvas.node()) : null;
+    const paintWebGpu = (canvasNode, scene) => {
+      if (!canvasNode || !scene) return;
+      if (webgpuUnavailable) {
+        paintCanvas(webgpuOverlay.node());
+        return;
+      }
+      webgpuPendingScene = scene;
+      const overlayNode = webgpuOverlay.node();
+      if (overlayNode) {
+        renderCanvas({
+          canvas: overlayNode,
+          scene,
+          camera: getCamera(chartState),
+          config: runtime.config,
+          scales: runtime.scales,
+          hoverLocusUid: canvasHoverLocusUid,
+          suppressLocusHover: canvasPreview?.type === "locus-flip",
+          pixelRatio: canvasPixelRatio(),
+          preview: canvasPreview,
+          showLinks: false,
+          showLocusTracks: false,
+          showGenes: false,
+        });
+      }
+      const draw = () => {
+        const bounds = canvasNode.getBoundingClientRect();
+        webgpuRenderer?.render({
+          nextScene: webgpuPendingScene,
+          preview: canvasPreview,
+          camera: getCamera(chartState),
+          scales: runtime.scales,
+          config: runtime.config,
+          width: bounds.width,
+          height: bounds.height,
+          pixelRatio: canvasPixelRatio(),
+        });
+      };
+      if (webgpuRenderer && webgpuCanvas === canvasNode) {
+        draw();
+        return;
+      }
+      if (webgpuInit) return;
+      webgpuCanvas = canvasNode;
+      const generation = ++webgpuGeneration;
+      webgpuInit = createWebGpuRenderer(canvasNode)
+        .then((renderer) => {
+          if (generation !== webgpuGeneration || webgpuCanvas !== canvasNode) {
+            renderer?.destroy();
+            return;
+          }
+          webgpuRenderer = renderer;
+          webgpuInit = null;
+          if (renderer) {
+            d3.select(canvasNode).attr("data-webgpu", "active");
+            draw();
+          }
+          else {
+            webgpuUnavailable = true;
+            d3.select(canvasNode).attr("data-webgpu", "unavailable");
+            paintCanvas(webgpuOverlay.node());
+          }
+        })
+        .catch((error) => {
+          if (generation !== webgpuGeneration || webgpuCanvas !== canvasNode) return;
+          webgpuInit = null;
+          webgpuUnavailable = true;
+          d3.select(canvasNode).attr("data-webgpu", "error");
+          console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
+          paintCanvas(webgpuOverlay.node());
+        });
+    };
+    paintCanvasFrame = useCanvas
+      ? () => paintCanvas(canvas.node())
+      : useWebGpu
+        ? () => paintWebGpu(canvas.node(), webgpuPendingScene || runtime.scene.get())
+        : null;
+    const flipLayerMatches = (layer, pending, bounds, pixelRatio) => {
+      if (!layer || layer.sourceScene !== pending.sourceScene || layer.locusUid !== pending.locus.uid) {
+        return false;
+      }
+      const camera = getCamera(chartState);
+      return (
+        layer.width === bounds.width &&
+        layer.height === bounds.height &&
+        layer.pixelRatio === pixelRatio &&
+        layer.camera.x === camera.x &&
+        layer.camera.y === camera.y &&
+        layer.camera.k === camera.k
+      );
+    };
+    const renderFlipStaticBase = (pending, baseCanvas, bounds, pixelRatio) => {
+      const renderOptions = {
+        scene: pending.sourceScene,
+        camera: getCamera(chartState),
+        config: runtime.config,
+        scales: runtime.scales,
+        dimensions: { width: bounds.width, height: bounds.height },
+        pixelRatio,
+        suppressLocusHover: true,
+      };
+      renderCanvas({
+        canvas: baseCanvas,
+        ...renderOptions,
+        omit: {
+          links: pending.dynamic.links,
+          loci: pending.dynamic.loci,
+          genes: pending.dynamic.genes,
+        },
+        showLoci: false,
+        showGenes: false,
+        showClusterLabels: false,
+        showChrome: false,
+      });
+      renderCanvas({
+        canvas: baseCanvas,
+        ...renderOptions,
+        omit: { loci: pending.dynamic.loci, genes: pending.dynamic.genes },
+        showLinks: false,
+        clear: false,
+      });
+    };
+    const renderFlipLocusBitmap = (pending, locusCanvas, bounds, pixelRatio) => {
+      const frame = screenFrameForBounds(
+        boundsForRecords(pending.sourceScene.loci, pending.locusRecords.loci),
+        bounds
+      );
+      const camera = getCamera(chartState);
+      renderCanvas({
+        canvas: locusCanvas,
+        scene: pending.sourceScene,
+        camera: { ...camera, x: camera.x - frame.x, y: camera.y - frame.y },
+        config: {
+          ...runtime.config,
+          gene: {
+            ...runtime.config.gene,
+            // A reflected bitmap would mirror glyphs. The normal target scene
+            // redraw restores labels at the end of the brief animation.
+            label: { ...runtime.config.gene.label, show: false },
+          },
+        },
+        scales: runtime.scales,
+        dimensions: frame,
+        pixelRatio,
+        include: pending.locusRecords,
+        showLinks: false,
+        showClusterLabels: false,
+        showChrome: false,
+        suppressLocusHover: true,
+      });
+      return frame;
+    };
+    const boundsForRecords = (records, ids) => {
+      let result = null;
+      for (const uid of ids) {
+        const bounds = records.get(uid)?.bounds;
+        if (!bounds) continue;
+        result = result
+          ? {
+              minX: Math.min(result.minX, bounds.minX),
+              maxX: Math.max(result.maxX, bounds.maxX),
+              minY: Math.min(result.minY, bounds.minY),
+              maxY: Math.max(result.maxY, bounds.maxY),
+            }
+          : { ...bounds };
+      }
+      return result;
+    };
+    const screenFrameForBounds = (worldBounds, canvasBounds, padding = 12) => {
+      const camera = getCamera(chartState);
+      if (!worldBounds) return { x: 0, y: 0, width: 1, height: 1 };
+      const x = Math.max(0, camera.x + worldBounds.minX * camera.k - padding);
+      const y = Math.max(0, camera.y + worldBounds.minY * camera.k - padding);
+      const right = Math.min(
+        canvasBounds.width,
+        camera.x + worldBounds.maxX * camera.k + padding
+      );
+      const bottom = Math.min(
+        canvasBounds.height,
+        camera.y + worldBounds.maxY * camera.k + padding
+      );
+      return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
+    };
+    const flipDirtyBounds = (pending) => {
+      const locusBounds = boundsForRecords(pending.sourceScene.loci, pending.dynamic.loci);
+      const linkBounds = boundsForRecords(pending.sourceScene.links, pending.dynamic.links);
+      const geneBounds = boundsForRecords(pending.sourceScene.genes, pending.dynamic.genes);
+      return [locusBounds, linkBounds, geneBounds]
+        .filter(Boolean)
+        .reduce(
+          (result, bounds) =>
+            result
+              ? {
+                  minX: Math.min(result.minX, bounds.minX),
+                  maxX: Math.max(result.maxX, bounds.maxX),
+                  minY: Math.min(result.minY, bounds.minY),
+                  maxY: Math.max(result.maxY, bounds.maxY),
+                }
+              : { ...bounds },
+          null
+        );
+    };
+    const restoreCanvasFlipRegion = (canvasNode, baseCanvas, frame, pixelRatio) => {
+      const context = canvasNode.getContext("2d");
+      const left = Math.max(0, Math.floor(frame.x * pixelRatio));
+      const top = Math.max(0, Math.floor(frame.y * pixelRatio));
+      const right = Math.min(baseCanvas.width, Math.ceil((frame.x + frame.width) * pixelRatio));
+      const bottom = Math.min(baseCanvas.height, Math.ceil((frame.y + frame.height) * pixelRatio));
+      const width = Math.max(1, right - left);
+      const height = Math.max(1, bottom - top);
+      const x = left / pixelRatio;
+      const y = top / pixelRatio;
+      const cssWidth = width / pixelRatio;
+      const cssHeight = height / pixelRatio;
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      context.clearRect(x, y, cssWidth, cssHeight);
+      context.drawImage(baseCanvas, left, top, width, height, x, y, cssWidth, cssHeight);
+    };
+    const drawCanvasFlipLocus = (canvasNode, locusCanvas, locusFrame, dirtyFrame, preview, pixelRatio) => {
+      const axis = preview.axes?.get(preview.locusUid);
+      if (axis === undefined) return;
+      const camera = getCamera(chartState);
+      const context = canvasNode.getContext("2d");
+      const screenAxis = camera.x + axis * camera.k;
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      context.save();
+      context.beginPath();
+      context.rect(dirtyFrame.x, dirtyFrame.y, dirtyFrame.width, dirtyFrame.height);
+      context.clip();
+      context.translate(screenAxis, 0);
+      context.scale(1 - 2 * preview.progress, 1);
+      context.translate(-screenAxis, 0);
+      context.drawImage(
+        locusCanvas,
+        0,
+        0,
+        locusCanvas.width,
+        locusCanvas.height,
+        locusFrame.x,
+        locusFrame.y,
+        locusFrame.width,
+        locusFrame.height
+      );
+      context.restore();
+    };
+    prepareCanvasFlipBase = (pending) => {
+      const canvasNode = canvas.node();
+      if (!canvasNode || !pending.sourceScene) return;
+      const bounds = canvasNode.getBoundingClientRect();
+      const pixelRatio = canvasPixelRatio();
+      if (flipLayerMatches(canvasPreparedFlipBase, pending, bounds, pixelRatio)) {
+        canvasFlipStaticCanvas = canvasPreparedFlipBase.baseCanvas;
+        canvasFlipLocusCanvas = canvasPreparedFlipBase.locusCanvas;
+        canvasFlipLocusFrame = canvasPreparedFlipBase.locusFrame;
+      } else {
+        if (!canvasFlipStaticCanvas) canvasFlipStaticCanvas = document.createElement("canvas");
+        if (!canvasFlipLocusCanvas) canvasFlipLocusCanvas = document.createElement("canvas");
+        renderFlipStaticBase(pending, canvasFlipStaticCanvas, bounds, pixelRatio);
+        canvasFlipLocusFrame = renderFlipLocusBitmap(
+          pending,
+          canvasFlipLocusCanvas,
+          bounds,
+          pixelRatio
+        );
+      }
+      canvasFlipDirtyFrame = screenFrameForBounds(flipDirtyBounds(pending), bounds);
+    };
+    warmCanvasFlipBase = (locusUid) => {
+      if (!locusUid || canvasPendingFlip) return;
+      if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
+      canvasFlipWarmFrame = requestAnimationFrame(() => {
+        canvasFlipWarmFrame = null;
+        const canvasNode = canvas.node();
+        const locus = runtime.get.locusData(locusUid);
+        const sourceScene = canvasScene || runtime.scene.get();
+        if (!canvasNode || !locus || !sourceScene || canvasPendingFlip) return;
+        const bounds = canvasNode.getBoundingClientRect();
+        const pixelRatio = canvasPixelRatio();
+        const pending = createCanvasFlipPending(locus, sourceScene);
+        if (flipLayerMatches(canvasPreparedFlipBase, pending, bounds, pixelRatio)) return;
+        const baseCanvas = document.createElement("canvas");
+        const locusCanvas = document.createElement("canvas");
+        renderFlipStaticBase(pending, baseCanvas, bounds, pixelRatio);
+        const locusFrame = renderFlipLocusBitmap(pending, locusCanvas, bounds, pixelRatio);
+        canvasPreparedFlipBase = {
+          sourceScene,
+          locusUid,
+          width: bounds.width,
+          height: bounds.height,
+          pixelRatio,
+          camera: { ...getCamera(chartState) },
+          baseCanvas,
+          locusCanvas,
+          locusFrame,
+        };
+      });
+    };
     const minimapProjection = (scene = runtime.scene.get()) =>
       createMinimapProjection({
         bounds: scene?.bounds,
@@ -463,7 +1088,7 @@ export default function clusterMap() {
         viewport: { width: bounds.width, height: bounds.height },
       });
     };
-    const scheduleMinimapBase = (scene) => {
+    scheduleMinimapBase = (scene) => {
       if (!showMinimap || !scene?.bounds) return;
       if (minimapBaseFrame !== null) cancelAnimationFrame(minimapBaseFrame);
       minimapBaseFrame = requestAnimationFrame(() => {
@@ -504,16 +1129,14 @@ export default function clusterMap() {
     const animateCanvas = (canvasNode, scene, animate) => {
       stopCanvasAnimation();
       if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
-        canvasFlipAnimationProgress = null;
         canvasScene = scene;
         paintCanvas(canvasNode);
         return;
       }
       const previousScene = canvasScene;
       const duration = runtime.config.plot.transitionDuration;
-      const initialProgress = canvasFlipAnimationProgress ?? 0;
-      const suppressLocusHover = canvasFlipAnimationProgress !== null;
-      canvasFlipAnimationProgress = null;
+      const initialProgress = 0;
+      const suppressLocusHover = false;
       const startedAt = performance.now();
       const frame = (now) => {
         const elapsed = Math.min(1, (now - startedAt) / duration);
@@ -554,10 +1177,13 @@ export default function clusterMap() {
       runtime.config.scaleBar.basePair = value;
       runtime.plot.update();
     };
-    if (useCanvas) {
+    if (useRaster) {
       const targetForEvent = (canvasNode, event) =>
         hitTestCanvas({
-          canvas: canvasNode,
+          // A canvas can only have one rendering context. WebGPU owns the
+          // visible surface, so use its transparent 2D text/chrome overlay
+          // for the metric-dependent portions of hit testing instead.
+          canvas: useWebGpu ? webgpuOverlay.node() : canvasNode,
           scene: runtime.scene.get(),
           camera: getCamera(chartState),
           config: runtime.config,
@@ -577,6 +1203,7 @@ export default function clusterMap() {
         if (canvasHoverLocusUid !== locusUid) {
           canvasHoverLocusUid = locusUid;
           scheduleCanvasPaint();
+          if (useCanvas) warmCanvasFlipBase(locusUid);
         }
         d3.select(canvasNode).style("cursor", cursorForTarget(target));
       };
@@ -611,20 +1238,30 @@ export default function clusterMap() {
           const point = canvasWorldPoint(this, event, getCamera(chartState));
           this.setPointerCapture(event.pointerId);
           updateCanvasAffordance(this, target);
+          if (useCanvas) warmCanvasFlipBase(locusForTarget(target));
           if (target.action === "move-cluster") {
-            beginCanvasMotion();
-            canvasGesture = { action: target.action, clusterUid: target.clusterUid };
+            canvasGesture = {
+              action: target.action,
+              clusterUid: target.clusterUid,
+              start: { x: event.clientX, y: event.clientY },
+              moved: false,
+            };
             interactionController.beginClusterDrag(target.clusterUid, point.y);
           } else if (target.action === "move-locus") {
-            beginCanvasMotion();
-            canvasGesture = { action: target.action, locusUid: target.locusUid };
+            canvasGesture = {
+              action: target.action,
+              locusUid: target.locusUid,
+              start: { x: event.clientX, y: event.clientY },
+              moved: false,
+            };
             interactionController.beginLocusDrag(target.locusUid, point.x);
           } else if (target.action.startsWith("trim-locus")) {
-            beginCanvasMotion();
             canvasGesture = {
               action: target.action,
               locusUid: target.locusUid,
               edge: target.action.endsWith("left") ? "left" : "right",
+              start: { x: event.clientX, y: event.clientY },
+              moved: false,
             };
             interactionController.beginLocusTrim();
           } else if (target.action === "gene") {
@@ -649,6 +1286,22 @@ export default function clusterMap() {
             return;
           }
           const point = canvasWorldPoint(this, event, getCamera(chartState));
+          const draggable =
+            (canvasGesture.action === "move-cluster" ||
+              canvasGesture.action === "move-locus" ||
+              canvasGesture.edge);
+          if (draggable && !canvasGesture.moved) {
+            if (
+              Math.hypot(
+                event.clientX - canvasGesture.start.x,
+                event.clientY - canvasGesture.start.y
+              ) < 2
+            ) {
+              return;
+            }
+            canvasGesture.moved = true;
+            beginCanvasMotion();
+          }
           if (canvasGesture.action === "move-cluster") {
             interactionController.moveClusterDrag(point.y);
           } else if (canvasGesture.action === "move-locus") {
@@ -669,14 +1322,19 @@ export default function clusterMap() {
           const gesture = canvasGesture;
           canvasGesture = null;
           if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
-          if (gesture.action === "move-cluster") interactionController.endClusterDrag();
-          else if (gesture.action === "move-locus") interactionController.endLocusDrag();
-          else if (gesture.edge) {
-            interactionController.endLocusTrim(runtime.get.locusData(gesture.locusUid));
+          if (gesture.action === "move-cluster") {
+            if (gesture.moved) interactionController.endClusterDrag();
+            else interactionController.cancelClusterDrag();
+          } else if (gesture.action === "move-locus") {
+            if (gesture.moved) interactionController.endLocusDrag();
+            else interactionController.cancelLocusDrag();
+          } else if (gesture.edge) {
+            if (gesture.moved) interactionController.endLocusTrim(runtime.get.locusData(gesture.locusUid));
+            else interactionController.cancelLocusTrim();
           } else if (gesture.action === "gene" && runtime.config.gene.shape.onClick) {
             runtime.config.gene.shape.onClick(event, runtime.get.geneData(gesture.geneUid));
           }
-          if (gesture.action === "move-cluster" || gesture.action === "move-locus" || gesture.edge) {
+          if (gesture.moved) {
             endCanvasMotion();
           }
           updateCanvasAffordance(this, targetForEvent(this, event));
@@ -762,6 +1420,10 @@ export default function clusterMap() {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
       scheduleMinimapBase(scene);
       animateCanvas(canvas.node(), scene, hasInitialView && animate);
+    } else if (useWebGpu) {
+      if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
+      webgpuPendingScene = scene;
+      paintWebGpu(canvas.node(), scene);
     } else {
       renderSvg({
         plot,
@@ -829,7 +1491,13 @@ export default function clusterMap() {
     const { width, height } = canvas.getBoundingClientRect();
     if (!width || !height || !scene.bounds) return;
 
-    const context = canvas.getContext("2d");
+    // Requesting a 2D context would permanently prevent a WebGPU context on
+    // the visible canvas. Text measurement has no visual side effect, so use
+    // a detached 2D canvas for the WebGPU renderer.
+    const measurementCanvas = runtime.config.plot.renderer === "webgpu"
+      ? document.createElement("canvas")
+      : canvas;
+    const context = measurementCanvas.getContext("2d");
     const bounds = { ...scene.bounds };
     const include = (x, y) => {
       bounds.minX = Math.min(bounds.minX, x);
