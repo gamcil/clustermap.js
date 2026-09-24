@@ -7265,6 +7265,30 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         runtime.config.scaleBar.basePair = value;
         runtime.plot.update();
       };
+      // Both renderers delegate mutations to the same controller. Raster input
+      // adapts stable IDs back to source records at its boundary; SVG already
+      // receives those records through its D3 joins.
+      const rendererInteractions = {
+        isDragging: () => isDragging(chartState),
+        beginClusterDrag: interactionController.beginClusterDrag,
+        moveClusterDrag: interactionController.moveClusterDrag,
+        endClusterDrag: interactionController.endClusterDrag,
+        cancelClusterDrag: interactionController.cancelClusterDrag,
+        beginLocusDrag: interactionController.beginLocusDrag,
+        moveLocusDrag: interactionController.moveLocusDrag,
+        endLocusDrag: interactionController.endLocusDrag,
+        cancelLocusDrag: interactionController.cancelLocusDrag,
+        beginLocusTrim: interactionController.beginLocusTrim,
+        moveLocusTrim: interactionController.moveLocusTrim,
+        endLocusTrim: interactionController.endLocusTrim,
+        cancelLocusTrim: interactionController.cancelLocusTrim,
+        flipLocus: interactionController.flipLocus,
+        onGeneClick: runtime.config.gene.shape.onClick,
+        showGeneMenu: overlay.showGeneMenu,
+        showGroupMenu: overlay.showGroupMenu,
+        setScaleBarLength,
+        chooseLegendColour,
+      };
       if (useRaster) {
         const targetForEvent = (canvasNode, event) =>
           hitTestCanvas({
@@ -7295,37 +7319,38 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           endMotion: rasterMotion.end,
           setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
           interactions: {
-            beginClusterDrag: interactionController.beginClusterDrag,
-            moveClusterDrag: interactionController.moveClusterDrag,
-            endClusterDrag: interactionController.endClusterDrag,
-            cancelClusterDrag: interactionController.cancelClusterDrag,
-            beginLocusDrag: interactionController.beginLocusDrag,
-            moveLocusDrag: interactionController.moveLocusDrag,
-            endLocusDrag: interactionController.endLocusDrag,
-            cancelLocusDrag: interactionController.cancelLocusDrag,
-            beginLocusTrim: interactionController.beginLocusTrim,
+            beginClusterDrag: rendererInteractions.beginClusterDrag,
+            moveClusterDrag: rendererInteractions.moveClusterDrag,
+            endClusterDrag: rendererInteractions.endClusterDrag,
+            cancelClusterDrag: rendererInteractions.cancelClusterDrag,
+            beginLocusDrag: rendererInteractions.beginLocusDrag,
+            moveLocusDrag: rendererInteractions.moveLocusDrag,
+            endLocusDrag: rendererInteractions.endLocusDrag,
+            cancelLocusDrag: rendererInteractions.cancelLocusDrag,
+            beginLocusTrim: rendererInteractions.beginLocusTrim,
             moveLocusTrim: (locusUid, edge, x) =>
-              interactionController.moveLocusTrim(runtime.get.locusData(locusUid), edge, x),
+              rendererInteractions.moveLocusTrim(runtime.get.locusData(locusUid), edge, x),
             endLocusTrim: (locusUid) =>
-              interactionController.endLocusTrim(runtime.get.locusData(locusUid)),
-            cancelLocusTrim: interactionController.cancelLocusTrim,
+              rendererInteractions.endLocusTrim(runtime.get.locusData(locusUid)),
+            cancelLocusTrim: rendererInteractions.cancelLocusTrim,
           },
           actions: {
             geneClick: (event, geneUid) =>
-              runtime.config.gene.shape.onClick?.(event, runtime.get.geneData(geneUid)),
+              rendererInteractions.onGeneClick?.(event, runtime.get.geneData(geneUid)),
             legendColour: (event, group) => {
               if (runtime.config.legend.onClickCircle) {
                 runtime.config.legend.onClickCircle(event, group);
               } else {
-                chooseLegendColour(group);
+                rendererInteractions.chooseLegendColour(group);
               }
             },
             legendText: (event, group) => runtime.config.legend.onClickText?.(event, group),
-            scaleBar: setScaleBarLength,
-            flipLocus: (locusUid) => interactionController.flipLocus(runtime.get.locusData(locusUid)),
-            geneMenu: (event, geneUid) => overlay.showGeneMenu(event, runtime.get.geneData(geneUid)),
+            scaleBar: rendererInteractions.setScaleBarLength,
+            flipLocus: (locusUid) => rendererInteractions.flipLocus(runtime.get.locusData(locusUid)),
+            geneMenu: (event, geneUid) =>
+              rendererInteractions.showGeneMenu(event, runtime.get.geneData(geneUid)),
             legendMenu: (event, group) => {
-              const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
+              const handler = runtime.config.legend.onAltClickText || rendererInteractions.showGroupMenu;
               handler(event, group);
             },
           },
@@ -7439,24 +7464,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           scales: runtime.scales,
           ids: runtime.ids,
           lookup: { gene: runtime.get.geneData },
-          interactions: {
-            isDragging: () => isDragging(chartState),
-            beginClusterDrag: interactionController.beginClusterDrag,
-            moveClusterDrag: interactionController.moveClusterDrag,
-            endClusterDrag: interactionController.endClusterDrag,
-            beginLocusDrag: interactionController.beginLocusDrag,
-            moveLocusDrag: interactionController.moveLocusDrag,
-            endLocusDrag: interactionController.endLocusDrag,
-            beginLocusTrim: interactionController.beginLocusTrim,
-            moveLocusTrim: interactionController.moveLocusTrim,
-            endLocusTrim: interactionController.endLocusTrim,
-            flipLocus: interactionController.flipLocus,
-            onGeneClick: runtime.config.gene.shape.onClick,
-            showGeneMenu: overlay.showGeneMenu,
-            showGroupMenu: overlay.showGroupMenu,
-            setScaleBarLength,
-            chooseLegendColour,
-          },
+          interactions: rendererInteractions,
         });
 
         if (!hasInitialView) fitInitialView(svg, plot);
