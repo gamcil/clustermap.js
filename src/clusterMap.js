@@ -57,7 +57,7 @@ export default function clusterMap() {
   let canvasHoverLocusUid = null;
   let canvasScene = null;
   let canvasAnimation = null;
-  let canvasPreview = null;
+  let rasterPreview = null;
   let canvasPreviewScene = null;
   let canvasFlipStaticCanvas = null;
   let canvasFlipLocusCanvas = null;
@@ -118,20 +118,20 @@ export default function clusterMap() {
       setPreviewClusterPosition(chartState, uid, position);
       if (order) setPreviewClusterOrder(chartState, order);
       if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
-        canvasPreview = createClusterDragPreview(runtime.scene.get(), {
+        rasterPreview = createClusterDragPreview(runtime.scene.get(), {
           clusterUid: uid,
           position,
           order: getClusterOrder(chartState),
           rows: runtime.scales.y.range(),
         });
-        scheduleCanvasPreview();
+        scheduleRasterPreview();
         return;
       }
       runtime.plot.update({ animate: false });
     },
     commitClusterOrder: () => {
       const sourceScene = runtime.scene.get();
-      const preview = canvasPreview?.type === "cluster-drag" ? canvasPreview : null;
+      const preview = rasterPreview?.type === "cluster-drag" ? rasterPreview : null;
       const order = [...getClusterOrder(chartState)];
       const rows = runtime.scales.y.range();
       commitPreviewClusterOrder(chartState);
@@ -143,43 +143,43 @@ export default function clusterMap() {
         // Paint the destination row once before the committed projection runs.
         // This avoids a release-time blank/stale frame while a large chart is
         // rebuilding its authoritative scene and indexes.
-        canvasPreview = createClusterDragPreview(sourceScene, {
+        rasterPreview = createClusterDragPreview(sourceScene, {
           clusterUid: preview.clusterUid,
           position: rows[order.indexOf(preview.clusterUid)],
           order,
           rows,
         });
         if (runtime.config.plot.renderer === "webgpu") {
-          webgpuClusterCommit = { sourceScene, preview: canvasPreview };
+          webgpuClusterCommit = { sourceScene, preview: rasterPreview };
         }
-        scheduleCanvasPreview();
+        scheduleRasterPreview();
         if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
         clusterCommitFrame = requestAnimationFrame(() => {
           clusterCommitFrame = requestAnimationFrame(() => {
             clusterCommitFrame = null;
-            clearCanvasPreview();
+            clearRasterPreview();
             runtime.plot.update({ animate: false });
           });
         });
         return;
       }
-      clearCanvasPreview();
+      clearRasterPreview();
       runtime.plot.update({ animate: false });
     },
     previewLocusOffset: (uid, offset) => {
       setPreviewLocusOffset(chartState, uid, offset);
       if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
-        canvasPreview = createLocusOffsetPreview(runtime.scene.get(), uid, offset, {
+        rasterPreview = createLocusOffsetPreview(runtime.scene.get(), uid, offset, {
           alignLabels: runtime.config.cluster.alignLabels,
         });
-        scheduleCanvasPreview();
+        scheduleRasterPreview();
         return;
       }
       runtime.plot.update({ animate: false });
     },
     commitLocusOffset: (uid) => {
       commitPreviewLocusOffset(chartState, uid);
-      clearCanvasPreview();
+      clearRasterPreview();
       runtime.plot.update({ animate: false });
     },
     previewLocusTrim: (locus, edge, position) => {
@@ -201,12 +201,12 @@ export default function clusterMap() {
         // packed x offsets for this temporary locus state. Deliberately avoid
         // rebuilding data, indexes, or the complete scene until release.
         runtime.scale.update(currentData);
-        canvasPreview = createLocusTrimPreview(runtime.scene.get(), locus.uid, result.state, {
+        rasterPreview = createLocusTrimPreview(runtime.scene.get(), locus.uid, result.state, {
           localXFor: runtime.scales.locus,
           scaleX: runtime.scales.x,
           alignLabels: runtime.config.cluster.alignLabels,
         });
-        scheduleCanvasPreview();
+        scheduleRasterPreview();
         return result;
       }
       runtime.plot.update({ animate: false, synchronize: false });
@@ -215,7 +215,7 @@ export default function clusterMap() {
     commitLocusTrim: (locus) => {
       finalizeLocusTrim(chartState, locus);
       commitPreviewLocusState(chartState, locus);
-      clearCanvasPreview();
+      clearRasterPreview();
       runtime.plot.update({ animate: false });
     },
     flipLocus: (locus) => {
@@ -232,11 +232,11 @@ export default function clusterMap() {
         const pending = createCanvasFlipPending(locus, sourceScene);
         canvasPendingFlip = pending;
         canvasPreviewScene = sourceScene;
-        canvasPreview = createLocusFlipPreview(sourceScene, locus.uid, {
+        rasterPreview = createLocusFlipPreview(sourceScene, locus.uid, {
           scaleX: runtime.scales.x,
           progress: previewProgress,
         });
-        scheduleCanvasPreview();
+        scheduleRasterPreview();
         // The first preview frame is retained-scene geometry plus a reflection
         // patch. Only after it has painted do we project the changed locus and
         // its incident links; the animation never interpolates every record.
@@ -257,7 +257,7 @@ export default function clusterMap() {
         const finish = () => {
           runtime.synchronizeLocusLayoutState(locus);
           webgpuBackend.setScene(runtime.scene.patchFlippedLocus(sourceScene, locus));
-          canvasPreview = null;
+          rasterPreview = null;
           webgpuFlipFrame = null;
           scheduleCanvasPaint();
         };
@@ -271,7 +271,7 @@ export default function clusterMap() {
           const eased = elapsed < 0.5
             ? 4 * elapsed * elapsed * elapsed
             : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
-          canvasPreview = createLocusFlipPreview(sourceScene, locus.uid, {
+          rasterPreview = createLocusFlipPreview(sourceScene, locus.uid, {
             scaleX: runtime.scales.x,
             progress: eased,
           });
@@ -295,12 +295,12 @@ export default function clusterMap() {
   runtime.plot.update = (options) => redraw(options);
   runtime.plot.data = (data) => my.data(data);
 
-  function clearCanvasPreview() {
+  function clearRasterPreview() {
     if (canvasPaintFrame !== null) cancelAnimationFrame(canvasPaintFrame);
     if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
     if (webgpuFlipFrame !== null) cancelAnimationFrame(webgpuFlipFrame);
     if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
-    canvasPreview = null;
+    rasterPreview = null;
     canvasPreviewScene = null;
     clearCanvasFlipBase();
     canvasPreparedFlipBase = null;
@@ -323,7 +323,7 @@ export default function clusterMap() {
       pending.targetScene = runtime.scene.patchFlippedLocus(pending.sourceScene, pending.locus);
     }
     canvasScene = pending.targetScene;
-    canvasPreview = null;
+    rasterPreview = null;
     canvasPreviewScene = null;
     canvasPendingFlip = null;
     clearCanvasFlipBase();
@@ -343,7 +343,7 @@ export default function clusterMap() {
     const duration = runtime.config.plot.transitionDuration;
     if (!duration) {
       canvasScene = pending.targetScene;
-      canvasPreview = null;
+      rasterPreview = null;
       canvasPreviewScene = null;
       canvasPendingFlip = null;
       paintCanvasFrame?.();
@@ -360,7 +360,7 @@ export default function clusterMap() {
       const eased = elapsed < 0.5
         ? 4 * elapsed * elapsed * elapsed
         : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
-      canvasPreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
+      rasterPreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
         scaleX: runtime.scales.x,
         progress: initialProgress + (1 - initialProgress) * eased,
       });
@@ -375,7 +375,7 @@ export default function clusterMap() {
         return;
       }
       canvasFlipFrame = null;
-      canvasPreview = null;
+      rasterPreview = null;
       canvasPreviewScene = null;
       canvasPendingFlip = null;
       canvasScene = pending.targetScene;
@@ -397,7 +397,7 @@ export default function clusterMap() {
     });
   }
 
-  const scheduleCanvasPreview = scheduleCanvasPaint;
+  const scheduleRasterPreview = scheduleCanvasPaint;
 
   function zoomExtent() {
     const minimum = Math.max(0, Number(runtime.config.plot.minZoom) || 0);
@@ -492,7 +492,7 @@ export default function clusterMap() {
     // The overview is a separate 2D canvas, so it works for both raster
     // backends. WebGPU owns only the main plot surface.
     const showMinimap = useRaster && minimapOptions.show;
-    if (!useCanvas) clearCanvasPreview();
+    if (!useCanvas) clearRasterPreview();
     if (!showMinimap) rasterMinimap.clear();
 
     // Build the figure
@@ -681,7 +681,7 @@ export default function clusterMap() {
       .on("mouseleave", overlay.leave);
     const paintCanvas = (canvasNode) => {
       const flipLayer =
-        canvasPreview?.type === "locus-flip" &&
+        rasterPreview?.type === "locus-flip" &&
         canvasPendingFlip &&
         canvasPreviewScene === canvasPendingFlip.sourceScene &&
         canvasFlipStaticCanvas &&
@@ -710,7 +710,7 @@ export default function clusterMap() {
           },
           scales: runtime.scales,
           pixelRatio: rasterMotion.pixelRatio(),
-          preview: canvasPreview,
+          preview: rasterPreview,
           include: { links: canvasPendingFlip.dynamic.links },
           showLoci: false,
           showGenes: false,
@@ -724,7 +724,7 @@ export default function clusterMap() {
           canvasFlipLocusCanvas,
           canvasFlipLocusFrame,
           canvasFlipDirtyFrame,
-          canvasPreview,
+          rasterPreview,
           rasterMotion.pixelRatio()
         );
         const stationaryGenes = new Set(canvasPendingFlip.dynamic.genes);
@@ -763,9 +763,9 @@ export default function clusterMap() {
         scales: runtime.scales,
         hoverLocusUid: canvasHoverLocusUid,
         suppressLocusHover:
-          canvasPreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
+          rasterPreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
         pixelRatio: rasterMotion.pixelRatio(),
-        preview: canvasPreview,
+        preview: rasterPreview,
       });
       paintMinimap();
       return result;
@@ -781,9 +781,9 @@ export default function clusterMap() {
           config: runtime.config,
           scales: runtime.scales,
           hoverLocusUid: canvasHoverLocusUid,
-          suppressLocusHover: canvasPreview?.type === "locus-flip",
+          suppressLocusHover: rasterPreview?.type === "locus-flip",
           pixelRatio: rasterMotion.pixelRatio(),
-          preview: canvasPreview,
+          preview: rasterPreview,
           showLinks: false,
           showLocusTracks: false,
           showGenes: false,
@@ -793,7 +793,7 @@ export default function clusterMap() {
       webgpuBackend.paint({
         canvas: canvasNode,
         scene,
-        preview: canvasPreview,
+        preview: rasterPreview,
         camera: getCamera(chartState),
         scales: runtime.scales,
         config: runtime.config,
