@@ -36,9 +36,12 @@ import {
   createLocusOffsetPreview,
   createLocusTrimPreview,
 } from "./layout.mjs";
+// SVG export deliberately renders into a detached document rather than the
+// retained on-screen backend.
 import { renderSvg } from "./svgRenderer.js";
 import { createChartRuntime } from "./chartRuntime.js";
 import { createCanvasBackend } from "./canvasBackend.mjs";
+import { createSvgBackend } from "./svgBackend.mjs";
 import { createWebGpuBackend } from "./webgpuBackend.mjs";
 
 let nextChartInstance = 0;
@@ -84,6 +87,7 @@ export default function clusterMap() {
   let currentData = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const canvasBackend = createCanvasBackend();
+  const svgBackend = createSvgBackend();
   const webgpuBackend = createWebGpuBackend();
   runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
     const sourceScene = runtime.scene.get();
@@ -517,6 +521,7 @@ export default function clusterMap() {
       anchorSceneCommit = null;
     }
     if (!useCanvas) canvasBackend.destroy();
+    if (useRaster) svgBackend.destroy();
     const minimapOptions = runtime.config.plot.minimap || {};
     const showMinimap = useCanvas && minimapOptions.show;
     if (!useCanvas) clearCanvasPreview();
@@ -1440,10 +1445,10 @@ export default function clusterMap() {
       webgpuBackend.setScene(scene);
       paintWebGpu(canvas.node(), scene);
     } else {
-      renderSvg({
+      svgBackend.setScene(scene);
+      svgBackend.paint({
         plot,
         data,
-        scene,
         transition,
         animate: hasInitialView && animate,
         config: runtime.config,

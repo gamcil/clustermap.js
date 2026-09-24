@@ -4489,6 +4489,31 @@
     };
   }
 
+  // SVG has no device context to initialise, but it still benefits from the
+  // same retained-scene lifecycle as the raster backends. The controller owns
+  // the SVG surface and interaction policy; this adapter owns the last scene
+  // supplied to the SVG renderer.
+  function createSvgBackend({ render = renderSvg } = {}) {
+    let pendingScene = null;
+
+    return {
+      get pendingScene() {
+        return pendingScene;
+      },
+      setScene: (scene) => {
+        pendingScene = scene;
+      },
+      paint: ({ plot, scene, ...options }) => {
+        if (scene) pendingScene = scene;
+        if (!plot || !pendingScene) return null;
+        return render({ plot, scene: pendingScene, ...options });
+      },
+      destroy: () => {
+        pendingScene = null;
+      },
+    };
+  }
+
   // Deliberately small, direct WebGPU renderer for the renderer-neutral scene.
 
   const shader = /* wgsl */ `
@@ -5751,6 +5776,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
     const canvasBackend = createCanvasBackend();
+    const svgBackend = createSvgBackend();
     const webgpuBackend = createWebGpuBackend();
     runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
       const sourceScene = runtime.scene.get();
@@ -6184,6 +6210,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         anchorSceneCommit = null;
       }
       if (!useCanvas) canvasBackend.destroy();
+      if (useRaster) svgBackend.destroy();
       const minimapOptions = runtime.config.plot.minimap || {};
       const showMinimap = useCanvas && minimapOptions.show;
       if (!useCanvas) clearCanvasPreview();
@@ -7107,10 +7134,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         webgpuBackend.setScene(scene);
         paintWebGpu(canvas.node(), scene);
       } else {
-        renderSvg({
+        svgBackend.setScene(scene);
+        svgBackend.paint({
           plot,
           data,
-          scene,
           transition,
           animate: hasInitialView && animate,
           config: runtime.config,
