@@ -2192,6 +2192,73 @@
     };
   }
 
+  // Preview patches carry layout deltas rather than cloned scenes. These
+  // accessors are deliberately renderer-neutral so SVG-adjacent Canvas chrome
+  // and dense WebGPU marks apply exactly the same locus and cluster movement.
+  function locusOffsetForPreview(preview, locusUid) {
+    if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
+    return preview?.type === "locus-offset" && preview.locusUid === locusUid
+      ? preview.offsetX
+      : 0;
+  }
+
+  function clusterLabelOffsetForPreview(preview, clusterUid) {
+    return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
+  }
+
+  function clusterOffsetForPreview(preview, clusterUid) {
+    return preview?.clusterOffsets?.get(clusterUid) || 0;
+  }
+
+  function previewOffsetsForLocus(preview, locus) {
+    if (!preview || !locus) return { x: 0, y: 0 };
+    return {
+      x: locusOffsetForPreview(preview, locus.source?.uid),
+      y: clusterOffsetForPreview(preview, locus.cluster?.uid ?? locus.source?.clusterUid),
+    };
+  }
+
+  function locusGeometryForPreview(preview, locus) {
+    if (preview?.type === "locus-flip") {
+      const axis = preview.axes?.get(locus.source.uid);
+      if (axis !== undefined) {
+        const flip = (x) => x + (axis * 2 - x - x) * preview.progress;
+        const start = flip(locus.worldStart);
+        const end = flip(locus.worldEnd);
+        const hoverStart = flip(locus.x + locus.hover.x);
+        const hoverEnd = flip(locus.x + locus.hover.x + locus.hover.width);
+        const left = Math.min(start, end);
+        const right = Math.max(start, end);
+        return {
+          offsets: previewOffsetsForLocus(preview, locus),
+          worldStart: left,
+          worldEnd: right,
+          track: {
+            ...locus.track,
+            x1: flip(locus.x + locus.track.x1) - locus.x,
+            x2: flip(locus.x + locus.track.x2) - locus.x,
+          },
+          hover: {
+            ...locus.hover,
+            x: Math.min(hoverStart, hoverEnd) - locus.x,
+            width: Math.abs(hoverEnd - hoverStart),
+            leftHandleX: left - locus.x - 8,
+            rightHandleX: right - locus.x,
+          },
+        };
+      }
+    }
+    const trimmed = preview?.loci?.get(locus.source.uid);
+    return {
+      offsets: previewOffsetsForLocus(preview, locus),
+      ...(trimmed || {}),
+    };
+  }
+
+  function geneVisibleForPreview(preview, gene) {
+    return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
+  }
+
   /**
    * Describe flip frames without re-projecting the chart.
    *
@@ -2626,72 +2693,8 @@
     context.stroke();
   }
 
-  function locusOffsetForPreview$1(preview, locusUid) {
-    if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
-    return preview?.type === "locus-offset" && preview.locusUid === locusUid
-      ? preview.offsetX
-      : 0;
-  }
-
-  function clusterLabelOffsetForPreview(preview, clusterUid) {
-    return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
-  }
-
-  function clusterOffsetForPreview$1(preview, clusterUid) {
-    return preview?.clusterOffsets?.get(clusterUid) || 0;
-  }
-
-  function offsetsForLocus$1(preview, locus) {
-    if (!preview || !locus) return { x: 0, y: 0 };
-    return {
-      x: locusOffsetForPreview$1(preview, locus.source?.uid),
-      y: clusterOffsetForPreview$1(preview, locus.cluster?.uid ?? locus.source?.clusterUid),
-    };
-  }
-
   function offsetsForGene(preview, gene) {
-    return offsetsForLocus$1(preview, gene.locus);
-  }
-
-  function locusGeometryForPreview(preview, locus) {
-    if (preview?.type === "locus-flip") {
-      const axis = preview.axes?.get(locus.source.uid);
-      if (axis !== undefined) {
-        const flip = (x) => x + (axis * 2 - x - x) * preview.progress;
-        const start = flip(locus.worldStart);
-        const end = flip(locus.worldEnd);
-        const hoverStart = flip(locus.x + locus.hover.x);
-        const hoverEnd = flip(locus.x + locus.hover.x + locus.hover.width);
-        const left = Math.min(start, end);
-        const right = Math.max(start, end);
-        return {
-          offsets: offsetsForLocus$1(preview, locus),
-          worldStart: left,
-          worldEnd: right,
-          track: {
-            ...locus.track,
-            x1: flip(locus.x + locus.track.x1) - locus.x,
-            x2: flip(locus.x + locus.track.x2) - locus.x,
-          },
-          hover: {
-            ...locus.hover,
-            x: Math.min(hoverStart, hoverEnd) - locus.x,
-            width: Math.abs(hoverEnd - hoverStart),
-            leftHandleX: left - locus.x - 8,
-            rightHandleX: right - locus.x,
-          },
-        };
-      }
-    }
-    const trimmed = preview?.loci?.get(locus.source.uid);
-    return {
-      offsets: offsetsForLocus$1(preview, locus),
-      ...(trimmed || {}),
-    };
-  }
-
-  function geneVisibleForPreview$1(preview, gene) {
-    return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
+    return previewOffsetsForLocus(preview, gene.locus);
   }
 
   function flipAxisForGene(preview, gene) {
@@ -2717,7 +2720,7 @@
     const query = scene.genes.get(link.source.query.uid);
     const target = scene.genes.get(link.source.target.uid);
     const offsetForGene = (gene) =>
-      locusOffsetForPreview$1(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
+      locusOffsetForPreview(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
     const queryOffset = offsetForGene(query);
     const targetOffset = offsetForGene(target);
     // Link anchors are ordered from the upper locus to the lower one, not from
@@ -2787,8 +2790,8 @@
       return {
         visible:
           link.visible &&
-          geneVisibleForPreview$1(preview, query) &&
-          geneVisibleForPreview$1(preview, target),
+          geneVisibleForPreview(preview, query) &&
+          geneVisibleForPreview(preview, target),
         // Most visible links do not touch the locus being reflected. Reusing
         // their retained anchors keeps a flip frame proportional to affected
         // links instead of recalculating every link in the viewport.
@@ -2802,8 +2805,8 @@
         ...linkOffsetsForPreview(scene, link, preview),
         visible:
           link.visible &&
-          geneVisibleForPreview$1(preview, query) &&
-          geneVisibleForPreview$1(preview, target),
+          geneVisibleForPreview(preview, query) &&
+          geneVisibleForPreview(preview, target),
       };
     }
     const query = scene.genes.get(link.source.query.uid);
@@ -2842,7 +2845,7 @@
       [...preview.clusterOrder].map(([uid, order]) => [order, uid])
     );
     for (const cluster of scene.clusters.values()) {
-      if (!boundsInViewport$1(cluster.bounds, viewport, { y: clusterOffsetForPreview$1(preview, cluster.source.uid) })) {
+      if (!boundsInViewport$1(cluster.bounds, viewport, { y: clusterOffsetForPreview(preview, cluster.source.uid) })) {
         continue;
       }
       clusters.push(cluster);
@@ -2852,7 +2855,7 @@
     const genes = [];
     for (const cluster of clusters) {
       for (const locus of cluster.loci) {
-        const offsets = offsetsForLocus$1(preview, locus);
+        const offsets = previewOffsetsForLocus(preview, locus);
         if (!boundsInViewport$1(locus.bounds, viewport, offsets)) continue;
         loci.push(locus);
         if (!includeGenes) continue;
@@ -2861,7 +2864,7 @@
           [...scene.genes.values()].filter((gene) => gene.locus.source?.uid === locus.source.uid);
         for (const gene of locusGenes) {
           if (
-            geneVisibleForPreview$1(preview, gene) &&
+            geneVisibleForPreview(preview, gene) &&
             boundsInViewport$1(gene.bounds, viewport, offsetsForGene(preview, gene))
           ) {
             genes.push(gene);
@@ -3182,7 +3185,7 @@
         drawnClusterLabels.add(cluster.source.uid);
         drawClusterInfo(context, cluster, config, {
           x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
-          y: clusterOffsetForPreview$1(preview, cluster.source.uid),
+          y: clusterOffsetForPreview(preview, cluster.source.uid),
         });
       }
     }
@@ -3215,7 +3218,7 @@
         config,
         scales,
         offsetsForGene(preview, gene),
-        geneVisibleForPreview$1(preview, gene),
+        geneVisibleForPreview(preview, gene),
         geneGeometryForPreview(preview, gene)
       );
     }
@@ -4578,26 +4581,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     pushLine(edges, upper[segments], lower[segments], stroke);
   }
 
-  function locusOffsetForPreview(preview, locusUid) {
-    if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
-    return preview?.type === "locus-offset" && preview.locusUid === locusUid
-      ? preview.offsetX
-      : 0;
-  }
-
-  function clusterOffsetForPreview(preview, clusterUid) {
-    return preview?.clusterOffsets?.get(clusterUid) || 0;
-  }
-
   function offsetsForLocus(preview, locus) {
-    return {
-      x: locusOffsetForPreview(preview, locus.source.uid),
-      y: clusterOffsetForPreview(preview, locus.cluster.uid),
-    };
-  }
-
-  function geneVisibleForPreview(preview, gene) {
-    return preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible;
+    return previewOffsetsForLocus(preview, locus);
   }
 
   function polygonForPreview(preview, gene) {

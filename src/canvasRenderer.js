@@ -1,7 +1,15 @@
 import { rgbaToRgb } from "./utils.js";
 import { hitTest } from "./hitTest.mjs";
 import { queryViewportOrdered } from "./spatialIndex.mjs";
-import { clusterPairKey } from "./layout.mjs";
+import {
+  clusterLabelOffsetForPreview,
+  clusterOffsetForPreview,
+  clusterPairKey,
+  geneVisibleForPreview,
+  locusGeometryForPreview,
+  locusOffsetForPreview,
+  previewOffsetsForLocus,
+} from "./layout.mjs";
 
 /**
  * Choose Canvas backing-store resolution from the view scale.  This affects
@@ -394,72 +402,8 @@ function drawLocusTrack(context, locus, viewport, config, geometry = {}) {
   context.stroke();
 }
 
-function locusOffsetForPreview(preview, locusUid) {
-  if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
-  return preview?.type === "locus-offset" && preview.locusUid === locusUid
-    ? preview.offsetX
-    : 0;
-}
-
-function clusterLabelOffsetForPreview(preview, clusterUid) {
-  return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
-}
-
-function clusterOffsetForPreview(preview, clusterUid) {
-  return preview?.clusterOffsets?.get(clusterUid) || 0;
-}
-
-function offsetsForLocus(preview, locus) {
-  if (!preview || !locus) return { x: 0, y: 0 };
-  return {
-    x: locusOffsetForPreview(preview, locus.source?.uid),
-    y: clusterOffsetForPreview(preview, locus.cluster?.uid ?? locus.source?.clusterUid),
-  };
-}
-
 function offsetsForGene(preview, gene) {
-  return offsetsForLocus(preview, gene.locus);
-}
-
-export function locusGeometryForPreview(preview, locus) {
-  if (preview?.type === "locus-flip") {
-    const axis = preview.axes?.get(locus.source.uid);
-    if (axis !== undefined) {
-      const flip = (x) => x + (axis * 2 - x - x) * preview.progress;
-      const start = flip(locus.worldStart);
-      const end = flip(locus.worldEnd);
-      const hoverStart = flip(locus.x + locus.hover.x);
-      const hoverEnd = flip(locus.x + locus.hover.x + locus.hover.width);
-      const left = Math.min(start, end);
-      const right = Math.max(start, end);
-      return {
-        offsets: offsetsForLocus(preview, locus),
-        worldStart: left,
-        worldEnd: right,
-        track: {
-          ...locus.track,
-          x1: flip(locus.x + locus.track.x1) - locus.x,
-          x2: flip(locus.x + locus.track.x2) - locus.x,
-        },
-        hover: {
-          ...locus.hover,
-          x: Math.min(hoverStart, hoverEnd) - locus.x,
-          width: Math.abs(hoverEnd - hoverStart),
-          leftHandleX: left - locus.x - 8,
-          rightHandleX: right - locus.x,
-        },
-      };
-    }
-  }
-  const trimmed = preview?.loci?.get(locus.source.uid);
-  return {
-    offsets: offsetsForLocus(preview, locus),
-    ...(trimmed || {}),
-  };
-}
-
-function geneVisibleForPreview(preview, gene) {
-  return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
+  return previewOffsetsForLocus(preview, gene.locus);
 }
 
 function flipAxisForGene(preview, gene) {
@@ -620,7 +564,7 @@ function recordsForClusterPreview(
   const genes = [];
   for (const cluster of clusters) {
     for (const locus of cluster.loci) {
-      const offsets = offsetsForLocus(preview, locus);
+      const offsets = previewOffsetsForLocus(preview, locus);
       if (!boundsInViewport(locus.bounds, viewport, offsets)) continue;
       loci.push(locus);
       if (!includeGenes) continue;

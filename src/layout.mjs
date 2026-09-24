@@ -983,6 +983,73 @@ export function createLocusTrimPreview(
   };
 }
 
+// Preview patches carry layout deltas rather than cloned scenes. These
+// accessors are deliberately renderer-neutral so SVG-adjacent Canvas chrome
+// and dense WebGPU marks apply exactly the same locus and cluster movement.
+export function locusOffsetForPreview(preview, locusUid) {
+  if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
+  return preview?.type === "locus-offset" && preview.locusUid === locusUid
+    ? preview.offsetX
+    : 0;
+}
+
+export function clusterLabelOffsetForPreview(preview, clusterUid) {
+  return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
+}
+
+export function clusterOffsetForPreview(preview, clusterUid) {
+  return preview?.clusterOffsets?.get(clusterUid) || 0;
+}
+
+export function previewOffsetsForLocus(preview, locus) {
+  if (!preview || !locus) return { x: 0, y: 0 };
+  return {
+    x: locusOffsetForPreview(preview, locus.source?.uid),
+    y: clusterOffsetForPreview(preview, locus.cluster?.uid ?? locus.source?.clusterUid),
+  };
+}
+
+export function locusGeometryForPreview(preview, locus) {
+  if (preview?.type === "locus-flip") {
+    const axis = preview.axes?.get(locus.source.uid);
+    if (axis !== undefined) {
+      const flip = (x) => x + (axis * 2 - x - x) * preview.progress;
+      const start = flip(locus.worldStart);
+      const end = flip(locus.worldEnd);
+      const hoverStart = flip(locus.x + locus.hover.x);
+      const hoverEnd = flip(locus.x + locus.hover.x + locus.hover.width);
+      const left = Math.min(start, end);
+      const right = Math.max(start, end);
+      return {
+        offsets: previewOffsetsForLocus(preview, locus),
+        worldStart: left,
+        worldEnd: right,
+        track: {
+          ...locus.track,
+          x1: flip(locus.x + locus.track.x1) - locus.x,
+          x2: flip(locus.x + locus.track.x2) - locus.x,
+        },
+        hover: {
+          ...locus.hover,
+          x: Math.min(hoverStart, hoverEnd) - locus.x,
+          width: Math.abs(hoverEnd - hoverStart),
+          leftHandleX: left - locus.x - 8,
+          rightHandleX: right - locus.x,
+        },
+      };
+    }
+  }
+  const trimmed = preview?.loci?.get(locus.source.uid);
+  return {
+    offsets: previewOffsetsForLocus(preview, locus),
+    ...(trimmed || {}),
+  };
+}
+
+export function geneVisibleForPreview(preview, gene) {
+  return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
+}
+
 /**
  * Describe flip frames without re-projecting the chart.
  *

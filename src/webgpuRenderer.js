@@ -2,8 +2,14 @@
 // It owns only dense geometric marks; Canvas/SVG remain responsible for text,
 // chrome, interaction affordances, export, and broad-browser fallback.
 
-import { locusGeometryForPreview } from "./canvasRenderer.js";
-import { clusterPairKey } from "./layout.mjs";
+import {
+  clusterOffsetForPreview,
+  clusterPairKey,
+  geneVisibleForPreview,
+  locusGeometryForPreview,
+  locusOffsetForPreview,
+  previewOffsetsForLocus,
+} from "./layout.mjs";
 
 const shader = /* wgsl */ `
 struct Camera {
@@ -227,26 +233,8 @@ function pushLink(vertices, edges, link, colour, stroke, {
   pushLine(edges, upper[segments], lower[segments], stroke);
 }
 
-function locusOffsetForPreview(preview, locusUid) {
-  if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
-  return preview?.type === "locus-offset" && preview.locusUid === locusUid
-    ? preview.offsetX
-    : 0;
-}
-
-function clusterOffsetForPreview(preview, clusterUid) {
-  return preview?.clusterOffsets?.get(clusterUid) || 0;
-}
-
 function offsetsForLocus(preview, locus) {
-  return {
-    x: locusOffsetForPreview(preview, locus.source.uid),
-    y: clusterOffsetForPreview(preview, locus.cluster.uid),
-  };
-}
-
-function geneVisibleForPreview(preview, gene) {
-  return preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible;
+  return previewOffsetsForLocus(preview, locus);
 }
 
 function polygonForPreview(preview, gene) {
