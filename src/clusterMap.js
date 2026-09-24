@@ -23,15 +23,13 @@ import { fitCameraForBounds } from "./camera.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
 import {
-  cameraForMinimapPoint,
   canvasFigureBounds,
   canvasPixelRatioForCamera,
   canvasWorldPoint,
-  createMinimapProjection,
   hitTestCanvas,
   renderCanvas,
-  renderCanvasMinimap,
 } from "./canvasRenderer.js";
+import { createRasterMinimap } from "./rasterMinimap.mjs";
 import {
   createClusterDragPreview,
   createLocusFlipPreview,
@@ -75,8 +73,6 @@ export default function clusterMap() {
   let canvasPendingFlip = null;
   let canvasMotion = false;
   let canvasMotionEndTimer = null;
-  let minimapBaseCanvas = null;
-  let minimapBaseFrame = null;
   let paintCanvasFrame = null;
   let webgpuFlipFrame = null;
   let clusterCommitFrame = null;
@@ -91,6 +87,7 @@ export default function clusterMap() {
   const canvasBackend = createCanvasBackend();
   const svgBackend = createSvgBackend();
   const webgpuBackend = createWebGpuBackend();
+  const rasterMinimap = createRasterMinimap();
   runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
     const sourceScene = runtime.scene.get();
     // Anchoring changes cluster origins and, when strands disagree, a small
@@ -529,10 +526,7 @@ export default function clusterMap() {
     // backends. WebGPU owns only the main plot surface.
     const showMinimap = useRaster && minimapOptions.show;
     if (!useCanvas) clearCanvasPreview();
-    if (!showMinimap && minimapBaseFrame !== null) {
-      cancelAnimationFrame(minimapBaseFrame);
-      minimapBaseFrame = null;
-    }
+    if (!showMinimap) rasterMinimap.clear();
 
     // Build the figure
     const svg = container
@@ -1068,58 +1062,48 @@ export default function clusterMap() {
         };
       });
     };
-    const minimapProjection = (scene = runtime.scene.get()) =>
-      createMinimapProjection({
-        bounds: scene?.figureBounds || scene?.bounds,
-        width: minimapOptions.width,
-        height: minimapOptions.height,
-      });
     const paintMinimap = () => {
-      const minimapNode = minimap.node();
-      const canvasNode = canvas.node();
-      const projection = minimapProjection();
-      if (!minimapNode || !canvasNode || !projection) return;
-      const bounds = canvasNode.getBoundingClientRect();
-      renderCanvasMinimap({
-        canvas: minimapNode,
-        baseCanvas: minimapBaseCanvas,
-        projection,
+      rasterMinimap.paint({
+        minimap: minimap.node(),
+        surface: canvas.node(),
+        scene: runtime.scene.get(),
+        options: minimapOptions,
         camera: getCamera(chartState),
-        viewport: { width: bounds.width, height: bounds.height },
+        pixelRatio: globalThis.devicePixelRatio || 1,
       });
     };
     scheduleMinimapBase = (scene) => {
-      if (!showMinimap || !scene?.bounds) return;
-      if (minimapBaseFrame !== null) cancelAnimationFrame(minimapBaseFrame);
-      minimapBaseFrame = requestAnimationFrame(() => {
-        minimapBaseFrame = null;
-        const projection = minimapProjection(scene);
-        if (!projection || !minimap.node()) return;
-        if (!minimapBaseCanvas) minimapBaseCanvas = document.createElement("canvas");
-        renderCanvas({
-          canvas: minimapBaseCanvas,
-          // A full ribbon overview becomes an opaque field for dense maps.
-          // Keep the structured, coloured gene raster by default; callers can
-          // opt links back in for sparse figures.
-          scene: {
-            ...scene,
-            chrome: null,
-            links: minimapOptions.showLinks ? scene.links : new Map(),
-          },
-          camera: { x: projection.x, y: projection.y, k: projection.scale },
-          config: {
-            ...runtime.config,
-            gene: {
-              ...runtime.config.gene,
-              label: { ...runtime.config.gene.label, show: false },
+      if (!showMinimap) return;
+      rasterMinimap.scheduleBase({
+        scene,
+        minimap: minimap.node(),
+        options: minimapOptions,
+        renderBase: ({ canvas: baseCanvas, scene: overviewScene, projection }) => {
+          renderCanvas({
+            canvas: baseCanvas,
+            // A full ribbon overview becomes an opaque field for dense maps.
+            // Keep the structured, coloured gene raster by default; callers
+            // can opt links back in for sparse figures.
+            scene: {
+              ...overviewScene,
+              chrome: null,
+              links: minimapOptions.showLinks ? overviewScene.links : new Map(),
             },
-          },
-          scales: runtime.scales,
-          dimensions: projection,
-          fullScene: true,
-          pixelRatio: globalThis.devicePixelRatio || 1,
-        });
-        paintMinimap();
+            camera: { x: projection.x, y: projection.y, k: projection.scale },
+            config: {
+              ...runtime.config,
+              gene: {
+                ...runtime.config.gene,
+                label: { ...runtime.config.gene.label, show: false },
+              },
+            },
+            scales: runtime.scales,
+            dimensions: projection,
+            fullScene: true,
+            pixelRatio: globalThis.devicePixelRatio || 1,
+          });
+        },
+        onPaint: paintMinimap,
       });
     };
     const stopCanvasAnimation = () => {
@@ -1358,17 +1342,16 @@ export default function clusterMap() {
 
       let minimapGesture = false;
       const moveCameraFromMinimap = (minimapNode, event) => {
-        const projection = minimapProjection();
         const mainCanvas = canvas.node();
-        if (!projection || !mainCanvas) return;
-        const minimapBounds = minimapNode.getBoundingClientRect();
-        const mainBounds = mainCanvas.getBoundingClientRect();
-        const camera = cameraForMinimapPoint(
-          projection,
-          { x: event.clientX - minimapBounds.left, y: event.clientY - minimapBounds.top },
-          { width: mainBounds.width, height: mainBounds.height },
-          getCamera(chartState)
-        );
+        const camera = rasterMinimap.cameraForPointer({
+          event,
+          minimap: minimapNode,
+          surface: mainCanvas,
+          scene: runtime.scene.get(),
+          options: minimapOptions,
+          camera: getCamera(chartState),
+        });
+        if (!camera || !mainCanvas) return;
         // Go through D3 rather than mutating its private __zoom state. This
         // keeps the next wheel/pan gesture continuous with minimap navigation.
         d3.select(mainCanvas).call(
