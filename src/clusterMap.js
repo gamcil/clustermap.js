@@ -42,6 +42,11 @@ import { createChartRuntime } from "./chartRuntime.js";
 import { createCanvasBackend } from "./canvasBackend.mjs";
 import { createSvgBackend } from "./svgBackend.mjs";
 import { createWebGpuBackend } from "./webgpuBackend.mjs";
+import {
+  isCanvasRenderer,
+  isRasterRenderer,
+  isWebGpuRenderer,
+} from "./rendererMode.mjs";
 
 let nextChartInstance = 0;
 
@@ -94,7 +99,7 @@ export default function clusterMap() {
     // set of loci. The scene patch retains everything else for every backend.
     if (!sourceScene || (!changes.length && !flippedLoci.size)) return;
     anchorSceneCommit = { sourceScene, changes, flippedLoci };
-    if (runtime.config.plot.renderer !== "webgpu") return;
+    if (!isWebGpuRenderer(runtime.config.plot.renderer)) return;
     const offsets = new Map(
       changes
         .filter(({ offset }) => offset)
@@ -117,7 +122,7 @@ export default function clusterMap() {
       }
       setPreviewClusterPosition(chartState, uid, position);
       if (order) setPreviewClusterOrder(chartState, order);
-      if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
+      if (isRasterRenderer(runtime.config.plot.renderer) && runtime.scene.get()) {
         rasterPreview = createClusterDragPreview(runtime.scene.get(), {
           clusterUid: uid,
           position,
@@ -138,7 +143,7 @@ export default function clusterMap() {
       if (
         preview &&
         sourceScene &&
-        ["canvas", "webgpu"].includes(runtime.config.plot.renderer)
+        isRasterRenderer(runtime.config.plot.renderer)
       ) {
         // Paint the destination row once before the committed projection runs.
         // This avoids a release-time blank/stale frame while a large chart is
@@ -149,7 +154,7 @@ export default function clusterMap() {
           order,
           rows,
         });
-        if (runtime.config.plot.renderer === "webgpu") {
+        if (isWebGpuRenderer(runtime.config.plot.renderer)) {
           webgpuClusterCommit = { sourceScene, preview: rasterPreview };
         }
         scheduleRasterPreview();
@@ -168,7 +173,7 @@ export default function clusterMap() {
     },
     previewLocusOffset: (uid, offset) => {
       setPreviewLocusOffset(chartState, uid, offset);
-      if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
+      if (isRasterRenderer(runtime.config.plot.renderer) && runtime.scene.get()) {
         rasterPreview = createLocusOffsetPreview(runtime.scene.get(), uid, offset, {
           alignLabels: runtime.config.cluster.alignLabels,
         });
@@ -196,7 +201,7 @@ export default function clusterMap() {
           runtime.scales.offset(locus.clusterUid),
         scaleGenes: runtime.config.plot.scaleGenes,
       });
-      if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
+      if (isRasterRenderer(runtime.config.plot.renderer) && runtime.scene.get()) {
         // Updating scales is inexpensive and gives the sparse projection the
         // packed x offsets for this temporary locus state. Deliberately avoid
         // rebuilding data, indexes, or the complete scene until release.
@@ -221,9 +226,9 @@ export default function clusterMap() {
     flipLocus: (locus) => {
       // A second double-click while the GPU preview is in flight must not
       // mutate the source state underneath that preview.
-      if (runtime.config.plot.renderer === "webgpu" && webgpuFlipFrame !== null) return;
+      if (isWebGpuRenderer(runtime.config.plot.renderer) && webgpuFlipFrame !== null) return;
       flipLocus(chartState, locus);
-      if (runtime.config.plot.renderer === "canvas" && runtime.scene.get()) {
+      if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.scene.get()) {
         if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
         canvasAnimation = null;
         if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
@@ -250,7 +255,7 @@ export default function clusterMap() {
         });
         return;
       }
-      if (runtime.config.plot.renderer === "webgpu" && runtime.scene.get()) {
+      if (isWebGpuRenderer(runtime.config.plot.renderer) && runtime.scene.get()) {
         if (webgpuFlipFrame !== null) return;
         const sourceScene = runtime.scene.get();
         const duration = runtime.config.plot.transitionDuration;
@@ -474,9 +479,9 @@ export default function clusterMap() {
 
     // Set up the shared transition
     transition = d3.transition().duration(runtime.config.plot.transitionDuration);
-    const useCanvas = runtime.config.plot.renderer === "canvas";
-    const useWebGpu = runtime.config.plot.renderer === "webgpu";
-    const useRaster = useCanvas || useWebGpu;
+    const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
+    const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
+    const useRaster = isRasterRenderer(runtime.config.plot.renderer);
     if (!useWebGpu && webgpuBackend.hasResources()) {
       // A renderer owns the WebGPU context for its canvas. Dispose it before
       // the chart changes backend, and invalidate any async setup that might
@@ -1366,7 +1371,7 @@ export default function clusterMap() {
     // Requesting a 2D context would permanently prevent a WebGPU context on
     // the visible canvas. Text measurement has no visual side effect, so use
     // a detached 2D canvas for the WebGPU renderer.
-    const measurementCanvas = runtime.config.plot.renderer === "webgpu"
+    const measurementCanvas = isWebGpuRenderer(runtime.config.plot.renderer)
       ? document.createElement("canvas")
       : canvas;
     const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config);
