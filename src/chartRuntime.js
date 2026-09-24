@@ -163,7 +163,11 @@ const scene = {
       chrome: {
         legend: {
           show: config.legend.show,
+          placement: config.legend.position,
+          columns: config.legend.columns,
+          columnWidth: config.legend.columnWidth,
           marginLeft: config.legend.marginLeft,
+          marginTop: config.legend.marginTop,
           entryHeight: config.legend.entryHeight,
           fontSize: config.legend.fontSize,
           fontFamily: config.plot.fontFamily,

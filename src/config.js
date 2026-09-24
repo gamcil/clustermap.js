@@ -17,12 +17,18 @@ const defaultConfig = {
       'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif',
   },
   legend: {
+    columns: 1,
+    columnWidth: 160,
     entryHeight: 18,
     fontSize: 14,
     onClickCircle: null,
     onClickText: null,
+    // "right" keeps the historical layout. "bottom" places the legend
+    // below the chart's content bounds, aligned with its left edge.
+    position: "right",
     show: true,
     marginLeft: 20,
+    marginTop: 20,
   },
   colourBar: {
     fontSize: 10,

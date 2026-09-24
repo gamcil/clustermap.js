@@ -72,10 +72,9 @@
 					}
 				},
 				legend: {
-					// The biological fixture has 1,200 homology groups. They remain
-					// available to interactions, but a 1,200-entry legend is not a
-					// useful overview of the figure.
-					show: !biologicalFixture,
+					show: true,
+					position: fixture === "large" || biologicalFixture ? "bottom" : "right",
+					columns: biologicalFixture ? 8 : 1,
 				},
 				link: {
 					threshold: 0.3,

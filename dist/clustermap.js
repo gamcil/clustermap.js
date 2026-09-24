@@ -1267,6 +1267,18 @@
     return `${+(basePairs / 1000).toFixed(1)}kb`;
   }
 
+  function legendPositionForBounds(bounds, legend) {
+    if (legend.placement === "bottom") {
+      return {
+        // Lower chrome shares the fixed chart baseline. Unlike a right-side
+        // legend it must not slide horizontally when a locus is dragged.
+        x: 0,
+        y: bounds.maxY + legend.bottomOffset + legend.marginTop,
+      };
+    }
+    return { x: bounds.maxX + legend.marginLeft, y: 0 };
+  }
+
   function buildChrome(bounds, genes, chrome) {
     if (!bounds || !chrome) return null;
 
@@ -1280,28 +1292,6 @@
     const groups = chrome.legend.groups.filter(
       (group) => !group.hidden && visibleGroupIds.has(group.uid)
     );
-    const totalHeight = chrome.legend.entryHeight * groups.length;
-    const step = groups.length > 1 ? totalHeight / (groups.length - 0.5) : totalHeight;
-    const radius = step / 4;
-    const legend = {
-      visible: chrome.legend.show,
-      position: { x: bounds.maxX + chrome.legend.marginLeft, y: 0 },
-      fontSize: chrome.legend.fontSize,
-      fontFamily: chrome.legend.fontFamily,
-      items: groups.map((group, index) => ({
-        uid: group.uid,
-        source: group,
-        label: group.label,
-        colour: chrome.legend.colourForGroup(group.uid),
-        x: 0,
-        y: index * step,
-        radius,
-        circleY: radius,
-        textX: radius + 6,
-        textY: radius + 1,
-      })),
-    };
-
     const scaleBarLength = chrome.scaleBar.coordinateFor(chrome.scaleBar.basePair);
     const scaleBar = {
       visible: chrome.scaleBar.show,
@@ -1335,6 +1325,59 @@
       label: "Identity (%)",
       startLabel: "0",
       endLabel: "100",
+    };
+
+    // Bottom legends share the lower chart edge with the scale and colour bars.
+    // Stack them rather than letting the first legend entry cover those bars.
+    const bottomOffset = Math.max(
+      scaleBar.visible
+        ? scaleBar.position.y - bounds.maxY + scaleBar.height + scaleBar.fontSize + 8
+        : 0,
+      colourBar.visible
+        ? colourBar.position.y - bounds.maxY + colourBar.height + colourBar.fontSize + 8
+        : 0
+    );
+    const columns = Math.min(
+      groups.length || 1,
+      Math.max(1, Math.floor(Number(chrome.legend.columns) || 1))
+    );
+    const columnWidth = Number(chrome.legend.columnWidth) || 160;
+    const rows = Math.ceil(groups.length / columns);
+    const totalHeight = chrome.legend.entryHeight * rows;
+    const step = rows > 1 ? totalHeight / (rows - 0.5) : totalHeight;
+    const radius = step / 4;
+    const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
+    const legend = {
+      visible: chrome.legend.show,
+      placement,
+      columns,
+      columnWidth,
+      marginLeft: chrome.legend.marginLeft,
+      marginTop: chrome.legend.marginTop,
+      bottomOffset,
+      position: legendPositionForBounds(bounds, {
+        ...chrome.legend,
+        placement,
+        bottomOffset,
+      }),
+      fontSize: chrome.legend.fontSize,
+      fontFamily: chrome.legend.fontFamily,
+      items: groups.map((group, index) => {
+        const column = Math.floor(index / rows);
+        const row = index % rows;
+        return {
+        uid: group.uid,
+        source: group,
+        label: group.label,
+        colour: chrome.legend.colourForGroup(group.uid),
+        x: column * columnWidth,
+        y: row * step,
+        radius,
+        circleY: radius,
+        textX: radius + 6,
+        textY: radius + 1,
+        };
+      }),
     };
 
     return { legend, scaleBar, colourBar };
@@ -1986,10 +2029,7 @@
           ...patched.chrome,
           legend: {
             ...patched.chrome.legend,
-            position: {
-              ...patched.chrome.legend.position,
-              x: patched.chrome.legend.position.x + bounds.maxX - patched.bounds.maxX,
-            },
+            position: legendPositionForBounds(bounds, patched.chrome.legend),
           },
         }
       : null;
@@ -2082,7 +2122,9 @@
             ...scene.chrome.legend,
             position: {
               ...scene.chrome.legend.position,
-              x: scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
+              x: scene.chrome.legend.placement === "bottom"
+                ? scene.chrome.legend.position.x
+                : scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
             },
           },
         }
@@ -2176,7 +2218,9 @@
             ...scene.chrome.legend,
             position: {
               ...scene.chrome.legend.position,
-              x: scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
+              x: scene.chrome.legend.placement === "bottom"
+                ? scene.chrome.legend.position.x
+                : scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
             },
           },
         }
@@ -3819,12 +3863,18 @@
         'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif',
     },
     legend: {
+      columns: 1,
+      columnWidth: 160,
       entryHeight: 18,
       fontSize: 14,
       onClickCircle: null,
       onClickText: null,
+      // "right" keeps the historical layout. "bottom" places the legend
+      // below the chart's content bounds, aligned with its left edge.
+      position: "right",
       show: true,
       marginLeft: 20,
+      marginTop: 20,
     },
     colourBar: {
       fontSize: 10,
@@ -4081,7 +4131,11 @@
         chrome: {
           legend: {
             show: config.legend.show,
+            placement: config.legend.position,
+            columns: config.legend.columns,
+            columnWidth: config.legend.columnWidth,
             marginLeft: config.legend.marginLeft,
+            marginTop: config.legend.marginTop,
             entryHeight: config.legend.entryHeight,
             fontSize: config.legend.fontSize,
             fontFamily: config.plot.fontFamily,
