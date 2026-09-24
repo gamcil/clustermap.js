@@ -575,6 +575,58 @@
     };
   }
 
+  function validBounds$1(bounds) {
+    return (
+      bounds &&
+      Number.isFinite(bounds.minX) &&
+      Number.isFinite(bounds.maxX) &&
+      Number.isFinite(bounds.minY) &&
+      Number.isFinite(bounds.maxY) &&
+      bounds.maxX > bounds.minX &&
+      bounds.maxY > bounds.minY
+    );
+  }
+
+  /**
+   * Fit a world-space figure envelope into a viewport.
+   *
+   * Renderers may obtain the envelope differently (SVG can use getBBox while
+   * raster renderers measure text), but camera policy stays shared: cap an
+   * ordinary fit, optionally retain a readable scale for oversized figures,
+   * and top-align whenever that scale crops the figure.
+   */
+  function fitCameraForBounds({
+    bounds,
+    viewport,
+    padding = 20,
+    maximumFitScale = 1.2,
+    minimumReadableScale = 0,
+    constrainScale = (scale) => scale,
+  } = {}) {
+    if (!validBounds$1(bounds) || !viewport?.width || !viewport?.height) return null;
+
+    const width = bounds.maxX - bounds.minX;
+    const height = bounds.maxY - bounds.minY;
+    const fitScale = Math.min(
+      maximumFitScale,
+      (viewport.width - padding * 2) / width,
+      (viewport.height - padding * 2) / height
+    );
+    const k = constrainScale(Math.max(fitScale, minimumReadableScale));
+    const cropped = k > fitScale;
+    return {
+      x: cropped
+        ? padding - bounds.minX * k
+        : (viewport.width - width * k) / 2 - bounds.minX * k,
+      y: cropped
+        ? padding - bounds.minY * k
+        : (viewport.height - height * k) / 2 - bounds.minY * k,
+      k,
+      fitScale,
+      cropped,
+    };
+  }
+
   // Browser-only tooltip lifecycle shared by any chart renderer. Menu content is
   // supplied by the caller because those controls may dispatch chart actions.
   function createHtmlOverlay({ tooltip, scales, actions }) {
@@ -7177,22 +7229,19 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const bounds = plotNode.getBBox();
       if (!width || !height || !bounds.width || !bounds.height) return;
 
-      const padding = 20;
-      const fittedScale = Math.min(
-        1.2,
-        (width - padding * 2) / bounds.width,
-        (height - padding * 2) / bounds.height
-      );
-      const scale = constrainZoom(fittedScale);
-      const cropped = scale > fittedScale;
-      const x = cropped
-        ? padding - bounds.x * scale
-        : (width - bounds.width * scale) / 2 - bounds.x * scale;
-      const y = cropped
-        ? padding - bounds.y * scale
-        : (height - bounds.height * scale) / 2 - bounds.y * scale;
+      const camera = fitCameraForBounds({
+        bounds: {
+          minX: bounds.x,
+          maxX: bounds.x + bounds.width,
+          minY: bounds.y,
+          maxY: bounds.y + bounds.height,
+        },
+        viewport: { width, height },
+        constrainScale: constrainZoom,
+      });
+      if (!camera) return;
 
-      svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(scale));
+      svg.call(zoom.transform, d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k));
       hasInitialView = true;
     }
 
@@ -7257,27 +7306,16 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         include(colourBar.position.x + colourBar.width, colourBar.position.y + colourBar.height + 20);
       }
 
-      const padding = 20;
-      const fitScale = Math.min(
-        1.2,
-        (width - padding * 2) / (bounds.maxX - bounds.minX),
-        (height - padding * 2) / (bounds.maxY - bounds.minY)
-      );
-      // A fit smaller than the default camera scale defeats Canvas culling and
-      // leaves an impractically dense interaction surface. Keep a readable
-      // scale in that case, showing the top-left of the figure (including the
-      // cluster labels). Ordinary figures retain the existing fit-to-view.
-      const cropped = fitScale < 1;
-      const scale = constrainZoom(cropped ? 1 : fitScale);
-      const camera = {
-        x: cropped
-          ? padding - bounds.minX * scale
-          : (width - (bounds.maxX - bounds.minX) * scale) / 2 - bounds.minX * scale,
-        y: cropped
-          ? padding - bounds.minY * scale
-          : (height - (bounds.maxY - bounds.minY) * scale) / 2 - bounds.minY * scale,
-        k: scale,
-      };
+      const camera = fitCameraForBounds({
+        bounds,
+        viewport: { width, height },
+        // A fit below this scale defeats raster culling and produces an
+        // impractically dense interaction surface. The helper then top-aligns
+        // the cropped figure, showing the first clusters and their labels.
+        minimumReadableScale: 1,
+        constrainScale: constrainZoom,
+      });
+      if (!camera) return;
       if (canvasZoom) {
         d3.select(canvas).call(
           canvasZoom.transform,

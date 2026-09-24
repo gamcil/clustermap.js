@@ -19,6 +19,7 @@ import {
 } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
+import { fitCameraForBounds } from "./camera.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
 import {
@@ -1488,22 +1489,19 @@ export default function clusterMap() {
     const bounds = plotNode.getBBox();
     if (!width || !height || !bounds.width || !bounds.height) return;
 
-    const padding = 20;
-    const fittedScale = Math.min(
-      1.2,
-      (width - padding * 2) / bounds.width,
-      (height - padding * 2) / bounds.height
-    );
-    const scale = constrainZoom(fittedScale);
-    const cropped = scale > fittedScale;
-    const x = cropped
-      ? padding - bounds.x * scale
-      : (width - bounds.width * scale) / 2 - bounds.x * scale;
-    const y = cropped
-      ? padding - bounds.y * scale
-      : (height - bounds.height * scale) / 2 - bounds.y * scale;
+    const camera = fitCameraForBounds({
+      bounds: {
+        minX: bounds.x,
+        maxX: bounds.x + bounds.width,
+        minY: bounds.y,
+        maxY: bounds.y + bounds.height,
+      },
+      viewport: { width, height },
+      constrainScale: constrainZoom,
+    });
+    if (!camera) return;
 
-    svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(scale));
+    svg.call(zoom.transform, d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k));
     hasInitialView = true;
   }
 
@@ -1568,27 +1566,16 @@ export default function clusterMap() {
       include(colourBar.position.x + colourBar.width, colourBar.position.y + colourBar.height + 20);
     }
 
-    const padding = 20;
-    const fitScale = Math.min(
-      1.2,
-      (width - padding * 2) / (bounds.maxX - bounds.minX),
-      (height - padding * 2) / (bounds.maxY - bounds.minY)
-    );
-    // A fit smaller than the default camera scale defeats Canvas culling and
-    // leaves an impractically dense interaction surface. Keep a readable
-    // scale in that case, showing the top-left of the figure (including the
-    // cluster labels). Ordinary figures retain the existing fit-to-view.
-    const cropped = fitScale < 1;
-    const scale = constrainZoom(cropped ? 1 : fitScale);
-    const camera = {
-      x: cropped
-        ? padding - bounds.minX * scale
-        : (width - (bounds.maxX - bounds.minX) * scale) / 2 - bounds.minX * scale,
-      y: cropped
-        ? padding - bounds.minY * scale
-        : (height - (bounds.maxY - bounds.minY) * scale) / 2 - bounds.minY * scale,
-      k: scale,
-    };
+    const camera = fitCameraForBounds({
+      bounds,
+      viewport: { width, height },
+      // A fit below this scale defeats raster culling and produces an
+      // impractically dense interaction surface. The helper then top-aligns
+      // the cropped figure, showing the first clusters and their labels.
+      minimumReadableScale: 1,
+      constrainScale: constrainZoom,
+    });
+    if (!camera) return;
     if (canvasZoom) {
       d3.select(canvas).call(
         canvasZoom.transform,
