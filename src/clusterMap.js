@@ -525,7 +525,9 @@ export default function clusterMap() {
     if (!useCanvas) canvasBackend.destroy();
     if (useRaster) svgBackend.destroy();
     const minimapOptions = runtime.config.plot.minimap || {};
-    const showMinimap = useCanvas && minimapOptions.show;
+    // The overview is a separate 2D canvas, so it works for both raster
+    // backends. WebGPU owns only the main plot surface.
+    const showMinimap = useRaster && minimapOptions.show;
     if (!useCanvas) clearCanvasPreview();
     if (!showMinimap && minimapBaseFrame !== null) {
       cancelAnimationFrame(minimapBaseFrame);
@@ -839,6 +841,7 @@ export default function clusterMap() {
         pixelRatio: canvasPixelRatio(),
         onUnavailable: () => paintCanvas(webgpuOverlay.node()),
       });
+      paintMinimap();
     };
     paintCanvasFrame = useCanvas
       ? () => paintCanvas(canvas.node())
@@ -1445,6 +1448,7 @@ export default function clusterMap() {
         webgpuAnchorCommit = null;
       }
       webgpuBackend.setScene(scene);
+      scheduleMinimapBase(scene);
       paintWebGpu(canvas.node(), scene);
     } else {
       svgBackend.setScene(scene);
