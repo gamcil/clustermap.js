@@ -38,7 +38,7 @@ import {
 } from "./layout.mjs";
 import { renderSvg } from "./svgRenderer.js";
 import { createChartRuntime } from "./chartRuntime.js";
-import { createWebGpuRenderer } from "./webgpuRenderer.js";
+import { createWebGpuBackend } from "./webgpuBackend.mjs";
 
 let nextChartInstance = 0;
 
@@ -72,12 +72,6 @@ export default function clusterMap() {
   let minimapBaseCanvas = null;
   let minimapBaseFrame = null;
   let paintCanvasFrame = null;
-  let webgpuRenderer = null;
-  let webgpuCanvas = null;
-  let webgpuInit = null;
-  let webgpuUnavailable = false;
-  let webgpuPendingScene = null;
-  let webgpuGeneration = 0;
   let webgpuFlipFrame = null;
   let clusterCommitFrame = null;
   let webgpuClusterCommit = null;
@@ -88,6 +82,7 @@ export default function clusterMap() {
   let warmCanvasFlipBase = () => {};
   let currentData = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+  const webgpuBackend = createWebGpuBackend();
   runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
     const sourceScene = runtime.scene.get();
     // Anchoring changes cluster origins and, when strands disagree, a small
@@ -256,7 +251,7 @@ export default function clusterMap() {
         const duration = runtime.config.plot.transitionDuration;
         const finish = () => {
           runtime.synchronizeLocusLayoutState(locus);
-          webgpuPendingScene = runtime.scene.patchFlippedLocus(sourceScene, locus);
+          webgpuBackend.setScene(runtime.scene.patchFlippedLocus(sourceScene, locus));
           canvasPreview = null;
           webgpuFlipFrame = null;
           scheduleCanvasPaint();
@@ -275,7 +270,7 @@ export default function clusterMap() {
             scaleX: runtime.scales.x,
             progress: eased,
           });
-          webgpuPendingScene = sourceScene;
+          webgpuBackend.setScene(sourceScene);
           scheduleCanvasPaint();
           if (elapsed < 1) {
             webgpuFlipFrame = requestAnimationFrame(frame);
@@ -510,17 +505,11 @@ export default function clusterMap() {
     const useCanvas = runtime.config.plot.renderer === "canvas";
     const useWebGpu = runtime.config.plot.renderer === "webgpu";
     const useRaster = useCanvas || useWebGpu;
-    if (!useWebGpu && (webgpuRenderer || webgpuCanvas || webgpuInit)) {
+    if (!useWebGpu && webgpuBackend.hasResources()) {
       // A renderer owns the WebGPU context for its canvas. Dispose it before
       // the chart changes backend, and invalidate any async setup that might
       // otherwise resolve after that canvas has been removed.
-      webgpuGeneration += 1;
-      webgpuRenderer?.destroy();
-      webgpuRenderer = null;
-      webgpuCanvas = null;
-      webgpuInit = null;
-      webgpuUnavailable = false;
-      webgpuPendingScene = null;
+      webgpuBackend.destroy();
       webgpuClusterCommit = null;
       webgpuAnchorCommit = null;
       anchorSceneCommit = null;
@@ -806,11 +795,6 @@ export default function clusterMap() {
     };
     const paintWebGpu = (canvasNode, scene) => {
       if (!canvasNode || !scene) return;
-      if (webgpuUnavailable) {
-        paintCanvas(webgpuOverlay.node());
-        return;
-      }
-      webgpuPendingScene = scene;
       const overlayNode = webgpuOverlay.node();
       if (overlayNode) {
         renderCanvas({
@@ -828,57 +812,24 @@ export default function clusterMap() {
           showGenes: false,
         });
       }
-      const draw = () => {
-        const bounds = canvasNode.getBoundingClientRect();
-        webgpuRenderer?.render({
-          nextScene: webgpuPendingScene,
-          preview: canvasPreview,
-          camera: getCamera(chartState),
-          scales: runtime.scales,
-          config: runtime.config,
-          width: bounds.width,
-          height: bounds.height,
-          pixelRatio: canvasPixelRatio(),
-        });
-      };
-      if (webgpuRenderer && webgpuCanvas === canvasNode) {
-        draw();
-        return;
-      }
-      if (webgpuInit) return;
-      webgpuCanvas = canvasNode;
-      const generation = ++webgpuGeneration;
-      webgpuInit = createWebGpuRenderer(canvasNode)
-        .then((renderer) => {
-          if (generation !== webgpuGeneration || webgpuCanvas !== canvasNode) {
-            renderer?.destroy();
-            return;
-          }
-          webgpuRenderer = renderer;
-          webgpuInit = null;
-          if (renderer) {
-            d3.select(canvasNode).attr("data-webgpu", "active");
-            draw();
-          }
-          else {
-            webgpuUnavailable = true;
-            d3.select(canvasNode).attr("data-webgpu", "unavailable");
-            paintCanvas(webgpuOverlay.node());
-          }
-        })
-        .catch((error) => {
-          if (generation !== webgpuGeneration || webgpuCanvas !== canvasNode) return;
-          webgpuInit = null;
-          webgpuUnavailable = true;
-          d3.select(canvasNode).attr("data-webgpu", "error");
-          console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
-          paintCanvas(webgpuOverlay.node());
-        });
+      const bounds = canvasNode.getBoundingClientRect();
+      webgpuBackend.paint({
+        canvas: canvasNode,
+        scene,
+        preview: canvasPreview,
+        camera: getCamera(chartState),
+        scales: runtime.scales,
+        config: runtime.config,
+        width: bounds.width,
+        height: bounds.height,
+        pixelRatio: canvasPixelRatio(),
+        onUnavailable: () => paintCanvas(webgpuOverlay.node()),
+      });
     };
     paintCanvasFrame = useCanvas
       ? () => paintCanvas(canvas.node())
       : useWebGpu
-        ? () => paintWebGpu(canvas.node(), webgpuPendingScene || runtime.scene.get())
+        ? () => paintWebGpu(canvas.node(), webgpuBackend.pendingScene || runtime.scene.get())
         : null;
     const flipLayerMatches = (layer, pending, bounds, pixelRatio) => {
       if (!layer || layer.sourceScene !== pending.sourceScene || layer.locusUid !== pending.locus.uid) {
@@ -1463,7 +1414,7 @@ export default function clusterMap() {
     } else if (useWebGpu) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
       if (webgpuClusterCommit) {
-        webgpuRenderer?.adoptClusterOrder(
+        webgpuBackend.adoptClusterOrder(
           scene,
           webgpuClusterCommit.sourceScene,
           webgpuClusterCommit.preview
@@ -1471,14 +1422,14 @@ export default function clusterMap() {
         webgpuClusterCommit = null;
       }
       if (webgpuAnchorCommit) {
-        webgpuRenderer?.adoptGeneAnchor(
+        webgpuBackend.adoptGeneAnchor(
           scene,
           webgpuAnchorCommit.sourceScene,
           webgpuAnchorCommit
         );
         webgpuAnchorCommit = null;
       }
-      webgpuPendingScene = scene;
+      webgpuBackend.setScene(scene);
       paintWebGpu(canvas.node(), scene);
     } else {
       renderSvg({

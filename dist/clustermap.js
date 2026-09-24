@@ -5459,6 +5459,123 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     };
   }
 
+  // Owns the lifetime of a WebGPU context, not chart state or interaction
+  // policy. The chart controller supplies the current scene and the Canvas
+  // fallback for each paint request.
+  function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
+    let renderer = null;
+    let canvas = null;
+    let initialization = null;
+    let unavailable = false;
+    let pendingScene = null;
+    let latestPaint = null;
+    let generation = 0;
+
+    const draw = () => {
+      if (!renderer || !latestPaint) return;
+      const {
+        camera,
+        config,
+        height,
+        pixelRatio,
+        preview,
+        scales,
+        width,
+      } = latestPaint;
+      renderer.render({
+        nextScene: pendingScene,
+        preview,
+        camera,
+        scales,
+        config,
+        width,
+        height,
+        pixelRatio,
+      });
+    };
+
+    const fallback = () => latestPaint?.onUnavailable?.();
+
+    return {
+      get pendingScene() {
+        return pendingScene;
+      },
+      get renderer() {
+        return renderer;
+      },
+      hasResources: () => Boolean(renderer || canvas || initialization || unavailable),
+      setScene: (scene) => {
+        pendingScene = scene;
+      },
+      paint: (request) => {
+        const targetCanvas = request.canvas;
+        if (!targetCanvas || !request.scene) return;
+        pendingScene = request.scene;
+        latestPaint = request;
+        if (unavailable) {
+          fallback();
+          return;
+        }
+        if (renderer && canvas === targetCanvas) {
+          draw();
+          return;
+        }
+        if (canvas && canvas !== targetCanvas) {
+          // A redraw can replace the DOM canvas while adapter setup is still in
+          // flight. Invalidate that setup before allowing the new canvas to
+          // acquire a WebGPU context.
+          generation += 1;
+          renderer?.destroy();
+          renderer = null;
+          canvas = null;
+          initialization = null;
+          unavailable = false;
+        }
+        if (initialization) return;
+
+        canvas = targetCanvas;
+        const currentGeneration = ++generation;
+        initialization = createRenderer(targetCanvas)
+          .then((nextRenderer) => {
+            if (currentGeneration !== generation || canvas !== targetCanvas) {
+              nextRenderer?.destroy();
+              return;
+            }
+            renderer = nextRenderer;
+            initialization = null;
+            if (renderer) {
+              targetCanvas.dataset.webgpu = "active";
+              draw();
+              return;
+            }
+            unavailable = true;
+            targetCanvas.dataset.webgpu = "unavailable";
+            fallback();
+          })
+          .catch((error) => {
+            if (currentGeneration !== generation || canvas !== targetCanvas) return;
+            initialization = null;
+            unavailable = true;
+            targetCanvas.dataset.webgpu = "error";
+            console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
+            fallback();
+          });
+      },
+      adoptClusterOrder: (...args) => renderer?.adoptClusterOrder(...args) || false,
+      adoptGeneAnchor: (...args) => renderer?.adoptGeneAnchor(...args) || false,
+      destroy: () => {
+        generation += 1;
+        renderer?.destroy();
+        renderer = null;
+        canvas = null;
+        initialization = null;
+        unavailable = false;
+        pendingScene = null;
+        latestPaint = null;
+      },
+    };
+  }
+
   let nextChartInstance = 0;
 
   function clusterMap() {
@@ -5491,12 +5608,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let minimapBaseCanvas = null;
     let minimapBaseFrame = null;
     let paintCanvasFrame = null;
-    let webgpuRenderer = null;
-    let webgpuCanvas = null;
-    let webgpuInit = null;
-    let webgpuUnavailable = false;
-    let webgpuPendingScene = null;
-    let webgpuGeneration = 0;
     let webgpuFlipFrame = null;
     let clusterCommitFrame = null;
     let webgpuClusterCommit = null;
@@ -5507,6 +5618,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let warmCanvasFlipBase = () => {};
     let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+    const webgpuBackend = createWebGpuBackend();
     runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
       const sourceScene = runtime.scene.get();
       // Anchoring changes cluster origins and, when strands disagree, a small
@@ -5675,7 +5787,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           const duration = runtime.config.plot.transitionDuration;
           const finish = () => {
             runtime.synchronizeLocusLayoutState(locus);
-            webgpuPendingScene = runtime.scene.patchFlippedLocus(sourceScene, locus);
+            webgpuBackend.setScene(runtime.scene.patchFlippedLocus(sourceScene, locus));
             canvasPreview = null;
             webgpuFlipFrame = null;
             scheduleCanvasPaint();
@@ -5694,7 +5806,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
               scaleX: runtime.scales.x,
               progress: eased,
             });
-            webgpuPendingScene = sourceScene;
+            webgpuBackend.setScene(sourceScene);
             scheduleCanvasPaint();
             if (elapsed < 1) {
               webgpuFlipFrame = requestAnimationFrame(frame);
@@ -5929,17 +6041,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const useCanvas = runtime.config.plot.renderer === "canvas";
       const useWebGpu = runtime.config.plot.renderer === "webgpu";
       const useRaster = useCanvas || useWebGpu;
-      if (!useWebGpu && (webgpuRenderer || webgpuCanvas || webgpuInit)) {
+      if (!useWebGpu && webgpuBackend.hasResources()) {
         // A renderer owns the WebGPU context for its canvas. Dispose it before
         // the chart changes backend, and invalidate any async setup that might
         // otherwise resolve after that canvas has been removed.
-        webgpuGeneration += 1;
-        webgpuRenderer?.destroy();
-        webgpuRenderer = null;
-        webgpuCanvas = null;
-        webgpuInit = null;
-        webgpuUnavailable = false;
-        webgpuPendingScene = null;
+        webgpuBackend.destroy();
         webgpuClusterCommit = null;
         webgpuAnchorCommit = null;
         anchorSceneCommit = null;
@@ -6225,11 +6331,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       };
       const paintWebGpu = (canvasNode, scene) => {
         if (!canvasNode || !scene) return;
-        if (webgpuUnavailable) {
-          paintCanvas(webgpuOverlay.node());
-          return;
-        }
-        webgpuPendingScene = scene;
         const overlayNode = webgpuOverlay.node();
         if (overlayNode) {
           renderCanvas({
@@ -6247,57 +6348,24 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             showGenes: false,
           });
         }
-        const draw = () => {
-          const bounds = canvasNode.getBoundingClientRect();
-          webgpuRenderer?.render({
-            nextScene: webgpuPendingScene,
-            preview: canvasPreview,
-            camera: getCamera(chartState),
-            scales: runtime.scales,
-            config: runtime.config,
-            width: bounds.width,
-            height: bounds.height,
-            pixelRatio: canvasPixelRatio(),
-          });
-        };
-        if (webgpuRenderer && webgpuCanvas === canvasNode) {
-          draw();
-          return;
-        }
-        if (webgpuInit) return;
-        webgpuCanvas = canvasNode;
-        const generation = ++webgpuGeneration;
-        webgpuInit = createWebGpuRenderer(canvasNode)
-          .then((renderer) => {
-            if (generation !== webgpuGeneration || webgpuCanvas !== canvasNode) {
-              renderer?.destroy();
-              return;
-            }
-            webgpuRenderer = renderer;
-            webgpuInit = null;
-            if (renderer) {
-              d3.select(canvasNode).attr("data-webgpu", "active");
-              draw();
-            }
-            else {
-              webgpuUnavailable = true;
-              d3.select(canvasNode).attr("data-webgpu", "unavailable");
-              paintCanvas(webgpuOverlay.node());
-            }
-          })
-          .catch((error) => {
-            if (generation !== webgpuGeneration || webgpuCanvas !== canvasNode) return;
-            webgpuInit = null;
-            webgpuUnavailable = true;
-            d3.select(canvasNode).attr("data-webgpu", "error");
-            console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
-            paintCanvas(webgpuOverlay.node());
-          });
+        const bounds = canvasNode.getBoundingClientRect();
+        webgpuBackend.paint({
+          canvas: canvasNode,
+          scene,
+          preview: canvasPreview,
+          camera: getCamera(chartState),
+          scales: runtime.scales,
+          config: runtime.config,
+          width: bounds.width,
+          height: bounds.height,
+          pixelRatio: canvasPixelRatio(),
+          onUnavailable: () => paintCanvas(webgpuOverlay.node()),
+        });
       };
       paintCanvasFrame = useCanvas
         ? () => paintCanvas(canvas.node())
         : useWebGpu
-          ? () => paintWebGpu(canvas.node(), webgpuPendingScene || runtime.scene.get())
+          ? () => paintWebGpu(canvas.node(), webgpuBackend.pendingScene || runtime.scene.get())
           : null;
       const flipLayerMatches = (layer, pending, bounds, pixelRatio) => {
         if (!layer || layer.sourceScene !== pending.sourceScene || layer.locusUid !== pending.locus.uid) {
@@ -6882,7 +6950,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       } else if (useWebGpu) {
         if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
         if (webgpuClusterCommit) {
-          webgpuRenderer?.adoptClusterOrder(
+          webgpuBackend.adoptClusterOrder(
             scene,
             webgpuClusterCommit.sourceScene,
             webgpuClusterCommit.preview
@@ -6890,14 +6958,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           webgpuClusterCommit = null;
         }
         if (webgpuAnchorCommit) {
-          webgpuRenderer?.adoptGeneAnchor(
+          webgpuBackend.adoptGeneAnchor(
             scene,
             webgpuAnchorCommit.sourceScene,
             webgpuAnchorCommit
           );
           webgpuAnchorCommit = null;
         }
-        webgpuPendingScene = scene;
+        webgpuBackend.setScene(scene);
         paintWebGpu(canvas.node(), scene);
       } else {
         renderSvg({
