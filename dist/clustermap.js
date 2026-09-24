@@ -2068,11 +2068,32 @@
       clusterLabelOffsets.set(cluster.source.uid, newStart - oldStart);
     }
 
+    const maxX = Math.max(
+      ...[...scene.loci.values()].map((candidate) =>
+        candidate.source.uid === locusUid
+          ? candidate.worldEnd + offsetX
+          : candidate.worldEnd
+      )
+    );
+    const chrome = scene.chrome
+      ? {
+          ...scene.chrome,
+          legend: {
+            ...scene.chrome.legend,
+            position: {
+              ...scene.chrome.legend.position,
+              x: scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
+            },
+          },
+        }
+      : null;
+
     return {
       type: "locus-offset",
       locusUid,
       offsetX,
       clusterLabelOffsets,
+      chrome,
     };
   }
 

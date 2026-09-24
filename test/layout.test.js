@@ -109,7 +109,9 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.deepEqual(topGene.bounds, { minX: 8, maxX: 14, minY: 0, maxY: 22 });
   const topLocus = scene.loci.get("top-locus");
   assert.equal(topLocus.worldStart, 6);
-  assert.deepEqual(createLocusOffsetPreview(scene, "top-locus", 14, { alignLabels: true }), {
+  const locusOffsetPreview = createLocusOffsetPreview(scene, "top-locus", 14, { alignLabels: true });
+  const { chrome: previewChrome, ...previewWithoutChrome } = locusOffsetPreview;
+  assert.deepEqual(previewWithoutChrome, {
     type: "locus-offset",
     locusUid: "top-locus",
     offsetX: 13,
@@ -118,6 +120,7 @@ test("scene derives world-space geometry without DOM state", async () => {
       ["bottom", 6],
     ]),
   });
+  assert.deepEqual(previewChrome.legend.position, { x: 59, y: 0 });
   assert.equal(createLocusOffsetPreview(scene, "unknown", 14, { alignLabels: true }), null);
   assert.deepEqual(
     createLocusFlipPreview(scene, "top-locus", { scaleX: (value) => value, progress: 0.12 }),
