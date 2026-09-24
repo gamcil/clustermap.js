@@ -154,6 +154,67 @@ export function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = 
   };
 }
 
+/**
+ * Extend the scene's structural figure bounds with exact Canvas text metrics.
+ * Scene layout deliberately records only renderer-neutral chrome extents; the
+ * raster adapter owns glyph measurement for initial camera fitting.
+ */
+export function canvasFigureBounds(context, scene, config) {
+  if (!scene?.bounds) return null;
+  const bounds = { ...(scene.figureBounds || scene.bounds) };
+  const include = (x, y) => {
+    bounds.minX = Math.min(bounds.minX, x);
+    bounds.maxX = Math.max(bounds.maxX, x);
+    bounds.minY = Math.min(bounds.minY, y);
+    bounds.maxY = Math.max(bounds.maxY, y);
+  };
+  const textWidth = (text, font) => {
+    context.save();
+    context.font = font;
+    const width = context.measureText(text || "").width;
+    context.restore();
+    return width;
+  };
+
+  for (const cluster of scene.clusters.values()) {
+    const anchorX = cluster.x + cluster.info.x;
+    include(
+      anchorX - textWidth(
+        cluster.source.name,
+        `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`
+      ),
+      cluster.y + 8
+    );
+    include(
+      anchorX - textWidth(
+        cluster.info.locusText,
+        `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`
+      ),
+      cluster.y + 24
+    );
+  }
+  if (scene.chrome?.legend.visible) {
+    const { legend } = scene.chrome;
+    for (const item of legend.items) {
+      include(
+        legend.position.x +
+          item.textX +
+          textWidth(item.label, `${legend.fontSize}px ${legend.fontFamily}`),
+        legend.position.y + item.y + legend.fontSize
+      );
+    }
+  }
+  if (scene.chrome?.scaleBar.visible) {
+    const { scaleBar } = scene.chrome;
+    include(scaleBar.position.x + scaleBar.length, scaleBar.position.y + scaleBar.height + 20);
+  }
+  if (scene.chrome?.colourBar.visible) {
+    const { colourBar } = scene.chrome;
+    include(colourBar.position.x + colourBar.width, colourBar.position.y + colourBar.height + 20);
+  }
+  return bounds;
+}
+
 function clusterLabelHit(context, scene, point, config) {
   for (const cluster of [...scene.clusters.values()].reverse()) {
     const anchorX = cluster.x + cluster.info.x;

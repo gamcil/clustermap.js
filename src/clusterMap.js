@@ -24,6 +24,7 @@ import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
 import {
   cameraForMinimapPoint,
+  canvasFigureBounds,
   canvasPixelRatioForCamera,
   canvasWorldPoint,
   createMinimapProjection,
@@ -1515,56 +1516,8 @@ export default function clusterMap() {
     const measurementCanvas = runtime.config.plot.renderer === "webgpu"
       ? document.createElement("canvas")
       : canvas;
-    const context = measurementCanvas.getContext("2d");
-    const bounds = { ...(scene.figureBounds || scene.bounds) };
-    const include = (x, y) => {
-      bounds.minX = Math.min(bounds.minX, x);
-      bounds.maxX = Math.max(bounds.maxX, x);
-      bounds.minY = Math.min(bounds.minY, y);
-      bounds.maxY = Math.max(bounds.maxY, y);
-    };
-    const textWidth = (text, font) => {
-      context.save();
-      context.font = font;
-      const measured = context.measureText(text).width;
-      context.restore();
-      return measured;
-    };
-
-    for (const cluster of scene.clusters.values()) {
-      const anchorX = cluster.x + cluster.info.x;
-      include(
-        anchorX - textWidth(
-          cluster.source.name,
-          `bold ${runtime.config.cluster.nameFontSize}px ${runtime.config.plot.fontFamily}`
-        ),
-        cluster.y + 8
-      );
-      include(
-        anchorX - textWidth(
-          cluster.info.locusText,
-          `${runtime.config.cluster.lociFontSize}px ${runtime.config.plot.fontFamily}`
-        ),
-        cluster.y + 24
-      );
-    }
-    if (scene.chrome?.legend.visible) {
-      const { legend } = scene.chrome;
-      for (const item of legend.items) {
-        include(
-          legend.position.x + item.textX + textWidth(item.label, `${legend.fontSize}px ${legend.fontFamily}`),
-          legend.position.y + item.y + legend.fontSize
-        );
-      }
-    }
-    if (scene.chrome?.scaleBar.visible) {
-      const { scaleBar } = scene.chrome;
-      include(scaleBar.position.x + scaleBar.length, scaleBar.position.y + scaleBar.height + 20);
-    }
-    if (scene.chrome?.colourBar.visible) {
-      const { colourBar } = scene.chrome;
-      include(colourBar.position.x + colourBar.width, colourBar.position.y + colourBar.height + 20);
-    }
+    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config);
+    if (!bounds) return;
 
     const camera = fitCameraForBounds({
       bounds,

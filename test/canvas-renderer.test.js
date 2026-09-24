@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 test("canvas renderer draws world-space scene geometry through the camera", async () => {
   const {
 	    cameraForMinimapPoint,
+    canvasFigureBounds,
     canvasMinimapViewport,
     canvasPixelRatioForCamera,
     canvasWorldViewport,
@@ -180,6 +181,13 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     },
     link: {},
   };
+  scene.bounds = { minX: 0, maxX: 20, minY: 10, maxY: 30 };
+  assert.deepEqual(canvasFigureBounds(context, scene, config), {
+    minX: -85,
+    maxX: 45,
+    minY: 10,
+    maxY: 34,
+  });
 
   const result = renderCanvas({
     canvas,
