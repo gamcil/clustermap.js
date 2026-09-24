@@ -80,11 +80,30 @@ export default function clusterMap() {
   let webgpuGeneration = 0;
   let webgpuFlipFrame = null;
   let clusterCommitFrame = null;
+  let webgpuClusterCommit = null;
+  let webgpuAnchorCommit = null;
   let scheduleMinimapBase = () => {};
   let prepareCanvasFlipBase = () => {};
   let warmCanvasFlipBase = () => {};
   let currentData = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+  runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
+    const sourceScene = runtime.scene.get();
+    // Anchoring changes cluster origins and, when strands disagree, a small
+    // set of loci. The GPU renderer can retain everything else.
+    if (
+      runtime.config.plot.renderer !== "webgpu" ||
+      !sourceScene
+    ) return;
+    const offsets = new Map(
+      changes
+        .filter(({ offset }) => offset)
+        .map(({ clusterUid, offset }) => [clusterUid, offset])
+    );
+    if (offsets.size || flippedLoci.size) {
+      webgpuAnchorCommit = { sourceScene, offsets, flippedLoci };
+    }
+  });
   const interactionController = createInteractionController({
     clusterRows: () => runtime.scales.y.range(),
     getClusterOrder: () => getClusterOrder(chartState),
@@ -130,6 +149,9 @@ export default function clusterMap() {
           order,
           rows,
         });
+        if (runtime.config.plot.renderer === "webgpu") {
+          webgpuClusterCommit = { sourceScene, preview: canvasPreview };
+        }
         scheduleCanvasPreview();
         if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
         clusterCommitFrame = requestAnimationFrame(() => {
@@ -164,7 +186,14 @@ export default function clusterMap() {
       const result = previewLocusTrim(chartState, locus, {
         edge,
         position,
-        coordinateFor: runtime.scales.x,
+        // Pointer positions are in chart-world space. Gene-state boundaries
+        // are locus-local, so project them through the locus and cluster
+        // translations as well; otherwise trimming drifts after anchoring or
+        // dragging a locus horizontally.
+        coordinateFor: (coordinate) =>
+          runtime.scales.x(coordinate) +
+          runtime.scales.locus(locus.uid) +
+          runtime.scales.offset(locus.clusterUid),
         scaleGenes: runtime.config.plot.scaleGenes,
       });
       if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
@@ -492,6 +521,8 @@ export default function clusterMap() {
       webgpuInit = null;
       webgpuUnavailable = false;
       webgpuPendingScene = null;
+      webgpuClusterCommit = null;
+      webgpuAnchorCommit = null;
     }
     const minimapOptions = runtime.config.plot.minimap || {};
     const showMinimap = useCanvas && minimapOptions.show;
@@ -1422,6 +1453,22 @@ export default function clusterMap() {
       animateCanvas(canvas.node(), scene, hasInitialView && animate);
     } else if (useWebGpu) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
+      if (webgpuClusterCommit) {
+        webgpuRenderer?.adoptClusterOrder(
+          scene,
+          webgpuClusterCommit.sourceScene,
+          webgpuClusterCommit.preview
+        );
+        webgpuClusterCommit = null;
+      }
+      if (webgpuAnchorCommit) {
+        webgpuRenderer?.adoptGeneAnchor(
+          scene,
+          webgpuAnchorCommit.sourceScene,
+          webgpuAnchorCommit
+        );
+        webgpuAnchorCommit = null;
+      }
       webgpuPendingScene = scene;
       paintWebGpu(canvas.node(), scene);
     } else {

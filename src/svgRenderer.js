@@ -100,11 +100,11 @@ export function renderSvg({
           .append("rect")
           .attr("class", "leftHandle")
           .attr("x", -8)
-          .call(createLocusResizeDrag({ interactions }));
+          .call(createLocusResizeDrag({ plot, interactions }));
         hover
           .append("rect")
           .attr("class", "rightHandle")
-          .call(createLocusResizeDrag({ interactions }));
+          .call(createLocusResizeDrag({ plot, interactions }));
         hover
           .selectAll(".leftHandle, .rightHandle")
           .attr("width", 8)
@@ -278,7 +278,7 @@ function createLocusPositionDrag({ plot, interactions }) {
 
 // Resize changes chart state through the controller, while this renderer-owned
 // adapter supplies immediate SVG feedback until the final redraw.
-function createLocusResizeDrag({ interactions }) {
+function createLocusResizeDrag({ plot, interactions }) {
   const started = () => interactions.beginLocusTrim();
 
   const dragged = function (event, locus) {
@@ -291,7 +291,15 @@ function createLocusResizeDrag({ interactions }) {
 
   const ended = (_, locus) => interactions.endLocusTrim(locus);
 
-  return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
+  return d3
+    .drag()
+    // Keep resize and Canvas pointer coordinates in the same chart-world
+    // space. The default handle-parent container reports locus-local x,
+    // which becomes incorrect as soon as that locus or its cluster moves.
+    .container(() => plot.node())
+    .on("start", started)
+    .on("drag", dragged)
+    .on("end", ended);
 }
 
 function updateLoci(selection, scene, config) {

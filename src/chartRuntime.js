@@ -73,6 +73,7 @@ const config = createDefaultConfig();
 let chartIndex = null;
 let chartState = null;
 let currentScene = null;
+let beforeGeneAnchorUpdate = null;
 
 // IDs are part of the SVG surface, so they must be unique when several maps
 // are mounted on the same document. Keep the logical suffix stable: it is
@@ -221,7 +222,10 @@ const scene = {
 
 const gene = {
   getId: ids.gene,
-  anchor: (_, anchor, flipLoci = false) => {
+  setBeforeAnchorUpdate: (callback) => {
+    beforeGeneAnchorUpdate = callback;
+  },
+  anchor: (_, anchor, flipLoci = false, { beforeUpdate } = {}) => {
     const genes = scales.group
       .domain()
       .filter((uid) => {
@@ -229,7 +233,8 @@ const gene = {
       })
       .map(get.geneData);
 
-    anchorGeneGroup(chartState, {
+    const flippedLoci = new Set();
+    const changes = anchorGeneGroup(chartState, {
       anchor,
       genes,
       locusForGene: (gene) => get.locusData(gene.locusUid),
@@ -242,11 +247,16 @@ const gene = {
         );
       },
       flipMismatchedLoci: flipLoci,
-      onLocusFlipped: synchronizeLocusLayoutState,
+      onLocusFlipped: (locus) => {
+        synchronizeLocusLayoutState(locus);
+        flippedLoci.add(locus.uid);
+      },
     });
 
     refreshClusterOffsetScale();
+    (beforeUpdate || beforeGeneAnchorUpdate)?.({ changes, flippedLoci });
     plot.update();
+    return { changes, flippedLoci };
   },
 };
 

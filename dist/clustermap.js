@@ -2853,9 +2853,9 @@
     const clusterPreview = preview?.type === "cluster-drag";
     const visible = !clusterPreview && viewport && displayScene.index
       ? {
-          links: queryViewportOrdered(displayScene.index.links, viewport),
-          loci: queryViewportOrdered(displayScene.index.loci, viewport),
-          genes: queryViewportOrdered(displayScene.index.genes, viewport),
+          links: showLinks ? queryViewportOrdered(displayScene.index.links, viewport) : null,
+          loci: showLoci ? queryViewportOrdered(displayScene.index.loci, viewport) : null,
+          genes: showGenes ? queryViewportOrdered(displayScene.index.genes, viewport) : null,
         }
       : null;
 
@@ -3059,11 +3059,11 @@
             .append("rect")
             .attr("class", "leftHandle")
             .attr("x", -8)
-            .call(createLocusResizeDrag({ interactions }));
+            .call(createLocusResizeDrag({ plot, interactions }));
           hover
             .append("rect")
             .attr("class", "rightHandle")
-            .call(createLocusResizeDrag({ interactions }));
+            .call(createLocusResizeDrag({ plot, interactions }));
           hover
             .selectAll(".leftHandle, .rightHandle")
             .attr("width", 8)
@@ -3237,7 +3237,7 @@
 
   // Resize changes chart state through the controller, while this renderer-owned
   // adapter supplies immediate SVG feedback until the final redraw.
-  function createLocusResizeDrag({ interactions }) {
+  function createLocusResizeDrag({ plot, interactions }) {
     const started = () => interactions.beginLocusTrim();
 
     const dragged = function (event, locus) {
@@ -3250,7 +3250,15 @@
 
     const ended = (_, locus) => interactions.endLocusTrim(locus);
 
-    return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
+    return d3
+      .drag()
+      // Keep resize and Canvas pointer coordinates in the same chart-world
+      // space. The default handle-parent container reports locus-local x,
+      // which becomes incorrect as soon as that locus or its cluster moves.
+      .container(() => plot.node())
+      .on("start", started)
+      .on("drag", dragged)
+      .on("end", ended);
   }
 
   function updateLoci(selection, scene, config) {
@@ -3715,6 +3723,7 @@
   let chartIndex = null;
   let chartState = null;
   let currentScene = null;
+  let beforeGeneAnchorUpdate = null;
 
   // IDs are part of the SVG surface, so they must be unique when several maps
   // are mounted on the same document. Keep the logical suffix stable: it is
@@ -3863,7 +3872,10 @@
 
   const gene = {
     getId: ids.gene,
-    anchor: (_, anchor, flipLoci = false) => {
+    setBeforeAnchorUpdate: (callback) => {
+      beforeGeneAnchorUpdate = callback;
+    },
+    anchor: (_, anchor, flipLoci = false, { beforeUpdate } = {}) => {
       const genes = scales.group
         .domain()
         .filter((uid) => {
@@ -3871,7 +3883,8 @@
         })
         .map(get.geneData);
 
-      anchorGeneGroup(chartState, {
+      const flippedLoci = new Set();
+      const changes = anchorGeneGroup(chartState, {
         anchor,
         genes,
         locusForGene: (gene) => get.locusData(gene.locusUid),
@@ -3884,11 +3897,16 @@
           );
         },
         flipMismatchedLoci: flipLoci,
-        onLocusFlipped: synchronizeLocusLayoutState,
+        onLocusFlipped: (locus) => {
+          synchronizeLocusLayoutState(locus);
+          flippedLoci.add(locus.uid);
+        },
       });
 
       refreshClusterOffsetScale();
+      (beforeUpdate || beforeGeneAnchorUpdate)?.({ changes, flippedLoci });
       plot.update();
+      return { changes, flippedLoci };
     },
   };
 
@@ -4051,7 +4069,7 @@ struct Camera {
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
 struct ClusterOffsets {
-  values: array<f32>,
+  values: array<vec2f>,
 }
 @group(0) @binding(1) var<storage, read> clusterOffsets: ClusterOffsets;
 struct LinkRecord {
@@ -4080,8 +4098,8 @@ struct VertexOutput {
 }
 
 @vertex fn vertexMain(input: VertexInput) -> VertexOutput {
-  let rowOffset = clusterOffsets.values[u32(input.clusterSlot)];
-  let screen = vec2f(input.position.x, input.position.y + rowOffset)
+  let clusterOffset = clusterOffsets.values[u32(input.clusterSlot)];
+  let screen = (input.position + clusterOffset)
     * camera.transform.z + camera.transform.xy;
   var output: VertexOutput;
   output.position = vec4f(
@@ -4107,15 +4125,19 @@ fn cubic(start: f32, controlA: f32, controlB: f32, end: f32, amount: f32) -> f32
 }
 
 fn ribbonPoint(link: LinkRecord, edge: u32, amount: f32) -> vec2f {
-  let queryY = link.query.z + clusterOffsets.values[u32(link.query.w)];
-  let mateY = link.mate.z + clusterOffsets.values[u32(link.mate.w)];
+  let queryOffset = clusterOffsets.values[u32(link.query.w)];
+  let mateOffset = clusterOffsets.values[u32(link.mate.w)];
+  let queryY = link.query.z + queryOffset.y;
+  let mateY = link.mate.z + mateOffset.y;
   let queryIsTop = queryY <= mateY;
   let top = select(link.mate, link.query, queryIsTop);
   let bottom = select(link.query, link.mate, queryIsTop);
   let topY = select(mateY, queryY, queryIsTop);
   let bottomY = select(queryY, mateY, queryIsTop);
-  let topX = select(top.x, top.y, edge == 0u);
-  let bottomX = select(bottom.x, bottom.y, edge == 0u);
+  let topOffset = select(mateOffset.x, queryOffset.x, queryIsTop);
+  let bottomOffset = select(queryOffset.x, mateOffset.x, queryIsTop);
+  let topX = select(top.x, top.y, edge == 0u) + topOffset;
+  let bottomX = select(bottom.x, bottom.y, edge == 0u) + bottomOffset;
   let middle = topY + abs(bottomY - topY) / 2.0;
   return vec2f(
     cubic(topX, topX, bottomX, bottomX, amount),
@@ -4399,40 +4421,54 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     return { links: new Float32Array(fill), linkEdges: new Float32Array(edge) };
   }
 
-  function linkEndpointForGpu(gene, clusterSlot) {
+  function linkEndpointForGpu(gene, clusterSlot, offsetX = 0) {
     const forward = gene.display.strand === 1;
     return [
-      forward ? gene.bounds.minX : gene.bounds.maxX,
-      forward ? gene.bounds.maxX : gene.bounds.minX,
+      (forward ? gene.bounds.minX : gene.bounds.maxX) - offsetX,
+      (forward ? gene.bounds.maxX : gene.bounds.minX) - offsetX,
       gene.locus.y + gene.locus.track.y,
       clusterSlot,
     ];
+  }
+
+  function linkRecordForGpu(scene, link, scales, config, clusterSlots, clusterOffsetX = () => 0) {
+    const query = scene.genes.get(link.source.query.uid);
+    const target = scene.genes.get(link.source.target.uid);
+    if (!query || !target) return null;
+    const fill = rgba(
+      config.link.groupColour
+        ? scales.colour(scales.group(link.source.query.uid))
+        : scales.score(link.source.identity)
+    );
+    const stroke = rgba(
+      config.link.groupColour
+        ? scales.colour(scales.group(link.source.query.uid))
+        : "black"
+    );
+    return new Float32Array([
+      ...linkEndpointForGpu(
+        query,
+        clusterSlots.get(query.locus.cluster.uid),
+        clusterOffsetX(query.locus.cluster.uid)
+      ),
+      ...linkEndpointForGpu(
+        target,
+        clusterSlots.get(target.locus.cluster.uid),
+        clusterOffsetX(target.locus.cluster.uid)
+      ),
+      ...fill,
+      ...stroke,
+    ]);
   }
 
   function buildLinkRecords(scene, scales, config, clusterSlots) {
     const values = [];
     const indexByUid = new Map();
     for (const link of scene.links.values()) {
-      const query = scene.genes.get(link.source.query.uid);
-      const target = scene.genes.get(link.source.target.uid);
-      if (!query || !target) continue;
+      const record = linkRecordForGpu(scene, link, scales, config, clusterSlots);
+      if (!record) continue;
       indexByUid.set(link.source.uid, indexByUid.size);
-      const fill = rgba(
-        config.link.groupColour
-          ? scales.colour(scales.group(link.source.query.uid))
-          : scales.score(link.source.identity)
-      );
-      const stroke = rgba(
-        config.link.groupColour
-          ? scales.colour(scales.group(link.source.query.uid))
-          : "black"
-      );
-      values.push(
-        ...linkEndpointForGpu(query, clusterSlots.get(query.locus.cluster.uid)),
-        ...linkEndpointForGpu(target, clusterSlots.get(target.locus.cluster.uid)),
-        ...fill,
-        ...stroke
-      );
+      values.push(...record);
     }
     return { values: new Float32Array(values), indexByUid };
   }
@@ -4457,6 +4493,15 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const range = { offset: target.length, length: values.length };
     target.push(...values);
     return range;
+  }
+
+  function translateVertexX(values, offsetX) {
+    if (!offsetX) return values;
+    const translated = new Float32Array(values);
+    for (let index = 0; index < translated.length; index += 7) {
+      translated[index] -= offsetX;
+    }
+    return translated;
   }
 
   function buildGeometry(scene, scales, config, preview = null, clusterSlots = null) {
@@ -4555,7 +4600,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         // upload while the pointer moves.
         loci: new Set(),
         genes: new Set(),
-        links: new Set(scene.links.keys()),
+        links: new Set(),
         full: false,
         clusterOffsets: true,
       };
@@ -4675,10 +4720,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     });
     const uniform = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     let clusterOffsetBuffer = device.createBuffer({
-      size: 4,
+      size: 8,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
     let clusterOffsetCapacity = 1;
+    // Each cluster owns a world-space x/y translation. Reusing this tiny
+    // buffer lets committed cluster moves avoid rebuilding every gene vertex.
+    let clusterBaseOffsets = new Float32Array(clusterOffsetCapacity * 2);
     let linkRecordBuffer = device.createBuffer({
       size: 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -4708,6 +4756,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let linkEdgeCount = 0;
     let previewLinkCount = 0;
     let previewLinksActive = false;
+    let retainedClusterGeometry = false;
     let linkRecordIndexByUid = new Map();
     let clusterPreviewIndexCache = new Map();
     let trackCount = 0;
@@ -4747,24 +4796,27 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const cacheKey = `${config.link.threshold}:${[...pairs].sort().join("|")}`;
       const cached = clusterPreviewIndexCache.get(cacheKey);
       if (cached) return cached;
-      // Scene link iteration is already in source order. Cache the matching GPU
-      // record indices once per distinct neighbouring-pair arrangement instead
-      // of sorting and remapping a potentially huge UID list for every move.
-      const values = new Uint32Array(
-        [...scene.links.values()]
-          .filter((link) => {
-            const query = scene.genes.get(link.source.query.uid);
-            const target = scene.genes.get(link.source.target.uid);
-            return (
-              query?.visible &&
-              target?.visible &&
-              link.source.identity >= config.link.threshold &&
-              pairs.has(clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid))
-            );
-          })
-          .map((link) => linkRecordIndexByUid.get(link.source.uid))
-          .filter((index) => index !== undefined)
-      );
+      // The scene already indexes links by cluster pair. Build the GPU list from
+      // those selected pairs, rather than scanning every link and recomputing
+      // its pair key whenever the dragged row crosses a snap boundary.
+      const indices = [];
+      for (const pair of pairs) {
+        for (const uid of scene.linksByClusterPair?.get(pair) || []) {
+          const link = scene.links.get(uid);
+          const query = link && scene.genes.get(link.source.query.uid);
+          const target = link && scene.genes.get(link.source.target.uid);
+          const index = link && linkRecordIndexByUid.get(link.source.uid);
+          if (
+            query?.visible &&
+            target?.visible &&
+            link.source.identity >= config.link.threshold &&
+            index !== undefined
+          ) {
+            indices.push(index);
+          }
+        }
+      }
+      const values = new Uint32Array(indices);
       clusterPreviewIndexCache.set(cacheKey, values);
       return values;
     };
@@ -4785,17 +4837,19 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (size > clusterOffsetCapacity) {
         clusterOffsetBuffer.destroy();
         clusterOffsetBuffer = device.createBuffer({
-          size: size * 4,
+          size: size * 8,
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
         clusterOffsetCapacity = size;
+        clusterBaseOffsets = new Float32Array(clusterOffsetCapacity * 2);
         bindGroup = createBindGroup();
       }
-      const offsets = new Float32Array(clusterOffsetCapacity);
+      const offsets = new Float32Array(clusterOffsetCapacity * 2);
+      offsets.set(clusterBaseOffsets);
       if (nextPreview?.type === "cluster-drag") {
         for (const [uid, offset] of nextPreview.clusterOffsets) {
           const slot = geometry?.clusterSlots?.get(uid);
-          if (slot !== undefined) offsets[slot] = offset;
+          if (slot !== undefined) offsets[slot * 2 + 1] += offset;
         }
       }
       device.queue.writeBuffer(clusterOffsetBuffer, 0, offsets);
@@ -4832,6 +4886,17 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       geneCount = data.genes.length / 7;
       geneEdgeCount = data.geneEdges.length / 7;
     };
+    const visibleLinkIndices = () => new Uint32Array(
+      [...scene.links.values()]
+        .filter((link) => link.visible)
+        .map((link) => linkRecordIndexByUid.get(link.source.uid))
+        .filter((index) => index !== undefined)
+    );
+    const resetRetainedClusterGeometry = () => {
+      retainedClusterGeometry = false;
+      clusterBaseOffsets.fill(0);
+      previewLinksActive = false;
+    };
     const restorePreview = (records) => {
       if (!records || !geometry) return;
       if (records.full) {
@@ -4856,6 +4921,16 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       }
     };
     const applyPreview = (nextPreview, scales, config, viewport) => {
+      // A committed cluster reorder retains the old GPU geometry plus row
+      // offsets. Materialize it only when another kind of edit needs direct
+      // per-record geometry in the new scene coordinates.
+      if (retainedClusterGeometry && nextPreview?.type !== "cluster-drag") {
+        geometry = buildGeometry(scene, scales, config);
+        uploadGeometry(geometry);
+        uploadLinkRecords(buildLinkRecords(scene, scales, config, geometry.clusterSlots));
+        resetRetainedClusterGeometry();
+        updateClusterOffsets(null);
+      }
       // Cluster-drag links are drawn from a temporary, viewport-limited buffer,
       // so the retained base link buffer never needs restoring or rewriting.
       if (!patchedRecords?.clusterOffsets) restorePreview(patchedRecords);
@@ -4926,6 +5001,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           geometry = buildGeometry(nextScene, scales, config);
           uploadGeometry(geometry);
           uploadLinkRecords(buildLinkRecords(nextScene, scales, config, geometry.clusterSlots));
+          resetRetainedClusterGeometry();
           updateClusterOffsets(null);
           scene = nextScene;
           preview = null;
@@ -4991,6 +5067,103 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         pass.end();
         device.queue.submit([encoder.finish()]);
       },
+      adoptClusterOrder(nextScene, sourceScene, committedPreview) {
+        if (
+          !geometry ||
+          !committedPreview ||
+          committedPreview.type !== "cluster-drag" ||
+          scene !== sourceScene
+        ) {
+          return false;
+        }
+        // Geometry is still expressed in the old scene's row coordinates. Keep
+        // that buffer and make the committed preview offsets its new baseline;
+        // nextScene remains authoritative for hit testing, labels, and export.
+        for (const [uid, offset] of committedPreview.clusterOffsets) {
+          const slot = geometry.clusterSlots.get(uid);
+          if (slot !== undefined) clusterBaseOffsets[slot * 2 + 1] += offset;
+        }
+        scene = nextScene;
+        preview = null;
+        patchedRecords = null;
+        retainedClusterGeometry = true;
+        clusterPreviewIndexCache = new Map();
+        updateClusterOffsets(null);
+        uploadPreviewLinkIndices(visibleLinkIndices());
+        previewLinksActive = true;
+        return true;
+      },
+      adoptGeneAnchor(nextScene, sourceScene, { offsets, flippedLoci }) {
+        if (!geometry || scene !== sourceScene) return false;
+
+        // First establish the new cluster-coordinate baseline. Target scene
+        // geometry is absolute, so sparse replacements below remove this base
+        // again before the vertex shader reapplies it.
+        for (const [uid, offset] of offsets || []) {
+          const slot = geometry.clusterSlots.get(uid);
+          if (slot !== undefined) clusterBaseOffsets[slot * 2] += offset;
+        }
+        const baseXForCluster = (uid) => {
+          const slot = geometry.clusterSlots.get(uid);
+          return slot === undefined ? 0 : clusterBaseOffsets[slot * 2];
+        };
+
+        const affectedGenes = new Set();
+        for (const locusUid of flippedLoci || []) {
+          const locus = nextScene.loci.get(locusUid);
+          if (!locus) continue;
+          const clusterSlot = geometry.clusterSlots.get(locus.cluster.uid);
+          const offsetX = baseXForCluster(locus.cluster.uid);
+          for (const gene of locus.genes) {
+            const targetGene = nextScene.genes.get(gene.source.uid);
+            const ranges = geometry.ranges.genes.get(gene.source.uid);
+            if (!targetGene || !ranges || clusterSlot === undefined) continue;
+            const vertices = geneVertices(targetGene, scales, null, clusterSlot);
+            write("genes", ranges.genes, translateVertexX(vertices.genes, offsetX));
+            write("geneEdges", ranges.geneEdges, translateVertexX(vertices.geneEdges, offsetX));
+            affectedGenes.add(gene.source.uid);
+          }
+          const ranges = geometry.ranges.loci.get(locusUid);
+          if (ranges && clusterSlot !== undefined) {
+            write(
+              "tracks",
+              ranges.tracks,
+              translateVertexX(trackVertices(locus, config, null, clusterSlot), offsetX)
+            );
+          }
+        }
+
+        // Ribbons are already instanced for retained cluster movement. Patch
+        // only endpoints whose loci flipped, rather than rebuilding records for
+        // every link in a large chart.
+        for (const link of nextScene.links.values()) {
+          if (
+            !affectedGenes.has(link.source.query.uid) &&
+            !affectedGenes.has(link.source.target.uid)
+          ) continue;
+          const index = linkRecordIndexByUid.get(link.source.uid);
+          if (index === undefined) continue;
+          const record = linkRecordForGpu(
+            nextScene,
+            link,
+            scales,
+            config,
+            geometry.clusterSlots,
+            baseXForCluster
+          );
+          if (record) device.queue.writeBuffer(linkRecordBuffer, index * 16 * 4, record);
+        }
+
+        scene = nextScene;
+        preview = null;
+        patchedRecords = null;
+        retainedClusterGeometry = true;
+        clusterPreviewIndexCache = new Map();
+        updateClusterOffsets(null);
+        uploadPreviewLinkIndices(visibleLinkIndices());
+        previewLinksActive = true;
+        return true;
+      },
       destroy() {
         linkBuffer?.destroy();
         linkEdgeBuffer?.destroy();
@@ -5046,11 +5219,30 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let webgpuGeneration = 0;
     let webgpuFlipFrame = null;
     let clusterCommitFrame = null;
+    let webgpuClusterCommit = null;
+    let webgpuAnchorCommit = null;
     let scheduleMinimapBase = () => {};
     let prepareCanvasFlipBase = () => {};
     let warmCanvasFlipBase = () => {};
     let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+    runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
+      const sourceScene = runtime.scene.get();
+      // Anchoring changes cluster origins and, when strands disagree, a small
+      // set of loci. The GPU renderer can retain everything else.
+      if (
+        runtime.config.plot.renderer !== "webgpu" ||
+        !sourceScene
+      ) return;
+      const offsets = new Map(
+        changes
+          .filter(({ offset }) => offset)
+          .map(({ clusterUid, offset }) => [clusterUid, offset])
+      );
+      if (offsets.size || flippedLoci.size) {
+        webgpuAnchorCommit = { sourceScene, offsets, flippedLoci };
+      }
+    });
     const interactionController = createInteractionController({
       clusterRows: () => runtime.scales.y.range(),
       getClusterOrder: () => getClusterOrder(chartState),
@@ -5096,6 +5288,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             order,
             rows,
           });
+          if (runtime.config.plot.renderer === "webgpu") {
+            webgpuClusterCommit = { sourceScene, preview: canvasPreview };
+          }
           scheduleCanvasPreview();
           if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
           clusterCommitFrame = requestAnimationFrame(() => {
@@ -5130,7 +5325,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         const result = previewLocusTrim(chartState, locus, {
           edge,
           position,
-          coordinateFor: runtime.scales.x,
+          // Pointer positions are in chart-world space. Gene-state boundaries
+          // are locus-local, so project them through the locus and cluster
+          // translations as well; otherwise trimming drifts after anchoring or
+          // dragging a locus horizontally.
+          coordinateFor: (coordinate) =>
+            runtime.scales.x(coordinate) +
+            runtime.scales.locus(locus.uid) +
+            runtime.scales.offset(locus.clusterUid),
           scaleGenes: runtime.config.plot.scaleGenes,
         });
         if (["canvas", "webgpu"].includes(runtime.config.plot.renderer) && runtime.scene.get()) {
@@ -5458,6 +5660,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         webgpuInit = null;
         webgpuUnavailable = false;
         webgpuPendingScene = null;
+        webgpuClusterCommit = null;
+        webgpuAnchorCommit = null;
       }
       const minimapOptions = runtime.config.plot.minimap || {};
       const showMinimap = useCanvas && minimapOptions.show;
@@ -6388,6 +6592,22 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         animateCanvas(canvas.node(), scene, hasInitialView && animate);
       } else if (useWebGpu) {
         if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
+        if (webgpuClusterCommit) {
+          webgpuRenderer?.adoptClusterOrder(
+            scene,
+            webgpuClusterCommit.sourceScene,
+            webgpuClusterCommit.preview
+          );
+          webgpuClusterCommit = null;
+        }
+        if (webgpuAnchorCommit) {
+          webgpuRenderer?.adoptGeneAnchor(
+            scene,
+            webgpuAnchorCommit.sourceScene,
+            webgpuAnchorCommit
+          );
+          webgpuAnchorCommit = null;
+        }
         webgpuPendingScene = scene;
         paintWebGpu(canvas.node(), scene);
       } else {

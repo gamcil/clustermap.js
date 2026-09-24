@@ -541,6 +541,104 @@ test("dragging a locus persists its horizontal position", async ({ page }, testI
   }));
 });
 
+test("trimming a moved locus uses its world-space gene boundary", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const locus = page.locator("g.locus").first();
+  const hover = locus.locator("rect.hover");
+  const moveTarget = locus.locator('[id$="gene_1"] polygon.genePolygon');
+  await expect(locus).toBeVisible();
+
+  // Move first so the trim boundary no longer coincides with local x=0.
+  await hover.dragTo(moveTarget);
+  await waitForPaint(page);
+
+  const handle = locus.locator("rect.rightHandle");
+  const geneThree = locus.locator('[id$="gene_3"] polygon.genePolygon');
+  const handleBounds = await handle.boundingBox();
+  const targetBounds = await geneThree.boundingBox();
+  if (!handleBounds || !targetBounds) throw new Error("trim targets are not visible");
+
+  await page.mouse.move(
+    handleBounds.x + handleBounds.width / 2,
+    handleBounds.y + handleBounds.height / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    targetBounds.x + targetBounds.width,
+    targetBounds.y + targetBounds.height / 2
+  );
+  await page.mouse.up();
+  await waitForPaint(page);
+
+  await expect(await getLocusText(page, locus)).toHaveText("input_locus:1-6500");
+});
+
+test("clicking a gene aligns its matching genes across clusters", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    // Make the second member of group 1 visibly offset from the anchor.
+    Object.assign(data.clusters[1].loci[0].genes[0], { start: 2500, end: 3500 });
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    d3.select(host).datum(data).call(clusterMap().config({ plot: { transitionDuration: 0 } }));
+  });
+
+  const anchor = page.locator('[id$="gene_0"] polygon.genePolygon');
+  const match = page.locator('[id$="gene_1001"] polygon.genePolygon');
+  const before = await match.boundingBox();
+  await anchor.click();
+
+  await expect
+    .poll(async () => {
+      const [anchorBox, matchBox] = await Promise.all([anchor.boundingBox(), match.boundingBox()]);
+      if (!anchorBox || !matchBox) return Infinity;
+      return Math.abs(
+        (anchorBox.x + anchorBox.width / 2) -
+        (matchBox.x + matchBox.width / 2)
+      );
+    })
+    .toBeLessThan(1);
+  const after = await match.boundingBox();
+  expect(after?.x).not.toBe(before?.x);
+});
+
+test("anchoring from the gene menu flips a mismatched locus before alignment", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    data.clusters[0].loci[0].genes[0].strand = 1;
+    data.clusters[1].loci[0].genes[0].strand = -1;
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    d3.select(host).datum(data).call(clusterMap().config({ plot: { transitionDuration: 0 } }));
+  });
+
+  const anchor = page.locator('[id$="gene_0"] polygon.genePolygon');
+  const match = page.locator('[id$="gene_1001"] polygon.genePolygon');
+  await anchor.click({ button: "right" });
+  await page.locator("div.tooltip button", { hasText: "Anchor map on gene" }).click();
+
+  await expect(page.locator("g.cluster").nth(1).locator("text.locusText")).toContainText("(reversed)");
+  await expect
+    .poll(async () => {
+      const [anchorBox, matchBox] = await Promise.all([anchor.boundingBox(), match.boundingBox()]);
+      if (!anchorBox || !matchBox) return Infinity;
+      return Math.abs(
+        (anchorBox.x + anchorBox.width / 2) -
+        (matchBox.x + matchBox.width / 2)
+      );
+    })
+    .toBeLessThan(1);
+});
+
 test("zoom state persists across a chart redraw", async ({ page }, testInfo) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
 
@@ -744,6 +842,56 @@ test("WebGPU renderer forwards locus interactions through its Canvas overlay", a
   await expect.poll(() => page.evaluate(() => window.__webgpuInteractionTest.chart.exportSvg())).toContain(
     "input_locus (reversed):10000-1"
   );
+});
+
+test("WebGPU aligns a matching gene without leaving the retained scene", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  const supported = await page.evaluate(() => Boolean(navigator.gpu));
+  test.skip(!supported, "WebGPU is unavailable in this browser");
+
+  const anchor = page.locator('[id$="gene_0"] polygon.genePolygon');
+  const anchorBox = await anchor.boundingBox();
+  expect(anchorBox).not.toBeNull();
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    Object.assign(data.clusters[1].loci[0].genes[0], { start: 2500, end: 3500 });
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({ plot: { renderer: "webgpu", transitionDuration: 0 } });
+    window.__webgpuAnchorTest = { chart };
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const canvas = await requireWebGpuCanvas(page);
+  const before = (await canvas.screenshot()).toString("base64");
+  await page.mouse.click(
+    anchorBox.x + anchorBox.width / 2,
+    anchorBox.y + anchorBox.height / 2
+  );
+  await expect.poll(async () => (await canvas.screenshot()).toString("base64")).not.toEqual(before);
+
+  await expect
+    .poll(() => page.evaluate(() => {
+      const svg = new DOMParser().parseFromString(
+        window.__webgpuAnchorTest.chart.exportSvg(),
+        "image/svg+xml"
+      );
+      const centreX = (uid) => {
+        const gene = svg.querySelector(`[id$="gene_${uid}"]`);
+        const locus = gene?.closest("g.locus");
+        const offset = Number(/translate\(([^, ]+)/.exec(locus?.getAttribute("transform") || "")?.[1] || 0);
+        const points = (gene?.querySelector("polygon")?.getAttribute("points") || "")
+          .trim()
+          .split(/\s+/)
+          .map((point) => Number(point.split(",")[0]));
+        return offset + (Math.min(...points) + Math.max(...points)) / 2;
+      };
+      return Math.abs(centreX("0") - centreX("1001"));
+    }))
+    .toBeLessThan(1);
 });
 
 test("WebGPU previews a locus drag before it is committed", async ({ page }) => {

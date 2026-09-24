@@ -890,9 +890,9 @@ export function renderCanvas({
   const clusterPreview = preview?.type === "cluster-drag";
   const visible = !clusterPreview && viewport && displayScene.index
     ? {
-        links: queryViewportOrdered(displayScene.index.links, viewport),
-        loci: queryViewportOrdered(displayScene.index.loci, viewport),
-        genes: queryViewportOrdered(displayScene.index.genes, viewport),
+        links: showLinks ? queryViewportOrdered(displayScene.index.links, viewport) : null,
+        loci: showLoci ? queryViewportOrdered(displayScene.index.loci, viewport) : null,
+        genes: showGenes ? queryViewportOrdered(displayScene.index.genes, viewport) : null,
       }
     : null;
 
