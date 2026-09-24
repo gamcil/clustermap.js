@@ -36,7 +36,7 @@ import {
   createLocusFlipPreview,
   createLocusOffsetPreview,
   createLocusTrimPreview,
-} from "./layout.mjs";
+} from "./scenePreview.mjs";
 // SVG export deliberately renders into a detached document rather than the
 // retained on-screen backend.
 import { renderSvg } from "./svgRenderer.js";

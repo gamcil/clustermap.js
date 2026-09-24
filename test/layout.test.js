@@ -2,15 +2,15 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 test("scene derives world-space geometry without DOM state", async () => {
-  const {
-    buildScene,
+  const [{ buildScene, patchAnchoredGeneScene, patchFlippedLocusScene }, {
     createClusterDragPreview,
     createLocusFlipPreview,
     createLocusOffsetPreview,
     createLocusTrimPreview,
-    patchAnchoredGeneScene,
-    patchFlippedLocusScene,
-  } = await import("../src/layout.mjs");
+  }] = await Promise.all([
+    import("../src/layout.mjs"),
+    import("../src/scenePreview.mjs"),
+  ]);
   const { hitTest } = await import("../src/hitTest.mjs");
   const { queryViewport } = await import("../src/spatialIndex.mjs");
   const data = {

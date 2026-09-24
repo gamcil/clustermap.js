@@ -4,12 +4,12 @@ import { queryViewportOrdered } from "./spatialIndex.mjs";
 import {
   clusterLabelOffsetForPreview,
   clusterOffsetForPreview,
-  clusterPairKey,
   geneVisibleForPreview,
   locusGeometryForPreview,
   locusOffsetForPreview,
   previewOffsetsForLocus,
-} from "./layout.mjs";
+} from "./scenePreview.mjs";
+import { clusterPairKey } from "./layout.mjs";
 
 /**
  * Choose Canvas backing-store resolution from the view scale.  This affects

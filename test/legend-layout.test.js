@@ -2,7 +2,10 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 test("bottom legends stack below lower chart chrome", async () => {
-  const { buildScene, createLocusOffsetPreview } = await import("../src/layout.mjs");
+  const [{ buildScene }, { createLocusOffsetPreview }] = await Promise.all([
+    import("../src/layout.mjs"),
+    import("../src/scenePreview.mjs"),
+  ]);
   const data = {
     clusters: [{
       uid: "cluster",

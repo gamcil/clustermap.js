@@ -4,12 +4,12 @@
 
 import {
   clusterOffsetForPreview,
-  clusterPairKey,
   geneVisibleForPreview,
   locusGeometryForPreview,
   locusOffsetForPreview,
   previewOffsetsForLocus,
-} from "./layout.mjs";
+} from "./scenePreview.mjs";
+import { clusterPairKey } from "./layout.mjs";
 
 const shader = /* wgsl */ `
 struct Camera {
