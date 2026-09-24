@@ -70,10 +70,10 @@ export default function clusterMap() {
   let canvasFlipDirtyFrame = null;
   let canvasPreparedFlipBase = null;
   let canvasFlipWarmFrame = null;
-  let canvasPaintFrame = null;
+  let rasterPaintFrame = null;
   let canvasFlipFrame = null;
   let canvasPendingFlip = null;
-  let paintCanvasFrame = null;
+  let paintRasterFrame = null;
   let webgpuFlipFrame = null;
   let clusterCommitFrame = null;
   let webgpuClusterCommit = null;
@@ -89,7 +89,7 @@ export default function clusterMap() {
   const webgpuBackend = createWebGpuBackend();
   const rasterMinimap = createRasterMinimap();
   const rasterMotion = createRasterMotion({
-    schedulePaint: () => scheduleCanvasPaint(),
+    schedulePaint: () => scheduleRasterPaint(),
     getCamera: () => getCamera(chartState),
     getRenderer: () => runtime.config.plot.renderer,
   });
@@ -264,7 +264,7 @@ export default function clusterMap() {
           webgpuBackend.setScene(runtime.scene.patchFlippedLocus(sourceScene, locus));
           rasterPreview = null;
           webgpuFlipFrame = null;
-          scheduleCanvasPaint();
+          scheduleRasterPaint();
         };
         if (!duration) {
           finish();
@@ -281,7 +281,7 @@ export default function clusterMap() {
             progress: eased,
           });
           webgpuBackend.setScene(sourceScene);
-          scheduleCanvasPaint();
+          scheduleRasterPaint();
           if (elapsed < 1) {
             webgpuFlipFrame = requestAnimationFrame(frame);
             return;
@@ -301,7 +301,7 @@ export default function clusterMap() {
   runtime.plot.data = (data) => my.data(data);
 
   function clearRasterPreview() {
-    if (canvasPaintFrame !== null) cancelAnimationFrame(canvasPaintFrame);
+    if (rasterPaintFrame !== null) cancelAnimationFrame(rasterPaintFrame);
     if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
     if (webgpuFlipFrame !== null) cancelAnimationFrame(webgpuFlipFrame);
     if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
@@ -311,7 +311,7 @@ export default function clusterMap() {
     canvasPreparedFlipBase = null;
     if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
     canvasFlipWarmFrame = null;
-    canvasPaintFrame = null;
+    rasterPaintFrame = null;
     canvasFlipFrame = null;
     canvasPendingFlip = null;
     webgpuFlipFrame = null;
@@ -344,17 +344,17 @@ export default function clusterMap() {
     // Restore and repaint the affected canvas region before the browser can
     // present a frame. The base image stays offscreen; the visible plot stays
     // a single canvas throughout the animation.
-    paintCanvasFrame?.();
+    paintRasterFrame?.();
     const duration = runtime.config.plot.transitionDuration;
     if (!duration) {
       canvasScene = pending.targetScene;
       rasterPreview = null;
       canvasPreviewScene = null;
       canvasPendingFlip = null;
-      paintCanvasFrame?.();
+      paintRasterFrame?.();
       clearCanvasFlipBase();
       canvasPreparedFlipBase = null;
-      scheduleCanvasPaint();
+      scheduleRasterPaint();
       scheduleMinimapBase(canvasScene);
       return;
     }
@@ -372,9 +372,9 @@ export default function clusterMap() {
       // The dirty region is bounded to the affected locus and its incident
       // links, so paint it in this rAF rather than one frame later. Links and
       // genes are drawn together in normal renderer order.
-      if (canvasPaintFrame !== null) cancelAnimationFrame(canvasPaintFrame);
-      canvasPaintFrame = null;
-      paintCanvasFrame?.();
+      if (rasterPaintFrame !== null) cancelAnimationFrame(rasterPaintFrame);
+      rasterPaintFrame = null;
+      paintRasterFrame?.();
       if (elapsed < 1) {
         canvasFlipFrame = requestAnimationFrame(frame);
         return;
@@ -385,24 +385,24 @@ export default function clusterMap() {
       canvasPendingFlip = null;
       canvasScene = pending.targetScene;
       // Replace the final preview with the complete target scene.
-      paintCanvasFrame?.();
+      paintRasterFrame?.();
       clearCanvasFlipBase();
       canvasPreparedFlipBase = null;
-      scheduleCanvasPaint();
+      scheduleRasterPaint();
       scheduleMinimapBase(canvasScene);
     };
     canvasFlipFrame = requestAnimationFrame(frame);
   }
 
-  function scheduleCanvasPaint() {
-    if (canvasPaintFrame !== null || !paintCanvasFrame) return;
-    canvasPaintFrame = requestAnimationFrame(() => {
-      canvasPaintFrame = null;
-      paintCanvasFrame();
+  function scheduleRasterPaint() {
+    if (rasterPaintFrame !== null || !paintRasterFrame) return;
+    rasterPaintFrame = requestAnimationFrame(() => {
+      rasterPaintFrame = null;
+      paintRasterFrame();
     });
   }
 
-  const scheduleRasterPreview = scheduleCanvasPaint;
+  const scheduleRasterPreview = scheduleRasterPaint;
 
   function zoomExtent() {
     const minimum = Math.max(0, Number(runtime.config.plot.minZoom) || 0);
@@ -604,7 +604,7 @@ export default function clusterMap() {
           .scaleExtent(zoomExtent())
           .on("zoom", function (event) {
             setCamera(chartState, event.transform);
-            scheduleCanvasPaint();
+            scheduleRasterPaint();
           })
           .on("start", function () {
             rasterMotion.begin();
@@ -809,7 +809,7 @@ export default function clusterMap() {
       });
       paintMinimap();
     };
-    paintCanvasFrame = useCanvas
+    paintRasterFrame = useCanvas
       ? () => paintCanvas(canvas.node())
       : useWebGpu
         ? () => paintWebGpu(canvas.node(), webgpuBackend.pendingScene || runtime.scene.get())
@@ -1179,7 +1179,7 @@ export default function clusterMap() {
         setHoverLocus: (locusUid) => {
           if (canvasHoverLocusUid === locusUid) return false;
           canvasHoverLocusUid = locusUid;
-          scheduleCanvasPaint();
+          scheduleRasterPaint();
           return true;
         },
         warmLocus: useCanvas ? warmCanvasFlipBase : () => {},
