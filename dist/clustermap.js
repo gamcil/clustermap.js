@@ -4912,10 +4912,10 @@
   };
   }
 
-  // The Canvas backend owns the retained scene used by ordinary full-surface
-  // paints. Canvas-only composition (the flip bitmap and minimap) remains a
-  // controller concern because it deliberately paints partial surfaces.
-  function createCanvasBackend({ render = renderCanvas } = {}) {
+  // Canvas and SVG both consume an already-projected scene synchronously. Keep
+  // their retained-scene contract in one place; backends with resource setup
+  // (WebGPU) intentionally own their more involved lifecycle separately.
+  function createRetainedSceneBackend({ render, surface }) {
     let pendingScene = null;
 
     return {
@@ -4925,10 +4925,10 @@
       setScene: (scene) => {
         pendingScene = scene;
       },
-      paint: ({ canvas, scene, ...options }) => {
-        if (scene) pendingScene = scene;
-        if (!canvas || !pendingScene) return null;
-        return render({ canvas, scene: pendingScene, ...options });
+      paint: (request) => {
+        if (request.scene) pendingScene = request.scene;
+        if (!request[surface] || !pendingScene) return null;
+        return render({ ...request, scene: pendingScene });
       },
       destroy: () => {
         pendingScene = null;
@@ -4936,29 +4936,19 @@
     };
   }
 
+  // The Canvas backend owns the retained scene used by ordinary full-surface
+  // paints. Canvas-only composition (the flip bitmap and minimap) remains a
+  // controller concern because it deliberately paints partial surfaces.
+  function createCanvasBackend({ render = renderCanvas } = {}) {
+    return createRetainedSceneBackend({ render, surface: "canvas" });
+  }
+
   // SVG has no device context to initialise, but it still benefits from the
   // same retained-scene lifecycle as the raster backends. The controller owns
   // the SVG surface and interaction policy; this adapter owns the last scene
   // supplied to the SVG renderer.
   function createSvgBackend({ render = renderSvg } = {}) {
-    let pendingScene = null;
-
-    return {
-      get pendingScene() {
-        return pendingScene;
-      },
-      setScene: (scene) => {
-        pendingScene = scene;
-      },
-      paint: ({ plot, scene, ...options }) => {
-        if (scene) pendingScene = scene;
-        if (!plot || !pendingScene) return null;
-        return render({ plot, scene: pendingScene, ...options });
-      },
-      destroy: () => {
-        pendingScene = null;
-      },
-    };
+    return createRetainedSceneBackend({ render, surface: "plot" });
   }
 
   // Deliberately small, direct WebGPU renderer for the renderer-neutral scene.
