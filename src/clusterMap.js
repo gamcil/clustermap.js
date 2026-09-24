@@ -30,6 +30,7 @@ import {
   renderCanvas,
 } from "./canvasRenderer.js";
 import { createRasterMinimap } from "./rasterMinimap.mjs";
+import { createRasterInteraction } from "./rasterInteraction.mjs";
 import {
   createClusterDragPreview,
   createLocusFlipPreview,
@@ -55,9 +56,7 @@ export default function clusterMap() {
   let canvasZoom = null;
   let hasInitialView = false;
   let chartState = null;
-  let canvasGesture = null;
   let canvasHoverLocusUid = null;
-  let canvasPanMode = false;
   let canvasScene = null;
   let canvasAnimation = null;
   let canvasPreview = null;
@@ -1175,170 +1174,61 @@ export default function clusterMap() {
         });
       const locusForTarget = (target) =>
         target?.locusUid || runtime.get.geneData(target?.geneUid)?.locusUid || null;
-      const cursorForTarget = (target) => {
-        if (!target) return "grab";
-        if (target.action === "move-cluster") return "grab";
-        if (target.action === "move-locus") return "move";
-        if (target.action.startsWith("trim-locus")) return "ew-resize";
-        return "pointer";
-      };
-      const updateCanvasAffordance = (canvasNode, target) => {
-        const locusUid = locusForTarget(target);
-        if (canvasHoverLocusUid !== locusUid) {
+      const rasterInteraction = createRasterInteraction({
+        targetForEvent,
+        worldPoint: (surface, event) =>
+          canvasWorldPoint(surface, event, getCamera(chartState)),
+        locusForTarget,
+        setHoverLocus: (locusUid) => {
+          if (canvasHoverLocusUid === locusUid) return false;
           canvasHoverLocusUid = locusUid;
           scheduleCanvasPaint();
-          if (useCanvas) warmCanvasFlipBase(locusUid);
-        }
-        d3.select(canvasNode).style("cursor", cursorForTarget(target));
-      };
-      canvasZoom.filter(function (event) {
-        if (canvasPanMode) return event.type === "wheel" || event.button === 0;
-        if (event.type === "wheel") return true;
-        if (event.ctrlKey || event.button) return false;
-        return !targetForEvent(this, event);
-      });
-      canvas
-        .on("pointerenter.canvasKeyboard", function () {
-          this.focus({ preventScroll: true });
-        })
-        .on("keydown.canvasKeyboard", function (event) {
-          if (event.code !== "Space") return;
-          canvasPanMode = true;
-          event.preventDefault();
-          d3.select(this).style("cursor", "grab");
-        })
-        .on("keyup.canvasKeyboard", function (event) {
-          if (event.code !== "Space") return;
-          canvasPanMode = false;
-          d3.select(this).style("cursor", "grab");
-        })
-        .on("blur.canvasKeyboard", function () {
-          canvasPanMode = false;
-        })
-        .on("pointerdown.canvasInteraction", function (event) {
-          if (canvasPanMode || event.button) return;
-          const target = targetForEvent(this, event);
-          if (!target) return;
-          const point = canvasWorldPoint(this, event, getCamera(chartState));
-          this.setPointerCapture(event.pointerId);
-          updateCanvasAffordance(this, target);
-          if (useCanvas) warmCanvasFlipBase(locusForTarget(target));
-          if (target.action === "move-cluster") {
-            canvasGesture = {
-              action: target.action,
-              clusterUid: target.clusterUid,
-              start: { x: event.clientX, y: event.clientY },
-              moved: false,
-            };
-            interactionController.beginClusterDrag(target.clusterUid, point.y);
-          } else if (target.action === "move-locus") {
-            canvasGesture = {
-              action: target.action,
-              locusUid: target.locusUid,
-              start: { x: event.clientX, y: event.clientY },
-              moved: false,
-            };
-            interactionController.beginLocusDrag(target.locusUid, point.x);
-          } else if (target.action.startsWith("trim-locus")) {
-            canvasGesture = {
-              action: target.action,
-              locusUid: target.locusUid,
-              edge: target.action.endsWith("left") ? "left" : "right",
-              start: { x: event.clientX, y: event.clientY },
-              moved: false,
-            };
-            interactionController.beginLocusTrim();
-          } else if (target.action === "gene") {
-            canvasGesture = { action: target.action, geneUid: target.geneUid };
-          } else if (target.action === "legend-colour") {
+          return true;
+        },
+        warmLocus: useCanvas ? warmCanvasFlipBase : () => {},
+        beginMotion: beginCanvasMotion,
+        endMotion: endCanvasMotion,
+        setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
+        interactions: {
+          beginClusterDrag: interactionController.beginClusterDrag,
+          moveClusterDrag: interactionController.moveClusterDrag,
+          endClusterDrag: interactionController.endClusterDrag,
+          cancelClusterDrag: interactionController.cancelClusterDrag,
+          beginLocusDrag: interactionController.beginLocusDrag,
+          moveLocusDrag: interactionController.moveLocusDrag,
+          endLocusDrag: interactionController.endLocusDrag,
+          cancelLocusDrag: interactionController.cancelLocusDrag,
+          beginLocusTrim: interactionController.beginLocusTrim,
+          moveLocusTrim: (locusUid, edge, x) =>
+            interactionController.moveLocusTrim(runtime.get.locusData(locusUid), edge, x),
+          endLocusTrim: (locusUid) =>
+            interactionController.endLocusTrim(runtime.get.locusData(locusUid)),
+          cancelLocusTrim: interactionController.cancelLocusTrim,
+        },
+        actions: {
+          geneClick: (event, geneUid) =>
+            runtime.config.gene.shape.onClick?.(event, runtime.get.geneData(geneUid)),
+          legendColour: (event, group) => {
             if (runtime.config.legend.onClickCircle) {
-              runtime.config.legend.onClickCircle(event, target.group);
+              runtime.config.legend.onClickCircle(event, group);
             } else {
-              chooseLegendColour(target.group);
+              chooseLegendColour(group);
             }
-          } else if (target.action === "legend-text") {
-            runtime.config.legend.onClickText?.(event, target.group);
-          } else if (target.action === "scale-bar") {
-            setScaleBarLength();
-          }
-          event.preventDefault();
-        })
-        .on("pointermove.canvasInteraction", function (event) {
-          if (canvasPanMode) return;
-          if (!canvasGesture) {
-            updateCanvasAffordance(this, targetForEvent(this, event));
-            return;
-          }
-          const point = canvasWorldPoint(this, event, getCamera(chartState));
-          const draggable =
-            (canvasGesture.action === "move-cluster" ||
-              canvasGesture.action === "move-locus" ||
-              canvasGesture.edge);
-          if (draggable && !canvasGesture.moved) {
-            if (
-              Math.hypot(
-                event.clientX - canvasGesture.start.x,
-                event.clientY - canvasGesture.start.y
-              ) < 2
-            ) {
-              return;
-            }
-            canvasGesture.moved = true;
-            beginCanvasMotion();
-          }
-          if (canvasGesture.action === "move-cluster") {
-            interactionController.moveClusterDrag(point.y);
-          } else if (canvasGesture.action === "move-locus") {
-            interactionController.moveLocusDrag(point.x);
-          } else if (canvasGesture.edge) {
-            interactionController.moveLocusTrim(
-              runtime.get.locusData(canvasGesture.locusUid),
-              canvasGesture.edge,
-              point.x
-            );
-          }
-        })
-        .on("pointerleave.canvasInteraction", function () {
-          if (!canvasGesture && !canvasPanMode) updateCanvasAffordance(this, null);
-        })
-        .on("pointerup.canvasInteraction pointercancel.canvasInteraction", function (event) {
-          if (!canvasGesture) return;
-          const gesture = canvasGesture;
-          canvasGesture = null;
-          if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
-          if (gesture.action === "move-cluster") {
-            if (gesture.moved) interactionController.endClusterDrag();
-            else interactionController.cancelClusterDrag();
-          } else if (gesture.action === "move-locus") {
-            if (gesture.moved) interactionController.endLocusDrag();
-            else interactionController.cancelLocusDrag();
-          } else if (gesture.edge) {
-            if (gesture.moved) interactionController.endLocusTrim(runtime.get.locusData(gesture.locusUid));
-            else interactionController.cancelLocusTrim();
-          } else if (gesture.action === "gene" && runtime.config.gene.shape.onClick) {
-            runtime.config.gene.shape.onClick(event, runtime.get.geneData(gesture.geneUid));
-          }
-          if (gesture.moved) {
-            endCanvasMotion();
-          }
-          updateCanvasAffordance(this, targetForEvent(this, event));
-        })
-        .on("dblclick.canvasInteraction", function (event) {
-          const target = targetForEvent(this, event);
-          const locusUid = target?.locusUid || runtime.get.geneData(target?.geneUid)?.locusUid;
-          if (locusUid) interactionController.flipLocus(runtime.get.locusData(locusUid));
-        })
-        .on("contextmenu.canvasInteraction", function (event) {
-          const target = targetForEvent(this, event);
-          if (target?.action === "gene") {
-            event.preventDefault();
-            overlay.showGeneMenu(event, runtime.get.geneData(target.geneUid));
-          } else if (target?.action === "legend-text") {
-            event.preventDefault();
+          },
+          legendText: (event, group) => runtime.config.legend.onClickText?.(event, group),
+          scaleBar: setScaleBarLength,
+          flipLocus: (locusUid) => interactionController.flipLocus(runtime.get.locusData(locusUid)),
+          geneMenu: (event, geneUid) => overlay.showGeneMenu(event, runtime.get.geneData(geneUid)),
+          legendMenu: (event, group) => {
             const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
-            handler(event, target.group);
-          }
-        });
+            handler(event, group);
+          },
+        },
+      });
+      canvasZoom.filter(function (event) {
+        return rasterInteraction.zoomFilter(this, event);
+      });
+      rasterInteraction.bind(canvas);
 
       let minimapGesture = false;
       const moveCameraFromMinimap = (minimapNode, event) => {
