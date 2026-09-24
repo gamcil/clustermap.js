@@ -3,11 +3,61 @@ const assert = require("node:assert/strict");
 
 test("canvas renderer draws world-space scene geometry through the camera", async () => {
   const {
+	    cameraForMinimapPoint,
+    canvasMinimapViewport,
+    canvasPixelRatioForCamera,
     canvasWorldViewport,
+    createMinimapProjection,
     hitTestCanvas,
     interpolateCanvasScene,
     renderCanvas,
   } = await import("../src/canvasRenderer.js");
+  const minimap = createMinimapProjection({
+    bounds: { minX: 10, maxX: 110, minY: 20, maxY: 70 },
+    width: 120,
+    height: 80,
+  });
+  const assertCoordinates = (actual, expected) => {
+    for (const [key, value] of Object.entries(expected)) {
+      assert.ok(Math.abs(actual[key] - value) < 1e-9, `${key}: ${actual[key]} ~= ${value}`);
+    }
+  };
+  assertCoordinates(minimap.frame, { x: 4, y: 12, width: 112, height: 56 });
+  assertCoordinates(
+    canvasMinimapViewport(minimap, { x: -10, y: -20, k: 1 }, { width: 40, height: 30 }),
+    { x: 4, y: 12, width: 44.8, height: 33.6 }
+  );
+  assertCoordinates(
+    cameraForMinimapPoint(
+      minimap,
+      { x: 60, y: 40 },
+      { width: 40, height: 30 },
+      { x: 0, y: 0, k: 1 }
+    ),
+    { x: -40, y: -30, k: 1 }
+  );
+  assert.equal(
+    canvasPixelRatioForCamera({ camera: { k: 1 }, devicePixelRatio: 2 }),
+    2,
+    "native resolution is retained at a readable zoom"
+  );
+  assert.equal(
+    canvasPixelRatioForCamera({ camera: { k: 0.7 }, devicePixelRatio: 2 }),
+    1.5
+  );
+  assert.equal(
+    canvasPixelRatioForCamera({ camera: { k: 0.5 }, devicePixelRatio: 2 }),
+    1
+  );
+  assert.equal(
+    canvasPixelRatioForCamera({ camera: { k: 0.2 }, devicePixelRatio: 2 }),
+    0.75
+  );
+  assert.equal(
+    canvasPixelRatioForCamera({ camera: { k: 1 }, moving: true, devicePixelRatio: 2 }),
+    1,
+    "active interaction takes precedence over the resting zoom policy"
+  );
   const { createSpatialIndex } = await import("../src/spatialIndex.mjs");
   const calls = [];
   const context = new Proxy(
@@ -148,6 +198,18 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   assert.ok(calls.some((call) => call[0] === "lineTo" && call[1] === 15));
   assert.ok(calls.some((call) => call[0] === "fill"));
   assert.ok(calls.some((call) => call[0] === "fillRect" && call[1] === 5 && call[2] === 0));
+
+  const highResolution = renderCanvas({
+    canvas,
+    scene,
+    camera: { x: 20, y: 30, k: 2 },
+    config,
+    scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
+    pixelRatio: 2,
+  });
+  assert.deepEqual(highResolution, { width: 200, height: 100, pixelRatio: 2 });
+  assert.equal(canvas.width, 400);
+  assert.equal(canvas.height, 200);
 
   const callsBeforeSuppressedHover = calls.length;
   renderCanvas({

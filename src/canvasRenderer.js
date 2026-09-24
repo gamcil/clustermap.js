@@ -3,6 +3,126 @@ import { hitTest } from "./hitTest.mjs";
 import { queryViewportOrdered } from "./spatialIndex.mjs";
 import { clusterPairKey } from "./layout.mjs";
 
+/**
+ * Choose Canvas backing-store resolution from the view scale.  This affects
+ * only raster detail: the CSS canvas size and chart-world coordinates remain
+ * unchanged.  Active gestures always favour throughput over sharpness.
+ */
+export function canvasPixelRatioForCamera({
+  camera,
+  moving = false,
+  devicePixelRatio = globalThis.devicePixelRatio || 1,
+}) {
+  if (moving) return Math.min(devicePixelRatio, 1);
+
+  const zoom = camera?.k ?? 1;
+  if (zoom < 0.35) return Math.min(devicePixelRatio, 0.75);
+  if (zoom < 0.6) return Math.min(devicePixelRatio, 1);
+  if (zoom < 0.85) return Math.min(devicePixelRatio, 1.5);
+  return devicePixelRatio;
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+/** Project the complete chart bounds into a fixed-size screen-space minimap. */
+export function createMinimapProjection({ bounds, width, height, padding = 4 }) {
+  if (!bounds || !width || !height) return null;
+  const worldWidth = Math.max(1, bounds.maxX - bounds.minX);
+  const worldHeight = Math.max(1, bounds.maxY - bounds.minY);
+  const availableWidth = Math.max(1, width - padding * 2);
+  const availableHeight = Math.max(1, height - padding * 2);
+  const scale = Math.min(availableWidth / worldWidth, availableHeight / worldHeight);
+  const frame = {
+    x: (width - worldWidth * scale) / 2,
+    y: (height - worldHeight * scale) / 2,
+    width: worldWidth * scale,
+    height: worldHeight * scale,
+  };
+  return {
+    bounds,
+    width,
+    height,
+    scale,
+    frame,
+    x: frame.x - bounds.minX * scale,
+    y: frame.y - bounds.minY * scale,
+  };
+}
+
+/** Return the main viewport rectangle in minimap screen coordinates. */
+export function canvasMinimapViewport(projection, camera, viewport) {
+  if (!projection || !camera || !viewport) return null;
+  const minX = -camera.x / camera.k;
+  const maxX = (viewport.width - camera.x) / camera.k;
+  const minY = -camera.y / camera.k;
+  const maxY = (viewport.height - camera.y) / camera.k;
+  const { bounds, scale, x, y, frame } = projection;
+  const left = clamp(x + minX * scale, frame.x, frame.x + frame.width);
+  const right = clamp(x + maxX * scale, frame.x, frame.x + frame.width);
+  const top = clamp(y + minY * scale, frame.y, frame.y + frame.height);
+  const bottom = clamp(y + maxY * scale, frame.y, frame.y + frame.height);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/** Centre the existing camera scale on a point selected in the minimap. */
+export function cameraForMinimapPoint(projection, point, viewport, camera) {
+  const worldX = clamp(
+    (point.x - projection.x) / projection.scale,
+    projection.bounds.minX,
+    projection.bounds.maxX
+  );
+  const worldY = clamp(
+    (point.y - projection.y) / projection.scale,
+    projection.bounds.minY,
+    projection.bounds.maxY
+  );
+  return {
+    ...camera,
+    x: viewport.width / 2 - worldX * camera.k,
+    y: viewport.height / 2 - worldY * camera.k,
+  };
+}
+
+/** Composite a cached overview raster with the live main-camera viewport. */
+export function renderCanvasMinimap({
+  canvas,
+  baseCanvas = null,
+  projection,
+  camera,
+  viewport,
+  pixelRatio = globalThis.devicePixelRatio || 1,
+}) {
+  if (!projection) return null;
+  const { width, height, frame } = projection;
+  const pixelWidth = Math.round(width * pixelRatio);
+  const pixelHeight = Math.round(height * pixelRatio);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+  const context = canvas.getContext("2d");
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  if (baseCanvas) context.drawImage(baseCanvas, 0, 0, width, height);
+  else {
+    context.fillStyle = "white";
+    context.fillRect(0, 0, width, height);
+  }
+  context.strokeStyle = "rgba(0, 0, 0, 0.55)";
+  context.lineWidth = 1;
+  context.strokeRect(frame.x, frame.y, frame.width, frame.height);
+  const visible = canvasMinimapViewport(projection, camera, viewport);
+  if (visible) {
+    context.fillStyle = "rgba(30, 120, 255, 0.16)";
+    context.fillRect(visible.x, visible.y, visible.width, visible.height);
+    context.strokeStyle = "rgb(30, 120, 255)";
+    context.strokeRect(visible.x, visible.y, visible.width, visible.height);
+  }
+  return { width, height, pixelRatio, viewport: visible };
+}
+
 export function canvasWorldPoint(canvas, event, camera) {
   const bounds = canvas.getBoundingClientRect();
   return {
@@ -682,14 +802,17 @@ export function renderCanvas({
   scales,
   hoverLocusUid = null,
   suppressLocusHover = false,
+  pixelRatio: requestedPixelRatio = globalThis.devicePixelRatio || 1,
+  dimensions = null,
+  fullScene = false,
   preview = null,
 }) {
   const displayScene = interpolateCanvasScene(previousScene, scene, progress);
   const context = canvas.getContext("2d");
-  const bounds = canvas.getBoundingClientRect();
+  const bounds = dimensions || canvas.getBoundingClientRect();
   const width = bounds.width;
   const height = bounds.height;
-  const pixelRatio = globalThis.devicePixelRatio || 1;
+  const pixelRatio = requestedPixelRatio;
   const pixelWidth = Math.round(width * pixelRatio);
   const pixelHeight = Math.round(height * pixelRatio);
   if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
@@ -706,7 +829,7 @@ export function renderCanvas({
   // During an animation, geometry is between the previous and target scenes,
   // while the index describes only the target scene. Draw the full frame then
   // so an in-flight record cannot be incorrectly culled.
-  const viewport = previousScene ? null : canvasWorldViewport(canvas, camera);
+  const viewport = previousScene || fullScene ? null : canvasWorldViewport(canvas, camera);
   const clusterPreview = preview?.type === "cluster-drag";
   const visible = !clusterPreview && viewport && displayScene.index
     ? {

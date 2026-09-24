@@ -1714,6 +1714,126 @@
     return { type: "cluster-drag", clusterUid, clusterOffsets, clusterOrder };
   }
 
+  /**
+   * Choose Canvas backing-store resolution from the view scale.  This affects
+   * only raster detail: the CSS canvas size and chart-world coordinates remain
+   * unchanged.  Active gestures always favour throughput over sharpness.
+   */
+  function canvasPixelRatioForCamera({
+    camera,
+    moving = false,
+    devicePixelRatio = globalThis.devicePixelRatio || 1,
+  }) {
+    if (moving) return Math.min(devicePixelRatio, 1);
+
+    const zoom = camera?.k ?? 1;
+    if (zoom < 0.35) return Math.min(devicePixelRatio, 0.75);
+    if (zoom < 0.6) return Math.min(devicePixelRatio, 1);
+    if (zoom < 0.85) return Math.min(devicePixelRatio, 1.5);
+    return devicePixelRatio;
+  }
+
+  function clamp(value, minimum, maximum) {
+    return Math.max(minimum, Math.min(maximum, value));
+  }
+
+  /** Project the complete chart bounds into a fixed-size screen-space minimap. */
+  function createMinimapProjection({ bounds, width, height, padding = 4 }) {
+    if (!bounds || !width || !height) return null;
+    const worldWidth = Math.max(1, bounds.maxX - bounds.minX);
+    const worldHeight = Math.max(1, bounds.maxY - bounds.minY);
+    const availableWidth = Math.max(1, width - padding * 2);
+    const availableHeight = Math.max(1, height - padding * 2);
+    const scale = Math.min(availableWidth / worldWidth, availableHeight / worldHeight);
+    const frame = {
+      x: (width - worldWidth * scale) / 2,
+      y: (height - worldHeight * scale) / 2,
+      width: worldWidth * scale,
+      height: worldHeight * scale,
+    };
+    return {
+      bounds,
+      width,
+      height,
+      scale,
+      frame,
+      x: frame.x - bounds.minX * scale,
+      y: frame.y - bounds.minY * scale,
+    };
+  }
+
+  /** Return the main viewport rectangle in minimap screen coordinates. */
+  function canvasMinimapViewport(projection, camera, viewport) {
+    if (!projection || !camera || !viewport) return null;
+    const minX = -camera.x / camera.k;
+    const maxX = (viewport.width - camera.x) / camera.k;
+    const minY = -camera.y / camera.k;
+    const maxY = (viewport.height - camera.y) / camera.k;
+    const { bounds, scale, x, y, frame } = projection;
+    const left = clamp(x + minX * scale, frame.x, frame.x + frame.width);
+    const right = clamp(x + maxX * scale, frame.x, frame.x + frame.width);
+    const top = clamp(y + minY * scale, frame.y, frame.y + frame.height);
+    const bottom = clamp(y + maxY * scale, frame.y, frame.y + frame.height);
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  }
+
+  /** Centre the existing camera scale on a point selected in the minimap. */
+  function cameraForMinimapPoint(projection, point, viewport, camera) {
+    const worldX = clamp(
+      (point.x - projection.x) / projection.scale,
+      projection.bounds.minX,
+      projection.bounds.maxX
+    );
+    const worldY = clamp(
+      (point.y - projection.y) / projection.scale,
+      projection.bounds.minY,
+      projection.bounds.maxY
+    );
+    return {
+      ...camera,
+      x: viewport.width / 2 - worldX * camera.k,
+      y: viewport.height / 2 - worldY * camera.k,
+    };
+  }
+
+  /** Composite a cached overview raster with the live main-camera viewport. */
+  function renderCanvasMinimap({
+    canvas,
+    baseCanvas = null,
+    projection,
+    camera,
+    viewport,
+    pixelRatio = globalThis.devicePixelRatio || 1,
+  }) {
+    if (!projection) return null;
+    const { width, height, frame } = projection;
+    const pixelWidth = Math.round(width * pixelRatio);
+    const pixelHeight = Math.round(height * pixelRatio);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+    const context = canvas.getContext("2d");
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    if (baseCanvas) context.drawImage(baseCanvas, 0, 0, width, height);
+    else {
+      context.fillStyle = "white";
+      context.fillRect(0, 0, width, height);
+    }
+    context.strokeStyle = "rgba(0, 0, 0, 0.55)";
+    context.lineWidth = 1;
+    context.strokeRect(frame.x, frame.y, frame.width, frame.height);
+    const visible = canvasMinimapViewport(projection, camera, viewport);
+    if (visible) {
+      context.fillStyle = "rgba(30, 120, 255, 0.16)";
+      context.fillRect(visible.x, visible.y, visible.width, visible.height);
+      context.strokeStyle = "rgb(30, 120, 255)";
+      context.strokeRect(visible.x, visible.y, visible.width, visible.height);
+    }
+    return { width, height, pixelRatio, viewport: visible };
+  }
+
   function canvasWorldPoint(canvas, event, camera) {
     const bounds = canvas.getBoundingClientRect();
     return {
@@ -2393,14 +2513,17 @@
     scales,
     hoverLocusUid = null,
     suppressLocusHover = false,
+    pixelRatio: requestedPixelRatio = globalThis.devicePixelRatio || 1,
+    dimensions = null,
+    fullScene = false,
     preview = null,
   }) {
     const displayScene = interpolateCanvasScene(previousScene, scene, progress);
     const context = canvas.getContext("2d");
-    const bounds = canvas.getBoundingClientRect();
+    const bounds = dimensions || canvas.getBoundingClientRect();
     const width = bounds.width;
     const height = bounds.height;
-    const pixelRatio = globalThis.devicePixelRatio || 1;
+    const pixelRatio = requestedPixelRatio;
     const pixelWidth = Math.round(width * pixelRatio);
     const pixelHeight = Math.round(height * pixelRatio);
     if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
@@ -2417,7 +2540,7 @@
     // During an animation, geometry is between the previous and target scenes,
     // while the index describes only the target scene. Draw the full frame then
     // so an in-flight record cannot be incorrectly culled.
-    const viewport = previousScene ? null : canvasWorldViewport(canvas, camera);
+    const viewport = previousScene || fullScene ? null : canvasWorldViewport(canvas, camera);
     const clusterPreview = preview?.type === "cluster-drag";
     const visible = !clusterPreview && viewport && displayScene.index
       ? {
@@ -3068,6 +3191,15 @@
     plot: {
       transitionDuration: 250,
       renderer: "svg",
+      minZoom: 0,
+      maxZoom: 8,
+      minimap: {
+        show: false,
+        width: 220,
+        height: 160,
+        margin: 12,
+        showLinks: false,
+      },
       scaleFactor: 15,
       scaleGenes: true,
       fontFamily:
@@ -3573,6 +3705,10 @@
     let canvasPaintFrame = null;
     let canvasFlipBuildFrame = null;
     let canvasFlipAnimationProgress = null;
+    let canvasMotion = false;
+    let canvasMotionEndTimer = null;
+    let minimapBaseCanvas = null;
+    let minimapBaseFrame = null;
     let paintCanvasFrame = null;
     let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
@@ -3708,6 +3844,45 @@
 
     const scheduleCanvasPreview = scheduleCanvasPaint;
 
+    function beginCanvasMotion() {
+      if (canvasMotionEndTimer !== null) clearTimeout(canvasMotionEndTimer);
+      canvasMotionEndTimer = null;
+      if (canvasMotion) return;
+      canvasMotion = true;
+      scheduleCanvasPaint();
+    }
+
+    function endCanvasMotion() {
+      if (canvasMotionEndTimer !== null) clearTimeout(canvasMotionEndTimer);
+      // D3's zoom end already debounces a wheel gesture. This short extra delay
+      // avoids resizing the backing bitmap between adjacent pointer updates.
+      canvasMotionEndTimer = setTimeout(() => {
+        canvasMotionEndTimer = null;
+        if (!canvasMotion) return;
+        canvasMotion = false;
+        scheduleCanvasPaint();
+      }, 100);
+    }
+
+    function canvasPixelRatio() {
+      return canvasPixelRatioForCamera({
+        camera: getCamera(chartState),
+        moving: canvasMotion,
+      });
+    }
+
+    function zoomExtent() {
+      const minimum = Math.max(0, Number(runtime.config.plot.minZoom) || 0);
+      const configuredMaximum = Number(runtime.config.plot.maxZoom);
+      const maximum = Math.max(minimum, Number.isFinite(configuredMaximum) ? configuredMaximum : 8);
+      return [minimum, maximum];
+    }
+
+    function constrainZoom(scale) {
+      const [minimum, maximum] = zoomExtent();
+      return Math.max(minimum, Math.min(maximum, scale));
+    }
+
     function my(selection, options) {
       selection.each(function (data) {
         container = d3.select(this).attr("width", "100%").attr("height", "100%");
@@ -3731,7 +3906,13 @@
       // Set up the shared transition
       transition = d3.transition().duration(runtime.config.plot.transitionDuration);
       const useCanvas = runtime.config.plot.renderer === "canvas";
+      const minimapOptions = runtime.config.plot.minimap || {};
+      const showMinimap = useCanvas && minimapOptions.show;
       if (!useCanvas) clearCanvasPreview();
+      if (!showMinimap && minimapBaseFrame !== null) {
+        cancelAnimationFrame(minimapBaseFrame);
+        minimapBaseFrame = null;
+      }
 
       // Build the figure
       const svg = container
@@ -3798,7 +3979,7 @@
             // Attach pan/zoom behaviour
             zoom = d3
               .zoom()
-              .scaleExtent([0, 8])
+              .scaleExtent(zoomExtent())
               .on("zoom", (event) => {
                 setCamera(chartState, event.transform);
                 applyCamera(viewport);
@@ -3812,6 +3993,7 @@
         );
 
       const plot = svg.select("g.clusterMapG");
+      if (zoom) zoom.scaleExtent(zoomExtent());
       const canvas = container
         .selectAll("canvas.clusterMapCanvas")
         .data(useCanvas ? [data] : [])
@@ -3828,20 +4010,48 @@
             .style("outline", "none");
           canvasZoom = d3
             .zoom()
-            .scaleExtent([0, 8])
+            .scaleExtent(zoomExtent())
             .on("zoom", function (event) {
               setCamera(chartState, event.transform);
               scheduleCanvasPaint();
             })
             .on("start", function () {
+              beginCanvasMotion();
               d3.select(this).style("cursor", "grabbing");
             })
             .on("end", function () {
               d3.select(this).style("cursor", "grab");
+              endCanvasMotion();
             });
           surface.call(canvasZoom).on("dblclick.zoom", null);
           return surface;
         });
+      if (canvasZoom) canvasZoom.scaleExtent(zoomExtent());
+      if (showMinimap && globalThis.getComputedStyle(container.node()).position === "static") {
+        container.style("position", "relative");
+      }
+      const minimap = container
+        .selectAll("canvas.clusterMapMinimap")
+        .data(showMinimap ? [data] : [])
+        .join((enter) =>
+          enter
+            .append("canvas")
+            .attr("class", "clusterMapMinimap")
+            .attr("aria-label", "Cluster map overview")
+            .style("position", "absolute")
+            .style("z-index", 2)
+            .style("display", "block")
+            .style("box-sizing", "border-box")
+            .style("background", "white")
+            .style("box-shadow", "0 1px 4px rgba(0, 0, 0, 0.25)")
+            .style("cursor", "grab")
+            .style("touch-action", "none")
+        );
+      minimap
+        .style("width", showMinimap ? `${minimapOptions.width}px` : null)
+        .style("height", showMinimap ? `${minimapOptions.height}px` : null)
+        .style("right", showMinimap ? `${minimapOptions.margin}px` : null)
+        .style("bottom", showMinimap ? `${minimapOptions.margin}px` : null);
       svg.style("display", useCanvas ? "none" : null);
       const overlay = createHtmlOverlay({
         tooltip: container.select("div.tooltip"),
@@ -3860,8 +4070,8 @@
         .select("div.tooltip")
         .on("mouseenter", overlay.enter)
         .on("mouseleave", overlay.leave);
-      const paintCanvas = (canvasNode) =>
-        renderCanvas({
+      const paintCanvas = (canvasNode) => {
+        const result = renderCanvas({
           canvas: canvasNode,
           scene: canvasAnimation?.scene || runtime.scene.get(),
           previousScene: canvasAnimation?.previousScene,
@@ -3872,9 +4082,67 @@
           hoverLocusUid: canvasHoverLocusUid,
           suppressLocusHover:
             canvasPreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
+          pixelRatio: canvasPixelRatio(),
           preview: canvasPreview,
         });
+        paintMinimap();
+        return result;
+      };
       paintCanvasFrame = useCanvas ? () => paintCanvas(canvas.node()) : null;
+      const minimapProjection = (scene = runtime.scene.get()) =>
+        createMinimapProjection({
+          bounds: scene?.bounds,
+          width: minimapOptions.width,
+          height: minimapOptions.height,
+        });
+      const paintMinimap = () => {
+        const minimapNode = minimap.node();
+        const canvasNode = canvas.node();
+        const projection = minimapProjection();
+        if (!minimapNode || !canvasNode || !projection) return;
+        const bounds = canvasNode.getBoundingClientRect();
+        renderCanvasMinimap({
+          canvas: minimapNode,
+          baseCanvas: minimapBaseCanvas,
+          projection,
+          camera: getCamera(chartState),
+          viewport: { width: bounds.width, height: bounds.height },
+        });
+      };
+      const scheduleMinimapBase = (scene) => {
+        if (!showMinimap || !scene?.bounds) return;
+        if (minimapBaseFrame !== null) cancelAnimationFrame(minimapBaseFrame);
+        minimapBaseFrame = requestAnimationFrame(() => {
+          minimapBaseFrame = null;
+          const projection = minimapProjection(scene);
+          if (!projection || !minimap.node()) return;
+          if (!minimapBaseCanvas) minimapBaseCanvas = document.createElement("canvas");
+          renderCanvas({
+            canvas: minimapBaseCanvas,
+            // A full ribbon overview becomes an opaque field for dense maps.
+            // Keep the structured, coloured gene raster by default; callers can
+            // opt links back in for sparse figures.
+            scene: {
+              ...scene,
+              chrome: null,
+              links: minimapOptions.showLinks ? scene.links : new Map(),
+            },
+            camera: { x: projection.x, y: projection.y, k: projection.scale },
+            config: {
+              ...runtime.config,
+              gene: {
+                ...runtime.config.gene,
+                label: { ...runtime.config.gene.label, show: false },
+              },
+            },
+            scales: runtime.scales,
+            dimensions: projection,
+            fullScene: true,
+            pixelRatio: globalThis.devicePixelRatio || 1,
+          });
+          paintMinimap();
+        });
+      };
       const stopCanvasAnimation = () => {
         if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
         canvasAnimation = null;
@@ -3990,12 +4258,15 @@
             this.setPointerCapture(event.pointerId);
             updateCanvasAffordance(this, target);
             if (target.action === "move-cluster") {
+              beginCanvasMotion();
               canvasGesture = { action: target.action, clusterUid: target.clusterUid };
               interactionController.beginClusterDrag(target.clusterUid, point.y);
             } else if (target.action === "move-locus") {
+              beginCanvasMotion();
               canvasGesture = { action: target.action, locusUid: target.locusUid };
               interactionController.beginLocusDrag(target.locusUid, point.x);
             } else if (target.action.startsWith("trim-locus")) {
+              beginCanvasMotion();
               canvasGesture = {
                 action: target.action,
                 locusUid: target.locusUid,
@@ -4051,6 +4322,9 @@
             } else if (gesture.action === "gene" && runtime.config.gene.shape.onClick) {
               runtime.config.gene.shape.onClick(event, runtime.get.geneData(gesture.geneUid));
             }
+            if (gesture.action === "move-cluster" || gesture.action === "move-locus" || gesture.edge) {
+              endCanvasMotion();
+            }
             updateCanvasAffordance(this, targetForEvent(this, event));
           })
           .on("dblclick.canvasInteraction", function (event) {
@@ -4068,6 +4342,50 @@
               const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
               handler(event, target.group);
             }
+          });
+
+        let minimapGesture = false;
+        const moveCameraFromMinimap = (minimapNode, event) => {
+          const projection = minimapProjection();
+          const mainCanvas = canvas.node();
+          if (!projection || !mainCanvas) return;
+          const minimapBounds = minimapNode.getBoundingClientRect();
+          const mainBounds = mainCanvas.getBoundingClientRect();
+          const camera = cameraForMinimapPoint(
+            projection,
+            { x: event.clientX - minimapBounds.left, y: event.clientY - minimapBounds.top },
+            { width: mainBounds.width, height: mainBounds.height },
+            getCamera(chartState)
+          );
+          // Go through D3 rather than mutating its private __zoom state. This
+          // keeps the next wheel/pan gesture continuous with minimap navigation.
+          d3.select(mainCanvas).call(
+            canvasZoom.transform,
+            d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+          );
+          paintMinimap();
+        };
+        minimap
+          .on("pointerdown.minimap", function (event) {
+            if (event.button) return;
+            minimapGesture = true;
+            beginCanvasMotion();
+            this.setPointerCapture(event.pointerId);
+            d3.select(this).style("cursor", "grabbing");
+            moveCameraFromMinimap(this, event);
+            event.preventDefault();
+          })
+          .on("pointermove.minimap", function (event) {
+            if (!minimapGesture) return;
+            moveCameraFromMinimap(this, event);
+            event.preventDefault();
+          })
+          .on("pointerup.minimap pointercancel.minimap", function (event) {
+            if (!minimapGesture) return;
+            minimapGesture = false;
+            if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
+            d3.select(this).style("cursor", "grab");
+            endCanvasMotion();
           });
       }
       applyCamera(svg.select("g.clusterMapViewport"));
@@ -4088,6 +4406,7 @@
 
       if (useCanvas) {
         if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
+        scheduleMinimapBase(scene);
         animateCanvas(canvas.node(), scene, hasInitialView && animate);
       } else {
         renderSvg({
@@ -4134,13 +4453,19 @@
       if (!width || !height || !bounds.width || !bounds.height) return;
 
       const padding = 20;
-      const scale = Math.min(
+      const fittedScale = Math.min(
         1.2,
         (width - padding * 2) / bounds.width,
         (height - padding * 2) / bounds.height
       );
-      const x = (width - bounds.width * scale) / 2 - bounds.x * scale;
-      const y = (height - bounds.height * scale) / 2 - bounds.y * scale;
+      const scale = constrainZoom(fittedScale);
+      const cropped = scale > fittedScale;
+      const x = cropped
+        ? padding - bounds.x * scale
+        : (width - bounds.width * scale) / 2 - bounds.x * scale;
+      const y = cropped
+        ? padding - bounds.y * scale
+        : (height - bounds.height * scale) / 2 - bounds.y * scale;
 
       svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(scale));
       hasInitialView = true;
@@ -4212,7 +4537,7 @@
       // scale in that case, showing the top-left of the figure (including the
       // cluster labels). Ordinary figures retain the existing fit-to-view.
       const cropped = fitScale < 1;
-      const scale = cropped ? 1 : fitScale;
+      const scale = constrainZoom(cropped ? 1 : fitScale);
       const camera = {
         x: cropped
           ? padding - bounds.minX * scale

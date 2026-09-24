@@ -30,6 +30,7 @@
 		const testMode = params.has("test")
 		const fixture = params.get("fixture")
 		const renderer = params.get("renderer") || (fixture === "large" ? "canvas" : "svg")
+		const minimumZoom = Number(params.get("minZoom"))
 
 		function download(blob, filename) {
 			/* Downloads a given blob to filename.
@@ -54,6 +55,8 @@
         plot: {
           transitionDuration: testMode ? 0 : 250,
           renderer,
+					minZoom: Number.isFinite(minimumZoom) ? minimumZoom : 0,
+					minimap: { show: params.has("minimap") },
         },
         cluster: {
           alignLabels: false

@@ -938,3 +938,45 @@ test("canvas renderer animates a locus flip between scene snapshots", async ({ p
   expect(during).not.toEqual(before);
   expect(during).not.toEqual(after);
 });
+
+test.describe("Canvas motion resolution", () => {
+  test.use({ deviceScaleFactor: 2 });
+
+  test("reduces backing resolution only while navigating", async ({ page }) => {
+    await page.goto("http://127.0.0.1:8080/?test=1&renderer=canvas");
+    const canvas = page.locator("canvas.clusterMapCanvas");
+    await expect(canvas).toBeVisible();
+    const pixelRatio = () =>
+      canvas.evaluate((node) => node.width / node.getBoundingClientRect().width);
+
+    await expect.poll(pixelRatio).toBeGreaterThan(1.5);
+    await canvas.hover();
+    await page.mouse.wheel(0, -100);
+    await expect.poll(pixelRatio).toBeLessThan(1.1);
+    await expect.poll(pixelRatio).toBeGreaterThan(1.5);
+  });
+});
+
+test("Canvas minimap constrains zoom-out and navigates the shared camera", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&renderer=canvas&minimap=1&minZoom=0.8");
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  const minimap = page.locator("canvas.clusterMapMinimap");
+  await expect(canvas).toBeVisible();
+  await expect(minimap).toBeVisible();
+  await expect.poll(() => minimap.evaluate((node) => node.width)).toBeGreaterThan(0);
+
+  const readCamera = () =>
+    canvas.evaluate((node) => {
+      const { x, y, k } = node.__zoom;
+      return { x, y, k };
+    });
+  const before = await readCamera();
+  const minimapBox = await minimap.boundingBox();
+  expect(minimapBox).not.toBeNull();
+  await minimap.click({ position: { x: minimapBox.width * 0.8, y: minimapBox.height * 0.2 } });
+  await expect.poll(readCamera).not.toEqual(before);
+
+  await canvas.hover();
+  await page.mouse.wheel(0, 4000);
+  await expect.poll(() => readCamera().then((camera) => camera.k)).toBeGreaterThanOrEqual(0.8);
+});

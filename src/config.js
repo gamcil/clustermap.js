@@ -2,6 +2,15 @@ const defaultConfig = {
   plot: {
     transitionDuration: 250,
     renderer: "svg",
+    minZoom: 0,
+    maxZoom: 8,
+    minimap: {
+      show: false,
+      width: 220,
+      height: 160,
+      margin: 12,
+      showLinks: false,
+    },
     scaleFactor: 15,
     scaleGenes: true,
     fontFamily:
