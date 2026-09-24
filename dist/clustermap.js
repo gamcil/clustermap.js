@@ -4210,117 +4210,106 @@
     locus: d3.scaleOrdinal(),
   };
 
+  // Every scene variant must project the same biological state with the same
+  // scales and visual policy. Keep that dependency bundle in one place so a
+  // configuration addition cannot silently affect full builds but not retained
+  // flip/anchor patches (or vice versa).
+  function sceneProjectionOptions({ areClustersAdjacent = cluster.adjacent } = {}) {
+    return {
+      scaleX: scales.x,
+      locusOffset: scales.locus,
+      getLocusState: locusState,
+      getGeneState: (gene) => getGeneState(chartState, gene),
+      areClustersAdjacent,
+      shape: config.gene.shape,
+      label: config.gene.label,
+      link: {
+        asLine: config.link.asLine,
+        straight: config.link.straight,
+        threshold: config.link.threshold,
+        labelPosition: config.link.label.position,
+      },
+      clusterLabel: cluster.locusText,
+      alignLabels: config.cluster.alignLabels,
+    };
+  }
+
+  function sceneChromeOptions(data) {
+    return {
+      legend: {
+        show: config.legend.show,
+        placement: config.legend.position,
+        columns: config.legend.columns,
+        columnWidth: config.legend.columnWidth,
+        marginLeft: config.legend.marginLeft,
+        marginTop: config.legend.marginTop,
+        entryHeight: config.legend.entryHeight,
+        fontSize: config.legend.fontSize,
+        fontFamily: config.plot.fontFamily,
+        groups: data.groups,
+        groupForGene: scales.group,
+        colourForGroup: scales.colour,
+      },
+      scaleBar: {
+        show: config.plot.scaleGenes && config.scaleBar.show,
+        x: 0,
+        marginTop: config.scaleBar.marginTop,
+        basePair: config.scaleBar.basePair,
+        coordinateFor: scales.x,
+        height: config.scaleBar.height,
+        colour: config.scaleBar.colour,
+        strokeWidth: config.scaleBar.stroke,
+        fontSize: config.scaleBar.fontSize,
+        fontFamily: config.plot.fontFamily,
+      },
+      colourBar: {
+        show: config.colourBar.show,
+        x: config.plot.scaleGenes ? scales.x(config.scaleBar.basePair) + 20 : 0,
+        marginTop: config.colourBar.marginTop,
+        width: config.colourBar.width,
+        height: config.colourBar.height,
+        fontSize: config.colourBar.fontSize,
+        fontFamily: config.plot.fontFamily,
+        scoreColour: scales.score,
+      },
+      link: {
+        show: config.link.show,
+        groupColour: config.link.groupColour,
+      },
+    };
+  }
+
+  function adjacencyForClusterOrder(order) {
+    const index = new Map(order.map((uid, position) => [uid, position]));
+    return (one, two) => Math.abs(index.get(one) - index.get(two)) === 1;
+  }
+
   const scene = {
     build: (data) => {
       // Scene construction is read-only. The controller synchronizes any
       // scale-dependent chart state before asking the runtime to project it.
       currentScene = buildScene(data, {
-        scaleX: scales.x,
+        ...sceneProjectionOptions(),
         scaleY: scales.y,
         clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
         clusterOffset: scales.offset,
-        locusOffset: scales.locus,
-        getLocusState: locusState,
-        getGeneState: (gene) => getGeneState(chartState, gene),
-        areClustersAdjacent: cluster.adjacent,
         clusterOrder: getClusterOrder(chartState),
-        shape: config.gene.shape,
-        label: config.gene.label,
-        link: {
-          asLine: config.link.asLine,
-          straight: config.link.straight,
-          threshold: config.link.threshold,
-          labelPosition: config.link.label.position,
-        },
-        clusterLabel: cluster.locusText,
-        alignLabels: config.cluster.alignLabels,
-        chrome: {
-          legend: {
-            show: config.legend.show,
-            placement: config.legend.position,
-            columns: config.legend.columns,
-            columnWidth: config.legend.columnWidth,
-            marginLeft: config.legend.marginLeft,
-            marginTop: config.legend.marginTop,
-            entryHeight: config.legend.entryHeight,
-            fontSize: config.legend.fontSize,
-            fontFamily: config.plot.fontFamily,
-            groups: data.groups,
-            groupForGene: scales.group,
-            colourForGroup: scales.colour,
-          },
-          scaleBar: {
-            show: config.plot.scaleGenes && config.scaleBar.show,
-            x: 0,
-            marginTop: config.scaleBar.marginTop,
-            basePair: config.scaleBar.basePair,
-            coordinateFor: scales.x,
-            height: config.scaleBar.height,
-            colour: config.scaleBar.colour,
-            strokeWidth: config.scaleBar.stroke,
-            fontSize: config.scaleBar.fontSize,
-            fontFamily: config.plot.fontFamily,
-          },
-          colourBar: {
-            show: config.colourBar.show,
-            x: config.plot.scaleGenes ? scales.x(config.scaleBar.basePair) + 20 : 0,
-            marginTop: config.colourBar.marginTop,
-            width: config.colourBar.width,
-            height: config.colourBar.height,
-            fontSize: config.colourBar.fontSize,
-            fontFamily: config.plot.fontFamily,
-            scoreColour: scales.score,
-          },
-          link: {
-            show: config.link.show,
-            groupColour: config.link.groupColour,
-          },
-        },
+        chrome: sceneChromeOptions(data),
       });
       return currentScene;
     },
     patchFlippedLocus: (previousScene, locus) => {
       currentScene = patchFlippedLocusScene(previousScene, locus, {
-        scaleX: scales.x,
-        locusOffset: scales.locus,
-        getLocusState: locusState,
-        getGeneState: (gene) => getGeneState(chartState, gene),
-        areClustersAdjacent: cluster.adjacent,
-        shape: config.gene.shape,
-        label: config.gene.label,
-        link: {
-          asLine: config.link.asLine,
-          straight: config.link.straight,
-          threshold: config.link.threshold,
-          labelPosition: config.link.label.position,
-        },
-        clusterLabel: cluster.locusText,
-        alignLabels: config.cluster.alignLabels,
+        ...sceneProjectionOptions(),
         linksForGene: get.linksForGene,
       });
       return currentScene;
     },
     patchGeneAnchor: (previousScene, changes, flippedLoci) => {
-      const clusterOrderIndex = new Map(
-        getClusterOrder(chartState).map((uid, index) => [uid, index])
-      );
       currentScene = patchAnchoredGeneScene(previousScene, { changes, flippedLoci }, {
-        scaleX: scales.x,
-        locusOffset: scales.locus,
-        getLocusState: locusState,
-        getGeneState: (gene) => getGeneState(chartState, gene),
-        areClustersAdjacent: (one, two) =>
-          Math.abs(clusterOrderIndex.get(one) - clusterOrderIndex.get(two)) === 1,
-        shape: config.gene.shape,
-        label: config.gene.label,
-        link: {
-          asLine: config.link.asLine,
-          straight: config.link.straight,
-          threshold: config.link.threshold,
-          labelPosition: config.link.label.position,
-        },
-        clusterLabel: cluster.locusText,
-        alignLabels: config.cluster.alignLabels,
+        ...sceneProjectionOptions({
+          areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
+        }),
         linksForGene: get.linksForGene,
       });
       return currentScene;
