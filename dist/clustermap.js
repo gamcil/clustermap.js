@@ -1825,6 +1825,17 @@
     return minX === Infinity ? null : { minX, maxX, minY, maxY };
   }
 
+  function updateSpatialIndex(index, changedEntries, allEntries) {
+    // Copy-on-write cell patches are excellent for a locus edit, but anchoring
+    // often shifts most clusters. At that point cloning each touched cell is
+    // more expensive than building a compact index from the already-patched
+    // records.
+    if (changedEntries.length > (index?.boundsById.size || 0) / 4) {
+      return createSpatialIndex(allEntries);
+    }
+    return patchSpatialIndex(index, changedEntries);
+  }
+
   /**
    * Apply a committed gene-anchor action without re-projecting unrelated chart
    * records. Anchoring shifts whole clusters; only their loci, genes, hit
@@ -1992,18 +2003,31 @@
       bounds,
       index: {
         ...patched.index,
-        genes: patchSpatialIndex(patched.index.genes, changedGenes),
-        loci: patchSpatialIndex(patched.index.loci, changedLoci),
-        links: patchSpatialIndex(
-          patched.index.links,
-          changedLinks.map(([uid, layout]) => [uid, layout.bounds])
+        genes: updateSpatialIndex(
+          patched.index.genes,
+          changedGenes,
+          [...genes].map(([uid, gene]) => [uid, gene.bounds])
         ),
-        hitLoci: patchSpatialIndex(
+        loci: updateSpatialIndex(
+          patched.index.loci,
+          changedLoci,
+          [...loci].map(([uid, locus]) => [uid, locus.bounds])
+        ),
+        links: updateSpatialIndex(
+          patched.index.links,
+          changedLinks.map(([uid, layout]) => [uid, layout.bounds]),
+          [...links].map(([uid, layout]) => [uid, layout.bounds])
+        ),
+        hitLoci: updateSpatialIndex(
           patched.index.hitLoci,
           changedLoci.map(([uid]) => {
             const regions = locusRegions.get(uid);
             return [uid, boundsFromRegions([regions.move, regions.trimLeft, regions.trimRight])];
-          })
+          }),
+          [...locusRegions].map(([uid, regions]) => [
+            uid,
+            boundsFromRegions([regions.move, regions.trimLeft, regions.trimRight]),
+          ])
         ),
       },
       hitRegions,
