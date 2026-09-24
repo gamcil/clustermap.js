@@ -3651,6 +3651,58 @@
     };
   }
 
+  /**
+   * Coordinate raster redraw quality during active gestures. Canvas 2D may
+   * temporarily favour throughput; WebGPU remains at native resolution because
+   * its geometry redraw is inexpensive and a resolution jump is distracting.
+   */
+  function createRasterMotion({
+    schedulePaint,
+    getCamera,
+    getRenderer,
+    devicePixelRatio = () => globalThis.devicePixelRatio || 1,
+    setTimer = globalThis.setTimeout,
+    clearTimer = globalThis.clearTimeout,
+    settleDelay = 100,
+  }) {
+    let moving = false;
+    let settleTimer = null;
+
+    return {
+      begin() {
+        if (settleTimer !== null) clearTimer(settleTimer);
+        settleTimer = null;
+        if (moving) return;
+        moving = true;
+        schedulePaint();
+      },
+
+      end() {
+        if (settleTimer !== null) clearTimer(settleTimer);
+        // D3's zoom end already debounces a wheel gesture. This short extra
+        // delay avoids resizing the backing bitmap between pointer updates.
+        settleTimer = setTimer(() => {
+          settleTimer = null;
+          if (!moving) return;
+          moving = false;
+          schedulePaint();
+        }, settleDelay);
+      },
+
+      pixelRatio() {
+        const ratio = devicePixelRatio();
+        if (getRenderer() === "webgpu") return ratio;
+        return canvasPixelRatioForCamera({ camera: getCamera(), moving, devicePixelRatio: ratio });
+      },
+
+      dispose() {
+        if (settleTimer !== null) clearTimer(settleTimer);
+        settleTimer = null;
+        moving = false;
+      },
+    };
+  }
+
   // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
   // host, camera viewport, and interaction state that causes a redraw.
   function renderSvg({
@@ -6068,8 +6120,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let canvasPaintFrame = null;
     let canvasFlipFrame = null;
     let canvasPendingFlip = null;
-    let canvasMotion = false;
-    let canvasMotionEndTimer = null;
     let paintCanvasFrame = null;
     let webgpuFlipFrame = null;
     let clusterCommitFrame = null;
@@ -6085,6 +6135,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const svgBackend = createSvgBackend();
     const webgpuBackend = createWebGpuBackend();
     const rasterMinimap = createRasterMinimap();
+    const rasterMotion = createRasterMotion({
+      schedulePaint: () => scheduleCanvasPaint(),
+      getCamera: () => getCamera(chartState),
+      getRenderer: () => runtime.config.plot.renderer,
+    });
     runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
       const sourceScene = runtime.scene.get();
       // Anchoring changes cluster origins and, when strands disagree, a small
@@ -6396,39 +6451,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     const scheduleCanvasPreview = scheduleCanvasPaint;
 
-    function beginCanvasMotion() {
-      if (canvasMotionEndTimer !== null) clearTimeout(canvasMotionEndTimer);
-      canvasMotionEndTimer = null;
-      if (canvasMotion) return;
-      canvasMotion = true;
-      scheduleCanvasPaint();
-    }
-
-    function endCanvasMotion() {
-      if (canvasMotionEndTimer !== null) clearTimeout(canvasMotionEndTimer);
-      // D3's zoom end already debounces a wheel gesture. This short extra delay
-      // avoids resizing the backing bitmap between adjacent pointer updates.
-      canvasMotionEndTimer = setTimeout(() => {
-        canvasMotionEndTimer = null;
-        if (!canvasMotion) return;
-        canvasMotion = false;
-        scheduleCanvasPaint();
-      }, 100);
-    }
-
-    function canvasPixelRatio() {
-      // WebGPU remains at its native backing resolution while moving. Its
-      // geometry is cheap enough to redraw without the visible text/shape-size
-      // jump that the Canvas 2D motion fallback intentionally makes.
-      if (runtime.config.plot.renderer === "webgpu") {
-        return globalThis.devicePixelRatio || 1;
-      }
-      return canvasPixelRatioForCamera({
-        camera: getCamera(chartState),
-        moving: canvasMotion,
-      });
-    }
-
     function zoomExtent() {
       const minimum = Math.max(0, Number(runtime.config.plot.minZoom) || 0);
       const configuredMaximum = Number(runtime.config.plot.maxZoom);
@@ -6632,12 +6654,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
               scheduleCanvasPaint();
             })
             .on("start", function () {
-              beginCanvasMotion();
+              rasterMotion.begin();
               d3.select(this).style("cursor", "grabbing");
             })
             .on("end", function () {
               d3.select(this).style("cursor", "grab");
-              endCanvasMotion();
+              rasterMotion.end();
             });
           surface.call(canvasZoom).on("dblclick.zoom", null);
           return surface;
@@ -6723,7 +6745,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             canvasNode,
             canvasFlipStaticCanvas,
             canvasFlipDirtyFrame,
-            canvasPixelRatio()
+            rasterMotion.pixelRatio()
           );
           renderCanvas({
             canvas: canvasNode,
@@ -6739,7 +6761,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
               },
             },
             scales: runtime.scales,
-            pixelRatio: canvasPixelRatio(),
+            pixelRatio: rasterMotion.pixelRatio(),
             preview: canvasPreview,
             include: { links: canvasPendingFlip.dynamic.links },
             showLoci: false,
@@ -6755,7 +6777,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             canvasFlipLocusFrame,
             canvasFlipDirtyFrame,
             canvasPreview,
-            canvasPixelRatio()
+            rasterMotion.pixelRatio()
           );
           const stationaryGenes = new Set(canvasPendingFlip.dynamic.genes);
           for (const uid of canvasPendingFlip.locusRecords.genes) stationaryGenes.delete(uid);
@@ -6766,7 +6788,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
               camera: getCamera(chartState),
               config: runtime.config,
               scales: runtime.scales,
-              pixelRatio: canvasPixelRatio(),
+              pixelRatio: rasterMotion.pixelRatio(),
               include: { genes: stationaryGenes },
               showLinks: false,
               showLoci: false,
@@ -6794,7 +6816,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           hoverLocusUid: canvasHoverLocusUid,
           suppressLocusHover:
             canvasPreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
-          pixelRatio: canvasPixelRatio(),
+          pixelRatio: rasterMotion.pixelRatio(),
           preview: canvasPreview,
         });
         paintMinimap();
@@ -6812,7 +6834,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             scales: runtime.scales,
             hoverLocusUid: canvasHoverLocusUid,
             suppressLocusHover: canvasPreview?.type === "locus-flip",
-            pixelRatio: canvasPixelRatio(),
+            pixelRatio: rasterMotion.pixelRatio(),
             preview: canvasPreview,
             showLinks: false,
             showLocusTracks: false,
@@ -6829,7 +6851,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           config: runtime.config,
           width: bounds.width,
           height: bounds.height,
-          pixelRatio: canvasPixelRatio(),
+          pixelRatio: rasterMotion.pixelRatio(),
           onUnavailable: () => paintCanvas(webgpuOverlay.node()),
         });
         paintMinimap();
@@ -7011,7 +7033,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         const canvasNode = canvas.node();
         if (!canvasNode || !pending.sourceScene) return;
         const bounds = canvasNode.getBoundingClientRect();
-        const pixelRatio = canvasPixelRatio();
+        const pixelRatio = rasterMotion.pixelRatio();
         if (flipLayerMatches(canvasPreparedFlipBase, pending, bounds, pixelRatio)) {
           canvasFlipStaticCanvas = canvasPreparedFlipBase.baseCanvas;
           canvasFlipLocusCanvas = canvasPreparedFlipBase.locusCanvas;
@@ -7039,7 +7061,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           const sourceScene = canvasScene || runtime.scene.get();
           if (!canvasNode || !locus || !sourceScene || canvasPendingFlip) return;
           const bounds = canvasNode.getBoundingClientRect();
-          const pixelRatio = canvasPixelRatio();
+          const pixelRatio = rasterMotion.pixelRatio();
           const pending = createCanvasFlipPending(locus, sourceScene);
           if (flipLayerMatches(canvasPreparedFlipBase, pending, bounds, pixelRatio)) return;
           const baseCanvas = document.createElement("canvas");
@@ -7184,8 +7206,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             return true;
           },
           warmLocus: useCanvas ? warmCanvasFlipBase : () => {},
-          beginMotion: beginCanvasMotion,
-          endMotion: endCanvasMotion,
+          beginMotion: rasterMotion.begin,
+          endMotion: rasterMotion.end,
           setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
           interactions: {
             beginClusterDrag: interactionController.beginClusterDrag,
@@ -7252,7 +7274,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           .on("pointerdown.minimap", function (event) {
             if (event.button) return;
             minimapGesture = true;
-            beginCanvasMotion();
+            rasterMotion.begin();
             this.setPointerCapture(event.pointerId);
             d3.select(this).style("cursor", "grabbing");
             moveCameraFromMinimap(this, event);
@@ -7268,7 +7290,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             minimapGesture = false;
             if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
             d3.select(this).style("cursor", "grab");
-            endCanvasMotion();
+            rasterMotion.end();
           });
       }
       applyCamera(svg.select("g.clusterMapViewport"));
