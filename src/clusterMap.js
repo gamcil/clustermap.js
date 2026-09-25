@@ -86,6 +86,7 @@ export default function clusterMap() {
   let prepareCanvasFlipBase = () => {};
   let warmCanvasFlipBase = () => {};
   let currentData = null;
+  let disposeRasterInteraction = () => {};
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const canvasBackend = createRetainedSceneBackend({
     render: renderCanvas,
@@ -486,6 +487,8 @@ export default function clusterMap() {
 
   function redraw({ animate = true, synchronize = true } = {}) {
     if (!currentData || !container) return;
+    disposeRasterInteraction();
+    disposeRasterInteraction = () => {};
     const data = currentData;
     if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
     canvasFlipWarmFrame = null;
@@ -1124,7 +1127,7 @@ export default function clusterMap() {
       canvasZoom.filter(function (event) {
         return rasterInteraction.zoomFilter(this, event);
       });
-      rasterInteraction.bind(canvas);
+      disposeRasterInteraction = rasterInteraction.bind(canvas);
 
       rasterMinimap.bind(minimap, {
         getSurface: () => canvas.node(),

@@ -25,6 +25,8 @@ export function createRasterInteraction({
 }) {
   let gesture = null;
   let panMode = false;
+  let spaceDown = false;
+  let activeSurface = null;
 
   const updateAffordance = (surface, target, { warm = false } = {}) => {
     const locusUid = locusForTarget(target);
@@ -124,18 +126,45 @@ export function createRasterInteraction({
     },
 
     bind(selection) {
+      const surface = selection.node();
+      const windowRef = surface?.ownerDocument?.defaultView;
+      const isActive = () =>
+        activeSurface === surface || surface?.ownerDocument?.activeElement === surface;
+      const keydown = (event) => {
+        if (event.code !== "Space") return;
+        spaceDown = true;
+        if (!isActive()) return;
+        panMode = true;
+        event.preventDefault();
+        setCursor(surface, "grab");
+      };
+      const keyup = (event) => {
+        if (event.code !== "Space") return;
+        spaceDown = false;
+        panMode = false;
+        if (isActive()) setCursor(surface, "grab");
+      };
+      windowRef?.addEventListener("keydown", keydown);
+      windowRef?.addEventListener("keyup", keyup);
       selection
         .on("pointerenter.canvasKeyboard", function () {
+          activeSurface = this;
           this.focus({ preventScroll: true });
+          if (spaceDown) {
+            panMode = true;
+            setCursor(this, "grab");
+          }
         })
         .on("keydown.canvasKeyboard", function (event) {
           if (event.code !== "Space") return;
+          spaceDown = true;
           panMode = true;
           event.preventDefault();
           setCursor(this, "grab");
         })
         .on("keyup.canvasKeyboard", function (event) {
           if (event.code !== "Space") return;
+          spaceDown = false;
           panMode = false;
           setCursor(this, "grab");
         })
@@ -153,12 +182,14 @@ export function createRasterInteraction({
           if (!panMode) moveGesture(this, event);
         })
         .on("pointerleave.canvasInteraction", function () {
+          if (activeSurface === this) activeSurface = null;
           if (!gesture && !panMode) updateAffordance(this, null);
         })
         .on("pointerup.canvasInteraction pointercancel.canvasInteraction", function (event) {
           finishGesture(this, event);
         })
         .on("dblclick.canvasInteraction", function (event) {
+          if (panMode) return;
           const target = targetForEvent(this, event);
           const locusUid = locusForTarget(target);
           if (locusUid) actions.flipLocus(locusUid);
@@ -173,6 +204,11 @@ export function createRasterInteraction({
             actions.legendMenu(event, target.group);
           }
         });
+      return () => {
+        windowRef?.removeEventListener("keydown", keydown);
+        windowRef?.removeEventListener("keyup", keyup);
+        selection.on(".canvasKeyboard", null).on(".canvasInteraction", null);
+      };
     },
   };
 }
