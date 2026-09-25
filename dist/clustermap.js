@@ -3416,6 +3416,7 @@
   } = {}) {
     let baseCanvas = null;
     let baseFrame = null;
+    let gesture = false;
 
     const projectionFor = (scene, options) =>
       createMinimapProjection({
@@ -3423,11 +3424,24 @@
         width: options.width,
         height: options.height,
       });
+    const cameraForPointer = ({ event, minimap, surface, scene, options, camera }) => {
+      const projection = projectionFor(scene, options);
+      if (!projection || !minimap || !surface) return null;
+      const minimapBounds = minimap.getBoundingClientRect();
+      const surfaceBounds = surface.getBoundingClientRect();
+      return cameraForMinimapPoint(
+        projection,
+        { x: event.clientX - minimapBounds.left, y: event.clientY - minimapBounds.top },
+        { width: surfaceBounds.width, height: surfaceBounds.height },
+        camera
+      );
+    };
 
     return {
       clear() {
         if (baseFrame !== null) cancelFrame(baseFrame);
         baseFrame = null;
+        gesture = false;
       },
 
       paint({ minimap, surface, scene, options, camera, pixelRatio }) {
@@ -3457,17 +3471,52 @@
         });
       },
 
-      cameraForPointer({ event, minimap, surface, scene, options, camera }) {
-        const projection = projectionFor(scene, options);
-        if (!projection || !minimap || !surface) return null;
-        const minimapBounds = minimap.getBoundingClientRect();
-        const surfaceBounds = surface.getBoundingClientRect();
-        return cameraForMinimapPoint(
-          projection,
-          { x: event.clientX - minimapBounds.left, y: event.clientY - minimapBounds.top },
-          { width: surfaceBounds.width, height: surfaceBounds.height },
-          camera
-        );
+      cameraForPointer,
+
+      bind(selection, {
+        getSurface,
+        getScene,
+        getCamera,
+        options,
+        moveCamera,
+        beginMotion,
+        endMotion,
+        setCursor,
+      }) {
+        gesture = false;
+        const move = (minimap, event) => {
+          const camera = cameraForPointer({
+            event,
+            minimap,
+            surface: getSurface(),
+            scene: getScene(),
+            options,
+            camera: getCamera(),
+          });
+          if (camera) moveCamera(camera);
+        };
+        selection
+          .on("pointerdown.minimap", function (event) {
+            if (event.button) return;
+            gesture = true;
+            beginMotion();
+            this.setPointerCapture(event.pointerId);
+            setCursor(this, "grabbing");
+            move(this, event);
+            event.preventDefault();
+          })
+          .on("pointermove.minimap", function (event) {
+            if (!gesture) return;
+            move(this, event);
+            event.preventDefault();
+          })
+          .on("pointerup.minimap pointercancel.minimap", function (event) {
+            if (!gesture) return;
+            gesture = false;
+            if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
+            setCursor(this, "grab");
+            endMotion();
+          });
       },
     };
   }
@@ -7441,17 +7490,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         });
         rasterInteraction.bind(canvas);
 
-        let minimapGesture = false;
-        const moveCameraFromMinimap = (minimapNode, event) => {
+        rasterMinimap.bind(minimap, {
+          getSurface: () => canvas.node(),
+          getScene: () => runtime.scene.get(),
+          getCamera: () => getCamera(chartState),
+          options: minimapOptions,
+          moveCamera: (camera) => {
           const mainCanvas = canvas.node();
-          const camera = rasterMinimap.cameraForPointer({
-            event,
-            minimap: minimapNode,
-            surface: mainCanvas,
-            scene: runtime.scene.get(),
-            options: minimapOptions,
-            camera: getCamera(chartState),
-          });
           if (!camera || !mainCanvas) return;
           // Go through D3 rather than mutating its private __zoom state. This
           // keeps the next wheel/pan gesture continuous with minimap navigation.
@@ -7460,29 +7505,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
           );
           paintMinimap();
-        };
-        minimap
-          .on("pointerdown.minimap", function (event) {
-            if (event.button) return;
-            minimapGesture = true;
-            rasterMotion.begin();
-            this.setPointerCapture(event.pointerId);
-            d3.select(this).style("cursor", "grabbing");
-            moveCameraFromMinimap(this, event);
-            event.preventDefault();
-          })
-          .on("pointermove.minimap", function (event) {
-            if (!minimapGesture) return;
-            moveCameraFromMinimap(this, event);
-            event.preventDefault();
-          })
-          .on("pointerup.minimap pointercancel.minimap", function (event) {
-            if (!minimapGesture) return;
-            minimapGesture = false;
-            if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
-            d3.select(this).style("cursor", "grab");
-            rasterMotion.end();
-          });
+          },
+          beginMotion: rasterMotion.begin,
+          endMotion: rasterMotion.end,
+          setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
+        });
       }
       applyCamera(svg.select("g.clusterMapViewport"));
 

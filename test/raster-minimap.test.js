@@ -80,4 +80,46 @@ test("raster minimap retains an overview and maps pointer movement to the shared
   assert.ok(Math.abs(camera.x - 100) < 1e-9);
   assert.equal(camera.y, 90);
   assert.equal(camera.k, 1);
+
+  const handlers = new Map();
+  const selection = {
+    on(name, handler) {
+      handlers.set(name, handler);
+      return this;
+    },
+  };
+  const pointer = {
+    getBoundingClientRect: overview.getBoundingClientRect,
+    captured: false,
+    setPointerCapture() { this.captured = true; },
+    hasPointerCapture() { return this.captured; },
+    releasePointerCapture() { this.captured = false; },
+  };
+  const moved = [];
+  const cursors = [];
+  let started = 0;
+  let ended = 0;
+  minimap.bind(selection, {
+    getSurface: () => surface,
+    getScene: () => scene,
+    getCamera: () => ({ x: 0, y: 0, k: 1 }),
+    options: { width: 100, height: 80 },
+    moveCamera: (value) => moved.push(value),
+    beginMotion: () => { started += 1; },
+    endMotion: () => { ended += 1; },
+    setCursor: (_surface, cursor) => cursors.push(cursor),
+  });
+  const pointerEvent = {
+    button: 0,
+    pointerId: 1,
+    clientX: 60,
+    clientY: 60,
+    preventDefault() {},
+  };
+  handlers.get("pointerdown.minimap").call(pointer, pointerEvent);
+  handlers.get("pointerup.minimap pointercancel.minimap").call(pointer, pointerEvent);
+  assert.equal(started, 1);
+  assert.equal(ended, 1);
+  assert.equal(moved.length, 1);
+  assert.deepEqual(cursors, ["grabbing", "grab"]);
 });

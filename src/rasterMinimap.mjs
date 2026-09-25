@@ -16,6 +16,7 @@ export function createRasterMinimap({
 } = {}) {
   let baseCanvas = null;
   let baseFrame = null;
+  let gesture = false;
 
   const projectionFor = (scene, options) =>
     createMinimapProjection({
@@ -23,11 +24,24 @@ export function createRasterMinimap({
       width: options.width,
       height: options.height,
     });
+  const cameraForPointer = ({ event, minimap, surface, scene, options, camera }) => {
+    const projection = projectionFor(scene, options);
+    if (!projection || !minimap || !surface) return null;
+    const minimapBounds = minimap.getBoundingClientRect();
+    const surfaceBounds = surface.getBoundingClientRect();
+    return cameraForMinimapPoint(
+      projection,
+      { x: event.clientX - minimapBounds.left, y: event.clientY - minimapBounds.top },
+      { width: surfaceBounds.width, height: surfaceBounds.height },
+      camera
+    );
+  };
 
   return {
     clear() {
       if (baseFrame !== null) cancelFrame(baseFrame);
       baseFrame = null;
+      gesture = false;
     },
 
     paint({ minimap, surface, scene, options, camera, pixelRatio }) {
@@ -57,17 +71,52 @@ export function createRasterMinimap({
       });
     },
 
-    cameraForPointer({ event, minimap, surface, scene, options, camera }) {
-      const projection = projectionFor(scene, options);
-      if (!projection || !minimap || !surface) return null;
-      const minimapBounds = minimap.getBoundingClientRect();
-      const surfaceBounds = surface.getBoundingClientRect();
-      return cameraForMinimapPoint(
-        projection,
-        { x: event.clientX - minimapBounds.left, y: event.clientY - minimapBounds.top },
-        { width: surfaceBounds.width, height: surfaceBounds.height },
-        camera
-      );
+    cameraForPointer,
+
+    bind(selection, {
+      getSurface,
+      getScene,
+      getCamera,
+      options,
+      moveCamera,
+      beginMotion,
+      endMotion,
+      setCursor,
+    }) {
+      gesture = false;
+      const move = (minimap, event) => {
+        const camera = cameraForPointer({
+          event,
+          minimap,
+          surface: getSurface(),
+          scene: getScene(),
+          options,
+          camera: getCamera(),
+        });
+        if (camera) moveCamera(camera);
+      };
+      selection
+        .on("pointerdown.minimap", function (event) {
+          if (event.button) return;
+          gesture = true;
+          beginMotion();
+          this.setPointerCapture(event.pointerId);
+          setCursor(this, "grabbing");
+          move(this, event);
+          event.preventDefault();
+        })
+        .on("pointermove.minimap", function (event) {
+          if (!gesture) return;
+          move(this, event);
+          event.preventDefault();
+        })
+        .on("pointerup.minimap pointercancel.minimap", function (event) {
+          if (!gesture) return;
+          gesture = false;
+          if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
+          setCursor(this, "grab");
+          endMotion();
+        });
     },
   };
 }

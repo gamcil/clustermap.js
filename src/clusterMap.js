@@ -1077,48 +1077,26 @@ export default function clusterMap() {
       });
       rasterInteraction.bind(canvas);
 
-      let minimapGesture = false;
-      const moveCameraFromMinimap = (minimapNode, event) => {
-        const mainCanvas = canvas.node();
-        const camera = rasterMinimap.cameraForPointer({
-          event,
-          minimap: minimapNode,
-          surface: mainCanvas,
-          scene: runtime.scene.get(),
-          options: minimapOptions,
-          camera: getCamera(chartState),
-        });
-        if (!camera || !mainCanvas) return;
-        // Go through D3 rather than mutating its private __zoom state. This
-        // keeps the next wheel/pan gesture continuous with minimap navigation.
-        d3.select(mainCanvas).call(
-          canvasZoom.transform,
-          d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
-        );
-        paintMinimap();
-      };
-      minimap
-        .on("pointerdown.minimap", function (event) {
-          if (event.button) return;
-          minimapGesture = true;
-          rasterMotion.begin();
-          this.setPointerCapture(event.pointerId);
-          d3.select(this).style("cursor", "grabbing");
-          moveCameraFromMinimap(this, event);
-          event.preventDefault();
-        })
-        .on("pointermove.minimap", function (event) {
-          if (!minimapGesture) return;
-          moveCameraFromMinimap(this, event);
-          event.preventDefault();
-        })
-        .on("pointerup.minimap pointercancel.minimap", function (event) {
-          if (!minimapGesture) return;
-          minimapGesture = false;
-          if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
-          d3.select(this).style("cursor", "grab");
-          rasterMotion.end();
-        });
+      rasterMinimap.bind(minimap, {
+        getSurface: () => canvas.node(),
+        getScene: () => runtime.scene.get(),
+        getCamera: () => getCamera(chartState),
+        options: minimapOptions,
+        moveCamera: (camera) => {
+          const mainCanvas = canvas.node();
+          if (!camera || !mainCanvas) return;
+          // Go through D3 rather than mutating its private __zoom state. This
+          // keeps the next wheel/pan gesture continuous with minimap navigation.
+          d3.select(mainCanvas).call(
+            canvasZoom.transform,
+            d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+          );
+          paintMinimap();
+        },
+        beginMotion: rasterMotion.begin,
+        endMotion: rasterMotion.end,
+        setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
+      });
     }
     applyCamera(svg.select("g.clusterMapViewport"));
 
