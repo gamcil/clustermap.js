@@ -44,6 +44,7 @@ import { createSvgBackend } from "./svgBackend.mjs";
 import { createWebGpuBackend } from "./webgpuBackend.mjs";
 import { ensureSvgSurface } from "./svgSurface.mjs";
 import { ensureRasterSurface } from "./rasterSurface.mjs";
+import { createRasterInteractionBindings } from "./rasterInteractionBindings.mjs";
 import {
   isCanvasRenderer,
   isRasterRenderer,
@@ -1048,6 +1049,12 @@ export default function clusterMap() {
         });
       const locusForTarget = (target) =>
         target?.locusUid || runtime.get.geneData(target?.geneUid)?.locusUid || null;
+      const rasterBindings = createRasterInteractionBindings({
+        interactions: rendererInteractions,
+        getGene: runtime.get.geneData,
+        getLocus: runtime.get.locusData,
+        config: runtime.config,
+      });
       const rasterInteraction = createRasterInteraction({
         targetForEvent,
         worldPoint: (surface, event) =>
@@ -1063,42 +1070,7 @@ export default function clusterMap() {
         beginMotion: rasterMotion.begin,
         endMotion: rasterMotion.end,
         setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
-        interactions: {
-          beginClusterDrag: rendererInteractions.beginClusterDrag,
-          moveClusterDrag: rendererInteractions.moveClusterDrag,
-          endClusterDrag: rendererInteractions.endClusterDrag,
-          cancelClusterDrag: rendererInteractions.cancelClusterDrag,
-          beginLocusDrag: rendererInteractions.beginLocusDrag,
-          moveLocusDrag: rendererInteractions.moveLocusDrag,
-          endLocusDrag: rendererInteractions.endLocusDrag,
-          cancelLocusDrag: rendererInteractions.cancelLocusDrag,
-          beginLocusTrim: rendererInteractions.beginLocusTrim,
-          moveLocusTrim: (locusUid, edge, x) =>
-            rendererInteractions.moveLocusTrim(runtime.get.locusData(locusUid), edge, x),
-          endLocusTrim: (locusUid) =>
-            rendererInteractions.endLocusTrim(runtime.get.locusData(locusUid)),
-          cancelLocusTrim: rendererInteractions.cancelLocusTrim,
-        },
-        actions: {
-          geneClick: (event, geneUid) =>
-            rendererInteractions.onGeneClick?.(event, runtime.get.geneData(geneUid)),
-          legendColour: (event, group) => {
-            if (runtime.config.legend.onClickCircle) {
-              runtime.config.legend.onClickCircle(event, group);
-            } else {
-              rendererInteractions.chooseLegendColour(group);
-            }
-          },
-          legendText: (event, group) => runtime.config.legend.onClickText?.(event, group),
-          scaleBar: rendererInteractions.setScaleBarLength,
-          flipLocus: (locusUid) => rendererInteractions.flipLocus(runtime.get.locusData(locusUid)),
-          geneMenu: (event, geneUid) =>
-            rendererInteractions.showGeneMenu(event, runtime.get.geneData(geneUid)),
-          legendMenu: (event, group) => {
-            const handler = runtime.config.legend.onAltClickText || rendererInteractions.showGroupMenu;
-            handler(event, group);
-          },
-        },
+        ...rasterBindings,
       });
       canvasZoom.filter(function (event) {
         return rasterInteraction.zoomFilter(this, event);

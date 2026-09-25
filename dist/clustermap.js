@@ -6358,6 +6358,49 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     return { canvas, webgpuOverlay, minimap: overview, zoom: currentZoom };
   }
 
+  // Raster hit testing returns stable scene IDs, while SVG joins already carry
+  // source records. Adapt IDs at this boundary so controller actions themselves
+  // retain one record-based contract across renderers.
+  function createRasterInteractionBindings({
+    interactions,
+    getGene,
+    getLocus,
+    config,
+  }) {
+    return {
+      interactions: {
+        beginClusterDrag: interactions.beginClusterDrag,
+        moveClusterDrag: interactions.moveClusterDrag,
+        endClusterDrag: interactions.endClusterDrag,
+        cancelClusterDrag: interactions.cancelClusterDrag,
+        beginLocusDrag: interactions.beginLocusDrag,
+        moveLocusDrag: interactions.moveLocusDrag,
+        endLocusDrag: interactions.endLocusDrag,
+        cancelLocusDrag: interactions.cancelLocusDrag,
+        beginLocusTrim: interactions.beginLocusTrim,
+        moveLocusTrim: (locusUid, edge, x) =>
+          interactions.moveLocusTrim(getLocus(locusUid), edge, x),
+        endLocusTrim: (locusUid) => interactions.endLocusTrim(getLocus(locusUid)),
+        cancelLocusTrim: interactions.cancelLocusTrim,
+      },
+      actions: {
+        geneClick: (event, geneUid) => interactions.onGeneClick?.(event, getGene(geneUid)),
+        legendColour: (event, group) => {
+          if (config.legend.onClickCircle) config.legend.onClickCircle(event, group);
+          else interactions.chooseLegendColour(group);
+        },
+        legendText: (event, group) => config.legend.onClickText?.(event, group),
+        scaleBar: interactions.setScaleBarLength,
+        flipLocus: (locusUid) => interactions.flipLocus(getLocus(locusUid)),
+        geneMenu: (event, geneUid) => interactions.showGeneMenu(event, getGene(geneUid)),
+        legendMenu: (event, group) => {
+          const handler = config.legend.onAltClickText || interactions.showGroupMenu;
+          handler(event, group);
+        },
+      },
+    };
+  }
+
   function isCanvasRenderer(renderer) {
     return renderer === "canvas";
   }
@@ -7370,6 +7413,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           });
         const locusForTarget = (target) =>
           target?.locusUid || runtime.get.geneData(target?.geneUid)?.locusUid || null;
+        const rasterBindings = createRasterInteractionBindings({
+          interactions: rendererInteractions,
+          getGene: runtime.get.geneData,
+          getLocus: runtime.get.locusData,
+          config: runtime.config,
+        });
         const rasterInteraction = createRasterInteraction({
           targetForEvent,
           worldPoint: (surface, event) =>
@@ -7385,42 +7434,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           beginMotion: rasterMotion.begin,
           endMotion: rasterMotion.end,
           setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
-          interactions: {
-            beginClusterDrag: rendererInteractions.beginClusterDrag,
-            moveClusterDrag: rendererInteractions.moveClusterDrag,
-            endClusterDrag: rendererInteractions.endClusterDrag,
-            cancelClusterDrag: rendererInteractions.cancelClusterDrag,
-            beginLocusDrag: rendererInteractions.beginLocusDrag,
-            moveLocusDrag: rendererInteractions.moveLocusDrag,
-            endLocusDrag: rendererInteractions.endLocusDrag,
-            cancelLocusDrag: rendererInteractions.cancelLocusDrag,
-            beginLocusTrim: rendererInteractions.beginLocusTrim,
-            moveLocusTrim: (locusUid, edge, x) =>
-              rendererInteractions.moveLocusTrim(runtime.get.locusData(locusUid), edge, x),
-            endLocusTrim: (locusUid) =>
-              rendererInteractions.endLocusTrim(runtime.get.locusData(locusUid)),
-            cancelLocusTrim: rendererInteractions.cancelLocusTrim,
-          },
-          actions: {
-            geneClick: (event, geneUid) =>
-              rendererInteractions.onGeneClick?.(event, runtime.get.geneData(geneUid)),
-            legendColour: (event, group) => {
-              if (runtime.config.legend.onClickCircle) {
-                runtime.config.legend.onClickCircle(event, group);
-              } else {
-                rendererInteractions.chooseLegendColour(group);
-              }
-            },
-            legendText: (event, group) => runtime.config.legend.onClickText?.(event, group),
-            scaleBar: rendererInteractions.setScaleBarLength,
-            flipLocus: (locusUid) => rendererInteractions.flipLocus(runtime.get.locusData(locusUid)),
-            geneMenu: (event, geneUid) =>
-              rendererInteractions.showGeneMenu(event, runtime.get.geneData(geneUid)),
-            legendMenu: (event, group) => {
-              const handler = runtime.config.legend.onAltClickText || rendererInteractions.showGroupMenu;
-              handler(event, group);
-            },
-          },
+          ...rasterBindings,
         });
         canvasZoom.filter(function (event) {
           return rasterInteraction.zoomFilter(this, event);
