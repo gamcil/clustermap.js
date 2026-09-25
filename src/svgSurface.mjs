@@ -1,6 +1,8 @@
 // Owns the persistent DOM surrounding an SVG chart. Scene joins and all chart
 // interactions remain in the SVG renderer/controller; this module only
 // establishes the SVG viewport, overlay nodes, and camera gesture binding.
+import { bindCameraZoom, updateCameraZoom } from "./cameraZoom.mjs";
+
 export function ensureSvgSurface({
   container,
   data,
@@ -66,17 +68,18 @@ export function ensureSvgSurface({
       const viewport = surface.append("g").attr("class", "clusterMapViewport");
       viewport.append("g").attr("class", "clusterMapG");
 
-      currentZoom = d3
-        .zoom()
-        .scaleExtent(zoomExtent())
-        .on("zoom", (event) => onZoom(event, viewport))
-        .on("start", () => onZoomStart(surface))
-        .on("end", () => onZoomEnd(surface));
-      surface.call(currentZoom).on("dblclick.zoom", null);
+      currentZoom = bindCameraZoom({
+        d3,
+        surface,
+        zoomExtent,
+        onZoom: (event) => onZoom(event, viewport),
+        onStart: () => onZoomStart(surface),
+        onEnd: () => onZoomEnd(surface),
+      });
       return surface;
     });
 
-  if (currentZoom) currentZoom.scaleExtent(zoomExtent());
+  updateCameraZoom(currentZoom, zoomExtent);
   return {
     svg,
     plot: svg.select("g.clusterMapG"),

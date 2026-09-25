@@ -6219,9 +6219,33 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     };
   }
 
+  // Surface modules supply renderer-specific effects, but every chart camera
+  // uses the same D3 gesture contract and intentionally reserves double-click
+  // for locus flipping.
+  function bindCameraZoom({
+    d3,
+    surface,
+    zoomExtent,
+    onZoom,
+    onStart,
+    onEnd,
+  }) {
+    const zoom = d3
+      .zoom()
+      .scaleExtent(zoomExtent())
+      .on("zoom", onZoom)
+      .on("start", onStart)
+      .on("end", onEnd);
+    surface.call(zoom).on("dblclick.zoom", null);
+    return zoom;
+  }
+
+  function updateCameraZoom(zoom, zoomExtent) {
+    if (zoom) zoom.scaleExtent(zoomExtent());
+  }
+
   // Owns the persistent DOM surrounding an SVG chart. Scene joins and all chart
-  // interactions remain in the SVG renderer/controller; this module only
-  // establishes the SVG viewport, overlay nodes, and camera gesture binding.
+
   function ensureSvgSurface({
     container,
     data,
@@ -6287,17 +6311,18 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         const viewport = surface.append("g").attr("class", "clusterMapViewport");
         viewport.append("g").attr("class", "clusterMapG");
 
-        currentZoom = d3
-          .zoom()
-          .scaleExtent(zoomExtent())
-          .on("zoom", (event) => onZoom(event, viewport))
-          .on("start", () => onZoomStart(surface))
-          .on("end", () => onZoomEnd(surface));
-        surface.call(currentZoom).on("dblclick.zoom", null);
+        currentZoom = bindCameraZoom({
+          d3,
+          surface,
+          zoomExtent,
+          onZoom: (event) => onZoom(event, viewport),
+          onStart: () => onZoomStart(surface),
+          onEnd: () => onZoomEnd(surface),
+        });
         return surface;
       });
 
-    if (currentZoom) currentZoom.scaleExtent(zoomExtent());
+    updateCameraZoom(currentZoom, zoomExtent);
     return {
       svg,
       plot: svg.select("g.clusterMapG"),
@@ -6307,8 +6332,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   }
 
   // Owns the persistent DOM surrounding retained raster renderers. Painting,
-  // hit testing, minimap behaviour, and renderer-specific resources stay with
-  // the chart controller/backends.
+
   function ensureRasterSurface({
     container,
     data,
@@ -6346,13 +6370,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           .style("width", "100%")
           .style("height", "100%")
           .style("outline", "none");
-        currentZoom = d3
-          .zoom()
-          .scaleExtent(zoomExtent())
-          .on("zoom", onZoom)
-          .on("start", function () { onZoomStart(this); })
-          .on("end", function () { onZoomEnd(this); });
-        surface.call(currentZoom).on("dblclick.zoom", null);
+        currentZoom = bindCameraZoom({
+          d3,
+          surface,
+          zoomExtent,
+          onZoom,
+          onStart: function () { onZoomStart(this); },
+          onEnd: function () { onZoomEnd(this); },
+        });
         return surface;
       })
       .attr("data-renderer", renderer);
@@ -6362,7 +6387,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     } else {
       canvas.attr("data-webgpu", null);
     }
-    if (currentZoom) currentZoom.scaleExtent(zoomExtent());
+    updateCameraZoom(currentZoom, zoomExtent);
 
     if ((showWebGpu || showMinimap) && globalThis.getComputedStyle(container.node()).position === "static") {
       container.style("position", "relative");
@@ -7496,15 +7521,15 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           getCamera: () => getCamera(chartState),
           options: minimapOptions,
           moveCamera: (camera) => {
-          const mainCanvas = canvas.node();
-          if (!camera || !mainCanvas) return;
-          // Go through D3 rather than mutating its private __zoom state. This
-          // keeps the next wheel/pan gesture continuous with minimap navigation.
-          d3.select(mainCanvas).call(
-            canvasZoom.transform,
-            d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
-          );
-          paintMinimap();
+            const mainCanvas = canvas.node();
+            if (!camera || !mainCanvas) return;
+            // Go through D3 rather than mutating its private __zoom state. This
+            // keeps the next wheel/pan gesture continuous with minimap navigation.
+            d3.select(mainCanvas).call(
+              canvasZoom.transform,
+              d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+            );
+            paintMinimap();
           },
           beginMotion: rasterMotion.begin,
           endMotion: rasterMotion.end,

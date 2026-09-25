@@ -1,6 +1,8 @@
 // Owns the persistent DOM surrounding retained raster renderers. Painting,
 // hit testing, minimap behaviour, and renderer-specific resources stay with
 // the chart controller/backends.
+import { bindCameraZoom, updateCameraZoom } from "./cameraZoom.mjs";
+
 export function ensureRasterSurface({
   container,
   data,
@@ -38,13 +40,14 @@ export function ensureRasterSurface({
         .style("width", "100%")
         .style("height", "100%")
         .style("outline", "none");
-      currentZoom = d3
-        .zoom()
-        .scaleExtent(zoomExtent())
-        .on("zoom", onZoom)
-        .on("start", function () { onZoomStart(this); })
-        .on("end", function () { onZoomEnd(this); });
-      surface.call(currentZoom).on("dblclick.zoom", null);
+      currentZoom = bindCameraZoom({
+        d3,
+        surface,
+        zoomExtent,
+        onZoom,
+        onStart: function () { onZoomStart(this); },
+        onEnd: function () { onZoomEnd(this); },
+      });
       return surface;
     })
     .attr("data-renderer", renderer);
@@ -54,7 +57,7 @@ export function ensureRasterSurface({
   } else {
     canvas.attr("data-webgpu", null);
   }
-  if (currentZoom) currentZoom.scaleExtent(zoomExtent());
+  updateCameraZoom(currentZoom, zoomExtent);
 
   if ((showWebGpu || showMinimap) && globalThis.getComputedStyle(container.node()).position === "static") {
     container.style("position", "relative");
