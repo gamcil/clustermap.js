@@ -88,6 +88,7 @@ export default function clusterMap() {
   let warmCanvasFlipBase = () => {};
   let currentData = null;
   let disposeRasterInteraction = () => {};
+  let disposeOverlay = () => {};
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const canvasBackend = createRetainedSceneBackend({
     render: renderCanvas,
@@ -490,6 +491,8 @@ export default function clusterMap() {
     if (!currentData || !container) return;
     disposeRasterInteraction();
     disposeRasterInteraction = () => {};
+    disposeOverlay();
+    disposeOverlay = () => {};
     const data = currentData;
     if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
     canvasFlipWarmFrame = null;
@@ -563,6 +566,7 @@ export default function clusterMap() {
     const overlay = createHtmlOverlay({
       tooltip: svgSurface.tooltip,
       scales: runtime.scales,
+      eventNamespace: `.${runtime.ids.root}-tooltip`,
       actions: {
         redraw,
         anchorGene: (gene) => anchorGene(gene, { flipMismatchedLoci: true }),
@@ -573,6 +577,7 @@ export default function clusterMap() {
         },
       },
     });
+    disposeOverlay = overlay.dispose;
     container
       .select("div.tooltip")
       .on("mouseenter", overlay.enter)
@@ -1304,6 +1309,45 @@ export default function clusterMap() {
       lookup: { gene: runtime.lookup.geneData },
       padding,
     });
+  };
+  my.destroy = () => {
+    disposeRasterInteraction();
+    disposeRasterInteraction = () => {};
+    disposeOverlay();
+    disposeOverlay = () => {};
+    clearRasterPreview();
+    if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+    canvasAnimation = null;
+    rasterMotion.dispose();
+    rasterMinimap.clear();
+    webgpuBackend.destroy();
+    canvasBackend.destroy();
+    svgBackend.destroy();
+    container
+      ?.selectAll([
+        "svg.clusterMap",
+        "input.colourPicker",
+        "div.tooltip",
+        "canvas.clusterMapCanvas",
+        "canvas.clusterMapWebGpuOverlay",
+        "canvas.clusterMapMinimap",
+      ].join(", "))
+      .interrupt()
+      .remove();
+    container = null;
+    zoom = null;
+    canvasZoom = null;
+    hasInitialView = false;
+    canvasHoverLocusUid = null;
+    canvasScene = null;
+    paintRasterFrame = null;
+    scheduleMinimapBase = () => {};
+    prepareCanvasFlipBase = () => {};
+    warmCanvasFlipBase = () => {};
+    webgpuClusterCommit = null;
+    webgpuAnchorCommit = null;
+    anchorSceneCommit = null;
+    return my;
   };
 
   return my;

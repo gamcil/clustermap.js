@@ -2,7 +2,24 @@
 // supplied by the caller because those controls may dispatch chart actions.
 import * as d3 from "d3";
 
-export function createHtmlOverlay({ tooltip, scales, actions }) {
+export function createHtmlOverlay({
+  tooltip,
+  scales,
+  actions,
+  eventNamespace = ".clusterMapTooltip",
+}) {
+  const windowRef = tooltip.node()?.ownerDocument?.defaultView;
+  const clickEvent = `click${eventNamespace}`;
+
+  const hide = () =>
+    tooltip.style("opacity", 0).style("pointer-events", "none");
+
+  const dismissOnOutsideClick = (event) => {
+    const node = tooltip.node();
+    if (!node || event.target === node || node.contains(event.target)) return;
+    hide();
+  };
+
   const show = (event, contents) => {
     tooltip.html("").append(() => contents.node());
     const bounds = tooltip.node().getBoundingClientRect();
@@ -85,11 +102,10 @@ export function createHtmlOverlay({ tooltip, scales, actions }) {
         .interrupt()
         .style("opacity", 1)
         .style("pointer-events", "all");
-      d3.select(window).on("click", (event) => {
-        const node = tooltip.node();
-        if (event.target === node || node.contains(event.target)) return;
-        tooltip.style("opacity", 0).style("pointer-events", "none");
-      });
+      // A chart must never replace another chart's window listener. The
+      // namespace is supplied by the chart runtime and is removed on redraw
+      // or destroy, which also releases this overlay's closure.
+      if (windowRef) d3.select(windowRef).on(clickEvent, dismissOnOutsideClick);
     },
     leave: () => {
       const active = document.activeElement;
@@ -103,5 +119,10 @@ export function createHtmlOverlay({ tooltip, scales, actions }) {
     show,
     showGeneMenu: (event, gene) => { event.preventDefault(); show(event, geneContents(gene)); },
     showGroupMenu: (event, group) => { event.preventDefault(); show(event, groupContents(group)); },
+    dispose: () => {
+      if (windowRef) d3.select(windowRef).on(clickEvent, null);
+      tooltip.interrupt();
+      hide();
+    },
   };
 }

@@ -98,8 +98,8 @@ the public link schema, and rejects dangling gene references.
 ```html
 <html>
   <head>
-    <!-- Import d3 v6 and clustermap.js -->
-    <script src="http://d3js.org/d3.v6.min.js"></script>
+    <!-- Import d3 v7 and the UMD browser bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
     <script src="clustermap.min.js"></script>
 
     <!-- Make div take up entire viewport -->
@@ -149,6 +149,8 @@ the public link schema, and rejects dangling gene references.
   returns its current normalized data.
 - `chart.exportSvg({ padding })` returns the current figure as an SVG string,
   irrespective of the interactive renderer in use.
+- `chart.destroy()` releases chart-owned event handlers, animations, minimap
+  resources, WebGPU resources, and generated DOM when the host is unmounted.
 
 Scenes, interaction state, and renderer backends are deliberately internal;
 all backends consume the same projected scene through the chart controller.
@@ -162,5 +164,8 @@ import { ClusterMap } from "clinker";
 const chart = ClusterMap().config({ plot: { renderer: "webgpu" } });
 ```
 
-The `dist/clustermap.js` and `dist/clustermap.min.js` files remain UMD browser
-bundles for script-tag usage and expect a global D3 instance.
+The `dist/clustermap.js` and `dist/clustermap.min.js` files are supported UMD
+browser bundles for script-tag usage and expect a global D3 v7 instance. This
+is the appropriate artifact for applications, such as the Python-packaged
+Clinker frontend, that bundle the library as a static browser asset; the ESM
+entry is intended for modern JavaScript bundlers.

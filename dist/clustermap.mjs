@@ -625,7 +625,24 @@ function fitCameraForBounds({
 
 // Browser-only tooltip lifecycle shared by any chart renderer. Menu content is
 
-function createHtmlOverlay({ tooltip, scales, actions }) {
+function createHtmlOverlay({
+  tooltip,
+  scales,
+  actions,
+  eventNamespace = ".clusterMapTooltip",
+}) {
+  const windowRef = tooltip.node()?.ownerDocument?.defaultView;
+  const clickEvent = `click${eventNamespace}`;
+
+  const hide = () =>
+    tooltip.style("opacity", 0).style("pointer-events", "none");
+
+  const dismissOnOutsideClick = (event) => {
+    const node = tooltip.node();
+    if (!node || event.target === node || node.contains(event.target)) return;
+    hide();
+  };
+
   const show = (event, contents) => {
     tooltip.html("").append(() => contents.node());
     const bounds = tooltip.node().getBoundingClientRect();
@@ -708,11 +725,10 @@ function createHtmlOverlay({ tooltip, scales, actions }) {
         .interrupt()
         .style("opacity", 1)
         .style("pointer-events", "all");
-      d3$1.select(window).on("click", (event) => {
-        const node = tooltip.node();
-        if (event.target === node || node.contains(event.target)) return;
-        tooltip.style("opacity", 0).style("pointer-events", "none");
-      });
+      // A chart must never replace another chart's window listener. The
+      // namespace is supplied by the chart runtime and is removed on redraw
+      // or destroy, which also releases this overlay's closure.
+      if (windowRef) d3$1.select(windowRef).on(clickEvent, dismissOnOutsideClick);
     },
     leave: () => {
       const active = document.activeElement;
@@ -726,6 +742,11 @@ function createHtmlOverlay({ tooltip, scales, actions }) {
     show,
     showGeneMenu: (event, gene) => { event.preventDefault(); show(event, geneContents(gene)); },
     showGroupMenu: (event, group) => { event.preventDefault(); show(event, groupContents(group)); },
+    dispose: () => {
+      if (windowRef) d3$1.select(windowRef).on(clickEvent, null);
+      tooltip.interrupt();
+      hide();
+    },
   };
 }
 
@@ -6592,6 +6613,7 @@ function clusterMap() {
   let warmCanvasFlipBase = () => {};
   let currentData = null;
   let disposeRasterInteraction = () => {};
+  let disposeOverlay = () => {};
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const canvasBackend = createRetainedSceneBackend({
     render: renderCanvas,
@@ -6994,6 +7016,8 @@ function clusterMap() {
     if (!currentData || !container) return;
     disposeRasterInteraction();
     disposeRasterInteraction = () => {};
+    disposeOverlay();
+    disposeOverlay = () => {};
     const data = currentData;
     if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
     canvasFlipWarmFrame = null;
@@ -7067,6 +7091,7 @@ function clusterMap() {
     const overlay = createHtmlOverlay({
       tooltip: svgSurface.tooltip,
       scales: runtime.scales,
+      eventNamespace: `.${runtime.ids.root}-tooltip`,
       actions: {
         redraw,
         anchorGene: (gene) => anchorGene(gene, { flipMismatchedLoci: true }),
@@ -7077,6 +7102,7 @@ function clusterMap() {
         },
       },
     });
+    disposeOverlay = overlay.dispose;
     container
       .select("div.tooltip")
       .on("mouseenter", overlay.enter)
@@ -7808,6 +7834,45 @@ function clusterMap() {
       lookup: { gene: runtime.lookup.geneData },
       padding,
     });
+  };
+  my.destroy = () => {
+    disposeRasterInteraction();
+    disposeRasterInteraction = () => {};
+    disposeOverlay();
+    disposeOverlay = () => {};
+    clearRasterPreview();
+    if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+    canvasAnimation = null;
+    rasterMotion.dispose();
+    rasterMinimap.clear();
+    webgpuBackend.destroy();
+    canvasBackend.destroy();
+    svgBackend.destroy();
+    container
+      ?.selectAll([
+        "svg.clusterMap",
+        "input.colourPicker",
+        "div.tooltip",
+        "canvas.clusterMapCanvas",
+        "canvas.clusterMapWebGpuOverlay",
+        "canvas.clusterMapMinimap",
+      ].join(", "))
+      .interrupt()
+      .remove();
+    container = null;
+    zoom = null;
+    canvasZoom = null;
+    hasInitialView = false;
+    canvasHoverLocusUid = null;
+    canvasScene = null;
+    paintRasterFrame = null;
+    scheduleMinimapBase = () => {};
+    prepareCanvasFlipBase = () => {};
+    warmCanvasFlipBase = () => {};
+    webgpuClusterCommit = null;
+    webgpuAnchorCommit = null;
+    anchorSceneCommit = null;
+    return my;
   };
 
   return my;

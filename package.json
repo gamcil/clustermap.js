@@ -7,9 +7,12 @@
   "exports": {
     ".": {
       "import": "./dist/clustermap.mjs"
-    }
+    },
+    "./dist/clustermap.js": "./dist/clustermap.js",
+    "./dist/clustermap.min.js": "./dist/clustermap.min.js"
   },
-  "browser": "./dist/clustermap.js",
+  "unpkg": "./dist/clustermap.min.js",
+  "jsdelivr": "./dist/clustermap.min.js",
   "files": [
     "dist",
     "README.md",
