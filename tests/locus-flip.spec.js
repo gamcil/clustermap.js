@@ -173,6 +173,16 @@ test("double-clicking a locus reverses its gene layout", async ({ page }, testIn
     .toEqual([...before.genes].reverse().map((uid) => `gene_${uid}`));
 });
 
+test("editing the SVG scale bar delegates through the chart action", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const label = page.locator("g.scaleBar text.barText");
+  await expect(label).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept("5000"));
+  await label.click();
+  await expect(label).toHaveText("5kb");
+});
+
 test("flipping a locus twice restores its link paths", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
 

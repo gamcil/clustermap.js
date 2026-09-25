@@ -4250,10 +4250,7 @@
       .style("font-size", `${scaleBar.fontSize}pt`)
       .style("font-family", scaleBar.fontFamily)
       .attr("cursor", "pointer")
-      .on("click", () => {
-        const value = prompt("Enter new length (bp):", scaleBar.basePair);
-        if (value) interactions.setScaleBarLength(value);
-      });
+      .on("click", () => interactions.setScaleBarLength());
     bar
       .selectAll("line")
       .style("stroke", scaleBar.colour)
