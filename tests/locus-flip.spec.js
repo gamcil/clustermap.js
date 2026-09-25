@@ -183,6 +183,16 @@ test("editing the SVG scale bar delegates through the chart action", async ({ pa
   await expect(label).toHaveText("5kb");
 });
 
+test("editing a legend label uses the default controller action", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const label = page.locator("g.legend g.element text").first();
+  await expect(label).toHaveText("group 1");
+  page.once("dialog", (dialog) => dialog.accept("renamed group"));
+  await label.click();
+  await expect(label).toHaveText("renamed group");
+});
+
 test("flipping a locus twice restores its link paths", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
 

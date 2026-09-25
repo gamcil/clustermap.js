@@ -1,4 +1,4 @@
-import { renameText, updateConfig } from "./utils.js";
+import { updateConfig } from "./utils.js";
 import { createDefaultConfig } from "./config.js";
 import { getGroupScaleValues } from "./links/groups.mjs";
 import {
@@ -110,20 +110,16 @@ function displayGene(gene) {
   return { ...gene, ...getGeneState(chartState, gene) };
 }
 
-const get = {
+const lookup = {
   geneData: (uid) => chartIndex?.geneById.get(uid),
   locusData: (uid) => chartIndex?.locusById.get(uid),
   clusterData: (uid) => chartIndex?.clusterById.get(uid),
   linksForGene: (uid) => chartIndex?.linksByGeneId.get(uid) || [],
 };
 
-const plot = {
-  updateConfig: function (target) {
-    updateConfig(config, target);
-  },
-  update: null,
-  data: null,
-};
+function configure(options) {
+  updateConfig(config, options);
+}
 
 const scales = {
   x: d3.scaleLinear().domain([1, 1001]).range([0, config.plot.scaleFactor]),
@@ -140,7 +136,16 @@ const scales = {
 // scales and visual policy. Keep that dependency bundle in one place so a
 // configuration addition cannot silently affect full builds but not retained
 // flip/anchor patches (or vice versa).
-function sceneProjectionOptions({ areClustersAdjacent = cluster.adjacent } = {}) {
+function clustersAreAdjacent(one, two) {
+  const order = getClusterOrder(chartState);
+  return Math.abs(order.indexOf(one) - order.indexOf(two)) === 1;
+}
+
+function locusText(cluster) {
+  return formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates);
+}
+
+function sceneProjectionOptions({ areClustersAdjacent = clustersAreAdjacent } = {}) {
   return {
     scaleX: scales.x,
     locusOffset: scales.locus,
@@ -155,7 +160,7 @@ function sceneProjectionOptions({ areClustersAdjacent = cluster.adjacent } = {})
       threshold: config.link.threshold,
       labelPosition: config.link.label.position,
     },
-    clusterLabel: cluster.locusText,
+    clusterLabel: locusText,
     alignLabels: config.cluster.alignLabels,
   };
 }
@@ -210,224 +215,143 @@ function adjacencyForClusterOrder(order) {
   return (one, two) => Math.abs(index.get(one) - index.get(two)) === 1;
 }
 
-const scene = {
-  build: (data) => {
-    // Scene construction is read-only. The controller synchronizes any
-    // scale-dependent chart state before asking the runtime to project it.
-    currentScene = buildScene(data, {
-      ...sceneProjectionOptions(),
-      scaleY: scales.y,
-      clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
-      clusterOffset: scales.offset,
-      clusterOrder: getClusterOrder(chartState),
-      chrome: sceneChromeOptions(data),
-    });
-    return currentScene;
-  },
-  patchFlippedLocus: (previousScene, locus) => {
-    currentScene = patchFlippedLocusScene(previousScene, locus, {
-      ...sceneProjectionOptions(),
-      linksForGene: get.linksForGene,
-    });
-    return currentScene;
-  },
-  patchGeneAnchor: (previousScene, changes, flippedLoci) => {
-    currentScene = patchAnchoredGeneScene(previousScene, { changes, flippedLoci }, {
-      ...sceneProjectionOptions({
-        areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
-      }),
-      linksForGene: get.linksForGene,
-    });
-    return currentScene;
-  },
-  get: () => currentScene,
-};
+function buildChartScene(data) {
+  // Scene construction is read-only. The controller synchronizes any
+  // scale-dependent chart state before asking the runtime to project it.
+  currentScene = buildScene(data, {
+    ...sceneProjectionOptions(),
+    scaleY: scales.y,
+    clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
+    clusterOffset: scales.offset,
+    clusterOrder: getClusterOrder(chartState),
+    chrome: sceneChromeOptions(data),
+  });
+  return currentScene;
+}
 
-const gene = {
-  getId: ids.gene,
-  setBeforeAnchorUpdate: (callback) => {
-    beforeGeneAnchorUpdate = callback;
-  },
-  anchor: (_, anchor, flipLoci = false, { beforeUpdate } = {}) => {
-    const genes = scales.group
-      .domain()
-      .filter((uid) => {
-        return scales.group(uid) === scales.group(anchor.uid);
-      })
-      .map(get.geneData);
+function patchFlippedLocus(previousScene, locus) {
+  currentScene = patchFlippedLocusScene(previousScene, locus, {
+    ...sceneProjectionOptions(),
+    linksForGene: lookup.linksForGene,
+  });
+  return currentScene;
+}
 
-    const flippedLoci = new Set();
-    const changes = anchorGeneGroup(chartState, {
-      anchor,
-      genes,
-      locusForGene: (gene) => get.locusData(gene.locusUid),
-      coordinateForGene: (gene) => {
-        const display = displayGene(gene);
-        return (
-          scales.x(display.start + (display.end - display.start) / 2) +
-          scales.locus(gene.locusUid) +
-          scales.offset(gene.clusterUid)
-        );
-      },
-      flipMismatchedLoci: flipLoci,
-      onLocusFlipped: (locus) => {
-        synchronizeLocusLayoutState(locus);
-        flippedLoci.add(locus.uid);
-      },
-    });
+function patchGeneAnchor(previousScene, changes, flippedLoci) {
+  currentScene = patchAnchoredGeneScene(previousScene, { changes, flippedLoci }, {
+    ...sceneProjectionOptions({
+      areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
+    }),
+    linksForGene: lookup.linksForGene,
+  });
+  return currentScene;
+}
 
-    refreshClusterOffsetScale();
-    (beforeUpdate || beforeGeneAnchorUpdate)?.({ changes, flippedLoci });
-    plot.update();
-    return { changes, flippedLoci };
-  },
-};
+function getScene() {
+  return currentScene;
+}
 
-const cluster = {
-  getId: ids.cluster,
-  /**
-   * Generates locus coordinates displayed next underneath a cluster name.
-   * If a locus is flipped, (reversed) will be added to its name.
-   * @param {Object} cluster - Cluster data object
-   * @returns {String} Comma-separated locus coordinates
-   */
-  locusText: (cluster) =>
-    formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates),
-  /**
-   * Tests if two clusters are vertically adjacent.
-   * @param {String} one - First cluster UID
-   * @param {String} two - Second cluster UID
-   * @return {bool} - Clusters are adjacent
-   */
-  adjacent: (one, two) => {
-    const domain = getClusterOrder(chartState);
-    return Math.abs(domain.indexOf(one) - domain.indexOf(two)) === 1;
-  },
-};
+function setBeforeGeneAnchorUpdate(callback) {
+  beforeGeneAnchorUpdate = callback;
+}
 
-const link = {
-  getId: ids.link,
-  /**
-   * Update group scales given new data.
-   */
-  updateGroups: (groups) => {
-    let { domain, range } = getGroupScaleValues(groups);
-    let uids = groups.map((g) => g.uid);
-    scales.group.domain(domain).range(range);
-    scales.name.domain(uids).range(groups.map((g) => g.label));
-    let colours = d3.quantize(d3.interpolateRainbow, groups.length + 1);
-    groups.forEach((group, index) => {
-      if (group.colour) colours[index] = group.colour;
-      else group.colour = colours[index];
-    });
-    scales.colour.domain(uids).range(colours);
-  },
-  hide: (event, datum) => {
-    event.preventDefault();
-    datum.hidden = true;
-    plot.update();
-  },
-  rename: (event, datum) => {
-    if (event.defaultPrevented) return;
-    let text = d3.select(event.target);
-    let result = prompt("Enter new value:", text.text());
-    if (result) {
-      datum.label = result;
-      text.text(result);
-      plot.update();
-    }
-  },
-};
+function anchorGene(anchor, { flipMismatchedLoci = false, beforeUpdate } = {}) {
+  const genes = scales.group
+    .domain()
+    .filter((uid) => scales.group(uid) === scales.group(anchor.uid))
+    .map(lookup.geneData);
 
-const locus = {
-  getId: ids.locus,
-};
+  const flippedLoci = new Set();
+  const changes = anchorGeneGroup(chartState, {
+    anchor,
+    genes,
+    locusForGene: (gene) => lookup.locusData(gene.locusUid),
+    coordinateForGene: (gene) => {
+      const display = displayGene(gene);
+      return (
+        scales.x(display.start + (display.end - display.start) / 2) +
+        scales.locus(gene.locusUid) +
+        scales.offset(gene.clusterUid)
+      );
+    },
+    flipMismatchedLoci,
+    onLocusFlipped: (locus) => {
+      synchronizeLocusLayoutState(locus);
+      flippedLoci.add(locus.uid);
+    },
+  });
 
-const scale = {
-  check: (s) => scale.checkDomain(s) && scale.checkRange(s),
-  checkDomain: (s) => scales[s].domain().length > 0,
-  checkRange: (s) => scales[s].range().length > 0,
-  updateX: () => {
-    scales.x.range([0, config.plot.scaleFactor]);
-  },
-  updateY: (data) => {
-    let body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
-    let rng = data.clusters.map((cluster, index) => {
-      return index * (config.cluster.spacing + body);
-    });
-    scales.y.range(rng);
-  },
-  updateOffset: (clusters) => {
-    scales.offset.domain(clusters.map((d) => d.uid));
-    refreshClusterOffsetScale();
-  },
-  updateLocus: (clusters) => {
-    let { domain, range } = getLocusScaleValues(clusters, {
-      ...locusLayout(),
-      locusOffset: () => 0,
-    });
-    initializeLocusOffsets(
-      chartState,
-      domain.map((uid, index) => [uid, range[index]])
-    );
-    scales.locus.domain(domain);
-    refreshLocusOffsetScale();
-  },
-  /**
-   * Rescales offset and locus scales with an updated x scale.
-   * @param {d3.scale} old - The old x scale
-   */
-  rescaleRanges: (old) => {
-    for (const [uid, offset] of chartState.clusterOffsets) {
-      setClusterOffset(chartState, uid, scales.x(old.invert(offset)));
-    }
-    for (const [uid, offset] of chartState.locusOffsets) {
-      setLocusOffset(chartState, uid, scales.x(old.invert(offset)));
-    }
-    refreshClusterOffsetScale();
-    refreshLocusOffsetScale();
-  },
-  /**
-   * Updates all scales based on new data.
-   * @param {Object} data - New data object
-   */
-  update: (data) => {
-    let oldX = scales.x.copy();
-    scale.updateX();
-    // Reproject dependent ranges only when the x-scale range actually
-    // changes. Repeating invert()/scale() on every redraw accumulates small
-    // floating-point errors, causing static link paths to drift after flips.
-    let xRangeChanged = oldX
-      .range()
-      .some((value, index) => value !== scales.x.range()[index]);
-    if (xRangeChanged) scale.rescaleRanges(oldX);
+  refreshClusterOffsetScale();
+  (beforeUpdate || beforeGeneAnchorUpdate)?.({ changes, flippedLoci });
+  return { changes, flippedLoci };
+}
 
-    scales.y.domain(getClusterOrder(chartState));
-    scale.updateY(data);
+function updateGroups(groups) {
+  const { domain, range } = getGroupScaleValues(groups);
+  const uids = groups.map((group) => group.uid);
+  scales.group.domain(domain).range(range);
+  scales.name.domain(uids).range(groups.map((group) => group.label));
+  const colours = d3.quantize(d3.interpolateRainbow, groups.length + 1);
+  groups.forEach((group, index) => {
+    if (group.colour) colours[index] = group.colour;
+    else group.colour = colours[index];
+  });
+  scales.colour.domain(uids).range(colours);
+}
 
-    scale.updateOffset(data.clusters);
-    scale.updateLocus(data.clusters);
-  },
-};
+function rescaleRanges(oldX) {
+  for (const [uid, offset] of chartState.clusterOffsets) {
+    setClusterOffset(chartState, uid, scales.x(oldX.invert(offset)));
+  }
+  for (const [uid, offset] of chartState.locusOffsets) {
+    setLocusOffset(chartState, uid, scales.x(oldX.invert(offset)));
+  }
+  refreshClusterOffsetScale();
+  refreshLocusOffsetScale();
+}
 
-config.gene.shape.onClick = gene.anchor;
-config.legend.onClickText = link.rename;
+function updateScales(data) {
+  const oldX = scales.x.copy();
+  scales.x.range([0, config.plot.scaleFactor]);
+  // Reproject dependent ranges only when the x-scale range actually changes.
+  // Repeating invert()/scale() on every redraw accumulates small
+  // floating-point errors, causing static link paths to drift after flips.
+  if (oldX.range().some((value, index) => value !== scales.x.range()[index])) {
+    rescaleRanges(oldX);
+  }
+
+  scales.y.domain(getClusterOrder(chartState));
+  const body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
+  scales.y.range(data.clusters.map((cluster, index) => index * (config.cluster.spacing + body)));
+
+  scales.offset.domain(data.clusters.map((cluster) => cluster.uid));
+  refreshClusterOffsetScale();
+  const { domain, range } = getLocusScaleValues(data.clusters, {
+    ...locusLayout(),
+    locusOffset: () => 0,
+  });
+  initializeLocusOffsets(chartState, domain.map((uid, index) => [uid, range[index]]));
+  scales.locus.domain(domain);
+  refreshLocusOffsetScale();
+}
 
 return {
   config,
-  get,
+  configure,
+  lookup,
   ids,
   synchronizeLocusLayoutState,
   synchronizeLocusLayoutStates,
   setChartIndex,
   setChartState,
-  plot,
   scales,
-  cluster,
-  gene,
-  link,
-  locus,
-  scale,
-  scene,
+  updateScales,
+  updateGroups,
+  getScene,
+  buildScene: buildChartScene,
+  patchFlippedLocus,
+  patchGeneAnchor,
+  setBeforeGeneAnchorUpdate,
+  anchorGene,
 };
 }

@@ -4627,20 +4627,16 @@
     return { ...gene, ...getGeneState(chartState, gene) };
   }
 
-  const get = {
+  const lookup = {
     geneData: (uid) => chartIndex?.geneById.get(uid),
     locusData: (uid) => chartIndex?.locusById.get(uid),
     clusterData: (uid) => chartIndex?.clusterById.get(uid),
     linksForGene: (uid) => chartIndex?.linksByGeneId.get(uid) || [],
   };
 
-  const plot = {
-    updateConfig: function (target) {
-      updateConfig(config, target);
-    },
-    update: null,
-    data: null,
-  };
+  function configure(options) {
+    updateConfig(config, options);
+  }
 
   const scales = {
     x: d3.scaleLinear().domain([1, 1001]).range([0, config.plot.scaleFactor]),
@@ -4657,7 +4653,16 @@
   // scales and visual policy. Keep that dependency bundle in one place so a
   // configuration addition cannot silently affect full builds but not retained
   // flip/anchor patches (or vice versa).
-  function sceneProjectionOptions({ areClustersAdjacent = cluster.adjacent } = {}) {
+  function clustersAreAdjacent(one, two) {
+    const order = getClusterOrder(chartState);
+    return Math.abs(order.indexOf(one) - order.indexOf(two)) === 1;
+  }
+
+  function locusText(cluster) {
+    return formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates);
+  }
+
+  function sceneProjectionOptions({ areClustersAdjacent = clustersAreAdjacent } = {}) {
     return {
       scaleX: scales.x,
       locusOffset: scales.locus,
@@ -4672,7 +4677,7 @@
         threshold: config.link.threshold,
         labelPosition: config.link.label.position,
       },
-      clusterLabel: cluster.locusText,
+      clusterLabel: locusText,
       alignLabels: config.cluster.alignLabels,
     };
   }
@@ -4727,225 +4732,144 @@
     return (one, two) => Math.abs(index.get(one) - index.get(two)) === 1;
   }
 
-  const scene = {
-    build: (data) => {
-      // Scene construction is read-only. The controller synchronizes any
-      // scale-dependent chart state before asking the runtime to project it.
-      currentScene = buildScene(data, {
-        ...sceneProjectionOptions(),
-        scaleY: scales.y,
-        clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
-        clusterOffset: scales.offset,
-        clusterOrder: getClusterOrder(chartState),
-        chrome: sceneChromeOptions(data),
-      });
-      return currentScene;
-    },
-    patchFlippedLocus: (previousScene, locus) => {
-      currentScene = patchFlippedLocusScene(previousScene, locus, {
-        ...sceneProjectionOptions(),
-        linksForGene: get.linksForGene,
-      });
-      return currentScene;
-    },
-    patchGeneAnchor: (previousScene, changes, flippedLoci) => {
-      currentScene = patchAnchoredGeneScene(previousScene, { changes, flippedLoci }, {
-        ...sceneProjectionOptions({
-          areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
-        }),
-        linksForGene: get.linksForGene,
-      });
-      return currentScene;
-    },
-    get: () => currentScene,
-  };
+  function buildChartScene(data) {
+    // Scene construction is read-only. The controller synchronizes any
+    // scale-dependent chart state before asking the runtime to project it.
+    currentScene = buildScene(data, {
+      ...sceneProjectionOptions(),
+      scaleY: scales.y,
+      clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
+      clusterOffset: scales.offset,
+      clusterOrder: getClusterOrder(chartState),
+      chrome: sceneChromeOptions(data),
+    });
+    return currentScene;
+  }
 
-  const gene = {
-    getId: ids.gene,
-    setBeforeAnchorUpdate: (callback) => {
-      beforeGeneAnchorUpdate = callback;
-    },
-    anchor: (_, anchor, flipLoci = false, { beforeUpdate } = {}) => {
-      const genes = scales.group
-        .domain()
-        .filter((uid) => {
-          return scales.group(uid) === scales.group(anchor.uid);
-        })
-        .map(get.geneData);
+  function patchFlippedLocus(previousScene, locus) {
+    currentScene = patchFlippedLocusScene(previousScene, locus, {
+      ...sceneProjectionOptions(),
+      linksForGene: lookup.linksForGene,
+    });
+    return currentScene;
+  }
 
-      const flippedLoci = new Set();
-      const changes = anchorGeneGroup(chartState, {
-        anchor,
-        genes,
-        locusForGene: (gene) => get.locusData(gene.locusUid),
-        coordinateForGene: (gene) => {
-          const display = displayGene(gene);
-          return (
-            scales.x(display.start + (display.end - display.start) / 2) +
-            scales.locus(gene.locusUid) +
-            scales.offset(gene.clusterUid)
-          );
-        },
-        flipMismatchedLoci: flipLoci,
-        onLocusFlipped: (locus) => {
-          synchronizeLocusLayoutState(locus);
-          flippedLoci.add(locus.uid);
-        },
-      });
+  function patchGeneAnchor(previousScene, changes, flippedLoci) {
+    currentScene = patchAnchoredGeneScene(previousScene, { changes, flippedLoci }, {
+      ...sceneProjectionOptions({
+        areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
+      }),
+      linksForGene: lookup.linksForGene,
+    });
+    return currentScene;
+  }
 
-      refreshClusterOffsetScale();
-      (beforeUpdate || beforeGeneAnchorUpdate)?.({ changes, flippedLoci });
-      plot.update();
-      return { changes, flippedLoci };
-    },
-  };
+  function getScene() {
+    return currentScene;
+  }
 
-  const cluster = {
-    getId: ids.cluster,
-    /**
-     * Generates locus coordinates displayed next underneath a cluster name.
-     * If a locus is flipped, (reversed) will be added to its name.
-     * @param {Object} cluster - Cluster data object
-     * @returns {String} Comma-separated locus coordinates
-     */
-    locusText: (cluster) =>
-      formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates),
-    /**
-     * Tests if two clusters are vertically adjacent.
-     * @param {String} one - First cluster UID
-     * @param {String} two - Second cluster UID
-     * @return {bool} - Clusters are adjacent
-     */
-    adjacent: (one, two) => {
-      const domain = getClusterOrder(chartState);
-      return Math.abs(domain.indexOf(one) - domain.indexOf(two)) === 1;
-    },
-  };
+  function setBeforeGeneAnchorUpdate(callback) {
+    beforeGeneAnchorUpdate = callback;
+  }
 
-  const link = {
-    getId: ids.link,
-    /**
-     * Update group scales given new data.
-     */
-    updateGroups: (groups) => {
-      let { domain, range } = getGroupScaleValues(groups);
-      let uids = groups.map((g) => g.uid);
-      scales.group.domain(domain).range(range);
-      scales.name.domain(uids).range(groups.map((g) => g.label));
-      let colours = d3.quantize(d3.interpolateRainbow, groups.length + 1);
-      groups.forEach((group, index) => {
-        if (group.colour) colours[index] = group.colour;
-        else group.colour = colours[index];
-      });
-      scales.colour.domain(uids).range(colours);
-    },
-    hide: (event, datum) => {
-      event.preventDefault();
-      datum.hidden = true;
-      plot.update();
-    },
-    rename: (event, datum) => {
-      if (event.defaultPrevented) return;
-      let text = d3.select(event.target);
-      let result = prompt("Enter new value:", text.text());
-      if (result) {
-        datum.label = result;
-        text.text(result);
-        plot.update();
-      }
-    },
-  };
+  function anchorGene(anchor, { flipMismatchedLoci = false, beforeUpdate } = {}) {
+    const genes = scales.group
+      .domain()
+      .filter((uid) => scales.group(uid) === scales.group(anchor.uid))
+      .map(lookup.geneData);
 
-  const locus = {
-    getId: ids.locus,
-  };
+    const flippedLoci = new Set();
+    const changes = anchorGeneGroup(chartState, {
+      anchor,
+      genes,
+      locusForGene: (gene) => lookup.locusData(gene.locusUid),
+      coordinateForGene: (gene) => {
+        const display = displayGene(gene);
+        return (
+          scales.x(display.start + (display.end - display.start) / 2) +
+          scales.locus(gene.locusUid) +
+          scales.offset(gene.clusterUid)
+        );
+      },
+      flipMismatchedLoci,
+      onLocusFlipped: (locus) => {
+        synchronizeLocusLayoutState(locus);
+        flippedLoci.add(locus.uid);
+      },
+    });
 
-  const scale = {
-    check: (s) => scale.checkDomain(s) && scale.checkRange(s),
-    checkDomain: (s) => scales[s].domain().length > 0,
-    checkRange: (s) => scales[s].range().length > 0,
-    updateX: () => {
-      scales.x.range([0, config.plot.scaleFactor]);
-    },
-    updateY: (data) => {
-      let body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
-      let rng = data.clusters.map((cluster, index) => {
-        return index * (config.cluster.spacing + body);
-      });
-      scales.y.range(rng);
-    },
-    updateOffset: (clusters) => {
-      scales.offset.domain(clusters.map((d) => d.uid));
-      refreshClusterOffsetScale();
-    },
-    updateLocus: (clusters) => {
-      let { domain, range } = getLocusScaleValues(clusters, {
-        ...locusLayout(),
-        locusOffset: () => 0,
-      });
-      initializeLocusOffsets(
-        chartState,
-        domain.map((uid, index) => [uid, range[index]])
-      );
-      scales.locus.domain(domain);
-      refreshLocusOffsetScale();
-    },
-    /**
-     * Rescales offset and locus scales with an updated x scale.
-     * @param {d3.scale} old - The old x scale
-     */
-    rescaleRanges: (old) => {
-      for (const [uid, offset] of chartState.clusterOffsets) {
-        setClusterOffset(chartState, uid, scales.x(old.invert(offset)));
-      }
-      for (const [uid, offset] of chartState.locusOffsets) {
-        setLocusOffset(chartState, uid, scales.x(old.invert(offset)));
-      }
-      refreshClusterOffsetScale();
-      refreshLocusOffsetScale();
-    },
-    /**
-     * Updates all scales based on new data.
-     * @param {Object} data - New data object
-     */
-    update: (data) => {
-      let oldX = scales.x.copy();
-      scale.updateX();
-      // Reproject dependent ranges only when the x-scale range actually
-      // changes. Repeating invert()/scale() on every redraw accumulates small
-      // floating-point errors, causing static link paths to drift after flips.
-      let xRangeChanged = oldX
-        .range()
-        .some((value, index) => value !== scales.x.range()[index]);
-      if (xRangeChanged) scale.rescaleRanges(oldX);
+    refreshClusterOffsetScale();
+    (beforeUpdate || beforeGeneAnchorUpdate)?.({ changes, flippedLoci });
+    return { changes, flippedLoci };
+  }
 
-      scales.y.domain(getClusterOrder(chartState));
-      scale.updateY(data);
+  function updateGroups(groups) {
+    const { domain, range } = getGroupScaleValues(groups);
+    const uids = groups.map((group) => group.uid);
+    scales.group.domain(domain).range(range);
+    scales.name.domain(uids).range(groups.map((group) => group.label));
+    const colours = d3.quantize(d3.interpolateRainbow, groups.length + 1);
+    groups.forEach((group, index) => {
+      if (group.colour) colours[index] = group.colour;
+      else group.colour = colours[index];
+    });
+    scales.colour.domain(uids).range(colours);
+  }
 
-      scale.updateOffset(data.clusters);
-      scale.updateLocus(data.clusters);
-    },
-  };
+  function rescaleRanges(oldX) {
+    for (const [uid, offset] of chartState.clusterOffsets) {
+      setClusterOffset(chartState, uid, scales.x(oldX.invert(offset)));
+    }
+    for (const [uid, offset] of chartState.locusOffsets) {
+      setLocusOffset(chartState, uid, scales.x(oldX.invert(offset)));
+    }
+    refreshClusterOffsetScale();
+    refreshLocusOffsetScale();
+  }
 
-  config.gene.shape.onClick = gene.anchor;
-  config.legend.onClickText = link.rename;
+  function updateScales(data) {
+    const oldX = scales.x.copy();
+    scales.x.range([0, config.plot.scaleFactor]);
+    // Reproject dependent ranges only when the x-scale range actually changes.
+    // Repeating invert()/scale() on every redraw accumulates small
+    // floating-point errors, causing static link paths to drift after flips.
+    if (oldX.range().some((value, index) => value !== scales.x.range()[index])) {
+      rescaleRanges(oldX);
+    }
+
+    scales.y.domain(getClusterOrder(chartState));
+    const body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
+    scales.y.range(data.clusters.map((cluster, index) => index * (config.cluster.spacing + body)));
+
+    scales.offset.domain(data.clusters.map((cluster) => cluster.uid));
+    refreshClusterOffsetScale();
+    const { domain, range } = getLocusScaleValues(data.clusters, {
+      ...locusLayout(),
+      locusOffset: () => 0,
+    });
+    initializeLocusOffsets(chartState, domain.map((uid, index) => [uid, range[index]]));
+    scales.locus.domain(domain);
+    refreshLocusOffsetScale();
+  }
 
   return {
     config,
-    get,
+    configure,
+    lookup,
     ids,
     synchronizeLocusLayoutState,
     synchronizeLocusLayoutStates,
     setChartIndex,
     setChartState,
-    plot,
     scales,
-    cluster,
-    gene,
-    link,
-    locus,
-    scale,
-    scene,
+    updateScales,
+    updateGroups,
+    getScene,
+    buildScene: buildChartScene,
+    patchFlippedLocus,
+    patchGeneAnchor,
+    setBeforeGeneAnchorUpdate,
+    anchorGene,
   };
   }
 
@@ -6601,8 +6525,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       getCamera: () => getCamera(chartState),
       getRenderer: () => runtime.config.plot.renderer,
     });
-    runtime.gene.setBeforeAnchorUpdate(({ changes, flippedLoci }) => {
-      const sourceScene = runtime.scene.get();
+    runtime.setBeforeGeneAnchorUpdate(({ changes, flippedLoci }) => {
+      const sourceScene = runtime.getScene();
       // Anchoring changes cluster origins and, when strands disagree, a small
       // set of loci. The scene patch retains everything else for every backend.
       if (!sourceScene || (!changes.length && !flippedLoci.size)) return;
@@ -6617,10 +6541,15 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         webgpuAnchorCommit = { sourceScene, offsets, flippedLoci };
       }
     });
+    const anchorGene = (gene, { flipMismatchedLoci = false } = {}) => {
+      const result = runtime.anchorGene(gene, { flipMismatchedLoci });
+      redraw();
+      return result;
+    };
     const interactionController = createInteractionController({
       clusterRows: () => runtime.scales.y.range(),
       getClusterOrder: () => getClusterOrder(chartState),
-      getClusterPosition: (uid) => runtime.scene.get().clusters.get(uid).y,
+      getClusterPosition: (uid) => runtime.getScene().clusters.get(uid).y,
       getLocusOffset: (uid) => getLocusOffset(chartState, uid),
       setDragging: (dragging) => setDragging(chartState, dragging),
       previewClusterDrag: (uid, position, order) => {
@@ -6630,8 +6559,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         }
         setPreviewClusterPosition(chartState, uid, position);
         if (order) setPreviewClusterOrder(chartState, order);
-        if (isRasterRenderer(runtime.config.plot.renderer) && runtime.scene.get()) {
-          rasterPreview = createClusterDragPreview(runtime.scene.get(), {
+        if (isRasterRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
+          rasterPreview = createClusterDragPreview(runtime.getScene(), {
             clusterUid: uid,
             position,
             order: getClusterOrder(chartState),
@@ -6640,10 +6569,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           scheduleRasterPreview();
           return;
         }
-        runtime.plot.update({ animate: false });
+        redraw({ animate: false });
       },
       commitClusterOrder: () => {
-        const sourceScene = runtime.scene.get();
+        const sourceScene = runtime.getScene();
         const preview = rasterPreview?.type === "cluster-drag" ? rasterPreview : null;
         const order = [...getClusterOrder(chartState)];
         const rows = runtime.scales.y.range();
@@ -6671,29 +6600,29 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             clusterCommitFrame = requestAnimationFrame(() => {
               clusterCommitFrame = null;
               clearRasterPreview();
-              runtime.plot.update({ animate: false });
+              redraw({ animate: false });
             });
           });
           return;
         }
         clearRasterPreview();
-        runtime.plot.update({ animate: false });
+        redraw({ animate: false });
       },
       previewLocusOffset: (uid, offset) => {
         setPreviewLocusOffset(chartState, uid, offset);
-        if (isRasterRenderer(runtime.config.plot.renderer) && runtime.scene.get()) {
-          rasterPreview = createLocusOffsetPreview(runtime.scene.get(), uid, offset, {
+        if (isRasterRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
+          rasterPreview = createLocusOffsetPreview(runtime.getScene(), uid, offset, {
             alignLabels: runtime.config.cluster.alignLabels,
           });
           scheduleRasterPreview();
           return;
         }
-        runtime.plot.update({ animate: false });
+        redraw({ animate: false });
       },
       commitLocusOffset: (uid) => {
         commitPreviewLocusOffset(chartState, uid);
         clearRasterPreview();
-        runtime.plot.update({ animate: false });
+        redraw({ animate: false });
       },
       previewLocusTrim: (locus, edge, position) => {
         const result = previewLocusTrim(chartState, locus, {
@@ -6709,12 +6638,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             runtime.scales.offset(locus.clusterUid),
           scaleGenes: runtime.config.plot.scaleGenes,
         });
-        if (isRasterRenderer(runtime.config.plot.renderer) && runtime.scene.get()) {
+        if (isRasterRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
           // Updating scales is inexpensive and gives the sparse projection the
           // packed x offsets for this temporary locus state. Deliberately avoid
           // rebuilding data, indexes, or the complete scene until release.
-          runtime.scale.update(currentData);
-          rasterPreview = createLocusTrimPreview(runtime.scene.get(), locus.uid, result.state, {
+          runtime.updateScales(currentData);
+          rasterPreview = createLocusTrimPreview(runtime.getScene(), locus.uid, result.state, {
             localXFor: runtime.scales.locus,
             scaleX: runtime.scales.x,
             alignLabels: runtime.config.cluster.alignLabels,
@@ -6722,26 +6651,26 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           scheduleRasterPreview();
           return result;
         }
-        runtime.plot.update({ animate: false, synchronize: false });
+        redraw({ animate: false, synchronize: false });
         return result;
       },
       commitLocusTrim: (locus) => {
         finalizeLocusTrim(chartState, locus);
         commitPreviewLocusState(chartState, locus);
         clearRasterPreview();
-        runtime.plot.update({ animate: false });
+        redraw({ animate: false });
       },
       flipLocus: (locus) => {
         // A second double-click while the GPU preview is in flight must not
         // mutate the source state underneath that preview.
         if (isWebGpuRenderer(runtime.config.plot.renderer) && webgpuFlipFrame !== null) return;
         flipLocus(chartState, locus);
-        if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.scene.get()) {
+        if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
           if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
           canvasAnimation = null;
           if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
           const previewProgress = 0.12;
-          const sourceScene = canvasScene || runtime.scene.get();
+          const sourceScene = canvasScene || runtime.getScene();
           const pending = createCanvasFlipPending(locus, sourceScene);
           canvasPendingFlip = pending;
           canvasPreviewScene = sourceScene;
@@ -6762,13 +6691,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           });
           return;
         }
-        if (isWebGpuRenderer(runtime.config.plot.renderer) && runtime.scene.get()) {
+        if (isWebGpuRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
           if (webgpuFlipFrame !== null) return;
-          const sourceScene = runtime.scene.get();
+          const sourceScene = runtime.getScene();
           const duration = runtime.config.plot.transitionDuration;
           const finish = () => {
             runtime.synchronizeLocusLayoutState(locus);
-            webgpuBackend.setScene(runtime.scene.patchFlippedLocus(sourceScene, locus));
+            webgpuBackend.setScene(runtime.patchFlippedLocus(sourceScene, locus));
             rasterPreview = null;
             webgpuFlipFrame = null;
             scheduleRasterPaint();
@@ -6797,14 +6726,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           webgpuFlipFrame = requestAnimationFrame(frame);
           return;
         }
-        runtime.plot.update();
+        redraw();
       },
     });
-
-    // Internal state actions redraw the retained normalized data. Only an
-    // external selection/data call enters the normalization and indexing path.
-    runtime.plot.update = (options) => redraw(options);
-    runtime.plot.data = (data) => my.data(data);
 
     function clearRasterPreview() {
       if (rasterPaintFrame !== null) cancelAnimationFrame(rasterPaintFrame);
@@ -6831,7 +6755,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       canvasFlipFrame = null;
       if (!pending.targetScene) {
         runtime.synchronizeLocusLayoutState(pending.locus);
-        pending.targetScene = runtime.scene.patchFlippedLocus(pending.sourceScene, pending.locus);
+        pending.targetScene = runtime.patchFlippedLocus(pending.sourceScene, pending.locus);
       }
       canvasScene = pending.targetScene;
       canvasBackend.setScene(canvasScene);
@@ -6846,7 +6770,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (canvasPendingFlip !== pending) return;
       canvasFlipFrame = null;
       runtime.synchronizeLocusLayoutState(pending.locus);
-      pending.targetScene = runtime.scene.patchFlippedLocus(pending.sourceScene, pending.locus);
+      pending.targetScene = runtime.patchFlippedLocus(pending.sourceScene, pending.locus);
       prepareCanvasFlipBase(pending);
       // Restore and repaint the affected canvas region before the browser can
       // present a frame. The base image stays offscreen; the visible plot stays
@@ -6929,7 +6853,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const locusGenes = new Set(locus.genes.map((gene) => gene.uid));
       const dynamicGenes = new Set(locusGenes);
       for (const gene of locus.genes) {
-        for (const link of runtime.get.linksForGene(gene.uid)) {
+        for (const link of runtime.lookup.linksForGene(gene.uid)) {
           dynamicLinks.add(link.uid);
           // The link must remain below both endpoint gene shapes. Repaint its
           // stationary neighbour in the same dirty canvas region as the
@@ -7054,12 +6978,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         tooltip: svgSurface.tooltip,
         scales: runtime.scales,
         actions: {
-          redraw: (options) => runtime.plot.update(options),
-          anchorGene: (gene) => runtime.gene.anchor(null, gene, true),
+          redraw,
+          anchorGene: (gene) => anchorGene(gene, { flipMismatchedLoci: true }),
           getGroups: () => data.groups,
           setGroups: (groups) => {
             data.groups = groups;
-            runtime.plot.update();
+            redraw();
           },
         },
       });
@@ -7143,7 +7067,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             canvasAnimation?.scene ||
             canvasPreviewScene ||
             canvasBackend.pendingScene ||
-            runtime.scene.get(),
+            runtime.getScene(),
           previousScene: canvasAnimation?.previousScene,
           progress: canvasAnimation?.progress,
           camera: getCamera(chartState),
@@ -7195,7 +7119,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       paintRasterFrame = useCanvas
         ? () => paintCanvas(canvas.node())
         : useWebGpu
-          ? () => paintWebGpu(canvas.node(), webgpuBackend.pendingScene || runtime.scene.get())
+          ? () => paintWebGpu(canvas.node(), webgpuBackend.pendingScene || runtime.getScene())
           : null;
       const flipLayerMatches = (layer, pending, bounds, pixelRatio) => {
         if (!layer || layer.sourceScene !== pending.sourceScene || layer.locusUid !== pending.locus.uid) {
@@ -7393,8 +7317,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         canvasFlipWarmFrame = requestAnimationFrame(() => {
           canvasFlipWarmFrame = null;
           const canvasNode = canvas.node();
-          const locus = runtime.get.locusData(locusUid);
-          const sourceScene = canvasScene || runtime.scene.get();
+          const locus = runtime.lookup.locusData(locusUid);
+          const sourceScene = canvasScene || runtime.getScene();
           if (!canvasNode || !locus || !sourceScene || canvasPendingFlip) return;
           const bounds = canvasNode.getBoundingClientRect();
           const pixelRatio = rasterMotion.pixelRatio();
@@ -7421,7 +7345,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         rasterMinimap.paint({
           minimap: minimap.node(),
           surface: canvas.node(),
-          scene: runtime.scene.get(),
+          scene: runtime.getScene(),
           options: minimapOptions,
           camera: getCamera(chartState),
           pixelRatio: globalThis.devicePixelRatio || 1,
@@ -7505,7 +7429,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         const picker = container.select("input.colourPicker");
         picker.on("change", () => {
           group.colour = picker.node().value;
-          runtime.plot.update();
+          redraw();
         });
         picker.node().click();
       };
@@ -7514,7 +7438,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           providedValue ?? prompt("Enter new length (bp):", runtime.config.scaleBar.basePair);
         if (!value) return;
         runtime.config.scaleBar.basePair = value;
-        runtime.plot.update();
+        redraw();
+      };
+      const renameLegend = (event, group) => {
+        if (event.defaultPrevented) return;
+        const label = prompt("Enter new value:", group.label);
+        if (!label) return;
+        group.label = label;
+        redraw();
       };
       // Both renderers delegate mutations to the same controller. Raster input
       // adapts stable IDs back to source records at its boundary; SVG already
@@ -7534,7 +7465,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         endLocusTrim: interactionController.endLocusTrim,
         cancelLocusTrim: interactionController.cancelLocusTrim,
         flipLocus: interactionController.flipLocus,
-        onGeneClick: runtime.config.gene.shape.onClick,
+        onGeneClick: runtime.config.gene.shape.onClick || ((event, gene) => anchorGene(gene)),
         showGeneMenu: overlay.showGeneMenu,
         showGroupMenu: overlay.showGroupMenu,
         setScaleBarLength,
@@ -7546,7 +7477,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             chooseLegendColour(group);
           }
         },
-        legendText: (event, group) => runtime.config.legend.onClickText?.(event, group),
+        legendText: (event, group) =>
+          (runtime.config.legend.onClickText || renameLegend)(event, group),
         legendMenu: (event, group) => {
           const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
           handler(event, group);
@@ -7559,17 +7491,17 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             // visible surface, so use its transparent 2D text/chrome overlay
             // for the metric-dependent portions of hit testing instead.
             canvas: useWebGpu ? webgpuOverlay.node() : canvasNode,
-            scene: runtime.scene.get(),
+            scene: runtime.getScene(),
             camera: getCamera(chartState),
             config: runtime.config,
             event,
           });
         const locusForTarget = (target) =>
-          target?.locusUid || runtime.get.geneData(target?.geneUid)?.locusUid || null;
+          target?.locusUid || runtime.lookup.geneData(target?.geneUid)?.locusUid || null;
         const rasterBindings = createRasterInteractionBindings({
           interactions: rendererInteractions,
-          getGene: runtime.get.geneData,
-          getLocus: runtime.get.locusData,
+          getGene: runtime.lookup.geneData,
+          getLocus: runtime.lookup.locusData,
         });
         const rasterInteraction = createRasterInteraction({
           targetForEvent,
@@ -7595,7 +7527,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
         rasterMinimap.bind(minimap, {
           getSurface: () => canvas.node(),
-          getScene: () => runtime.scene.get(),
+          getScene: runtime.getScene,
           getCamera: () => getCamera(chartState),
           options: minimapOptions,
           moveCamera: (camera) => {
@@ -7616,7 +7548,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       }
       applyCamera(svg.select("g.clusterMapViewport"));
 
-      runtime.scale.update(data);
+      runtime.updateScales(data);
       if (synchronize) runtime.synchronizeLocusLayoutStates(data);
 
       // Only disable grouping if explicitly defined false
@@ -7626,17 +7558,17 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         data.groups = createLinkGroups(data.links, data.groups);
       }
 
-      runtime.link.updateGroups(data.groups);
+      runtime.updateGroups(data.groups);
 
       const committedAnchor = anchorSceneCommit;
       anchorSceneCommit = null;
       const scene = committedAnchor
-        ? runtime.scene.patchGeneAnchor(
+        ? runtime.patchGeneAnchor(
             committedAnchor.sourceScene,
             committedAnchor.changes,
             committedAnchor.flippedLoci
           )
-        : runtime.scene.build(data);
+        : runtime.buildScene(data);
 
       if (useCanvas) {
         if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
@@ -7674,7 +7606,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           config: runtime.config,
           scales: runtime.scales,
           ids: runtime.ids,
-          lookup: { gene: runtime.get.geneData },
+          lookup: { gene: runtime.lookup.geneData },
           interactions: rendererInteractions,
         });
 
@@ -7748,7 +7680,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     my.config = function (_) {
       if (!arguments.length) return runtime.config;
-      runtime.plot.updateConfig(_);
+      runtime.configure(_);
       return my;
     };
     my.data = (data) => {
@@ -7760,11 +7692,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       flushCanvasFlip();
       return exportChartSvg({
         data: currentData,
-        scene: runtime.scene.get(),
+        scene: runtime.getScene(),
         config: runtime.config,
         scales: runtime.scales,
         ids: runtime.ids,
-        lookup: { gene: runtime.get.geneData },
+        lookup: { gene: runtime.lookup.geneData },
         padding,
       });
     };
