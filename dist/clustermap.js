@@ -6257,6 +6257,107 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     };
   }
 
+  // Owns the persistent DOM surrounding retained raster renderers. Painting,
+  // hit testing, minimap behaviour, and renderer-specific resources stay with
+  // the chart controller/backends.
+  function ensureRasterSurface({
+    container,
+    data,
+    renderer,
+    showRaster,
+    showWebGpu,
+    showMinimap,
+    minimap,
+    zoom,
+    zoomExtent,
+    onZoom,
+    onZoomStart,
+    onZoomEnd,
+  }) {
+    let currentZoom = zoom;
+    // A canvas cannot switch between 2D and WebGPU contexts in place.
+    container
+      .selectAll("canvas.clusterMapCanvas")
+      .filter(function () {
+        return this.dataset.renderer && this.dataset.renderer !== renderer;
+      })
+      .remove();
+
+    const canvas = container
+      .selectAll("canvas.clusterMapCanvas")
+      .data(showRaster ? [data] : [])
+      .join((enter) => {
+        const surface = enter
+          .append("canvas")
+          .attr("class", "clusterMapCanvas")
+          .attr("cursor", "grab")
+          .attr("tabindex", 0)
+          .attr("aria-label", "Cluster map")
+          .style("display", "block")
+          .style("width", "100%")
+          .style("height", "100%")
+          .style("outline", "none");
+        currentZoom = d3
+          .zoom()
+          .scaleExtent(zoomExtent())
+          .on("zoom", onZoom)
+          .on("start", function () { onZoomStart(this); })
+          .on("end", function () { onZoomEnd(this); });
+        surface.call(currentZoom).on("dblclick.zoom", null);
+        return surface;
+      })
+      .attr("data-renderer", renderer);
+
+    if (showWebGpu) {
+      canvas.attr("data-webgpu", function () { return this.dataset.webgpu || "initializing"; });
+    } else {
+      canvas.attr("data-webgpu", null);
+    }
+    if (currentZoom) currentZoom.scaleExtent(zoomExtent());
+
+    if ((showWebGpu || showMinimap) && globalThis.getComputedStyle(container.node()).position === "static") {
+      container.style("position", "relative");
+    }
+    const webgpuOverlay = container
+      .selectAll("canvas.clusterMapWebGpuOverlay")
+      .data(showWebGpu ? [data] : [])
+      .join((enter) =>
+        enter
+          .append("canvas")
+          .attr("class", "clusterMapWebGpuOverlay")
+          .style("position", "absolute")
+          .style("inset", "0")
+          .style("display", "block")
+          .style("width", "100%")
+          .style("height", "100%")
+          .style("pointer-events", "none")
+      );
+    const overview = container
+      .selectAll("canvas.clusterMapMinimap")
+      .data(showMinimap ? [data] : [])
+      .join((enter) =>
+        enter
+          .append("canvas")
+          .attr("class", "clusterMapMinimap")
+          .attr("aria-label", "Cluster map overview")
+          .style("position", "absolute")
+          .style("z-index", 2)
+          .style("display", "block")
+          .style("box-sizing", "border-box")
+          .style("background", "white")
+          .style("box-shadow", "0 1px 4px rgba(0, 0, 0, 0.25)")
+          .style("cursor", "grab")
+          .style("touch-action", "none")
+      );
+    overview
+      .style("width", showMinimap ? `${minimap.width}px` : null)
+      .style("height", showMinimap ? `${minimap.height}px` : null)
+      .style("right", showMinimap ? `${minimap.margin}px` : null)
+      .style("bottom", showMinimap ? `${minimap.margin}px` : null);
+
+    return { canvas, webgpuOverlay, minimap: overview, zoom: currentZoom };
+  }
+
   function isCanvasRenderer(renderer) {
     return renderer === "canvas";
   }
@@ -6739,92 +6840,31 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       });
       const { svg, plot } = svgSurface;
       zoom = svgSurface.zoom;
-      // A canvas cannot change from a 2D to a WebGPU context in place.
-      container
-        .selectAll("canvas.clusterMapCanvas")
-        .filter(function () { return this.dataset.renderer && this.dataset.renderer !== runtime.config.plot.renderer; })
-        .remove();
-      const canvas = container
-        .selectAll("canvas.clusterMapCanvas")
-        .data(useRaster ? [data] : [])
-        .join((enter) => {
-          const surface = enter
-            .append("canvas")
-            .attr("class", "clusterMapCanvas")
-            .attr("cursor", "grab")
-            .attr("tabindex", 0)
-            .attr("aria-label", "Cluster map")
-            .style("display", "block")
-            .style("width", "100%")
-            .style("height", "100%")
-            .style("outline", "none");
-          canvasZoom = d3
-            .zoom()
-            .scaleExtent(zoomExtent())
-            .on("zoom", function (event) {
-              setCamera(chartState, event.transform);
-              scheduleRasterPaint();
-            })
-            .on("start", function () {
-              rasterMotion.begin();
-              d3.select(this).style("cursor", "grabbing");
-            })
-            .on("end", function () {
-              d3.select(this).style("cursor", "grab");
-              rasterMotion.end();
-            });
-          surface.call(canvasZoom).on("dblclick.zoom", null);
-          return surface;
-        })
-        .attr("data-renderer", runtime.config.plot.renderer);
-      if (useWebGpu) {
-        canvas.attr("data-webgpu", function () { return this.dataset.webgpu || "initializing"; });
-      } else {
-        canvas.attr("data-webgpu", null);
-      }
-      if (canvasZoom) canvasZoom.scaleExtent(zoomExtent());
-      if (useWebGpu && globalThis.getComputedStyle(container.node()).position === "static") {
-        container.style("position", "relative");
-      }
-      const webgpuOverlay = container
-        .selectAll("canvas.clusterMapWebGpuOverlay")
-        .data(useWebGpu ? [data] : [])
-        .join((enter) =>
-          enter
-            .append("canvas")
-            .attr("class", "clusterMapWebGpuOverlay")
-            .style("position", "absolute")
-            .style("inset", "0")
-            .style("display", "block")
-            .style("width", "100%")
-            .style("height", "100%")
-            .style("pointer-events", "none")
-        );
-      if (showMinimap && globalThis.getComputedStyle(container.node()).position === "static") {
-        container.style("position", "relative");
-      }
-      const minimap = container
-        .selectAll("canvas.clusterMapMinimap")
-        .data(showMinimap ? [data] : [])
-        .join((enter) =>
-          enter
-            .append("canvas")
-            .attr("class", "clusterMapMinimap")
-            .attr("aria-label", "Cluster map overview")
-            .style("position", "absolute")
-            .style("z-index", 2)
-            .style("display", "block")
-            .style("box-sizing", "border-box")
-            .style("background", "white")
-            .style("box-shadow", "0 1px 4px rgba(0, 0, 0, 0.25)")
-            .style("cursor", "grab")
-            .style("touch-action", "none")
-        );
-      minimap
-        .style("width", showMinimap ? `${minimapOptions.width}px` : null)
-        .style("height", showMinimap ? `${minimapOptions.height}px` : null)
-        .style("right", showMinimap ? `${minimapOptions.margin}px` : null)
-        .style("bottom", showMinimap ? `${minimapOptions.margin}px` : null);
+      const rasterSurface = ensureRasterSurface({
+        container,
+        data,
+        renderer: runtime.config.plot.renderer,
+        showRaster: useRaster,
+        showWebGpu: useWebGpu,
+        showMinimap,
+        minimap: minimapOptions,
+        zoom: canvasZoom,
+        zoomExtent,
+        onZoom: (event) => {
+          setCamera(chartState, event.transform);
+          scheduleRasterPaint();
+        },
+        onZoomStart: (surface) => {
+          rasterMotion.begin();
+          d3.select(surface).style("cursor", "grabbing");
+        },
+        onZoomEnd: (surface) => {
+          d3.select(surface).style("cursor", "grab");
+          rasterMotion.end();
+        },
+      });
+      const { canvas, webgpuOverlay, minimap } = rasterSurface;
+      canvasZoom = rasterSurface.zoom;
       svg.style("display", useRaster ? "none" : null);
       const overlay = createHtmlOverlay({
         tooltip: svgSurface.tooltip,
