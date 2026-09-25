@@ -1,3 +1,5 @@
+import * as d3 from "d3";
+
 // Changes value of a text node to a prompted value
 export function renameText(event) {
   if (event.defaultPrevented) return;

@@ -1,3 +1,4 @@
+import * as d3 from "d3";
 import { renameText, rgbaToRgb } from "./utils.js";
 import { filterLinks } from "./links/groups.mjs";
 

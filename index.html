@@ -3,7 +3,13 @@
 	<head>
 		<meta charset="utf-8">
 		<title>cmap</title>
-		<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+		<script type="importmap">
+			{
+				"imports": {
+					"d3": "https://cdn.jsdelivr.net/npm/d3@7.9.0/+esm"
+				}
+			}
+		</script>
 		<style>
 			html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
 			main { display: flex; flex-direction: column; height: 100%; }
@@ -24,8 +30,12 @@
 		</main>
 	</body>
 	<script type="module">
+		import * as d3 from "d3"
 		import clusterMap from "./src/clusterMap.js"
 		import { createLargeTestingData } from "./largeTestingData.mjs"
+		// The demo exposes D3 for its test harness; the library itself imports
+		// its declared D3 dependency and no longer reads this global.
+		window.d3 = d3
 		const params = new URLSearchParams(window.location.search)
 		const testMode = params.has("test")
 		const fixture = params.get("fixture")

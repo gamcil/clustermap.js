@@ -1,11 +1,10 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { readFile } = require("node:fs/promises");
-const { join } = require("node:path");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 async function assertCanonicalFixture(filename, expected) {
   const data = JSON.parse(
-    await readFile(join(__dirname, "..", "fixtures", filename))
+    await readFile(new URL(`../fixtures/${filename}`, import.meta.url))
   );
   const genes = new Set(
     data.clusters.flatMap((cluster) =>

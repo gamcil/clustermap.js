@@ -89,7 +89,7 @@ the public link schema, and rejects dangling gene references.
 
 ## Example usage
 
-1. Import d3 v6
+1. Import d3 v7
 2. Import clustermap.js
 3. Style container div element to take up entire viewport
 4. Create and configure clustermap.js ClusterMap function
@@ -152,3 +152,15 @@ the public link schema, and rejects dangling gene references.
 
 Scenes, interaction state, and renderer backends are deliberately internal;
 all backends consume the same projected scene through the chart controller.
+
+For a bundler-based application, import the ESM package entry directly. D3 is
+declared as a peer dependency and is imported by the library:
+
+```js
+import { ClusterMap } from "clinker";
+
+const chart = ClusterMap().config({ plot: { renderer: "webgpu" } });
+```
+
+The `dist/clustermap.js` and `dist/clustermap.min.js` files remain UMD browser
+bundles for script-tag usage and expect a global D3 instance.

@@ -1,5 +1,5 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 test("bottom legends stack below lower chart chrome", async () => {
   const [{ buildScene }, { createLocusOffsetPreview }] = await Promise.all([

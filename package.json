@@ -2,7 +2,22 @@
   "name": "clinker",
   "version": "0.0.0",
   "description": "Visualisations of gene cluster homology",
-  "main": "index.js",
+  "type": "module",
+  "main": "./dist/clustermap.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/clustermap.mjs"
+    }
+  },
+  "browser": "./dist/clustermap.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "d3": "^7.9.0"
+  },
   "scripts": {
     "build": "rollup --config",
     "import:clinker": "node scripts/import-clinker-render.mjs",

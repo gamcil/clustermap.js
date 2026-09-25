@@ -1,5 +1,5 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 test("canvas renderer draws world-space scene geometry through the camera", async () => {
   const {

@@ -1,5 +1,5 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 test("default configuration is recursively isolated per chart runtime", async () => {
   const { createDefaultConfig } = await import("../src/config.js");

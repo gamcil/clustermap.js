@@ -1,5 +1,5 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 test("link layout anchors reverse genes on their displayed left edge", async () => {
   const { getLinkAnchors, getLinkLabelPosition } = await import(

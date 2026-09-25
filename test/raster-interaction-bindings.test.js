@@ -1,5 +1,5 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 test("raster interaction bindings adapt stable IDs to source records", async () => {
   const { createRasterInteractionBindings } = await import(

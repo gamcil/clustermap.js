@@ -1,5 +1,5 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 test("chart normalization establishes explicit hierarchy relationships", async () => {
   const { normalizeChartData } = await import("../src/data/normalize.mjs");

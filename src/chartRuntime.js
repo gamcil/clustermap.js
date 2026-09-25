@@ -1,3 +1,4 @@
+import * as d3 from "d3";
 import { updateConfig } from "./utils.js";
 import { createDefaultConfig } from "./config.js";
 import { getGroupScaleValues } from "./links/groups.mjs";

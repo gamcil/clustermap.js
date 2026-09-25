@@ -1,3 +1,4 @@
+import * as d3 from "d3";
 import { renderSvg } from "./svgRenderer.js";
 
 const noop = () => {};

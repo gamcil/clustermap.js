@@ -1,10 +1,8 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 test("chart factory exposes only the supported public methods", async () => {
-  const previousD3 = globalThis.d3;
   const previousDocument = globalThis.document;
-  globalThis.d3 = await import("d3");
   globalThis.document = { documentElement: {} };
 
   try {
@@ -18,7 +16,6 @@ test("chart factory exposes only the supported public methods", async () => {
     assert.equal(chart.config({ plot: { renderer: "canvas" } }), chart);
     assert.equal(chart.config().plot.renderer, "canvas");
   } finally {
-    globalThis.d3 = previousD3;
     globalThis.document = previousDocument;
   }
 });

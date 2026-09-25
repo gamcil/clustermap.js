@@ -1,5 +1,5 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 test("camera fitting centres figures that fit in the viewport", async () => {
   const { fitCameraForBounds } = await import("../src/camera.mjs");

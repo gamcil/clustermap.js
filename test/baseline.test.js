@@ -1,6 +1,6 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const fixture = require("../testing.json");
+import test from "node:test";
+import assert from "node:assert/strict";
+import fixture from "../testing.json" with { type: "json" };
 
 function collectEntities(data) {
   const clusters = data.clusters ?? [];

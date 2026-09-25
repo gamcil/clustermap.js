@@ -1,5 +1,7 @@
 // Browser-only tooltip lifecycle shared by any chart renderer. Menu content is
 // supplied by the caller because those controls may dispatch chart actions.
+import * as d3 from "d3";
+
 export function createHtmlOverlay({ tooltip, scales, actions }) {
   const show = (event, contents) => {
     tooltip.html("").append(() => contents.node());

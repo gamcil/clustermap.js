@@ -1,5 +1,5 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 const shape = { bodyHeight: 12, tipHeight: 5, tipLength: 12 };
 

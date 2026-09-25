@@ -1,5 +1,5 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 test("locus layout calculates ranges and extents from supplied scales", async () => {
   const { getClusterExtent, getLocusScaleValues, xDistance } = await import(

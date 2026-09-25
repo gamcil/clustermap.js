@@ -1,8 +1,28 @@
 (function (global, factory) {
-  typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
-  typeof define === 'function' && define.amd ? define(['exports'], factory) :
-  (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ClusterMap = {}));
-})(this, (function (exports) { 'use strict';
+  typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports, require('d3')) :
+  typeof define === 'function' && define.amd ? define(['exports', 'd3'], factory) :
+  (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ClusterMap = {}, global.d3));
+})(this, (function (exports, d3$1) { 'use strict';
+
+  function _interopNamespace(e) {
+    if (e && e.__esModule) return e;
+    var n = Object.create(null);
+    if (e) {
+      Object.keys(e).forEach(function (k) {
+        if (k !== 'default') {
+          var d = Object.getOwnPropertyDescriptor(e, k);
+          Object.defineProperty(n, k, d.get ? d : {
+            enumerable: true,
+            get: function () { return e[k]; }
+          });
+        }
+      });
+    }
+    n["default"] = e;
+    return Object.freeze(n);
+  }
+
+  var d3__namespace = /*#__PURE__*/_interopNamespace(d3$1);
 
   function createLinkGroups(links, oldGroups) {
     const groups = links
@@ -628,7 +648,7 @@
   }
 
   // Browser-only tooltip lifecycle shared by any chart renderer. Menu content is
-  // supplied by the caller because those controls may dispatch chart actions.
+
   function createHtmlOverlay({ tooltip, scales, actions }) {
     const show = (event, contents) => {
       tooltip.html("").append(() => contents.node());
@@ -651,7 +671,7 @@
     };
 
     const geneContents = (gene) => {
-      const div = d3.create("div").attr("class", "tooltip-contents")
+      const div = d3__namespace.create("div").attr("class", "tooltip-contents")
         .style("display", "flex").style("flex-direction", "column")
         .style("gap", "4px").style("width", "260px");
       div.append("label").attr("for", "gene-label-input").text("Edit label");
@@ -667,7 +687,7 @@
       const group = div.append("div").style("margin-top", "2px");
       group.append("span").text("Similarity group: ");
       group.append("span").text(scales.name(groupId)).style("color", scales.colour(groupId)).style("font-weight", "bold");
-      const colour = d3.color(gene.colour || scales.colour(groupId));
+      const colour = d3__namespace.color(gene.colour || scales.colour(groupId));
       const pickerColour = colour ? colour.formatHex() : "#000000";
       div.append("label").text("Choose gene colour: ").append("input")
         .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
@@ -679,7 +699,7 @@
     };
 
     const groupContents = (group) => {
-      const div = d3.create("div").attr("class", "tooltip-contents")
+      const div = d3__namespace.create("div").attr("class", "tooltip-contents")
         .style("display", "flex").style("flex-direction", "column");
       div.append("label").text("Edit label");
       const text = div.append("input").attr("type", "text").attr("value", group.label || group.uid);
@@ -696,7 +716,7 @@
         for (const index of indices) groups.splice(index, 1);
         actions.setGroups(groups);
       });
-      const colour = d3.color(group.colour);
+      const colour = d3__namespace.color(group.colour);
       const pickerColour = colour ? colour.formatHex() : "#000000";
       div.append("label").text("Choose group colour: ").append("input")
         .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
@@ -712,7 +732,7 @@
           .interrupt()
           .style("opacity", 1)
           .style("pointer-events", "all");
-        d3.select(window).on("click", (event) => {
+        d3__namespace.select(window).on("click", (event) => {
           const node = tooltip.node();
           if (event.target === node || node.contains(event.target)) return;
           tooltip.style("opacity", 0).style("pointer-events", "none");
@@ -851,7 +871,7 @@
   // Changes value of a text node to a prompted value
   function renameText(event) {
     if (event.defaultPrevented) return;
-    let text = d3.select(event.target);
+    let text = d3__namespace.select(event.target);
     let result = prompt("Enter new value:", text.text());
     if (result) text.text(result);
   }
@@ -872,8 +892,8 @@
   }
 
   function rgbaToRgb(rgba, opacity = 0.6) {
-    let colour = d3.color(rgba).rgb();
-    return d3.rgb(
+    let colour = d3__namespace.color(rgba).rgb();
+    return d3__namespace.rgb(
       (1 - opacity) * 255 + opacity * colour.r,
       (1 - opacity) * 255 + opacity * colour.g,
       (1 - opacity) * 255 + opacity * colour.b
@@ -3555,12 +3575,12 @@
           enter
             .on("mouseenter", (event) => {
               if (!interactions.isDragging()) {
-                d3.select(event.target).select("g.hover").transition().attr("opacity", 1);
+                d3__namespace.select(event.target).select("g.hover").transition().attr("opacity", 1);
               }
             })
             .on("mouseleave", (event) => {
               if (!interactions.isDragging()) {
-                d3.select(event.target).select("g.hover").transition().attr("opacity", 0);
+                d3__namespace.select(event.target).select("g.hover").transition().attr("opacity", 0);
               }
             })
             .on("dblclick", (event, locus) => {
@@ -3568,7 +3588,7 @@
               // geometry. It would otherwise remain visible while the locus
               // itself animates through a flip.
               const locusNode = event.currentTarget;
-              const hover = d3.select(locusNode).select("g.hover").interrupt().attr("opacity", 0);
+              const hover = d3__namespace.select(locusNode).select("g.hover").interrupt().attr("opacity", 0);
               // Restore the affordance only if this locus is still under the
               // pointer after its geometry transition completes.
               if (animate && config.plot.transitionDuration) {
@@ -3577,7 +3597,7 @@
                   .delay(config.plot.transitionDuration)
                   .duration(0)
                   .on("end", function () {
-                    if (locusNode.matches(":hover")) d3.select(this).attr("opacity", 1);
+                    if (locusNode.matches(":hover")) d3__namespace.select(this).attr("opacity", 1);
                   });
               }
               interactions.flipLocus(locus);
@@ -3694,7 +3714,7 @@
       interactions.endClusterDrag();
     };
 
-    return d3
+    return d3__namespace
       .drag()
       .container(function () {
         return this.parentNode.parentNode;
@@ -3713,7 +3733,7 @@
 
     const ended = () => interactions.endLocusDrag();
 
-    return d3
+    return d3__namespace
       .drag()
       .container(() => plot.node())
       .on("start", started)
@@ -3729,14 +3749,14 @@
     const dragged = function (event, locus) {
       interactions.moveLocusTrim(
         locus,
-        d3.select(this).classed("leftHandle") ? "left" : "right",
+        d3__namespace.select(this).classed("leftHandle") ? "left" : "right",
         event.x
       );
     };
 
     const ended = (_, locus) => interactions.endLocusTrim(locus);
 
-    return d3
+    return d3__namespace
       .drag()
       // Keep resize and Canvas pointer coordinates in the same chart-world
       // space. The default handle-parent container reports locus-local x,
@@ -4426,7 +4446,7 @@
     if (!scene) throw new Error("Cannot export an SVG before the chart has rendered.");
     const namespace = "http://www.w3.org/2000/svg";
     const svgNode = documentRef.createElementNS(namespace, "svg");
-    const defs = d3.select(svgNode).append("defs");
+    const defs = d3__namespace.select(svgNode).append("defs");
     const filter = defs
       .append("filter")
       .attr("id", "filter_solid")
@@ -4436,13 +4456,13 @@
       .attr("height", 1);
     filter.append("feFlood").attr("flood-color", "rgba(0, 0, 0, 0.8)");
     filter.append("feComposite").attr("in", "SourceGraphic").attr("in2", "");
-    const plot = d3.select(svgNode).append("g").attr("class", "clusterMapG");
+    const plot = d3__namespace.select(svgNode).append("g").attr("class", "clusterMapG");
     const exportIds = { ...ids, filter: "filter_solid", colourGradient: "colour-gradient" };
     renderSvg({
       plot,
       data,
       scene,
-      transition: d3.transition().duration(0),
+      transition: d3__namespace.transition().duration(0),
       animate: false,
       config,
       scales,
@@ -4454,7 +4474,7 @@
     // be visible as nodes in an exported publication figure.
     plot.selectAll("g.hover").remove();
 
-    d3.select(documentRef.body)
+    d3__namespace.select(documentRef.body)
       .append(() => svgNode)
       .style("position", "fixed")
       .style("visibility", "hidden")
@@ -4742,14 +4762,14 @@
   }
 
   const scales = {
-    x: d3.scaleLinear().domain([1, 1001]).range([0, config.plot.scaleFactor]),
-    y: d3.scaleOrdinal(),
-    group: d3.scaleOrdinal().unknown(null),
-    colour: d3.scaleOrdinal().unknown("#bbb"),
-    name: d3.scaleOrdinal().unknown("None"),
-    score: d3.scaleSequential(d3.interpolateGreys).domain([0, 1]),
-    offset: d3.scaleOrdinal(),
-    locus: d3.scaleOrdinal(),
+    x: d3__namespace.scaleLinear().domain([1, 1001]).range([0, config.plot.scaleFactor]),
+    y: d3__namespace.scaleOrdinal(),
+    group: d3__namespace.scaleOrdinal().unknown(null),
+    colour: d3__namespace.scaleOrdinal().unknown("#bbb"),
+    name: d3__namespace.scaleOrdinal().unknown("None"),
+    score: d3__namespace.scaleSequential(d3__namespace.interpolateGreys).domain([0, 1]),
+    offset: d3__namespace.scaleOrdinal(),
+    locus: d3__namespace.scaleOrdinal(),
   };
 
   // Every scene variant must project the same biological state with the same
@@ -4916,7 +4936,7 @@
     const uids = groups.map((group) => group.uid);
     scales.group.domain(domain).range(range);
     scales.name.domain(uids).range(groups.map((group) => group.label));
-    const colours = d3.quantize(d3.interpolateRainbow, groups.length + 1);
+    const colours = d3__namespace.quantize(d3__namespace.interpolateRainbow, groups.length + 1);
     groups.forEach((group, index) => {
       if (group.colour) colours[index] = group.colour;
       else group.colour = colours[index];
@@ -6566,7 +6586,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     /* A ClusterMap plot. */
 
     let container = null;
-    let transition = d3.transition();
+    let transition = d3__namespace.transition();
     let zoom = null;
     let canvasZoom = null;
     let hasInitialView = false;
@@ -6980,7 +7000,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     function my(selection, options) {
       selection.each(function (data) {
-        container = d3.select(this).attr("width", "100%").attr("height", "100%");
+        container = d3__namespace.select(this).attr("width", "100%").attr("height", "100%");
         loadData(data);
         redraw(options);
       });
@@ -7004,7 +7024,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       canvasPreparedFlipBase = null;
 
       // Set up the shared transition
-      transition = d3.transition().duration(runtime.config.plot.transitionDuration);
+      transition = d3__namespace.transition().duration(runtime.config.plot.transitionDuration);
       const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
       const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
       const useRaster = isRasterRenderer(runtime.config.plot.renderer);
@@ -7058,10 +7078,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         },
         onZoomStart: (surface) => {
           rasterMotion.begin();
-          d3.select(surface).style("cursor", "grabbing");
+          d3__namespace.select(surface).style("cursor", "grabbing");
         },
         onZoomEnd: (surface) => {
-          d3.select(surface).style("cursor", "grab");
+          d3__namespace.select(surface).style("cursor", "grab");
           rasterMotion.end();
         },
       });
@@ -7630,7 +7650,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           warmLocus: useCanvas ? warmCanvasFlipBase : () => {},
           beginMotion: rasterMotion.begin,
           endMotion: rasterMotion.end,
-          setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
+          setCursor: (surface, cursor) => d3__namespace.select(surface).style("cursor", cursor),
           ...rasterBindings,
         });
         canvasZoom.filter(function (event) {
@@ -7648,15 +7668,15 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             if (!camera || !mainCanvas) return;
             // Go through D3 rather than mutating its private __zoom state. This
             // keeps the next wheel/pan gesture continuous with minimap navigation.
-            d3.select(mainCanvas).call(
+            d3__namespace.select(mainCanvas).call(
               canvasZoom.transform,
-              d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+              d3__namespace.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
             );
             paintMinimap();
           },
           beginMotion: rasterMotion.begin,
           endMotion: rasterMotion.end,
-          setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
+          setCursor: (surface, cursor) => d3__namespace.select(surface).style("cursor", cursor),
         });
       }
       applyCamera(svg.select("g.clusterMapViewport"));
@@ -7748,7 +7768,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       });
       if (!camera) return;
 
-      svg.call(zoom.transform, d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k));
+      svg.call(zoom.transform, d3__namespace.zoomIdentity.translate(camera.x, camera.y).scale(camera.k));
       hasInitialView = true;
     }
 
@@ -7776,9 +7796,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       });
       if (!camera) return;
       if (canvasZoom) {
-        d3.select(canvas).call(
+        d3__namespace.select(canvas).call(
           canvasZoom.transform,
-          d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+          d3__namespace.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
         );
       } else {
         setCamera(chartState, camera);

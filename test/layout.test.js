@@ -1,5 +1,5 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 test("scene derives world-space geometry without DOM state", async () => {
   const [{ buildScene, patchAnchoredGeneScene, patchFlippedLocusScene }, {
