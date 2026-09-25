@@ -201,18 +201,17 @@ export function geneVisibleForPreview(preview, gene) {
 }
 
 /** Describe flip frames without re-projecting the chart. */
-export function createLocusFlipPreview(scene, locusUid, { scaleX, progress = 0 }) {
+export function createLocusFlipPreview(scene, locusUid, { progress = 0 } = {}) {
   const locus = scene.loci.get(locusUid);
   if (!locus) return null;
-  const length =
-    (locus.source.end ?? locus.state.end) - (locus.source.start ?? locus.state.start);
-  const left = locus.x + scaleX(0);
-  const right = locus.x + scaleX(length);
   return {
     type: "locus-flip",
     locusUid,
     progress,
-    axes: new Map([[locusUid, (left + right) / 2]]),
+    // The projected bounds reflect the currently displayed locus, including
+    // any committed trim. Source coordinates describe the original record and
+    // must not determine the transient flip axis.
+    axes: new Map([[locusUid, (locus.worldStart + locus.worldEnd) / 2]]),
   };
 }
 

@@ -123,7 +123,7 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.deepEqual(previewChrome.legend.position, { x: 59, y: 0 });
   assert.equal(createLocusOffsetPreview(scene, "unknown", 14, { alignLabels: true }), null);
   assert.deepEqual(
-    createLocusFlipPreview(scene, "top-locus", { scaleX: (value) => value, progress: 0.12 }),
+    createLocusFlipPreview(scene, "top-locus", { progress: 0.12 }),
     {
       type: "locus-flip",
       locusUid: "top-locus",
@@ -132,8 +132,24 @@ test("scene derives world-space geometry without DOM state", async () => {
     }
   );
   assert.equal(
-    createLocusFlipPreview(scene, "unknown", { scaleX: (value) => value }),
+    createLocusFlipPreview(scene, "unknown"),
     null
+  );
+  const trimmedTopLocus = {
+    ...topLocus,
+    // Preserve a deliberately different source span: the flip preview must
+    // follow projected (trimmed) bounds, never the original locus record.
+    source: { ...topLocus.source, start: 1, end: 10000 },
+    worldStart: 10,
+    worldEnd: 14,
+  };
+  const trimmedScene = {
+    ...scene,
+    loci: new Map([["top-locus", trimmedTopLocus]]),
+  };
+  assert.equal(
+    createLocusFlipPreview(trimmedScene, "top-locus").axes.get("top-locus"),
+    12
   );
   // The initial loci share the same left coordinate, but `alignLabels: false`
   // must still keep the preview change local to the dragged cluster.

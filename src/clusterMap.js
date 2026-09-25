@@ -241,7 +241,6 @@ export default function clusterMap() {
         canvasPendingFlip = pending;
         canvasPreviewScene = sourceScene;
         rasterPreview = createLocusFlipPreview(sourceScene, locus.uid, {
-          scaleX: runtime.scales.x,
           progress: previewProgress,
         });
         scheduleRasterPreview();
@@ -280,7 +279,6 @@ export default function clusterMap() {
             ? 4 * elapsed * elapsed * elapsed
             : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
           rasterPreview = createLocusFlipPreview(sourceScene, locus.uid, {
-            scaleX: runtime.scales.x,
             progress: eased,
           });
           webgpuBackend.setScene(sourceScene);
@@ -331,6 +329,7 @@ export default function clusterMap() {
       pending.targetScene = runtime.scene.patchFlippedLocus(pending.sourceScene, pending.locus);
     }
     canvasScene = pending.targetScene;
+    canvasBackend.setScene(canvasScene);
     rasterPreview = null;
     canvasPreviewScene = null;
     canvasPendingFlip = null;
@@ -351,6 +350,7 @@ export default function clusterMap() {
     const duration = runtime.config.plot.transitionDuration;
     if (!duration) {
       canvasScene = pending.targetScene;
+      canvasBackend.setScene(canvasScene);
       rasterPreview = null;
       canvasPreviewScene = null;
       canvasPendingFlip = null;
@@ -369,7 +369,6 @@ export default function clusterMap() {
         ? 4 * elapsed * elapsed * elapsed
         : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
       rasterPreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
-        scaleX: runtime.scales.x,
         progress: initialProgress + (1 - initialProgress) * eased,
       });
       // The dirty region is bounded to the affected locus and its incident
@@ -387,6 +386,7 @@ export default function clusterMap() {
       canvasPreviewScene = null;
       canvasPendingFlip = null;
       canvasScene = pending.targetScene;
+      canvasBackend.setScene(canvasScene);
       // Replace the final preview with the complete target scene.
       paintRasterFrame?.();
       clearCanvasFlipBase();

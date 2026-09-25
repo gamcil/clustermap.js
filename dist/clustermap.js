@@ -1307,18 +1307,17 @@
   }
 
   /** Describe flip frames without re-projecting the chart. */
-  function createLocusFlipPreview(scene, locusUid, { scaleX, progress = 0 }) {
+  function createLocusFlipPreview(scene, locusUid, { progress = 0 } = {}) {
     const locus = scene.loci.get(locusUid);
     if (!locus) return null;
-    const length =
-      (locus.source.end ?? locus.state.end) - (locus.source.start ?? locus.state.start);
-    const left = locus.x + scaleX(0);
-    const right = locus.x + scaleX(length);
     return {
       type: "locus-flip",
       locusUid,
       progress,
-      axes: new Map([[locusUid, (left + right) / 2]]),
+      // The projected bounds reflect the currently displayed locus, including
+      // any committed trim. Source coordinates describe the original record and
+      // must not determine the transient flip axis.
+      axes: new Map([[locusUid, (locus.worldStart + locus.worldEnd) / 2]]),
     };
   }
 
@@ -6661,7 +6660,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           canvasPendingFlip = pending;
           canvasPreviewScene = sourceScene;
           rasterPreview = createLocusFlipPreview(sourceScene, locus.uid, {
-            scaleX: runtime.scales.x,
             progress: previewProgress,
           });
           scheduleRasterPreview();
@@ -6700,7 +6698,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
               ? 4 * elapsed * elapsed * elapsed
               : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
             rasterPreview = createLocusFlipPreview(sourceScene, locus.uid, {
-              scaleX: runtime.scales.x,
               progress: eased,
             });
             webgpuBackend.setScene(sourceScene);
@@ -6751,6 +6748,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         pending.targetScene = runtime.scene.patchFlippedLocus(pending.sourceScene, pending.locus);
       }
       canvasScene = pending.targetScene;
+      canvasBackend.setScene(canvasScene);
       rasterPreview = null;
       canvasPreviewScene = null;
       canvasPendingFlip = null;
@@ -6771,6 +6769,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const duration = runtime.config.plot.transitionDuration;
       if (!duration) {
         canvasScene = pending.targetScene;
+        canvasBackend.setScene(canvasScene);
         rasterPreview = null;
         canvasPreviewScene = null;
         canvasPendingFlip = null;
@@ -6789,7 +6788,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           ? 4 * elapsed * elapsed * elapsed
           : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
         rasterPreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
-          scaleX: runtime.scales.x,
           progress: initialProgress + (1 - initialProgress) * eased,
         });
         // The dirty region is bounded to the affected locus and its incident
@@ -6807,6 +6805,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         canvasPreviewScene = null;
         canvasPendingFlip = null;
         canvasScene = pending.targetScene;
+        canvasBackend.setScene(canvasScene);
         // Replace the final preview with the complete target scene.
         paintRasterFrame?.();
         clearCanvasFlipBase();

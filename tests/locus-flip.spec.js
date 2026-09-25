@@ -1305,6 +1305,10 @@ test("canvas renderer animates a locus flip between scene snapshots", async ({ p
 
   expect(during).not.toEqual(before);
   expect(during).not.toEqual(after);
+  // The retained Canvas scene must be advanced at completion as well as the
+  // temporary flip compositor; otherwise the next ordinary paint restores the
+  // pre-flip orientation.
+  expect(after).not.toEqual(before);
 });
 
 test.describe("Canvas motion resolution", () => {
