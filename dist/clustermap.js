@@ -5026,10 +5026,51 @@ struct VertexOutput {
   @location(0) colour: vec4f,
 }
 
+struct StrokeInput {
+  @location(0) first: vec2f,
+  @location(1) second: vec2f,
+  @location(2) colour: vec4f,
+  @location(3) clusterSlot: f32,
+  @location(4) width: f32,
+}
+
 @vertex fn vertexMain(input: VertexInput) -> VertexOutput {
   let clusterOffset = clusterOffsets.values[u32(input.clusterSlot)];
   let screen = (input.position + clusterOffset)
     * camera.transform.z + camera.transform.xy;
+  var output: VertexOutput;
+  output.position = vec4f(
+    screen.x / camera.viewport.x * 2.0 - 1.0,
+    1.0 - screen.y / camera.viewport.y * 2.0,
+    0.0,
+    1.0
+  );
+  output.colour = input.colour;
+  return output;
+}
+
+// WebGPU line-list primitives are always one *physical* pixel wide. Draw
+// gene outlines as quads instead so their configured stroke width matches
+// Canvas and SVG at every device-pixel ratio and camera scale.
+@vertex fn strokeVertex(
+  input: StrokeInput,
+  @builtin(vertex_index) vertexIndex: u32,
+) -> VertexOutput {
+  let clusterOffset = clusterOffsets.values[u32(input.clusterSlot)];
+  let first = (input.first + clusterOffset) * camera.transform.z + camera.transform.xy;
+  let second = (input.second + clusterOffset) * camera.transform.z + camera.transform.xy;
+  let delta = second - first;
+  let segmentLength = max(length(delta), 0.0001);
+  let direction = delta / segmentLength;
+  let normal = vec2f(-direction.y, direction.x);
+  let halfWidth = input.width * camera.transform.z / 2.0;
+  let corner = vertexIndex % 6u;
+  let useSecond = corner == 1u || corner == 2u || corner == 4u;
+  let positiveSide = corner == 2u || corner == 4u || corner == 5u;
+  // Extending each endpoint by half a stroke joins adjacent edge quads at
+  // polygon corners without a CPU-side miter calculation.
+  let point = select(first - direction * halfWidth, second + direction * halfWidth, useSecond);
+  let screen = point + normal * select(-halfWidth, halfWidth, positiveSide);
   var output: VertexOutput;
   output.position = vec4f(
     screen.x / camera.viewport.x * 2.0 - 1.0,
@@ -5155,6 +5196,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     pushVertex(vertices, second[0], second[1], colour, clusterSlot);
   }
 
+  function pushStrokeSegment(vertices, first, second, colour, clusterSlot, width) {
+    vertices.push(...first, ...second, ...colour, clusterSlot, width);
+  }
+
   function pushGene(
     vertices,
     edges,
@@ -5162,7 +5207,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     colour,
     points = gene.polygon,
     stroke = [0, 0, 0, 1],
-    clusterSlot = 0
+    clusterSlot = 0,
+    strokeWidth = 1
   ) {
     if (points.length !== 14) return;
     const point = (index) => [points[index * 2], points[index * 2 + 1]];
@@ -5173,7 +5219,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       pushTriangle(vertices, point(triangle[0]), point(triangle[1]), point(triangle[2]), colour, clusterSlot);
     }
     for (let index = 0; index < 7; index += 1) {
-      pushLine(edges, point(index), point((index + 1) % 7), stroke, clusterSlot);
+      pushStrokeSegment(
+        edges,
+        point(index),
+        point((index + 1) % 7),
+        stroke,
+        clusterSlot,
+        strokeWidth
+      );
     }
   }
 
@@ -5292,7 +5345,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     return [colour[0], colour[1], colour[2], 0];
   }
 
-  function geneVertices(gene, scales, preview = null, clusterSlot = 0) {
+  function geneVertices(gene, scales, preview = null, clusterSlot = 0, strokeWidth = 1) {
     const fill = [];
     const edge = [];
     const visible = geneVisibleForPreview(preview, gene);
@@ -5304,7 +5357,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       visible ? colour : transparent(colour),
       polygonForPreview(preview, gene),
       visible ? [0, 0, 0, 1] : [0, 0, 0, 0],
-      clusterSlot
+      clusterSlot,
+      strokeWidth
     );
     return { genes: new Float32Array(fill), geneEdges: new Float32Array(edge) };
   }
@@ -5390,12 +5444,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const y = preview?.type === "cluster-drag" ? 0 : previewY;
     const track = geometry.track || locus.track;
     const vertices = [];
-    pushLine(
+    pushStrokeSegment(
       vertices,
       [locus.x + track.x1 + x, locus.y + track.y + y],
       [locus.x + track.x2 + x, locus.y + track.y + y],
       rgba(config.locus.trackBar.colour, [0.07, 0.07, 0.07, 1]),
-      clusterSlot
+      clusterSlot,
+      config.locus.trackBar.stroke
     );
     return new Float32Array(vertices);
   }
@@ -5437,7 +5492,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     for (const gene of scene.genes.values()) {
       // Trimming only hides base-visible genes, so their range is stable too.
       if (!gene.visible) continue;
-      const vertices = geneVertices(gene, scales, preview, slots.get(gene.locus.cluster.uid));
+      const vertices = geneVertices(
+        gene,
+        scales,
+        preview,
+        slots.get(gene.locus.cluster.uid),
+        config.gene.shape.strokeWidth
+      );
       ranges.genes.set(gene.source.uid, {
         genes: append(genes, vertices.genes),
         geneEdges: append(geneEdges, vertices.geneEdges),
@@ -5586,6 +5647,18 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         { shaderLocation: 2, offset: 24, format: "float32" },
       ],
     }];
+    const strokeVertexBuffers = [{
+      // first.xy, second.xy, colour.rgba, cluster slot, world-space stroke width
+      arrayStride: 40,
+      attributes: [
+        { shaderLocation: 0, offset: 0, format: "float32x2" },
+        { shaderLocation: 1, offset: 8, format: "float32x2" },
+        { shaderLocation: 2, offset: 16, format: "float32x4" },
+        { shaderLocation: 3, offset: 32, format: "float32" },
+        { shaderLocation: 4, offset: 36, format: "float32" },
+      ],
+      stepMode: "instance",
+    }];
     const bindGroupLayout = device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
@@ -5616,6 +5689,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       vertex: { module, entryPoint: "vertexMain", buffers: vertexBuffers },
       fragment: { module, entryPoint: "fragmentMain", targets: target },
       primitive: { topology: "line-list" },
+    });
+    const strokePipeline = await createPipeline({
+      layout: pipelineLayout,
+      vertex: { module, entryPoint: "strokeVertex", buffers: strokeVertexBuffers },
+      fragment: { module, entryPoint: "fragmentMain", targets: target },
+      primitive: { topology: "triangle-list" },
     });
     const linkPipeline = await createPipeline({
       layout: pipelineLayout,
@@ -5793,9 +5872,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       geneEdgeBuffer = bufferFor(device, geneEdgeBuffer, data.geneEdges);
       linkCount = data.links.length / 7;
       linkEdgeCount = data.linkEdges.length / 7;
-      trackCount = data.tracks.length / 7;
+      trackCount = data.tracks.length / 10;
       geneCount = data.genes.length / 7;
-      geneEdgeCount = data.geneEdges.length / 7;
+      geneEdgeCount = data.geneEdges.length / 10;
     };
     const visibleLinkIndices = () => new Uint32Array(
       [...scene.links.values()]
@@ -5877,7 +5956,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           gene,
           scales,
           nextPreview,
-          geometry.clusterSlots.get(gene.locus.cluster.uid)
+          geometry.clusterSlots.get(gene.locus.cluster.uid),
+          config.gene.shape.strokeWidth
         );
         write("genes", ranges.genes, vertices.genes);
         write("geneEdges", ranges.geneEdges, vertices.geneEdges);
@@ -5957,11 +6037,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           pass.setVertexBuffer(0, linkEdgeBuffer);
           pass.draw(linkEdgeCount);
         }
-        pass.setPipeline(linePipeline);
+        pass.setPipeline(strokePipeline);
         pass.setBindGroup(0, bindGroup);
         if (trackBuffer) {
           pass.setVertexBuffer(0, trackBuffer);
-          pass.draw(trackCount);
+          pass.draw(6, trackCount);
         }
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, bindGroup);
@@ -5969,11 +6049,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           pass.setVertexBuffer(0, geneBuffer);
           pass.draw(geneCount);
         }
-        pass.setPipeline(linePipeline);
+        pass.setPipeline(strokePipeline);
         pass.setBindGroup(0, bindGroup);
         if (geneEdgeBuffer) {
           pass.setVertexBuffer(0, geneEdgeBuffer);
-          pass.draw(geneEdgeCount);
+          pass.draw(6, geneEdgeCount);
         }
         pass.end();
         device.queue.submit([encoder.finish()]);
@@ -6029,7 +6109,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             const targetGene = nextScene.genes.get(gene.source.uid);
             const ranges = geometry.ranges.genes.get(gene.source.uid);
             if (!targetGene || !ranges || clusterSlot === undefined) continue;
-            const vertices = geneVertices(targetGene, scales, null, clusterSlot);
+            const vertices = geneVertices(
+              targetGene,
+              scales,
+              null,
+              clusterSlot,
+              config.gene.shape.strokeWidth
+            );
             write("genes", ranges.genes, translateVertexX(vertices.genes, offsetX));
             write("geneEdges", ranges.geneEdges, translateVertexX(vertices.geneEdges, offsetX));
             affectedGenes.add(gene.source.uid);
