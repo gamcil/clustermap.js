@@ -138,6 +138,25 @@ const scales = {
   locus: d3.scaleOrdinal(),
 };
 
+function updateIdentityScale(data) {
+  const identities = data.links
+    .map((link) => Number(link.identity))
+    .filter(Number.isFinite);
+  const dataMin = identities.length ? d3.min(identities) : 0;
+  const dataMax = identities.length ? d3.max(identities) : 1;
+  const domain = config.colourBar.domain;
+  let min = domain.minMode === "data" ? dataMin : Number(domain.min);
+  let max = domain.maxMode === "data" ? dataMax : Number(domain.max);
+  min = Number.isFinite(min) ? Math.max(0, Math.min(1, min)) : 0;
+  max = Number.isFinite(max) ? Math.max(0, Math.min(1, max)) : 1;
+  if (min === max) {
+    min = Math.max(0, min - 0.005);
+    max = Math.min(1, max + 0.005);
+  }
+  if (min > max) [min, max] = [max, min];
+  scales.score.domain([min, max]).clamp(true);
+}
+
 // Every scene variant must project the same biological state with the same
 // scales and visual policy. Keep that dependency bundle in one place so a
 // configuration addition cannot silently affect full builds but not retained
@@ -213,6 +232,7 @@ function sceneChromeOptions(data) {
       fontSize: config.colourBar.fontSize,
       fontFamily: config.plot.fontFamily,
       scoreColour: scales.score,
+      domain: scales.score.domain(),
     },
     link: {
       show: config.link.show,
@@ -334,6 +354,8 @@ function updateScales(data) {
   scales.y.domain(getClusterOrder(chartState));
   const body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
   scales.y.range(data.clusters.map((cluster, index) => index * (config.cluster.spacing + body)));
+
+  updateIdentityScale(data);
 
   scales.offset.domain(data.clusters.map((cluster) => cluster.uid));
   refreshClusterOffsetScale();

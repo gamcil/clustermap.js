@@ -51,3 +51,22 @@ test("best-only filtering keeps the highest-identity overlapping link per cluste
 
   assert.deepEqual(filtered.map((item) => item.uid), ["higher"]);
 });
+
+test("identity threshold applies even when best-only filtering is disabled", async () => {
+  const { filterLinks } = await import("../src/links/groups.mjs");
+  const genes = new Map([
+    ["a", { clusterUid: "one" }],
+    ["b", { clusterUid: "two" }],
+    ["c", { clusterUid: "two" }],
+  ]);
+  const filtered = filterLinks([
+    link("below", "a", "b", 0.29),
+    link("at", "a", "c", 0.3),
+  ], {
+    groupForGene: () => 0,
+    geneForUid: (uid) => genes.get(uid),
+    bestOnly: false,
+    threshold: 0.3,
+  });
+  assert.deepEqual(filtered.map((item) => item.uid), ["at"]);
+});

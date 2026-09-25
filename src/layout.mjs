@@ -152,6 +152,7 @@ function buildChrome(bounds, genes, chrome) {
     fontFamily: chrome.scaleBar.fontFamily,
   };
 
+  const identityDomain = chrome.colourBar.domain || [0, 1];
   const colourBar = {
     visible: chrome.colourBar.show && !chrome.link.groupColour && chrome.link.show,
     position: {
@@ -162,11 +163,11 @@ function buildChrome(bounds, genes, chrome) {
     height: chrome.colourBar.height,
     fontSize: chrome.colourBar.fontSize,
     fontFamily: chrome.colourBar.fontFamily,
-    startColour: chrome.colourBar.scoreColour(0),
-    endColour: chrome.colourBar.scoreColour(1),
+    startColour: chrome.colourBar.scoreColour(identityDomain[0]),
+    endColour: chrome.colourBar.scoreColour(identityDomain[1]),
     label: "Identity (%)",
-    startLabel: "0",
-    endLabel: "100",
+    startLabel: `${Math.round(identityDomain[0] * 100)}`,
+    endLabel: `${Math.round(identityDomain[1] * 100)}`,
   };
 
   // Bottom legends share the lower chart edge with the scale and colour bars.
@@ -321,6 +322,7 @@ function createLinkLayout(source, order, { genes, loci, clusters, areClustersAdj
     labelPosition: anchors ? getLinkLabelPosition(anchors, link.labelPosition) : null,
     visible:
       Boolean(anchors) &&
+      !source.hidden &&
       source.identity >= link.threshold &&
       query?.visible &&
       target?.visible,

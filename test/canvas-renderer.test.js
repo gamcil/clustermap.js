@@ -101,10 +101,21 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
       },
     ],
   };
+  const renderedLink = {
+    visible: true,
+    anchors: [5, 10, 17, 5, 10, 37],
+    bounds: { minX: 5, maxX: 10, minY: 17, maxY: 37 },
+    source: {
+      uid: "link",
+      query: { uid: "gene" },
+      target: { uid: "distant" },
+      identity: 0.8,
+    },
+  };
   const scene = {
     clusters: new Map([["cluster", cluster]]),
     loci: new Map([["locus", cluster.loci[0]]]),
-    links: new Map(),
+    links: new Map([["link", renderedLink]]),
     genes: new Map([
       [
         "gene",
@@ -169,7 +180,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
       ["distant", distantGene.bounds],
     ]),
     loci: createSpatialIndex([["locus", { minX: 5, maxX: 15, minY: 0, maxY: 30 }]]),
-    links: createSpatialIndex([]),
+    links: createSpatialIndex([["link", renderedLink.bounds]]),
   };
   const config = {
     plot: { fontFamily: "sans-serif" },
@@ -179,7 +190,13 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
       shape: { stroke: "black", strokeWidth: 1 },
       label: { show: true, anchor: "middle", fontSize: 10 },
     },
-    link: {},
+    link: {
+      asLine: false,
+      straight: false,
+      strokeWidth: 1,
+      groupColour: false,
+      label: { show: false, position: 0.5 },
+    },
   };
   scene.bounds = { minX: 0, maxX: 20, minY: 10, maxY: 30 };
   assert.deepEqual(canvasFigureBounds(context, scene, config), {
@@ -205,6 +222,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   assert.ok(calls.some((call) => call[0] === "scale" && call[1] === 2));
   assert.ok(calls.some((call) => call[0] === "lineTo" && call[1] === 15));
   assert.ok(calls.some((call) => call[0] === "fill"));
+  assert.ok(calls.some((call) => call[0] === "bezierCurveTo"), "retained link anchors draw in an ordinary Canvas frame");
   assert.ok(calls.some((call) => call[0] === "fillRect" && call[1] === 5 && call[2] === 0));
 
   const highResolution = renderCanvas({
@@ -218,6 +236,51 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   assert.deepEqual(highResolution, { width: 200, height: 100, pixelRatio: 2 });
   assert.equal(canvas.width, 400);
   assert.equal(canvas.height, 200);
+
+  calls.length = 0;
+  renderCanvas({
+    canvas,
+    scene,
+    camera: { x: 20, y: 30, k: 2 },
+    config,
+    scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
+    showLinks: false,
+    showLoci: false,
+    showLocusTracks: false,
+    showGenes: false,
+    showGeneLabels: true,
+    showClusterLabels: false,
+    showChrome: false,
+  });
+  assert.ok(
+    calls.some((call) => call[0] === "fillText" && call[1] === "gene"),
+    "a text-only overlay can draw gene labels above WebGPU geometry"
+  );
+  assert.ok(
+    !calls.some((call) => call[0] === "fill"),
+    "the text-only overlay does not repaint gene polygons"
+  );
+
+  calls.length = 0;
+  renderCanvas({
+    canvas,
+    scene,
+    camera: { x: 20, y: 30, k: 2 },
+    config,
+    scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
+    showLinks: false,
+    showLoci: false,
+    showLocusTracks: false,
+    showGenes: false,
+    showGeneLabels: false,
+    showClusterLabels: false,
+    showChrome: false,
+    highlightGeneIds: new Set(["gene"]),
+  });
+  assert.ok(
+    calls.some((call) => call[0] === "set" && call[1] === "strokeStyle" && call[2] === "#1677ff"),
+    "a highlight-only Canvas overlay outlines editor-selected genes"
+  );
 
   const callsBeforeSuppressedHover = calls.length;
   renderCanvas({

@@ -20,6 +20,7 @@ import {
 } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
+import { applyChartOperations } from "./data/operations.mjs";
 import { fitCameraForBounds } from "./camera.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
@@ -87,8 +88,11 @@ export default function clusterMap() {
   let prepareCanvasFlipBase = () => {};
   let warmCanvasFlipBase = () => {};
   let currentData = null;
+  let chartIndex = null;
+  let highlightGeneIds = new Set();
   let disposeRasterInteraction = () => {};
   let disposeOverlay = () => {};
+  const changeListeners = new Set();
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const canvasBackend = createRetainedSceneBackend({
     render: renderCanvas,
@@ -481,10 +485,14 @@ export default function clusterMap() {
 
   function loadData(data) {
     currentData = normalizeChartData(data);
-    const chartIndex = createChartIndex(currentData);
+    chartIndex = createChartIndex(currentData);
     chartState = createChartState(currentData, chartState);
     runtime.setChartIndex(chartIndex);
     runtime.setChartState(chartState);
+  }
+
+  function emitChange(change) {
+    for (const listener of changeListeners) listener({ ...change, data: currentData });
   }
 
   function redraw({ animate = true, synchronize = true } = {}) {
@@ -569,12 +577,19 @@ export default function clusterMap() {
       eventNamespace: `.${runtime.ids.root}-tooltip`,
       actions: {
         redraw,
+        updateGene: (gene, changes) => my.patch([
+          { type: "genes.update", ids: [gene.uid], changes },
+        ]),
+        updateGroup: (group, changes) => my.patch([
+          { type: "groups.update", ids: [group.uid], changes },
+        ]),
+        mergeGroups: (target, sourceIds) => my.patch([{
+          type: "groups.merge",
+          targetId: target.uid,
+          sourceIds,
+        }]),
         anchorGene: (gene) => anchorGene(gene, { flipMismatchedLoci: true }),
         getGroups: () => data.groups,
-        setGroups: (groups) => {
-          data.groups = groups;
-          redraw();
-        },
       },
     });
     disposeOverlay = overlay.dispose;
@@ -688,6 +703,7 @@ export default function clusterMap() {
           rasterPreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
         pixelRatio: rasterMotion.pixelRatio(),
         preview: rasterPreview,
+        highlightGeneIds,
       });
       paintMinimap();
       return result;
@@ -707,8 +723,11 @@ export default function clusterMap() {
           pixelRatio: rasterMotion.pixelRatio(),
           preview: rasterPreview,
           showLinks: false,
+          showLinkLabels: true,
           showLocusTracks: false,
           showGenes: false,
+          showGeneLabels: true,
+          highlightGeneIds,
         });
       }
       const bounds = canvasNode.getBoundingClientRect();
@@ -1038,8 +1057,11 @@ export default function clusterMap() {
     const chooseLegendColour = (group) => {
       const picker = container.select("input.colourPicker");
       picker.on("change", () => {
-        group.colour = picker.node().value;
-        redraw();
+        my.patch([{
+          type: "groups.update",
+          ids: [group.uid],
+          changes: { colour: picker.node().value },
+        }]);
       });
       picker.node().click();
     };
@@ -1054,8 +1076,7 @@ export default function clusterMap() {
       if (event.defaultPrevented) return;
       const label = prompt("Enter new value:", group.label);
       if (!label) return;
-      group.label = label;
-      redraw();
+      my.patch([{ type: "groups.update", ids: [group.uid], changes: { label } }]);
     };
     // Both renderers delegate mutations to the same controller. Raster input
     // adapts stable IDs back to source records at its boundary; SVG already
@@ -1165,7 +1186,13 @@ export default function clusterMap() {
     if (data.config && data.config.updateGroups === false) {
       if (!data.groups) data.groups = [];
     } else {
-      data.groups = createLinkGroups(data.links, data.groups);
+      // Deleted genes deliberately leave link records intact for persistence
+      // and later restoration. Exclude dangling links only from this visual
+      // projection; neither the links nor their group membership are erased.
+      const projectedLinks = data.links.filter((link) =>
+        chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
+      );
+      data.groups = createLinkGroups(projectedLinks, data.groups);
     }
 
     runtime.updateGroups(data.groups);
@@ -1218,6 +1245,7 @@ export default function clusterMap() {
         ids: runtime.ids,
         lookup: { gene: runtime.lookup.geneData },
         interactions: rendererInteractions,
+        highlightGeneIds,
       });
 
       if (!hasInitialView) fitInitialView(svg, plot);
@@ -1291,12 +1319,54 @@ export default function clusterMap() {
   my.config = function (_) {
     if (!arguments.length) return runtime.config;
     runtime.configure(_);
+    // Configuration is a live part of the public chart API. Updating it after
+    // mounting should have the same immediate effect as updating data, without
+    // requiring consumers to re-bind the chart's normalized data themselves.
+    if (container && currentData) redraw({ animate: false });
     return my;
   };
-  my.data = (data) => {
-    if (!data) return currentData;
+  my.data = function (data) {
+    if (!arguments.length) return currentData;
+    if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
     container.datum(data).call(my);
+    emitChange({ type: "data.replace" });
     return my;
+  };
+  // Do not name this `apply`: D3 invokes callable charts through
+  // Function.prototype.apply when mounting them.
+  my.patch = (operations) => {
+    if (!container || !currentData || !chartIndex) {
+      throw new Error("Cannot patch chart data before the chart has rendered.");
+    }
+    const result = applyChartOperations(currentData, chartIndex, operations);
+    // Membership operations can create or remove groups, so cached lookups
+    // must be rebuilt before rendering and before the next public patch.
+    chartIndex = createChartIndex(currentData);
+    chartState = createChartState(currentData, chartState);
+    runtime.setChartIndex(chartIndex);
+    runtime.setChartState(chartState);
+    redraw({ animate: false });
+    emitChange({ type: "data.apply", operations: result.operations });
+    return my;
+  };
+  my.highlight = function (geneIds) {
+    if (!arguments.length) return [...highlightGeneIds];
+    const next = new Set(geneIds || []);
+    if (
+      next.size === highlightGeneIds.size &&
+      [...next].every((uid) => highlightGeneIds.has(uid))
+    ) return my;
+    highlightGeneIds = next;
+    if (!container || !currentData) return my;
+    if (isRasterRenderer(runtime.config.plot.renderer)) scheduleRasterPaint();
+    else redraw({ animate: false });
+    return my;
+  };
+  my.on = (type, listener) => {
+    if (type !== "change") throw new TypeError(`Unsupported chart event: ${type}`);
+    if (typeof listener !== "function") throw new TypeError("Chart event listeners must be functions.");
+    changeListeners.add(listener);
+    return () => changeListeners.delete(listener);
   };
   my.exportSvg = ({ padding = 20 } = {}) => {
     flushCanvasFlip();
@@ -1347,6 +1417,9 @@ export default function clusterMap() {
     webgpuClusterCommit = null;
     webgpuAnchorCommit = null;
     anchorSceneCommit = null;
+    chartIndex = null;
+    highlightGeneIds.clear();
+    changeListeners.clear();
     return my;
   };
 

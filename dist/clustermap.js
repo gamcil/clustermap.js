@@ -80,11 +80,23 @@
     { groupForGene, geneForUid, bestOnly, threshold }
   ) {
     const visibleLinks = links.filter(
-      (link) =>
+      (link) => {
+        // Link records remain part of the editable data even if an endpoint is
+        // temporarily absent (for example after deleting a gene). A renderer
+        // must omit such a link rather than treating that data relationship as
+        // deleted or dereferencing a missing gene below.
+        if (link.hidden || !geneForUid(link.query.uid) || !geneForUid(link.target.uid)) return false;
+        return (
         groupForGene(link.query.uid) !== null &&
         groupForGene(link.target.uid) !== null
+        );
+      }
     );
-    if (!bestOnly) return visibleLinks;
+    // Threshold decides visibility regardless of whether the optional
+    // best-per-cluster-pair reduction is enabled. Colour scaling is deliberately
+    // independent and is resolved by the shared identity scale.
+    const passingThreshold = visibleLinks.filter((link) => link.identity >= threshold);
+    if (!bestOnly) return passingThreshold;
 
     const setsEqual = (a, b) =>
       a.size === b.size && [...a].every((value) => b.has(value));
@@ -106,7 +118,7 @@
     }
 
     const linksByClusterPair = new ClusterPairMap();
-    const byIdentity = [...visibleLinks].sort((a, b) => b.identity - a.identity);
+    const byIdentity = [...passingThreshold].sort((a, b) => b.identity - a.identity);
 
     for (const link of byIdentity) {
       const clusterPair = new Set([
@@ -129,8 +141,7 @@
     }
 
     return [...linksByClusterPair.values()]
-      .flat()
-      .filter((link) => link.identity > threshold);
+      .flat();
   }
 
   function createChartState(data, previous = null) {
@@ -532,6 +543,7 @@
     const clusterById = new Map();
     const locusById = new Map();
     const geneById = new Map();
+    const groupById = new Map();
     const linkById = new Map();
     const linksByGeneId = new Map();
 
@@ -550,7 +562,9 @@
       appendToIndex(linksByGeneId, link.target.uid, link);
     }
 
-    return { clusterById, locusById, geneById, linkById, linksByGeneId };
+    for (const group of data.groups || []) groupById.set(group.uid, group);
+
+    return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId };
   }
 
   function normalizeGene(gene, locusUid, clusterUid) {
@@ -593,6 +607,215 @@
         genes: group.genes ? [...group.genes] : group.genes,
       })),
     };
+  }
+
+  // Public editing operations deliberately distinguish presentation updates from
+  // structural group edits. Group membership is exclusive: assigning a gene to
+  // one group removes it from every other group.
+  const fieldsForType = {
+    "genes.update": new Set(["label", "colour", "name"]),
+    "groups.update": new Set(["label", "colour", "hidden"]),
+    "loci.update": new Set(["label", "name"]),
+    "clusters.update": new Set(["label", "name"]),
+    "links.update": new Set(["label", "colour", "hidden", "identity"]),
+  };
+
+  function operationError(message) {
+    return new TypeError(`Invalid chart operation: ${message}`);
+  }
+
+  function uniqueIds(value, description) {
+    if (!Array.isArray(value) || !value.length) {
+      throw operationError(`${description} requires a non-empty array`);
+    }
+    return [...new Set(value)];
+  }
+
+  function validateGeneIds(index, geneIds, description) {
+    const ids = uniqueIds(geneIds, description);
+    for (const uid of ids) {
+      if (!index.geneById.has(uid)) throw operationError(`${description} refers to unknown gene ${uid}`);
+    }
+    return ids;
+  }
+
+  function validateOptionalGeneIds(index, geneIds, description) {
+    if (!Array.isArray(geneIds)) throw operationError(`${description} requires a geneIds array`);
+    const ids = [...new Set(geneIds)];
+    for (const uid of ids) {
+      if (!index.geneById.has(uid)) throw operationError(`${description} refers to unknown gene ${uid}`);
+    }
+    return ids;
+  }
+
+  function recordsForOperation(index, type) {
+    if (type === "genes.update") return index.geneById;
+    if (type === "groups.update") return index.groupById;
+    if (type === "loci.update") return index.locusById;
+    if (type === "links.update") return index.linkById;
+    return index.clusterById;
+  }
+
+  function validateUpdate(operation, index, groupIds) {
+    const fields = fieldsForType[operation.type];
+    if (!fields) return null;
+    const ids = uniqueIds(operation.ids, operation.type);
+    if (!operation.changes || typeof operation.changes !== "object" || Array.isArray(operation.changes)) {
+      throw operationError(`${operation.type} requires a changes object`);
+    }
+    const changeKeys = Object.keys(operation.changes);
+    if (!changeKeys.length || changeKeys.some((key) => !fields.has(key))) {
+      throw operationError(`${operation.type} contains an unsupported field`);
+    }
+    if (operation.type === "links.update" && "identity" in operation.changes) {
+      const identity = Number(operation.changes.identity);
+      if (!Number.isFinite(identity) || identity < 0 || identity > 1) {
+        throw operationError("links.update identity must be a number from 0 to 1");
+      }
+      operation = { ...operation, changes: { ...operation.changes, identity } };
+    }
+    const records = recordsForOperation(index, operation.type);
+    for (const uid of ids) {
+      if (operation.type === "groups.update") requireKnownGroup(groupIds, uid, operation.type);
+      if (!records.has(uid)) throw operationError(`${operation.type} refers to unknown ID ${uid}`);
+    }
+    return { type: operation.type, ids, changes: { ...operation.changes } };
+  }
+
+  function requireKnownGroup(groupIds, uid, type) {
+    if (!groupIds.has(uid)) throw operationError(`${type} refers to unknown group ${uid}`);
+  }
+
+  function validateStructuralGroupOperation(operation, index, groupIds) {
+    switch (operation.type) {
+      case "groups.assignGenes": {
+        requireKnownGroup(groupIds, operation.groupId, operation.type);
+        return { type: operation.type, groupId: operation.groupId, geneIds: validateGeneIds(index, operation.geneIds, operation.type) };
+      }
+      case "groups.unassignGenes":
+        return { type: operation.type, geneIds: validateGeneIds(index, operation.geneIds, operation.type) };
+      case "groups.delete": {
+        const ids = uniqueIds(operation.ids, operation.type);
+        ids.forEach((uid) => requireKnownGroup(groupIds, uid, operation.type));
+        ids.forEach((uid) => groupIds.delete(uid));
+        return { type: operation.type, ids };
+      }
+      case "groups.merge": {
+        requireKnownGroup(groupIds, operation.targetId, operation.type);
+        const sourceIds = uniqueIds(operation.sourceIds, operation.type).filter((uid) => uid !== operation.targetId);
+        if (!sourceIds.length) throw operationError(`${operation.type} requires at least one source group other than the target`);
+        sourceIds.forEach((uid) => requireKnownGroup(groupIds, uid, operation.type));
+        sourceIds.forEach((uid) => groupIds.delete(uid));
+        return { type: operation.type, targetId: operation.targetId, sourceIds };
+      }
+      case "groups.create": {
+        const group = operation.group;
+        if (!group || typeof group !== "object" || Array.isArray(group)) throw operationError("groups.create requires a group object");
+        if (group.uid === undefined || group.uid === null || group.uid === "") throw operationError("groups.create requires group.uid");
+        if (groupIds.has(group.uid)) throw operationError(`groups.create refers to existing group ${group.uid}`);
+        const unsupported = Object.keys(group).filter((key) => !["uid", "label", "colour", "hidden"].includes(key));
+        if (unsupported.length) throw operationError("groups.create contains an unsupported group field");
+        groupIds.add(group.uid);
+        return {
+          type: operation.type,
+          group: {
+            uid: group.uid,
+            ...(group.label !== undefined ? { label: group.label } : {}),
+            ...(group.colour !== undefined ? { colour: group.colour } : {}),
+            ...(group.hidden !== undefined ? { hidden: Boolean(group.hidden) } : {}),
+          },
+          geneIds: operation.geneIds === undefined ? [] : validateOptionalGeneIds(index, operation.geneIds, operation.type),
+        };
+      }
+      default:
+        throw operationError(`unsupported type ${String(operation.type)}`);
+    }
+  }
+
+  function validateOperation(operation, index, groupIds) {
+    if (!operation || typeof operation !== "object") throw operationError("each operation must be an object");
+    if (operation.type === "genes.delete") {
+      return { type: operation.type, ids: validateGeneIds(index, operation.ids, operation.type) };
+    }
+    if (operation.type === "links.delete") {
+      const ids = uniqueIds(operation.ids, operation.type);
+      for (const uid of ids) {
+        if (!index.linkById.has(uid)) throw operationError(`${operation.type} refers to unknown link ${uid}`);
+      }
+      return { type: operation.type, ids };
+    }
+    return validateUpdate(operation, index, groupIds) || validateStructuralGroupOperation(operation, index, groupIds);
+  }
+
+  function removeGenesFromGroups(groups, geneIds) {
+    const genes = new Set(geneIds);
+    groups.forEach((group) => {
+      group.genes = (group.genes || []).filter((uid) => !genes.has(uid));
+    });
+  }
+
+  function assignGenes(groups, groupId, geneIds) {
+    removeGenesFromGroups(groups, geneIds);
+    const group = groups.find((candidate) => candidate.uid === groupId);
+    group.genes = [...new Set([...(group.genes || []), ...geneIds])];
+  }
+
+  function applyOperation(data, index, operation) {
+    const updateRecords = fieldsForType[operation.type] && recordsForOperation(index, operation.type);
+    if (updateRecords) {
+      operation.ids.forEach((uid) => Object.assign(updateRecords.get(uid), operation.changes));
+      return;
+    }
+    switch (operation.type) {
+      case "genes.delete": {
+        const ids = new Set(operation.ids);
+        data.clusters.forEach((cluster) => cluster.loci.forEach((locus) => {
+          locus.genes = locus.genes.filter((gene) => !ids.has(gene.uid));
+        }));
+        return;
+      }
+      case "links.delete":
+        data.links = data.links.filter((link) => !operation.ids.includes(link.uid));
+        return;
+      case "groups.assignGenes":
+        assignGenes(data.groups, operation.groupId, operation.geneIds);
+        return;
+      case "groups.unassignGenes":
+        removeGenesFromGroups(data.groups, operation.geneIds);
+        return;
+      case "groups.create":
+        removeGenesFromGroups(data.groups, operation.geneIds);
+        data.groups.push({ ...operation.group, genes: [...operation.geneIds] });
+        return;
+      case "groups.delete":
+        data.groups = data.groups.filter((group) => !operation.ids.includes(group.uid));
+        return;
+      case "groups.merge": {
+        const target = data.groups.find((group) => group.uid === operation.targetId);
+        const sourceGenes = data.groups.filter((group) => operation.sourceIds.includes(group.uid)).flatMap((group) => group.genes || []);
+        target.genes = [...new Set([...(target.genes || []), ...sourceGenes])];
+        data.groups = data.groups.filter((group) => !operation.sourceIds.includes(group.uid));
+      }
+    }
+  }
+
+  /**
+   * Validate then apply a serializable batch of chart edits. Structural group
+   * edits are validated against a virtual group ID set first, so a malformed
+   * later operation cannot leave earlier records partially modified.
+   */
+  function applyChartOperations(data, index, operations) {
+    if (!Array.isArray(operations) || !operations.length) {
+      throw operationError("operations must be a non-empty array");
+    }
+    const groupIds = new Set(index.groupById.keys());
+    const applied = operations.map((operation) => validateOperation(operation, index, groupIds));
+    const hasStructuralGroupEdit = applied.some((operation) => operation.type !== "groups.update" && operation.type.startsWith("groups."));
+    for (const operation of applied) applyOperation(data, index, operation);
+    // Link-derived grouping is useful for an untouched chart, but a deliberate
+    // membership edit makes the user's group assignments authoritative.
+    if (hasStructuralGroupEdit) data.config = { ...(data.config || {}), updateGroups: false };
+    return { data, operations: applied };
   }
 
   function validBounds$1(bounds) {
@@ -708,10 +931,10 @@
       const pickerColour = colour ? colour.formatHex() : "#000000";
       div.append("label").text("Choose gene colour: ").append("input")
         .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
-        .on("change", (event) => { gene.colour = event.target.value; actions.redraw(); });
+        .on("change", (event) => actions.updateGene(gene, { colour: event.target.value }));
       div.append("button").text("Anchor map on gene").on("click", () => actions.anchorGene(gene));
-      text.on("input", (event) => { gene.label = event.target.value; select.attr("value", null); actions.redraw(); });
-      select.on("change", (event) => { gene.label = event.target.value; text.attr("value", event.target.value); actions.redraw(); });
+      text.on("input", (event) => { actions.updateGene(gene, { label: event.target.value }); select.attr("value", null); });
+      select.on("change", (event) => { actions.updateGene(gene, { label: event.target.value }); text.attr("value", event.target.value); });
       return div;
     };
 
@@ -726,20 +949,19 @@
       select.selectAll("option").data(groups.filter((candidate) => candidate.uid !== group.uid)).join("option")
         .text((candidate) => candidate.label).attr("value", (candidate) => candidate.uid);
       div.append("button").text("Merge!").on("click", () => {
-        const indices = [...select.node().options].filter((option) => option.selected)
-          .map((option) => groups.findIndex((candidate) => candidate.uid === option.value))
-          .sort((left, right) => right - left);
-        for (const index of indices) group.genes.push(...groups[index].genes);
-        for (const index of indices) groups.splice(index, 1);
-        actions.setGroups(groups);
+        const sourceIds = [...select.node().options]
+          .filter((option) => option.selected)
+          .map((option) => groups.find((candidate) => String(candidate.uid) === option.value)?.uid)
+          .filter((uid) => uid !== undefined);
+        if (sourceIds.length) actions.mergeGroups(group, sourceIds);
       });
       const colour = d3__namespace.color(group.colour);
       const pickerColour = colour ? colour.formatHex() : "#000000";
       div.append("label").text("Choose group colour: ").append("input")
         .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
-        .on("change", (event) => { group.colour = event.target.value; actions.redraw(); });
-      div.append("button").text("Hide group").on("click", () => { group.hidden = true; actions.redraw(); });
-      text.on("input", (event) => { group.label = event.target.value; actions.redraw(); });
+        .on("change", (event) => actions.updateGroup(group, { colour: event.target.value }));
+      div.append("button").text("Hide group").on("click", () => actions.updateGroup(group, { hidden: true }));
+      text.on("input", (event) => actions.updateGroup(group, { label: event.target.value }));
       return div;
     };
 
@@ -1713,6 +1935,7 @@
       fontFamily: chrome.scaleBar.fontFamily,
     };
 
+    const identityDomain = chrome.colourBar.domain || [0, 1];
     const colourBar = {
       visible: chrome.colourBar.show && !chrome.link.groupColour && chrome.link.show,
       position: {
@@ -1723,11 +1946,11 @@
       height: chrome.colourBar.height,
       fontSize: chrome.colourBar.fontSize,
       fontFamily: chrome.colourBar.fontFamily,
-      startColour: chrome.colourBar.scoreColour(0),
-      endColour: chrome.colourBar.scoreColour(1),
+      startColour: chrome.colourBar.scoreColour(identityDomain[0]),
+      endColour: chrome.colourBar.scoreColour(identityDomain[1]),
       label: "Identity (%)",
-      startLabel: "0",
-      endLabel: "100",
+      startLabel: `${Math.round(identityDomain[0] * 100)}`,
+      endLabel: `${Math.round(identityDomain[1] * 100)}`,
     };
 
     // Bottom legends share the lower chart edge with the scale and colour bars.
@@ -1882,6 +2105,7 @@
       labelPosition: anchors ? getLinkLabelPosition(anchors, link.labelPosition) : null,
       visible:
         Boolean(anchors) &&
+        !source.hidden &&
         source.identity >= link.threshold &&
         query?.visible &&
         target?.visible,
@@ -2776,6 +3000,26 @@
     context.closePath();
   }
 
+  function drawLinkLabel(context, layout, source, config, anchors, geometry = {}) {
+    if (!config.link.label.show || !(geometry.labelPosition || layout.labelPosition)) return;
+    let [ax1, ax2, ay, bx1, bx2, by] = anchors;
+    ax1 += geometry.a || 0;
+    ax2 += geometry.a || 0;
+    bx1 += geometry.b || 0;
+    bx2 += geometry.b || 0;
+    const aMid = (ax1 + ax2) / 2;
+    const bMid = (bx1 + bx2) / 2;
+    const labelPosition = geometry.labelPosition || {
+      x: aMid + (bMid - aMid) * config.link.label.position,
+      y: ay + Math.abs(by - ay) * config.link.label.position,
+    };
+    context.fillStyle = "white";
+    context.font = `${config.link.label.fontSize}px ${config.plot.fontFamily}`;
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+    context.fillText(source.label ?? source.identity.toFixed(2), labelPosition.x, labelPosition.y);
+  }
+
   function drawLink(context, layout, source, config, scales, geometry = {}) {
     const visible = geometry.visible ?? layout.visible;
     const anchors = geometry.anchors ?? layout.anchors;
@@ -2788,7 +3032,7 @@
     const aMid = (ax1 + ax2) / 2;
     const bMid = (bx1 + bx2) / 2;
     const group = scales.group(source.query.uid);
-    const colour = scales.colour(group);
+    const colour = source.colour || scales.colour(group);
     const score = scales.score(source.identity);
 
     context.beginPath();
@@ -2799,7 +3043,7 @@
         const middle = (ay + by) / 2;
         context.bezierCurveTo(aMid, middle, bMid, middle, bMid, by);
       }
-      context.strokeStyle = config.link.groupColour ? rgbaToRgb(colour) : score;
+      context.strokeStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
     } else {
       context.moveTo(ax2, ay);
       if (config.link.straight) {
@@ -2813,24 +3057,14 @@
         context.bezierCurveTo(bx1, middle, ax1, middle, ax1, ay);
       }
       context.closePath();
-      context.fillStyle = config.link.groupColour ? rgbaToRgb(colour) : score;
+      context.fillStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
       context.fill();
-      context.strokeStyle = config.link.groupColour ? colour : "black";
+      context.strokeStyle = source.colour || (config.link.groupColour ? colour : "black");
     }
     context.lineWidth = config.link.strokeWidth;
     context.stroke();
 
-    if (config.link.label.show && (geometry.labelPosition || layout.labelPosition)) {
-      const labelPosition = geometry.labelPosition || {
-        x: aMid + (bMid - aMid) * config.link.label.position,
-        y: ay + Math.abs(by - ay) * config.link.label.position,
-      };
-      context.fillStyle = "white";
-      context.font = `${config.link.label.fontSize}px ${config.plot.fontFamily}`;
-      context.textAlign = "center";
-      context.textBaseline = "alphabetic";
-      context.fillText(source.identity.toFixed(2), labelPosition.x, labelPosition.y);
-    }
+    drawLinkLabel(context, layout, source, config, anchors, geometry);
   }
 
   function drawClusterInfo(
@@ -2883,14 +3117,16 @@
     context.stroke();
     if (geometry.flipAxis !== undefined) context.restore();
 
-    if (!config.gene.label.show) {
-      context.restore();
-      return;
-    }
+    drawGeneLabel(context, gene, config, geometry);
+    context.restore();
+  }
+
+  function drawGeneLabel(context, gene, config, geometry = {}, { x: offsetX = 0, y: offsetY = 0 } = {}) {
+    if (!config.gene.label.show) return;
     const { x, y, rotation } = gene.label;
-    const labelX = geometry.labelX ?? gene.locus.x + x;
+    const labelX = (geometry.labelX ?? gene.locus.x + x) + offsetX;
     context.save();
-    context.translate(labelX, gene.locus.y + y);
+    context.translate(labelX, gene.locus.y + y + offsetY);
     context.rotate((rotation * Math.PI) / 180);
     context.fillStyle = "black";
     context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
@@ -2898,6 +3134,22 @@
     context.textBaseline = "alphabetic";
     context.fillText(gene.source.label || gene.source.name || gene.source.uid, 0, 0);
     context.restore();
+  }
+
+  function drawGeneHighlight(context, gene, camera, geometry = {}, { x: offsetX = 0, y: offsetY = 0 } = {}) {
+    context.save();
+    context.translate(offsetX, offsetY);
+    if (geometry.flipAxis !== undefined) {
+      context.translate(geometry.flipAxis, 0);
+      context.scale(geometry.flipScale, 1);
+      context.translate(-geometry.flipAxis, 0);
+    }
+    polygon(context, gene.polygon);
+    // Keep the editor-selection ring readable at every zoom level without
+    // obscuring the gene's group colour.
+    context.strokeStyle = "#1677ff";
+    context.lineWidth = 2.5 / camera.k;
+    context.stroke();
     context.restore();
   }
 
@@ -3334,6 +3586,9 @@
     showLoci = true,
     showLocusTracks = true,
     showGenes = true,
+    showGeneLabels = showGenes,
+    showLinkLabels = showLinks,
+    highlightGeneIds = null,
     showClusterLabels = true,
     showChrome = true,
   }) {
@@ -3370,9 +3625,9 @@
     const clusterPreview = preview?.type === "cluster-drag";
     const visible = !clusterPreview && viewport && displayScene.index
       ? {
-          links: showLinks ? queryViewportOrdered(displayScene.index.links, viewport) : null,
+          links: (showLinks || showLinkLabels) ? queryViewportOrdered(displayScene.index.links, viewport) : null,
           loci: showLoci ? queryViewportOrdered(displayScene.index.loci, viewport) : null,
-          genes: showGenes ? queryViewportOrdered(displayScene.index.genes, viewport) : null,
+          genes: (showGenes || showGeneLabels) ? queryViewportOrdered(displayScene.index.genes, viewport) : null,
         }
       : null;
 
@@ -3387,34 +3642,32 @@
     };
     const previewRecords = clusterPreview
       ? recordsForClusterPreview(displayScene, preview, viewport, {
-          includeLinks: showLinks,
-          includeGenes: showGenes,
+          includeLinks: showLinks || showLinkLabels,
+          includeGenes: showGenes || showGeneLabels,
         })
       : null;
 
-    for (const link of showLinks
+    for (const link of (showLinks || showLinkLabels)
       ? previewRecords?.links || recordsFor(displayScene.links, visible?.links, "links")
       : []) {
       const geometry = linkGeometryForPreview(displayScene, link, preview, config);
+      // Ordinary frames retain anchors on the link layout; only dynamic previews
+      // provide replacement anchors in their sparse geometry patch.
+      const anchors = geometry.anchors ?? link.anchors;
+      if (!geometry.visible || !anchors) continue;
       if (
         clusterPreview &&
-        (!geometry.visible || !boundsInViewport$1({
-          minX: Math.min(geometry.anchors[0], geometry.anchors[1], geometry.anchors[3], geometry.anchors[4]),
-          maxX: Math.max(geometry.anchors[0], geometry.anchors[1], geometry.anchors[3], geometry.anchors[4]),
-          minY: Math.min(geometry.anchors[2], geometry.anchors[5]),
-          maxY: Math.max(geometry.anchors[2], geometry.anchors[5]),
+        (!boundsInViewport$1({
+          minX: Math.min(anchors[0], anchors[1], anchors[3], anchors[4]),
+          maxX: Math.max(anchors[0], anchors[1], anchors[3], anchors[4]),
+          minY: Math.min(anchors[2], anchors[5]),
+          maxY: Math.max(anchors[2], anchors[5]),
         }, viewport))
       ) {
         continue;
       }
-      drawLink(
-        context,
-        link,
-        link.source,
-        config,
-        scales,
-        geometry
-      );
+      if (showLinks) drawLink(context, link, link.source, config, scales, geometry);
+      else drawLinkLabel(context, link, link.source, config, anchors, geometry);
     }
     const loci = showLoci
       ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci")
@@ -3459,18 +3712,28 @@
         hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
       );
     }
-    for (const gene of showGenes
+    for (const gene of (showGenes || showGeneLabels)
       ? previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes, "genes")
       : []) {
-      drawGene(
-        context,
-        gene,
-        config,
-        scales,
-        offsetsForGene(preview, gene),
-        geneVisibleForPreview(preview, gene),
-        geneGeometryForPreview(preview, gene)
-      );
+      const offsets = offsetsForGene(preview, gene);
+      const visible = geneVisibleForPreview(preview, gene);
+      const geometry = geneGeometryForPreview(preview, gene);
+      if (showGenes) drawGene(context, gene, config, scales, offsets, visible, geometry);
+      else if (visible) drawGeneLabel(context, gene, config, geometry, offsets);
+    }
+    if (highlightGeneIds?.size) {
+      for (const uid of highlightGeneIds) {
+        if (visible?.genes && !visible.genes.includes(uid)) continue;
+        const gene = displayScene.genes.get(uid);
+        if (!gene || !geneVisibleForPreview(preview, gene)) continue;
+        drawGeneHighlight(
+          context,
+          gene,
+          camera,
+          geneGeometryForPreview(preview, gene),
+          offsetsForGene(preview, gene)
+        );
+      }
     }
     if (showChrome && displayScene.chrome) {
       const chrome = preview?.chrome || displayScene.chrome;
@@ -3495,6 +3758,7 @@
     ids,
     lookup,
     interactions,
+    highlightGeneIds = new Set(),
   }) {
     const linkGroup = plot
       .selectAll("g.links")
@@ -3652,11 +3916,11 @@
             .attr("class", "geneLabel")
             .attr("dy", "-0.3em")
             .style("font-family", config.plot.fontFamily);
-          return updateGenes(enter, scene, config, scales);
+          return updateGenes(enter, scene, config, scales, highlightGeneIds);
         },
         (update) =>
           update.call((selection) =>
-            updateGenes(updateRender(selection), scene, config, scales)
+            updateGenes(updateRender(selection), scene, config, scales, highlightGeneIds)
           )
       );
 
@@ -3678,7 +3942,7 @@
           enter.append("path").attr("class", "geneLink");
           enter
             .append("text")
-            .text((link) => link.identity.toFixed(2))
+            .text((link) => link.label ?? link.identity.toFixed(2))
             .attr("class", "geneLinkLabel")
             .style("fill", "white")
             .style("text-anchor", "middle")
@@ -3820,7 +4084,7 @@
     return selection;
   }
 
-  function updateGenes(selection, scene, config, scales) {
+  function updateGenes(selection, scene, config, scales, highlightGeneIds) {
     const geneLayout = (gene) => scene.genes.get(gene.uid);
     const fill = (gene) => {
       if (gene.colour) return gene.colour;
@@ -3839,8 +4103,8 @@
       })
       .attr("points", (gene) => geneLayout(gene)?.localPolygon.join(" ") || "")
       .attr("fill", fill)
-      .style("stroke", config.gene.shape.stroke)
-      .style("stroke-width", config.gene.shape.strokeWidth);
+      .style("stroke", (gene) => highlightGeneIds.has(gene.uid) ? "#1677ff" : config.gene.shape.stroke)
+      .style("stroke-width", (gene) => highlightGeneIds.has(gene.uid) ? Math.max(2, config.gene.shape.strokeWidth) : config.gene.shape.strokeWidth);
     selection
       .selectAll("text.geneLabel")
       .text((gene) => gene.label || gene.name || gene.uid)
@@ -3856,10 +4120,12 @@
     const linkLayout = (link) => scene.links.get(link.uid);
     const fill = (link) => {
       if (config.link.asLine) return "none";
+      if (link.colour) return link.colour;
       if (config.link.groupColour) return rgbaToRgb(scales.colour(scales.group(link.query.uid)));
       return scales.score(link.identity);
     };
     const stroke = (link) => {
+      if (link.colour) return link.colour;
       if (config.link.groupColour) {
         const colour = scales.colour(scales.group(link.query.uid));
         return config.link.asLine ? rgbaToRgb(colour) : colour;
@@ -3878,6 +4144,7 @@
       .style("stroke-width", `${config.link.strokeWidth}px`);
     selection
       .selectAll("text")
+      .text((link) => link.label ?? link.identity.toFixed(2))
       .attr("opacity", (link) =>
         config.link.label.show && linkLayout(link)?.visible ? 1 : 0
       )
@@ -4551,6 +4818,14 @@
       show: true,
       width: 150,
       marginTop: 20,
+      // Bounds describe the colour mapping only; link.threshold remains the
+      // separate visibility filter. "data" resolves against all link records.
+      domain: {
+        min: 0,
+        max: 1,
+        minMode: "fixed",
+        maxMode: "fixed",
+      },
     },
     scaleBar: {
       colour: "black",
@@ -4793,6 +5068,25 @@
     locus: d3__namespace.scaleOrdinal(),
   };
 
+  function updateIdentityScale(data) {
+    const identities = data.links
+      .map((link) => Number(link.identity))
+      .filter(Number.isFinite);
+    const dataMin = identities.length ? d3__namespace.min(identities) : 0;
+    const dataMax = identities.length ? d3__namespace.max(identities) : 1;
+    const domain = config.colourBar.domain;
+    let min = domain.minMode === "data" ? dataMin : Number(domain.min);
+    let max = domain.maxMode === "data" ? dataMax : Number(domain.max);
+    min = Number.isFinite(min) ? Math.max(0, Math.min(1, min)) : 0;
+    max = Number.isFinite(max) ? Math.max(0, Math.min(1, max)) : 1;
+    if (min === max) {
+      min = Math.max(0, min - 0.005);
+      max = Math.min(1, max + 0.005);
+    }
+    if (min > max) [min, max] = [max, min];
+    scales.score.domain([min, max]).clamp(true);
+  }
+
   // Every scene variant must project the same biological state with the same
   // scales and visual policy. Keep that dependency bundle in one place so a
   // configuration addition cannot silently affect full builds but not retained
@@ -4868,6 +5162,7 @@
         fontSize: config.colourBar.fontSize,
         fontFamily: config.plot.fontFamily,
         scoreColour: scales.score,
+        domain: scales.score.domain(),
       },
       link: {
         show: config.link.show,
@@ -4989,6 +5284,8 @@
     scales.y.domain(getClusterOrder(chartState));
     const body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
     scales.y.range(data.clusters.map((cluster, index) => index * (config.cluster.spacing + body)));
+
+    updateIdentityScale(data);
 
     scales.offset.domain(data.clusters.map((cluster) => cluster.uid));
     refreshClusterOffsetScale();
@@ -5427,14 +5724,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const edge = [];
     const visible = linkVisibleForPreview(scene, link, preview, config);
     const colour = rgba(
-      config.link.groupColour
+      link.source.colour || (config.link.groupColour
         ? scales.colour(scales.group(link.source.query.uid))
-        : scales.score(link.source.identity)
+        : scales.score(link.source.identity))
     );
     const stroke = rgba(
-      config.link.groupColour
+      link.source.colour || (config.link.groupColour
         ? scales.colour(scales.group(link.source.query.uid))
-        : "black"
+        : "black")
     );
     pushLink(fill, edge, link, visible ? colour : transparent(colour), visible ? stroke : transparent(stroke), {
       // Records with a range were visible in the retained base scene. Keeping
@@ -5460,14 +5757,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const target = scene.genes.get(link.source.target.uid);
     if (!query || !target) return null;
     const fill = rgba(
-      config.link.groupColour
+      link.source.colour || (config.link.groupColour
         ? scales.colour(scales.group(link.source.query.uid))
-        : scales.score(link.source.identity)
+        : scales.score(link.source.identity))
     );
     const stroke = rgba(
-      config.link.groupColour
+      link.source.colour || (config.link.groupColour
         ? scales.colour(scales.group(link.source.query.uid))
-        : "black"
+        : "black")
     );
     return new Float32Array([
       ...linkEndpointForGpu(
@@ -6636,8 +6933,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let prepareCanvasFlipBase = () => {};
     let warmCanvasFlipBase = () => {};
     let currentData = null;
+    let chartIndex = null;
+    let highlightGeneIds = new Set();
     let disposeRasterInteraction = () => {};
     let disposeOverlay = () => {};
+    const changeListeners = new Set();
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
     const canvasBackend = createRetainedSceneBackend({
       render: renderCanvas,
@@ -7030,10 +7330,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     function loadData(data) {
       currentData = normalizeChartData(data);
-      const chartIndex = createChartIndex(currentData);
+      chartIndex = createChartIndex(currentData);
       chartState = createChartState(currentData, chartState);
       runtime.setChartIndex(chartIndex);
       runtime.setChartState(chartState);
+    }
+
+    function emitChange(change) {
+      for (const listener of changeListeners) listener({ ...change, data: currentData });
     }
 
     function redraw({ animate = true, synchronize = true } = {}) {
@@ -7118,12 +7422,19 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         eventNamespace: `.${runtime.ids.root}-tooltip`,
         actions: {
           redraw,
+          updateGene: (gene, changes) => my.patch([
+            { type: "genes.update", ids: [gene.uid], changes },
+          ]),
+          updateGroup: (group, changes) => my.patch([
+            { type: "groups.update", ids: [group.uid], changes },
+          ]),
+          mergeGroups: (target, sourceIds) => my.patch([{
+            type: "groups.merge",
+            targetId: target.uid,
+            sourceIds,
+          }]),
           anchorGene: (gene) => anchorGene(gene, { flipMismatchedLoci: true }),
           getGroups: () => data.groups,
-          setGroups: (groups) => {
-            data.groups = groups;
-            redraw();
-          },
         },
       });
       disposeOverlay = overlay.dispose;
@@ -7237,6 +7548,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             rasterPreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
           pixelRatio: rasterMotion.pixelRatio(),
           preview: rasterPreview,
+          highlightGeneIds,
         });
         paintMinimap();
         return result;
@@ -7256,8 +7568,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             pixelRatio: rasterMotion.pixelRatio(),
             preview: rasterPreview,
             showLinks: false,
+            showLinkLabels: true,
             showLocusTracks: false,
             showGenes: false,
+            showGeneLabels: true,
+            highlightGeneIds,
           });
         }
         const bounds = canvasNode.getBoundingClientRect();
@@ -7587,8 +7902,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const chooseLegendColour = (group) => {
         const picker = container.select("input.colourPicker");
         picker.on("change", () => {
-          group.colour = picker.node().value;
-          redraw();
+          my.patch([{
+            type: "groups.update",
+            ids: [group.uid],
+            changes: { colour: picker.node().value },
+          }]);
         });
         picker.node().click();
       };
@@ -7603,8 +7921,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         if (event.defaultPrevented) return;
         const label = prompt("Enter new value:", group.label);
         if (!label) return;
-        group.label = label;
-        redraw();
+        my.patch([{ type: "groups.update", ids: [group.uid], changes: { label } }]);
       };
       // Both renderers delegate mutations to the same controller. Raster input
       // adapts stable IDs back to source records at its boundary; SVG already
@@ -7714,7 +8031,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (data.config && data.config.updateGroups === false) {
         if (!data.groups) data.groups = [];
       } else {
-        data.groups = createLinkGroups(data.links, data.groups);
+        // Deleted genes deliberately leave link records intact for persistence
+        // and later restoration. Exclude dangling links only from this visual
+        // projection; neither the links nor their group membership are erased.
+        const projectedLinks = data.links.filter((link) =>
+          chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
+        );
+        data.groups = createLinkGroups(projectedLinks, data.groups);
       }
 
       runtime.updateGroups(data.groups);
@@ -7767,6 +8090,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           ids: runtime.ids,
           lookup: { gene: runtime.lookup.geneData },
           interactions: rendererInteractions,
+          highlightGeneIds,
         });
 
         if (!hasInitialView) fitInitialView(svg, plot);
@@ -7840,12 +8164,54 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     my.config = function (_) {
       if (!arguments.length) return runtime.config;
       runtime.configure(_);
+      // Configuration is a live part of the public chart API. Updating it after
+      // mounting should have the same immediate effect as updating data, without
+      // requiring consumers to re-bind the chart's normalized data themselves.
+      if (container && currentData) redraw({ animate: false });
       return my;
     };
-    my.data = (data) => {
-      if (!data) return currentData;
+    my.data = function (data) {
+      if (!arguments.length) return currentData;
+      if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
       container.datum(data).call(my);
+      emitChange({ type: "data.replace" });
       return my;
+    };
+    // Do not name this `apply`: D3 invokes callable charts through
+    // Function.prototype.apply when mounting them.
+    my.patch = (operations) => {
+      if (!container || !currentData || !chartIndex) {
+        throw new Error("Cannot patch chart data before the chart has rendered.");
+      }
+      const result = applyChartOperations(currentData, chartIndex, operations);
+      // Membership operations can create or remove groups, so cached lookups
+      // must be rebuilt before rendering and before the next public patch.
+      chartIndex = createChartIndex(currentData);
+      chartState = createChartState(currentData, chartState);
+      runtime.setChartIndex(chartIndex);
+      runtime.setChartState(chartState);
+      redraw({ animate: false });
+      emitChange({ type: "data.apply", operations: result.operations });
+      return my;
+    };
+    my.highlight = function (geneIds) {
+      if (!arguments.length) return [...highlightGeneIds];
+      const next = new Set(geneIds || []);
+      if (
+        next.size === highlightGeneIds.size &&
+        [...next].every((uid) => highlightGeneIds.has(uid))
+      ) return my;
+      highlightGeneIds = next;
+      if (!container || !currentData) return my;
+      if (isRasterRenderer(runtime.config.plot.renderer)) scheduleRasterPaint();
+      else redraw({ animate: false });
+      return my;
+    };
+    my.on = (type, listener) => {
+      if (type !== "change") throw new TypeError(`Unsupported chart event: ${type}`);
+      if (typeof listener !== "function") throw new TypeError("Chart event listeners must be functions.");
+      changeListeners.add(listener);
+      return () => changeListeners.delete(listener);
     };
     my.exportSvg = ({ padding = 20 } = {}) => {
       flushCanvasFlip();
@@ -7896,6 +8262,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       webgpuClusterCommit = null;
       webgpuAnchorCommit = null;
       anchorSceneCommit = null;
+      chartIndex = null;
+      highlightGeneIds.clear();
+      changeListeners.clear();
       return my;
     };
 

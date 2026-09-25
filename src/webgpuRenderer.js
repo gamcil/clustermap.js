@@ -393,14 +393,14 @@ function linkVertices(scene, link, scales, config, preview = null) {
   const edge = [];
   const visible = linkVisibleForPreview(scene, link, preview, config);
   const colour = rgba(
-    config.link.groupColour
+    link.source.colour || (config.link.groupColour
       ? scales.colour(scales.group(link.source.query.uid))
-      : scales.score(link.source.identity)
+      : scales.score(link.source.identity))
   );
   const stroke = rgba(
-    config.link.groupColour
+    link.source.colour || (config.link.groupColour
       ? scales.colour(scales.group(link.source.query.uid))
-      : "black"
+      : "black")
   );
   pushLink(fill, edge, link, visible ? colour : transparent(colour), visible ? stroke : transparent(stroke), {
     // Records with a range were visible in the retained base scene. Keeping
@@ -426,14 +426,14 @@ function linkRecordForGpu(scene, link, scales, config, clusterSlots, clusterOffs
   const target = scene.genes.get(link.source.target.uid);
   if (!query || !target) return null;
   const fill = rgba(
-    config.link.groupColour
+    link.source.colour || (config.link.groupColour
       ? scales.colour(scales.group(link.source.query.uid))
-      : scales.score(link.source.identity)
+      : scales.score(link.source.identity))
   );
   const stroke = rgba(
-    config.link.groupColour
+    link.source.colour || (config.link.groupColour
       ? scales.colour(scales.group(link.source.query.uid))
-      : "black"
+      : "black")
   );
   return new Float32Array([
     ...linkEndpointForGpu(

@@ -9,6 +9,7 @@ test("default configuration is recursively isolated per chart runtime", async ()
   first.plot.transitionDuration = 0;
   first.link.label.position = 0.25;
   first.gene.shape.stroke = "red";
+  first.colourBar.domain.min = 0.3;
 
   assert.equal(second.plot.transitionDuration, 250);
   assert.equal(second.link.label.position, 0.5);
@@ -17,4 +18,5 @@ test("default configuration is recursively isolated per chart runtime", async ()
   assert.equal(second.legend.marginTop, 20);
   assert.equal(second.legend.columns, 1);
   assert.equal(second.legend.columnWidth, 160);
+  assert.equal(second.colourBar.domain.min, 0);
 });

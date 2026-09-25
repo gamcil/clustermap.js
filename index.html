@@ -12,7 +12,9 @@
 		</script>
 		<style>
 			html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
-			main { display: flex; flex-direction: column; height: 100%; }
+			main { position: relative; display: flex; flex-direction: column; height: 100%; }
+			#toolbar { display: flex; gap: 6px; padding: 4px; }
+			#workspace { display: flex; flex: 1; min-height: 0; }
 			#plot,
 			#plot > .chart-host {
 				width: 100%;
@@ -20,13 +22,223 @@
 				margin: 0;
 				padding: 0;
 			}
-			#plot { flex: 1; min-height: 0; }
+			#plot { flex: 1; width: auto; min-height: 0; }
+			#editor {
+				position: absolute;
+				z-index: 3;
+				left: 12px;
+				right: 12px;
+				bottom: 12px;
+				height: min(360px, 42vh);
+				max-height: calc(100% - 48px);
+				min-height: 180px;
+				padding: 10px;
+				border: 1px solid #ccc;
+				border-radius: 6px;
+				background: rgba(255, 255, 255, 0.97);
+				box-shadow: 0 3px 16px rgba(0, 0, 0, 0.2);
+				box-sizing: border-box;
+				display: flex;
+				flex-direction: column;
+				overflow: hidden;
+				font: 13px system-ui, sans-serif;
+			}
+			#editor h2 { margin: 0; font-size: 16px; }
+			#editor-resize-handle { height: 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }
+			#editor-resize-handle::after { content: ""; display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: #aaa; }
+			#editor-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+			#editor-tabs { display: flex; gap: 4px; border-bottom: 1px solid #ddd; margin-bottom: 8px; }
+			#editor-tabs button { border: 0; border-bottom: 2px solid transparent; background: none; padding: 5px 8px; font: inherit; cursor: pointer; }
+			#editor-tabs button[aria-selected="true"] { border-bottom-color: #1677ff; font-weight: 600; }
+			.editor-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+			.editor-panel[hidden] { display: none; }
+			#data-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+			#group-create { display: flex; align-items: center; gap: 4px; }
+			#group-create[hidden] { display: none; }
+			#data-kind, #gene-view { display: flex; padding: 2px; border-radius: 5px; background: #eee; }
+			#gene-view[hidden] { display: none; }
+			#data-kind button, #gene-view button { border: 0; border-radius: 3px; padding: 4px 8px; background: transparent; font: inherit; cursor: pointer; }
+			#data-kind button[aria-pressed="true"], #gene-view button[aria-pressed="true"] { background: white; box-shadow: 0 1px 2px rgba(0, 0, 0, .18); font-weight: 600; }
+			#editor-filter { flex: 1 1 240px; min-width: 160px; box-sizing: border-box; }
+			#selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 0 8px; border-bottom: 1px solid #ddd; margin-bottom: 4px; }
+			#selection-actions[hidden] { display: none; }
+			#selection-actions strong { margin-right: 4px; }
+			#selection-label { width: 180px; max-width: 35vw; }
+			#selection-colour-label[hidden] { display: none; }
+			#selection-group, #selection-merge-target { max-width: 220px; }
+			#selection-new-group { width: 150px; max-width: 28vw; }
+			#editor-list-scroll { flex: 1; min-height: 120px; overflow: auto; }
+			#editor-rows { min-width: 0; }
+			.editor-row { height: 34px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid #eee; padding: 0 5px; box-sizing: border-box; cursor: pointer; }
+			.editor-row:hover, .editor-row.selected { background: #f1f6ff; }
+			.editor-row input[type="checkbox"] { opacity: .45; }
+			.editor-row:hover input[type="checkbox"], .editor-row.selected input[type="checkbox"] { opacity: 1; }
+			.editor-row .row-label { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+			.editor-row .context { color: #666; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+			.editor-row .colour { width: 28px; height: 22px; padding: 0; border: 0; background: transparent; }
+			.editor-row .visibility { border: 0; background: transparent; cursor: pointer; font-size: 16px; color: #555; }
+			.editor-row.tree-cluster { font-weight: 600; background: #fafafa; }
+			.editor-row.tree-locus { font-weight: 500; }
+			.tree-toggle { width: 20px; border: 0; background: transparent; padding: 0; cursor: pointer; font: inherit; }
+			.tree-spacer { flex: 0 0 auto; }
+			.editor-spacer { height: 0; }
+			#editor-summary { color: #666; font-size: 12px; padding: 3px 5px 6px; }
+			#appearance-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 20px; overflow: auto; padding: 4px 0; }
+			#appearance-controls fieldset { margin: 0; min-width: 0; border: 1px solid #ddd; border-radius: 4px; }
+			#appearance-controls legend { padding: 0 4px; font-weight: 600; }
+			#appearance-controls label { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+			#appearance-controls label > span { min-width: 0; flex: 1; }
+			#appearance-controls select, #appearance-controls input:not([type="checkbox"]):not([type="color"]) { min-width: 0; width: 76px; }
 		</style>
 	</head>
 	<body>
 		<main>
-			<button id="btn-save-svg">Save</button>
-			<div id="plot"></div>
+			<div id="toolbar">
+				<button id="btn-save-svg">Save</button>
+				<button id="btn-editor" aria-expanded="false">Edit data</button>
+			</div>
+			<div id="workspace">
+				<div id="plot"></div>
+			</div>
+			<aside id="editor" hidden>
+				<div id="editor-resize-handle" role="separator" aria-label="Resize plot editor" aria-orientation="horizontal"></div>
+				<div id="editor-header"><h2>Plot editor</h2></div>
+				<div id="editor-tabs" role="tablist" aria-label="Plot editor sections">
+					<button role="tab" data-editor-tab="data" aria-selected="true">Data</button>
+					<button role="tab" data-editor-tab="appearance" aria-selected="false">Appearance</button>
+				</div>
+				<section class="editor-panel" data-editor-panel="data">
+					<div id="data-toolbar">
+						<div id="data-kind" aria-label="Data type">
+							<button data-data-kind="groups" aria-pressed="true">Groups</button>
+							<button data-data-kind="genes" aria-pressed="false">Genes</button>
+							<button data-data-kind="links" aria-pressed="false">Links</button>
+						</div>
+						<div id="gene-view" aria-label="Gene view" hidden>
+							<button data-gene-view="tree" aria-pressed="true">Tree</button>
+							<button data-gene-view="list" aria-pressed="false">List</button>
+						</div>
+						<div id="group-create">
+							<input id="new-group-name" type="text" placeholder="New group name" aria-label="New group name">
+							<button id="new-group-create">Create group</button>
+						</div>
+						<input id="editor-filter" type="search" placeholder="Search names, labels, loci, or clusters">
+					</div>
+					<div id="selection-actions" hidden>
+						<strong id="selection-summary"></strong>
+						<input id="selection-label" type="text" placeholder="Set label">
+						<button id="selection-rename">Rename</button>
+						<label id="selection-colour-label" title="Set group colour"><input id="selection-colour" type="color"></label>
+						<input id="selection-identity" type="number" min="0" max="100" step="0.1" placeholder="Set identity (%)" hidden>
+						<button id="selection-set-identity" hidden>Set identity</button>
+						<button id="selection-show" hidden>Show</button>
+						<button id="selection-hide" hidden>Hide</button>
+						<select id="selection-group" hidden aria-label="Move selected genes to group"></select>
+						<button id="selection-assign" hidden>Move</button>
+						<button id="selection-unassign" hidden>Ungroup</button>
+						<input id="selection-new-group" type="text" placeholder="New group from selection" hidden>
+						<button id="selection-create-group" hidden>Create</button>
+						<button id="selection-delete-genes" hidden>Delete genes</button>
+						<button id="selection-delete-links" hidden>Delete links</button>
+						<select id="selection-merge-target" hidden aria-label="Group to keep when merging"></select>
+						<button id="selection-merge" hidden>Merge groups</button>
+						<button id="selection-delete" hidden>Delete groups</button>
+						<button id="selection-clear">Clear</button>
+						<button id="selection-undo" disabled>Undo</button>
+						<button id="selection-redo" disabled>Redo</button>
+					</div>
+					<div id="editor-summary" class="summary"></div>
+					<div id="editor-list-scroll">
+						<div id="editor-rows"></div>
+					</div>
+				</section>
+				<section class="editor-panel" data-editor-panel="appearance" hidden>
+					<div id="appearance-controls">
+						<fieldset><legend>Legend</legend>
+							<label><input data-config="legend.show" type="checkbox"> Show legend</label>
+							<label><span>Position</span><select data-config="legend.position"><option value="right">Right</option><option value="bottom">Bottom</option></select></label>
+							<label><span>Columns</span><input data-config="legend.columns" type="number" min="1" step="1"></label>
+							<label><span>Column width</span><input data-config="legend.columnWidth" type="number" min="1"></label>
+							<label><span>Entry height</span><input data-config="legend.entryHeight" type="number" min="1"></label>
+							<label><span>Font size</span><input data-config="legend.fontSize" type="number" min="1"></label>
+							<label><span>Left margin</span><input data-config="legend.marginLeft" type="number" min="0"></label>
+							<label><span>Top margin</span><input data-config="legend.marginTop" type="number" min="0"></label>
+						</fieldset>
+						<fieldset><legend>Links</legend>
+							<label><input data-config="link.show" type="checkbox"> Show links</label>
+							<label><input data-config="link.asLine" type="checkbox"> Draw as lines</label>
+							<label><input data-config="link.straight" type="checkbox"> Straight links</label>
+							<label><input data-config="link.bestOnly" type="checkbox"> Best match only</label>
+							<label><input data-config="link.groupColour" type="checkbox"> Use group colour</label>
+							<label><span>Minimum identity</span><input data-config="link.threshold" type="range" min="0" max="1" step="0.05" data-output></label>
+							<label><span>Stroke width</span><input data-config="link.strokeWidth" type="number" min="0" step="0.1"></label>
+						</fieldset>
+						<fieldset><legend>Link labels</legend>
+							<label><input data-config="link.label.show" type="checkbox"> Show link labels</label>
+							<label><input data-config="link.label.background" type="checkbox"> Label background</label>
+							<label><span>Font size</span><input data-config="link.label.fontSize" type="number" min="1"></label>
+							<label><span>Position</span><input data-config="link.label.position" type="number" min="0" max="1" step="0.05"></label>
+						</fieldset>
+						<fieldset><legend>Clusters &amp; loci</legend>
+							<label><input data-config="cluster.alignLabels" type="checkbox"> Align cluster labels</label>
+							<label><input data-config="cluster.hideLocusCoordinates" type="checkbox"> Hide locus coordinates</label>
+							<label><span>Cluster spacing</span><input data-config="cluster.spacing" type="number" min="0"></label>
+							<label><span>Cluster name size</span><input data-config="cluster.nameFontSize" type="number" min="1"></label>
+							<label><span>Locus label size</span><input data-config="cluster.lociFontSize" type="number" min="1"></label>
+							<label><span>Locus spacing</span><input data-config="locus.spacing" type="number" min="0"></label>
+							<label><span>Track colour</span><input data-config="locus.trackBar.colour" type="color"></label>
+							<label><span>Track stroke</span><input data-config="locus.trackBar.stroke" type="number" min="0" step="0.1"></label>
+						</fieldset>
+						<fieldset><legend>Genes</legend>
+							<label><input data-config="gene.label.show" type="checkbox"> Show gene labels</label>
+							<label><span>Label field</span><select data-config="gene.label.name"><option value="uid">UID</option><option value="name">Name</option><option value="label">Label</option></select></label>
+							<label><span>Label position</span><select data-config="gene.label.position"><option value="top">Top</option><option value="bottom">Bottom</option></select></label>
+							<label><span>Label anchor</span><select data-config="gene.label.anchor"><option value="start">Start</option><option value="middle">Middle</option><option value="end">End</option></select></label>
+							<label><span>Label size</span><input data-config="gene.label.fontSize" type="number" min="1"></label>
+							<label><span>Label rotation</span><input data-config="gene.label.rotation" type="number" step="1"></label>
+							<label><span>Label spacing</span><input data-config="gene.label.spacing" type="number" min="0"></label>
+							<label><span>Label start</span><input data-config="gene.label.start" type="number" min="0" max="1" step="0.05"></label>
+							<label><span>Body height</span><input data-config="gene.shape.bodyHeight" type="number" min="0"></label>
+							<label><span>Tip height</span><input data-config="gene.shape.tipHeight" type="number" min="0"></label>
+							<label><span>Tip length</span><input data-config="gene.shape.tipLength" type="number" min="0"></label>
+							<label><span>Stroke colour</span><input data-config="gene.shape.stroke" type="color"></label>
+							<label><span>Stroke width</span><input data-config="gene.shape.strokeWidth" type="number" min="0" step="0.1"></label>
+						</fieldset>
+						<fieldset><legend>Scale bars</legend>
+							<label><input data-config="scaleBar.show" type="checkbox"> Show scale bar</label>
+							<label><span>Base pairs</span><input data-config="scaleBar.basePair" type="number" min="1"></label>
+							<label><span>Height</span><input data-config="scaleBar.height" type="number" min="1"></label>
+							<label><span>Font size</span><input data-config="scaleBar.fontSize" type="number" min="1"></label>
+							<label><span>Stroke</span><input data-config="scaleBar.stroke" type="number" min="0" step="0.1"></label>
+							<label><span>Colour</span><input data-config="scaleBar.colour" type="color"></label>
+							<label><span>Scale margin</span><input data-config="scaleBar.marginTop" type="number" min="0"></label>
+							<label><input data-config="colourBar.show" type="checkbox"> Show identity bar</label>
+							<label><span>Identity width</span><input data-config="colourBar.width" type="number" min="1"></label>
+							<label><span>Identity height</span><input data-config="colourBar.height" type="number" min="1"></label>
+							<label><span>Identity font size</span><input data-config="colourBar.fontSize" type="number" min="1"></label>
+							<label><span>Identity margin</span><input data-config="colourBar.marginTop" type="number" min="0"></label>
+							<label><span>Minimum source</span><select data-config="colourBar.domain.minMode"><option value="fixed">Custom value</option><option value="data">Lowest identity in data</option></select></label>
+							<label><span>Minimum identity (%)</span><input data-config="colourBar.domain.min" data-percent data-identity-bound="min" type="number" min="0" max="100" step="0.1"></label>
+							<label><span>Maximum source</span><select data-config="colourBar.domain.maxMode"><option value="fixed">Custom value</option><option value="data">Highest identity in data</option></select></label>
+							<label><span>Maximum identity (%)</span><input data-config="colourBar.domain.max" data-percent data-identity-bound="max" type="number" min="0" max="100" step="0.1"></label>
+						</fieldset>
+						<fieldset><legend>Plot &amp; navigation</legend>
+							<label><span>Renderer</span><select data-config="plot.renderer"><option value="svg">SVG</option><option value="canvas">Canvas</option><option value="webgpu">WebGPU</option></select></label>
+							<label><span>Transition (ms)</span><input data-config="plot.transitionDuration" type="number" min="0"></label>
+							<label><span>Minimum zoom</span><input data-config="plot.minZoom" type="number" min="0" step="0.1"></label>
+							<label><span>Maximum zoom</span><input data-config="plot.maxZoom" type="number" min="0.1" step="0.1"></label>
+							<label><span>Scale factor</span><input data-config="plot.scaleFactor" type="number" min="0.1" step="0.1"></label>
+							<label><input data-config="plot.scaleGenes" type="checkbox"> Scale genes</label>
+							<label><span>Font family</span><input data-config="plot.fontFamily" type="text"></label>
+							<label><input data-config="plot.minimap.show" type="checkbox"> Show minimap</label>
+							<label><input data-config="plot.minimap.showLinks" type="checkbox"> Minimap links</label>
+							<label><span>Minimap width</span><input data-config="plot.minimap.width" type="number" min="1"></label>
+							<label><span>Minimap height</span><input data-config="plot.minimap.height" type="number" min="1"></label>
+							<label><span>Minimap margin</span><input data-config="plot.minimap.margin" type="number" min="0"></label>
+						</fieldset>
+					</div>
+				</section>
+				</aside>
 		</main>
 	</body>
 	<script type="module">
@@ -46,6 +258,7 @@
 		const biologicalFixture = biologicalFixtures[fixture]
 		const renderer = params.get("renderer") || (fixture === "large" || biologicalFixture ? "canvas" : "svg")
 		const minimumZoom = Number(params.get("minZoom"))
+		const editorEnabled = params.has("editor")
 
 		function download(blob, filename) {
 			/* Downloads a given blob to filename.
@@ -98,13 +311,507 @@
 				? d3.json(biologicalFixture)
 				: d3.json("testing.json")
 
+		const editor = {
+			root: document.querySelector("#editor"),
+			button: document.querySelector("#btn-editor"),
+			filter: document.querySelector("#editor-filter"),
+			rows: document.querySelector("#editor-rows"),
+			viewport: document.querySelector("#editor-list-scroll"),
+			summary: document.querySelector("#editor-summary"),
+			kindButtons: [...document.querySelectorAll("[data-data-kind]")],
+			geneView: document.querySelector("#gene-view"),
+			geneViewButtons: [...document.querySelectorAll("[data-gene-view]")],
+			groupCreate: document.querySelector("#group-create"),
+			newGroupName: document.querySelector("#new-group-name"),
+			newGroupCreate: document.querySelector("#new-group-create"),
+			selectionActions: document.querySelector("#selection-actions"),
+			selectionSummary: document.querySelector("#selection-summary"),
+			selectionLabel: document.querySelector("#selection-label"),
+			selectionRename: document.querySelector("#selection-rename"),
+			selectionColour: document.querySelector("#selection-colour"),
+			selectionColourLabel: document.querySelector("#selection-colour-label"),
+			selectionIdentity: document.querySelector("#selection-identity"),
+			selectionSetIdentity: document.querySelector("#selection-set-identity"),
+			selectionShow: document.querySelector("#selection-show"),
+			selectionHide: document.querySelector("#selection-hide"),
+			selectionGroup: document.querySelector("#selection-group"),
+			selectionAssign: document.querySelector("#selection-assign"),
+			selectionUnassign: document.querySelector("#selection-unassign"),
+			selectionNewGroup: document.querySelector("#selection-new-group"),
+			selectionCreateGroup: document.querySelector("#selection-create-group"),
+			selectionDeleteGenes: document.querySelector("#selection-delete-genes"),
+			selectionDeleteLinks: document.querySelector("#selection-delete-links"),
+			selectionMergeTarget: document.querySelector("#selection-merge-target"),
+			selectionMerge: document.querySelector("#selection-merge"),
+			selectionDelete: document.querySelector("#selection-delete"),
+			selectionClear: document.querySelector("#selection-clear"),
+			selectionUndo: document.querySelector("#selection-undo"),
+			selectionRedo: document.querySelector("#selection-redo"),
+			resizeHandle: document.querySelector("#editor-resize-handle"),
+			tabs: [...document.querySelectorAll("[data-editor-tab]")],
+			panels: [...document.querySelectorAll("[data-editor-panel]")],
+			appearanceFields: [...document.querySelectorAll("[data-config]")],
+			kind: "groups",
+			geneMode: "tree",
+			selected: new Set(),
+			expanded: new Set(),
+			history: [],
+			future: [],
+			allRows: [],
+			rowHeight: 34,
+			overscan: 8,
+		}
+
+		const escapeHtml = (value) => String(value ?? "")
+			.replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+			.replaceAll(">", "&gt;").replaceAll('"', "&quot;")
+		// The chart assigns its default palette as CSS rgb() strings. Colour inputs
+		// only accept a hex value, so normalize both defaults and explicit colours.
+		const colourInputValue = (value) => d3.color(value || "#888888")?.formatHex() || "#888888"
+		const labelFor = (record, fallback) => record.label || record.name || fallback
+		const matches = (needle, ...values) => !needle || values.join(" ").toLowerCase().includes(needle)
+		const groupForGene = (data) => new Map(data.groups.flatMap((group) => group.genes.map((uid) => [uid, group])))
+		const linkRows = (data, groups, needle) => {
+			const genes = new Map(data.clusters.flatMap((cluster) => cluster.loci.flatMap((locus) => locus.genes)).map((gene) => [gene.uid, gene]))
+			const domain = chart.config().colourBar.domain
+			const identities = data.links.map((link) => link.identity).filter(Number.isFinite)
+			const min = domain.minMode === "data" && identities.length ? d3.min(identities) : domain.min
+			const max = domain.maxMode === "data" && identities.length ? d3.max(identities) : domain.max
+			const scoreColour = d3.scaleSequential(d3.interpolateGreys)
+				.domain(min === max ? [Math.max(0, min - 0.005), Math.min(1, max + 0.005)] : [min, max])
+				.clamp(true)
+			const defaultColour = (link) => chart.config().link.groupColour
+				? groups.get(link.query.uid)?.colour
+				: scoreColour(link.identity)
+			return data.links.map((link) => {
+				const query = genes.get(link.query.uid)
+				const target = genes.get(link.target.uid)
+				const endpoints = `${labelFor(query, "Missing gene")} ↔ ${labelFor(target, "Missing gene")}`
+				const context = `${Math.round(link.identity * 100)}% identity · ${labelFor(groups.get(link.query.uid), "Ungrouped")} / ${labelFor(groups.get(link.target.uid), "Ungrouped")}`
+				return {
+					key: `link:${link.uid}`,
+					type: "link",
+					label: link.label || endpoints,
+					context,
+					colour: link.colour || defaultColour(link),
+					hidden: Boolean(link.hidden),
+					selectIds: [link.uid],
+					depth: 0,
+				}
+			}).filter((row) => matches(needle, row.label, row.context))
+		}
+		const flatGeneRows = (data, groups) => data.clusters.flatMap((cluster) => cluster.loci.flatMap((locus) =>
+			locus.genes.map((gene) => ({
+				key: `gene:${gene.uid}`,
+				label: labelFor(gene, "Unlabelled gene"),
+				context: `${labelFor(locus, "Unlabelled locus")} · ${labelFor(cluster, "Unlabelled cluster")}`,
+				colour: gene.colour || groups.get(gene.uid)?.colour,
+				selectIds: [gene.uid],
+				depth: 0,
+				type: "gene",
+			}))
+		))
+		const treeGeneRows = (data, groups, needle) => {
+			const rows = []
+			for (const cluster of data.clusters) {
+				const clusterGenes = cluster.loci.flatMap((locus) => locus.genes)
+				const clusterMatch = matches(needle, labelFor(cluster, "")) || clusterGenes.some((gene) => matches(needle, labelFor(gene, "")))
+				if (!clusterMatch) continue
+				const clusterKey = `cluster:${cluster.uid}`
+				const clusterOpen = Boolean(needle) || editor.expanded.has(clusterKey)
+				rows.push({ key: clusterKey, type: "cluster", label: labelFor(cluster, "Unlabelled cluster"), context: `${cluster.loci.length} loci · ${clusterGenes.length} genes`, selectIds: clusterGenes.map((gene) => gene.uid), depth: 0, expandable: true, expanded: clusterOpen })
+				if (!clusterOpen) continue
+				for (const locus of cluster.loci) {
+					const locusMatch = matches(needle, labelFor(locus, ""), labelFor(cluster, "")) || locus.genes.some((gene) => matches(needle, labelFor(gene, "")))
+					if (!locusMatch) continue
+					const locusKey = `locus:${locus.uid}`
+					const locusOpen = Boolean(needle) || editor.expanded.has(locusKey)
+					rows.push({ key: locusKey, type: "locus", label: labelFor(locus, "Unlabelled locus"), context: `${locus.start + 1}–${locus.end} · ${locus.genes.length} genes`, selectIds: locus.genes.map((gene) => gene.uid), depth: 1, expandable: true, expanded: locusOpen })
+					if (!locusOpen) continue
+					for (const gene of locus.genes) {
+						if (!matches(needle, labelFor(gene, ""), labelFor(locus, ""), labelFor(cluster, ""))) continue
+						rows.push({ key: `gene:${gene.uid}`, type: "gene", label: labelFor(gene, "Unlabelled gene"), context: groups.get(gene.uid)?.label || "Ungrouped", colour: gene.colour || groups.get(gene.uid)?.colour, selectIds: [gene.uid], depth: 2 })
+					}
+				}
+			}
+			return rows
+		}
+		const refreshEditorRows = () => {
+			const data = chart.data()
+			if (!data) return
+			const needle = editor.filter.value.trim().toLowerCase()
+			const groups = groupForGene(data)
+			if (editor.kind === "groups") {
+				editor.allRows = data.groups
+					.map((group) => ({ key: `group:${group.uid}`, type: "group", label: labelFor(group, "Unlabelled group"), context: `${group.genes.length} genes`, colour: group.colour, hidden: Boolean(group.hidden), selectIds: [group.uid], depth: 0 }))
+					.filter((row) => matches(needle, row.label, row.context))
+			} else if (editor.kind === "links") {
+				editor.allRows = linkRows(data, groups, needle)
+			} else if (editor.geneMode === "tree") {
+				editor.allRows = treeGeneRows(data, groups, needle)
+			} else {
+				editor.allRows = flatGeneRows(data, groups)
+					.filter((row) => matches(needle, row.label, row.context))
+					.sort((left, right) => left.label.localeCompare(right.label))
+			}
+			editor.rowByKey = new Map(editor.allRows.map((row) => [row.key, row]))
+		}
+		const selectedFor = (row) => row.selectIds.length > 0 && row.selectIds.every((uid) => editor.selected.has(uid))
+		const optionMarkup = (groups, selected) => groups.map((group) =>
+			`<option value="${escapeHtml(group.uid)}" ${String(group.uid) === String(selected) ? "selected" : ""}>${escapeHtml(labelFor(group, group.uid))}</option>`
+		).join("")
+		const groupUidForValue = (value) => chart.data()?.groups.find((group) => String(group.uid) === value)?.uid
+		const syncSelectionActions = () => {
+			const count = editor.selected.size
+			const editingGroups = editor.kind === "groups"
+			const editingLinks = editor.kind === "links"
+			const editingPresentation = editingGroups || editingLinks
+			const groups = chart.data()?.groups || []
+			editor.groupCreate.hidden = !editingGroups
+			editor.selectionActions.hidden = count === 0
+			if (!count) return
+			editor.selectionSummary.textContent = `${count} ${editingGroups ? "group" : editingLinks ? "link" : "gene"}${count === 1 ? "" : "s"} selected`
+			editor.selectionLabel.hidden = !editingPresentation
+			editor.selectionRename.hidden = !editingPresentation
+			editor.selectionColourLabel.hidden = !editingPresentation
+			editor.selectionIdentity.hidden = !editingLinks
+			editor.selectionSetIdentity.hidden = !editingLinks
+			editor.selectionShow.hidden = !editingPresentation
+			editor.selectionHide.hidden = !editingPresentation
+			editor.selectionGroup.hidden = editingGroups || editingLinks
+			editor.selectionAssign.hidden = editingGroups || editingLinks
+			editor.selectionUnassign.hidden = editingGroups || editingLinks
+			editor.selectionNewGroup.hidden = editingGroups || editingLinks
+			editor.selectionCreateGroup.hidden = editingGroups || editingLinks
+			editor.selectionDeleteGenes.hidden = !(!editingGroups && !editingLinks)
+			editor.selectionDeleteLinks.hidden = !editingLinks
+			editor.selectionMergeTarget.hidden = !editingGroups || count < 2
+			editor.selectionMerge.hidden = !editingGroups || count < 2
+			editor.selectionDelete.hidden = !editingGroups
+			if (!editingGroups) {
+				const selected = editor.selectionGroup.value
+				editor.selectionGroup.innerHTML = optionMarkup(groups, selected)
+			} else if (count > 1) {
+				const selectedGroups = groups.filter((group) => editor.selected.has(group.uid))
+				const selected = editor.selectionMergeTarget.value
+				editor.selectionMergeTarget.innerHTML = optionMarkup(selectedGroups, selected)
+			}
+			if (editingPresentation) {
+				const records = recordsForKind()
+				const colours = [...editor.selected]
+					.map((uid) => records.get(uid)?.colour || editor.allRows.find((row) => row.selectIds[0] === uid)?.colour)
+					.filter(Boolean)
+				const uniqueColours = [...new Set(colours)]
+				editor.selectionColour.value = colourInputValue(uniqueColours.length === 1 ? uniqueColours[0] : "#888888")
+				editor.selectionColour.title = uniqueColours.length === 1 ? "Set group colour" : "Selected groups have different colours"
+			}
+			editor.selectionUndo.disabled = editor.history.length === 0
+			editor.selectionRedo.disabled = editor.future.length === 0
+		}
+		const renderEditor = ({ refresh = true } = {}) => {
+			if (refresh) refreshEditorRows()
+			const allRows = editor.allRows
+			const visibleCount = Math.ceil((editor.viewport.clientHeight || 320) / editor.rowHeight) + editor.overscan * 2
+			const first = Math.max(0, Math.floor(editor.viewport.scrollTop / editor.rowHeight) - editor.overscan)
+			const last = Math.min(allRows.length, first + visibleCount)
+			const rows = allRows.slice(first, last)
+			const genes = editor.kind === "genes"
+			const links = editor.kind === "links"
+			editor.geneView.hidden = !genes
+			const noun = editor.kind === "groups" ? "groups" : links ? "links" : editor.geneMode === "tree" ? "tree items" : "genes"
+			editor.summary.textContent = `${allRows.length} visible ${noun}${editor.filter.value ? " matching search" : ""}.`
+			editor.rows.innerHTML = [
+				`<div class="editor-spacer" style="height:${first * editor.rowHeight}px"></div>`,
+				...rows.map((row) => `
+				<div class="editor-row ${row.type === "cluster" ? "tree-cluster" : row.type === "locus" ? "tree-locus" : ""} ${selectedFor(row) ? "selected" : ""}" data-row-key="${escapeHtml(row.key)}" data-row-type="${row.type}">
+					<span class="tree-spacer" style="width:${row.depth * 18}px"></span>
+					${row.expandable ? `<button class="tree-toggle" data-tree-toggle="${escapeHtml(row.key)}" aria-label="${row.expanded ? "Collapse" : "Expand"}">${row.expanded ? "⌄" : "›"}</button>` : `<span class="tree-spacer" style="width:20px"></span>`}
+					<input type="checkbox" data-row-select="${escapeHtml(row.key)}" ${selectedFor(row) ? "checked" : ""} aria-label="Select ${escapeHtml(row.label)}">
+					<span class="row-label" title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</span>
+					<span class="context" title="${escapeHtml(row.context)}">${escapeHtml(row.context)}</span>
+					${row.type === "group" || row.type === "gene" || row.type === "link" ? `<input class="colour" type="color" data-row-colour="${escapeHtml(row.key)}" value="${colourInputValue(row.colour)}" aria-label="Colour for ${escapeHtml(row.label)}">` : ""}
+					${row.type === "group" || row.type === "link" ? `<button class="visibility" data-row-visibility="${escapeHtml(row.key)}" title="${row.hidden ? "Show" : "Hide"} ${row.type}">${row.hidden ? "◉" : "◌"}</button>` : ""}
+				</div>`),
+				`<div class="editor-spacer" style="height:${Math.max(0, allRows.length - last) * editor.rowHeight}px"></div>`,
+			].join("")
+			syncSelectionActions()
+		}
+		const recordsForKind = () => {
+			const data = chart.data()
+			if (editor.kind === "groups") return new Map(data.groups.map((record) => [record.uid, record]))
+			if (editor.kind === "links") return new Map(data.links.map((record) => [record.uid, record]))
+			return new Map(data.clusters.flatMap((cluster) => cluster.loci.flatMap((locus) => locus.genes)).map((record) => [record.uid, record]))
+		}
+		const operationsForValues = (type, values) => {
+			const buckets = new Map()
+			for (const [uid, changes] of values) {
+				const key = JSON.stringify(changes)
+				const bucket = buckets.get(key) || { type, ids: [], changes }
+				bucket.ids.push(uid)
+				buckets.set(key, bucket)
+			}
+			return [...buckets.values()]
+		}
+		const applyChanges = (ids, changes, { remember = true } = {}) => {
+			if (!ids.length || !Object.keys(changes).length) return
+			const records = recordsForKind()
+			const before = ids.map((uid) => [uid, Object.fromEntries(Object.keys(changes).map((key) => [key, records.get(uid)?.[key]]))])
+			const operation = { type: `${editor.kind}.update`, ids, changes }
+			chart.patch([operation])
+			if (remember) {
+				editor.history.push({ operation, before })
+				editor.future = []
+				syncSelectionActions()
+			}
+		}
+		const nextGroupUid = () => {
+			const existing = new Set((chart.data()?.groups || []).map((group) => String(group.uid)))
+			let number = existing.size + 1
+			while (existing.has(`group-${number}`)) number += 1
+			return `group-${number}`
+		}
+		const applyMembershipChange = (operation, { clearSelection = false } = {}) => {
+			// Presentation edits have compact reversible values. Membership edits can
+			// create/delete several records, so they deliberately start a new history.
+			editor.history = []
+			editor.future = []
+			chart.patch([operation])
+			if (clearSelection) {
+				editor.selected.clear()
+				syncGeneHighlight()
+			}
+			renderEditor()
+		}
+		const createGroup = (name, geneIds = []) => {
+			const label = name.trim()
+			if (!label) return false
+			applyMembershipChange({
+				type: "groups.create",
+				group: { uid: nextGroupUid(), label },
+				geneIds,
+			})
+			return true
+		}
+		const syncGeneHighlight = () => chart.highlight(editor.kind === "genes" ? editor.selected : [])
+		const showEditorTab = (name) => {
+			editor.tabs.forEach((tab) => { tab.setAttribute("aria-selected", String(tab.dataset.editorTab === name)) })
+			editor.panels.forEach((panel) => { panel.hidden = panel.dataset.editorPanel !== name })
+		}
+		const configAtPath = (config, path) => path.split(".").reduce((value, key) => value?.[key], config)
+		const configChange = (path, value) => path.split(".").reverse().reduce((nested, key) => ({ [key]: nested }), value)
+		const appearanceValue = (field) => {
+			if (field.type === "checkbox") return field.checked
+			if (field.type === "number" || field.type === "range") return Number(field.value) / (field.dataset.percent !== undefined ? 100 : 1)
+			return field.value
+		}
+		const syncAppearanceControls = () => {
+			const config = chart.config()
+			editor.appearanceFields.forEach((field) => {
+				const value = configAtPath(config, field.dataset.config)
+				if (field.type === "checkbox") field.checked = Boolean(value)
+				else if (field.type === "color") field.value = colourInputValue(value)
+				else field.value = field.dataset.percent !== undefined ? Number(value ?? 0) * 100 : value ?? ""
+				if (field.dataset.identityBound) field.disabled = config.colourBar.domain[`${field.dataset.identityBound}Mode`] === "data"
+				if (field.dataset.output !== undefined) field.parentElement.querySelector("output")?.replaceChildren(Number(value).toFixed(2))
+			})
+		}
+		const updateAppearance = (options) => {
+			chart.config(options)
+			syncAppearanceControls()
+		}
+		editor.button.addEventListener("click", () => {
+			const visible = editor.root.hidden
+			editor.root.hidden = !visible
+			editor.button.setAttribute("aria-expanded", String(visible))
+			if (visible) renderEditor()
+		})
+		if (editorEnabled) editor.button.click()
+		editor.tabs.forEach((tab) => tab.addEventListener("click", () => showEditorTab(tab.dataset.editorTab)))
+		let editorResize = null
+		editor.resizeHandle.addEventListener("pointerdown", (event) => {
+			editorResize = { pointerId: event.pointerId, y: event.clientY, height: editor.root.getBoundingClientRect().height }
+			editor.resizeHandle.setPointerCapture(event.pointerId)
+			document.body.style.cursor = "ns-resize"
+		})
+		editor.resizeHandle.addEventListener("pointermove", (event) => {
+			if (!editorResize || event.pointerId !== editorResize.pointerId) return
+			const toolbarHeight = document.querySelector("#toolbar").getBoundingClientRect().height
+			const height = Math.max(180, Math.min(window.innerHeight - toolbarHeight - 80, editorResize.height + editorResize.y - event.clientY))
+			editor.root.style.height = `${height}px`
+			renderEditor({ refresh: false })
+		})
+		const stopEditorResize = (event) => {
+			if (!editorResize || event.pointerId !== editorResize.pointerId) return
+			editorResize = null
+			document.body.style.cursor = ""
+		}
+		editor.resizeHandle.addEventListener("pointerup", stopEditorResize)
+		editor.resizeHandle.addEventListener("pointercancel", stopEditorResize)
+		editor.kindButtons.forEach((button) => button.addEventListener("click", () => {
+			editor.kind = button.dataset.dataKind
+			editor.selected.clear()
+			syncGeneHighlight()
+			editor.kindButtons.forEach((candidate) => candidate.setAttribute("aria-pressed", String(candidate === button)))
+			editor.viewport.scrollTop = 0
+			renderEditor()
+		}))
+		editor.geneViewButtons.forEach((button) => button.addEventListener("click", () => {
+			editor.geneMode = button.dataset.geneView
+			editor.geneViewButtons.forEach((candidate) => candidate.setAttribute("aria-pressed", String(candidate === button)))
+			editor.viewport.scrollTop = 0
+			renderEditor()
+		}))
+		editor.filter.addEventListener("input", () => { editor.viewport.scrollTop = 0; renderEditor() })
+		editor.viewport.addEventListener("scroll", () => renderEditor({ refresh: false }))
+		editor.rows.addEventListener("pointerover", (event) => {
+			if (editor.kind !== "genes") return
+			const rowNode = event.target.closest("[data-row-key]")
+			if (!rowNode || rowNode.contains(event.relatedTarget)) return
+			const row = editor.rowByKey.get(rowNode.dataset.rowKey)
+			if (row) chart.highlight(row.selectIds)
+		})
+		editor.rows.addEventListener("pointerout", (event) => {
+			if (editor.kind !== "genes") return
+			const rowNode = event.target.closest("[data-row-key]")
+			if (!rowNode || rowNode.contains(event.relatedTarget)) return
+			syncGeneHighlight()
+		})
+		editor.rows.addEventListener("click", (event) => {
+			const target = event.target
+			const key = target.dataset.treeToggle
+			if (key) {
+				editor.expanded.has(key) ? editor.expanded.delete(key) : editor.expanded.add(key)
+				renderEditor()
+				return
+			}
+			if (target.dataset.rowVisibility) {
+				const row = editor.rowByKey.get(target.dataset.rowVisibility)
+				applyChanges(row.selectIds, { hidden: !row.hidden })
+				return
+			}
+			if (target.dataset.rowColour || target.matches("input")) return
+			const row = target.closest("[data-row-key]") && editor.rowByKey.get(target.closest("[data-row-key]").dataset.rowKey)
+			if (!row) return
+			const select = !selectedFor(row)
+			row.selectIds.forEach((uid) => select ? editor.selected.add(uid) : editor.selected.delete(uid))
+			syncGeneHighlight()
+			renderEditor({ refresh: false })
+		})
+		editor.rows.addEventListener("change", (event) => {
+			const target = event.target
+			if (target.dataset.rowSelect) {
+				const row = editor.rowByKey.get(target.dataset.rowSelect)
+				target.checked ? row.selectIds.forEach((uid) => editor.selected.add(uid)) : row.selectIds.forEach((uid) => editor.selected.delete(uid))
+				syncGeneHighlight()
+			renderEditor({ refresh: false })
+				return
+			}
+			if (!target.dataset.rowColour) return
+			const row = editor.rowByKey.get(target.dataset.rowColour)
+			applyChanges(row.selectIds, { colour: target.value })
+		})
+		editor.selectionRename.addEventListener("click", () => {
+			if (!editor.selectionLabel.value) return
+			applyChanges([...editor.selected], { label: editor.selectionLabel.value })
+			editor.selectionLabel.value = ""
+		})
+		editor.selectionLabel.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") editor.selectionRename.click()
+		})
+		editor.selectionColour.addEventListener("change", () => applyChanges([...editor.selected], { colour: editor.selectionColour.value }))
+		editor.selectionSetIdentity.addEventListener("click", () => {
+			const identity = Number(editor.selectionIdentity.value)
+			if (!Number.isFinite(identity) || identity < 0 || identity > 100) return
+			applyChanges([...editor.selected], { identity: identity / 100 })
+			editor.selectionIdentity.value = ""
+		})
+		editor.selectionIdentity.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") editor.selectionSetIdentity.click()
+		})
+		editor.selectionShow.addEventListener("click", () => applyChanges([...editor.selected], { hidden: false }))
+		editor.selectionHide.addEventListener("click", () => applyChanges([...editor.selected], { hidden: true }))
+		editor.newGroupCreate.addEventListener("click", () => {
+			if (createGroup(editor.newGroupName.value)) editor.newGroupName.value = ""
+		})
+		editor.newGroupName.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") editor.newGroupCreate.click()
+		})
+		editor.selectionAssign.addEventListener("click", () => {
+			const groupId = groupUidForValue(editor.selectionGroup.value)
+			if (groupId === undefined) return
+			applyMembershipChange({ type: "groups.assignGenes", groupId, geneIds: [...editor.selected] })
+		})
+		editor.selectionUnassign.addEventListener("click", () => {
+			applyMembershipChange({ type: "groups.unassignGenes", geneIds: [...editor.selected] })
+		})
+		editor.selectionCreateGroup.addEventListener("click", () => {
+			if (createGroup(editor.selectionNewGroup.value, [...editor.selected])) editor.selectionNewGroup.value = ""
+		})
+		editor.selectionNewGroup.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") editor.selectionCreateGroup.click()
+		})
+		editor.selectionDeleteGenes.addEventListener("click", () => {
+			const geneIds = [...editor.selected]
+			if (!geneIds.length) return
+			if (!window.confirm(`Delete ${geneIds.length} gene${geneIds.length === 1 ? "" : "s"} from the plot? Links will be kept in the data.`)) return
+			applyMembershipChange({ type: "genes.delete", ids: geneIds }, { clearSelection: true })
+		})
+		editor.selectionDeleteLinks.addEventListener("click", () => {
+			const ids = [...editor.selected]
+			if (!ids.length) return
+			if (!window.confirm(`Delete ${ids.length} link${ids.length === 1 ? "" : "s"}? This does not delete genes.`)) return
+			applyMembershipChange({ type: "links.delete", ids }, { clearSelection: true })
+		})
+		editor.selectionMerge.addEventListener("click", () => {
+			const targetId = groupUidForValue(editor.selectionMergeTarget.value)
+			if (targetId === undefined) return
+			applyMembershipChange({
+				type: "groups.merge",
+				targetId,
+				sourceIds: [...editor.selected],
+			}, { clearSelection: true })
+		})
+		editor.selectionDelete.addEventListener("click", () => {
+			applyMembershipChange({ type: "groups.delete", ids: [...editor.selected] }, { clearSelection: true })
+		})
+		editor.selectionClear.addEventListener("click", () => { editor.selected.clear(); syncGeneHighlight(); renderEditor({ refresh: false }) })
+		editor.selectionUndo.addEventListener("click", () => {
+			const change = editor.history.pop()
+			if (!change) return
+			chart.patch(operationsForValues(change.operation.type, change.before))
+			editor.future.push(change)
+			renderEditor()
+		})
+		editor.selectionRedo.addEventListener("click", () => {
+			const change = editor.future.pop()
+			if (!change) return
+			chart.patch([change.operation])
+			editor.history.push(change)
+			renderEditor()
+		})
+		editor.appearanceFields.forEach((field) => {
+			field.addEventListener("input", () => {
+				if (field.dataset.output !== undefined) field.parentElement.querySelector("output")?.replaceChildren(Number(field.value).toFixed(2))
+			})
+			field.addEventListener("change", () => updateAppearance(configChange(field.dataset.config, appearanceValue(field))))
+		})
+
 		data
 			.then(data => {
+				// Exposed only in test mode for browser assertions.
+				if (testMode) window.__demoChart = chart
 				div.selectAll("div")
 					.data([data])
 					.join("div")
 					.attr("class", "chart-host")
 					.call(chart)
+				chart.data().clusters.forEach((cluster) => {
+					editor.expanded.add(`cluster:${cluster.uid}`)
+					cluster.loci.forEach((locus) => editor.expanded.add(`locus:${locus.uid}`))
+				})
+				chart.on("change", renderEditor)
+				renderEditor()
+				syncAppearanceControls()
 
 				d3.select("#btn-save-svg")
 					.on("click", () => {

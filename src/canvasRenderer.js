@@ -307,6 +307,26 @@ function polygon(context, points) {
   context.closePath();
 }
 
+function drawLinkLabel(context, layout, source, config, anchors, geometry = {}) {
+  if (!config.link.label.show || !(geometry.labelPosition || layout.labelPosition)) return;
+  let [ax1, ax2, ay, bx1, bx2, by] = anchors;
+  ax1 += geometry.a || 0;
+  ax2 += geometry.a || 0;
+  bx1 += geometry.b || 0;
+  bx2 += geometry.b || 0;
+  const aMid = (ax1 + ax2) / 2;
+  const bMid = (bx1 + bx2) / 2;
+  const labelPosition = geometry.labelPosition || {
+    x: aMid + (bMid - aMid) * config.link.label.position,
+    y: ay + Math.abs(by - ay) * config.link.label.position,
+  };
+  context.fillStyle = "white";
+  context.font = `${config.link.label.fontSize}px ${config.plot.fontFamily}`;
+  context.textAlign = "center";
+  context.textBaseline = "alphabetic";
+  context.fillText(source.label ?? source.identity.toFixed(2), labelPosition.x, labelPosition.y);
+}
+
 function drawLink(context, layout, source, config, scales, geometry = {}) {
   const visible = geometry.visible ?? layout.visible;
   const anchors = geometry.anchors ?? layout.anchors;
@@ -319,7 +339,7 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   const aMid = (ax1 + ax2) / 2;
   const bMid = (bx1 + bx2) / 2;
   const group = scales.group(source.query.uid);
-  const colour = scales.colour(group);
+  const colour = source.colour || scales.colour(group);
   const score = scales.score(source.identity);
 
   context.beginPath();
@@ -330,7 +350,7 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
       const middle = (ay + by) / 2;
       context.bezierCurveTo(aMid, middle, bMid, middle, bMid, by);
     }
-    context.strokeStyle = config.link.groupColour ? rgbaToRgb(colour) : score;
+    context.strokeStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
   } else {
     context.moveTo(ax2, ay);
     if (config.link.straight) {
@@ -344,24 +364,14 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
       context.bezierCurveTo(bx1, middle, ax1, middle, ax1, ay);
     }
     context.closePath();
-    context.fillStyle = config.link.groupColour ? rgbaToRgb(colour) : score;
+    context.fillStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
     context.fill();
-    context.strokeStyle = config.link.groupColour ? colour : "black";
+    context.strokeStyle = source.colour || (config.link.groupColour ? colour : "black");
   }
   context.lineWidth = config.link.strokeWidth;
   context.stroke();
 
-  if (config.link.label.show && (geometry.labelPosition || layout.labelPosition)) {
-    const labelPosition = geometry.labelPosition || {
-      x: aMid + (bMid - aMid) * config.link.label.position,
-      y: ay + Math.abs(by - ay) * config.link.label.position,
-    };
-    context.fillStyle = "white";
-    context.font = `${config.link.label.fontSize}px ${config.plot.fontFamily}`;
-    context.textAlign = "center";
-    context.textBaseline = "alphabetic";
-    context.fillText(source.identity.toFixed(2), labelPosition.x, labelPosition.y);
-  }
+  drawLinkLabel(context, layout, source, config, anchors, geometry);
 }
 
 function drawClusterInfo(
@@ -414,14 +424,16 @@ function drawGene(
   context.stroke();
   if (geometry.flipAxis !== undefined) context.restore();
 
-  if (!config.gene.label.show) {
-    context.restore();
-    return;
-  }
+  drawGeneLabel(context, gene, config, geometry);
+  context.restore();
+}
+
+function drawGeneLabel(context, gene, config, geometry = {}, { x: offsetX = 0, y: offsetY = 0 } = {}) {
+  if (!config.gene.label.show) return;
   const { x, y, rotation } = gene.label;
-  const labelX = geometry.labelX ?? gene.locus.x + x;
+  const labelX = (geometry.labelX ?? gene.locus.x + x) + offsetX;
   context.save();
-  context.translate(labelX, gene.locus.y + y);
+  context.translate(labelX, gene.locus.y + y + offsetY);
   context.rotate((rotation * Math.PI) / 180);
   context.fillStyle = "black";
   context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
@@ -429,6 +441,22 @@ function drawGene(
   context.textBaseline = "alphabetic";
   context.fillText(gene.source.label || gene.source.name || gene.source.uid, 0, 0);
   context.restore();
+}
+
+function drawGeneHighlight(context, gene, camera, geometry = {}, { x: offsetX = 0, y: offsetY = 0 } = {}) {
+  context.save();
+  context.translate(offsetX, offsetY);
+  if (geometry.flipAxis !== undefined) {
+    context.translate(geometry.flipAxis, 0);
+    context.scale(geometry.flipScale, 1);
+    context.translate(-geometry.flipAxis, 0);
+  }
+  polygon(context, gene.polygon);
+  // Keep the editor-selection ring readable at every zoom level without
+  // obscuring the gene's group colour.
+  context.strokeStyle = "#1677ff";
+  context.lineWidth = 2.5 / camera.k;
+  context.stroke();
   context.restore();
 }
 
@@ -865,6 +893,9 @@ export function renderCanvas({
   showLoci = true,
   showLocusTracks = true,
   showGenes = true,
+  showGeneLabels = showGenes,
+  showLinkLabels = showLinks,
+  highlightGeneIds = null,
   showClusterLabels = true,
   showChrome = true,
 }) {
@@ -901,9 +932,9 @@ export function renderCanvas({
   const clusterPreview = preview?.type === "cluster-drag";
   const visible = !clusterPreview && viewport && displayScene.index
     ? {
-        links: showLinks ? queryViewportOrdered(displayScene.index.links, viewport) : null,
+        links: (showLinks || showLinkLabels) ? queryViewportOrdered(displayScene.index.links, viewport) : null,
         loci: showLoci ? queryViewportOrdered(displayScene.index.loci, viewport) : null,
-        genes: showGenes ? queryViewportOrdered(displayScene.index.genes, viewport) : null,
+        genes: (showGenes || showGeneLabels) ? queryViewportOrdered(displayScene.index.genes, viewport) : null,
       }
     : null;
 
@@ -918,34 +949,32 @@ export function renderCanvas({
   };
   const previewRecords = clusterPreview
     ? recordsForClusterPreview(displayScene, preview, viewport, {
-        includeLinks: showLinks,
-        includeGenes: showGenes,
+        includeLinks: showLinks || showLinkLabels,
+        includeGenes: showGenes || showGeneLabels,
       })
     : null;
 
-  for (const link of showLinks
+  for (const link of (showLinks || showLinkLabels)
     ? previewRecords?.links || recordsFor(displayScene.links, visible?.links, "links")
     : []) {
     const geometry = linkGeometryForPreview(displayScene, link, preview, config);
+    // Ordinary frames retain anchors on the link layout; only dynamic previews
+    // provide replacement anchors in their sparse geometry patch.
+    const anchors = geometry.anchors ?? link.anchors;
+    if (!geometry.visible || !anchors) continue;
     if (
       clusterPreview &&
-      (!geometry.visible || !boundsInViewport({
-        minX: Math.min(geometry.anchors[0], geometry.anchors[1], geometry.anchors[3], geometry.anchors[4]),
-        maxX: Math.max(geometry.anchors[0], geometry.anchors[1], geometry.anchors[3], geometry.anchors[4]),
-        minY: Math.min(geometry.anchors[2], geometry.anchors[5]),
-        maxY: Math.max(geometry.anchors[2], geometry.anchors[5]),
+      (!boundsInViewport({
+        minX: Math.min(anchors[0], anchors[1], anchors[3], anchors[4]),
+        maxX: Math.max(anchors[0], anchors[1], anchors[3], anchors[4]),
+        minY: Math.min(anchors[2], anchors[5]),
+        maxY: Math.max(anchors[2], anchors[5]),
       }, viewport))
     ) {
       continue;
     }
-    drawLink(
-      context,
-      link,
-      link.source,
-      config,
-      scales,
-      geometry
-    );
+    if (showLinks) drawLink(context, link, link.source, config, scales, geometry);
+    else drawLinkLabel(context, link, link.source, config, anchors, geometry);
   }
   const loci = showLoci
     ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci")
@@ -990,18 +1019,28 @@ export function renderCanvas({
       hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
     );
   }
-  for (const gene of showGenes
+  for (const gene of (showGenes || showGeneLabels)
     ? previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes, "genes")
     : []) {
-    drawGene(
-      context,
-      gene,
-      config,
-      scales,
-      offsetsForGene(preview, gene),
-      geneVisibleForPreview(preview, gene),
-      geneGeometryForPreview(preview, gene)
-    );
+    const offsets = offsetsForGene(preview, gene);
+    const visible = geneVisibleForPreview(preview, gene);
+    const geometry = geneGeometryForPreview(preview, gene);
+    if (showGenes) drawGene(context, gene, config, scales, offsets, visible, geometry);
+    else if (visible) drawGeneLabel(context, gene, config, geometry, offsets);
+  }
+  if (highlightGeneIds?.size) {
+    for (const uid of highlightGeneIds) {
+      if (visible?.genes && !visible.genes.includes(uid)) continue;
+      const gene = displayScene.genes.get(uid);
+      if (!gene || !geneVisibleForPreview(preview, gene)) continue;
+      drawGeneHighlight(
+        context,
+        gene,
+        camera,
+        geneGeometryForPreview(preview, gene),
+        offsetsForGene(preview, gene)
+      );
+    }
   }
   if (showChrome && displayScene.chrome) {
     const chrome = preview?.chrome || displayScene.chrome;

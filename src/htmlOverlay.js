@@ -61,10 +61,10 @@ export function createHtmlOverlay({
     const pickerColour = colour ? colour.formatHex() : "#000000";
     div.append("label").text("Choose gene colour: ").append("input")
       .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
-      .on("change", (event) => { gene.colour = event.target.value; actions.redraw(); });
+      .on("change", (event) => actions.updateGene(gene, { colour: event.target.value }));
     div.append("button").text("Anchor map on gene").on("click", () => actions.anchorGene(gene));
-    text.on("input", (event) => { gene.label = event.target.value; select.attr("value", null); actions.redraw(); });
-    select.on("change", (event) => { gene.label = event.target.value; text.attr("value", event.target.value); actions.redraw(); });
+    text.on("input", (event) => { actions.updateGene(gene, { label: event.target.value }); select.attr("value", null); });
+    select.on("change", (event) => { actions.updateGene(gene, { label: event.target.value }); text.attr("value", event.target.value); });
     return div;
   };
 
@@ -79,20 +79,19 @@ export function createHtmlOverlay({
     select.selectAll("option").data(groups.filter((candidate) => candidate.uid !== group.uid)).join("option")
       .text((candidate) => candidate.label).attr("value", (candidate) => candidate.uid);
     div.append("button").text("Merge!").on("click", () => {
-      const indices = [...select.node().options].filter((option) => option.selected)
-        .map((option) => groups.findIndex((candidate) => candidate.uid === option.value))
-        .sort((left, right) => right - left);
-      for (const index of indices) group.genes.push(...groups[index].genes);
-      for (const index of indices) groups.splice(index, 1);
-      actions.setGroups(groups);
+      const sourceIds = [...select.node().options]
+        .filter((option) => option.selected)
+        .map((option) => groups.find((candidate) => String(candidate.uid) === option.value)?.uid)
+        .filter((uid) => uid !== undefined);
+      if (sourceIds.length) actions.mergeGroups(group, sourceIds);
     });
     const colour = d3.color(group.colour);
     const pickerColour = colour ? colour.formatHex() : "#000000";
     div.append("label").text("Choose group colour: ").append("input")
       .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
-      .on("change", (event) => { group.colour = event.target.value; actions.redraw(); });
-    div.append("button").text("Hide group").on("click", () => { group.hidden = true; actions.redraw(); });
-    text.on("input", (event) => { group.label = event.target.value; actions.redraw(); });
+      .on("change", (event) => actions.updateGroup(group, { colour: event.target.value }));
+    div.append("button").text("Hide group").on("click", () => actions.updateGroup(group, { hidden: true }));
+    text.on("input", (event) => actions.updateGroup(group, { label: event.target.value }));
     return div;
   };
 

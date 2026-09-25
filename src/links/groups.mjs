@@ -54,11 +54,23 @@ export function filterLinks(
   { groupForGene, geneForUid, bestOnly, threshold }
 ) {
   const visibleLinks = links.filter(
-    (link) =>
+    (link) => {
+      // Link records remain part of the editable data even if an endpoint is
+      // temporarily absent (for example after deleting a gene). A renderer
+      // must omit such a link rather than treating that data relationship as
+      // deleted or dereferencing a missing gene below.
+      if (link.hidden || !geneForUid(link.query.uid) || !geneForUid(link.target.uid)) return false;
+      return (
       groupForGene(link.query.uid) !== null &&
       groupForGene(link.target.uid) !== null
+      );
+    }
   );
-  if (!bestOnly) return visibleLinks;
+  // Threshold decides visibility regardless of whether the optional
+  // best-per-cluster-pair reduction is enabled. Colour scaling is deliberately
+  // independent and is resolved by the shared identity scale.
+  const passingThreshold = visibleLinks.filter((link) => link.identity >= threshold);
+  if (!bestOnly) return passingThreshold;
 
   const setsEqual = (a, b) =>
     a.size === b.size && [...a].every((value) => b.has(value));
@@ -80,7 +92,7 @@ export function filterLinks(
   }
 
   const linksByClusterPair = new ClusterPairMap();
-  const byIdentity = [...visibleLinks].sort((a, b) => b.identity - a.identity);
+  const byIdentity = [...passingThreshold].sort((a, b) => b.identity - a.identity);
 
   for (const link of byIdentity) {
     const clusterPair = new Set([
@@ -103,6 +115,5 @@ export function filterLinks(
   }
 
   return [...linksByClusterPair.values()]
-    .flat()
-    .filter((link) => link.identity > threshold);
+    .flat();
 }

@@ -15,6 +15,7 @@ export function renderSvg({
   ids,
   lookup,
   interactions,
+  highlightGeneIds = new Set(),
 }) {
   const linkGroup = plot
     .selectAll("g.links")
@@ -172,11 +173,11 @@ export function renderSvg({
           .attr("class", "geneLabel")
           .attr("dy", "-0.3em")
           .style("font-family", config.plot.fontFamily);
-        return updateGenes(enter, scene, config, scales);
+        return updateGenes(enter, scene, config, scales, highlightGeneIds);
       },
       (update) =>
         update.call((selection) =>
-          updateGenes(updateRender(selection), scene, config, scales)
+          updateGenes(updateRender(selection), scene, config, scales, highlightGeneIds)
         )
     );
 
@@ -198,7 +199,7 @@ export function renderSvg({
         enter.append("path").attr("class", "geneLink");
         enter
           .append("text")
-          .text((link) => link.identity.toFixed(2))
+          .text((link) => link.label ?? link.identity.toFixed(2))
           .attr("class", "geneLinkLabel")
           .style("fill", "white")
           .style("text-anchor", "middle")
@@ -340,7 +341,7 @@ function updateLoci(selection, scene, config) {
   return selection;
 }
 
-function updateGenes(selection, scene, config, scales) {
+function updateGenes(selection, scene, config, scales, highlightGeneIds) {
   const geneLayout = (gene) => scene.genes.get(gene.uid);
   const fill = (gene) => {
     if (gene.colour) return gene.colour;
@@ -359,8 +360,8 @@ function updateGenes(selection, scene, config, scales) {
     })
     .attr("points", (gene) => geneLayout(gene)?.localPolygon.join(" ") || "")
     .attr("fill", fill)
-    .style("stroke", config.gene.shape.stroke)
-    .style("stroke-width", config.gene.shape.strokeWidth);
+    .style("stroke", (gene) => highlightGeneIds.has(gene.uid) ? "#1677ff" : config.gene.shape.stroke)
+    .style("stroke-width", (gene) => highlightGeneIds.has(gene.uid) ? Math.max(2, config.gene.shape.strokeWidth) : config.gene.shape.strokeWidth);
   selection
     .selectAll("text.geneLabel")
     .text((gene) => gene.label || gene.name || gene.uid)
@@ -376,10 +377,12 @@ function updateLinks(selection, scene, config, scales, ids) {
   const linkLayout = (link) => scene.links.get(link.uid);
   const fill = (link) => {
     if (config.link.asLine) return "none";
+    if (link.colour) return link.colour;
     if (config.link.groupColour) return rgbaToRgb(scales.colour(scales.group(link.query.uid)));
     return scales.score(link.identity);
   };
   const stroke = (link) => {
+    if (link.colour) return link.colour;
     if (config.link.groupColour) {
       const colour = scales.colour(scales.group(link.query.uid));
       return config.link.asLine ? rgbaToRgb(colour) : colour;
@@ -398,6 +401,7 @@ function updateLinks(selection, scene, config, scales, ids) {
     .style("stroke-width", `${config.link.strokeWidth}px`);
   selection
     .selectAll("text")
+    .text((link) => link.label ?? link.identity.toFixed(2))
     .attr("opacity", (link) =>
       config.link.label.show && linkLayout(link)?.visible ? 1 : 0
     )

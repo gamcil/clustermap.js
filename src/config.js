@@ -36,6 +36,14 @@ const defaultConfig = {
     show: true,
     width: 150,
     marginTop: 20,
+    // Bounds describe the colour mapping only; link.threshold remains the
+    // separate visibility filter. "data" resolves against all link records.
+    domain: {
+      min: 0,
+      max: 1,
+      minMode: "fixed",
+      maxMode: "fixed",
+    },
   },
   scaleBar: {
     colour: "black",

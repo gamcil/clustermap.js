@@ -143,10 +143,34 @@ the public link schema, and rejects dangling gene references.
 `ClusterMap()` returns a callable D3 chart. Its supported methods are:
 
 - `chart.config(options)` merges supported configuration options and returns the
-  chart; `chart.config()` returns the current configuration. Set
+  chart; when mounted, it redraws immediately. `chart.config()` returns the current configuration. Set
   `plot.renderer` to `"svg"`, `"canvas"`, or `"webgpu"`.
 - `chart.data(data)` replaces data on an already-mounted chart; `chart.data()`
   returns its current normalized data.
+- `chart.patch(operations)` validates and atomically applies a batch of edits.
+  Presentation operations are `genes.update` (label, colour, name),
+  `groups.update` (label, colour, hidden), `links.update` (label, colour,
+  hidden, identity), and `loci.update` /
+  `clusters.update` (label, name), each with stable `ids` and a `changes`
+  object. `genes.delete` removes a gene from its locus but deliberately keeps
+  its link records in the data; dangling links are omitted from the projected
+  figure until both endpoints exist again. `links.delete` removes only selected
+  link records. Structural group operations are `groups.assignGenes`,
+  `groups.unassignGenes`, `groups.create`, `groups.merge`, and
+  `groups.delete`. They retain exclusive membership: assigning a gene to a
+  group removes it from any other group, and makes the user-managed groups
+  authoritative rather than regenerating them from links on redraw.
+- `colourBar.domain` controls the shared identity colour scale. Its `min` and
+  `max` are normalized values from 0 to 1; set `minMode` or `maxMode` to
+  `"data"` to derive that edge from the lowest or highest link identity. The
+  scale clamps outside values. This changes colour mapping only;
+  `link.threshold` independently controls which links are visible.
+- `chart.on("change", listener)` subscribes to data replacements and applied
+  edit batches, returning an unsubscribe function. This lets an external table
+  or persistence layer stay synchronized without inspecting renderer state.
+- `chart.highlight(geneIds)` draws a non-destructive selection outline around
+  the given gene IDs in every renderer; call `chart.highlight()` to read the
+  current selection or pass an empty iterable to clear it.
 - `chart.exportSvg({ padding })` returns the current figure as an SVG string,
   irrespective of the interactive renderer in use.
 - `chart.destroy()` releases chart-owned event handlers, animations, minimap

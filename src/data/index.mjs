@@ -8,6 +8,7 @@ export function createChartIndex(data) {
   const clusterById = new Map();
   const locusById = new Map();
   const geneById = new Map();
+  const groupById = new Map();
   const linkById = new Map();
   const linksByGeneId = new Map();
 
@@ -26,5 +27,7 @@ export function createChartIndex(data) {
     appendToIndex(linksByGeneId, link.target.uid, link);
   }
 
-  return { clusterById, locusById, geneById, linkById, linksByGeneId };
+  for (const group of data.groups || []) groupById.set(group.uid, group);
+
+  return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId };
 }
