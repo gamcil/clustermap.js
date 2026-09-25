@@ -3964,7 +3964,7 @@
           })
       );
 
-    renderChrome({ plot, chrome: scene.chrome, ids, config, interactions });
+    renderChrome({ plot, chrome: scene.chrome, ids, interactions });
   }
 
   function updateClusters(selection, scene) {
@@ -4153,15 +4153,15 @@
     return selection;
   }
 
-  function renderChrome({ plot, chrome, ids, config, interactions }) {
+  function renderChrome({ plot, chrome, ids, interactions }) {
     if (!chrome) return;
     const transform = ({ x, y }) => `translate(${x}, ${y})`;
-    renderLegend({ plot, legend: chrome.legend, config, interactions, transform });
+    renderLegend({ plot, legend: chrome.legend, interactions, transform });
     renderScaleBar({ plot, scaleBar: chrome.scaleBar, interactions, transform });
     renderColourBar({ plot, colourBar: chrome.colourBar, ids, transform });
   }
 
-  function renderLegend({ plot, legend, config, interactions, transform }) {
+  function renderLegend({ plot, legend, interactions, transform }) {
     const key = plot
       .selectAll("g.legend")
       .data([legend])
@@ -4191,10 +4191,7 @@
       .attr("r", (item) => item.radius)
       .attr("fill", (item) => item.colour)
       .attr("cursor", "pointer")
-      .on("click", (event, item) => {
-        if (config.legend.onClickCircle) config.legend.onClickCircle(event, item.source);
-        else interactions.chooseLegendColour(item.source);
-      });
+      .on("click", (event, item) => interactions.legendColour(event, item.source));
     items
       .select("text")
       .text((item) => item.label)
@@ -4203,16 +4200,8 @@
       .style("font-size", `${legend.fontSize}px`)
       .style("font-family", legend.fontFamily)
       .attr("cursor", "pointer")
-      .on(
-        "click",
-        config.legend.onClickText
-          ? (event, item) => config.legend.onClickText(event, item.source)
-          : null
-      )
-      .on("contextmenu", (event, item) => {
-        const handler = config.legend.onAltClickText || interactions.showGroupMenu;
-        handler(event, item.source);
-      });
+      .on("click", (event, item) => interactions.legendText(event, item.source))
+      .on("contextmenu", (event, item) => interactions.legendMenu(event, item.source));
   }
 
   function renderScaleBar({ plot, scaleBar, interactions, transform }) {
@@ -4336,6 +4325,9 @@
     showGroupMenu: noop,
     setScaleBarLength: noop,
     chooseLegendColour: noop,
+    legendColour: noop,
+    legendText: noop,
+    legendMenu: noop,
   };
 
   /**
@@ -6436,7 +6428,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     interactions,
     getGene,
     getLocus,
-    config,
   }) {
     return {
       interactions: {
@@ -6456,18 +6447,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       },
       actions: {
         geneClick: (event, geneUid) => interactions.onGeneClick?.(event, getGene(geneUid)),
-        legendColour: (event, group) => {
-          if (config.legend.onClickCircle) config.legend.onClickCircle(event, group);
-          else interactions.chooseLegendColour(group);
-        },
-        legendText: (event, group) => config.legend.onClickText?.(event, group),
+        legendColour: interactions.legendColour,
+        legendText: interactions.legendText,
         scaleBar: interactions.setScaleBarLength,
         flipLocus: (locusUid) => interactions.flipLocus(getLocus(locusUid)),
         geneMenu: (event, geneUid) => interactions.showGeneMenu(event, getGene(geneUid)),
-        legendMenu: (event, group) => {
-          const handler = config.legend.onAltClickText || interactions.showGroupMenu;
-          handler(event, group);
-        },
+        legendMenu: interactions.legendMenu,
       },
     };
   }
@@ -7469,6 +7454,18 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         showGroupMenu: overlay.showGroupMenu,
         setScaleBarLength,
         chooseLegendColour,
+        legendColour: (event, group) => {
+          if (runtime.config.legend.onClickCircle) {
+            runtime.config.legend.onClickCircle(event, group);
+          } else {
+            chooseLegendColour(group);
+          }
+        },
+        legendText: (event, group) => runtime.config.legend.onClickText?.(event, group),
+        legendMenu: (event, group) => {
+          const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
+          handler(event, group);
+        },
       };
       if (useRaster) {
         const targetForEvent = (canvasNode, event) =>
@@ -7488,7 +7485,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           interactions: rendererInteractions,
           getGene: runtime.get.geneData,
           getLocus: runtime.get.locusData,
-          config: runtime.config,
         });
         const rasterInteraction = createRasterInteraction({
           targetForEvent,

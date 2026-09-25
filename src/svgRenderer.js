@@ -213,7 +213,7 @@ export function renderSvg({
         })
     );
 
-  renderChrome({ plot, chrome: scene.chrome, ids, config, interactions });
+  renderChrome({ plot, chrome: scene.chrome, ids, interactions });
 }
 
 function updateClusters(selection, scene) {
@@ -402,15 +402,15 @@ function updateLinks(selection, scene, config, scales, ids) {
   return selection;
 }
 
-function renderChrome({ plot, chrome, ids, config, interactions }) {
+function renderChrome({ plot, chrome, ids, interactions }) {
   if (!chrome) return;
   const transform = ({ x, y }) => `translate(${x}, ${y})`;
-  renderLegend({ plot, legend: chrome.legend, config, interactions, transform });
+  renderLegend({ plot, legend: chrome.legend, interactions, transform });
   renderScaleBar({ plot, scaleBar: chrome.scaleBar, interactions, transform });
   renderColourBar({ plot, colourBar: chrome.colourBar, ids, transform });
 }
 
-function renderLegend({ plot, legend, config, interactions, transform }) {
+function renderLegend({ plot, legend, interactions, transform }) {
   const key = plot
     .selectAll("g.legend")
     .data([legend])
@@ -440,10 +440,7 @@ function renderLegend({ plot, legend, config, interactions, transform }) {
     .attr("r", (item) => item.radius)
     .attr("fill", (item) => item.colour)
     .attr("cursor", "pointer")
-    .on("click", (event, item) => {
-      if (config.legend.onClickCircle) config.legend.onClickCircle(event, item.source);
-      else interactions.chooseLegendColour(item.source);
-    });
+    .on("click", (event, item) => interactions.legendColour(event, item.source));
   items
     .select("text")
     .text((item) => item.label)
@@ -452,16 +449,8 @@ function renderLegend({ plot, legend, config, interactions, transform }) {
     .style("font-size", `${legend.fontSize}px`)
     .style("font-family", legend.fontFamily)
     .attr("cursor", "pointer")
-    .on(
-      "click",
-      config.legend.onClickText
-        ? (event, item) => config.legend.onClickText(event, item.source)
-        : null
-    )
-    .on("contextmenu", (event, item) => {
-      const handler = config.legend.onAltClickText || interactions.showGroupMenu;
-      handler(event, item.source);
-    });
+    .on("click", (event, item) => interactions.legendText(event, item.source))
+    .on("contextmenu", (event, item) => interactions.legendMenu(event, item.source));
 }
 
 function renderScaleBar({ plot, scaleBar, interactions, transform }) {

@@ -11,7 +11,6 @@ test("raster interaction bindings adapt stable IDs to source records", async () 
   const bindings = createRasterInteractionBindings({
     getGene: (uid) => (uid === gene.uid ? gene : null),
     getLocus: (uid) => (uid === locus.uid ? locus : null),
-    config: { legend: {} },
     interactions: {
       beginClusterDrag: () => {}, moveClusterDrag: () => {}, endClusterDrag: () => {},
       cancelClusterDrag: () => {}, beginLocusDrag: () => {}, moveLocusDrag: () => {},
@@ -23,6 +22,8 @@ test("raster interaction bindings adapt stable IDs to source records", async () 
       showGeneMenu: (_event, value) => calls.push(["menu", value]),
       showGroupMenu: (_event, value) => calls.push(["group-menu", value]),
       setScaleBarLength: () => {}, chooseLegendColour: (value) => calls.push(["colour", value]),
+      legendColour: (_event, value) => calls.push(["colour", value]),
+      legendText: () => {}, legendMenu: () => {},
     },
   });
 

@@ -19,6 +19,9 @@ const exportInteractions = {
   showGroupMenu: noop,
   setScaleBarLength: noop,
   chooseLegendColour: noop,
+  legendColour: noop,
+  legendText: noop,
+  legendMenu: noop,
 };
 
 /**

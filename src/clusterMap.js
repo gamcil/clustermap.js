@@ -1034,6 +1034,18 @@ export default function clusterMap() {
       showGroupMenu: overlay.showGroupMenu,
       setScaleBarLength,
       chooseLegendColour,
+      legendColour: (event, group) => {
+        if (runtime.config.legend.onClickCircle) {
+          runtime.config.legend.onClickCircle(event, group);
+        } else {
+          chooseLegendColour(group);
+        }
+      },
+      legendText: (event, group) => runtime.config.legend.onClickText?.(event, group),
+      legendMenu: (event, group) => {
+        const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
+        handler(event, group);
+      },
     };
     if (useRaster) {
       const targetForEvent = (canvasNode, event) =>
@@ -1053,7 +1065,6 @@ export default function clusterMap() {
         interactions: rendererInteractions,
         getGene: runtime.get.geneData,
         getLocus: runtime.get.locusData,
-        config: runtime.config,
       });
       const rasterInteraction = createRasterInteraction({
         targetForEvent,

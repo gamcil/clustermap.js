@@ -5,7 +5,6 @@ export function createRasterInteractionBindings({
   interactions,
   getGene,
   getLocus,
-  config,
 }) {
   return {
     interactions: {
@@ -25,18 +24,12 @@ export function createRasterInteractionBindings({
     },
     actions: {
       geneClick: (event, geneUid) => interactions.onGeneClick?.(event, getGene(geneUid)),
-      legendColour: (event, group) => {
-        if (config.legend.onClickCircle) config.legend.onClickCircle(event, group);
-        else interactions.chooseLegendColour(group);
-      },
-      legendText: (event, group) => config.legend.onClickText?.(event, group),
+      legendColour: interactions.legendColour,
+      legendText: interactions.legendText,
       scaleBar: interactions.setScaleBarLength,
       flipLocus: (locusUid) => interactions.flipLocus(getLocus(locusUid)),
       geneMenu: (event, geneUid) => interactions.showGeneMenu(event, getGene(geneUid)),
-      legendMenu: (event, group) => {
-        const handler = config.legend.onAltClickText || interactions.showGroupMenu;
-        handler(event, group);
-      },
+      legendMenu: interactions.legendMenu,
     },
   };
 }
