@@ -1,3 +1,9 @@
+const rendererModes = new Set(["svg", "canvas", "webgpu"]);
+
+export function isRendererMode(renderer) {
+  return rendererModes.has(renderer);
+}
+
 export function isCanvasRenderer(renderer) {
   return renderer === "canvas";
 }

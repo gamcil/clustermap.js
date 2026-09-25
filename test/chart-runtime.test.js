@@ -15,6 +15,14 @@ test("runtime keeps default interaction callbacks declarative", async () => {
     assert.equal(typeof runtime.updateScales, "function");
     assert.equal("plot" in runtime, false);
     assert.equal("scale" in runtime, false);
+
+    runtime.configure({ plot: { renderer: "canvas" } });
+    assert.equal(runtime.config.plot.renderer, "canvas");
+    assert.throws(
+      () => runtime.configure({ plot: { renderer: "webgl" } }),
+      /Unknown plot renderer: webgl/
+    );
+    assert.equal(runtime.config.plot.renderer, "canvas");
   } finally {
     globalThis.d3 = previousD3;
   }

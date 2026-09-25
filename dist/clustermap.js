@@ -4543,6 +4543,26 @@
     return { domain, range };
   }
 
+  const rendererModes = new Set(["svg", "canvas", "webgpu"]);
+
+  function isRendererMode(renderer) {
+    return rendererModes.has(renderer);
+  }
+
+  function isCanvasRenderer(renderer) {
+    return renderer === "canvas";
+  }
+
+  function isWebGpuRenderer(renderer) {
+    return renderer === "webgpu";
+  }
+
+  // Canvas and WebGPU share the retained scene, pointer interaction, minimap,
+  // and preview paths. SVG is intentionally separate because D3 owns its DOM.
+  function isRasterRenderer(renderer) {
+    return isCanvasRenderer(renderer) || isWebGpuRenderer(renderer);
+  }
+
   // This is deliberately one factory per chart, not a collection of tiny API
   // factories: configuration, scales, indexes, and mutable scene state must not
   // leak between independently mounted maps.
@@ -4635,6 +4655,10 @@
   };
 
   function configure(options) {
+    const renderer = options?.plot?.renderer;
+    if (renderer !== undefined && !isRendererMode(renderer)) {
+      throw new TypeError(`Unknown plot renderer: ${renderer}. Expected svg, canvas, or webgpu.`);
+    }
     updateConfig(config, options);
   }
 
@@ -6449,20 +6473,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         legendMenu: interactions.legendMenu,
       },
     };
-  }
-
-  function isCanvasRenderer(renderer) {
-    return renderer === "canvas";
-  }
-
-  function isWebGpuRenderer(renderer) {
-    return renderer === "webgpu";
-  }
-
-  // Canvas and WebGPU share the retained scene, pointer interaction, minimap,
-  // and preview paths. SVG is intentionally separate because D3 owns its DOM.
-  function isRasterRenderer(renderer) {
-    return isCanvasRenderer(renderer) || isWebGpuRenderer(renderer);
   }
 
   let nextChartInstance = 0;

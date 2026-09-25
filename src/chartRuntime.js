@@ -25,6 +25,7 @@ import {
   patchAnchoredGeneScene,
   patchFlippedLocusScene,
 } from "./layout.mjs";
+import { isRendererMode } from "./rendererMode.mjs";
 
 // This is deliberately one factory per chart, not a collection of tiny API
 // factories: configuration, scales, indexes, and mutable scene state must not
@@ -118,6 +119,10 @@ const lookup = {
 };
 
 function configure(options) {
+  const renderer = options?.plot?.renderer;
+  if (renderer !== undefined && !isRendererMode(renderer)) {
+    throw new TypeError(`Unknown plot renderer: ${renderer}. Expected svg, canvas, or webgpu.`);
+  }
   updateConfig(config, options);
 }
 

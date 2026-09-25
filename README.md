@@ -137,3 +137,18 @@ the public link schema, and rejects dangling gene references.
   </body>
 </html>
 ```
+
+## Chart API
+
+`ClusterMap()` returns a callable D3 chart. Its supported methods are:
+
+- `chart.config(options)` merges supported configuration options and returns the
+  chart; `chart.config()` returns the current configuration. Set
+  `plot.renderer` to `"svg"`, `"canvas"`, or `"webgpu"`.
+- `chart.data(data)` replaces data on an already-mounted chart; `chart.data()`
+  returns its current normalized data.
+- `chart.exportSvg({ padding })` returns the current figure as an SVG string,
+  irrespective of the interactive renderer in use.
+
+Scenes, interaction state, and renderer backends are deliberately internal;
+all backends consume the same projected scene through the chart controller.
