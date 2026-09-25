@@ -28,6 +28,7 @@ import {
   hitTestCanvas,
   renderCanvas,
 } from "./canvasRenderer.js";
+import { renderSvg } from "./svgRenderer.js";
 import { createRasterMinimap } from "./rasterMinimap.mjs";
 import { createRasterInteraction } from "./rasterInteraction.mjs";
 import { createRasterMotion } from "./rasterMotion.mjs";
@@ -39,8 +40,7 @@ import {
 } from "./scenePreview.mjs";
 import { exportChartSvg } from "./svgExport.mjs";
 import { createChartRuntime } from "./chartRuntime.js";
-import { createCanvasBackend } from "./canvasBackend.mjs";
-import { createSvgBackend } from "./svgBackend.mjs";
+import { createRetainedSceneBackend } from "./retainedSceneBackend.mjs";
 import { createWebGpuBackend } from "./webgpuBackend.mjs";
 import { ensureSvgSurface } from "./svgSurface.mjs";
 import { ensureRasterSurface } from "./rasterSurface.mjs";
@@ -87,8 +87,14 @@ export default function clusterMap() {
   let warmCanvasFlipBase = () => {};
   let currentData = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
-  const canvasBackend = createCanvasBackend();
-  const svgBackend = createSvgBackend();
+  const canvasBackend = createRetainedSceneBackend({
+    render: renderCanvas,
+    surface: "canvas",
+  });
+  const svgBackend = createRetainedSceneBackend({
+    render: renderSvg,
+    surface: "plot",
+  });
   const webgpuBackend = createWebGpuBackend();
   const rasterMinimap = createRasterMinimap();
   const rasterMotion = createRasterMotion({

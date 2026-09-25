@@ -3403,354 +3403,6 @@
     return { width, height, pixelRatio };
   }
 
-  /**
-   * Retain the overview bitmap separately from either raster backend. The
-   * controller deliberately knows nothing about D3 or chart state: callers
-   * provide the current scene, camera, and the callback that draws an overview.
-   */
-  function createRasterMinimap({
-    requestFrame = globalThis.requestAnimationFrame,
-    cancelFrame = globalThis.cancelAnimationFrame,
-    createCanvas = () => document.createElement("canvas"),
-  } = {}) {
-    let baseCanvas = null;
-    let baseFrame = null;
-    let gesture = false;
-
-    const projectionFor = (scene, options) =>
-      createMinimapProjection({
-        bounds: scene?.figureBounds || scene?.bounds,
-        width: options.width,
-        height: options.height,
-      });
-    const cameraForPointer = ({ event, minimap, surface, scene, options, camera }) => {
-      const projection = projectionFor(scene, options);
-      if (!projection || !minimap || !surface) return null;
-      const minimapBounds = minimap.getBoundingClientRect();
-      const surfaceBounds = surface.getBoundingClientRect();
-      return cameraForMinimapPoint(
-        projection,
-        { x: event.clientX - minimapBounds.left, y: event.clientY - minimapBounds.top },
-        { width: surfaceBounds.width, height: surfaceBounds.height },
-        camera
-      );
-    };
-
-    return {
-      clear() {
-        if (baseFrame !== null) cancelFrame(baseFrame);
-        baseFrame = null;
-        gesture = false;
-      },
-
-      paint({ minimap, surface, scene, options, camera, pixelRatio }) {
-        const projection = projectionFor(scene, options);
-        if (!minimap || !surface || !projection) return null;
-        const bounds = surface.getBoundingClientRect();
-        return renderCanvasMinimap({
-          canvas: minimap,
-          baseCanvas,
-          projection,
-          camera,
-          viewport: { width: bounds.width, height: bounds.height },
-          pixelRatio,
-        });
-      },
-
-      scheduleBase({ scene, minimap, options, renderBase, onPaint }) {
-        if (!scene?.bounds || !minimap) return;
-        if (baseFrame !== null) cancelFrame(baseFrame);
-        baseFrame = requestFrame(() => {
-          baseFrame = null;
-          const projection = projectionFor(scene, options);
-          if (!projection || !minimap.isConnected) return;
-          if (!baseCanvas) baseCanvas = createCanvas();
-          renderBase({ canvas: baseCanvas, scene, projection });
-          onPaint();
-        });
-      },
-
-      cameraForPointer,
-
-      bind(selection, {
-        getSurface,
-        getScene,
-        getCamera,
-        options,
-        moveCamera,
-        beginMotion,
-        endMotion,
-        setCursor,
-      }) {
-        gesture = false;
-        const move = (minimap, event) => {
-          const camera = cameraForPointer({
-            event,
-            minimap,
-            surface: getSurface(),
-            scene: getScene(),
-            options,
-            camera: getCamera(),
-          });
-          if (camera) moveCamera(camera);
-        };
-        selection
-          .on("pointerdown.minimap", function (event) {
-            if (event.button) return;
-            gesture = true;
-            beginMotion();
-            this.setPointerCapture(event.pointerId);
-            setCursor(this, "grabbing");
-            move(this, event);
-            event.preventDefault();
-          })
-          .on("pointermove.minimap", function (event) {
-            if (!gesture) return;
-            move(this, event);
-            event.preventDefault();
-          })
-          .on("pointerup.minimap pointercancel.minimap", function (event) {
-            if (!gesture) return;
-            gesture = false;
-            if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
-            setCursor(this, "grab");
-            endMotion();
-          });
-      },
-    };
-  }
-
-  function cursorForTarget(target) {
-    if (!target) return "grab";
-    if (target.action === "move-cluster") return "grab";
-    if (target.action === "move-locus") return "move";
-    if (target.action.startsWith("trim-locus")) return "ew-resize";
-    return "pointer";
-  }
-
-  /**
-   * Shared pointer and keyboard lifecycle for Canvas and WebGPU surfaces.
-   * It owns only gesture state and event interpretation; chart state changes,
-   * menus, cursor styling, and painting remain explicit callbacks.
-   */
-  function createRasterInteraction({
-    targetForEvent,
-    worldPoint,
-    locusForTarget,
-    setHoverLocus,
-    warmLocus = () => {},
-    beginMotion = () => {},
-    endMotion = () => {},
-    setCursor = () => {},
-    interactions,
-    actions,
-  }) {
-    let gesture = null;
-    let panMode = false;
-
-    const updateAffordance = (surface, target, { warm = false } = {}) => {
-      const locusUid = locusForTarget(target);
-      if (setHoverLocus(locusUid) || warm) warmLocus(locusUid);
-      setCursor(surface, cursorForTarget(target));
-    };
-
-    const startGesture = (surface, event, target) => {
-      const point = worldPoint(surface, event);
-      surface.setPointerCapture(event.pointerId);
-      updateAffordance(surface, target, { warm: true });
-      if (target.action === "move-cluster") {
-        gesture = {
-          action: target.action,
-          clusterUid: target.clusterUid,
-          start: { x: event.clientX, y: event.clientY },
-          moved: false,
-        };
-        interactions.beginClusterDrag(target.clusterUid, point.y);
-      } else if (target.action === "move-locus") {
-        gesture = {
-          action: target.action,
-          locusUid: target.locusUid,
-          start: { x: event.clientX, y: event.clientY },
-          moved: false,
-        };
-        interactions.beginLocusDrag(target.locusUid, point.x);
-      } else if (target.action.startsWith("trim-locus")) {
-        gesture = {
-          action: target.action,
-          locusUid: target.locusUid,
-          edge: target.action.endsWith("left") ? "left" : "right",
-          start: { x: event.clientX, y: event.clientY },
-          moved: false,
-        };
-        interactions.beginLocusTrim();
-      } else if (target.action === "gene") {
-        gesture = { action: target.action, geneUid: target.geneUid };
-      } else if (target.action === "legend-colour") {
-        actions.legendColour(event, target.group);
-      } else if (target.action === "legend-text") {
-        actions.legendText(event, target.group);
-      } else if (target.action === "scale-bar") {
-        actions.scaleBar();
-      }
-    };
-
-    const moveGesture = (surface, event) => {
-      if (!gesture) {
-        updateAffordance(surface, targetForEvent(surface, event));
-        return;
-      }
-      const draggable =
-        gesture.action === "move-cluster" || gesture.action === "move-locus" || gesture.edge;
-      if (draggable && !gesture.moved) {
-        if (Math.hypot(event.clientX - gesture.start.x, event.clientY - gesture.start.y) < 2) return;
-        gesture.moved = true;
-        beginMotion();
-      }
-      const point = worldPoint(surface, event);
-      if (gesture.action === "move-cluster") {
-        interactions.moveClusterDrag(point.y);
-      } else if (gesture.action === "move-locus") {
-        interactions.moveLocusDrag(point.x);
-      } else if (gesture.edge) {
-        interactions.moveLocusTrim(gesture.locusUid, gesture.edge, point.x);
-      }
-    };
-
-    const finishGesture = (surface, event) => {
-      if (!gesture) return;
-      const finished = gesture;
-      gesture = null;
-      if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
-      if (finished.action === "move-cluster") {
-        if (finished.moved) interactions.endClusterDrag();
-        else interactions.cancelClusterDrag();
-      } else if (finished.action === "move-locus") {
-        if (finished.moved) interactions.endLocusDrag();
-        else interactions.cancelLocusDrag();
-      } else if (finished.edge) {
-        if (finished.moved) interactions.endLocusTrim(finished.locusUid);
-        else interactions.cancelLocusTrim();
-      } else if (finished.action === "gene") {
-        actions.geneClick(event, finished.geneUid);
-      }
-      if (finished.moved) endMotion();
-      updateAffordance(surface, targetForEvent(surface, event));
-    };
-
-    return {
-      zoomFilter(surface, event) {
-        if (panMode) return event.type === "wheel" || event.button === 0;
-        if (event.type === "wheel") return true;
-        if (event.ctrlKey || event.button) return false;
-        return !targetForEvent(surface, event);
-      },
-
-      bind(selection) {
-        selection
-          .on("pointerenter.canvasKeyboard", function () {
-            this.focus({ preventScroll: true });
-          })
-          .on("keydown.canvasKeyboard", function (event) {
-            if (event.code !== "Space") return;
-            panMode = true;
-            event.preventDefault();
-            setCursor(this, "grab");
-          })
-          .on("keyup.canvasKeyboard", function (event) {
-            if (event.code !== "Space") return;
-            panMode = false;
-            setCursor(this, "grab");
-          })
-          .on("blur.canvasKeyboard", function () {
-            panMode = false;
-          })
-          .on("pointerdown.canvasInteraction", function (event) {
-            if (panMode || event.button) return;
-            const target = targetForEvent(this, event);
-            if (!target) return;
-            startGesture(this, event, target);
-            event.preventDefault();
-          })
-          .on("pointermove.canvasInteraction", function (event) {
-            if (!panMode) moveGesture(this, event);
-          })
-          .on("pointerleave.canvasInteraction", function () {
-            if (!gesture && !panMode) updateAffordance(this, null);
-          })
-          .on("pointerup.canvasInteraction pointercancel.canvasInteraction", function (event) {
-            finishGesture(this, event);
-          })
-          .on("dblclick.canvasInteraction", function (event) {
-            const target = targetForEvent(this, event);
-            const locusUid = locusForTarget(target);
-            if (locusUid) actions.flipLocus(locusUid);
-          })
-          .on("contextmenu.canvasInteraction", function (event) {
-            const target = targetForEvent(this, event);
-            if (target?.action === "gene") {
-              event.preventDefault();
-              actions.geneMenu(event, target.geneUid);
-            } else if (target?.action === "legend-text") {
-              event.preventDefault();
-              actions.legendMenu(event, target.group);
-            }
-          });
-      },
-    };
-  }
-
-  /**
-   * Coordinate raster redraw quality during active gestures. Canvas 2D may
-   * temporarily favour throughput; WebGPU remains at native resolution because
-   * its geometry redraw is inexpensive and a resolution jump is distracting.
-   */
-  function createRasterMotion({
-    schedulePaint,
-    getCamera,
-    getRenderer,
-    devicePixelRatio = () => globalThis.devicePixelRatio || 1,
-    setTimer = globalThis.setTimeout,
-    clearTimer = globalThis.clearTimeout,
-    settleDelay = 100,
-  }) {
-    let moving = false;
-    let settleTimer = null;
-
-    return {
-      begin() {
-        if (settleTimer !== null) clearTimer(settleTimer);
-        settleTimer = null;
-        if (moving) return;
-        moving = true;
-        schedulePaint();
-      },
-
-      end() {
-        if (settleTimer !== null) clearTimer(settleTimer);
-        // D3's zoom end already debounces a wheel gesture. This short extra
-        // delay avoids resizing the backing bitmap between pointer updates.
-        settleTimer = setTimer(() => {
-          settleTimer = null;
-          if (!moving) return;
-          moving = false;
-          schedulePaint();
-        }, settleDelay);
-      },
-
-      pixelRatio() {
-        const ratio = devicePixelRatio();
-        if (getRenderer() === "webgpu") return ratio;
-        return canvasPixelRatioForCamera({ camera: getCamera(), moving, devicePixelRatio: ratio });
-      },
-
-      dispose() {
-        if (settleTimer !== null) clearTimer(settleTimer);
-        settleTimer = null;
-        moving = false;
-      },
-    };
-  }
-
   // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
   // host, camera viewport, and interaction state that causes a redraw.
   function renderSvg({
@@ -4303,6 +3955,354 @@
       .style("font-family", colourBar.fontFamily)
       .style("font-size", `${colourBar.fontSize}pt`)
       .style("dominant-baseline", "hanging");
+  }
+
+  /**
+   * Retain the overview bitmap separately from either raster backend. The
+   * controller deliberately knows nothing about D3 or chart state: callers
+   * provide the current scene, camera, and the callback that draws an overview.
+   */
+  function createRasterMinimap({
+    requestFrame = globalThis.requestAnimationFrame,
+    cancelFrame = globalThis.cancelAnimationFrame,
+    createCanvas = () => document.createElement("canvas"),
+  } = {}) {
+    let baseCanvas = null;
+    let baseFrame = null;
+    let gesture = false;
+
+    const projectionFor = (scene, options) =>
+      createMinimapProjection({
+        bounds: scene?.figureBounds || scene?.bounds,
+        width: options.width,
+        height: options.height,
+      });
+    const cameraForPointer = ({ event, minimap, surface, scene, options, camera }) => {
+      const projection = projectionFor(scene, options);
+      if (!projection || !minimap || !surface) return null;
+      const minimapBounds = minimap.getBoundingClientRect();
+      const surfaceBounds = surface.getBoundingClientRect();
+      return cameraForMinimapPoint(
+        projection,
+        { x: event.clientX - minimapBounds.left, y: event.clientY - minimapBounds.top },
+        { width: surfaceBounds.width, height: surfaceBounds.height },
+        camera
+      );
+    };
+
+    return {
+      clear() {
+        if (baseFrame !== null) cancelFrame(baseFrame);
+        baseFrame = null;
+        gesture = false;
+      },
+
+      paint({ minimap, surface, scene, options, camera, pixelRatio }) {
+        const projection = projectionFor(scene, options);
+        if (!minimap || !surface || !projection) return null;
+        const bounds = surface.getBoundingClientRect();
+        return renderCanvasMinimap({
+          canvas: minimap,
+          baseCanvas,
+          projection,
+          camera,
+          viewport: { width: bounds.width, height: bounds.height },
+          pixelRatio,
+        });
+      },
+
+      scheduleBase({ scene, minimap, options, renderBase, onPaint }) {
+        if (!scene?.bounds || !minimap) return;
+        if (baseFrame !== null) cancelFrame(baseFrame);
+        baseFrame = requestFrame(() => {
+          baseFrame = null;
+          const projection = projectionFor(scene, options);
+          if (!projection || !minimap.isConnected) return;
+          if (!baseCanvas) baseCanvas = createCanvas();
+          renderBase({ canvas: baseCanvas, scene, projection });
+          onPaint();
+        });
+      },
+
+      cameraForPointer,
+
+      bind(selection, {
+        getSurface,
+        getScene,
+        getCamera,
+        options,
+        moveCamera,
+        beginMotion,
+        endMotion,
+        setCursor,
+      }) {
+        gesture = false;
+        const move = (minimap, event) => {
+          const camera = cameraForPointer({
+            event,
+            minimap,
+            surface: getSurface(),
+            scene: getScene(),
+            options,
+            camera: getCamera(),
+          });
+          if (camera) moveCamera(camera);
+        };
+        selection
+          .on("pointerdown.minimap", function (event) {
+            if (event.button) return;
+            gesture = true;
+            beginMotion();
+            this.setPointerCapture(event.pointerId);
+            setCursor(this, "grabbing");
+            move(this, event);
+            event.preventDefault();
+          })
+          .on("pointermove.minimap", function (event) {
+            if (!gesture) return;
+            move(this, event);
+            event.preventDefault();
+          })
+          .on("pointerup.minimap pointercancel.minimap", function (event) {
+            if (!gesture) return;
+            gesture = false;
+            if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
+            setCursor(this, "grab");
+            endMotion();
+          });
+      },
+    };
+  }
+
+  function cursorForTarget(target) {
+    if (!target) return "grab";
+    if (target.action === "move-cluster") return "grab";
+    if (target.action === "move-locus") return "move";
+    if (target.action.startsWith("trim-locus")) return "ew-resize";
+    return "pointer";
+  }
+
+  /**
+   * Shared pointer and keyboard lifecycle for Canvas and WebGPU surfaces.
+   * It owns only gesture state and event interpretation; chart state changes,
+   * menus, cursor styling, and painting remain explicit callbacks.
+   */
+  function createRasterInteraction({
+    targetForEvent,
+    worldPoint,
+    locusForTarget,
+    setHoverLocus,
+    warmLocus = () => {},
+    beginMotion = () => {},
+    endMotion = () => {},
+    setCursor = () => {},
+    interactions,
+    actions,
+  }) {
+    let gesture = null;
+    let panMode = false;
+
+    const updateAffordance = (surface, target, { warm = false } = {}) => {
+      const locusUid = locusForTarget(target);
+      if (setHoverLocus(locusUid) || warm) warmLocus(locusUid);
+      setCursor(surface, cursorForTarget(target));
+    };
+
+    const startGesture = (surface, event, target) => {
+      const point = worldPoint(surface, event);
+      surface.setPointerCapture(event.pointerId);
+      updateAffordance(surface, target, { warm: true });
+      if (target.action === "move-cluster") {
+        gesture = {
+          action: target.action,
+          clusterUid: target.clusterUid,
+          start: { x: event.clientX, y: event.clientY },
+          moved: false,
+        };
+        interactions.beginClusterDrag(target.clusterUid, point.y);
+      } else if (target.action === "move-locus") {
+        gesture = {
+          action: target.action,
+          locusUid: target.locusUid,
+          start: { x: event.clientX, y: event.clientY },
+          moved: false,
+        };
+        interactions.beginLocusDrag(target.locusUid, point.x);
+      } else if (target.action.startsWith("trim-locus")) {
+        gesture = {
+          action: target.action,
+          locusUid: target.locusUid,
+          edge: target.action.endsWith("left") ? "left" : "right",
+          start: { x: event.clientX, y: event.clientY },
+          moved: false,
+        };
+        interactions.beginLocusTrim();
+      } else if (target.action === "gene") {
+        gesture = { action: target.action, geneUid: target.geneUid };
+      } else if (target.action === "legend-colour") {
+        actions.legendColour(event, target.group);
+      } else if (target.action === "legend-text") {
+        actions.legendText(event, target.group);
+      } else if (target.action === "scale-bar") {
+        actions.scaleBar();
+      }
+    };
+
+    const moveGesture = (surface, event) => {
+      if (!gesture) {
+        updateAffordance(surface, targetForEvent(surface, event));
+        return;
+      }
+      const draggable =
+        gesture.action === "move-cluster" || gesture.action === "move-locus" || gesture.edge;
+      if (draggable && !gesture.moved) {
+        if (Math.hypot(event.clientX - gesture.start.x, event.clientY - gesture.start.y) < 2) return;
+        gesture.moved = true;
+        beginMotion();
+      }
+      const point = worldPoint(surface, event);
+      if (gesture.action === "move-cluster") {
+        interactions.moveClusterDrag(point.y);
+      } else if (gesture.action === "move-locus") {
+        interactions.moveLocusDrag(point.x);
+      } else if (gesture.edge) {
+        interactions.moveLocusTrim(gesture.locusUid, gesture.edge, point.x);
+      }
+    };
+
+    const finishGesture = (surface, event) => {
+      if (!gesture) return;
+      const finished = gesture;
+      gesture = null;
+      if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
+      if (finished.action === "move-cluster") {
+        if (finished.moved) interactions.endClusterDrag();
+        else interactions.cancelClusterDrag();
+      } else if (finished.action === "move-locus") {
+        if (finished.moved) interactions.endLocusDrag();
+        else interactions.cancelLocusDrag();
+      } else if (finished.edge) {
+        if (finished.moved) interactions.endLocusTrim(finished.locusUid);
+        else interactions.cancelLocusTrim();
+      } else if (finished.action === "gene") {
+        actions.geneClick(event, finished.geneUid);
+      }
+      if (finished.moved) endMotion();
+      updateAffordance(surface, targetForEvent(surface, event));
+    };
+
+    return {
+      zoomFilter(surface, event) {
+        if (panMode) return event.type === "wheel" || event.button === 0;
+        if (event.type === "wheel") return true;
+        if (event.ctrlKey || event.button) return false;
+        return !targetForEvent(surface, event);
+      },
+
+      bind(selection) {
+        selection
+          .on("pointerenter.canvasKeyboard", function () {
+            this.focus({ preventScroll: true });
+          })
+          .on("keydown.canvasKeyboard", function (event) {
+            if (event.code !== "Space") return;
+            panMode = true;
+            event.preventDefault();
+            setCursor(this, "grab");
+          })
+          .on("keyup.canvasKeyboard", function (event) {
+            if (event.code !== "Space") return;
+            panMode = false;
+            setCursor(this, "grab");
+          })
+          .on("blur.canvasKeyboard", function () {
+            panMode = false;
+          })
+          .on("pointerdown.canvasInteraction", function (event) {
+            if (panMode || event.button) return;
+            const target = targetForEvent(this, event);
+            if (!target) return;
+            startGesture(this, event, target);
+            event.preventDefault();
+          })
+          .on("pointermove.canvasInteraction", function (event) {
+            if (!panMode) moveGesture(this, event);
+          })
+          .on("pointerleave.canvasInteraction", function () {
+            if (!gesture && !panMode) updateAffordance(this, null);
+          })
+          .on("pointerup.canvasInteraction pointercancel.canvasInteraction", function (event) {
+            finishGesture(this, event);
+          })
+          .on("dblclick.canvasInteraction", function (event) {
+            const target = targetForEvent(this, event);
+            const locusUid = locusForTarget(target);
+            if (locusUid) actions.flipLocus(locusUid);
+          })
+          .on("contextmenu.canvasInteraction", function (event) {
+            const target = targetForEvent(this, event);
+            if (target?.action === "gene") {
+              event.preventDefault();
+              actions.geneMenu(event, target.geneUid);
+            } else if (target?.action === "legend-text") {
+              event.preventDefault();
+              actions.legendMenu(event, target.group);
+            }
+          });
+      },
+    };
+  }
+
+  /**
+   * Coordinate raster redraw quality during active gestures. Canvas 2D may
+   * temporarily favour throughput; WebGPU remains at native resolution because
+   * its geometry redraw is inexpensive and a resolution jump is distracting.
+   */
+  function createRasterMotion({
+    schedulePaint,
+    getCamera,
+    getRenderer,
+    devicePixelRatio = () => globalThis.devicePixelRatio || 1,
+    setTimer = globalThis.setTimeout,
+    clearTimer = globalThis.clearTimeout,
+    settleDelay = 100,
+  }) {
+    let moving = false;
+    let settleTimer = null;
+
+    return {
+      begin() {
+        if (settleTimer !== null) clearTimer(settleTimer);
+        settleTimer = null;
+        if (moving) return;
+        moving = true;
+        schedulePaint();
+      },
+
+      end() {
+        if (settleTimer !== null) clearTimer(settleTimer);
+        // D3's zoom end already debounces a wheel gesture. This short extra
+        // delay avoids resizing the backing bitmap between pointer updates.
+        settleTimer = setTimer(() => {
+          settleTimer = null;
+          if (!moving) return;
+          moving = false;
+          schedulePaint();
+        }, settleDelay);
+      },
+
+      pixelRatio() {
+        const ratio = devicePixelRatio();
+        if (getRenderer() === "webgpu") return ratio;
+        return canvasPixelRatioForCamera({ camera: getCamera(), moving, devicePixelRatio: ratio });
+      },
+
+      dispose() {
+        if (settleTimer !== null) clearTimer(settleTimer);
+        settleTimer = null;
+        moving = false;
+      },
+    };
   }
 
   const noop = () => {};
@@ -4895,21 +4895,6 @@
         pendingScene = null;
       },
     };
-  }
-
-  // The Canvas backend owns the retained scene used by ordinary full-surface
-  // paints. Canvas-only composition (the flip bitmap and minimap) remains a
-  // controller concern because it deliberately paints partial surfaces.
-  function createCanvasBackend({ render = renderCanvas } = {}) {
-    return createRetainedSceneBackend({ render, surface: "canvas" });
-  }
-
-  // SVG has no device context to initialise, but it still benefits from the
-  // same retained-scene lifecycle as the raster backends. The controller owns
-  // the SVG surface and interaction policy; this adapter owns the last scene
-  // supplied to the SVG renderer.
-  function createSvgBackend({ render = renderSvg } = {}) {
-    return createRetainedSceneBackend({ render, surface: "plot" });
   }
 
   // Deliberately small, direct WebGPU renderer for the renderer-neutral scene.
@@ -6516,8 +6501,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let warmCanvasFlipBase = () => {};
     let currentData = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
-    const canvasBackend = createCanvasBackend();
-    const svgBackend = createSvgBackend();
+    const canvasBackend = createRetainedSceneBackend({
+      render: renderCanvas,
+      surface: "canvas",
+    });
+    const svgBackend = createRetainedSceneBackend({
+      render: renderSvg,
+      surface: "plot",
+    });
     const webgpuBackend = createWebGpuBackend();
     const rasterMinimap = createRasterMinimap();
     const rasterMotion = createRasterMotion({
