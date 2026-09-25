@@ -150,6 +150,11 @@ function locusText(cluster) {
   return formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates);
 }
 
+function locusTextForCluster(uid) {
+  const cluster = lookup.clusterData(uid);
+  return cluster ? locusText(cluster) : "";
+}
+
 function sceneProjectionOptions({ areClustersAdjacent = clustersAreAdjacent } = {}) {
   return {
     scaleX: scales.x,
@@ -345,6 +350,7 @@ return {
   configure,
   lookup,
   ids,
+  locusTextForCluster,
   synchronizeLocusLayoutState,
   synchronizeLocusLayoutStates,
   setChartIndex,

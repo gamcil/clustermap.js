@@ -2,6 +2,10 @@ function minStart(loci, startFor) {
   return Math.min(...loci.map(startFor));
 }
 
+function clusterUidForLocus(locus) {
+  return locus.cluster?.uid ?? locus.cluster?.source?.uid ?? locus.source.clusterUid;
+}
+
 function clusterLabelOffsetsForStarts(
   scene,
   startFor,
@@ -77,7 +81,7 @@ export function createLocusTrimPreview(
   scene,
   locusUid,
   state,
-  { localXFor, scaleX, alignLabels }
+  { localXFor, scaleX, alignLabels, clusterLabelText = null }
 ) {
   const locus = scene.loci.get(locusUid);
   if (!locus) return null;
@@ -129,6 +133,14 @@ export function createLocusTrimPreview(
     loci: locusGeometry,
     geneVisibility,
     clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels),
+    ...(clusterLabelText === null
+      ? {}
+      : {
+          clusterLabelTexts: new Map([[
+            clusterUidForLocus(locus),
+            clusterLabelText,
+          ]]),
+        }),
     chrome: chromeForPreview(scene, maxX),
   };
 }
@@ -145,6 +157,10 @@ export function locusOffsetForPreview(preview, locusUid) {
 
 export function clusterLabelOffsetForPreview(preview, clusterUid) {
   return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
+}
+
+export function clusterLabelTextForPreview(preview, clusterUid, fallback) {
+  return preview?.clusterLabelTexts?.get(clusterUid) ?? fallback;
 }
 
 export function clusterOffsetForPreview(preview, clusterUid) {
@@ -201,13 +217,25 @@ export function geneVisibleForPreview(preview, gene) {
 }
 
 /** Describe flip frames without re-projecting the chart. */
-export function createLocusFlipPreview(scene, locusUid, { progress = 0 } = {}) {
+export function createLocusFlipPreview(
+  scene,
+  locusUid,
+  { progress = 0, clusterLabelText = null } = {}
+) {
   const locus = scene.loci.get(locusUid);
   if (!locus) return null;
   return {
     type: "locus-flip",
     locusUid,
     progress,
+    ...(clusterLabelText === null
+      ? {}
+      : {
+          clusterLabelTexts: new Map([[
+            clusterUidForLocus(locus),
+            clusterLabelText,
+          ]]),
+        }),
     // The projected bounds reflect the currently displayed locus, including
     // any committed trim. Source coordinates describe the original record and
     // must not determine the transient flip axis.

@@ -173,6 +173,17 @@ test("double-clicking a locus reverses its gene layout", async ({ page }, testIn
     .toEqual([...before.genes].reverse().map((uid) => `gene_${uid}`));
 });
 
+test("SVG locus text updates before its flip transition finishes", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const locus = page.locator("g.locus").first();
+  const locusText = await getLocusText(page, locus);
+  await expect(locusText).toHaveText("input_locus:1-10000");
+
+  await locus.dblclick({ position: { x: 20, y: 11 } });
+  await expect(locusText).toHaveText("input_locus (reversed):10000-1", { timeout: 100 });
+});
+
 test("editing the SVG scale bar delegates through the chart action", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
 

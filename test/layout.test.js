@@ -7,6 +7,7 @@ test("scene derives world-space geometry without DOM state", async () => {
     createLocusFlipPreview,
     createLocusOffsetPreview,
     createLocusTrimPreview,
+    clusterLabelTextForPreview,
   }] = await Promise.all([
     import("../src/layout.mjs"),
     import("../src/scenePreview.mjs"),
@@ -150,6 +151,17 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.equal(
     createLocusFlipPreview(trimmedScene, "top-locus").axes.get("top-locus"),
     12
+  );
+  const labelledFlipPreview = createLocusFlipPreview(scene, "top-locus", {
+    clusterLabelText: "top-locus (reversed):21-1",
+  });
+  assert.equal(
+    clusterLabelTextForPreview(labelledFlipPreview, "top", "stale label"),
+    "top-locus (reversed):21-1"
+  );
+  assert.equal(
+    clusterLabelTextForPreview(labelledFlipPreview, "bottom", "unchanged label"),
+    "unchanged label"
   );
   // The initial loci share the same left coordinate, but `alignLabels: false`
   // must still keep the preview change local to the dragged cluster.

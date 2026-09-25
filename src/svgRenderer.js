@@ -70,6 +70,9 @@ export function renderSvg({
   // rows. Cancel it before the scene supplies their snapped final positions.
   const updateRender = (selection) =>
     animate ? selection.interrupt().transition(transition) : selection.interrupt();
+  // Cluster labels describe committed locus state. Keep them responsive even
+  // when locus geometry is still travelling through an SVG transition.
+  updateClusters(clusters.interrupt(), scene, { labelsOnly: true });
   const clusterRender = updateRender(clusters);
   updateClusters(clusterRender, scene);
 
@@ -216,16 +219,18 @@ export function renderSvg({
   renderChrome({ plot, chrome: scene.chrome, ids, interactions });
 }
 
-function updateClusters(selection, scene) {
+function updateClusters(selection, scene, { labelsOnly = false } = {}) {
   const layout = (cluster) => scene.clusters.get(cluster.uid);
-  selection.attr("transform", (cluster) => {
-    const { x, y } = layout(cluster);
-    return `translate(${x}, ${y})`;
-  });
-  selection.selectAll("g.clusterInfo").attr("transform", (cluster) => {
-    const { x, y } = layout(cluster).info;
-    return `translate(${x}, ${y})`;
-  });
+  if (!labelsOnly) {
+    selection.attr("transform", (cluster) => {
+      const { x, y } = layout(cluster);
+      return `translate(${x}, ${y})`;
+    });
+    selection.selectAll("g.clusterInfo").attr("transform", (cluster) => {
+      const { x, y } = layout(cluster).info;
+      return `translate(${x}, ${y})`;
+    });
+  }
   selection.selectAll("text.locusText").each(function (cluster) {
     const text = layout(cluster).info.locusText;
     if (this.textContent !== text) this.textContent = text;

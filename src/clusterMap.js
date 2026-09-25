@@ -224,6 +224,7 @@ export default function clusterMap() {
           localXFor: runtime.scales.locus,
           scaleX: runtime.scales.x,
           alignLabels: runtime.config.cluster.alignLabels,
+          clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
         });
         scheduleRasterPreview();
         return result;
@@ -253,6 +254,7 @@ export default function clusterMap() {
         canvasPreviewScene = sourceScene;
         rasterPreview = createLocusFlipPreview(sourceScene, locus.uid, {
           progress: previewProgress,
+          clusterLabelText: pending.clusterLabelText,
         });
         scheduleRasterPreview();
         // The first preview frame is retained-scene geometry plus a reflection
@@ -291,6 +293,7 @@ export default function clusterMap() {
             : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
           rasterPreview = createLocusFlipPreview(sourceScene, locus.uid, {
             progress: eased,
+            clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
           });
           webgpuBackend.setScene(sourceScene);
           scheduleRasterPaint();
@@ -376,6 +379,7 @@ export default function clusterMap() {
         : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
       rasterPreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
         progress: initialProgress + (1 - initialProgress) * eased,
+        clusterLabelText: pending.clusterLabelText,
       });
       // The dirty region is bounded to the affected locus and its incident
       // links, so paint it in this rAF rather than one frame later. Links and
@@ -442,6 +446,7 @@ export default function clusterMap() {
     return {
       locus,
       sourceScene,
+      clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
       targetScene: null,
       locusRecords: {
         loci: new Set([locus.uid]),
@@ -635,6 +640,25 @@ export default function clusterMap() {
             clear: false,
           });
         }
+        // The cached base contains the source label. Repaint the affected
+        // cluster info from the sparse preview so flipped coordinates become
+        // visible immediately rather than at the end of the bitmap animation.
+        renderCanvas({
+          canvas: canvasNode,
+          scene: canvasPreviewScene,
+          camera: getCamera(chartState),
+          config: runtime.config,
+          scales: runtime.scales,
+          pixelRatio: rasterMotion.pixelRatio(),
+          preview: rasterPreview,
+          include: { loci: canvasPendingFlip.locusRecords.loci },
+          showLinks: false,
+          showLocusTracks: false,
+          showGenes: false,
+          showChrome: false,
+          suppressLocusHover: true,
+          clear: false,
+        });
         paintMinimap();
         return canvasFlipDirtyFrame;
       }

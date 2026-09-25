@@ -3,6 +3,7 @@ import { hitTest } from "./hitTest.mjs";
 import { queryViewportOrdered } from "./spatialIndex.mjs";
 import {
   clusterLabelOffsetForPreview,
+  clusterLabelTextForPreview,
   clusterOffsetForPreview,
   geneVisibleForPreview,
   locusGeometryForPreview,
@@ -363,7 +364,12 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   }
 }
 
-function drawClusterInfo(context, cluster, config, { x: offsetX = 0, y: offsetY = 0 } = {}) {
+function drawClusterInfo(
+  context,
+  cluster,
+  config,
+  { x: offsetX = 0, y: offsetY = 0, locusText = cluster.info.locusText } = {}
+) {
   const { x, y } = cluster;
   const anchorX = x + cluster.info.x + offsetX;
   context.fillStyle = "black";
@@ -373,7 +379,7 @@ function drawClusterInfo(context, cluster, config, { x: offsetX = 0, y: offsetY 
   context.fillText(cluster.source.name, anchorX, y + offsetY + 8);
   context.font = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
   context.textBaseline = "top";
-  context.fillText(cluster.info.locusText, anchorX, y + offsetY + 12);
+  context.fillText(locusText, anchorX, y + offsetY + 12);
 }
 
 function drawGene(
@@ -956,6 +962,11 @@ export function renderCanvas({
       drawClusterInfo(context, cluster, config, {
         x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
         y: clusterOffsetForPreview(preview, cluster.source.uid),
+        locusText: clusterLabelTextForPreview(
+          preview,
+          cluster.source.uid,
+          cluster.info.locusText
+        ),
       });
     }
   }

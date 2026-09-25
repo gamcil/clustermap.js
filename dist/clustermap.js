@@ -1108,6 +1108,10 @@
     return Math.min(...loci.map(startFor));
   }
 
+  function clusterUidForLocus(locus) {
+    return locus.cluster?.uid ?? locus.cluster?.source?.uid ?? locus.source.clusterUid;
+  }
+
   function clusterLabelOffsetsForStarts(
     scene,
     startFor,
@@ -1183,7 +1187,7 @@
     scene,
     locusUid,
     state,
-    { localXFor, scaleX, alignLabels }
+    { localXFor, scaleX, alignLabels, clusterLabelText = null }
   ) {
     const locus = scene.loci.get(locusUid);
     if (!locus) return null;
@@ -1235,6 +1239,14 @@
       loci: locusGeometry,
       geneVisibility,
       clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels),
+      ...(clusterLabelText === null
+        ? {}
+        : {
+            clusterLabelTexts: new Map([[
+              clusterUidForLocus(locus),
+              clusterLabelText,
+            ]]),
+          }),
       chrome: chromeForPreview(scene, maxX),
     };
   }
@@ -1251,6 +1263,10 @@
 
   function clusterLabelOffsetForPreview(preview, clusterUid) {
     return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
+  }
+
+  function clusterLabelTextForPreview(preview, clusterUid, fallback) {
+    return preview?.clusterLabelTexts?.get(clusterUid) ?? fallback;
   }
 
   function clusterOffsetForPreview(preview, clusterUid) {
@@ -1307,13 +1323,25 @@
   }
 
   /** Describe flip frames without re-projecting the chart. */
-  function createLocusFlipPreview(scene, locusUid, { progress = 0 } = {}) {
+  function createLocusFlipPreview(
+    scene,
+    locusUid,
+    { progress = 0, clusterLabelText = null } = {}
+  ) {
     const locus = scene.loci.get(locusUid);
     if (!locus) return null;
     return {
       type: "locus-flip",
       locusUid,
       progress,
+      ...(clusterLabelText === null
+        ? {}
+        : {
+            clusterLabelTexts: new Map([[
+              clusterUidForLocus(locus),
+              clusterLabelText,
+            ]]),
+          }),
       // The projected bounds reflect the currently displayed locus, including
       // any committed trim. Source coordinates describe the original record and
       // must not determine the transient flip axis.
@@ -2764,7 +2792,12 @@
     }
   }
 
-  function drawClusterInfo(context, cluster, config, { x: offsetX = 0, y: offsetY = 0 } = {}) {
+  function drawClusterInfo(
+    context,
+    cluster,
+    config,
+    { x: offsetX = 0, y: offsetY = 0, locusText = cluster.info.locusText } = {}
+  ) {
     const { x, y } = cluster;
     const anchorX = x + cluster.info.x + offsetX;
     context.fillStyle = "black";
@@ -2774,7 +2807,7 @@
     context.fillText(cluster.source.name, anchorX, y + offsetY + 8);
     context.font = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
     context.textBaseline = "top";
-    context.fillText(cluster.info.locusText, anchorX, y + offsetY + 12);
+    context.fillText(locusText, anchorX, y + offsetY + 12);
   }
 
   function drawGene(
@@ -3357,6 +3390,11 @@
         drawClusterInfo(context, cluster, config, {
           x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
           y: clusterOffsetForPreview(preview, cluster.source.uid),
+          locusText: clusterLabelTextForPreview(
+            preview,
+            cluster.source.uid,
+            cluster.info.locusText
+          ),
         });
       }
     }
@@ -3472,6 +3510,9 @@
     // rows. Cancel it before the scene supplies their snapped final positions.
     const updateRender = (selection) =>
       animate ? selection.interrupt().transition(transition) : selection.interrupt();
+    // Cluster labels describe committed locus state. Keep them responsive even
+    // when locus geometry is still travelling through an SVG transition.
+    updateClusters(clusters.interrupt(), scene, { labelsOnly: true });
     const clusterRender = updateRender(clusters);
     updateClusters(clusterRender, scene);
 
@@ -3618,16 +3659,18 @@
     renderChrome({ plot, chrome: scene.chrome, ids, interactions });
   }
 
-  function updateClusters(selection, scene) {
+  function updateClusters(selection, scene, { labelsOnly = false } = {}) {
     const layout = (cluster) => scene.clusters.get(cluster.uid);
-    selection.attr("transform", (cluster) => {
-      const { x, y } = layout(cluster);
-      return `translate(${x}, ${y})`;
-    });
-    selection.selectAll("g.clusterInfo").attr("transform", (cluster) => {
-      const { x, y } = layout(cluster).info;
-      return `translate(${x}, ${y})`;
-    });
+    if (!labelsOnly) {
+      selection.attr("transform", (cluster) => {
+        const { x, y } = layout(cluster);
+        return `translate(${x}, ${y})`;
+      });
+      selection.selectAll("g.clusterInfo").attr("transform", (cluster) => {
+        const { x, y } = layout(cluster).info;
+        return `translate(${x}, ${y})`;
+      });
+    }
     selection.selectAll("text.locusText").each(function (cluster) {
       const text = layout(cluster).info.locusText;
       if (this.textContent !== text) this.textContent = text;
@@ -4686,6 +4729,11 @@
     return formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates);
   }
 
+  function locusTextForCluster(uid) {
+    const cluster = lookup.clusterData(uid);
+    return cluster ? locusText(cluster) : "";
+  }
+
   function sceneProjectionOptions({ areClustersAdjacent = clustersAreAdjacent } = {}) {
     return {
       scaleX: scales.x,
@@ -4881,6 +4929,7 @@
     configure,
     lookup,
     ids,
+    locusTextForCluster,
     synchronizeLocusLayoutState,
     synchronizeLocusLayoutStates,
     setChartIndex,
@@ -6648,6 +6697,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             localXFor: runtime.scales.locus,
             scaleX: runtime.scales.x,
             alignLabels: runtime.config.cluster.alignLabels,
+            clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
           });
           scheduleRasterPreview();
           return result;
@@ -6677,6 +6727,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           canvasPreviewScene = sourceScene;
           rasterPreview = createLocusFlipPreview(sourceScene, locus.uid, {
             progress: previewProgress,
+            clusterLabelText: pending.clusterLabelText,
           });
           scheduleRasterPreview();
           // The first preview frame is retained-scene geometry plus a reflection
@@ -6715,6 +6766,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
               : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
             rasterPreview = createLocusFlipPreview(sourceScene, locus.uid, {
               progress: eased,
+              clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
             });
             webgpuBackend.setScene(sourceScene);
             scheduleRasterPaint();
@@ -6800,6 +6852,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
         rasterPreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
           progress: initialProgress + (1 - initialProgress) * eased,
+          clusterLabelText: pending.clusterLabelText,
         });
         // The dirty region is bounded to the affected locus and its incident
         // links, so paint it in this rAF rather than one frame later. Links and
@@ -6866,6 +6919,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       return {
         locus,
         sourceScene,
+        clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
         targetScene: null,
         locusRecords: {
           loci: new Set([locus.uid]),
@@ -7059,6 +7113,25 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
               clear: false,
             });
           }
+          // The cached base contains the source label. Repaint the affected
+          // cluster info from the sparse preview so flipped coordinates become
+          // visible immediately rather than at the end of the bitmap animation.
+          renderCanvas({
+            canvas: canvasNode,
+            scene: canvasPreviewScene,
+            camera: getCamera(chartState),
+            config: runtime.config,
+            scales: runtime.scales,
+            pixelRatio: rasterMotion.pixelRatio(),
+            preview: rasterPreview,
+            include: { loci: canvasPendingFlip.locusRecords.loci },
+            showLinks: false,
+            showLocusTracks: false,
+            showGenes: false,
+            showChrome: false,
+            suppressLocusHover: true,
+            clear: false,
+          });
           paintMinimap();
           return canvasFlipDirtyFrame;
         }
