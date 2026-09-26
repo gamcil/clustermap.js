@@ -149,7 +149,7 @@ the public link schema, and rejects dangling gene references.
   returns its current normalized data.
 - `chart.patch(operations)` validates and atomically applies a batch of edits.
   Presentation operations are `genes.update` (label, colour, name),
-  `groups.update` (label, colour, hidden), `links.update` (label, colour,
+  `groups.update` (label, subtitle, colour, hidden), `links.update` (label, colour,
   hidden, identity), and `loci.update` /
   `clusters.update` (label, name), each with stable `ids` and a `changes`
   object. `genes.delete` removes a gene from its locus but deliberately keeps
@@ -170,7 +170,8 @@ the public link schema, and rejects dangling gene references.
   or persistence layer stay synchronized without inspecting renderer state.
 - `chart.highlight(geneIds)` draws a non-destructive selection outline around
   the given gene IDs in every renderer; call `chart.highlight()` to read the
-  current selection or pass an empty iterable to clear it.
+  current selection or pass an empty iterable to clear it. Pass
+  `{ genes, links }` to highlight genes and/or links independently.
 - `chart.exportSvg({ padding })` returns the current figure as an SVG string,
   irrespective of the interactive renderer in use.
 - `chart.destroy()` releases chart-owned event handlers, animations, minimap

@@ -21,6 +21,7 @@ const defaultConfig = {
     columnWidth: 160,
     entryHeight: 18,
     fontSize: 14,
+    subtitleFontSize: 10,
     onClickCircle: null,
     onClickText: null,
     // "right" keeps the historical layout. "bottom" places the legend

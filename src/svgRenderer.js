@@ -16,6 +16,7 @@ export function renderSvg({
   lookup,
   interactions,
   highlightGeneIds = new Set(),
+  highlightLinkIds = new Set(),
 }) {
   const linkGroup = plot
     .selectAll("g.links")
@@ -169,6 +170,10 @@ export function renderSvg({
           .on("contextmenu", interactions.showGeneMenu)
           .attr("class", "genePolygon");
         enter
+          .append("polygon")
+          .attr("class", "geneHighlight")
+          .style("pointer-events", "none");
+        enter
           .append("text")
           .attr("class", "geneLabel")
           .attr("dy", "-0.3em")
@@ -198,18 +203,22 @@ export function renderSvg({
           .attr("class", "geneLinkG");
         enter.append("path").attr("class", "geneLink");
         enter
+          .append("path")
+          .attr("class", "geneLinkHighlight")
+          .style("pointer-events", "none");
+        enter
           .append("text")
           .text((link) => link.label ?? link.identity.toFixed(2))
           .attr("class", "geneLinkLabel")
           .style("fill", "white")
           .style("text-anchor", "middle")
           .style("font-family", config.plot.fontFamily);
-        return updateLinks(enter, scene, config, scales, ids);
+        return updateLinks(enter, scene, config, scales, ids, highlightLinkIds);
       },
       (update) =>
         update.call((selection) => {
           selection.classed("hidden", !config.link.show);
-          updateRender(selection).call(updateLinks, scene, config, scales, ids);
+          updateRender(selection).call(updateLinks, scene, config, scales, ids, highlightLinkIds);
         }),
       (exit) =>
         exit.call((selection) => {
@@ -353,15 +362,23 @@ function updateGenes(selection, scene, config, scales, highlightGeneIds) {
     geneLayout(gene)?.visible ? "inline" : "none"
   );
   selection
-    .selectAll("polygon")
+    .select("polygon.genePolygon")
     .attr("class", (gene) => {
       const group = scales.group(gene.uid);
       return group === null ? "genePolygon" : `genePolygon group-${group}`;
     })
     .attr("points", (gene) => geneLayout(gene)?.localPolygon.join(" ") || "")
     .attr("fill", fill)
-    .style("stroke", (gene) => highlightGeneIds.has(gene.uid) ? "#1677ff" : config.gene.shape.stroke)
-    .style("stroke-width", (gene) => highlightGeneIds.has(gene.uid) ? Math.max(2, config.gene.shape.strokeWidth) : config.gene.shape.strokeWidth);
+    .style("stroke", config.gene.shape.stroke)
+    .style("stroke-width", config.gene.shape.strokeWidth);
+  selection
+    .select("polygon.geneHighlight")
+    .attr("points", (gene) => geneLayout(gene)?.localPolygon.join(" ") || "")
+    .attr("display", (gene) => (highlightGeneIds.has(gene.uid) ? "inline" : "none"))
+    .attr("fill", "rgba(22, 119, 255, 0.18)")
+    .style("stroke", "#1677ff")
+    .style("stroke-width", Math.max(2, config.gene.shape.strokeWidth))
+    .style("pointer-events", "none");
   selection
     .selectAll("text.geneLabel")
     .text((gene) => gene.label || gene.name || gene.uid)
@@ -373,7 +390,7 @@ function updateGenes(selection, scene, config, scales, highlightGeneIds) {
   return selection;
 }
 
-function updateLinks(selection, scene, config, scales, ids) {
+function updateLinks(selection, scene, config, scales, ids, highlightLinkIds) {
   const linkLayout = (link) => scene.links.get(link.uid);
   const fill = (link) => {
     if (config.link.asLine) return "none";
@@ -394,11 +411,19 @@ function updateLinks(selection, scene, config, scales, ids) {
     config.link.show && linkLayout(link)?.visible ? 1 : 0
   );
   selection
-    .selectAll("path")
+    .select("path.geneLink")
     .attr("d", (link) => linkLayout(link)?.path || "")
     .style("fill", fill)
     .style("stroke", stroke)
     .style("stroke-width", `${config.link.strokeWidth}px`);
+  selection
+    .select("path.geneLinkHighlight")
+    .attr("d", (link) => linkLayout(link)?.path || "")
+    .attr("display", (link) => (highlightLinkIds.has(link.uid) ? "inline" : "none"))
+    .style("fill", config.link.asLine ? "none" : "rgba(22, 119, 255, 0.18)")
+    .style("stroke", "#1677ff")
+    .style("stroke-width", `${Math.max(2, config.link.strokeWidth + 1)}px`)
+    .style("pointer-events", "none");
   selection
     .selectAll("text")
     .text((link) => link.label ?? link.identity.toFixed(2))
@@ -437,6 +462,12 @@ function renderLegend({ plot, legend, interactions, transform }) {
       item.append("circle");
       item
         .append("text")
+        .attr("class", "legend-label")
+        .attr("text-anchor", "start")
+        .style("dominant-baseline", "middle");
+      item
+        .append("text")
+        .attr("class", "legend-subtitle")
         .attr("text-anchor", "start")
         .style("dominant-baseline", "middle");
       return item;
@@ -452,11 +483,22 @@ function renderLegend({ plot, legend, interactions, transform }) {
     .attr("cursor", "pointer")
     .on("click", (event, item) => interactions.legendColour(event, item.source));
   items
-    .select("text")
+    .select("text.legend-label")
     .text((item) => item.label)
     .attr("x", (item) => item.textX)
     .attr("y", (item) => item.textY)
     .style("font-size", `${legend.fontSize}px`)
+    .style("font-family", legend.fontFamily)
+    .attr("cursor", "pointer")
+    .on("click", (event, item) => interactions.legendText(event, item.source))
+    .on("contextmenu", (event, item) => interactions.legendMenu(event, item.source));
+  items
+    .select("text.legend-subtitle")
+    .text((item) => item.subtitle)
+    .attr("x", (item) => item.textX)
+    .attr("y", (item) => item.subtitleY ?? item.textY)
+    .attr("opacity", (item) => item.subtitle ? 0.72 : 0)
+    .style("font-size", `${legend.subtitleFontSize}px`)
     .style("font-family", legend.fontFamily)
     .attr("cursor", "pointer")
     .on("click", (event, item) => interactions.legendText(event, item.source))

@@ -206,6 +206,7 @@ function sceneChromeOptions(data) {
       marginTop: config.legend.marginTop,
       entryHeight: config.legend.entryHeight,
       fontSize: config.legend.fontSize,
+      subtitleFontSize: config.legend.subtitleFontSize,
       fontFamily: config.plot.fontFamily,
       groups: data.groups,
       groupForGene: scales.group,

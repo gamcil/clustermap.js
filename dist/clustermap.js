@@ -614,7 +614,7 @@
   // one group removes it from every other group.
   const fieldsForType = {
     "genes.update": new Set(["label", "colour", "name"]),
-    "groups.update": new Set(["label", "colour", "hidden"]),
+    "groups.update": new Set(["label", "subtitle", "colour", "hidden"]),
     "loci.update": new Set(["label", "name"]),
     "clusters.update": new Set(["label", "name"]),
     "links.update": new Set(["label", "colour", "hidden", "identity"]),
@@ -713,7 +713,7 @@
         if (!group || typeof group !== "object" || Array.isArray(group)) throw operationError("groups.create requires a group object");
         if (group.uid === undefined || group.uid === null || group.uid === "") throw operationError("groups.create requires group.uid");
         if (groupIds.has(group.uid)) throw operationError(`groups.create refers to existing group ${group.uid}`);
-        const unsupported = Object.keys(group).filter((key) => !["uid", "label", "colour", "hidden"].includes(key));
+        const unsupported = Object.keys(group).filter((key) => !["uid", "label", "subtitle", "colour", "hidden"].includes(key));
         if (unsupported.length) throw operationError("groups.create contains an unsupported group field");
         groupIds.add(group.uid);
         return {
@@ -721,6 +721,7 @@
           group: {
             uid: group.uid,
             ...(group.label !== undefined ? { label: group.label } : {}),
+            ...(group.subtitle !== undefined ? { subtitle: group.subtitle } : {}),
             ...(group.colour !== undefined ? { colour: group.colour } : {}),
             ...(group.hidden !== undefined ? { hidden: Boolean(group.hidden) } : {}),
           },
@@ -1879,7 +1880,7 @@
           x - item.radius,
           x + legend.columnWidth,
           y,
-          y + legend.fontSize
+          y + (legend.hasSubtitles ? legend.entryHeight : legend.fontSize)
         );
       }
     }
@@ -1969,7 +1970,13 @@
     );
     const columnWidth = Number(chrome.legend.columnWidth) || 160;
     const rows = Math.ceil(groups.length / columns);
-    const totalHeight = chrome.legend.entryHeight * rows;
+    const fontSize = Number(chrome.legend.fontSize) || 14;
+    const subtitleFontSize = Number(chrome.legend.subtitleFontSize) || Math.max(10, Math.round(fontSize * 0.72));
+    const hasSubtitles = groups.some((group) => Boolean(group.subtitle));
+    const entryHeight = hasSubtitles
+      ? Math.max(Number(chrome.legend.entryHeight) || 18, fontSize + subtitleFontSize + 4)
+      : Number(chrome.legend.entryHeight) || 18;
+    const totalHeight = entryHeight * rows;
     const step = rows > 1 ? totalHeight / (rows - 0.5) : totalHeight;
     const radius = step / 4;
     const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
@@ -1986,7 +1993,10 @@
         placement,
         bottomOffset,
       }),
-      fontSize: chrome.legend.fontSize,
+      entryHeight,
+      fontSize,
+      subtitleFontSize,
+      hasSubtitles,
       fontFamily: chrome.legend.fontFamily,
       items: groups.map((group, index) => {
         const column = Math.floor(index / rows);
@@ -1999,9 +2009,10 @@
         x: column * columnWidth,
         y: row * step,
         radius,
-        circleY: radius,
+        circleY: hasSubtitles ? entryHeight / 2 : radius,
         textX: radius + 6,
-        textY: radius + 1,
+        textY: hasSubtitles ? entryHeight / 2 - subtitleFontSize * 0.42 : radius + 1,
+        ...(group.subtitle ? { subtitle: group.subtitle, subtitleY: entryHeight / 2 + fontSize * 0.48 } : {}),
         };
       }),
     };
@@ -2889,12 +2900,17 @@
     }
     if (scene.chrome?.legend.visible) {
       const { legend } = scene.chrome;
+      const entryHeight = legend.entryHeight || legend.fontSize;
+      const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
       for (const item of legend.items) {
         include(
           legend.position.x +
             item.textX +
-            textWidth(item.label, `${legend.fontSize}px ${legend.fontFamily}`),
-          legend.position.y + item.y + legend.fontSize
+            Math.max(
+              textWidth(item.label, `${legend.fontSize}px ${legend.fontFamily}`),
+              textWidth(item.subtitle, `${subtitleFontSize}px ${legend.fontFamily}`)
+            ),
+          legend.position.y + item.y + (item.subtitle ? entryHeight : legend.fontSize)
         );
       }
     }
@@ -2941,6 +2957,7 @@
     if (legend.visible) {
       context.save();
       context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+      const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
       for (const item of [...legend.items].reverse()) {
         const x = legend.position.x + item.x;
         const y = legend.position.y + item.y;
@@ -2951,12 +2968,16 @@
           return { action: "legend-colour", group: item.source };
         }
         const textX = x + item.textX;
-        const textWidth = context.measureText(item.label).width;
+        const labelWidth = context.measureText(item.label).width;
+        context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
+        const subtitleWidth = item.subtitle ? context.measureText(item.subtitle).width : 0;
+        context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+        const textWidth = Math.max(labelWidth, subtitleWidth);
         if (
           point.x >= textX &&
           point.x <= textX + textWidth &&
           point.y >= y + item.textY - legend.fontSize / 2 &&
-          point.y <= y + item.textY + legend.fontSize / 2
+          point.y <= y + (item.subtitleY ?? item.textY) + subtitleFontSize / 2
         ) {
           context.restore();
           return { action: "legend-text", group: item.source };
@@ -3067,6 +3088,47 @@
     drawLinkLabel(context, layout, source, config, anchors, geometry);
   }
 
+  function drawLinkHighlight(context, layout, source, config, geometry = {}) {
+    const visible = geometry.visible ?? layout.visible;
+    const anchors = geometry.anchors ?? layout.anchors;
+    if (!visible || !anchors) return;
+    let [ax1, ax2, ay, bx1, bx2, by] = anchors;
+    ax1 += geometry.a || 0;
+    ax2 += geometry.a || 0;
+    bx1 += geometry.b || 0;
+    bx2 += geometry.b || 0;
+    const aMid = (ax1 + ax2) / 2;
+    const bMid = (bx1 + bx2) / 2;
+
+    context.beginPath();
+    if (config.link.asLine) {
+      context.moveTo(aMid, ay);
+      if (config.link.straight) context.lineTo(bMid, by);
+      else {
+        const middle = (ay + by) / 2;
+        context.bezierCurveTo(aMid, middle, bMid, middle, bMid, by);
+      }
+    } else {
+      context.moveTo(ax2, ay);
+      if (config.link.straight) {
+        context.lineTo(bx2, by);
+        context.lineTo(bx1, by);
+        context.lineTo(ax1, ay);
+      } else {
+        const middle = ay + Math.abs(by - ay) / 2;
+        context.bezierCurveTo(ax2, middle, bx2, middle, bx2, by);
+        context.lineTo(bx1, by);
+        context.bezierCurveTo(bx1, middle, ax1, middle, ax1, ay);
+      }
+      context.closePath();
+      context.fillStyle = "rgba(22, 119, 255, 0.18)";
+      context.fill();
+    }
+    context.strokeStyle = "#1677ff";
+    context.lineWidth = Math.max(2, config.link.strokeWidth + 1);
+    context.stroke();
+  }
+
   function drawClusterInfo(
     context,
     cluster,
@@ -3145,8 +3207,9 @@
       context.translate(-geometry.flipAxis, 0);
     }
     polygon(context, gene.polygon);
-    // Keep the editor-selection ring readable at every zoom level without
-    // obscuring the gene's group colour.
+    context.fillStyle = "rgba(22, 119, 255, 0.18)";
+    context.fill();
+    // Keep the editor-selection ring readable at every zoom level.
     context.strokeStyle = "#1677ff";
     context.lineWidth = 2.5 / camera.k;
     context.stroke();
@@ -3396,6 +3459,7 @@
     context.save();
     context.translate(legend.position.x, legend.position.y);
     context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+    const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
     context.textAlign = "start";
     context.textBaseline = "middle";
     for (const item of legend.items) {
@@ -3405,6 +3469,12 @@
       context.fill();
       context.fillStyle = "black";
       context.fillText(item.label, item.x + item.textX, item.y + item.textY);
+      if (item.subtitle) {
+        context.fillStyle = "#566273";
+        context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
+        context.fillText(item.subtitle, item.x + item.textX, item.y + item.subtitleY);
+        context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+      }
     }
     context.restore();
   }
@@ -3589,6 +3659,7 @@
     showGeneLabels = showGenes,
     showLinkLabels = showLinks,
     highlightGeneIds = null,
+    highlightLinkIds = null,
     showClusterLabels = true,
     showChrome = true,
   }) {
@@ -3668,6 +3739,14 @@
       }
       if (showLinks) drawLink(context, link, link.source, config, scales, geometry);
       else drawLinkLabel(context, link, link.source, config, anchors, geometry);
+    }
+    if (highlightLinkIds?.size) {
+      for (const uid of highlightLinkIds) {
+        if (visible?.links && !visible.links.includes(uid)) continue;
+        const link = displayScene.links.get(uid);
+        if (!link) continue;
+        drawLinkHighlight(context, link, link.source, config, linkGeometryForPreview(displayScene, link, preview));
+      }
     }
     const loci = showLoci
       ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci")
@@ -3759,6 +3838,7 @@
     lookup,
     interactions,
     highlightGeneIds = new Set(),
+    highlightLinkIds = new Set(),
   }) {
     const linkGroup = plot
       .selectAll("g.links")
@@ -3912,6 +3992,10 @@
             .on("contextmenu", interactions.showGeneMenu)
             .attr("class", "genePolygon");
           enter
+            .append("polygon")
+            .attr("class", "geneHighlight")
+            .style("pointer-events", "none");
+          enter
             .append("text")
             .attr("class", "geneLabel")
             .attr("dy", "-0.3em")
@@ -3941,18 +4025,22 @@
             .attr("class", "geneLinkG");
           enter.append("path").attr("class", "geneLink");
           enter
+            .append("path")
+            .attr("class", "geneLinkHighlight")
+            .style("pointer-events", "none");
+          enter
             .append("text")
             .text((link) => link.label ?? link.identity.toFixed(2))
             .attr("class", "geneLinkLabel")
             .style("fill", "white")
             .style("text-anchor", "middle")
             .style("font-family", config.plot.fontFamily);
-          return updateLinks(enter, scene, config, scales, ids);
+          return updateLinks(enter, scene, config, scales, ids, highlightLinkIds);
         },
         (update) =>
           update.call((selection) => {
             selection.classed("hidden", !config.link.show);
-            updateRender(selection).call(updateLinks, scene, config, scales, ids);
+            updateRender(selection).call(updateLinks, scene, config, scales, ids, highlightLinkIds);
           }),
         (exit) =>
           exit.call((selection) => {
@@ -4096,15 +4184,23 @@
       geneLayout(gene)?.visible ? "inline" : "none"
     );
     selection
-      .selectAll("polygon")
+      .select("polygon.genePolygon")
       .attr("class", (gene) => {
         const group = scales.group(gene.uid);
         return group === null ? "genePolygon" : `genePolygon group-${group}`;
       })
       .attr("points", (gene) => geneLayout(gene)?.localPolygon.join(" ") || "")
       .attr("fill", fill)
-      .style("stroke", (gene) => highlightGeneIds.has(gene.uid) ? "#1677ff" : config.gene.shape.stroke)
-      .style("stroke-width", (gene) => highlightGeneIds.has(gene.uid) ? Math.max(2, config.gene.shape.strokeWidth) : config.gene.shape.strokeWidth);
+      .style("stroke", config.gene.shape.stroke)
+      .style("stroke-width", config.gene.shape.strokeWidth);
+    selection
+      .select("polygon.geneHighlight")
+      .attr("points", (gene) => geneLayout(gene)?.localPolygon.join(" ") || "")
+      .attr("display", (gene) => (highlightGeneIds.has(gene.uid) ? "inline" : "none"))
+      .attr("fill", "rgba(22, 119, 255, 0.18)")
+      .style("stroke", "#1677ff")
+      .style("stroke-width", Math.max(2, config.gene.shape.strokeWidth))
+      .style("pointer-events", "none");
     selection
       .selectAll("text.geneLabel")
       .text((gene) => gene.label || gene.name || gene.uid)
@@ -4116,7 +4212,7 @@
     return selection;
   }
 
-  function updateLinks(selection, scene, config, scales, ids) {
+  function updateLinks(selection, scene, config, scales, ids, highlightLinkIds) {
     const linkLayout = (link) => scene.links.get(link.uid);
     const fill = (link) => {
       if (config.link.asLine) return "none";
@@ -4137,11 +4233,19 @@
       config.link.show && linkLayout(link)?.visible ? 1 : 0
     );
     selection
-      .selectAll("path")
+      .select("path.geneLink")
       .attr("d", (link) => linkLayout(link)?.path || "")
       .style("fill", fill)
       .style("stroke", stroke)
       .style("stroke-width", `${config.link.strokeWidth}px`);
+    selection
+      .select("path.geneLinkHighlight")
+      .attr("d", (link) => linkLayout(link)?.path || "")
+      .attr("display", (link) => (highlightLinkIds.has(link.uid) ? "inline" : "none"))
+      .style("fill", config.link.asLine ? "none" : "rgba(22, 119, 255, 0.18)")
+      .style("stroke", "#1677ff")
+      .style("stroke-width", `${Math.max(2, config.link.strokeWidth + 1)}px`)
+      .style("pointer-events", "none");
     selection
       .selectAll("text")
       .text((link) => link.label ?? link.identity.toFixed(2))
@@ -4180,6 +4284,12 @@
         item.append("circle");
         item
           .append("text")
+          .attr("class", "legend-label")
+          .attr("text-anchor", "start")
+          .style("dominant-baseline", "middle");
+        item
+          .append("text")
+          .attr("class", "legend-subtitle")
           .attr("text-anchor", "start")
           .style("dominant-baseline", "middle");
         return item;
@@ -4195,11 +4305,22 @@
       .attr("cursor", "pointer")
       .on("click", (event, item) => interactions.legendColour(event, item.source));
     items
-      .select("text")
+      .select("text.legend-label")
       .text((item) => item.label)
       .attr("x", (item) => item.textX)
       .attr("y", (item) => item.textY)
       .style("font-size", `${legend.fontSize}px`)
+      .style("font-family", legend.fontFamily)
+      .attr("cursor", "pointer")
+      .on("click", (event, item) => interactions.legendText(event, item.source))
+      .on("contextmenu", (event, item) => interactions.legendMenu(event, item.source));
+    items
+      .select("text.legend-subtitle")
+      .text((item) => item.subtitle)
+      .attr("x", (item) => item.textX)
+      .attr("y", (item) => item.subtitleY ?? item.textY)
+      .attr("opacity", (item) => item.subtitle ? 0.72 : 0)
+      .style("font-size", `${legend.subtitleFontSize}px`)
       .style("font-family", legend.fontFamily)
       .attr("cursor", "pointer")
       .on("click", (event, item) => interactions.legendText(event, item.source))
@@ -4803,6 +4924,7 @@
       columnWidth: 160,
       entryHeight: 18,
       fontSize: 14,
+      subtitleFontSize: 10,
       onClickCircle: null,
       onClickText: null,
       // "right" keeps the historical layout. "bottom" places the legend
@@ -5136,6 +5258,7 @@
         marginTop: config.legend.marginTop,
         entryHeight: config.legend.entryHeight,
         fontSize: config.legend.fontSize,
+        subtitleFontSize: config.legend.subtitleFontSize,
         fontFamily: config.plot.fontFamily,
         groups: data.groups,
         groupForGene: scales.group,
@@ -6674,6 +6797,21 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     if (zoom) zoom.scaleExtent(zoomExtent());
   }
 
+  // D3 keeps a transform on each gesture surface. The chart camera is shared by
+  // all renderers, so a surface created while switching renderer must adopt that
+  // camera before its first wheel or drag event. Otherwise its default identity
+  // transform would overwrite the already-visible camera on that first gesture.
+  function syncCameraZoom({ d3, surface, zoom, camera }) {
+    const node = surface?.node?.();
+    if (!node || !zoom || !camera) return;
+    const current = d3.zoomTransform(node);
+    if (current.x === camera.x && current.y === camera.y && current.k === camera.k) return;
+    surface.call(
+      zoom.transform,
+      d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+    );
+  }
+
   // Owns the persistent DOM surrounding an SVG chart. Scene joins and all chart
 
   function ensureSvgSurface({
@@ -6857,7 +6995,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       .style("width", showMinimap ? `${minimap.width}px` : null)
       .style("height", showMinimap ? `${minimap.height}px` : null)
       .style("right", showMinimap ? `${minimap.margin}px` : null)
-      .style("bottom", showMinimap ? `${minimap.margin}px` : null);
+      // The editor is a bottom overlay. Keep navigation independently reachable
+      // by anchoring the overview at the chart's top-right corner instead.
+      .style("top", showMinimap ? `${minimap.margin}px` : null)
+      .style("bottom", null);
 
     return { canvas, webgpuOverlay, minimap: overview, zoom: currentZoom };
   }
@@ -6935,6 +7076,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let currentData = null;
     let chartIndex = null;
     let highlightGeneIds = new Set();
+    let highlightLinkIds = new Set();
     let disposeRasterInteraction = () => {};
     let disposeOverlay = () => {};
     const changeListeners = new Set();
@@ -7549,6 +7691,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           pixelRatio: rasterMotion.pixelRatio(),
           preview: rasterPreview,
           highlightGeneIds,
+          highlightLinkIds,
         });
         paintMinimap();
         return result;
@@ -7573,6 +7716,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             showGenes: false,
             showGeneLabels: true,
             highlightGeneIds,
+            highlightLinkIds,
           });
         }
         const bounds = canvasNode.getBoundingClientRect();
@@ -8022,6 +8166,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           setCursor: (surface, cursor) => d3__namespace.select(surface).style("cursor", cursor),
         });
       }
+      // The currently displayed renderer can change without changing the chart
+      // camera. Keep D3's per-surface gesture state aligned before a newly
+      // created SVG or canvas receives its first interaction.
+      const camera = getCamera(chartState);
+      syncCameraZoom({ d3: d3__namespace, surface: svg, zoom, camera });
+      syncCameraZoom({ d3: d3__namespace, surface: canvas, zoom: canvasZoom, camera });
       applyCamera(svg.select("g.clusterMapViewport"));
 
       runtime.updateScales(data);
@@ -8091,6 +8241,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           lookup: { gene: runtime.lookup.geneData },
           interactions: rendererInteractions,
           highlightGeneIds,
+          highlightLinkIds,
         });
 
         if (!hasInitialView) fitInitialView(svg, plot);
@@ -8194,14 +8345,19 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       emitChange({ type: "data.apply", operations: result.operations });
       return my;
     };
-    my.highlight = function (geneIds) {
+    my.highlight = function (ids) {
       if (!arguments.length) return [...highlightGeneIds];
-      const next = new Set(geneIds || []);
+      const isScopedHighlight = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
+      const nextGenes = new Set(isScopedHighlight ? ids.genes || [] : ids || []);
+      const nextLinks = new Set(isScopedHighlight ? ids.links || [] : []);
       if (
-        next.size === highlightGeneIds.size &&
-        [...next].every((uid) => highlightGeneIds.has(uid))
+        nextGenes.size === highlightGeneIds.size &&
+        [...nextGenes].every((uid) => highlightGeneIds.has(uid)) &&
+        nextLinks.size === highlightLinkIds.size &&
+        [...nextLinks].every((uid) => highlightLinkIds.has(uid))
       ) return my;
-      highlightGeneIds = next;
+      highlightGeneIds = nextGenes;
+      highlightLinkIds = nextLinks;
       if (!container || !currentData) return my;
       if (isRasterRenderer(runtime.config.plot.renderer)) scheduleRasterPaint();
       else redraw({ animate: false });
@@ -8264,6 +8420,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       anchorSceneCommit = null;
       chartIndex = null;
       highlightGeneIds.clear();
+      highlightLinkIds.clear();
       changeListeners.clear();
       return my;
     };

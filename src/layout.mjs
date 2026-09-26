@@ -96,7 +96,7 @@ function figureBoundsForChrome(bounds, chrome) {
         x - item.radius,
         x + legend.columnWidth,
         y,
-        y + legend.fontSize
+        y + (legend.hasSubtitles ? legend.entryHeight : legend.fontSize)
       );
     }
   }
@@ -186,7 +186,13 @@ function buildChrome(bounds, genes, chrome) {
   );
   const columnWidth = Number(chrome.legend.columnWidth) || 160;
   const rows = Math.ceil(groups.length / columns);
-  const totalHeight = chrome.legend.entryHeight * rows;
+  const fontSize = Number(chrome.legend.fontSize) || 14;
+  const subtitleFontSize = Number(chrome.legend.subtitleFontSize) || Math.max(10, Math.round(fontSize * 0.72));
+  const hasSubtitles = groups.some((group) => Boolean(group.subtitle));
+  const entryHeight = hasSubtitles
+    ? Math.max(Number(chrome.legend.entryHeight) || 18, fontSize + subtitleFontSize + 4)
+    : Number(chrome.legend.entryHeight) || 18;
+  const totalHeight = entryHeight * rows;
   const step = rows > 1 ? totalHeight / (rows - 0.5) : totalHeight;
   const radius = step / 4;
   const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
@@ -203,7 +209,10 @@ function buildChrome(bounds, genes, chrome) {
       placement,
       bottomOffset,
     }),
-    fontSize: chrome.legend.fontSize,
+    entryHeight,
+    fontSize,
+    subtitleFontSize,
+    hasSubtitles,
     fontFamily: chrome.legend.fontFamily,
     items: groups.map((group, index) => {
       const column = Math.floor(index / rows);
@@ -216,9 +225,10 @@ function buildChrome(bounds, genes, chrome) {
       x: column * columnWidth,
       y: row * step,
       radius,
-      circleY: radius,
+      circleY: hasSubtitles ? entryHeight / 2 : radius,
       textX: radius + 6,
-      textY: radius + 1,
+      textY: hasSubtitles ? entryHeight / 2 - subtitleFontSize * 0.42 : radius + 1,
+      ...(group.subtitle ? { subtitle: group.subtitle, subtitleY: entryHeight / 2 + fontSize * 0.48 } : {}),
       };
     }),
   };

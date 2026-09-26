@@ -23,13 +23,14 @@ test("chart operations update selected genes and groups atomically", async () =>
 
   const result = applyChartOperations(chartData, createChartIndex(chartData), [
     { type: "genes.update", ids: ["gene-1"], changes: { label: "Core enzyme", colour: "#ff0000" } },
-    { type: "groups.update", ids: ["group-1"], changes: { label: "Core group", hidden: true } },
+    { type: "groups.update", ids: ["group-1"], changes: { label: "Core group", subtitle: "Conserved enzymes", hidden: true } },
     { type: "loci.update", ids: ["locus-1"], changes: { name: "Neighbourhood" } },
     { type: "clusters.update", ids: ["cluster-1"], changes: { label: "Reference genome" } },
   ]);
 
   assert.equal(chartData.clusters[0].loci[0].genes[0].label, "Core enzyme");
   assert.equal(chartData.groups[0].label, "Core group");
+  assert.equal(chartData.groups[0].subtitle, "Conserved enzymes");
   assert.equal(chartData.groups[0].hidden, true);
   assert.equal(chartData.clusters[0].loci[0].name, "Neighbourhood");
   assert.equal(chartData.clusters[0].label, "Reference genome");
@@ -58,16 +59,16 @@ test("structural group operations preserve exclusive gene membership", async () 
   applyChartOperations(chartData, createChartIndex(chartData), [
     {
       type: "groups.create",
-      group: { uid: "group-2", label: "New group" },
+      group: { uid: "group-2", label: "New group", subtitle: "Optional detail" },
       geneIds: ["gene-1"],
     },
     { type: "groups.unassignGenes", geneIds: ["gene-1"] },
     { type: "groups.assignGenes", groupId: "group-1", geneIds: ["gene-1"] },
   ]);
 
-  assert.deepEqual(chartData.groups.map((group) => [group.uid, group.genes]), [
-    ["group-1", ["gene-1"]],
-    ["group-2", []],
+  assert.deepEqual(chartData.groups.map((group) => [group.uid, group.subtitle, group.genes]), [
+    ["group-1", undefined, ["gene-1"]],
+    ["group-2", "Optional detail", []],
   ]);
   assert.equal(chartData.config.updateGroups, false);
 

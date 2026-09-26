@@ -46,6 +46,7 @@ import { createRetainedSceneBackend } from "./retainedSceneBackend.mjs";
 import { createWebGpuBackend } from "./webgpuBackend.mjs";
 import { ensureSvgSurface } from "./svgSurface.mjs";
 import { ensureRasterSurface } from "./rasterSurface.mjs";
+import { syncCameraZoom } from "./cameraZoom.mjs";
 import { createRasterInteractionBindings } from "./rasterInteractionBindings.mjs";
 import {
   isCanvasRenderer,
@@ -90,6 +91,7 @@ export default function clusterMap() {
   let currentData = null;
   let chartIndex = null;
   let highlightGeneIds = new Set();
+  let highlightLinkIds = new Set();
   let disposeRasterInteraction = () => {};
   let disposeOverlay = () => {};
   const changeListeners = new Set();
@@ -704,6 +706,7 @@ export default function clusterMap() {
         pixelRatio: rasterMotion.pixelRatio(),
         preview: rasterPreview,
         highlightGeneIds,
+        highlightLinkIds,
       });
       paintMinimap();
       return result;
@@ -728,6 +731,7 @@ export default function clusterMap() {
           showGenes: false,
           showGeneLabels: true,
           highlightGeneIds,
+          highlightLinkIds,
         });
       }
       const bounds = canvasNode.getBoundingClientRect();
@@ -1177,6 +1181,12 @@ export default function clusterMap() {
         setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
       });
     }
+    // The currently displayed renderer can change without changing the chart
+    // camera. Keep D3's per-surface gesture state aligned before a newly
+    // created SVG or canvas receives its first interaction.
+    const camera = getCamera(chartState);
+    syncCameraZoom({ d3, surface: svg, zoom, camera });
+    syncCameraZoom({ d3, surface: canvas, zoom: canvasZoom, camera });
     applyCamera(svg.select("g.clusterMapViewport"));
 
     runtime.updateScales(data);
@@ -1246,6 +1256,7 @@ export default function clusterMap() {
         lookup: { gene: runtime.lookup.geneData },
         interactions: rendererInteractions,
         highlightGeneIds,
+        highlightLinkIds,
       });
 
       if (!hasInitialView) fitInitialView(svg, plot);
@@ -1349,14 +1360,19 @@ export default function clusterMap() {
     emitChange({ type: "data.apply", operations: result.operations });
     return my;
   };
-  my.highlight = function (geneIds) {
+  my.highlight = function (ids) {
     if (!arguments.length) return [...highlightGeneIds];
-    const next = new Set(geneIds || []);
+    const isScopedHighlight = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
+    const nextGenes = new Set(isScopedHighlight ? ids.genes || [] : ids || []);
+    const nextLinks = new Set(isScopedHighlight ? ids.links || [] : []);
     if (
-      next.size === highlightGeneIds.size &&
-      [...next].every((uid) => highlightGeneIds.has(uid))
+      nextGenes.size === highlightGeneIds.size &&
+      [...nextGenes].every((uid) => highlightGeneIds.has(uid)) &&
+      nextLinks.size === highlightLinkIds.size &&
+      [...nextLinks].every((uid) => highlightLinkIds.has(uid))
     ) return my;
-    highlightGeneIds = next;
+    highlightGeneIds = nextGenes;
+    highlightLinkIds = nextLinks;
     if (!container || !currentData) return my;
     if (isRasterRenderer(runtime.config.plot.renderer)) scheduleRasterPaint();
     else redraw({ animate: false });
@@ -1419,6 +1435,7 @@ export default function clusterMap() {
     anchorSceneCommit = null;
     chartIndex = null;
     highlightGeneIds.clear();
+    highlightLinkIds.clear();
     changeListeners.clear();
     return my;
   };

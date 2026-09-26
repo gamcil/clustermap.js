@@ -3,7 +3,7 @@
 // one group removes it from every other group.
 const fieldsForType = {
   "genes.update": new Set(["label", "colour", "name"]),
-  "groups.update": new Set(["label", "colour", "hidden"]),
+  "groups.update": new Set(["label", "subtitle", "colour", "hidden"]),
   "loci.update": new Set(["label", "name"]),
   "clusters.update": new Set(["label", "name"]),
   "links.update": new Set(["label", "colour", "hidden", "identity"]),
@@ -102,7 +102,7 @@ function validateStructuralGroupOperation(operation, index, groupIds) {
       if (!group || typeof group !== "object" || Array.isArray(group)) throw operationError("groups.create requires a group object");
       if (group.uid === undefined || group.uid === null || group.uid === "") throw operationError("groups.create requires group.uid");
       if (groupIds.has(group.uid)) throw operationError(`groups.create refers to existing group ${group.uid}`);
-      const unsupported = Object.keys(group).filter((key) => !["uid", "label", "colour", "hidden"].includes(key));
+      const unsupported = Object.keys(group).filter((key) => !["uid", "label", "subtitle", "colour", "hidden"].includes(key));
       if (unsupported.length) throw operationError("groups.create contains an unsupported group field");
       groupIds.add(group.uid);
       return {
@@ -110,6 +110,7 @@ function validateStructuralGroupOperation(operation, index, groupIds) {
         group: {
           uid: group.uid,
           ...(group.label !== undefined ? { label: group.label } : {}),
+          ...(group.subtitle !== undefined ? { subtitle: group.subtitle } : {}),
           ...(group.colour !== undefined ? { colour: group.colour } : {}),
           ...(group.hidden !== undefined ? { hidden: Boolean(group.hidden) } : {}),
         },

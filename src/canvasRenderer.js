@@ -196,12 +196,17 @@ export function canvasFigureBounds(context, scene, config) {
   }
   if (scene.chrome?.legend.visible) {
     const { legend } = scene.chrome;
+    const entryHeight = legend.entryHeight || legend.fontSize;
+    const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
     for (const item of legend.items) {
       include(
         legend.position.x +
           item.textX +
-          textWidth(item.label, `${legend.fontSize}px ${legend.fontFamily}`),
-        legend.position.y + item.y + legend.fontSize
+          Math.max(
+            textWidth(item.label, `${legend.fontSize}px ${legend.fontFamily}`),
+            textWidth(item.subtitle, `${subtitleFontSize}px ${legend.fontFamily}`)
+          ),
+        legend.position.y + item.y + (item.subtitle ? entryHeight : legend.fontSize)
       );
     }
   }
@@ -248,6 +253,7 @@ function chromeHit(context, scene, point) {
   if (legend.visible) {
     context.save();
     context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+    const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
     for (const item of [...legend.items].reverse()) {
       const x = legend.position.x + item.x;
       const y = legend.position.y + item.y;
@@ -258,12 +264,16 @@ function chromeHit(context, scene, point) {
         return { action: "legend-colour", group: item.source };
       }
       const textX = x + item.textX;
-      const textWidth = context.measureText(item.label).width;
+      const labelWidth = context.measureText(item.label).width;
+      context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
+      const subtitleWidth = item.subtitle ? context.measureText(item.subtitle).width : 0;
+      context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+      const textWidth = Math.max(labelWidth, subtitleWidth);
       if (
         point.x >= textX &&
         point.x <= textX + textWidth &&
         point.y >= y + item.textY - legend.fontSize / 2 &&
-        point.y <= y + item.textY + legend.fontSize / 2
+        point.y <= y + (item.subtitleY ?? item.textY) + subtitleFontSize / 2
       ) {
         context.restore();
         return { action: "legend-text", group: item.source };
@@ -374,6 +384,47 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   drawLinkLabel(context, layout, source, config, anchors, geometry);
 }
 
+function drawLinkHighlight(context, layout, source, config, geometry = {}) {
+  const visible = geometry.visible ?? layout.visible;
+  const anchors = geometry.anchors ?? layout.anchors;
+  if (!visible || !anchors) return;
+  let [ax1, ax2, ay, bx1, bx2, by] = anchors;
+  ax1 += geometry.a || 0;
+  ax2 += geometry.a || 0;
+  bx1 += geometry.b || 0;
+  bx2 += geometry.b || 0;
+  const aMid = (ax1 + ax2) / 2;
+  const bMid = (bx1 + bx2) / 2;
+
+  context.beginPath();
+  if (config.link.asLine) {
+    context.moveTo(aMid, ay);
+    if (config.link.straight) context.lineTo(bMid, by);
+    else {
+      const middle = (ay + by) / 2;
+      context.bezierCurveTo(aMid, middle, bMid, middle, bMid, by);
+    }
+  } else {
+    context.moveTo(ax2, ay);
+    if (config.link.straight) {
+      context.lineTo(bx2, by);
+      context.lineTo(bx1, by);
+      context.lineTo(ax1, ay);
+    } else {
+      const middle = ay + Math.abs(by - ay) / 2;
+      context.bezierCurveTo(ax2, middle, bx2, middle, bx2, by);
+      context.lineTo(bx1, by);
+      context.bezierCurveTo(bx1, middle, ax1, middle, ax1, ay);
+    }
+    context.closePath();
+    context.fillStyle = "rgba(22, 119, 255, 0.18)";
+    context.fill();
+  }
+  context.strokeStyle = "#1677ff";
+  context.lineWidth = Math.max(2, config.link.strokeWidth + 1);
+  context.stroke();
+}
+
 function drawClusterInfo(
   context,
   cluster,
@@ -452,8 +503,9 @@ function drawGeneHighlight(context, gene, camera, geometry = {}, { x: offsetX = 
     context.translate(-geometry.flipAxis, 0);
   }
   polygon(context, gene.polygon);
-  // Keep the editor-selection ring readable at every zoom level without
-  // obscuring the gene's group colour.
+  context.fillStyle = "rgba(22, 119, 255, 0.18)";
+  context.fill();
+  // Keep the editor-selection ring readable at every zoom level.
   context.strokeStyle = "#1677ff";
   context.lineWidth = 2.5 / camera.k;
   context.stroke();
@@ -703,6 +755,7 @@ function drawLegend(context, legend) {
   context.save();
   context.translate(legend.position.x, legend.position.y);
   context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+  const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
   context.textAlign = "start";
   context.textBaseline = "middle";
   for (const item of legend.items) {
@@ -712,6 +765,12 @@ function drawLegend(context, legend) {
     context.fill();
     context.fillStyle = "black";
     context.fillText(item.label, item.x + item.textX, item.y + item.textY);
+    if (item.subtitle) {
+      context.fillStyle = "#566273";
+      context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
+      context.fillText(item.subtitle, item.x + item.textX, item.y + item.subtitleY);
+      context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+    }
   }
   context.restore();
 }
@@ -896,6 +955,7 @@ export function renderCanvas({
   showGeneLabels = showGenes,
   showLinkLabels = showLinks,
   highlightGeneIds = null,
+  highlightLinkIds = null,
   showClusterLabels = true,
   showChrome = true,
 }) {
@@ -975,6 +1035,14 @@ export function renderCanvas({
     }
     if (showLinks) drawLink(context, link, link.source, config, scales, geometry);
     else drawLinkLabel(context, link, link.source, config, anchors, geometry);
+  }
+  if (highlightLinkIds?.size) {
+    for (const uid of highlightLinkIds) {
+      if (visible?.links && !visible.links.includes(uid)) continue;
+      const link = displayScene.links.get(uid);
+      if (!link) continue;
+      drawLinkHighlight(context, link, link.source, config, linkGeometryForPreview(displayScene, link, preview));
+    }
   }
   const loci = showLoci
     ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci")

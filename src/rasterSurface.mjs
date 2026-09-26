@@ -97,7 +97,10 @@ export function ensureRasterSurface({
     .style("width", showMinimap ? `${minimap.width}px` : null)
     .style("height", showMinimap ? `${minimap.height}px` : null)
     .style("right", showMinimap ? `${minimap.margin}px` : null)
-    .style("bottom", showMinimap ? `${minimap.margin}px` : null);
+    // The editor is a bottom overlay. Keep navigation independently reachable
+    // by anchoring the overview at the chart's top-right corner instead.
+    .style("top", showMinimap ? `${minimap.margin}px` : null)
+    .style("bottom", null);
 
   return { canvas, webgpuOverlay, minimap: overview, zoom: currentZoom };
 }

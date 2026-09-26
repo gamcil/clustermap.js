@@ -33,56 +33,106 @@
 				max-height: calc(100% - 48px);
 				min-height: 180px;
 				padding: 10px;
-				border: 1px solid #ccc;
-				border-radius: 6px;
-				background: rgba(255, 255, 255, 0.97);
-				box-shadow: 0 3px 16px rgba(0, 0, 0, 0.2);
+				border: 1px solid #d7dce3;
+				border-radius: 10px;
+				background: rgba(255, 255, 255, 0.98);
+				box-shadow: 0 8px 28px rgba(23, 36, 54, 0.16);
 				box-sizing: border-box;
 				display: flex;
 				flex-direction: column;
 				overflow: hidden;
 				font: 13px system-ui, sans-serif;
 			}
-			#editor h2 { margin: 0; font-size: 16px; }
+			#editor h2 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
 			#editor-resize-handle { height: 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }
 			#editor-resize-handle::after { content: ""; display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: #aaa; }
 			#editor-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-			#editor-tabs { display: flex; gap: 4px; border-bottom: 1px solid #ddd; margin-bottom: 8px; }
-			#editor-tabs button { border: 0; border-bottom: 2px solid transparent; background: none; padding: 5px 8px; font: inherit; cursor: pointer; }
+			#editor-tabs { display: flex; gap: 4px; border-bottom: 1px solid #e1e5ea; margin-bottom: 10px; }
+			#editor button, #editor select, #editor input:not([type="checkbox"]):not([type="color"]) { font: inherit; }
+			#editor button { box-sizing: border-box; min-height: 30px; border: 1px solid #cbd3de; border-radius: 6px; padding: 4px 8px; background: #fff; color: #273444; cursor: pointer; }
+			#editor button:hover:not(:disabled) { border-color: #78a9ed; background: #f4f8ff; }
+			#editor button:disabled { color: #8993a1; border-color: #d8dde4; background: #f5f6f8; cursor: default; }
+			#editor select, #editor input:not([type="checkbox"]):not([type="color"]) { box-sizing: border-box; height: 30px; border: 1px solid #bfc8d4; border-radius: 6px; padding: 3px 7px; background: #fff; color: #273444; }
+			#editor-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 6px 10px; font: inherit; cursor: pointer; }
 			#editor-tabs button[aria-selected="true"] { border-bottom-color: #1677ff; font-weight: 600; }
 			.editor-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 			.editor-panel[hidden] { display: none; }
-			#data-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+			#data-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
 			#group-create { display: flex; align-items: center; gap: 4px; }
 			#group-create[hidden] { display: none; }
-			#data-kind, #gene-view { display: flex; padding: 2px; border-radius: 5px; background: #eee; }
+			#data-kind, #gene-view { display: flex; padding: 3px; border: 1px solid #e0e5eb; border-radius: 7px; background: #f2f4f7; }
 			#gene-view[hidden] { display: none; }
-			#data-kind button, #gene-view button { border: 0; border-radius: 3px; padding: 4px 8px; background: transparent; font: inherit; cursor: pointer; }
-			#data-kind button[aria-pressed="true"], #gene-view button[aria-pressed="true"] { background: white; box-shadow: 0 1px 2px rgba(0, 0, 0, .18); font-weight: 600; }
+			#data-kind button, #gene-view button { min-height: 28px; border: 0; border-radius: 4px; padding: 4px 9px; background: transparent; font: inherit; cursor: pointer; }
+			#data-kind button:hover:not(:disabled), #gene-view button:hover:not(:disabled) { border-color: transparent; background: #e8eef7; }
+			#data-kind button[aria-pressed="true"], #gene-view button[aria-pressed="true"] { background: white; box-shadow: 0 1px 2px rgba(29, 43, 61, .16); font-weight: 600; }
 			#editor-filter { flex: 1 1 240px; min-width: 160px; box-sizing: border-box; }
-			#selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 0 8px; border-bottom: 1px solid #ddd; margin-bottom: 4px; }
+			#selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid #dce5f2; border-radius: 8px; background: #f7faff; margin: 0 0 8px; }
 			#selection-actions[hidden] { display: none; }
-			#selection-actions strong { margin-right: 4px; }
+			#selection-actions [hidden] { display: none !important; }
+			#selection-actions > :not(.action-group) { flex: 0 0 auto; box-sizing: border-box; height: 30px; }
+			#selection-actions strong { display: inline-flex; align-items: center; margin-right: 3px; padding: 4px 7px; border-radius: 5px; background: #e7f0ff; color: #184a86; }
+			#selection-actions label { display: inline-flex; align-items: center; gap: 5px; color: #4c5b6d; font-weight: 500; }
+			.action-group { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; }
+			.action-group.separated { padding-left: 12px; border-left: 1px solid #cfd9e6; }
+			.action-group > * { box-sizing: border-box; height: 30px; }
+			#selection-actions #selection-unassign, #selection-actions #selection-begin-create-group { background: transparent; border-color: transparent; color: #3f5d83; }
+			#selection-actions #selection-unassign:hover, #selection-actions #selection-begin-create-group:hover { border-color: #c6d8f0; background: #fff; }
+			.destructive-action { color: #b3261e !important; border-color: #e4aaa5 !important; background: #fffafa !important; }
+			.destructive-action:hover:not(:disabled) { border-color: #cc6f68 !important; background: #fff1f0 !important; }
+			#editor-history { display: flex; gap: 5px; }
+			#editor-history button { font-size: 12px; padding: 3px 7px; }
 			#selection-label { width: 180px; max-width: 35vw; }
+			#selection-colour-label { width: 40px; }
+			#selection-colour { box-sizing: border-box; width: 40px; height: 30px; padding: 2px; }
 			#selection-colour-label[hidden] { display: none; }
 			#selection-group, #selection-merge-target { max-width: 220px; }
 			#selection-new-group { width: 150px; max-width: 28vw; }
+			.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 			#editor-list-scroll { flex: 1; min-height: 120px; overflow: auto; }
 			#editor-rows { min-width: 0; }
+			#editor-list-header[hidden] { display: none; }
+			/* Keep control columns compact and predictable; text columns absorb the remaining room. */
+			.editor-list-header.gene-list, .editor-row.list-gene { display: grid; grid-template-columns: 28px minmax(150px, 1.35fr) minmax(90px, .8fr) minmax(110px, 1fr) minmax(90px, .85fr) 28px; align-items: center; column-gap: 7px; padding: 0 5px; box-sizing: border-box; }
+			.editor-list-header.group-list, .editor-row.list-group { display: grid; grid-template-columns: 28px minmax(160px, 1.35fr) minmax(130px, 1fr) 78px 24px 28px; align-items: center; column-gap: 7px; padding: 0 5px; box-sizing: border-box; }
+			.editor-list-header.link-list, .editor-row.list-link { display: grid; grid-template-columns: 28px minmax(110px, 1.1fr) minmax(110px, 1.1fr) 72px minmax(110px, 1fr) minmax(96px, .85fr) 28px 24px; align-items: center; column-gap: 7px; padding: 0 5px; box-sizing: border-box; }
+			.editor-list-header { min-height: 32px; border-bottom: 1px solid #dbe2eb; background: #f7f9fc; color: #556274; font-size: 11px; font-weight: 650; }
+			.editor-list-header > *, .editor-row.list-gene > *, .editor-row.list-group > *, .editor-row.list-link > * { min-width: 0; }
+			#editor .editor-list-header button { min-width: 0; min-height: 32px; border: 0; border-radius: 0; padding: 3px 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+			#editor .editor-list-header button:hover { background: #edf4ff; color: #145da8; }
+			.editor-list-header .sort-indicator { display: inline-block; width: 10px; color: #1677ff; }
 			.editor-row { height: 34px; display: flex; align-items: center; gap: 7px; border-bottom: 1px solid #eee; padding: 0 5px; box-sizing: border-box; cursor: pointer; }
 			.editor-row:hover, .editor-row.selected { background: #f1f6ff; }
 			.editor-row input[type="checkbox"] { opacity: .45; }
 			.editor-row:hover input[type="checkbox"], .editor-row.selected input[type="checkbox"] { opacity: 1; }
-			.editor-row .row-label { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+			.editor-row .row-label { display: flex; min-width: 0; flex: 1; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; }
+			.editor-row .label-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+			.editor-row .row-label[title] { cursor: text; }
+			.editor-row .row-label[title]:hover { color: #145da8; text-decoration: underline dotted; text-underline-offset: 3px; }
+			#editor .row-rename-button { flex: 0 0 22px; width: 22px; min-height: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #4f6d95; font-size: 14px; line-height: 1; opacity: 0; }
+			.editor-row:hover .row-rename-button, .row-rename-button:focus-visible { opacity: 1; }
+			#editor .row-rename-button:hover { background: #dfeeff; color: #145da8; }
+			.editor-row .row-rename-input { min-width: 0; width: 100%; height: 28px; box-sizing: border-box; padding: 2px 6px; }
+			.editor-row .identity { width: 100%; min-width: 0; height: 26px; padding: 2px 5px; text-align: right; }
 			.editor-row .context { color: #666; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+			.editor-row.list-gene .row-label, .editor-row.list-gene .source-column, .editor-row.list-group .source-column, .editor-row.list-link .source-column { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+			.editor-row.list-gene .source-column, .editor-row.list-group .source-column, .editor-row.list-link .source-column { color: #666; font-size: 11px; }
 			.editor-row .colour { width: 28px; height: 22px; padding: 0; border: 0; background: transparent; }
-			.editor-row .visibility { border: 0; background: transparent; cursor: pointer; font-size: 16px; color: #555; }
+			#editor .editor-row .visibility, #editor .tree-toggle { display: inline-grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; min-height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #64748b; cursor: pointer; }
+			#editor .editor-row .visibility:hover, #editor .tree-toggle:hover { background: #e7f0ff; color: #145da8; }
+			.editor-row .visibility[aria-pressed="false"] { color: #9aa6b5; }
+			.editor-row .visibility svg, .tree-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 			.editor-row.tree-cluster { font-weight: 600; background: #fafafa; }
 			.editor-row.tree-locus { font-weight: 500; }
-			.tree-toggle { width: 20px; border: 0; background: transparent; padding: 0; cursor: pointer; font: inherit; }
+			.tree-toggle { font: inherit; }
+			.combined-tree-label { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; }
+			.combined-tree-label .row-label { flex: 0 1 auto; }
+			.combined-tree-label > .row-rename-input { flex: 0 1 260px; width: min(260px, 42%); }
+			.combined-tree-label .tree-name-separator { flex: 0 0 auto; color: #8a96a6; }
 			.tree-spacer { flex: 0 0 auto; }
 			.editor-spacer { height: 0; }
-			#editor-summary { color: #666; font-size: 12px; padding: 3px 5px 6px; }
+			#editor-list-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 29px; }
+			#editor-summary { color: #667386; font-size: 12px; padding: 3px 5px 7px; }
+			#select-all-visible { min-height: 26px; padding: 3px 7px; font-size: 12px; }
 			#appearance-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 20px; overflow: auto; padding: 4px 0; }
 			#appearance-controls fieldset { margin: 0; min-width: 0; border: 1px solid #ddd; border-radius: 4px; }
 			#appearance-controls legend { padding: 0 4px; font-weight: 600; }
@@ -102,7 +152,7 @@
 			</div>
 			<aside id="editor" hidden>
 				<div id="editor-resize-handle" role="separator" aria-label="Resize plot editor" aria-orientation="horizontal"></div>
-				<div id="editor-header"><h2>Plot editor</h2></div>
+				<div id="editor-header"><h2>Plot editor</h2><div id="editor-history"><button id="selection-undo" disabled title="Undo the last editor change">Undo</button><button id="selection-redo" disabled title="Redo the last editor change">Redo</button></div></div>
 				<div id="editor-tabs" role="tablist" aria-label="Plot editor sections">
 					<button role="tab" data-editor-tab="data" aria-selected="true">Data</button>
 					<button role="tab" data-editor-tab="appearance" aria-selected="false">Appearance</button>
@@ -118,36 +168,49 @@
 							<button data-gene-view="tree" aria-pressed="true">Tree</button>
 							<button data-gene-view="list" aria-pressed="false">List</button>
 						</div>
-						<div id="group-create">
+						<button id="group-begin-create" hidden>New group…</button>
+						<div id="group-create" hidden>
 							<input id="new-group-name" type="text" placeholder="New group name" aria-label="New group name">
 							<button id="new-group-create">Create group</button>
+							<button id="group-cancel-create" title="Cancel creating group">Cancel</button>
 						</div>
 						<input id="editor-filter" type="search" placeholder="Search names, labels, loci, or clusters">
 					</div>
 					<div id="selection-actions" hidden>
 						<strong id="selection-summary"></strong>
-						<input id="selection-label" type="text" placeholder="Set label">
-						<button id="selection-rename">Rename</button>
-						<label id="selection-colour-label" title="Set group colour"><input id="selection-colour" type="color"></label>
-						<input id="selection-identity" type="number" min="0" max="100" step="0.1" placeholder="Set identity (%)" hidden>
-						<button id="selection-set-identity" hidden>Set identity</button>
-						<button id="selection-show" hidden>Show</button>
-						<button id="selection-hide" hidden>Hide</button>
-						<select id="selection-group" hidden aria-label="Move selected genes to group"></select>
-						<button id="selection-assign" hidden>Move</button>
-						<button id="selection-unassign" hidden>Ungroup</button>
-						<input id="selection-new-group" type="text" placeholder="New group from selection" hidden>
-						<button id="selection-create-group" hidden>Create</button>
-						<button id="selection-delete-genes" hidden>Delete genes</button>
-						<button id="selection-delete-links" hidden>Delete links</button>
-						<select id="selection-merge-target" hidden aria-label="Group to keep when merging"></select>
-						<button id="selection-merge" hidden>Merge groups</button>
-						<button id="selection-delete" hidden>Delete groups</button>
-						<button id="selection-clear">Clear</button>
-						<button id="selection-undo" disabled>Undo</button>
-						<button id="selection-redo" disabled>Redo</button>
+						<div id="selection-presentation" class="action-group" hidden>
+							<input id="selection-label" type="text" placeholder="Set label">
+							<button id="selection-rename">Rename</button>
+							<label id="selection-colour-label" title="Set colour"><span class="sr-only">Set colour</span><input id="selection-colour" type="color" aria-label="Set colour"></label>
+						</div>
+						<div id="selection-link-actions" class="action-group separated" hidden>
+							<input id="selection-identity" type="number" min="0" max="100" step="0.1" placeholder="Set identity (%)">
+							<button id="selection-set-identity">Set identity</button>
+						</div>
+						<div id="selection-visibility-actions" class="action-group separated" hidden>
+							<select id="selection-visibility" aria-label="Change visibility"><option value="">Visibility…</option><option value="show">Show</option><option value="hide">Hide</option></select>
+						</div>
+						<div id="selection-gene-actions" class="action-group separated" hidden>
+							<label id="selection-group-label">Move to <select id="selection-group" aria-label="Move selected genes to group"></select></label>
+							<button id="selection-assign">Move</button>
+							<button id="selection-unassign">Remove from groups</button>
+							<button id="selection-begin-create-group">New group…</button>
+							<label id="selection-new-group-label" hidden><span class="sr-only">New group name</span><input id="selection-new-group" type="text" placeholder="New group from selection"></label>
+							<button id="selection-create-group" hidden>Create group</button>
+						</div>
+						<div id="selection-group-actions" class="action-group separated" hidden>
+							<select id="selection-merge-target" aria-label="Group to keep when merging"></select>
+							<button id="selection-merge">Merge groups</button>
+						</div>
+						<div id="selection-danger-actions" class="action-group separated">
+							<button id="selection-delete-genes" class="destructive-action" hidden>Delete selected genes</button>
+							<button id="selection-delete-links" class="destructive-action" hidden>Delete selected links</button>
+							<button id="selection-delete" class="destructive-action" hidden>Delete selected groups</button>
+						</div>
+						<button id="selection-clear">Clear selection</button>
 					</div>
-					<div id="editor-summary" class="summary"></div>
+					<div id="editor-list-meta"><div id="editor-summary" class="summary"></div><button id="select-all-visible">Select all visible</button></div>
+					<div id="editor-list-header" class="editor-list-header" hidden></div>
 					<div id="editor-list-scroll">
 						<div id="editor-rows"></div>
 					</div>
@@ -161,6 +224,7 @@
 							<label><span>Column width</span><input data-config="legend.columnWidth" type="number" min="1"></label>
 							<label><span>Entry height</span><input data-config="legend.entryHeight" type="number" min="1"></label>
 							<label><span>Font size</span><input data-config="legend.fontSize" type="number" min="1"></label>
+							<label><span>Subtitle size</span><input data-config="legend.subtitleFontSize" type="number" min="1"></label>
 							<label><span>Left margin</span><input data-config="legend.marginLeft" type="number" min="0"></label>
 							<label><span>Top margin</span><input data-config="legend.marginTop" type="number" min="0"></label>
 						</fieldset>
@@ -316,28 +380,39 @@
 			button: document.querySelector("#btn-editor"),
 			filter: document.querySelector("#editor-filter"),
 			rows: document.querySelector("#editor-rows"),
+			listHeader: document.querySelector("#editor-list-header"),
 			viewport: document.querySelector("#editor-list-scroll"),
 			summary: document.querySelector("#editor-summary"),
 			kindButtons: [...document.querySelectorAll("[data-data-kind]")],
 			geneView: document.querySelector("#gene-view"),
 			geneViewButtons: [...document.querySelectorAll("[data-gene-view]")],
 			groupCreate: document.querySelector("#group-create"),
+			groupBeginCreate: document.querySelector("#group-begin-create"),
+			groupCancelCreate: document.querySelector("#group-cancel-create"),
 			newGroupName: document.querySelector("#new-group-name"),
 			newGroupCreate: document.querySelector("#new-group-create"),
 			selectionActions: document.querySelector("#selection-actions"),
 			selectionSummary: document.querySelector("#selection-summary"),
+			selectionPresentation: document.querySelector("#selection-presentation"),
+			selectionLinkActions: document.querySelector("#selection-link-actions"),
+			selectionVisibilityActions: document.querySelector("#selection-visibility-actions"),
+			selectionGeneActions: document.querySelector("#selection-gene-actions"),
+			selectionGroupActions: document.querySelector("#selection-group-actions"),
+			selectionDangerActions: document.querySelector("#selection-danger-actions"),
 			selectionLabel: document.querySelector("#selection-label"),
 			selectionRename: document.querySelector("#selection-rename"),
 			selectionColour: document.querySelector("#selection-colour"),
 			selectionColourLabel: document.querySelector("#selection-colour-label"),
 			selectionIdentity: document.querySelector("#selection-identity"),
 			selectionSetIdentity: document.querySelector("#selection-set-identity"),
-			selectionShow: document.querySelector("#selection-show"),
-			selectionHide: document.querySelector("#selection-hide"),
+			selectionVisibility: document.querySelector("#selection-visibility"),
 			selectionGroup: document.querySelector("#selection-group"),
+			selectionGroupLabel: document.querySelector("#selection-group-label"),
 			selectionAssign: document.querySelector("#selection-assign"),
 			selectionUnassign: document.querySelector("#selection-unassign"),
+			selectionBeginCreateGroup: document.querySelector("#selection-begin-create-group"),
 			selectionNewGroup: document.querySelector("#selection-new-group"),
+			selectionNewGroupLabel: document.querySelector("#selection-new-group-label"),
 			selectionCreateGroup: document.querySelector("#selection-create-group"),
 			selectionDeleteGenes: document.querySelector("#selection-delete-genes"),
 			selectionDeleteLinks: document.querySelector("#selection-delete-links"),
@@ -347,17 +422,24 @@
 			selectionClear: document.querySelector("#selection-clear"),
 			selectionUndo: document.querySelector("#selection-undo"),
 			selectionRedo: document.querySelector("#selection-redo"),
+			selectAllVisible: document.querySelector("#select-all-visible"),
 			resizeHandle: document.querySelector("#editor-resize-handle"),
 			tabs: [...document.querySelectorAll("[data-editor-tab]")],
 			panels: [...document.querySelectorAll("[data-editor-panel]")],
 			appearanceFields: [...document.querySelectorAll("[data-config]")],
 			kind: "groups",
 			geneMode: "tree",
+			creatingGroup: false,
+			creatingStandaloneGroup: false,
+			renameKey: null,
 			selected: new Set(),
+			selectionAnchor: null,
+			pendingRangeSelection: null,
 			expanded: new Set(),
 			history: [],
 			future: [],
 			allRows: [],
+			sort: { column: "label", direction: 1 },
 			rowHeight: 34,
 			overscan: 8,
 		}
@@ -387,29 +469,44 @@
 				const query = genes.get(link.query.uid)
 				const target = genes.get(link.target.uid)
 				const endpoints = `${labelFor(query, "Missing gene")} ↔ ${labelFor(target, "Missing gene")}`
-				const context = `${Math.round(link.identity * 100)}% identity · ${labelFor(groups.get(link.query.uid), "Ungrouped")} / ${labelFor(groups.get(link.target.uid), "Ungrouped")}`
+				const queryGroup = labelFor(groups.get(link.query.uid), "Ungrouped")
+				const targetGroup = labelFor(groups.get(link.target.uid), "Ungrouped")
+				const identity = Math.round(link.identity * 100)
+				const context = `${identity}% identity · ${queryGroup} / ${targetGroup}`
 				return {
 					key: `link:${link.uid}`,
 					type: "link",
-					label: link.label || endpoints,
+					// A link label is optional annotation text. Endpoints remain the
+					// stable identity shown first in the table and are not duplicated
+					// as a synthetic "name".
+					label: link.label || "",
+					query: labelFor(query, "Missing gene"),
+					target: labelFor(target, "Missing gene"),
+					identity,
+					groups: `${queryGroup} / ${targetGroup}`,
 					context,
 					colour: link.colour || defaultColour(link),
 					hidden: Boolean(link.hidden),
 					selectIds: [link.uid],
 					depth: 0,
 				}
-			}).filter((row) => matches(needle, row.label, row.context))
+			}).filter((row) => matches(needle, row.label, row.query, row.target, row.groups, row.context))
 		}
 		const flatGeneRows = (data, groups) => data.clusters.flatMap((cluster) => cluster.loci.flatMap((locus) =>
-			locus.genes.map((gene) => ({
-				key: `gene:${gene.uid}`,
-				label: labelFor(gene, "Unlabelled gene"),
-				context: `${labelFor(locus, "Unlabelled locus")} · ${labelFor(cluster, "Unlabelled cluster")}`,
-				colour: gene.colour || groups.get(gene.uid)?.colour,
-				selectIds: [gene.uid],
-				depth: 0,
-				type: "gene",
-			}))
+			locus.genes.map((gene) => {
+				const group = groups.get(gene.uid)
+				return {
+					key: `gene:${gene.uid}`,
+					label: labelFor(gene, gene.uid),
+					locus: labelFor(locus, locus.uid),
+					cluster: labelFor(cluster, cluster.uid),
+					group: group ? labelFor(group, "Ungrouped") : "Ungrouped",
+					colour: gene.colour || group?.colour,
+					selectIds: [gene.uid],
+					depth: 0,
+					type: "gene",
+				}
+			})
 		))
 		const treeGeneRows = (data, groups, needle) => {
 			const rows = []
@@ -417,6 +514,36 @@
 				const clusterGenes = cluster.loci.flatMap((locus) => locus.genes)
 				const clusterMatch = matches(needle, labelFor(cluster, "")) || clusterGenes.some((gene) => matches(needle, labelFor(gene, "")))
 				if (!clusterMatch) continue
+				// A one-locus cluster has no useful intermediate hierarchy. Keep its
+				// cluster and locus names together, but retain separate inline rename
+				// affordances for each record.
+				if (cluster.loci.length === 1) {
+					const locus = cluster.loci[0]
+					const locusMatch = matches(needle, labelFor(locus, ""), labelFor(cluster, "")) || locus.genes.some((gene) => matches(needle, labelFor(gene, "")))
+					if (!locusMatch) continue
+					const key = `cluster-locus:${cluster.uid}:${locus.uid}`
+					const expanded = Boolean(needle) || editor.expanded.has(key)
+					rows.push({
+						key,
+						type: "cluster-locus",
+						clusterUid: cluster.uid,
+						locusUid: locus.uid,
+						label: labelFor(cluster, "Unlabelled cluster"),
+						locusLabel: labelFor(locus, "Unlabelled locus"),
+						context: `${locus.start + 1}–${locus.end} · ${locus.genes.length} genes`,
+						selectIds: locus.genes.map((gene) => gene.uid),
+						depth: 0,
+						expandable: true,
+						expanded,
+					})
+					if (expanded) {
+						for (const gene of locus.genes) {
+							if (!matches(needle, labelFor(gene, ""), labelFor(locus, ""), labelFor(cluster, ""))) continue
+							rows.push({ key: `gene:${gene.uid}`, type: "gene", label: labelFor(gene, "Unlabelled gene"), context: groups.get(gene.uid)?.label || "Ungrouped", colour: gene.colour || groups.get(gene.uid)?.colour, selectIds: [gene.uid], depth: 1 })
+						}
+					}
+					continue
+				}
 				const clusterKey = `cluster:${cluster.uid}`
 				const clusterOpen = Boolean(needle) || editor.expanded.has(clusterKey)
 				rows.push({ key: clusterKey, type: "cluster", label: labelFor(cluster, "Unlabelled cluster"), context: `${cluster.loci.length} loci · ${clusterGenes.length} genes`, selectIds: clusterGenes.map((gene) => gene.uid), depth: 0, expandable: true, expanded: clusterOpen })
@@ -441,60 +568,119 @@
 			if (!data) return
 			const needle = editor.filter.value.trim().toLowerCase()
 			const groups = groupForGene(data)
+			const sortRows = (rows) => rows.sort((left, right) => {
+				const leftValue = left[editor.sort.column] ?? ""
+				const rightValue = right[editor.sort.column] ?? ""
+				const comparison = Number.isFinite(leftValue) && Number.isFinite(rightValue)
+					? leftValue - rightValue
+					: String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: "base" })
+				return editor.sort.direction * comparison
+			})
 			if (editor.kind === "groups") {
 				editor.allRows = data.groups
-					.map((group) => ({ key: `group:${group.uid}`, type: "group", label: labelFor(group, "Unlabelled group"), context: `${group.genes.length} genes`, colour: group.colour, hidden: Boolean(group.hidden), selectIds: [group.uid], depth: 0 }))
-					.filter((row) => matches(needle, row.label, row.context))
+					.map((group) => ({ key: `group:${group.uid}`, type: "group", label: labelFor(group, "Unlabelled group"), subtitle: group.subtitle || "", genes: group.genes.length, context: `${group.genes.length} genes`, colour: group.colour, hidden: Boolean(group.hidden), selectIds: [group.uid], depth: 0 }))
+					.filter((row) => matches(needle, row.label, row.subtitle, row.context))
+				editor.allRows = sortRows(editor.allRows)
 			} else if (editor.kind === "links") {
-				editor.allRows = linkRows(data, groups, needle)
+				editor.allRows = sortRows(linkRows(data, groups, needle))
 			} else if (editor.geneMode === "tree") {
 				editor.allRows = treeGeneRows(data, groups, needle)
 			} else {
-				editor.allRows = flatGeneRows(data, groups)
-					.filter((row) => matches(needle, row.label, row.context))
-					.sort((left, right) => left.label.localeCompare(right.label))
+				editor.allRows = sortRows(flatGeneRows(data, groups)
+					.filter((row) => matches(needle, row.label, row.locus, row.cluster, row.group)))
 			}
 			editor.rowByKey = new Map(editor.allRows.map((row) => [row.key, row]))
 		}
 		const selectedFor = (row) => row.selectIds.length > 0 && row.selectIds.every((uid) => editor.selected.has(uid))
-		const optionMarkup = (groups, selected) => groups.map((group) =>
+		const selectRowRange = (row) => {
+			const anchor = editor.allRows.findIndex((candidate) => candidate.key === editor.selectionAnchor)
+			const target = editor.allRows.findIndex((candidate) => candidate.key === row.key)
+			if (anchor < 0 || target < 0) return false
+			editor.allRows.slice(Math.min(anchor, target), Math.max(anchor, target) + 1)
+				.flatMap((candidate) => candidate.selectIds)
+				.forEach((uid) => editor.selected.add(uid))
+			return true
+		}
+		const updateRowSelection = (row, { selected, range = false } = {}) => {
+			if (!(range && editor.selectionAnchor && selectRowRange(row))) {
+				row.selectIds.forEach((uid) => selected ? editor.selected.add(uid) : editor.selected.delete(uid))
+			}
+			editor.selectionAnchor = row.key
+		}
+		const listSortHeader = () => {
+			const column = (key, label) => `<button data-sort-column="${key}" aria-label="Sort by ${label}">${label}<span class="sort-indicator">${editor.sort.column === key ? editor.sort.direction > 0 ? "↑" : "↓" : ""}</span></button>`
+			const iconColumn = (key, label, icon) => `<button data-sort-column="${key}" aria-label="Sort by ${label}" title="Sort by ${label}">${icon}<span class="sr-only">${label}</span><span class="sort-indicator">${editor.sort.column === key ? editor.sort.direction > 0 ? "↑" : "↓" : ""}</span></button>`
+			if (editor.kind === "groups") return `<span></span>${column("label", "Group")}${column("subtitle", "Legend label")}${column("genes", "Genes")}${iconColumn("hidden", "Visible", "◉")}<span title="Colour">Colour</span>`
+			if (editor.kind === "links") return `<span></span>${column("query", "Source")}${column("target", "Target")}${column("identity", "Identity")}${column("groups", "Endpoint groups")}${column("label", "Link label") }<span title="Colour">Colour</span><span title="Visible">Visible</span>`
+			if (editor.geneMode !== "list") return ""
+			return `<span></span>${column("label", "Gene")}${column("locus", "Locus")}${column("cluster", "Cluster")}${column("group", "Group")}<span title="Colour">Colour</span>`
+		}
+		const optionMarkup = (groups, selected, prompt = "") => `${prompt ? `<option value="">${prompt}</option>` : ""}${groups.map((group) =>
 			`<option value="${escapeHtml(group.uid)}" ${String(group.uid) === String(selected) ? "selected" : ""}>${escapeHtml(labelFor(group, group.uid))}</option>`
-		).join("")
+		).join("")}`
 		const groupUidForValue = (value) => chart.data()?.groups.find((group) => String(group.uid) === value)?.uid
+		const renameMarkup = (key, type, label, { emptyText = "", title = `Double-click to rename ${label}` } = {}) => editor.renameKey === key
+			? `<input class="row-rename-input" data-row-rename="${escapeHtml(key)}" value="${escapeHtml(label)}" aria-label="Rename ${type}">`
+			: `<span class="row-label" data-row-rename-key="${escapeHtml(key)}" title="${escapeHtml(title)}"><span class="label-text">${escapeHtml(label || emptyText)}</span><button class="row-rename-button" data-row-begin-rename="${escapeHtml(key)}" aria-label="${label ? `Rename ${escapeHtml(label)}` : `Add label to ${type}`}" title="${label ? "Rename" : "Add label"}">✎</button></span>`
+		const rowLabelMarkup = (row, options) => renameMarkup(row.key, row.type, row.label, options)
+		const groupSubtitleMarkup = (row) => renameMarkup(
+			`group-subtitle:${row.selectIds[0]}`,
+			"legend label",
+			row.subtitle,
+			{ emptyText: "Add legend label…", title: "Optional smaller text shown beneath this group in the legend" }
+		)
+		const combinedTreeLabelMarkup = (row) => `<span class="combined-tree-label">${renameMarkup(`cluster:${row.clusterUid}`, "cluster", row.label)}<span class="tree-name-separator" aria-hidden="true">→</span>${renameMarkup(`locus:${row.locusUid}`, "locus", row.locusLabel)}</span>`
+		const eyeIcon = (hidden) => hidden
+			? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 4.2A10.5 10.5 0 0 1 12 4c5.5 0 9.5 5 9.5 8a11 11 0 0 1-2 3.8M6.2 6.2C3.8 8 2.5 10.4 2.5 12c0 3 4 8 9.5 8 1.5 0 2.9-.4 4.1-1"></path></svg>`
+			: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>`
+		const visibilityButtonMarkup = (row, noun) => `<button class="visibility" data-row-visibility="${escapeHtml(row.key)}" aria-pressed="${String(!row.hidden)}" aria-label="${row.hidden ? "Show" : "Hide"} ${escapeHtml(row.label || noun)}" title="${row.hidden ? "Show" : "Hide"} ${noun}">${eyeIcon(row.hidden)}</button>`
+		const treeToggleMarkup = (row) => `<button class="tree-toggle" data-tree-toggle="${escapeHtml(row.key)}" aria-label="${row.expanded ? "Collapse" : "Expand"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${row.expanded ? "m8 10 4 4 4-4" : "m10 8 4 4-4 4"}"></path></svg></button>`
 		const syncSelectionActions = () => {
 			const count = editor.selected.size
 			const editingGroups = editor.kind === "groups"
 			const editingLinks = editor.kind === "links"
+			const editingGenes = !editingGroups && !editingLinks
 			const editingPresentation = editingGroups || editingLinks
 			const groups = chart.data()?.groups || []
-			editor.groupCreate.hidden = !editingGroups
+			editor.groupCreate.hidden = !editingGroups || !editor.creatingStandaloneGroup
+			editor.groupBeginCreate.hidden = !editingGroups || editor.creatingStandaloneGroup
 			editor.selectionActions.hidden = count === 0
-			if (!count) return
+			editor.selectionUndo.disabled = editor.history.length === 0
+			editor.selectionRedo.disabled = editor.future.length === 0
+			if (!count) {
+				editor.creatingGroup = false
+				editor.selectionGroup.value = ""
+				editor.selectionMergeTarget.value = ""
+				return
+			}
 			editor.selectionSummary.textContent = `${count} ${editingGroups ? "group" : editingLinks ? "link" : "gene"}${count === 1 ? "" : "s"} selected`
-			editor.selectionLabel.hidden = !editingPresentation
-			editor.selectionRename.hidden = !editingPresentation
-			editor.selectionColourLabel.hidden = !editingPresentation
-			editor.selectionIdentity.hidden = !editingLinks
-			editor.selectionSetIdentity.hidden = !editingLinks
-			editor.selectionShow.hidden = !editingPresentation
-			editor.selectionHide.hidden = !editingPresentation
-			editor.selectionGroup.hidden = editingGroups || editingLinks
-			editor.selectionAssign.hidden = editingGroups || editingLinks
-			editor.selectionUnassign.hidden = editingGroups || editingLinks
-			editor.selectionNewGroup.hidden = editingGroups || editingLinks
-			editor.selectionCreateGroup.hidden = editingGroups || editingLinks
-			editor.selectionDeleteGenes.hidden = !(!editingGroups && !editingLinks)
+			editor.selectionLabel.placeholder = editingLinks
+				? count === 1 ? "Set optional link label" : "Set label on selected links"
+				: count === 1 ? "Set label" : "Set same label on all selected"
+			editor.selectionRename.textContent = editingLinks ? "Set label" : "Rename"
+			// The row itself owns fast single-record edits. The action bar is for
+			// applying the same presentation edit to several selected records.
+			editor.selectionPresentation.hidden = !editingPresentation || count < 2
+			editor.selectionLinkActions.hidden = !editingLinks || count < 2
+			editor.selectionVisibilityActions.hidden = !editingPresentation || count < 2
+			editor.selectionGeneActions.hidden = !editingGenes
+			editor.selectionGroupActions.hidden = !editingGroups || count < 2
+			editor.selectionDangerActions.hidden = !(editingGenes || editingLinks || editingGroups)
+			editor.selectionNewGroupLabel.hidden = !editingGenes || !editor.creatingGroup
+			editor.selectionCreateGroup.hidden = !editingGenes || !editor.creatingGroup
+			editor.selectionBeginCreateGroup.hidden = !editingGenes || editor.creatingGroup
+			editor.selectionDeleteGenes.hidden = !editingGenes
 			editor.selectionDeleteLinks.hidden = !editingLinks
-			editor.selectionMergeTarget.hidden = !editingGroups || count < 2
-			editor.selectionMerge.hidden = !editingGroups || count < 2
 			editor.selectionDelete.hidden = !editingGroups
 			if (!editingGroups) {
 				const selected = editor.selectionGroup.value
-				editor.selectionGroup.innerHTML = optionMarkup(groups, selected)
+				editor.selectionGroup.innerHTML = optionMarkup(groups, selected, "Choose a group…")
+				editor.selectionAssign.disabled = !editor.selectionGroup.value
 			} else if (count > 1) {
 				const selectedGroups = groups.filter((group) => editor.selected.has(group.uid))
 				const selected = editor.selectionMergeTarget.value
-				editor.selectionMergeTarget.innerHTML = optionMarkup(selectedGroups, selected)
+				editor.selectionMergeTarget.innerHTML = optionMarkup(selectedGroups, selected, "Choose group to keep…")
+				editor.selectionMerge.disabled = !editor.selectionMergeTarget.value
 			}
 			if (editingPresentation) {
 				const records = recordsForKind()
@@ -503,10 +689,10 @@
 					.filter(Boolean)
 				const uniqueColours = [...new Set(colours)]
 				editor.selectionColour.value = colourInputValue(uniqueColours.length === 1 ? uniqueColours[0] : "#888888")
-				editor.selectionColour.title = uniqueColours.length === 1 ? "Set group colour" : "Selected groups have different colours"
+				const noun = editingGroups ? "group" : "link"
+				editor.selectionColour.title = uniqueColours.length === 1 ? `Set ${noun} colour` : `Selected ${noun}s have different colours`
+				editor.selectionVisibility.value = ""
 			}
-			editor.selectionUndo.disabled = editor.history.length === 0
-			editor.selectionRedo.disabled = editor.future.length === 0
 		}
 		const renderEditor = ({ refresh = true } = {}) => {
 			if (refresh) refreshEditorRows()
@@ -517,20 +703,59 @@
 			const rows = allRows.slice(first, last)
 			const genes = editor.kind === "genes"
 			const links = editor.kind === "links"
+			const groupList = editor.kind === "groups"
+			const linkList = editor.kind === "links"
+			const flatGenes = genes && editor.geneMode === "list"
 			editor.geneView.hidden = !genes
+			editor.listHeader.hidden = !(flatGenes || groupList || linkList)
+			editor.listHeader.className = `editor-list-header ${flatGenes ? "gene-list" : groupList ? "group-list" : linkList ? "link-list" : ""}`
+			editor.listHeader.innerHTML = listSortHeader()
+			editor.filter.placeholder = flatGenes
+				? "Filter gene, locus, cluster, or group"
+				: "Search names, labels, loci, or clusters"
 			const noun = editor.kind === "groups" ? "groups" : links ? "links" : editor.geneMode === "tree" ? "tree items" : "genes"
 			editor.summary.textContent = `${allRows.length} visible ${noun}${editor.filter.value ? " matching search" : ""}.`
+			const selectable = new Set(allRows.flatMap((row) => row.selectIds))
+			editor.selectAllVisible.hidden = selectable.size === 0
+			editor.selectAllVisible.disabled = selectable.size > 0 && [...selectable].every((uid) => editor.selected.has(uid))
+			editor.selectAllVisible.textContent = `Select all ${selectable.size.toLocaleString()} visible`
 			editor.rows.innerHTML = [
 				`<div class="editor-spacer" style="height:${first * editor.rowHeight}px"></div>`,
-				...rows.map((row) => `
-				<div class="editor-row ${row.type === "cluster" ? "tree-cluster" : row.type === "locus" ? "tree-locus" : ""} ${selectedFor(row) ? "selected" : ""}" data-row-key="${escapeHtml(row.key)}" data-row-type="${row.type}">
+				...rows.map((row) => flatGenes ? `
+				<div class="editor-row list-gene ${selectedFor(row) ? "selected" : ""}" data-row-key="${escapeHtml(row.key)}" data-row-type="gene">
+					<input type="checkbox" data-row-select="${escapeHtml(row.key)}" ${selectedFor(row) ? "checked" : ""} aria-label="Select ${escapeHtml(row.label)}; Shift-click to select a range">
+					${rowLabelMarkup(row)}
+					<span class="source-column list-locus" title="${escapeHtml(row.locus)}">${escapeHtml(row.locus)}</span>
+					<span class="source-column list-cluster" title="${escapeHtml(row.cluster)}">${escapeHtml(row.cluster)}</span>
+					<span class="source-column list-group" title="${escapeHtml(row.group)}">${escapeHtml(row.group)}</span>
+					<input class="colour" type="color" data-row-colour="${escapeHtml(row.key)}" value="${colourInputValue(row.colour)}" aria-label="Colour for ${escapeHtml(row.label)}">
+				</div>` : groupList ? `
+				<div class="editor-row list-group ${selectedFor(row) ? "selected" : ""}" data-row-key="${escapeHtml(row.key)}" data-row-type="group">
+					<input type="checkbox" data-row-select="${escapeHtml(row.key)}" ${selectedFor(row) ? "checked" : ""} aria-label="Select ${escapeHtml(row.label)}; Shift-click to select a range">
+					${rowLabelMarkup(row)}
+					${groupSubtitleMarkup(row)}
+					<span class="source-column" title="${escapeHtml(row.context)}">${escapeHtml(row.context)}</span>
+					${visibilityButtonMarkup(row, "group")}
+					<input class="colour" type="color" data-row-colour="${escapeHtml(row.key)}" value="${colourInputValue(row.colour)}" aria-label="Colour for ${escapeHtml(row.label)}">
+				</div>` : linkList ? `
+				<div class="editor-row list-link ${selectedFor(row) ? "selected" : ""}" data-row-key="${escapeHtml(row.key)}" data-row-type="link">
+					<input type="checkbox" data-row-select="${escapeHtml(row.key)}" ${selectedFor(row) ? "checked" : ""} aria-label="Select ${escapeHtml(row.label)}; Shift-click to select a range">
+					<span class="source-column" title="${escapeHtml(row.query)}">${escapeHtml(row.query)}</span>
+					<span class="source-column" title="${escapeHtml(row.target)}">${escapeHtml(row.target)}</span>
+					<input class="identity" type="number" min="0" max="100" step="0.1" data-row-identity="${escapeHtml(row.key)}" value="${row.identity}" aria-label="Identity for ${escapeHtml(row.query)} and ${escapeHtml(row.target)}">
+					<span class="source-column" title="${escapeHtml(row.groups)}">${escapeHtml(row.groups)}</span>
+					${rowLabelMarkup(row, { emptyText: "Add label…", title: "Optional label shown on the plot when link labels are enabled" })}
+					<input class="colour" type="color" data-row-colour="${escapeHtml(row.key)}" value="${colourInputValue(row.colour)}" aria-label="Colour for ${escapeHtml(row.label)}">
+					${visibilityButtonMarkup(row, "link")}
+				</div>` : `
+				<div class="editor-row ${row.type === "cluster" || row.type === "cluster-locus" ? "tree-cluster" : row.type === "locus" ? "tree-locus" : ""} ${selectedFor(row) ? "selected" : ""}" data-row-key="${escapeHtml(row.key)}" data-row-type="${row.type}">
 					<span class="tree-spacer" style="width:${row.depth * 18}px"></span>
-					${row.expandable ? `<button class="tree-toggle" data-tree-toggle="${escapeHtml(row.key)}" aria-label="${row.expanded ? "Collapse" : "Expand"}">${row.expanded ? "⌄" : "›"}</button>` : `<span class="tree-spacer" style="width:20px"></span>`}
-					<input type="checkbox" data-row-select="${escapeHtml(row.key)}" ${selectedFor(row) ? "checked" : ""} aria-label="Select ${escapeHtml(row.label)}">
-					<span class="row-label" title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</span>
+					${row.expandable ? treeToggleMarkup(row) : `<span class="tree-spacer" style="width:24px"></span>`}
+					<input type="checkbox" data-row-select="${escapeHtml(row.key)}" ${selectedFor(row) ? "checked" : ""} aria-label="Select ${escapeHtml(row.label)}; Shift-click to select a range">
+					${row.type === "cluster-locus" ? combinedTreeLabelMarkup(row) : rowLabelMarkup(row)}
 					<span class="context" title="${escapeHtml(row.context)}">${escapeHtml(row.context)}</span>
 					${row.type === "group" || row.type === "gene" || row.type === "link" ? `<input class="colour" type="color" data-row-colour="${escapeHtml(row.key)}" value="${colourInputValue(row.colour)}" aria-label="Colour for ${escapeHtml(row.label)}">` : ""}
-					${row.type === "group" || row.type === "link" ? `<button class="visibility" data-row-visibility="${escapeHtml(row.key)}" title="${row.hidden ? "Show" : "Hide"} ${row.type}">${row.hidden ? "◉" : "◌"}</button>` : ""}
+					${row.type === "group" || row.type === "link" ? visibilityButtonMarkup(row, row.type) : ""}
 				</div>`),
 				`<div class="editor-spacer" style="height:${Math.max(0, allRows.length - last) * editor.rowHeight}px"></div>`,
 			].join("")
@@ -541,6 +766,32 @@
 			if (editor.kind === "groups") return new Map(data.groups.map((record) => [record.uid, record]))
 			if (editor.kind === "links") return new Map(data.links.map((record) => [record.uid, record]))
 			return new Map(data.clusters.flatMap((cluster) => cluster.loci.flatMap((locus) => locus.genes)).map((record) => [record.uid, record]))
+		}
+		const recordForRenameKey = (key) => {
+			const [type, uid] = key.split(":")
+			const data = chart.data()
+			if (type === "gene") return data.clusters.flatMap((cluster) => cluster.loci).flatMap((locus) => locus.genes).find((record) => String(record.uid) === uid)
+			if (type === "locus") return data.clusters.flatMap((cluster) => cluster.loci).find((record) => String(record.uid) === uid)
+			if (type === "cluster") return data.clusters.find((record) => String(record.uid) === uid)
+			if (type === "group" || type === "group-subtitle") return data.groups.find((record) => String(record.uid) === uid)
+			if (type === "link") return data.links.find((record) => String(record.uid) === uid)
+			return null
+		}
+		const applyRowRename = (key, value) => {
+			const record = recordForRenameKey(key)
+			const name = value.trim()
+			const type = key.slice(0, key.indexOf(":"))
+			const field = type === "locus" || type === "cluster" ? "name" : type === "group-subtitle" ? "subtitle" : "label"
+			if (!record || (!name && type !== "group-subtitle") || name === record[field]) return
+			const operationType = type === "locus" ? "loci.update" : type === "group-subtitle" ? "groups.update" : `${type}s.update`
+			// Gene labels are presentation text, whereas loci and clusters are named
+			// records throughout the plot and its export.
+			const changes = { [field]: name }
+			const operation = { type: operationType, ids: [record.uid], changes }
+			const before = [[record.uid, Object.fromEntries(Object.keys(changes).map((key) => [key, record[key]]))]]
+			chart.patch([operation])
+			editor.history.push({ operation, before })
+			editor.future = []
 		}
 		const operationsForValues = (type, values) => {
 			const buckets = new Map()
@@ -592,7 +843,17 @@
 			})
 			return true
 		}
-		const syncGeneHighlight = () => chart.highlight(editor.kind === "genes" ? editor.selected : [])
+		const syncGeneHighlight = () => {
+			if (editor.kind === "genes") return chart.highlight({ genes: editor.selected })
+			if (editor.kind === "groups") {
+				const genes = chart.data()?.groups
+					.filter((group) => editor.selected.has(group.uid))
+					.flatMap((group) => group.genes) || []
+				return chart.highlight({ genes })
+			}
+			if (editor.kind === "links") return chart.highlight({ links: editor.selected })
+			return chart.highlight({})
+		}
 		const showEditorTab = (name) => {
 			editor.tabs.forEach((tab) => { tab.setAttribute("aria-selected", String(tab.dataset.editorTab === name)) })
 			editor.panels.forEach((panel) => { panel.hidden = panel.dataset.editorPanel !== name })
@@ -649,7 +910,12 @@
 		editor.resizeHandle.addEventListener("pointercancel", stopEditorResize)
 		editor.kindButtons.forEach((button) => button.addEventListener("click", () => {
 			editor.kind = button.dataset.dataKind
+			editor.creatingGroup = false
+			editor.creatingStandaloneGroup = false
+			editor.renameKey = null
 			editor.selected.clear()
+			editor.selectionAnchor = null
+			editor.pendingRangeSelection = null
 			syncGeneHighlight()
 			editor.kindButtons.forEach((candidate) => candidate.setAttribute("aria-pressed", String(candidate === button)))
 			editor.viewport.scrollTop = 0
@@ -657,53 +923,125 @@
 		}))
 		editor.geneViewButtons.forEach((button) => button.addEventListener("click", () => {
 			editor.geneMode = button.dataset.geneView
+			editor.renameKey = null
 			editor.geneViewButtons.forEach((candidate) => candidate.setAttribute("aria-pressed", String(candidate === button)))
 			editor.viewport.scrollTop = 0
 			renderEditor()
 		}))
+		editor.listHeader.addEventListener("click", (event) => {
+			const column = event.target.closest("[data-sort-column]")?.dataset.sortColumn
+			if (!column) return
+			editor.sort.direction = editor.sort.column === column ? -editor.sort.direction : 1
+			editor.sort.column = column
+			editor.viewport.scrollTop = 0
+			renderEditor()
+		})
 		editor.filter.addEventListener("input", () => { editor.viewport.scrollTop = 0; renderEditor() })
 		editor.viewport.addEventListener("scroll", () => renderEditor({ refresh: false }))
+		editor.selectAllVisible.addEventListener("click", () => {
+			editor.allRows.flatMap((row) => row.selectIds).forEach((uid) => editor.selected.add(uid))
+			editor.selectionAnchor = editor.allRows[0]?.key || null
+			syncGeneHighlight()
+			renderEditor({ refresh: false })
+		})
+		const beginRowRename = (key) => {
+			if (!recordForRenameKey(key)) return
+			editor.renameKey = key
+			renderEditor({ refresh: false })
+			requestAnimationFrame(() => {
+				const input = editor.rows.querySelector(`[data-row-rename="${CSS.escape(row.key)}"]`)
+				input?.focus()
+				input?.select()
+			})
+		}
+		const finishRowRename = (key, value) => {
+			if (editor.renameKey !== key) return
+			editor.renameKey = null
+			applyRowRename(key, value)
+			renderEditor()
+		}
 		editor.rows.addEventListener("pointerover", (event) => {
-			if (editor.kind !== "genes") return
+			if (editor.kind !== "genes" && editor.kind !== "links") return
 			const rowNode = event.target.closest("[data-row-key]")
 			if (!rowNode || rowNode.contains(event.relatedTarget)) return
 			const row = editor.rowByKey.get(rowNode.dataset.rowKey)
-			if (row) chart.highlight(row.selectIds)
+			if (row) chart.highlight(editor.kind === "links" ? { links: row.selectIds } : { genes: row.selectIds })
 		})
 		editor.rows.addEventListener("pointerout", (event) => {
-			if (editor.kind !== "genes") return
+			if (editor.kind !== "genes" && editor.kind !== "links") return
 			const rowNode = event.target.closest("[data-row-key]")
 			if (!rowNode || rowNode.contains(event.relatedTarget)) return
 			syncGeneHighlight()
 		})
 		editor.rows.addEventListener("click", (event) => {
 			const target = event.target
-			const key = target.dataset.treeToggle
+			const rowSelectKey = target.closest("[data-row-select]")?.dataset.rowSelect
+			if (rowSelectKey) {
+				editor.pendingRangeSelection = { key: rowSelectKey, range: event.shiftKey }
+				return
+			}
+			const key = target.closest("[data-tree-toggle]")?.dataset.treeToggle
 			if (key) {
 				editor.expanded.has(key) ? editor.expanded.delete(key) : editor.expanded.add(key)
 				renderEditor()
 				return
 			}
-			if (target.dataset.rowVisibility) {
-				const row = editor.rowByKey.get(target.dataset.rowVisibility)
+			if (target.dataset.rowBeginRename) {
+				beginRowRename(target.dataset.rowBeginRename)
+				return
+			}
+			const visibilityKey = target.closest("[data-row-visibility]")?.dataset.rowVisibility
+			if (visibilityKey) {
+				const row = editor.rowByKey.get(visibilityKey)
 				applyChanges(row.selectIds, { hidden: !row.hidden })
 				return
 			}
-			if (target.dataset.rowColour || target.matches("input")) return
+			if (target.dataset.rowColour || target.matches("input") || target.closest(".row-label")) return
 			const row = target.closest("[data-row-key]") && editor.rowByKey.get(target.closest("[data-row-key]").dataset.rowKey)
 			if (!row) return
-			const select = !selectedFor(row)
-			row.selectIds.forEach((uid) => select ? editor.selected.add(uid) : editor.selected.delete(uid))
+			updateRowSelection(row, { selected: !selectedFor(row), range: event.shiftKey })
 			syncGeneHighlight()
 			renderEditor({ refresh: false })
+		})
+		editor.rows.addEventListener("dblclick", (event) => {
+			const label = event.target.closest(".row-label")
+			if (!label) return
+			event.preventDefault()
+			beginRowRename(label.dataset.rowRenameKey)
+		})
+		editor.rows.addEventListener("keydown", (event) => {
+			const input = event.target.closest("[data-row-rename]")
+			if (!input) return
+			if (event.key === "Enter") {
+				event.preventDefault()
+				finishRowRename(input.dataset.rowRename, input.value)
+			} else if (event.key === "Escape") {
+				event.preventDefault()
+				editor.renameKey = null
+				renderEditor({ refresh: false })
+			}
+		})
+		editor.rows.addEventListener("focusout", (event) => {
+			const input = event.target.closest("[data-row-rename]")
+			if (input) finishRowRename(input.dataset.rowRename, input.value)
 		})
 		editor.rows.addEventListener("change", (event) => {
 			const target = event.target
 			if (target.dataset.rowSelect) {
 				const row = editor.rowByKey.get(target.dataset.rowSelect)
-				target.checked ? row.selectIds.forEach((uid) => editor.selected.add(uid)) : row.selectIds.forEach((uid) => editor.selected.delete(uid))
+				const range = editor.pendingRangeSelection?.key === row.key && editor.pendingRangeSelection.range
+				editor.pendingRangeSelection = null
+				updateRowSelection(row, { selected: target.checked, range })
 				syncGeneHighlight()
-			renderEditor({ refresh: false })
+				renderEditor({ refresh: false })
+				return
+			}
+			if (target.dataset.rowIdentity) {
+				const identity = Number(target.value)
+				if (Number.isFinite(identity) && identity >= 0 && identity <= 100) {
+					const row = editor.rowByKey.get(target.dataset.rowIdentity)
+					applyChanges(row.selectIds, { identity: identity / 100 })
+				} else renderEditor({ refresh: false })
 				return
 			}
 			if (!target.dataset.rowColour) return
@@ -728,10 +1066,27 @@
 		editor.selectionIdentity.addEventListener("keydown", (event) => {
 			if (event.key === "Enter") editor.selectionSetIdentity.click()
 		})
-		editor.selectionShow.addEventListener("click", () => applyChanges([...editor.selected], { hidden: false }))
-		editor.selectionHide.addEventListener("click", () => applyChanges([...editor.selected], { hidden: true }))
+		editor.selectionVisibility.addEventListener("change", () => {
+			if (!editor.selectionVisibility.value) return
+			applyChanges([...editor.selected], { hidden: editor.selectionVisibility.value === "hide" })
+			editor.selectionVisibility.value = ""
+		})
+		editor.groupBeginCreate.addEventListener("click", () => {
+			editor.creatingStandaloneGroup = true
+			renderEditor({ refresh: false })
+			editor.newGroupName.focus()
+		})
+		editor.groupCancelCreate.addEventListener("click", () => {
+			editor.creatingStandaloneGroup = false
+			editor.newGroupName.value = ""
+			renderEditor({ refresh: false })
+		})
 		editor.newGroupCreate.addEventListener("click", () => {
-			if (createGroup(editor.newGroupName.value)) editor.newGroupName.value = ""
+			if (createGroup(editor.newGroupName.value)) {
+				editor.newGroupName.value = ""
+				editor.creatingStandaloneGroup = false
+				renderEditor({ refresh: false })
+			}
 		})
 		editor.newGroupName.addEventListener("keydown", (event) => {
 			if (event.key === "Enter") editor.newGroupCreate.click()
@@ -739,13 +1094,26 @@
 		editor.selectionAssign.addEventListener("click", () => {
 			const groupId = groupUidForValue(editor.selectionGroup.value)
 			if (groupId === undefined) return
+			editor.selectionGroup.value = ""
 			applyMembershipChange({ type: "groups.assignGenes", groupId, geneIds: [...editor.selected] })
+		})
+		editor.selectionGroup.addEventListener("change", () => {
+			editor.selectionAssign.disabled = !editor.selectionGroup.value
 		})
 		editor.selectionUnassign.addEventListener("click", () => {
 			applyMembershipChange({ type: "groups.unassignGenes", geneIds: [...editor.selected] })
 		})
+		editor.selectionBeginCreateGroup.addEventListener("click", () => {
+			editor.creatingGroup = true
+			renderEditor({ refresh: false })
+			editor.selectionNewGroup.focus()
+		})
 		editor.selectionCreateGroup.addEventListener("click", () => {
-			if (createGroup(editor.selectionNewGroup.value, [...editor.selected])) editor.selectionNewGroup.value = ""
+			if (createGroup(editor.selectionNewGroup.value, [...editor.selected])) {
+				editor.selectionNewGroup.value = ""
+				editor.creatingGroup = false
+				renderEditor({ refresh: false })
+			}
 		})
 		editor.selectionNewGroup.addEventListener("keydown", (event) => {
 			if (event.key === "Enter") editor.selectionCreateGroup.click()
@@ -765,16 +1133,20 @@
 		editor.selectionMerge.addEventListener("click", () => {
 			const targetId = groupUidForValue(editor.selectionMergeTarget.value)
 			if (targetId === undefined) return
+			editor.selectionMergeTarget.value = ""
 			applyMembershipChange({
 				type: "groups.merge",
 				targetId,
 				sourceIds: [...editor.selected],
 			}, { clearSelection: true })
 		})
+		editor.selectionMergeTarget.addEventListener("change", () => {
+			editor.selectionMerge.disabled = !editor.selectionMergeTarget.value
+		})
 		editor.selectionDelete.addEventListener("click", () => {
 			applyMembershipChange({ type: "groups.delete", ids: [...editor.selected] }, { clearSelection: true })
 		})
-		editor.selectionClear.addEventListener("click", () => { editor.selected.clear(); syncGeneHighlight(); renderEditor({ refresh: false }) })
+		editor.selectionClear.addEventListener("click", () => { editor.selected.clear(); editor.selectionAnchor = null; syncGeneHighlight(); renderEditor({ refresh: false }) })
 		editor.selectionUndo.addEventListener("click", () => {
 			const change = editor.history.pop()
 			if (!change) return
@@ -805,7 +1177,10 @@
 					.join("div")
 					.attr("class", "chart-host")
 					.call(chart)
-				chart.data().clusters.forEach((cluster) => {
+				const geneCount = chart.data().clusters.flatMap((cluster) => cluster.loci).reduce((count, locus) => count + locus.genes.length, 0)
+				// A small fixture is immediately inspectable; a biological-scale tree
+				// starts collapsed and search expands only matching branches.
+				if (geneCount <= 500) chart.data().clusters.forEach((cluster) => {
 					editor.expanded.add(`cluster:${cluster.uid}`)
 					cluster.loci.forEach((locus) => editor.expanded.add(`locus:${locus.uid}`))
 				})

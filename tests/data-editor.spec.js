@@ -7,21 +7,22 @@ test("the contextual group actions apply a batch update through the chart API", 
   await expect(page.locator("#editor-rows [data-row-select]")).toHaveCount(3);
   await expect(page.locator("#gene-view")).toBeHidden();
   await page.locator('[data-row-select="group:group1"]').check();
+  await page.locator('[data-row-select="group:group2"]').check();
   await expect(page.locator("#selection-actions")).toBeVisible();
-  await expect(page.locator("#selection-colour")).toHaveValue("#6e40aa");
+  await expect(page.locator("#selection-colour")).toHaveValue("#888888");
   await page.locator("#selection-colour").evaluate((node) => {
     node.value = "#123456";
     node.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
   await expect.poll(() => page.evaluate(() =>
-    window.__demoChart?.data().groups.find((group) => group.uid === "group1")?.colour
-  )).toBe("#123456");
+    window.__demoChart?.data().groups.filter((group) => ["group1", "group2"].includes(group.uid)).map((group) => group.colour)
+  )).toEqual(["#123456", "#123456"]);
   await expect(page.locator("#selection-undo")).toBeEnabled();
   await page.locator("#selection-undo").click();
   await expect.poll(() => page.evaluate(() =>
-    window.__demoChart?.data().groups.find((group) => group.uid === "group1")?.colour
-  )).not.toBe("#123456");
+    window.__demoChart?.data().groups.filter((group) => ["group1", "group2"].includes(group.uid)).map((group) => group.colour)
+  )).not.toEqual(["#123456", "#123456"]);
 });
 
 test("the editor shows each group's rendered palette colour", async ({ page }) => {
@@ -35,31 +36,140 @@ test("the editor shows each group's rendered palette colour", async ({ page }) =
   await expect(page.locator('[data-row-colour="group:group1"]')).toHaveValue(expected);
 });
 
-test("the gene browser offers a collapsible hierarchy and selects locus descendants", async ({ page }) => {
+test("groups edit an optional legend label directly in the table", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const group = page.locator('[data-row-key="group:group1"]');
+  await group.locator('[data-row-rename-key^="group-subtitle:"]').dblclick();
+  await group.locator("[data-row-rename]").fill("Reference proteins");
+  await group.locator("[data-row-rename]").press("Enter");
+  await expect.poll(() => page.evaluate(() =>
+    window.__demoChart?.data().groups.find((group) => group.uid === "group1")?.subtitle
+  )).toBe("Reference proteins");
+  await expect(page.locator("text.legend-subtitle").filter({ hasText: "Reference proteins" })).toBeVisible();
+});
+
+test("the gene browser compacts single-locus clusters and selects their descendants", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   await page.locator('[data-data-kind="genes"]').click();
 
-  await expect(page.locator('[data-row-type="cluster"]')).toHaveCount(3);
-  await expect(page.locator('[data-row-type="locus"]')).toHaveCount(3);
-  await expect(page.locator('[data-row-type="gene"]')).toHaveCount(9);
+  await expect(page.locator('[data-row-type="cluster-locus"]')).toHaveCount(3);
+  await expect(page.locator('[data-row-type="cluster"]')).toHaveCount(0);
+  await expect(page.locator('[data-row-type="locus"]')).toHaveCount(0);
+  await expect(page.locator('[data-row-type="gene"]')).toHaveCount(0);
 
-  const firstLocus = page.locator('[data-row-type="locus"]').first();
-  await firstLocus.locator('[data-row-select]').check();
+  const firstCluster = page.locator('[data-row-type="cluster-locus"]').first();
+  await firstCluster.locator('[data-row-select]').check();
   await expect(page.locator("#selection-summary")).toHaveText("3 genes selected");
 
-  await firstLocus.locator('[data-tree-toggle]').click();
-  await expect(page.locator('[data-row-type="gene"]')).toHaveCount(6);
+  await firstCluster.locator('[data-tree-toggle]').click();
+  await expect(page.locator('[data-row-type="gene"]')).toHaveCount(3);
+});
+
+test("double-clicking names renames every editable row type in place", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-data-kind="genes"]').click();
+
+  const rename = async (rowType, name) => {
+    const row = page.locator(`[data-row-type="${rowType}"]`).first();
+    await row.locator(".row-label").dblclick();
+    const input = row.locator("[data-row-rename]");
+    await expect(input).toBeFocused();
+    await input.fill(name);
+    await input.press("Enter");
+  };
+
+  const compact = page.locator('[data-row-type="cluster-locus"]').first();
+  await compact.locator('[data-row-rename-key^="cluster:"]').dblclick();
+  await compact.locator("[data-row-rename]").fill("Reference genome");
+  await compact.locator("[data-row-rename]").press("Enter");
+  await compact.locator('[data-row-rename-key^="locus:"]').dblclick();
+  await compact.locator("[data-row-rename]").fill("Reference locus");
+  await compact.locator("[data-row-rename]").press("Enter");
+  await rename("gene", "Reference gene");
+  await expect.poll(() => page.evaluate(() => {
+    const data = window.__demoChart?.data();
+    return [data?.clusters[0]?.name, data?.clusters[0]?.loci[0]?.name, data?.clusters[0]?.loci[0]?.genes[0]?.label];
+  })).toEqual(["Reference genome", "Reference locus", "Reference gene"]);
+
+  await page.locator('[data-data-kind="groups"]').click();
+  await page.locator('[data-row-type="group"]').first().locator(".row-label").dblclick();
+  await page.locator('[data-row-rename]').fill("Reviewed group");
+  await page.locator('[data-row-rename]').press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.data().groups[0]?.label)).toBe("Reviewed group");
+
+  await page.locator('[data-data-kind="links"]').click();
+  await page.locator('[data-row-type="link"]').first().locator(".row-label").dblclick();
+  await page.locator('[data-row-rename]').fill("Reviewed link");
+  await page.locator('[data-row-rename]').press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.data().links[0]?.label)).toBe("Reviewed link");
+});
+
+test("the flat gene list exposes sortable locus and cluster columns", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-data-kind="genes"]').click();
+  await page.locator('[data-gene-view="list"]').click();
+
+  const header = page.locator("#editor-list-header");
+  await expect(header).toBeVisible();
+  await expect(header.getByRole("button", { name: "Sort by Locus" })).toBeVisible();
+  await expect(header.getByRole("button", { name: "Sort by Cluster" })).toBeVisible();
+  await expect(page.locator(".editor-row.list-gene .list-locus").first()).not.toBeEmpty();
+  await expect(page.locator(".editor-row.list-gene .list-cluster").first()).not.toBeEmpty();
+
+  await header.getByRole("button", { name: "Sort by Cluster" }).click();
+  const clusters = await page.locator(".editor-row.list-gene .list-cluster").allTextContents();
+  expect(clusters).toEqual([...clusters].sort((left, right) => left.localeCompare(right)));
+
+  await page.locator("#editor-filter").fill("GCF_003123456.1");
+  await expect(page.locator("#editor-summary")).toContainText("3 visible genes");
+  await expect(page.locator(".editor-row.list-gene .list-cluster")).toHaveText([
+    "GCF_003123456.1",
+    "GCF_003123456.1",
+    "GCF_003123456.1",
+  ]);
+});
+
+test("group and link views expose sortable columns and select all visible records", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await expect(page.locator("#editor-list-header").getByRole("button", { name: "Sort by Genes" })).toBeVisible();
+  await expect(page.locator("#editor-list-header").getByRole("button", { name: "Sort by Legend label" })).toBeVisible();
+  await expect(page.locator("#editor-list-header").getByRole("button", { name: "Sort by Visible" })).toBeVisible();
+  await page.locator("#select-all-visible").click();
+  await expect(page.locator("#selection-summary")).toHaveText("3 groups selected");
+
+  await page.locator('[data-data-kind="links"]').click();
+  const header = page.locator("#editor-list-header");
+  await expect(header.getByRole("button", { name: "Sort by Source" })).toBeVisible();
+  await expect(header.getByRole("button", { name: "Sort by Target" })).toBeVisible();
+  await expect(header.getByRole("button", { name: "Sort by Identity" })).toBeVisible();
+  await expect(header.getByRole("button", { name: "Sort by Endpoint groups" })).toBeVisible();
+});
+
+test("Shift-click selects a contiguous range of visible rows", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const first = page.locator('[data-row-select="group:group1"]');
+  const last = page.locator('[data-row-select="group:group3"]');
+
+  await first.check();
+  await last.click({ modifiers: ["Shift"] });
+
+  await expect(page.locator("#selection-summary")).toHaveText("3 groups selected");
+  await expect(page.locator('[data-row-select="group:group2"]')).toBeChecked();
 });
 
 test("the editor moves genes between groups and creates a group from a selection", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   await page.locator('[data-data-kind="genes"]').click();
+  await page.locator('[data-gene-view="list"]').click();
 
   const firstGene = page.locator('[data-row-type="gene"]').first();
   const key = await firstGene.locator('[data-row-select]').getAttribute("data-row-select");
   const geneId = key.replace("gene:", "");
   await firstGene.locator('[data-row-select]').check();
+  await expect(page.locator("#selection-group")).toHaveValue("");
+  await expect(page.locator("#selection-assign")).toBeDisabled();
   await page.locator("#selection-group").selectOption({ label: "group 2" });
+  await expect(page.locator("#selection-assign")).toBeEnabled();
   await page.locator("#selection-assign").click();
 
   await expect.poll(() => page.evaluate((uid) => {
@@ -67,6 +177,7 @@ test("the editor moves genes between groups and creates a group from a selection
     return groups.filter((group) => group.genes.includes(uid)).map((group) => group.label);
   }, geneId)).toEqual(["group 2"]);
 
+  await page.locator("#selection-begin-create-group").click();
   await page.locator("#selection-new-group").fill("Hand-picked genes");
   await page.locator("#selection-create-group").click();
   await expect.poll(() => page.evaluate((uid) => {
@@ -75,9 +186,35 @@ test("the editor moves genes between groups and creates a group from a selection
   }, geneId)).toEqual(["Hand-picked genes"]);
 });
 
+test("selection actions only show operations valid for the active data type", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+
+  await page.locator('[data-data-kind="genes"]').click();
+  await page.locator('[data-gene-view="list"]').click();
+  await page.locator('[data-row-type="gene"]').first().locator('[data-row-select]').check();
+  await expect(page.locator("#selection-group-label")).toBeVisible();
+  await expect(page.locator("#selection-begin-create-group")).toBeVisible();
+  await expect(page.locator("#selection-new-group-label")).toBeHidden();
+  await expect(page.locator("#selection-delete-genes")).toBeVisible();
+
+  await page.locator('[data-data-kind="groups"]').click();
+  await page.locator('[data-row-select="group:group1"]').check();
+  await expect(page.locator("#selection-group-label")).toBeHidden();
+  await expect(page.locator("#selection-begin-create-group")).toBeHidden();
+  await expect(page.locator("#selection-delete-genes")).toBeHidden();
+  await expect(page.locator("#selection-delete")).toBeVisible();
+
+  await page.locator('[data-data-kind="links"]').click();
+  await page.locator('[data-row-type="link"]').first().locator('[data-row-select]').check();
+  await expect(page.locator("#selection-group-label")).toBeHidden();
+  await expect(page.locator("#selection-new-group-label")).toBeHidden();
+  await expect(page.locator("#selection-delete-links")).toBeVisible();
+});
+
 test("selecting genes in the editor highlights their plotted arrows", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   await page.locator('[data-data-kind="genes"]').click();
+  await page.locator('[data-gene-view="list"]').click();
   const firstGene = page.locator('[data-row-type="gene"]').first();
   const key = await firstGene.locator('[data-row-select]').getAttribute("data-row-select");
   const geneId = key.replace("gene:", "");
@@ -85,13 +222,59 @@ test("selecting genes in the editor highlights their plotted arrows", async ({ p
 
   await expect.poll(() => page.evaluate((uid) => {
     const node = [...document.querySelectorAll("g.gene")].find((candidate) => candidate.__data__?.uid === uid);
-    return node?.querySelector("polygon")?.style.stroke || "";
+    return node?.querySelector("polygon.geneHighlight")?.style.stroke || "";
   }, geneId)).toContain("rgb(22, 119, 255)");
+  await expect.poll(() => page.evaluate((uid) => {
+    const node = [...document.querySelectorAll("g.gene")].find((candidate) => candidate.__data__?.uid === uid);
+    return node?.querySelector("polygon.geneHighlight")?.getAttribute("fill") || "";
+  }, geneId)).toContain("22, 119, 255");
+  await expect.poll(() => page.evaluate((uid) => {
+    const node = [...document.querySelectorAll("g.gene")].find((candidate) => candidate.__data__?.uid === uid);
+    return node?.querySelector("polygon.genePolygon")?.getAttribute("fill") || "";
+  }, geneId)).not.toContain("22, 119, 255");
+});
+
+test("selecting a group highlights all of its member genes in the plot", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-row-select="group:group1"]').check();
+
+  await expect.poll(() => page.evaluate(() => {
+    const highlighted = new Set(window.__demoChart?.highlight());
+    return ["0", "1001"].every((uid) => highlighted.has(uid));
+  })).toBe(true);
+});
+
+test("selecting or hovering a link highlights it in the plot", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-data-kind="links"]').click();
+  const links = page.locator('[data-row-type="link"]');
+  const first = links.nth(0);
+  const second = links.nth(1);
+  const linkId = (row) => row.locator('[data-row-select]').getAttribute("data-row-select").then((key) => key.replace("link:", ""));
+  const stroke = (uid) => page.evaluate((id) => {
+    const node = [...document.querySelectorAll("g.geneLinkG")].find((candidate) => candidate.__data__?.uid === id);
+    return node?.querySelector("path.geneLinkHighlight")?.style.stroke || "";
+  }, uid);
+
+  const firstId = await linkId(first);
+  const secondId = await linkId(second);
+  await first.locator('[data-row-select]').check();
+  await expect.poll(() => stroke(firstId)).toContain("rgb(22, 119, 255)");
+  await expect.poll(() => page.evaluate((id) => {
+    const node = [...document.querySelectorAll("g.geneLinkG")].find((candidate) => candidate.__data__?.uid === id);
+    return node?.querySelector("path.geneLinkHighlight")?.style.fill || "";
+  }, firstId)).toContain("22, 119, 255");
+
+  await second.hover();
+  await expect.poll(() => stroke(secondId)).toContain("rgb(22, 119, 255)");
+  await page.locator("#editor-summary").hover();
+  await expect.poll(() => stroke(firstId)).toContain("rgb(22, 119, 255)");
 });
 
 test("hovering a gene row temporarily highlights its plotted arrow", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   await page.locator('[data-data-kind="genes"]').click();
+  await page.locator('[data-gene-view="list"]').click();
   const firstGene = page.locator('[data-row-type="gene"]').first();
   const key = await firstGene.locator('[data-row-select]').getAttribute("data-row-select");
   const geneId = key.replace("gene:", "");
@@ -111,6 +294,7 @@ test("hovering a gene row temporarily highlights its plotted arrow", async ({ pa
 test("deleting genes preserves link data while removing them from the plot", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   await page.locator('[data-data-kind="genes"]').click();
+  await page.locator('[data-gene-view="list"]').click();
   const firstGene = page.locator('[data-row-type="gene"]').first();
   const key = await firstGene.locator('[data-row-select]').getAttribute("data-row-select");
   const geneId = key.replace("gene:", "");
@@ -132,13 +316,14 @@ test("the link view edits and deletes links without changing genes", async ({ pa
   const linkId = key.replace("link:", "");
   const geneCount = await page.evaluate(() => window.__demoChart?.data().clusters.flatMap((cluster) => cluster.loci).flatMap((locus) => locus.genes).length);
   await firstLink.locator('[data-row-select]').check();
-  await page.locator("#selection-identity").fill("72.5");
-  await page.locator("#selection-set-identity").click();
+  await firstLink.locator("[data-row-identity]").fill("72.5");
+  await firstLink.locator("[data-row-identity]").press("Tab");
   await expect.poll(() => page.evaluate((uid) =>
     window.__demoChart?.data().links.find((link) => link.uid === uid)?.identity
   , linkId)).toBe(0.725);
-  await page.locator("#selection-label").fill("Reviewed match");
-  await page.locator("#selection-rename").click();
+  await firstLink.locator(".row-label").dblclick();
+  await firstLink.locator("[data-row-rename]").fill("Reviewed match");
+  await firstLink.locator("[data-row-rename]").press("Enter");
   await expect.poll(() => page.evaluate((uid) =>
     window.__demoChart?.data().links.find((link) => link.uid === uid)?.label
   , linkId)).toBe("Reviewed match");
@@ -150,6 +335,17 @@ test("the link view edits and deletes links without changing genes", async ({ pa
   await expect.poll(() => page.evaluate(() =>
     window.__demoChart?.data().clusters.flatMap((cluster) => cluster.loci).flatMap((locus) => locus.genes).length
   )).toBe(geneCount);
+});
+
+test("visible selection controls share one fixed action-bar height", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-data-kind="links"]').click();
+  await page.locator('[data-row-type="link"]').first().locator('[data-row-select]').check();
+
+  const heights = await page.locator("#selection-summary, #selection-clear, #selection-actions .action-group > :not([hidden])").evaluateAll((nodes) =>
+    nodes.map((node) => Math.round(node.getBoundingClientRect().height)).filter(Boolean)
+  );
+  expect(new Set(heights)).toEqual(new Set([30]));
 });
 
 test("the identity colour domain controls link shading and bar endpoints", async ({ page }) => {
@@ -175,6 +371,7 @@ test("the editor deletes a selected group", async ({ page }) => {
 
 test("the groups view creates an empty named group without selecting genes", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator("#group-begin-create").click();
   await page.locator("#new-group-name").fill("Notes for review");
   await page.locator("#new-group-create").click();
   await expect.poll(() => page.evaluate(() =>

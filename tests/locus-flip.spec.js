@@ -705,6 +705,43 @@ test("zoom state persists across a chart redraw", async ({ page }, testInfo) => 
     .toBe(true);
 });
 
+test("switching renderer preserves the camera through the first Canvas gesture", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+
+  const svg = page.locator("svg.clusterMap");
+  const viewport = svg.locator("g.clusterMapViewport");
+  await svg.hover();
+  await page.mouse.wheel(0, -400);
+  await waitForPaint(page);
+  const beforeSwitch = await readCamera(viewport);
+  expect(beforeSwitch.k).toBeGreaterThan(1);
+
+  // The editor changes this same live configuration path.
+  await page.evaluate(() => {
+    window.__demoChart.config({ plot: { renderer: "canvas" } });
+  });
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  await expect(canvas).toBeVisible();
+  const synced = await canvas.evaluate((node) => {
+    const { x, y, k } = node.__zoom;
+    return { x, y, k };
+  });
+  expect(synced.k).toBeCloseTo(beforeSwitch.k, 4);
+  expect(synced.x).toBeCloseTo(beforeSwitch.x, 3);
+  expect(synced.y).toBeCloseTo(beforeSwitch.y, 3);
+
+  await canvas.hover();
+  await page.mouse.wheel(0, -100);
+  await waitForPaint(page);
+  const afterGesture = await canvas.evaluate((node) => {
+    const { x, y, k } = node.__zoom;
+    return { x, y, k };
+  });
+  // A fresh identity transform would leave this near 1.15 instead of
+  // continuing from the already zoomed SVG camera.
+  expect(afterGesture.k).toBeGreaterThan(beforeSwitch.k);
+});
+
 test("separate chart instances keep SVG IDs and interactions isolated", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
   await expect(page.locator("svg.clusterMap")).toHaveCount(1);
@@ -1372,6 +1409,18 @@ test("Canvas minimap constrains zoom-out and navigates the shared camera", async
   await canvas.hover();
   await page.mouse.wheel(0, 4000);
   await expect.poll(() => readCamera().then((camera) => camera.k)).toBeGreaterThanOrEqual(0.8);
+});
+
+test("Canvas minimap stays clear of the bottom plot editor", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&renderer=canvas&minimap=1&editor=1");
+  const minimap = page.locator("canvas.clusterMapMinimap");
+  const editor = page.locator("#editor");
+  await expect(minimap).toBeVisible();
+  await expect(editor).toBeVisible();
+  const [minimapBox, editorBox] = await Promise.all([minimap.boundingBox(), editor.boundingBox()]);
+  expect(minimapBox).not.toBeNull();
+  expect(editorBox).not.toBeNull();
+  expect(minimapBox.y + minimapBox.height).toBeLessThan(editorBox.y);
 });
 
 test("WebGPU minimap navigates the shared camera", async ({ page }) => {
