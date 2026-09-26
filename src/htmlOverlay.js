@@ -27,17 +27,11 @@ export function createHtmlOverlay({
     const x = event.clientX ?? (rect ? rect.x + rect.width / 2 : 0);
     const y = event.clientY ?? (rect ? rect.y + rect.height : 0);
     tooltip
+      .interrupt()
       .style("left", `${x - bounds.width / 2}px`)
       .style("top", `${y + 12}px`)
-      .transition()
-      .duration(100)
       .style("opacity", 1)
       .style("pointer-events", "all");
-    tooltip
-      .transition()
-      .delay(1000)
-      .style("opacity", 0)
-      .style("pointer-events", "none");
   };
 
   const geneContents = (gene) => {
@@ -63,6 +57,12 @@ export function createHtmlOverlay({
       .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
       .on("change", (event) => actions.updateGene(gene, { colour: event.target.value }));
     div.append("button").text("Anchor map on gene").on("click", () => actions.anchorGene(gene));
+    if (typeof actions.revealGene === "function") {
+      div.append("button").text("Reveal in data editor").on("click", () => {
+        actions.revealGene(gene);
+        hide();
+      });
+    }
     text.on("input", (event) => { actions.updateGene(gene, { label: event.target.value }); select.attr("value", null); });
     select.on("change", (event) => { actions.updateGene(gene, { label: event.target.value }); text.attr("value", event.target.value); });
     return div;
@@ -91,6 +91,12 @@ export function createHtmlOverlay({
       .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
       .on("change", (event) => actions.updateGroup(group, { colour: event.target.value }));
     div.append("button").text("Hide group").on("click", () => actions.updateGroup(group, { hidden: true }));
+    if (typeof actions.revealGroup === "function") {
+      div.append("button").text("Reveal in data editor").on("click", () => {
+        actions.revealGroup(group);
+        hide();
+      });
+    }
     text.on("input", (event) => actions.updateGroup(group, { label: event.target.value }));
     return div;
   };

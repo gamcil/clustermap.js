@@ -33,7 +33,9 @@ export function ensureSvgSurface({
         .style("opacity", 0)
         .style("position", "absolute")
         .style("pointer-events", "none")
-        .style("z-index", 1)
+        // Context menus must stay interactive above optional side panels that
+        // share the chart container (such as the demo data editor).
+        .style("z-index", 4)
         .style("box-sizing", "border-box")
         .style("padding", "8px")
         .style("background", "white")

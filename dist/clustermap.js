@@ -898,17 +898,11 @@
       const x = event.clientX ?? (rect ? rect.x + rect.width / 2 : 0);
       const y = event.clientY ?? (rect ? rect.y + rect.height : 0);
       tooltip
+        .interrupt()
         .style("left", `${x - bounds.width / 2}px`)
         .style("top", `${y + 12}px`)
-        .transition()
-        .duration(100)
         .style("opacity", 1)
         .style("pointer-events", "all");
-      tooltip
-        .transition()
-        .delay(1000)
-        .style("opacity", 0)
-        .style("pointer-events", "none");
     };
 
     const geneContents = (gene) => {
@@ -934,6 +928,12 @@
         .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
         .on("change", (event) => actions.updateGene(gene, { colour: event.target.value }));
       div.append("button").text("Anchor map on gene").on("click", () => actions.anchorGene(gene));
+      if (typeof actions.revealGene === "function") {
+        div.append("button").text("Reveal in data editor").on("click", () => {
+          actions.revealGene(gene);
+          hide();
+        });
+      }
       text.on("input", (event) => { actions.updateGene(gene, { label: event.target.value }); select.attr("value", null); });
       select.on("change", (event) => { actions.updateGene(gene, { label: event.target.value }); text.attr("value", event.target.value); });
       return div;
@@ -962,6 +962,12 @@
         .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
         .on("change", (event) => actions.updateGroup(group, { colour: event.target.value }));
       div.append("button").text("Hide group").on("click", () => actions.updateGroup(group, { hidden: true }));
+      if (typeof actions.revealGroup === "function") {
+        div.append("button").text("Reveal in data editor").on("click", () => {
+          actions.revealGroup(group);
+          hide();
+        });
+      }
       text.on("input", (event) => actions.updateGroup(group, { label: event.target.value }));
       return div;
     };
@@ -4927,6 +4933,9 @@
       subtitleFontSize: 10,
       onClickCircle: null,
       onClickText: null,
+      // Optional hook exposed as a deliberate action in the group context menu.
+      // Consumers can use it to reveal a group in an adjacent inspector.
+      onReveal: null,
       // "right" keeps the historical layout. "bottom" places the legend
       // below the chart's content bounds, aligned with its left edge.
       position: "right",
@@ -4993,6 +5002,9 @@
         tipHeight: 5,
         tipLength: 12,
         onClick: null,
+        // Optional hook exposed as a deliberate action in the gene context menu.
+        // It intentionally does not replace the normal click-to-anchor behaviour.
+        onReveal: null,
         stroke: "black",
         strokeWidth: 1,
       },
@@ -6844,7 +6856,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           .style("opacity", 0)
           .style("position", "absolute")
           .style("pointer-events", "none")
-          .style("z-index", 1)
+          // Context menus must stay interactive above optional side panels that
+          // share the chart container (such as the demo data editor).
+          .style("z-index", 4)
           .style("box-sizing", "border-box")
           .style("padding", "8px")
           .style("background", "white")
@@ -7079,6 +7093,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let highlightLinkIds = new Set();
     let disposeRasterInteraction = () => {};
     let disposeOverlay = () => {};
+    // Rebound on each redraw so programmatic focusing always targets the
+    // currently active renderer surface.
+    let focusCamera = () => false;
     const changeListeners = new Set();
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
     const canvasBackend = createRetainedSceneBackend({
@@ -7576,6 +7593,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             sourceIds,
           }]),
           anchorGene: (gene) => anchorGene(gene, { flipMismatchedLoci: true }),
+          revealGene: runtime.config.gene.shape.onReveal,
+          revealGroup: runtime.config.legend.onReveal,
           getGroups: () => data.groups,
         },
       });
@@ -8202,6 +8221,51 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           )
         : runtime.buildScene(data);
 
+      focusCamera = ({ genes = [], links = [] } = {}) => {
+        let bounds = null;
+        const include = (candidate) => {
+          if (!candidate) return;
+          if (!bounds) {
+            bounds = { ...candidate };
+            return;
+          }
+          bounds.minX = Math.min(bounds.minX, candidate.minX);
+          bounds.maxX = Math.max(bounds.maxX, candidate.maxX);
+          bounds.minY = Math.min(bounds.minY, candidate.minY);
+          bounds.maxY = Math.max(bounds.maxY, candidate.maxY);
+        };
+        for (const uid of genes) include(scene.genes.get(uid)?.bounds);
+        for (const uid of links) {
+          const rendered = scene.links.get(uid);
+          if (rendered?.bounds) {
+            include(rendered.bounds);
+            continue;
+          }
+          // The data editor intentionally includes links that are hidden by a
+          // threshold or best-match setting. They have no scene ribbon, but
+          // their endpoints remain useful, focusable context.
+          const link = chartIndex?.linkById.get(uid);
+          include(scene.genes.get(link?.query.uid)?.bounds);
+          include(scene.genes.get(link?.target.uid)?.bounds);
+        }
+        const surface = useRaster ? canvas : svg;
+        const node = surface.node();
+        if (!bounds || !node) return false;
+        const viewport = node.getBoundingClientRect();
+        const camera = fitCameraForBounds({
+          bounds,
+          viewport,
+          padding: 56,
+          constrainScale: constrainZoom,
+        });
+        if (!camera) return false;
+        const transform = d3__namespace.zoomIdentity.translate(camera.x, camera.y).scale(camera.k);
+        if (useRaster && canvasZoom) d3__namespace.select(node).call(canvasZoom.transform, transform);
+        else if (zoom) svg.call(zoom.transform, transform);
+        else setCamera(chartState, camera);
+        return true;
+      };
+
       if (useCanvas) {
         if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
         canvasBackend.setScene(scene);
@@ -8361,6 +8425,15 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (!container || !currentData) return my;
       if (isRasterRenderer(runtime.config.plot.renderer)) scheduleRasterPaint();
       else redraw({ animate: false });
+      return my;
+    };
+    /** Frame selected genes and/or links without changing their selection. */
+    my.focus = function (ids) {
+      const isScoped = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
+      focusCamera({
+        genes: isScoped ? ids.genes || [] : ids || [],
+        links: isScoped ? ids.links || [] : [],
+      });
       return my;
     };
     my.on = (type, listener) => {

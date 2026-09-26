@@ -94,6 +94,9 @@ export default function clusterMap() {
   let highlightLinkIds = new Set();
   let disposeRasterInteraction = () => {};
   let disposeOverlay = () => {};
+  // Rebound on each redraw so programmatic focusing always targets the
+  // currently active renderer surface.
+  let focusCamera = () => false;
   const changeListeners = new Set();
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const canvasBackend = createRetainedSceneBackend({
@@ -591,6 +594,8 @@ export default function clusterMap() {
           sourceIds,
         }]),
         anchorGene: (gene) => anchorGene(gene, { flipMismatchedLoci: true }),
+        revealGene: runtime.config.gene.shape.onReveal,
+        revealGroup: runtime.config.legend.onReveal,
         getGroups: () => data.groups,
       },
     });
@@ -1217,6 +1222,51 @@ export default function clusterMap() {
         )
       : runtime.buildScene(data);
 
+    focusCamera = ({ genes = [], links = [] } = {}) => {
+      let bounds = null;
+      const include = (candidate) => {
+        if (!candidate) return;
+        if (!bounds) {
+          bounds = { ...candidate };
+          return;
+        }
+        bounds.minX = Math.min(bounds.minX, candidate.minX);
+        bounds.maxX = Math.max(bounds.maxX, candidate.maxX);
+        bounds.minY = Math.min(bounds.minY, candidate.minY);
+        bounds.maxY = Math.max(bounds.maxY, candidate.maxY);
+      };
+      for (const uid of genes) include(scene.genes.get(uid)?.bounds);
+      for (const uid of links) {
+        const rendered = scene.links.get(uid);
+        if (rendered?.bounds) {
+          include(rendered.bounds);
+          continue;
+        }
+        // The data editor intentionally includes links that are hidden by a
+        // threshold or best-match setting. They have no scene ribbon, but
+        // their endpoints remain useful, focusable context.
+        const link = chartIndex?.linkById.get(uid);
+        include(scene.genes.get(link?.query.uid)?.bounds);
+        include(scene.genes.get(link?.target.uid)?.bounds);
+      }
+      const surface = useRaster ? canvas : svg;
+      const node = surface.node();
+      if (!bounds || !node) return false;
+      const viewport = node.getBoundingClientRect();
+      const camera = fitCameraForBounds({
+        bounds,
+        viewport,
+        padding: 56,
+        constrainScale: constrainZoom,
+      });
+      if (!camera) return false;
+      const transform = d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k);
+      if (useRaster && canvasZoom) d3.select(node).call(canvasZoom.transform, transform);
+      else if (zoom) svg.call(zoom.transform, transform);
+      else setCamera(chartState, camera);
+      return true;
+    };
+
     if (useCanvas) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
       canvasBackend.setScene(scene);
@@ -1376,6 +1426,15 @@ export default function clusterMap() {
     if (!container || !currentData) return my;
     if (isRasterRenderer(runtime.config.plot.renderer)) scheduleRasterPaint();
     else redraw({ animate: false });
+    return my;
+  };
+  /** Frame selected genes and/or links without changing their selection. */
+  my.focus = function (ids) {
+    const isScoped = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
+    focusCamera({
+      genes: isScoped ? ids.genes || [] : ids || [],
+      links: isScoped ? ids.links || [] : [],
+    });
     return my;
   };
   my.on = (type, listener) => {

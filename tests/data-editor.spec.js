@@ -56,13 +56,77 @@ test("the gene browser compacts single-locus clusters and selects their descenda
   await expect(page.locator('[data-row-type="cluster"]')).toHaveCount(0);
   await expect(page.locator('[data-row-type="locus"]')).toHaveCount(0);
   await expect(page.locator('[data-row-type="gene"]')).toHaveCount(0);
+  await expect(page.locator("#editor-summary")).toHaveText("3 visible tree rows · 9 selectable genes.");
+  await expect(page.locator("#select-all-visible")).toHaveText("Select all 9 visible genes");
 
   const firstCluster = page.locator('[data-row-type="cluster-locus"]').first();
+  const compactGap = await firstCluster.locator(".combined-tree-label").evaluate((node) => {
+    const cluster = node.querySelector('[data-row-rename-key^="cluster:"] .label-text').getBoundingClientRect();
+    const separator = node.querySelector(".tree-name-separator").getBoundingClientRect();
+    return separator.left - cluster.right;
+  });
+  expect(compactGap).toBeLessThanOrEqual(8);
   await firstCluster.locator('[data-row-select]').check();
   await expect(page.locator("#selection-summary")).toHaveText("3 genes selected");
 
   await firstCluster.locator('[data-tree-toggle]').click();
   await expect(page.locator('[data-row-type="gene"]')).toHaveCount(3);
+});
+
+test("the group gene tree organizes homology groups and their members", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-data-kind="genes"]').click();
+  await page.locator('[data-gene-view="groups"]').click();
+
+  await expect(page.locator('[data-row-type="gene-group"]')).toHaveCount(4);
+  await expect(page.locator("#editor-summary")).toHaveText("4 visible tree rows · 9 selectable genes.");
+  const group = page.locator('[data-row-key="gene-group:group1"]');
+  await expect(group).toContainText("group 1");
+  await group.locator('[data-row-select]').check();
+  await expect(page.locator("#selection-summary")).toHaveText("2 genes selected");
+
+  await group.locator('[data-tree-toggle]').click();
+  await expect(page.locator('[data-row-type="gene"]')).toHaveCount(2);
+});
+
+test("a selected group opens an exact member filter in the gene list", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-row-select="group:group1"]').check();
+  await expect(page.locator("#selection-view-members")).toBeVisible();
+
+  await page.locator("#selection-view-members").click();
+  await expect(page.locator('[data-data-kind="genes"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-gene-view="list"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#member-group-filter")).toBeVisible();
+  await expect(page.locator("#member-group-filter")).toContainText("Group: group 1");
+  await expect(page.locator("#editor-summary")).toHaveText("2 visible genes in selected group.");
+  await expect(page.locator('[data-row-type="gene"]')).toHaveCount(2);
+  await expect(page.locator(".list-group")).toHaveText(["group 1", "group 1"]);
+
+  await page.locator("#member-group-filter-clear").click();
+  await expect(page.locator("#member-group-filter")).toBeHidden();
+  await expect(page.locator("#editor-summary")).toHaveText("9 visible genes.");
+});
+
+test("plot context menus can reveal a gene or group in the data editor", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await expect.poll(() => page.evaluate(() => Boolean(window.__demoChart?.data()))).toBe(true);
+
+  const gene = page.locator("polygon.genePolygon").first();
+  await gene.click({ button: "right" });
+  // Context menus contain editable controls, so they stay available until the
+  // user dismisses them instead of timing out while they are being read.
+  await page.waitForTimeout(1100);
+  await expect(page.getByRole("button", { name: "Reveal in data editor" })).toBeVisible();
+  await page.getByRole("button", { name: "Reveal in data editor" }).click();
+  await expect(page.locator("#editor")).toBeVisible();
+  await expect(page.locator('[data-data-kind="genes"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-row-type="gene"] [data-row-select]:checked')).toHaveCount(1);
+
+  await page.locator("text.legend-label").first().click({ button: "right" });
+  await page.getByRole("button", { name: "Reveal in data editor" }).click();
+  await expect(page.locator('[data-data-kind="groups"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-row-type="group"] [data-row-select]:checked')).toHaveCount(1);
 });
 
 test("double-clicking names renames every editable row type in place", async ({ page }) => {
@@ -85,6 +149,7 @@ test("double-clicking names renames every editable row type in place", async ({ 
   await compact.locator('[data-row-rename-key^="locus:"]').dblclick();
   await compact.locator("[data-row-rename]").fill("Reference locus");
   await compact.locator("[data-row-rename]").press("Enter");
+  await compact.locator("[data-tree-toggle]").click();
   await rename("gene", "Reference gene");
   await expect.poll(() => page.evaluate(() => {
     const data = window.__demoChart?.data();
@@ -92,7 +157,7 @@ test("double-clicking names renames every editable row type in place", async ({ 
   })).toEqual(["Reference genome", "Reference locus", "Reference gene"]);
 
   await page.locator('[data-data-kind="groups"]').click();
-  await page.locator('[data-row-type="group"]').first().locator(".row-label").dblclick();
+  await page.locator('[data-row-type="group"]').first().locator('[data-row-rename-key^="group:"]').dblclick();
   await page.locator('[data-row-rename]').fill("Reviewed group");
   await page.locator('[data-row-rename]').press("Enter");
   await expect.poll(() => page.evaluate(() => window.__demoChart?.data().groups[0]?.label)).toBe("Reviewed group");
@@ -129,6 +194,26 @@ test("the flat gene list exposes sortable locus and cluster columns", async ({ p
   ]);
 });
 
+test("the data filter supports clearing", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const filter = page.locator("#editor-filter");
+  await filter.focus();
+  await filter.fill("group 1");
+  await expect(page.locator("#editor-filter-clear")).toBeVisible();
+  await filter.press("Escape");
+  await expect(filter).toHaveValue("");
+  await expect(page.locator("#editor-filter-clear")).toBeHidden();
+});
+
+test("an empty filter result explains how to return to the data", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator("#editor-filter").fill("no such group");
+  await expect(page.locator("#editor-empty-state")).toContainText('No groups match “no such group”.');
+  await page.locator("#editor-empty-state [data-clear-filter]").click();
+  await expect(page.locator("#editor-filter")).toHaveValue("");
+  await expect(page.locator('[data-row-type="group"]')).toHaveCount(3);
+});
+
 test("group and link views expose sortable columns and select all visible records", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   await expect(page.locator("#editor-list-header").getByRole("button", { name: "Sort by Genes" })).toBeVisible();
@@ -155,6 +240,18 @@ test("Shift-click selects a contiguous range of visible rows", async ({ page }) 
 
   await expect(page.locator("#selection-summary")).toHaveText("3 groups selected");
   await expect(page.locator('[data-row-select="group:group2"]')).toBeChecked();
+});
+
+test("the focused data table supports select-all and clear-selection shortcuts", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const table = page.locator("#editor-list-scroll");
+  await table.focus();
+  await page.keyboard.press("Control+A");
+  await expect(page.locator("#selection-summary")).toHaveText("3 groups selected");
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#selection-actions")).toBeHidden();
+  await expect(page.locator('[data-row-select]:checked')).toHaveCount(0);
 });
 
 test("the editor moves genes between groups and creates a group from a selection", async ({ page }) => {
@@ -234,6 +331,37 @@ test("selecting genes in the editor highlights their plotted arrows", async ({ p
   }, geneId)).not.toContain("22, 119, 255");
 });
 
+test("Focus in plot frames the selected records only when requested", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-data-kind="genes"]').click();
+  await page.locator('[data-gene-view="list"]').click();
+  const row = page.locator('[data-row-type="gene"]').last();
+  await row.locator('[data-row-select]').check();
+  const before = await page.locator("svg.clusterMap").evaluate((node) => ({ ...node.__zoom }));
+  await page.locator("#selection-focus").click();
+  await expect.poll(() => page.locator("svg.clusterMap").evaluate((node) => ({ ...node.__zoom }))).not.toEqual(before);
+
+  // Hidden links remain in the editor so users can revise their metadata;
+  // focusing one falls back to its endpoint genes rather than doing nothing.
+  await page.evaluate(() => window.__demoChart?.config({ link: { threshold: 1 } }));
+  await page.locator('[data-data-kind="links"]').click();
+  await page.locator('[data-row-type="link"]').first().locator('[data-row-select]').check();
+  const beforeHiddenLinkFocus = await page.locator("svg.clusterMap").evaluate((node) => ({ ...node.__zoom }));
+  await page.locator("#selection-focus").click();
+  await expect.poll(() => page.locator("svg.clusterMap").evaluate((node) => ({ ...node.__zoom }))).not.toEqual(beforeHiddenLinkFocus);
+});
+
+test("Focus in plot uses the active Canvas camera", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1&renderer=canvas");
+  await page.locator('[data-data-kind="genes"]').click();
+  await page.locator('[data-gene-view="list"]').click();
+  await page.locator('[data-row-type="gene"]').last().locator('[data-row-select]').check();
+  const canvas = page.locator("canvas.clusterMapCanvas");
+  const before = await canvas.evaluate((node) => ({ ...node.__zoom }));
+  await page.locator("#selection-focus").click();
+  await expect.poll(() => canvas.evaluate((node) => ({ ...node.__zoom }))).not.toEqual(before);
+});
+
 test("selecting a group highlights all of its member genes in the plot", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   await page.locator('[data-row-select="group:group1"]').check();
@@ -282,13 +410,13 @@ test("hovering a gene row temporarily highlights its plotted arrow", async ({ pa
 
   await expect.poll(() => page.evaluate((uid) => {
     const node = [...document.querySelectorAll("g.gene")].find((candidate) => candidate.__data__?.uid === uid);
-    return node?.querySelector("polygon")?.style.stroke || "";
+    return node?.querySelector("polygon.geneHighlight")?.style.stroke || "";
   }, geneId)).toContain("rgb(22, 119, 255)");
   await page.locator("#editor-summary").hover();
   await expect.poll(() => page.evaluate((uid) => {
     const node = [...document.querySelectorAll("g.gene")].find((candidate) => candidate.__data__?.uid === uid);
-    return node?.querySelector("polygon")?.style.stroke || "";
-  }, geneId)).not.toContain("22, 119, 255");
+    return node?.querySelector("polygon.geneHighlight")?.getAttribute("display") || "";
+  }, geneId)).toBe("none");
 });
 
 test("deleting genes preserves link data while removing them from the plot", async ({ page }) => {
@@ -316,6 +444,7 @@ test("the link view edits and deletes links without changing genes", async ({ pa
   const linkId = key.replace("link:", "");
   const geneCount = await page.evaluate(() => window.__demoChart?.data().clusters.flatMap((cluster) => cluster.loci).flatMap((locus) => locus.genes).length);
   await firstLink.locator('[data-row-select]').check();
+  await firstLink.locator("[data-row-begin-identity]").click();
   await firstLink.locator("[data-row-identity]").fill("72.5");
   await firstLink.locator("[data-row-identity]").press("Tab");
   await expect.poll(() => page.evaluate((uid) =>
@@ -388,6 +517,25 @@ test("the bottom editor exposes live appearance controls", async ({ page }) => {
   await page.locator('[data-config="link.show"]').uncheck();
 
   await expect.poll(() => page.evaluate(() => window.__demoChart?.config().link.show)).toBe(false);
+
+  const geneAdvanced = page.locator("#appearance-controls fieldset").filter({ has: page.getByText("Genes", { exact: true }) }).locator("details");
+  await expect(geneAdvanced).not.toHaveAttribute("open", "");
+  await expect(page.locator('[data-config="gene.shape.bodyHeight"]')).toBeHidden();
+  await geneAdvanced.locator("summary").click();
+  await expect(page.locator('[data-config="gene.shape.bodyHeight"]')).toBeVisible();
+});
+
+test("the appearance finder reveals matching advanced settings", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.getByRole("tab", { name: "Appearance" }).click();
+  const finder = page.locator("#appearance-filter");
+  await finder.fill("body height");
+  await expect(page.locator('[data-config="gene.shape.bodyHeight"]')).toBeVisible();
+  await expect(page.locator('[data-config="link.show"]')).toBeHidden();
+  await expect(page.locator("#appearance-filter-clear")).toBeVisible();
+  await page.locator("#appearance-filter-clear").click();
+  await expect(finder).toHaveValue("");
+  await expect(page.locator('[data-config="link.show"]')).toBeVisible();
 });
 
 test("the bottom editor grows from its top resize handle", async ({ page }) => {

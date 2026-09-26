@@ -24,6 +24,9 @@ const defaultConfig = {
     subtitleFontSize: 10,
     onClickCircle: null,
     onClickText: null,
+    // Optional hook exposed as a deliberate action in the group context menu.
+    // Consumers can use it to reveal a group in an adjacent inspector.
+    onReveal: null,
     // "right" keeps the historical layout. "bottom" places the legend
     // below the chart's content bounds, aligned with its left edge.
     position: "right",
@@ -90,6 +93,9 @@ const defaultConfig = {
       tipHeight: 5,
       tipLength: 12,
       onClick: null,
+      // Optional hook exposed as a deliberate action in the gene context menu.
+      // It intentionally does not replace the normal click-to-anchor behaviour.
+      onReveal: null,
       stroke: "black",
       strokeWidth: 1,
     },

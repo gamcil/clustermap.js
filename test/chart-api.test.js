@@ -14,6 +14,7 @@ test("chart factory exposes only the supported public methods", async () => {
     assert.equal(typeof chart.data, "function");
     assert.equal(typeof chart.patch, "function");
     assert.equal(typeof chart.highlight, "function");
+    assert.equal(typeof chart.focus, "function");
     assert.equal(typeof chart.on, "function");
     assert.equal(typeof chart.exportSvg, "function");
     assert.equal(typeof chart.destroy, "function");
