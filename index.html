@@ -59,6 +59,8 @@
 			.editor-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 			.editor-panel[hidden] { display: none; }
 			#data-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+			#tree-actions { display: inline-flex; align-items: center; }
+			#tree-actions[hidden] { display: none; }
 			#member-group-filter { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; box-sizing: border-box; padding: 3px 5px 3px 8px; border: 1px solid #c6d8f0; border-radius: 6px; background: #f4f8ff; color: #36577e; font-size: 12px; white-space: nowrap; }
 			#member-group-filter[hidden] { display: none; }
 			#member-group-filter button { min-height: 22px; width: 22px; padding: 0; border: 0; background: transparent; color: #4f6d95; font-size: 16px; line-height: 1; }
@@ -192,6 +194,9 @@
 							<button data-gene-view="tree" aria-pressed="true" title="Group genes by cluster and locus">By locus</button>
 							<button data-gene-view="groups" aria-pressed="false" title="Group genes by homology group">By group</button>
 							<button data-gene-view="list" aria-pressed="false">List</button>
+						</div>
+						<div id="tree-actions" hidden>
+							<button id="tree-toggle-all" title="Expand all currently visible branches">Expand visible</button>
 						</div>
 						<div id="member-group-filter" hidden><span>Group: <strong id="member-group-filter-label"></strong></span><button id="member-group-filter-clear" aria-label="Clear group member filter" title="Clear group member filter">×</button></div>
 						<button id="group-begin-create" hidden>Create group…</button>
@@ -434,6 +439,8 @@
 			kindButtons: [...document.querySelectorAll("[data-data-kind]")],
 			geneView: document.querySelector("#gene-view"),
 			geneViewButtons: [...document.querySelectorAll("[data-gene-view]")],
+			treeActions: document.querySelector("#tree-actions"),
+			treeToggleAll: document.querySelector("#tree-toggle-all"),
 			memberGroupFilter: document.querySelector("#member-group-filter"),
 			memberGroupFilterLabel: document.querySelector("#member-group-filter-label"),
 			memberGroupFilterClear: document.querySelector("#member-group-filter-clear"),
@@ -629,7 +636,9 @@
 		}
 		const groupGeneRows = (data, groups, needle) => {
 			const entries = data.clusters.flatMap((cluster) => cluster.loci.flatMap((locus) =>
-				locus.genes.map((gene) => ({ gene, locus, cluster }))
+				locus.genes
+					.filter((gene) => geneMatchesMemberFilter(gene, groups))
+					.map((gene) => ({ gene, locus, cluster }))
 			))
 			const rows = []
 			const groupBuckets = [
@@ -815,7 +824,7 @@
 				editor.selectionVisibility.value = ""
 			}
 		}
-		const renderEditor = ({ refresh = true } = {}) => {
+			const renderEditor = ({ refresh = true } = {}) => {
 			let memberGroup = chart.data()?.groups.find((group) => group.uid === editor.memberGroupUid)
 			if (editor.memberGroupUid && !memberGroup) {
 				editor.memberGroupUid = null
@@ -833,6 +842,13 @@
 			const linkList = editor.kind === "links"
 			const flatGenes = genes && editor.geneMode === "list"
 			editor.geneView.hidden = !genes
+			editor.treeActions.hidden = !genes || flatGenes
+			const hasCollapsedTreeBranch = !flatGenes && allRows.some((row) => row.expandable && !row.expanded)
+			editor.treeToggleAll.disabled = Boolean(editor.filter.value)
+			editor.treeToggleAll.textContent = hasCollapsedTreeBranch ? "Expand visible" : "Collapse all"
+			editor.treeToggleAll.title = hasCollapsedTreeBranch
+				? "Expand all currently visible branches"
+				: "Collapse every tree branch"
 			editor.listHeader.hidden = !(flatGenes || groupList || linkList)
 			editor.listHeader.className = `editor-list-header ${flatGenes ? "gene-list" : groupList ? "group-list" : linkList ? "link-list" : ""}`
 			editor.listHeader.innerHTML = listSortHeader()
@@ -1177,6 +1193,34 @@
 			editor.viewport.scrollTop = 0
 			renderEditor()
 		}))
+		const expandVisibleTree = () => {
+			const data = chart.data()
+			if (!data || editor.kind !== "genes" || editor.geneMode === "list") return
+			if (editor.geneMode === "groups") {
+				data.groups.forEach((group) => editor.expanded.add(`gene-group:${group.uid}`))
+				editor.expanded.add("gene-group:ungrouped")
+			} else {
+				data.clusters.forEach((cluster) => {
+					if (cluster.loci.length === 1) {
+						editor.expanded.add(`cluster-locus:${cluster.uid}:${cluster.loci[0].uid}`)
+						return
+					}
+					editor.expanded.add(`cluster:${cluster.uid}`)
+					cluster.loci.forEach((locus) => editor.expanded.add(`locus:${locus.uid}`))
+				})
+			}
+			renderEditor()
+		}
+		const collapseAllTree = () => {
+			if (editor.kind !== "genes" || editor.geneMode === "list") return
+			editor.expanded.clear()
+			renderEditor()
+		}
+		editor.treeToggleAll.addEventListener("click", () => {
+			const hasCollapsedTreeBranch = editor.allRows.some((row) => row.expandable && !row.expanded)
+			if (hasCollapsedTreeBranch) expandVisibleTree()
+			else collapseAllTree()
+		})
 		editor.listHeader.addEventListener("click", (event) => {
 			const column = event.target.closest("[data-sort-column]")?.dataset.sortColumn
 			if (!column) return

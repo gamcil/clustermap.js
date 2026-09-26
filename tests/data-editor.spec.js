@@ -89,6 +89,24 @@ test("the group gene tree organizes homology groups and their members", async ({
   await expect(page.locator('[data-row-type="gene"]')).toHaveCount(2);
 });
 
+test("gene trees can expand and collapse all visible branches", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-data-kind="genes"]').click();
+  await page.locator('[data-gene-view="groups"]').click();
+  await expect(page.locator("#tree-actions")).toBeVisible();
+  await expect(page.locator('[data-row-type="gene"]')).toHaveCount(0);
+  await expect(page.locator("#tree-toggle-all")).toHaveText("Expand visible");
+
+  await page.locator("#tree-toggle-all").click();
+  await expect(page.locator('[data-row-type="gene"]')).toHaveCount(9);
+  await expect(page.locator("#tree-toggle-all")).toHaveText("Collapse all");
+  await page.locator("#tree-toggle-all").click();
+  await expect(page.locator('[data-row-type="gene"]')).toHaveCount(0);
+
+  await page.locator('[data-gene-view="list"]').click();
+  await expect(page.locator("#tree-actions")).toBeHidden();
+});
+
 test("a selected group opens an exact member filter in the gene list", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   await page.locator('[data-row-select="group:group1"]').check();
@@ -106,6 +124,16 @@ test("a selected group opens an exact member filter in the gene list", async ({ 
   await page.locator("#member-group-filter-clear").click();
   await expect(page.locator("#member-group-filter")).toBeHidden();
   await expect(page.locator("#editor-summary")).toHaveText("9 visible genes.");
+});
+
+test("the group-member scope carries into the group gene tree", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-row-select="group:group1"]').check();
+  await page.locator("#selection-view-members").click();
+  await page.locator('[data-gene-view="groups"]').click();
+
+  await expect(page.locator('[data-row-type="gene-group"]')).toHaveCount(1);
+  await expect(page.locator('[data-row-key="gene-group:group1"]')).toContainText("2 genes");
 });
 
 test("plot context menus can reveal a gene or group in the data editor", async ({ page }) => {
