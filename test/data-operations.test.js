@@ -111,6 +111,31 @@ test("groups can be created without assigning genes", async () => {
   });
 });
 
+test("groups can be reordered without changing their membership", async () => {
+  const { createChartIndex } = await import("../src/data/index.mjs");
+  const { normalizeChartData } = await import("../src/data/normalize.mjs");
+  const { applyChartOperations } = await import("../src/data/operations.mjs");
+  const raw = structuredClone(data);
+  raw.groups.push({ uid: "group-2", label: "Second group", genes: [] });
+  const chartData = normalizeChartData(raw);
+
+  const result = applyChartOperations(chartData, createChartIndex(chartData), [{
+    type: "groups.reorder",
+    ids: ["group-2", "group-1"],
+  }]);
+
+  assert.deepEqual(chartData.groups.map((group) => [group.uid, group.genes]), [
+    ["group-2", []],
+    ["group-1", ["gene-1"]],
+  ]);
+  assert.deepEqual(result.operations, [{ type: "groups.reorder", ids: ["group-2", "group-1"] }]);
+  assert.equal(chartData.config.updateGroups, false);
+  assert.throws(() => applyChartOperations(chartData, createChartIndex(chartData), [{
+    type: "groups.reorder",
+    ids: ["group-1"],
+  }]), /must contain every group exactly once/);
+});
+
 test("deleting a gene preserves its link records", async () => {
   const { createChartIndex } = await import("../src/data/index.mjs");
   const { normalizeChartData } = await import("../src/data/normalize.mjs");

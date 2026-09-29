@@ -97,6 +97,13 @@ function validateStructuralGroupOperation(operation, index, groupIds) {
       sourceIds.forEach((uid) => groupIds.delete(uid));
       return { type: operation.type, targetId: operation.targetId, sourceIds };
     }
+    case "groups.reorder": {
+      const ids = uniqueIds(operation.ids, operation.type);
+      if (ids.length !== groupIds.size || ids.some((uid) => !groupIds.has(uid))) {
+        throw operationError(`${operation.type} must contain every group exactly once`);
+      }
+      return { type: operation.type, ids };
+    }
     case "groups.create": {
       const group = operation.group;
       if (!group || typeof group !== "object" || Array.isArray(group)) throw operationError("groups.create requires a group object");
@@ -185,6 +192,12 @@ function applyOperation(data, index, operation) {
       const sourceGenes = data.groups.filter((group) => operation.sourceIds.includes(group.uid)).flatMap((group) => group.genes || []);
       target.genes = [...new Set([...(target.genes || []), ...sourceGenes])];
       data.groups = data.groups.filter((group) => !operation.sourceIds.includes(group.uid));
+      return;
+    }
+    case "groups.reorder": {
+      const groups = new Map(data.groups.map((group) => [group.uid, group]));
+      data.groups = operation.ids.map((uid) => groups.get(uid));
+      return;
     }
   }
 }

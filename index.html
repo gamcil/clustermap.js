@@ -13,7 +13,9 @@
 		<style>
 			html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
 			main { position: relative; display: flex; flex-direction: column; height: 100%; }
-			#toolbar { display: flex; gap: 6px; padding: 4px; }
+			#toolbar { display: flex; align-items: center; gap: 6px; padding: 4px; }
+			#data-import-status { color: #536b88; font-size: 12px; }
+			#data-import-status[data-error="true"] { color: #b42318; }
 			#workspace { display: flex; flex: 1; min-height: 0; }
 			#plot,
 			#plot > .chart-host {
@@ -90,6 +92,7 @@
 			#editor-history { display: flex; gap: 5px; }
 			#editor-history button { font-size: 12px; padding: 3px 7px; }
 			#selection-label { width: 180px; max-width: 35vw; }
+			#selection-group-position { width: 52px; }
 			#selection-colour-label { width: 40px; }
 			#selection-colour { box-sizing: border-box; width: 40px; height: 30px; padding: 2px; }
 			#selection-colour-label[hidden] { display: none; }
@@ -104,11 +107,12 @@
 			#editor-list-header[hidden] { display: none; }
 			/* Keep control columns compact and predictable; text columns absorb the remaining room. */
 			.editor-list-header.gene-list, .editor-row.list-gene { display: grid; grid-template-columns: 28px minmax(150px, 1.35fr) minmax(90px, .8fr) minmax(110px, 1fr) minmax(90px, .85fr) 28px; align-items: center; column-gap: 7px; padding: 0 5px; box-sizing: border-box; }
-			.editor-list-header.group-list, .editor-row.list-group { display: grid; grid-template-columns: 28px minmax(160px, 1.35fr) minmax(130px, 1fr) 78px 48px 48px; align-items: center; column-gap: 7px; padding: 0 5px; box-sizing: border-box; }
+			.editor-list-header.group-list, .editor-row.list-group { display: grid; grid-template-columns: 28px 28px minmax(200px, 1fr) minmax(150px, 320px) 86px 28px 36px; align-items: center; column-gap: 6px; padding: 0 5px; box-sizing: border-box; }
 			.editor-list-header.link-list, .editor-row.list-link { display: grid; grid-template-columns: 28px minmax(110px, 1.1fr) minmax(110px, 1.1fr) 72px minmax(110px, 1fr) minmax(96px, .85fr) 48px 48px; align-items: center; column-gap: 7px; padding: 0 5px; box-sizing: border-box; }
 			.editor-list-header { min-height: 32px; border-bottom: 1px solid #dbe2eb; background: #f7f9fc; color: #556274; font-size: 11px; font-weight: 650; }
 			.editor-list-header > *, .editor-row.list-gene > *, .editor-row.list-group > *, .editor-row.list-link > * { min-width: 0; }
 			#editor .editor-list-header button { min-width: 0; min-height: 32px; border: 0; border-radius: 0; padding: 3px 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+			#editor .editor-list-header button.icon-heading { padding: 3px 0; text-align: center; }
 			#editor .editor-list-header button:hover { background: #edf4ff; color: #145da8; }
 			.editor-list-header .sort-indicator { display: inline-block; width: 10px; color: #1677ff; }
 			.editor-list-header .utility-heading { justify-self: center; white-space: nowrap; }
@@ -135,6 +139,12 @@
 			#editor .editor-row .visibility:hover, #editor .tree-toggle:hover { background: #e7f0ff; color: #145da8; }
 			.editor-row .visibility[aria-pressed="false"] { color: #9aa6b5; }
 			.editor-row .visibility svg, .tree-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+			#editor .editor-row .reorder-grip { justify-self: center; width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #9aa6b5; font-size: 15px; line-height: 1; letter-spacing: -3px; cursor: grab; }
+			#editor .editor-row .reorder-grip:hover, #editor .editor-row .reorder-grip:focus-visible { background: #e7f0ff; color: #145da8; }
+			#editor .editor-row .reorder-grip:active { cursor: grabbing; }
+			.editor-row.drop-target { box-shadow: inset 0 2px #1677ff; }
+			.editor-row.list-group .group-subtitle .row-label { color: #667386; font-size: 12px; font-weight: 400; }
+			.editor-row.list-group .group-subtitle.empty .label-text { font-style: italic; }
 			.editor-row.tree-cluster { font-weight: 600; background: #fafafa; }
 			.editor-row.tree-locus { font-weight: 500; }
 			.tree-toggle { font: inherit; }
@@ -170,7 +180,14 @@
 	<body>
 		<main>
 			<div id="toolbar">
-				<button id="btn-save-svg">Save</button>
+				<button id="btn-save-svg" title="Export the current figure as SVG">Export SVG</button>
+				<button id="btn-export-data" title="Export the current editable data as JSON">Export data</button>
+				<button id="btn-export-project" title="Export data, appearance, layout, and current view">Export project</button>
+				<button id="btn-import-data" title="Replace the plot with an exported JSON data file">Load data…</button>
+				<input id="data-import-file" type="file" accept="application/json,.json" hidden>
+				<button id="btn-import-project" title="Restore an exported editing project">Load project…</button>
+				<input id="project-import-file" type="file" accept="application/json,.json" hidden>
+				<span id="data-import-status" role="status" aria-live="polite"></span>
 				<button id="btn-editor" aria-expanded="false">Edit data</button>
 			</div>
 			<div id="workspace">
@@ -234,6 +251,12 @@
 						<div id="selection-group-actions" class="action-group separated" hidden>
 							<select id="selection-merge-target" aria-label="Group to keep when merging"></select>
 							<button id="selection-merge">Merge groups</button>
+						</div>
+						<div id="selection-group-order-actions" class="action-group separated" hidden>
+							<button id="selection-group-move-first" title="Move selected group to the first legend position">First</button>
+							<label>Position <input id="selection-group-position" type="number" min="1" step="1" inputmode="numeric" aria-label="Legend position for selected group"></label>
+							<button id="selection-group-move-position">Move</button>
+							<button id="selection-group-move-last" title="Move selected group to the final legend position">Last</button>
 						</div>
 						<div id="selection-group-member-actions" class="action-group separated" hidden><button id="selection-view-members">View member genes</button></div>
 						<div id="selection-danger-actions" class="action-group separated">
@@ -383,11 +406,46 @@
 			 * then the anchor is removed.
 			*/
 			const link = document.createElement("a");
-			link.href = URL.createObjectURL(blob);
+			const url = URL.createObjectURL(blob);
+			link.href = url;
 			link.download = filename;
 			document.body.appendChild(link);
 			link.click();
 			document.body.removeChild(link);
+			setTimeout(() => URL.revokeObjectURL(url), 0);
+		}
+		function validateImportedData(data) {
+			if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("the file must contain a JSON object")
+			if (!Array.isArray(data.clusters) || !Array.isArray(data.links) || !Array.isArray(data.groups)) {
+				throw new Error("expected clusters, links, and groups arrays")
+			}
+			const geneIds = new Set()
+			for (const cluster of data.clusters) {
+				if (!cluster || !Array.isArray(cluster.loci)) throw new Error("every cluster needs a loci array")
+				for (const locus of cluster.loci) {
+					if (!locus || !Array.isArray(locus.genes)) throw new Error("every locus needs a genes array")
+					for (const gene of locus.genes) {
+						if (!gene || gene.uid === undefined || gene.uid === null) throw new Error("every gene needs a uid")
+						if (geneIds.has(gene.uid)) throw new Error(`gene uid ${gene.uid} appears more than once`)
+						geneIds.add(gene.uid)
+					}
+				}
+			}
+			for (const group of data.groups) {
+				if (!group || group.uid === undefined || !Array.isArray(group.genes)) throw new Error("every group needs a uid and genes array")
+				for (const uid of group.genes) if (!geneIds.has(uid)) throw new Error(`group ${group.uid} refers to unknown gene ${uid}`)
+			}
+			for (const link of data.links) {
+				if (!link?.query || !link?.target || !geneIds.has(link.query.uid) || !geneIds.has(link.target.uid)) {
+					throw new Error("every link must refer to known source and target genes")
+				}
+			}
+		}
+		function validateImportedProject(project) {
+			if (!project || typeof project !== "object" || Array.isArray(project)) throw new Error("the file must contain a project object")
+			if (project.format !== "clinker-project" || project.version !== 1) throw new Error("unsupported project format")
+			if (!project.config || typeof project.config !== "object" || Array.isArray(project.config)) throw new Error("the project needs appearance settings")
+			validateImportedData(project.data)
 		}
 
 		const div = d3.select("#plot")
@@ -457,6 +515,11 @@
 			selectionVisibilityActions: document.querySelector("#selection-visibility-actions"),
 			selectionGeneActions: document.querySelector("#selection-gene-actions"),
 			selectionGroupActions: document.querySelector("#selection-group-actions"),
+			selectionGroupOrderActions: document.querySelector("#selection-group-order-actions"),
+			selectionGroupMoveFirst: document.querySelector("#selection-group-move-first"),
+			selectionGroupPosition: document.querySelector("#selection-group-position"),
+			selectionGroupMovePosition: document.querySelector("#selection-group-move-position"),
+			selectionGroupMoveLast: document.querySelector("#selection-group-move-last"),
 			selectionGroupMemberActions: document.querySelector("#selection-group-member-actions"),
 			selectionViewMembers: document.querySelector("#selection-view-members"),
 			selectionDangerActions: document.querySelector("#selection-danger-actions"),
@@ -504,7 +567,7 @@
 			history: [],
 			future: [],
 			allRows: [],
-			sort: { column: "label", direction: 1 },
+			sort: { column: "order", direction: 1 },
 			rowHeight: 34,
 			overscan: 8,
 		}
@@ -702,7 +765,7 @@
 			})
 			if (editor.kind === "groups") {
 				editor.allRows = data.groups
-					.map((group) => ({ key: `group:${group.uid}`, type: "group", label: labelFor(group, "Unlabelled group"), subtitle: group.subtitle || "", genes: group.genes.length, context: `${group.genes.length} genes`, colour: group.colour, hidden: Boolean(group.hidden), selectIds: [group.uid], depth: 0 }))
+					.map((group, order) => ({ key: `group:${group.uid}`, type: "group", order, label: labelFor(group, "Unlabelled group"), subtitle: group.subtitle || "", genes: group.genes.length, context: `${group.genes.length} genes`, colour: group.colour, hidden: Boolean(group.hidden), selectIds: [group.uid], depth: 0 }))
 					.filter((row) => matches(needle, row.label, row.subtitle, row.context))
 				editor.allRows = sortRows(editor.allRows)
 			} else if (editor.kind === "links") {
@@ -735,8 +798,9 @@
 		}
 		const listSortHeader = () => {
 			const column = (key, label) => `<button data-sort-column="${key}" aria-label="Sort by ${label}">${label}<span class="sort-indicator">${editor.sort.column === key ? editor.sort.direction > 0 ? "↑" : "↓" : ""}</span></button>`
-			const iconColumn = (key, label, icon) => `<button data-sort-column="${key}" aria-label="Sort by ${label}" title="Sort by ${label}">${icon}<span class="sr-only">${label}</span><span class="sort-indicator">${editor.sort.column === key ? editor.sort.direction > 0 ? "↑" : "↓" : ""}</span></button>`
-			if (editor.kind === "groups") return `<span></span>${column("label", "Group")}${column("subtitle", "Legend label")}${column("genes", "Genes")}${iconColumn("hidden", "Visible", "◉")}<span class="utility-heading" title="Colour">Colour</span>`
+			const iconColumn = (key, label, icon) => `<button class="icon-heading" data-sort-column="${key}" aria-label="Sort by ${label}" title="Sort by ${label}">${icon}<span class="sr-only">${label}</span><span class="sort-indicator">${editor.sort.column === key ? editor.sort.direction > 0 ? "↑" : "↓" : ""}</span></button>`
+			const legendOrderColumn = `<button class="icon-heading" data-sort-column="order" aria-label="Restore legend order" title="Restore legend order">↕<span class="sr-only">Legend order</span></button>`
+			if (editor.kind === "groups") return `<span></span>${legendOrderColumn}${column("label", "Group")}${column("subtitle", "Legend label")}${column("genes", "Genes")}${iconColumn("hidden", "Visible", "◉")}<span class="utility-heading" title="Colour">Colour</span>`
 			if (editor.kind === "links") return `<span></span>${column("query", "Source")}${column("target", "Target")}${column("identity", "Identity")}${column("groups", "Endpoint groups")}${column("label", "Link label") }<span class="utility-heading" title="Colour">Colour</span><span class="utility-heading" title="Visible">Visible</span>`
 			if (editor.geneMode !== "list") return ""
 			return `<span></span>${column("label", "Gene")}${column("locus", "Locus")}${column("cluster", "Cluster")}${column("group", "Group")}<span title="Colour">Colour</span>`
@@ -749,12 +813,12 @@
 			? `<input class="row-rename-input" data-row-rename="${escapeHtml(key)}" value="${escapeHtml(label)}" aria-label="Rename ${type}">`
 			: `<span class="row-label" data-row-rename-key="${escapeHtml(key)}" title="${escapeHtml(title)}"><span class="label-text">${escapeHtml(label || emptyText)}</span><button class="row-rename-button" data-row-begin-rename="${escapeHtml(key)}" aria-label="${label ? `Rename ${escapeHtml(label)}` : `Add label to ${type}`}" title="${label ? "Rename" : "Add label"}">✎</button></span>`
 		const rowLabelMarkup = (row, options) => renameMarkup(row.key, row.type, row.label, options)
-		const groupSubtitleMarkup = (row) => renameMarkup(
+		const groupSubtitleMarkup = (row) => `<span class="group-subtitle ${row.subtitle ? "" : "empty"}">${renameMarkup(
 			`group-subtitle:${row.selectIds[0]}`,
 			"legend label",
 			row.subtitle,
-			{ emptyText: "Add legend label…", title: "Optional smaller text shown beneath this group in the legend" }
-		)
+			{ emptyText: "Add label…", title: "Optional smaller text shown beneath this group in the legend" }
+		)}</span>`
 		const identityMarkup = (row) => editor.identityKey === row.key
 			? `<input class="identity" type="number" min="0" max="100" step="0.1" data-row-identity="${escapeHtml(row.key)}" value="${row.identity}" aria-label="Identity for ${escapeHtml(row.query)} and ${escapeHtml(row.target)}">`
 			: `<button class="identity-value" data-row-begin-identity="${escapeHtml(row.key)}" aria-label="Edit ${row.identity}% identity for ${escapeHtml(row.query)} and ${escapeHtml(row.target)}" title="Click to edit identity">${row.identity}%</button>`
@@ -794,6 +858,7 @@
 			editor.selectionVisibilityActions.hidden = !editingPresentation || count < 2
 			editor.selectionGeneActions.hidden = !editingGenes
 			editor.selectionGroupActions.hidden = !editingGroups || count < 2
+			editor.selectionGroupOrderActions.hidden = !editingGroups || count !== 1
 			editor.selectionGroupMemberActions.hidden = !editingGroups || count !== 1
 			editor.selectionDangerActions.hidden = !(editingGenes || editingLinks || editingGroups)
 			editor.selectionNewGroupLabel.hidden = !editingGenes || !editor.creatingGroup
@@ -811,6 +876,16 @@
 				const selected = editor.selectionMergeTarget.value
 				editor.selectionMergeTarget.innerHTML = optionMarkup(selectedGroups, selected, "Choose group to keep…")
 				editor.selectionMerge.disabled = !editor.selectionMergeTarget.value
+			}
+			if (editingGroups && count === 1) {
+				const ids = groups.map((group) => group.uid)
+				const position = ids.indexOf([...editor.selected][0])
+				editor.selectionGroupPosition.min = "1"
+				editor.selectionGroupPosition.max = String(ids.length)
+				editor.selectionGroupPosition.value = position >= 0 ? String(position + 1) : ""
+				editor.selectionGroupMoveFirst.disabled = position <= 0
+				editor.selectionGroupMoveLast.disabled = position < 0 || position === ids.length - 1
+				editor.selectionGroupMovePosition.disabled = position < 0 || ids.length < 2
 			}
 			if (editingPresentation) {
 				const records = recordsForKind()
@@ -886,6 +961,7 @@
 				</div>` : groupList ? `
 				<div class="editor-row list-group ${selectedFor(row) ? "selected" : ""}" data-row-key="${escapeHtml(row.key)}" data-row-type="group">
 					<input type="checkbox" data-row-select="${escapeHtml(row.key)}" ${selectedFor(row) ? "checked" : ""} aria-label="Select ${escapeHtml(row.label)}; Shift-click to select a range">
+					<button class="reorder-grip" draggable="true" data-row-reorder="${escapeHtml(row.selectIds[0])}" aria-label="Reorder ${escapeHtml(row.label)} in the legend; press Arrow Up or Arrow Down to move it" title="Drag to reorder; Arrow Up or Arrow Down moves one place">⠿</button>
 					${rowLabelMarkup(row)}
 					${groupSubtitleMarkup(row)}
 					<span class="source-column" title="${escapeHtml(row.context)}">${escapeHtml(row.context)}</span>
@@ -956,6 +1032,49 @@
 				buckets.set(key, bucket)
 			}
 			return [...buckets.values()]
+		}
+		const reorderGroups = (ids) => {
+			const before = chart.data()?.groups.map((group) => group.uid) || []
+			if (ids.length < 2 || ids.every((uid, index) => uid === before[index])) return
+			const operation = { type: "groups.reorder", ids }
+			// Reordering is meaningful in legend order, so restore that view as soon
+			// as a drag or keyboard move changes the underlying order.
+			editor.sort = { column: "order", direction: 1 }
+			chart.patch([operation])
+			editor.history.push({ operation, before })
+			editor.future = []
+			renderEditor()
+		}
+		const moveGroup = (uid, delta) => {
+			const ids = chart.data()?.groups.map((group) => group.uid) || []
+			const from = ids.indexOf(uid)
+			const to = from + delta
+			if (from < 0 || to < 0 || to >= ids.length) return false
+			ids.splice(from, 1)
+			ids.splice(to, 0, uid)
+			reorderGroups(ids)
+			return true
+		}
+		const moveGroupTo = (uid, position) => {
+			const ids = chart.data()?.groups.map((group) => group.uid) || []
+			const from = ids.indexOf(uid)
+			const to = Number(position) - 1
+			if (from < 0 || !Number.isInteger(to) || to < 0 || to >= ids.length || from === to) return false
+			ids.splice(from, 1)
+			ids.splice(to, 0, uid)
+			reorderGroups(ids)
+			return true
+		}
+		const placeGroup = (uid, targetUid, after) => {
+			const ids = chart.data()?.groups.map((group) => group.uid) || []
+			const from = ids.indexOf(uid)
+			if (from < 0 || uid === targetUid) return
+			ids.splice(from, 1)
+			let target = ids.indexOf(targetUid)
+			if (target < 0) return
+			if (after) target += 1
+			ids.splice(target, 0, uid)
+			reorderGroups(ids)
 		}
 		const applyChanges = (ids, changes, { remember = true } = {}) => {
 			if (!ids.length || !Object.keys(changes).length) return
@@ -1173,6 +1292,9 @@
 		editor.resizeHandle.addEventListener("pointercancel", stopEditorResize)
 		editor.kindButtons.forEach((button) => button.addEventListener("click", () => {
 			editor.kind = button.dataset.dataKind
+			editor.sort = editor.kind === "groups"
+				? { column: "order", direction: 1 }
+				: { column: editor.kind === "links" ? "query" : "label", direction: 1 }
 			editor.creatingGroup = false
 			editor.creatingStandaloneGroup = false
 			editor.renameKey = null
@@ -1224,7 +1346,9 @@
 		editor.listHeader.addEventListener("click", (event) => {
 			const column = event.target.closest("[data-sort-column]")?.dataset.sortColumn
 			if (!column) return
-			editor.sort.direction = editor.sort.column === column ? -editor.sort.direction : 1
+			editor.sort.direction = column === "order" && editor.kind === "groups"
+				? 1
+				: editor.sort.column === column ? -editor.sort.direction : 1
 			editor.sort.column = column
 			editor.viewport.scrollTop = 0
 			renderEditor()
@@ -1327,6 +1451,38 @@
 			if (!rowNode || rowNode.contains(event.relatedTarget)) return
 			syncGeneHighlight()
 		})
+		let draggedGroupId = null
+		editor.rows.addEventListener("dragstart", (event) => {
+			const grip = event.target.closest("[data-row-reorder]")
+			if (!grip || editor.kind !== "groups") return
+			draggedGroupId = grip.dataset.rowReorder
+			event.dataTransfer.effectAllowed = "move"
+			event.dataTransfer.setData("text/plain", draggedGroupId)
+		})
+		editor.rows.addEventListener("dragover", (event) => {
+			if (!draggedGroupId || editor.kind !== "groups") return
+			const target = event.target.closest('[data-row-type="group"]')
+			if (!target || target.dataset.rowKey === `group:${draggedGroupId}`) return
+			event.preventDefault()
+			editor.rows.querySelectorAll(".drop-target").forEach((row) => row.classList.remove("drop-target"))
+			target.classList.add("drop-target")
+		})
+		editor.rows.addEventListener("drop", (event) => {
+			if (!draggedGroupId || editor.kind !== "groups") return
+			const target = event.target.closest('[data-row-type="group"]')
+			if (target) {
+				event.preventDefault()
+				const targetUid = target.dataset.rowKey.slice("group:".length)
+				const bounds = target.getBoundingClientRect()
+				placeGroup(draggedGroupId, targetUid, event.clientY > bounds.top + bounds.height / 2)
+			}
+			draggedGroupId = null
+			editor.rows.querySelectorAll(".drop-target").forEach((row) => row.classList.remove("drop-target"))
+		})
+		editor.rows.addEventListener("dragend", () => {
+			draggedGroupId = null
+			editor.rows.querySelectorAll(".drop-target").forEach((row) => row.classList.remove("drop-target"))
+		})
 		editor.rows.addEventListener("click", (event) => {
 			const target = event.target
 			if (target.closest("[data-clear-filter]")) {
@@ -1348,6 +1504,7 @@
 				beginRowRename(target.dataset.rowBeginRename)
 				return
 			}
+			if (target.closest("[data-row-reorder]")) return
 			const identityKey = target.closest("[data-row-begin-identity]")?.dataset.rowBeginIdentity
 			if (identityKey) {
 				beginRowIdentityEdit(identityKey)
@@ -1374,6 +1531,14 @@
 			beginRowRename(label.dataset.rowRenameKey)
 		})
 		editor.rows.addEventListener("keydown", (event) => {
+			const reorderUid = event.target.closest("[data-row-reorder]")?.dataset.rowReorder
+			if (reorderUid && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+				event.preventDefault()
+				if (moveGroup(reorderUid, event.key === "ArrowUp" ? -1 : 1)) {
+					requestAnimationFrame(() => editor.rows.querySelector(`[data-row-reorder="${CSS.escape(reorderUid)}"]`)?.focus())
+				}
+				return
+			}
 			const input = event.target.closest("[data-row-rename]")
 			if (input && event.key === "Enter") {
 				event.preventDefault()
@@ -1513,6 +1678,25 @@
 		editor.selectionMergeTarget.addEventListener("change", () => {
 			editor.selectionMerge.disabled = !editor.selectionMergeTarget.value
 		})
+		const selectedGroupUid = () => editor.kind === "groups" && editor.selected.size === 1 ? [...editor.selected][0] : null
+		editor.selectionGroupMoveFirst.addEventListener("click", () => {
+			const uid = selectedGroupUid()
+			if (uid !== null) moveGroupTo(uid, 1)
+		})
+		editor.selectionGroupMoveLast.addEventListener("click", () => {
+			const uid = selectedGroupUid()
+			if (uid !== null) moveGroupTo(uid, chart.data()?.groups.length)
+		})
+		editor.selectionGroupMovePosition.addEventListener("click", () => {
+			const uid = selectedGroupUid()
+			if (uid !== null) moveGroupTo(uid, editor.selectionGroupPosition.value)
+		})
+		editor.selectionGroupPosition.addEventListener("keydown", (event) => {
+			if (event.key === "Enter") {
+				event.preventDefault()
+				editor.selectionGroupMovePosition.click()
+			}
+		})
 		editor.selectionDelete.addEventListener("click", () => {
 			applyMembershipChange({ type: "groups.delete", ids: [...editor.selected] }, { clearSelection: true })
 		})
@@ -1522,7 +1706,9 @@
 		editor.selectionUndo.addEventListener("click", () => {
 			const change = editor.history.pop()
 			if (!change) return
-			chart.patch(operationsForValues(change.operation.type, change.before))
+			chart.patch(change.operation.type === "groups.reorder"
+				? [{ type: "groups.reorder", ids: change.before }]
+				: operationsForValues(change.operation.type, change.before))
 			editor.future.push(change)
 			renderEditor()
 		})
@@ -1572,6 +1758,86 @@
 						const blob = new Blob([chart.exportSvg()], {type: "image/svg+xml"})
 						download(blob, "clinker.svg")
 					})
+				d3.select("#btn-export-data")
+					.on("click", () => {
+						// chart.data() is the live normalized model, so this captures every
+						// label, group, colour, link, and membership edit made in the editor.
+						const source = JSON.stringify(chart.data(), null, 2)
+						const blob = new Blob([`${source}\n`], { type: "application/json" })
+						download(blob, "clinker-data.json")
+					})
+				d3.select("#btn-export-project")
+					.on("click", () => {
+						const project = {
+							format: "clinker-project",
+							version: 1,
+							data: chart.data(),
+							config: chart.config(),
+							state: chart.state(),
+						}
+						const blob = new Blob([`${JSON.stringify(project, null, 2)}\n`], { type: "application/json" })
+						download(blob, "clinker-project.json")
+					})
+				const importButton = document.querySelector("#btn-import-data")
+				const importFile = document.querySelector("#data-import-file")
+				const importProjectButton = document.querySelector("#btn-import-project")
+				const importProjectFile = document.querySelector("#project-import-file")
+				const importStatus = document.querySelector("#data-import-status")
+				const setImportStatus = (message, { error = false } = {}) => {
+					importStatus.textContent = message
+					importStatus.dataset.error = String(error)
+				}
+				const resetEditorAfterImport = () => {
+					editor.kind = "groups"
+					editor.geneMode = "tree"
+					editor.memberGroupUid = null
+					editor.filter.value = ""
+					editor.selected.clear()
+					editor.selectionAnchor = null
+					editor.pendingRangeSelection = null
+					editor.renameKey = null
+					editor.identityKey = null
+					editor.history = []
+					editor.future = []
+					editor.expanded.clear()
+					editor.viewport.scrollTop = 0
+					editor.kindButtons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.dataKind === "groups")))
+					editor.geneViewButtons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.geneView === "tree")))
+					syncGeneHighlight()
+					renderEditor()
+				}
+				importButton.addEventListener("click", () => importFile.click())
+				importFile.addEventListener("change", async () => {
+					const [file] = importFile.files
+					importFile.value = ""
+					if (!file) return
+					try {
+						const imported = JSON.parse(await file.text())
+						validateImportedData(imported)
+						chart.data(imported)
+						resetEditorAfterImport()
+						setImportStatus(`Loaded ${file.name}`)
+					} catch (error) {
+						setImportStatus(`Could not load ${file.name}: ${error.message}`, { error: true })
+					}
+				})
+				importProjectButton.addEventListener("click", () => importProjectFile.click())
+				importProjectFile.addEventListener("change", async () => {
+					const [file] = importProjectFile.files
+					importProjectFile.value = ""
+					if (!file) return
+					try {
+						const project = JSON.parse(await file.text())
+						validateImportedProject(project)
+						chart.data(project.data)
+						chart.config(project.config)
+						if (project.state) chart.state(project.state)
+						resetEditorAfterImport()
+						setImportStatus(`Loaded project ${file.name}`)
+					} catch (error) {
+						setImportStatus(`Could not load project ${file.name}: ${error.message}`, { error: true })
+					}
+				})
 			})
 
 	</script>

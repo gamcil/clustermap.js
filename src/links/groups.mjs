@@ -1,37 +1,118 @@
-export function createLinkGroups(links, oldGroups) {
-  const groups = links
-    .map((link) => [link.query.uid, link.target.uid])
-    .map((group, index, allGroups) =>
-      allGroups.slice(index).reduce(
-        (merged, candidate) =>
-          group.some((gene) => candidate.includes(gene))
-            ? [...new Set([...merged, ...candidate])]
-            : merged,
-        []
-      )
-    )
-    .map((genes, index) => ({
-      label: `Group ${index}`,
-      genes,
-      hidden: false,
-      colour: null,
-    }))
-    .reduce((result, group) => {
-      let merged = false;
-      result = result.map((existing) => {
-        if (existing.genes.some((gene) => group.genes.includes(gene))) {
-          merged = true;
-          existing.genes = [...new Set([...existing.genes, ...group.genes])];
-        }
-        return existing;
-      });
-      if (!merged) result.push({ ...group, uid: result.length });
-      return result;
-    }, oldGroups || []);
+function connectedComponents(links) {
+  const parent = new Map();
+  const rank = new Map();
+  const genes = [];
+  const add = (uid) => {
+    if (parent.has(uid)) return;
+    parent.set(uid, uid);
+    rank.set(uid, 0);
+    genes.push(uid);
+  };
+  const find = (uid) => {
+    let root = uid;
+    while (parent.get(root) !== root) root = parent.get(root);
+    while (uid !== root) {
+      const next = parent.get(uid);
+      parent.set(uid, root);
+      uid = next;
+    }
+    return root;
+  };
+  const join = (left, right) => {
+    let leftRoot = find(left);
+    let rightRoot = find(right);
+    if (leftRoot === rightRoot) return;
+    if (rank.get(leftRoot) < rank.get(rightRoot)) [leftRoot, rightRoot] = [rightRoot, leftRoot];
+    parent.set(rightRoot, leftRoot);
+    if (rank.get(leftRoot) === rank.get(rightRoot)) rank.set(leftRoot, rank.get(leftRoot) + 1);
+  };
 
-  if (!oldGroups)
-    groups.forEach((group, index) => (group.label = `Group ${index}`));
-  return groups;
+  for (const link of links) {
+    const query = link.query.uid;
+    const target = link.target.uid;
+    add(query);
+    add(target);
+    join(query, target);
+  }
+
+  const components = new Map();
+  for (const uid of genes) {
+    const root = find(uid);
+    const component = components.get(root) || [];
+    component.push(uid);
+    components.set(root, component);
+  }
+  return [...components.values()];
+}
+
+function nextGeneratedUid(used) {
+  let uid = 0;
+  while (used.has(uid)) uid += 1;
+  used.add(uid);
+  return uid;
+}
+
+function generatedGroup(usedUids, genes) {
+  const uid = nextGeneratedUid(usedUids);
+  return { uid, label: `Group ${uid}`, genes, hidden: false, colour: null };
+}
+
+/**
+ * Build connected homology groups from link endpoints.
+ *
+ * Existing groups keep their uid, label, colour, and visibility when they
+ * overlap a new component. Groups with no linked members are retained, which
+ * preserves intentionally empty or unlinked groups from older input data.
+ */
+export function createLinkGroups(links, oldGroups = []) {
+  const previous = oldGroups || [];
+  const previousByGene = new Map();
+  previous.forEach((group, index) => {
+    for (const uid of group.genes || []) {
+      const indices = previousByGene.get(uid) || [];
+      indices.push(index);
+      previousByGene.set(uid, indices);
+    }
+  });
+
+  const components = connectedComponents(links);
+  const linkedGenes = new Set(components.flat());
+  const usedPrevious = new Set();
+  const usedUids = new Set(previous.map((group) => group.uid));
+  const generated = [];
+  const byPreviousIndex = new Map();
+
+  for (const genes of components) {
+    const overlaps = new Map();
+    for (const uid of genes) {
+      for (const index of previousByGene.get(uid) || []) {
+        if (!usedPrevious.has(index)) overlaps.set(index, (overlaps.get(index) || 0) + 1);
+      }
+    }
+    let previousIndex = null;
+    let largestOverlap = 0;
+    for (const [index, overlap] of overlaps) {
+      if (overlap > largestOverlap) {
+        previousIndex = index;
+        largestOverlap = overlap;
+      }
+    }
+    const group = previousIndex === null
+      ? generatedGroup(usedUids, genes)
+      : { ...previous[previousIndex], genes };
+    if (previousIndex === null) generated.push(group);
+    else {
+      usedPrevious.add(previousIndex);
+      byPreviousIndex.set(previousIndex, group);
+    }
+  }
+
+  const retained = previous.flatMap((group, index) => {
+    const replacement = byPreviousIndex.get(index);
+    if (replacement) return [replacement];
+    return (group.genes || []).some((uid) => linkedGenes.has(uid)) ? [] : [{ ...group, genes: [...(group.genes || [])] }];
+  });
+  return [...retained, ...generated];
 }
 
 export function getGroupScaleValues(groups) {
@@ -72,33 +153,18 @@ export function filterLinks(
   const passingThreshold = visibleLinks.filter((link) => link.identity >= threshold);
   if (!bestOnly) return passingThreshold;
 
-  const setsEqual = (a, b) =>
-    a.size === b.size && [...a].every((value) => b.has(value));
-
-  class ClusterPairMap extends Map {
-    has(pair) {
-      return [...this.keys()].some((key) => setsEqual(pair, key));
-    }
-
-    get(pair) {
-      for (const [key, value] of this) {
-        if (setsEqual(pair, key)) return value;
-      }
-    }
-
-    set(pair, value) {
-      return super.set(this.get(pair) || pair, value);
-    }
-  }
-
-  const linksByClusterPair = new ClusterPairMap();
+  const pairKey = (left, right) => [left, right]
+    .map((uid) => `${typeof uid}:${String(uid)}`)
+    .sort()
+    .join("|");
+  const linksByClusterPair = new Map();
   const byIdentity = [...passingThreshold].sort((a, b) => b.identity - a.identity);
 
   for (const link of byIdentity) {
-    const clusterPair = new Set([
+    const clusterPair = pairKey(
       geneForUid(link.query.uid).clusterUid,
-      geneForUid(link.target.uid).clusterUid,
-    ]);
+      geneForUid(link.target.uid).clusterUid
+    );
 
     if (!linksByClusterPair.has(clusterPair)) {
       linksByClusterPair.set(clusterPair, [link]);

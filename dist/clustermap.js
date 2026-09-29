@@ -24,40 +24,121 @@
 
   var d3__namespace = /*#__PURE__*/_interopNamespace(d3$1);
 
-  function createLinkGroups(links, oldGroups) {
-    const groups = links
-      .map((link) => [link.query.uid, link.target.uid])
-      .map((group, index, allGroups) =>
-        allGroups.slice(index).reduce(
-          (merged, candidate) =>
-            group.some((gene) => candidate.includes(gene))
-              ? [...new Set([...merged, ...candidate])]
-              : merged,
-          []
-        )
-      )
-      .map((genes, index) => ({
-        label: `Group ${index}`,
-        genes,
-        hidden: false,
-        colour: null,
-      }))
-      .reduce((result, group) => {
-        let merged = false;
-        result = result.map((existing) => {
-          if (existing.genes.some((gene) => group.genes.includes(gene))) {
-            merged = true;
-            existing.genes = [...new Set([...existing.genes, ...group.genes])];
-          }
-          return existing;
-        });
-        if (!merged) result.push({ ...group, uid: result.length });
-        return result;
-      }, oldGroups || []);
+  function connectedComponents(links) {
+    const parent = new Map();
+    const rank = new Map();
+    const genes = [];
+    const add = (uid) => {
+      if (parent.has(uid)) return;
+      parent.set(uid, uid);
+      rank.set(uid, 0);
+      genes.push(uid);
+    };
+    const find = (uid) => {
+      let root = uid;
+      while (parent.get(root) !== root) root = parent.get(root);
+      while (uid !== root) {
+        const next = parent.get(uid);
+        parent.set(uid, root);
+        uid = next;
+      }
+      return root;
+    };
+    const join = (left, right) => {
+      let leftRoot = find(left);
+      let rightRoot = find(right);
+      if (leftRoot === rightRoot) return;
+      if (rank.get(leftRoot) < rank.get(rightRoot)) [leftRoot, rightRoot] = [rightRoot, leftRoot];
+      parent.set(rightRoot, leftRoot);
+      if (rank.get(leftRoot) === rank.get(rightRoot)) rank.set(leftRoot, rank.get(leftRoot) + 1);
+    };
 
-    if (!oldGroups)
-      groups.forEach((group, index) => (group.label = `Group ${index}`));
-    return groups;
+    for (const link of links) {
+      const query = link.query.uid;
+      const target = link.target.uid;
+      add(query);
+      add(target);
+      join(query, target);
+    }
+
+    const components = new Map();
+    for (const uid of genes) {
+      const root = find(uid);
+      const component = components.get(root) || [];
+      component.push(uid);
+      components.set(root, component);
+    }
+    return [...components.values()];
+  }
+
+  function nextGeneratedUid(used) {
+    let uid = 0;
+    while (used.has(uid)) uid += 1;
+    used.add(uid);
+    return uid;
+  }
+
+  function generatedGroup(usedUids, genes) {
+    const uid = nextGeneratedUid(usedUids);
+    return { uid, label: `Group ${uid}`, genes, hidden: false, colour: null };
+  }
+
+  /**
+   * Build connected homology groups from link endpoints.
+   *
+   * Existing groups keep their uid, label, colour, and visibility when they
+   * overlap a new component. Groups with no linked members are retained, which
+   * preserves intentionally empty or unlinked groups from older input data.
+   */
+  function createLinkGroups(links, oldGroups = []) {
+    const previous = oldGroups || [];
+    const previousByGene = new Map();
+    previous.forEach((group, index) => {
+      for (const uid of group.genes || []) {
+        const indices = previousByGene.get(uid) || [];
+        indices.push(index);
+        previousByGene.set(uid, indices);
+      }
+    });
+
+    const components = connectedComponents(links);
+    const linkedGenes = new Set(components.flat());
+    const usedPrevious = new Set();
+    const usedUids = new Set(previous.map((group) => group.uid));
+    const generated = [];
+    const byPreviousIndex = new Map();
+
+    for (const genes of components) {
+      const overlaps = new Map();
+      for (const uid of genes) {
+        for (const index of previousByGene.get(uid) || []) {
+          if (!usedPrevious.has(index)) overlaps.set(index, (overlaps.get(index) || 0) + 1);
+        }
+      }
+      let previousIndex = null;
+      let largestOverlap = 0;
+      for (const [index, overlap] of overlaps) {
+        if (overlap > largestOverlap) {
+          previousIndex = index;
+          largestOverlap = overlap;
+        }
+      }
+      const group = previousIndex === null
+        ? generatedGroup(usedUids, genes)
+        : { ...previous[previousIndex], genes };
+      if (previousIndex === null) generated.push(group);
+      else {
+        usedPrevious.add(previousIndex);
+        byPreviousIndex.set(previousIndex, group);
+      }
+    }
+
+    const retained = previous.flatMap((group, index) => {
+      const replacement = byPreviousIndex.get(index);
+      if (replacement) return [replacement];
+      return (group.genes || []).some((uid) => linkedGenes.has(uid)) ? [] : [{ ...group, genes: [...(group.genes || [])] }];
+    });
+    return [...retained, ...generated];
   }
 
   function getGroupScaleValues(groups) {
@@ -98,33 +179,18 @@
     const passingThreshold = visibleLinks.filter((link) => link.identity >= threshold);
     if (!bestOnly) return passingThreshold;
 
-    const setsEqual = (a, b) =>
-      a.size === b.size && [...a].every((value) => b.has(value));
-
-    class ClusterPairMap extends Map {
-      has(pair) {
-        return [...this.keys()].some((key) => setsEqual(pair, key));
-      }
-
-      get(pair) {
-        for (const [key, value] of this) {
-          if (setsEqual(pair, key)) return value;
-        }
-      }
-
-      set(pair, value) {
-        return super.set(this.get(pair) || pair, value);
-      }
-    }
-
-    const linksByClusterPair = new ClusterPairMap();
+    const pairKey = (left, right) => [left, right]
+      .map((uid) => `${typeof uid}:${String(uid)}`)
+      .sort()
+      .join("|");
+    const linksByClusterPair = new Map();
     const byIdentity = [...passingThreshold].sort((a, b) => b.identity - a.identity);
 
     for (const link of byIdentity) {
-      const clusterPair = new Set([
+      const clusterPair = pairKey(
         geneForUid(link.query.uid).clusterUid,
-        geneForUid(link.target.uid).clusterUid,
-      ]);
+        geneForUid(link.target.uid).clusterUid
+      );
 
       if (!linksByClusterPair.has(clusterPair)) {
         linksByClusterPair.set(clusterPair, [link]);
@@ -708,6 +774,13 @@
         sourceIds.forEach((uid) => groupIds.delete(uid));
         return { type: operation.type, targetId: operation.targetId, sourceIds };
       }
+      case "groups.reorder": {
+        const ids = uniqueIds(operation.ids, operation.type);
+        if (ids.length !== groupIds.size || ids.some((uid) => !groupIds.has(uid))) {
+          throw operationError(`${operation.type} must contain every group exactly once`);
+        }
+        return { type: operation.type, ids };
+      }
       case "groups.create": {
         const group = operation.group;
         if (!group || typeof group !== "object" || Array.isArray(group)) throw operationError("groups.create requires a group object");
@@ -796,6 +869,12 @@
         const sourceGenes = data.groups.filter((group) => operation.sourceIds.includes(group.uid)).flatMap((group) => group.genes || []);
         target.genes = [...new Set([...(target.genes || []), ...sourceGenes])];
         data.groups = data.groups.filter((group) => !operation.sourceIds.includes(group.uid));
+        return;
+      }
+      case "groups.reorder": {
+        const groups = new Map(data.groups.map((group) => [group.uid, group]));
+        data.groups = operation.ids.map((uid) => groups.get(uid));
+        return;
       }
     }
   }
@@ -7490,9 +7569,35 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     function loadData(data) {
       currentData = normalizeChartData(data);
       chartIndex = createChartIndex(currentData);
+      refreshDerivedGroups();
+      // Generated groups are part of the editable model, so index them after
+      // automatic grouping rather than leaving the group lookup one redraw old.
+      chartIndex = createChartIndex(currentData);
       chartState = createChartState(currentData, chartState);
       runtime.setChartIndex(chartIndex);
       runtime.setChartState(chartState);
+    }
+
+    function groupsAreAutomatic(data = currentData) {
+      return data?.config?.updateGroups !== false;
+    }
+
+    function refreshDerivedGroups() {
+      if (!currentData) return;
+      if (!groupsAreAutomatic()) {
+        if (!currentData.groups) currentData.groups = [];
+        return;
+      }
+      // Deleted genes intentionally leave link records in editable data. Only
+      // links whose endpoints remain in the index participate in auto-grouping.
+      const projectedLinks = currentData.links.filter((link) =>
+        chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
+      );
+      currentData.groups = createLinkGroups(projectedLinks, currentData.groups);
+    }
+
+    function operationsChangeDerivedGroups(operations) {
+      return operations.some(({ type }) => type === "genes.delete" || type === "links.delete");
     }
 
     function emitChange(change) {
@@ -8196,19 +8301,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       runtime.updateScales(data);
       if (synchronize) runtime.synchronizeLocusLayoutStates(data);
 
-      // Only disable grouping if explicitly defined false
-      if (data.config && data.config.updateGroups === false) {
-        if (!data.groups) data.groups = [];
-      } else {
-        // Deleted genes deliberately leave link records intact for persistence
-        // and later restoration. Exclude dangling links only from this visual
-        // projection; neither the links nor their group membership are erased.
-        const projectedLinks = data.links.filter((link) =>
-          chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
-        );
-        data.groups = createLinkGroups(projectedLinks, data.groups);
-      }
-
       runtime.updateGroups(data.groups);
 
       const committedAnchor = anchorSceneCommit;
@@ -8376,6 +8468,61 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       selection.attr("transform", `translate(${x}, ${y}) scale(${k})`);
     }
 
+    const finiteNumber = (value) => Number.isFinite(value) ? value : null;
+    const stateEntries = (value) => Array.isArray(value)
+      ? value.filter((entry) => Array.isArray(entry) && entry.length === 2 && entry[0] !== undefined)
+      : [];
+    const recordStateEntries = (value) => stateEntries(value)
+      .filter(([, entry]) => entry && typeof entry === "object" && !Array.isArray(entry));
+    const serializableState = (state) => ({
+      version: 1,
+      clusterOrder: [...state.clusterOrder],
+      clusterOffsets: [...state.clusterOffsets],
+      locusOffsets: [...state.locusOffsets],
+      loci: [...state.loci],
+      genes: [...state.genes],
+      camera: { ...state.camera },
+    });
+    const stateFromSnapshot = (data, snapshot) => {
+      if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+        throw new TypeError("Chart state must be an object.");
+      }
+      const clusterIds = new Set(data.clusters.map((cluster) => cluster.uid));
+      const locusIds = new Set(data.clusters.flatMap((cluster) => cluster.loci).map((locus) => locus.uid));
+      const geneKeys = new Set(data.clusters.flatMap((cluster) => cluster.loci)
+        .flatMap((locus) => locus.genes.map((gene) => `${locus.uid}:${gene.uid}`)));
+      const restored = createChartState(data);
+      const applyOffsets = (entries, allowed, target) => stateEntries(entries).forEach(([uid, value]) => {
+        if (allowed.has(uid) && finiteNumber(value) !== null) target.set(uid, value);
+      });
+      applyOffsets(snapshot.clusterOffsets, clusterIds, restored.clusterOffsets);
+      applyOffsets(snapshot.locusOffsets, locusIds, restored.locusOffsets);
+      recordStateEntries(snapshot.loci).forEach(([uid, value]) => {
+        if (!locusIds.has(uid)) return;
+        const target = restored.loci.get(uid);
+        ["start", "end", "trimLeft", "trimRight"].forEach((key) => {
+          if (finiteNumber(value[key]) !== null) target[key] = value[key];
+        });
+        if (value.flipped !== undefined) target.flipped = Boolean(value.flipped);
+      });
+      recordStateEntries(snapshot.genes).forEach(([key, value]) => {
+        if (!geneKeys.has(key)) return;
+        const target = restored.genes.get(key);
+        ["start", "end", "strand"].forEach((property) => {
+          if (finiteNumber(value[property]) !== null) target[property] = value[property];
+        });
+      });
+      const camera = snapshot.camera || {};
+      if (Array.isArray(snapshot.clusterOrder)) {
+        const order = snapshot.clusterOrder.filter((uid) => clusterIds.has(uid));
+        restored.clusterOrder = [...new Set([...order, ...restored.clusterOrder])];
+      }
+      if (finiteNumber(camera.x) !== null && finiteNumber(camera.y) !== null && finiteNumber(camera.k) !== null && camera.k > 0) {
+        restored.camera = { x: camera.x, y: camera.y, k: camera.k };
+      }
+      return restored;
+    };
+
     my.config = function (_) {
       if (!arguments.length) return runtime.config;
       runtime.configure(_);
@@ -8392,6 +8539,18 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       emitChange({ type: "data.replace" });
       return my;
     };
+    /** A serializable layout and camera snapshot for project persistence. */
+    my.state = function (snapshot) {
+      if (!arguments.length) return chartState ? serializableState(chartState) : null;
+      if (!container || !currentData) {
+        throw new Error("Cannot replace chart state before the chart has rendered.");
+      }
+      chartState = stateFromSnapshot(currentData, snapshot);
+      runtime.setChartState(chartState);
+      hasInitialView = true;
+      redraw({ animate: false });
+      return my;
+    };
     // Do not name this `apply`: D3 invokes callable charts through
     // Function.prototype.apply when mounting them.
     my.patch = (operations) => {
@@ -8399,9 +8558,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         throw new Error("Cannot patch chart data before the chart has rendered.");
       }
       const result = applyChartOperations(currentData, chartIndex, operations);
-      // Membership operations can create or remove groups, so cached lookups
-      // must be rebuilt before rendering and before the next public patch.
+      // Membership operations can create or remove groups, and topology edits
+      // can change automatic components, so refresh lookups before rendering.
       chartIndex = createChartIndex(currentData);
+      if (groupsAreAutomatic() && operationsChangeDerivedGroups(result.operations)) {
+        refreshDerivedGroups();
+        chartIndex = createChartIndex(currentData);
+      }
       chartState = createChartState(currentData, chartState);
       runtime.setChartIndex(chartIndex);
       runtime.setChartState(chartState);

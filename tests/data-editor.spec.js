@@ -36,6 +36,167 @@ test("the editor shows each group's rendered palette colour", async ({ page }) =
   await expect(page.locator('[data-row-colour="group:group1"]')).toHaveValue(expected);
 });
 
+test("automatic link groups survive presentation redraws and refresh after topology edits", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const groups = await page.evaluate(() => {
+    window.__demoChart?.data({
+      clusters: [{
+        uid: "cluster",
+        loci: [{
+          uid: "locus",
+          start: 0,
+          end: 100,
+          genes: [
+            { uid: "a", start: 0, end: 10, strand: 1 },
+            { uid: "b", start: 20, end: 30, strand: 1 },
+            { uid: "c", start: 40, end: 50, strand: 1 },
+          ],
+        }],
+      }],
+      links: [
+        { uid: "first", query: { uid: "a" }, target: { uid: "b" }, identity: 0.9 },
+        { uid: "second", query: { uid: "b" }, target: { uid: "c" }, identity: 0.8 },
+      ],
+    });
+    return window.__demoChart?.data().groups.map((group) => ({ uid: group.uid, genes: group.genes }));
+  });
+  expect(groups).toEqual([
+    { uid: 0, genes: ["a", "b", "c"] },
+  ]);
+
+  const label = await page.evaluate(() => {
+    const chart = window.__demoChart;
+    chart.patch([{ type: "groups.update", ids: [0], changes: { label: "Saved automatic group" } }]);
+    chart.config({ legend: { show: false } });
+    return chart.data().groups.find((group) => group.uid === 0)?.label;
+  });
+  expect(label).toBe("Saved automatic group");
+
+  const afterDelete = await page.evaluate(() => {
+    const chart = window.__demoChart;
+    chart.patch([{ type: "links.delete", ids: ["second"] }]);
+    return chart.data().groups.map((group) => ({ uid: group.uid, genes: group.genes }));
+  });
+  expect(afterDelete).toEqual([{ uid: 0, genes: ["a", "b"] }]);
+});
+
+test("export data downloads the current edited model as reloadable JSON", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.evaluate(() => window.__demoChart?.patch([
+    { type: "groups.update", ids: ["group1"], changes: { label: "Reviewed group" } },
+  ]));
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#btn-export-data").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("clinker-data.json");
+  const stream = await download.createReadStream();
+  let text = "";
+  for await (const chunk of stream) text += chunk;
+  const data = JSON.parse(text);
+  expect(data.groups.find((group) => group.uid === "group1")?.label).toBe("Reviewed group");
+  expect(data.clusters[0].loci[0].genes[0].uid).toBe("0");
+});
+
+test("export project captures data, appearance, and the current view", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.evaluate(() => {
+    const chart = window.__demoChart;
+    chart.patch([{ type: "groups.update", ids: ["group1"], changes: { label: "Saved group" } }]);
+    chart.config({ legend: { position: "bottom" } });
+    chart.state({
+      version: 1,
+      clusterOrder: [],
+      clusterOffsets: [],
+      locusOffsets: [],
+      loci: [],
+      genes: [],
+      camera: { x: 18, y: 24, k: 1.3 },
+    });
+  });
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#btn-export-project").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("clinker-project.json");
+  const stream = await download.createReadStream();
+  let text = "";
+  for await (const chunk of stream) text += chunk;
+  const project = JSON.parse(text);
+  expect(project.format).toBe("clinker-project");
+  expect(project.version).toBe(1);
+  expect(project.data.groups.find((group) => group.uid === "group1")?.label).toBe("Saved group");
+  expect(project.config.legend.position).toBe("bottom");
+  expect(project.state.camera).toEqual({ x: 18, y: 24, k: 1.3 });
+});
+
+test("load project restores data, appearance, and the current view", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const imported = await page.evaluate(() => {
+    const data = structuredClone(window.__demoChart?.data());
+    data.groups[0].label = "Restored group";
+    return JSON.stringify({
+      format: "clinker-project",
+      version: 1,
+      data,
+      config: { legend: { position: "bottom" } },
+      state: {
+        version: 1,
+        clusterOrder: [],
+        clusterOffsets: [],
+        locusOffsets: [],
+        loci: [],
+        genes: [],
+        camera: { x: 30, y: 40, k: 1.2 },
+      },
+    });
+  });
+  await page.locator("#project-import-file").setInputFiles({
+    name: "reviewed-project.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(imported),
+  });
+
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.data().groups[0].label)).toBe("Restored group");
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.config().legend.position)).toBe("bottom");
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.state().camera))
+    .toEqual({ x: 30, y: 40, k: 1.2 });
+  await expect(page.locator("#data-import-status")).toHaveText("Loaded project reviewed-project.json");
+});
+
+test("load data replaces the model with validated exported JSON", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const imported = await page.evaluate(() => {
+    const data = structuredClone(window.__demoChart?.data());
+    data.groups[0].label = "Reloaded group";
+    return JSON.stringify(data);
+  });
+  await page.locator('[data-row-select="group:group1"]').check();
+  await page.locator("#data-import-file").setInputFiles({
+    name: "edited-clinker.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(imported),
+  });
+
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.data().groups[0].label)).toBe("Reloaded group");
+  await expect(page.locator("#data-import-status")).toHaveText("Loaded edited-clinker.json");
+  await expect(page.locator("#selection-actions")).toBeHidden();
+  await expect(page.locator('[data-data-kind="groups"]')).toHaveAttribute("aria-pressed", "true");
+});
+
+test("load data keeps the current chart when JSON is not chart data", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator("#data-import-file").setInputFiles({
+    name: "not-chart-data.json",
+    mimeType: "application/json",
+    buffer: Buffer.from('{"hello":"world"}'),
+  });
+
+  await expect(page.locator("#data-import-status")).toContainText("Could not load not-chart-data.json");
+  await expect(page.locator("#data-import-status")).toHaveAttribute("data-error", "true");
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.data().groups[0].label)).toBe("group 1");
+});
+
 test("groups edit an optional legend label directly in the table", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   const group = page.locator('[data-row-key="group:group1"]');
@@ -46,6 +207,55 @@ test("groups edit an optional legend label directly in the table", async ({ page
     window.__demoChart?.data().groups.find((group) => group.uid === "group1")?.subtitle
   )).toBe("Reference proteins");
   await expect(page.locator("text.legend-subtitle").filter({ hasText: "Reference proteins" })).toBeVisible();
+});
+
+test("group table reorders the legend with its drag handle keyboard control", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const group = page.locator('[data-row-key="group:group2"]');
+  const handle = group.locator("[data-row-reorder]");
+  await expect(handle).toHaveAttribute("title", /Drag to reorder/);
+
+  await handle.focus();
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.data().groups.map((group) => group.uid)))
+    .toEqual(["group2", "group1", "group3"]);
+  await expect(await page.locator('[data-row-type="group"] [data-row-reorder]').evaluateAll((nodes) => nodes.map((node) => node.dataset.rowReorder)))
+    .toEqual(["group2", "group1", "group3"]);
+  await expect(await page.locator("text.legend-label").evaluateAll((nodes) => nodes.map((node) => node.textContent)))
+    .toEqual(["group 2", "group 1", "group 3"]);
+
+  await page.locator("#selection-undo").click();
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.data().groups.map((group) => group.uid)))
+    .toEqual(["group1", "group2", "group3"]);
+});
+
+test("dragging a group reorders its legend entry", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-row-key="group:group3"] [data-row-reorder]').dragTo(
+    page.locator('[data-row-key="group:group1"] [data-row-reorder]'),
+  );
+
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.data().groups.map((group) => group.uid)))
+    .toEqual(["group3", "group1", "group2"]);
+  await expect(await page.locator("text.legend-label").evaluateAll((nodes) => nodes.map((node) => node.textContent)))
+    .toEqual(["group 3", "group 1", "group 2"]);
+});
+
+test("a selected group can move directly to a legend position", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  await page.locator('[data-row-select="group:group3"]').check();
+  await expect(page.locator("#selection-group-order-actions")).toBeVisible();
+  await expect(page.locator("#selection-group-position")).toHaveValue("3");
+
+  await page.locator("#selection-group-move-first").click();
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.data().groups.map((group) => group.uid)))
+    .toEqual(["group3", "group1", "group2"]);
+  await expect(page.locator("#selection-group-position")).toHaveValue("1");
+
+  await page.locator("#selection-group-position").fill("3");
+  await page.locator("#selection-group-position").press("Enter");
+  await expect.poll(() => page.evaluate(() => window.__demoChart?.data().groups.map((group) => group.uid)))
+    .toEqual(["group1", "group2", "group3"]);
 });
 
 test("the gene browser compacts single-locus clusters and selects their descendants", async ({ page }) => {
