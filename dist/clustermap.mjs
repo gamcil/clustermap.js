@@ -7169,15 +7169,57 @@ function geneSnapshot(state) {
   return { start: state.start, end: state.end, strand: state.strand };
 }
 
+function defaultGeneStates(data) {
+  const states = new Map();
+  data.clusters.forEach((cluster) => cluster.loci.forEach((locus) => {
+    const locusBio = locus.bio || { start: locus.start, end: locus.end };
+    locus.genes.forEach((gene) => {
+      const geneBio = gene.bio || { start: gene.start, end: gene.end, strand: gene.strand };
+      states.set(`${locus.uid}:${gene.uid}`, {
+        start: geneBio.start - locusBio.start,
+        end: geneBio.end - locusBio.start,
+        strand: geneBio.strand,
+      });
+    });
+  }));
+  return states;
+}
+
+function sameState(left, right) {
+  return left && right && left.start === right.start && left.end === right.end && left.strand === right.strand;
+}
+
+function changedLocusEntries(state, data) {
+  const loci = new Map(data.clusters.flatMap((cluster) => cluster.loci).map((locus) => [locus.uid, locus]));
+  return [...state.loci]
+    .filter(([uid, value]) => {
+      const locus = loci.get(uid);
+      return locus && (
+        value.start !== locus.start ||
+        value.end !== locus.end ||
+        value.flipped ||
+        value.trimLeft ||
+        value.trimRight
+      );
+    })
+    .map(([uid, value]) => [uid, locusSnapshot(value)]);
+}
+
 /** Return the durable, JSON-safe portion of a chart's visual state. */
-function serializeChartState(state) {
+function serializeChartState(state, data) {
+  const defaults = defaultGeneStates(data);
+  const defaultOrder = data.clusters.map((cluster) => cluster.uid);
   return {
     version: 1,
-    clusterOrder: [...state.clusterOrder],
-    clusterOffsets: numericEntries(state.clusterOffsets),
-    locusOffsets: numericEntries(state.locusOffsets),
-    loci: [...state.loci].map(([uid, value]) => [uid, locusSnapshot(value)]),
-    genes: [...state.genes].map(([uid, value]) => [uid, geneSnapshot(value)]),
+    clusterOrder: state.clusterOrder.length === defaultOrder.length && state.clusterOrder.every((uid, index) => uid === defaultOrder[index])
+      ? []
+      : [...state.clusterOrder],
+    clusterOffsets: numericEntries(state.clusterOffsets).filter(([, value]) => value !== 0),
+    locusOffsets: numericEntries(state.locusOffsets).filter(([, value]) => value !== 0),
+    loci: changedLocusEntries(state, data),
+    genes: [...state.genes]
+      .filter(([uid, value]) => !sameState(value, defaults.get(uid)))
+      .map(([uid, value]) => [uid, geneSnapshot(value)]),
     camera: { ...state.camera },
   };
 }
@@ -8586,7 +8628,7 @@ function clusterMap() {
   };
   /** A serializable layout and camera snapshot for project persistence. */
   my.state = function (snapshot) {
-    if (!arguments.length) return chartState ? serializeChartState(chartState) : null;
+    if (!arguments.length) return chartState ? serializeChartState(chartState, currentData) : null;
     if (!container || !currentData) {
       throw new Error("Cannot replace chart state before the chart has rendered.");
     }

@@ -144,7 +144,7 @@ test("chart state snapshots preserve flipped trimmed loci as JSON-safe gene IDs"
   trimLocus(state, locus, { edge: "right", position: 50, coordinateFor, scaleGenes: true });
   flipLocus(state, locus);
 
-  const snapshot = JSON.parse(JSON.stringify(serializeChartState(state)));
+  const snapshot = JSON.parse(JSON.stringify(serializeChartState(state, data)));
   const savedLocus = new Map(snapshot.loci).get("locus-a");
   assert.equal(savedLocus.flipped, true);
   assert.equal(savedLocus.trimLeft, "gene-c");
@@ -152,10 +152,33 @@ test("chart state snapshots preserve flipped trimmed loci as JSON-safe gene IDs"
 
   const restoredData = makeData();
   const restored = chartStateFromSnapshot(restoredData, snapshot);
-  assert.deepEqual(serializeChartState(restored), snapshot);
+  assert.deepEqual(serializeChartState(restored, restoredData), snapshot);
   const restoredLocus = getLocusState(restored, restoredData.clusters[0].loci[0]);
   assert.equal(restoredLocus.trimLeft.uid, "gene-c");
   assert.equal(restoredLocus.trimRight.uid, "gene-b");
+});
+
+test("chart state snapshots omit default layout records", async () => {
+  const { createChartState } = await import("../src/chartState.mjs");
+  const { serializeChartState } = await import("../src/chartStateSnapshot.mjs");
+  const data = {
+    clusters: [{
+      uid: "cluster-a",
+      loci: [{
+        uid: "locus-a",
+        start: 0,
+        end: 100,
+        genes: [{ uid: "gene-a", locusUid: "locus-a", start: 0, end: 20, strand: 1 }],
+      }],
+    }],
+  };
+  const snapshot = serializeChartState(createChartState(data), data);
+
+  assert.deepEqual(snapshot.clusterOrder, []);
+  assert.deepEqual(snapshot.clusterOffsets, []);
+  assert.deepEqual(snapshot.locusOffsets, []);
+  assert.deepEqual(snapshot.loci, []);
+  assert.deepEqual(snapshot.genes, []);
 });
 
 test("chart state tracks transient drag interactions", async () => {

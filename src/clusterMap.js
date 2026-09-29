@@ -1405,7 +1405,7 @@ export default function clusterMap() {
   };
   /** A serializable layout and camera snapshot for project persistence. */
   my.state = function (snapshot) {
-    if (!arguments.length) return chartState ? serializeChartState(chartState) : null;
+    if (!arguments.length) return chartState ? serializeChartState(chartState, currentData) : null;
     if (!container || !currentData) {
       throw new Error("Cannot replace chart state before the chart has rendered.");
     }
