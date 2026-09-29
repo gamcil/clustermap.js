@@ -604,6 +604,9 @@ function recordsForPreview(scene, preview) {
   }
   const loci = new Set();
   if (preview.type === "locus-offset") loci.add(preview.locusUid);
+  if (preview.type === "locus-offsets") {
+    for (const locusUid of preview.locusOffsets.keys()) loci.add(locusUid);
+  }
   if (preview.type === "locus-flip") loci.add(preview.locusUid);
   if (preview.type === "locus-trim") {
     const trimmed = scene.loci.get(preview.locusUid);

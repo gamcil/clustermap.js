@@ -512,6 +512,20 @@ function drawGeneHighlight(context, gene, camera, geometry = {}, { x: offsetX = 
   context.restore();
 }
 
+function drawLocusHighlight(context, locus, camera, geometry = {}) {
+  const hover = geometry.hover || locus.hover;
+  const offsets = geometry.offsets || {};
+  const x = locus.x + hover.x + (offsets.x || 0);
+  const y = locus.y + hover.y + (offsets.y || 0);
+  context.save();
+  context.fillStyle = "rgba(22, 119, 255, 0.12)";
+  context.fillRect(x, y, hover.width, hover.height);
+  context.strokeStyle = "#1677ff";
+  context.lineWidth = 2 / camera.k;
+  context.strokeRect(x, y, hover.width, hover.height);
+  context.restore();
+}
+
 function drawLocusHover(context, scene, locusUid, geometry = {}) {
   if (!locusUid) return;
   const locus = scene.loci.get(locusUid);
@@ -956,6 +970,7 @@ export function renderCanvas({
   showLinkLabels = showLinks,
   highlightGeneIds = null,
   highlightLinkIds = null,
+  highlightLocusIds = null,
   showClusterLabels = true,
   showChrome = true,
 }) {
@@ -1076,6 +1091,13 @@ export function renderCanvas({
         config,
         locusGeometryForPreview(preview, locus)
       );
+    }
+  }
+  if (highlightLocusIds?.size) {
+    for (const uid of highlightLocusIds) {
+      if (visible?.loci && !visible.loci.includes(uid)) continue;
+      const locus = displayScene.loci.get(uid);
+      if (locus) drawLocusHighlight(context, locus, camera, locusGeometryForPreview(preview, locus));
     }
   }
   if (!suppressLocusHover) {

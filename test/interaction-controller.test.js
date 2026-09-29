@@ -87,3 +87,37 @@ test("interaction controller cancels an unstarted drag without committing state"
     ["dragging", false],
   ]);
 });
+
+test("interaction controller drags a selected locus set by one shared delta", async () => {
+  const { createInteractionController } = await import(
+    "../src/interactionController.mjs"
+  );
+  const calls = [];
+  const controller = createInteractionController({
+    clusterRows: () => [0],
+    getClusterOrder: () => ["cluster"],
+    getClusterPosition: () => 0,
+    getLocusOffset: (uid) => uid === "left" ? 10 : 40,
+    selectedLocusIds: () => ["left", "right"],
+    setDragging: (value) => calls.push(["dragging", value]),
+    previewClusterDrag: () => {},
+    commitClusterOrder: () => {},
+    previewLocusOffset: () => {},
+    previewLocusOffsets: (offsets) => calls.push(["preview", [...offsets]]),
+    commitLocusOffset: (ids) => calls.push(["commit", ids]),
+    previewLocusTrim: () => {},
+    commitLocusTrim: () => {},
+    flipLocus: () => {},
+  });
+
+  controller.beginLocusDrag("left", 100);
+  controller.moveLocusDrag(115);
+  controller.endLocusDrag();
+
+  assert.deepEqual(calls, [
+    ["dragging", true],
+    ["preview", [["left", 25], ["right", 55]]],
+    ["dragging", false],
+    ["commit", ["left", "right"]],
+  ]);
+});

@@ -38,6 +38,7 @@ import {
   createClusterDragPreview,
   createLocusFlipPreview,
   createLocusOffsetPreview,
+  createLocusOffsetsPreview,
   createLocusTrimPreview,
 } from "./scenePreview.mjs";
 import { exportChartSvg } from "./svgExport.mjs";
@@ -93,6 +94,7 @@ export default function clusterMap() {
   let chartIndex = null;
   let highlightGeneIds = new Set();
   let highlightLinkIds = new Set();
+  let selectedLocusIds = new Set();
   let disposeRasterInteraction = () => {};
   let disposeOverlay = () => {};
   // Rebound on each redraw so programmatic focusing always targets the
@@ -141,6 +143,7 @@ export default function clusterMap() {
     getClusterOrder: () => getClusterOrder(chartState),
     getClusterPosition: (uid) => runtime.getScene().clusters.get(uid).y,
     getLocusOffset: (uid) => getLocusOffset(chartState, uid),
+    selectedLocusIds: () => [...selectedLocusIds],
     setDragging: (dragging) => setDragging(chartState, dragging),
     previewClusterDrag: (uid, position, order) => {
       if (clusterCommitFrame !== null) {
@@ -209,8 +212,19 @@ export default function clusterMap() {
       }
       redraw({ animate: false });
     },
-    commitLocusOffset: (uid) => {
-      commitPreviewLocusOffset(chartState, uid);
+    previewLocusOffsets: (offsets) => {
+      for (const [uid, offset] of offsets) setPreviewLocusOffset(chartState, uid, offset);
+      if (isRasterRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
+        rasterPreview = createLocusOffsetsPreview(runtime.getScene(), offsets, {
+          alignLabels: runtime.config.cluster.alignLabels,
+        });
+        scheduleRasterPreview();
+        return;
+      }
+      redraw({ animate: false });
+    },
+    commitLocusOffset: (ids) => {
+      for (const uid of Array.isArray(ids) ? ids : [ids]) commitPreviewLocusOffset(chartState, uid);
       clearRasterPreview();
       redraw({ animate: false });
     },
@@ -496,6 +510,9 @@ export default function clusterMap() {
     // Generated groups are part of the editable model, so index them after
     // automatic grouping rather than leaving the group lookup one redraw old.
     chartIndex = createChartIndex(currentData);
+    selectedLocusIds = new Set(
+      [...selectedLocusIds].map(locusForId).filter(Boolean).map((locus) => locus.uid)
+    );
     chartState = createChartState(currentData, chartState);
     runtime.setChartIndex(chartIndex);
     runtime.setChartState(chartState);
@@ -521,6 +538,19 @@ export default function clusterMap() {
 
   function emitChange(change) {
     for (const listener of changeListeners) listener({ ...change, data: currentData });
+  }
+
+  function highlightedGeneIds() {
+    const ids = new Set(highlightGeneIds);
+    for (const locusUid of selectedLocusIds) {
+      for (const gene of chartIndex?.locusById.get(locusUid)?.genes || []) ids.add(gene.uid);
+    }
+    return ids;
+  }
+
+  function locusForId(uid) {
+    return chartIndex?.locusById.get(uid) || [...(chartIndex?.locusById || [])]
+      .find(([key]) => String(key) === String(uid))?.[1];
   }
 
   function redraw({ animate = true, synchronize = true } = {}) {
@@ -733,8 +763,9 @@ export default function clusterMap() {
           rasterPreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
         pixelRatio: rasterMotion.pixelRatio(),
         preview: rasterPreview,
-        highlightGeneIds,
+        highlightGeneIds: highlightedGeneIds(),
         highlightLinkIds,
+        highlightLocusIds: selectedLocusIds,
       });
       paintMinimap();
       return result;
@@ -758,8 +789,9 @@ export default function clusterMap() {
           showLocusTracks: false,
           showGenes: false,
           showGeneLabels: true,
-          highlightGeneIds,
+          highlightGeneIds: highlightedGeneIds(),
           highlightLinkIds,
+          highlightLocusIds: selectedLocusIds,
         });
       }
       const bounds = canvasNode.getBoundingClientRect();
@@ -1128,7 +1160,18 @@ export default function clusterMap() {
       endLocusTrim: interactionController.endLocusTrim,
       cancelLocusTrim: interactionController.cancelLocusTrim,
       flipLocus: interactionController.flipLocus,
-      onGeneClick: runtime.config.gene.shape.onClick || ((event, gene) => anchorGene(gene)),
+      toggleLocusSelection: (locus) => {
+        const ids = new Set(selectedLocusIds);
+        if (ids.has(locus.uid)) ids.delete(locus.uid);
+        else ids.add(locus.uid);
+        my.locusSelection(ids);
+      },
+      onGeneClick: (event, gene) => {
+        // Shift-click belongs to the containing locus and must not also invoke
+        // the established single-gene anchor interaction.
+        if (event.shiftKey) return;
+        (runtime.config.gene.shape.onClick || ((_, record) => anchorGene(record)))(event, gene);
+      },
       showGeneMenu: overlay.showGeneMenu,
       showGroupMenu: overlay.showGroupMenu,
       setScaleBarLength,
@@ -1315,8 +1358,9 @@ export default function clusterMap() {
         ids: runtime.ids,
         lookup: { gene: runtime.lookup.geneData },
         interactions: rendererInteractions,
-        highlightGeneIds,
+        highlightGeneIds: highlightedGeneIds(),
         highlightLinkIds,
+        highlightLocusIds: selectedLocusIds,
       });
 
       if (!hasInitialView) fitInitialView(svg, plot);
@@ -1457,6 +1501,40 @@ export default function clusterMap() {
     else redraw({ animate: false });
     return my;
   };
+  /** Selected locus IDs used for batch plot operations. */
+  my.locusSelection = function (ids) {
+    if (!arguments.length) return [...selectedLocusIds];
+    const next = chartIndex
+      ? new Set([...(ids || [])].map(locusForId).filter(Boolean).map((locus) => locus.uid))
+      : new Set(ids || []);
+    if (
+      next.size === selectedLocusIds.size &&
+      [...next].every((uid) => selectedLocusIds.has(uid))
+    ) return my;
+    selectedLocusIds = next;
+    if (container && currentData) {
+      if (isRasterRenderer(runtime.config.plot.renderer)) scheduleRasterPaint();
+      else redraw({ animate: false });
+    }
+    emitChange({ type: "loci.select", locusIds: [...selectedLocusIds] });
+    return my;
+  };
+  /** Flip the supplied loci, or the current locus selection, as one operation. */
+  my.flipLoci = function (ids = selectedLocusIds) {
+    if (!container || !currentData || !chartIndex || !chartState) {
+      throw new Error("Cannot flip loci before the chart has rendered.");
+    }
+    const loci = [...new Set(ids || [])]
+      .map(locusForId)
+      .filter(Boolean);
+    if (!loci.length) return my;
+    flushCanvasFlip();
+    clearRasterPreview();
+    for (const locus of loci) flipLocus(chartState, locus);
+    redraw({ animate: true });
+    emitChange({ type: "loci.flip", locusIds: loci.map((locus) => locus.uid) });
+    return my;
+  };
   /** Frame selected genes and/or links without changing their selection. */
   my.focus = function (ids) {
     const isScoped = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
@@ -1524,6 +1602,7 @@ export default function clusterMap() {
     chartIndex = null;
     highlightGeneIds.clear();
     highlightLinkIds.clear();
+    selectedLocusIds.clear();
     changeListeners.clear();
     return my;
   };

@@ -165,13 +165,18 @@ the public link schema, and rejects dangling gene references.
   `"data"` to derive that edge from the lowest or highest link identity. The
   scale clamps outside values. This changes colour mapping only;
   `link.threshold` independently controls which links are visible.
-- `chart.on("change", listener)` subscribes to data replacements and applied
-  edit batches, returning an unsubscribe function. This lets an external table
-  or persistence layer stay synchronized without inspecting renderer state.
+- `chart.on("change", listener)` subscribes to data replacements, applied
+  edit batches, and locus-selection/flip events, returning an unsubscribe
+  function. This lets an external table or persistence layer stay synchronized
+  without inspecting renderer state.
 - `chart.highlight(geneIds)` draws a non-destructive selection outline around
   the given gene IDs in every renderer; call `chart.highlight()` to read the
   current selection or pass an empty iterable to clear it. Pass
   `{ genes, links }` to highlight genes and/or links independently.
+- `chart.locusSelection(ids)` sets the loci selected for batch plot operations;
+  call it without arguments to read the selected IDs. Shift-clicking a locus in
+  the plot uses the same selection. `chart.flipLoci(ids)` flips the supplied
+  loci, or the current locus selection when called without IDs.
 - `chart.exportSvg({ padding })` returns the current figure as an SVG string,
   irrespective of the interactive renderer in use.
 - `chart.destroy()` releases chart-owned event handlers, animations, minimap

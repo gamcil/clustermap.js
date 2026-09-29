@@ -5,10 +5,12 @@ export function createInteractionController({
   getClusterOrder,
   getClusterPosition,
   getLocusOffset,
+  selectedLocusIds = () => [],
   setDragging,
   previewClusterDrag,
   commitClusterOrder,
   previewLocusOffset,
+  previewLocusOffsets = null,
   commitLocusOffset,
   previewLocusTrim,
   commitLocusTrim,
@@ -62,28 +64,35 @@ export function createInteractionController({
     },
 
     beginLocusDrag(uid, pointerX) {
+      const selected = [...selectedLocusIds()];
+      const locusUids = selected.includes(uid) ? selected : [uid];
       locusDrag = {
-        uid,
+        uids: locusUids,
         pointerStart: pointerX,
-        initialOffset: getLocusOffset(uid),
+        initialOffsets: new Map(locusUids.map((locusUid) => [locusUid, getLocusOffset(locusUid)])),
       };
       setDragging(true);
     },
 
     moveLocusDrag(pointerX) {
       if (!locusDrag) return;
-      previewLocusOffset(
-        locusDrag.uid,
-        locusDrag.initialOffset + pointerX - locusDrag.pointerStart
+      const delta = pointerX - locusDrag.pointerStart;
+      const offsets = new Map(
+        locusDrag.uids.map((uid) => [uid, locusDrag.initialOffsets.get(uid) + delta])
       );
+      if (locusDrag.uids.length > 1 && previewLocusOffsets) {
+        previewLocusOffsets(offsets);
+        return;
+      }
+      previewLocusOffset(locusDrag.uids[0], offsets.get(locusDrag.uids[0]));
     },
 
     endLocusDrag() {
       if (!locusDrag) return;
-      const { uid } = locusDrag;
+      const { uids } = locusDrag;
       locusDrag = null;
       setDragging(false);
-      commitLocusOffset(uid);
+      commitLocusOffset(uids.length === 1 ? uids[0] : uids);
     },
 
     cancelLocusDrag() {

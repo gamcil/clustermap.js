@@ -16,7 +16,7 @@
 			#toolbar { display: flex; align-items: center; gap: 6px; padding: 4px; }
 			#data-import-status { color: #536b88; font-size: 12px; }
 			#data-import-status[data-error="true"] { color: #b42318; }
-			#workspace { display: flex; flex: 1; min-height: 0; }
+			#workspace { position: relative; display: flex; flex: 1; min-height: 0; }
 			#plot,
 			#plot > .chart-host {
 				width: 100%;
@@ -135,8 +135,8 @@
 			.editor-row.list-gene .row-label, .editor-row.list-gene .source-column, .editor-row.list-group .source-column, .editor-row.list-link .source-column { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 			.editor-row.list-gene .source-column, .editor-row.list-group .source-column, .editor-row.list-link .source-column { color: #666; font-size: 11px; }
 			.editor-row .colour { width: 28px; height: 22px; padding: 0; border: 0; background: transparent; }
-			#editor .editor-row .visibility, #editor .tree-toggle { display: inline-grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; min-height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #64748b; cursor: pointer; }
-			#editor .editor-row .visibility:hover, #editor .tree-toggle:hover { background: #e7f0ff; color: #145da8; }
+			#editor .editor-row .visibility, #editor .tree-toggle, #editor .locus-select { display: inline-grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; min-height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #64748b; cursor: pointer; }
+			#editor .editor-row .visibility:hover, #editor .tree-toggle:hover, #editor .locus-select:hover, #editor .locus-select[aria-pressed="true"] { background: #e7f0ff; color: #145da8; }
 			.editor-row .visibility[aria-pressed="false"] { color: #9aa6b5; }
 			.editor-row .visibility svg, .tree-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 			#editor .editor-row .reorder-grip { justify-self: center; width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #9aa6b5; font-size: 15px; line-height: 1; letter-spacing: -3px; cursor: grab; }
@@ -148,6 +148,16 @@
 			.editor-row.tree-cluster { font-weight: 600; background: #fafafa; }
 			.editor-row.tree-locus { font-weight: 500; }
 			.tree-toggle { font: inherit; }
+			#editor .locus-select { font-size: 16px; line-height: 1; }
+			.editor-row.locus-selected { background: #edf5ff; }
+			/* The raster minimap occupies the plot's top-right corner. Keep transient
+			   batch controls on the opposite side, where they remain available in
+			   every renderer without obscuring navigation. */
+			#plot-selection-actions { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; align-items: center; gap: 6px; padding: 7px 8px; border: 1px solid #c7d9f1; border-radius: 8px; background: rgba(255, 255, 255, .94); box-shadow: 0 3px 12px rgba(23, 36, 54, .12); font: 13px system-ui, sans-serif; }
+			#plot-selection-actions[hidden] { display: none; }
+			#plot-selection-actions strong { padding: 4px 6px; border-radius: 5px; background: #e7f0ff; color: #184a86; }
+			#plot-selection-actions button { min-height: 28px; box-sizing: border-box; border: 1px solid #cbd3de; border-radius: 6px; padding: 3px 7px; background: #fff; color: #273444; font: inherit; cursor: pointer; }
+			#plot-selection-actions button:hover { border-color: #78a9ed; background: #f4f8ff; }
 			.editor-row.tree-group { font-weight: 600; background: #fafafa; }
 			.tree-group-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 			.combined-tree-label { display: flex; flex: 1; min-width: 0; align-items: center; gap: 5px; }
@@ -192,6 +202,11 @@
 			</div>
 			<div id="workspace">
 				<div id="plot"></div>
+				<div id="plot-selection-actions" hidden>
+					<strong id="locus-selection-summary"></strong>
+					<button id="locus-selection-flip" title="Flip every selected locus">Flip selected loci</button>
+					<button id="locus-selection-clear" title="Clear selected loci (Escape)" aria-keyshortcuts="Escape">Clear</button>
+				</div>
 			</div>
 			<aside id="editor" hidden>
 				<div id="editor-resize-handle" role="separator" aria-label="Resize plot editor" aria-orientation="horizontal"></div>
@@ -508,6 +523,10 @@
 			newGroupName: document.querySelector("#new-group-name"),
 			newGroupCreate: document.querySelector("#new-group-create"),
 			selectionActions: document.querySelector("#selection-actions"),
+			locusSelectionActions: document.querySelector("#plot-selection-actions"),
+			locusSelectionSummary: document.querySelector("#locus-selection-summary"),
+			locusSelectionFlip: document.querySelector("#locus-selection-flip"),
+			locusSelectionClear: document.querySelector("#locus-selection-clear"),
 			selectionSummary: document.querySelector("#selection-summary"),
 			selectionFocus: document.querySelector("#selection-focus"),
 			selectionPresentation: document.querySelector("#selection-presentation"),
@@ -561,6 +580,7 @@
 			identityKey: null,
 			memberGroupUid: null,
 			selected: new Set(),
+			selectedLoci: new Set(),
 			selectionAnchor: null,
 			pendingRangeSelection: null,
 			expanded: new Set(),
@@ -674,7 +694,7 @@
 					})
 					if (expanded) {
 						for (const gene of locusGenes) {
-							rows.push({ key: `gene:${gene.uid}`, type: "gene", label: labelFor(gene, "Unlabelled gene"), context: groups.get(gene.uid)?.label || "Ungrouped", colour: gene.colour || groups.get(gene.uid)?.colour, selectIds: [gene.uid], depth: 1 })
+							rows.push({ key: `gene:${gene.uid}`, type: "gene", locusUid: locus.uid, label: labelFor(gene, "Unlabelled gene"), context: groups.get(gene.uid)?.label || "Ungrouped", colour: gene.colour || groups.get(gene.uid)?.colour, selectIds: [gene.uid], depth: 1 })
 						}
 					}
 					continue
@@ -688,10 +708,10 @@
 					if (!locusGenes.length) continue
 					const locusKey = `locus:${locus.uid}`
 					const locusOpen = Boolean(needle) || editor.expanded.has(locusKey)
-					rows.push({ key: locusKey, type: "locus", label: labelFor(locus, "Unlabelled locus"), context: `${locus.start + 1}–${locus.end} · ${locusGenes.length} genes`, selectIds: locusGenes.map((gene) => gene.uid), depth: 1, expandable: true, expanded: locusOpen })
+					rows.push({ key: locusKey, type: "locus", locusUid: locus.uid, label: labelFor(locus, "Unlabelled locus"), context: `${locus.start + 1}–${locus.end} · ${locusGenes.length} genes`, selectIds: locusGenes.map((gene) => gene.uid), depth: 1, expandable: true, expanded: locusOpen })
 					if (!locusOpen) continue
 					for (const gene of locusGenes) {
-						rows.push({ key: `gene:${gene.uid}`, type: "gene", label: labelFor(gene, "Unlabelled gene"), context: groups.get(gene.uid)?.label || "Ungrouped", colour: gene.colour || groups.get(gene.uid)?.colour, selectIds: [gene.uid], depth: 2 })
+						rows.push({ key: `gene:${gene.uid}`, type: "gene", locusUid: locus.uid, label: labelFor(gene, "Unlabelled gene"), context: groups.get(gene.uid)?.label || "Ungrouped", colour: gene.colour || groups.get(gene.uid)?.colour, selectIds: [gene.uid], depth: 2 })
 					}
 				}
 			}
@@ -828,6 +848,9 @@
 			: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>`
 		const visibilityButtonMarkup = (row, noun) => `<button class="visibility" data-row-visibility="${escapeHtml(row.key)}" aria-pressed="${String(!row.hidden)}" aria-label="${row.hidden ? "Show" : "Hide"} ${escapeHtml(row.label || noun)}" title="${row.hidden ? "Show" : "Hide"} ${noun}">${eyeIcon(row.hidden)}</button>`
 		const treeToggleMarkup = (row) => `<button class="tree-toggle" data-tree-toggle="${escapeHtml(row.key)}" aria-label="${row.expanded ? "Collapse" : "Expand"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${row.expanded ? "m8 10 4 4 4-4" : "m10 8 4 4-4 4"}"></path></svg></button>`
+		const locusSelectMarkup = (row) => (row.type === "cluster-locus" || row.type === "locus") && row.locusUid
+			? `<button class="locus-select" data-locus-select="${escapeHtml(row.locusUid)}" aria-pressed="${String(editor.selectedLoci.has(row.locusUid))}" aria-label="${editor.selectedLoci.has(row.locusUid) ? "Deselect" : "Select"} locus ${escapeHtml(row.label)}" title="${editor.selectedLoci.has(row.locusUid) ? "Deselect" : "Select"} locus for batch actions">◌</button>`
+			: ""
 		const syncSelectionActions = () => {
 			const count = editor.selected.size
 			const editingGroups = editor.kind === "groups"
@@ -840,6 +863,9 @@
 			editor.selectionActions.hidden = count === 0
 			editor.selectionUndo.disabled = editor.history.length === 0
 			editor.selectionRedo.disabled = editor.future.length === 0
+			const locusCount = editor.selectedLoci.size
+			editor.locusSelectionActions.hidden = locusCount === 0
+			editor.locusSelectionSummary.textContent = `${locusCount} ${locusCount === 1 ? "locus" : "loci"} selected`
 			if (!count) {
 				editor.creatingGroup = false
 				editor.selectionGroup.value = ""
@@ -978,10 +1004,11 @@
 					<input class="colour" type="color" data-row-colour="${escapeHtml(row.key)}" value="${colourInputValue(row.colour)}" aria-label="Colour for ${escapeHtml(row.label)}">
 					${visibilityButtonMarkup(row, "link")}
 				</div>` : `
-				<div class="editor-row ${row.type === "cluster" || row.type === "cluster-locus" ? "tree-cluster" : row.type === "locus" ? "tree-locus" : row.type === "gene-group" ? "tree-group" : ""} ${selectedFor(row) ? "selected" : ""}" data-row-key="${escapeHtml(row.key)}" data-row-type="${row.type}">
+				<div class="editor-row ${row.type === "cluster" || row.type === "cluster-locus" ? "tree-cluster" : row.type === "locus" ? "tree-locus" : row.type === "gene-group" ? "tree-group" : ""} ${selectedFor(row) ? "selected" : ""} ${row.locusUid && editor.selectedLoci.has(row.locusUid) ? "locus-selected" : ""}" data-row-key="${escapeHtml(row.key)}" data-row-type="${row.type}">
 					<span class="tree-spacer" style="width:${row.depth * 18}px"></span>
 					${row.expandable ? treeToggleMarkup(row) : `<span class="tree-spacer" style="width:24px"></span>`}
 					<input type="checkbox" data-row-select="${escapeHtml(row.key)}" ${selectedFor(row) ? "checked" : ""} aria-label="Select ${escapeHtml(row.label)}; Shift-click to select a range">
+					${locusSelectMarkup(row)}
 					${row.type === "cluster-locus" ? combinedTreeLabelMarkup(row) : row.type === "gene-group" ? `<span class="tree-group-label" title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</span>` : rowLabelMarkup(row)}
 					<span class="context" title="${escapeHtml(row.context)}">${escapeHtml(row.context)}</span>
 					${row.type === "group" || row.type === "gene" || row.type === "link" ? `<input class="colour" type="color" data-row-colour="${escapeHtml(row.key)}" value="${colourInputValue(row.colour)}" aria-label="Colour for ${escapeHtml(row.label)}">` : ""}
@@ -1494,6 +1521,17 @@
 				editor.pendingRangeSelection = { key: rowSelectKey, range: event.shiftKey }
 				return
 			}
+			const locusUid = target.closest("[data-locus-select]")?.dataset.locusSelect
+			if (locusUid) {
+				const locus = chart.data()?.clusters.flatMap((cluster) => cluster.loci)
+					.find((candidate) => String(candidate.uid) === locusUid)
+				if (!locus) return
+				const selected = new Set(editor.selectedLoci)
+				if (selected.has(locus.uid)) selected.delete(locus.uid)
+				else selected.add(locus.uid)
+				chart.locusSelection(selected)
+				return
+			}
 			const key = target.closest("[data-tree-toggle]")?.dataset.treeToggle
 			if (key) {
 				editor.expanded.has(key) ? editor.expanded.delete(key) : editor.expanded.add(key)
@@ -1703,10 +1741,29 @@
 		editor.selectionFocus.addEventListener("click", focusSelectionInPlot)
 		editor.selectionViewMembers.addEventListener("click", viewSelectedGroupMembers)
 		editor.selectionClear.addEventListener("click", clearRowSelection)
+		editor.locusSelectionClear.addEventListener("click", () => chart.locusSelection([]))
+		window.addEventListener("keydown", (event) => {
+			if (event.key !== "Escape" || event.defaultPrevented || !chart.locusSelection().length) return
+			// Escape should preserve its ordinary edit-cancel/filter-clear behaviour
+			// while focus is in a text entry control.
+			if (event.target.matches('input, textarea, select, [contenteditable="true"]')) return
+			event.preventDefault()
+			chart.locusSelection([])
+		})
+		editor.locusSelectionFlip.addEventListener("click", () => {
+			const locusIds = chart.locusSelection()
+			if (!locusIds.length) return
+			const before = chart.state()
+			chart.flipLoci(locusIds)
+			editor.history.push({ type: "loci.flip", before, after: chart.state() })
+			editor.future = []
+			renderEditor({ refresh: false })
+		})
 		editor.selectionUndo.addEventListener("click", () => {
 			const change = editor.history.pop()
 			if (!change) return
-			chart.patch(change.operation.type === "groups.reorder"
+			if (change.type === "loci.flip") chart.state(change.before)
+			else chart.patch(change.operation.type === "groups.reorder"
 				? [{ type: "groups.reorder", ids: change.before }]
 				: operationsForValues(change.operation.type, change.before))
 			editor.future.push(change)
@@ -1715,7 +1772,8 @@
 		editor.selectionRedo.addEventListener("click", () => {
 			const change = editor.future.pop()
 			if (!change) return
-			chart.patch([change.operation])
+			if (change.type === "loci.flip") chart.state(change.after)
+			else chart.patch([change.operation])
 			editor.history.push(change)
 			renderEditor()
 		})
@@ -1748,7 +1806,10 @@
 					editor.expanded.add(`cluster:${cluster.uid}`)
 					cluster.loci.forEach((locus) => editor.expanded.add(`locus:${locus.uid}`))
 				})
-				chart.on("change", renderEditor)
+				chart.on("change", (change) => {
+					if (change.type === "loci.select") editor.selectedLoci = new Set(change.locusIds)
+					renderEditor()
+				})
 				renderEditor()
 				syncAppearanceControls()
 				filterAppearanceControls()

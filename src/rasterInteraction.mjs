@@ -175,6 +175,12 @@ export function createRasterInteraction({
           if (panMode || event.button) return;
           const target = targetForEvent(this, event);
           if (!target) return;
+          const locusUid = locusForTarget(target);
+          if (event.shiftKey && locusUid) {
+            actions.toggleLocusSelection(locusUid);
+            event.preventDefault();
+            return;
+          }
           startGesture(this, event, target);
           event.preventDefault();
         })

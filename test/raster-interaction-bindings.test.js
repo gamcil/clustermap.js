@@ -18,6 +18,7 @@ test("raster interaction bindings adapt stable IDs to source records", async () 
       moveLocusTrim: (...args) => calls.push(["trim", ...args]),
       endLocusTrim: (...args) => calls.push(["finish-trim", ...args]),
       cancelLocusTrim: () => {}, flipLocus: (value) => calls.push(["flip", value]),
+      toggleLocusSelection: (value) => calls.push(["select", value]),
       onGeneClick: (_event, value) => calls.push(["gene", value]),
       showGeneMenu: (_event, value) => calls.push(["menu", value]),
       showGroupMenu: (_event, value) => calls.push(["group-menu", value]),
@@ -31,6 +32,7 @@ test("raster interaction bindings adapt stable IDs to source records", async () 
   bindings.interactions.endLocusTrim(locus.uid);
   bindings.actions.geneClick({}, gene.uid);
   bindings.actions.flipLocus(locus.uid);
+  bindings.actions.toggleLocusSelection(locus.uid);
   bindings.actions.legendColour({}, "group-1");
 
   assert.deepEqual(calls, [
@@ -38,6 +40,7 @@ test("raster interaction bindings adapt stable IDs to source records", async () 
     ["finish-trim", locus],
     ["gene", gene],
     ["flip", locus],
+    ["select", locus],
     ["colour", "group-1"],
   ]);
 });

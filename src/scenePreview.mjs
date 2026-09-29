@@ -71,6 +71,35 @@ export function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels 
   };
 }
 
+/** Describe several transient locus translations without rebuilding the scene. */
+export function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
+  const locusOffsets = new Map();
+  const affectedClusters = new Set();
+  for (const [locusUid, offset] of offsets) {
+    const locus = scene.loci.get(locusUid);
+    if (!locus) continue;
+    locusOffsets.set(locusUid, offset - locus.localX);
+    const cluster = scene.clusters.get(locus.cluster.uid);
+    if (cluster) affectedClusters.add(cluster);
+  }
+  if (!locusOffsets.size) return null;
+  const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
+  const startFor = (candidate) => candidate.worldStart + offsetFor(candidate);
+  const endFor = (candidate) => candidate.worldEnd + offsetFor(candidate);
+  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
+  return {
+    type: "locus-offsets",
+    locusOffsets,
+    clusterLabelOffsets: clusterLabelOffsetsForStarts(
+      scene,
+      startFor,
+      alignLabels,
+      affectedClusters
+    ),
+    chrome: chromeForPreview(scene, maxX),
+  };
+}
+
 /**
  * Describe a transient trim using the current scene and updated locus-scale
  * offsets. The controller updates scales (but not the scene) before calling

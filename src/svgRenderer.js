@@ -17,6 +17,7 @@ export function renderSvg({
   interactions,
   highlightGeneIds = new Set(),
   highlightLinkIds = new Set(),
+  highlightLocusIds = new Set(),
 }) {
   const linkGroup = plot
     .selectAll("g.links")
@@ -90,6 +91,10 @@ export function renderSvg({
           .attr("id", ids.locus)
           .attr("class", "locus");
         enter.append("line").attr("class", "trackBar").style("fill", "#111");
+        enter
+          .append("rect")
+          .attr("class", "locusHighlight")
+          .style("pointer-events", "none");
         const hover = enter
           .append("g")
           .attr("class", "hover hidden")
@@ -126,6 +131,9 @@ export function renderSvg({
               d3.select(event.target).select("g.hover").transition().attr("opacity", 0);
             }
           })
+          .on("click", (event, locus) => {
+            if (event.shiftKey) interactions.toggleLocusSelection(locus);
+          })
           .on("dblclick", (event, locus) => {
             // The hover rectangle describes pointer affordances, not locus
             // geometry. It would otherwise remain visible while the locus
@@ -145,11 +153,11 @@ export function renderSvg({
             }
             interactions.flipLocus(locus);
           });
-        return updateLoci(enter, scene, config);
+        return updateLoci(enter, scene, config, highlightLocusIds);
       },
       (update) =>
         update.call((selection) =>
-          updateLoci(updateRender(selection), scene, config)
+          updateLoci(updateRender(selection), scene, config, highlightLocusIds)
         )
     );
 
@@ -318,7 +326,7 @@ function createLocusResizeDrag({ plot, interactions }) {
     .on("end", ended);
 }
 
-function updateLoci(selection, scene, config) {
+function updateLoci(selection, scene, config, highlightLocusIds) {
   const layout = (locus) => scene.loci.get(locus.uid);
 
   selection.attr("transform", (locus) => {
@@ -333,6 +341,16 @@ function updateLoci(selection, scene, config) {
     .attr("y2", (locus) => layout(locus).track.y)
     .style("stroke", config.locus.trackBar.colour)
     .style("stroke-width", config.locus.trackBar.stroke);
+  selection
+    .select("rect.locusHighlight")
+    .attr("x", (locus) => layout(locus).hover.x)
+    .attr("y", (locus) => layout(locus).hover.y)
+    .attr("width", (locus) => layout(locus).hover.width)
+    .attr("height", (locus) => layout(locus).hover.height)
+    .attr("display", (locus) => (highlightLocusIds.has(locus.uid) ? "inline" : "none"))
+    .attr("fill", "rgba(22, 119, 255, 0.12)")
+    .style("stroke", "#1677ff")
+    .style("stroke-width", Math.max(2, config.locus.trackBar.stroke));
   selection
     .selectAll("rect.hover, rect.leftHandle, rect.rightHandle")
     .attr("y", (locus) => layout(locus).hover.y)

@@ -605,6 +605,83 @@ test("selecting genes in the editor highlights their plotted arrows", async ({ p
   }, geneId)).not.toContain("22, 119, 255");
 });
 
+test("locus selection synchronizes with the editor and flips selected loci as one undoable action", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const locus = page.locator("g.locus").first();
+  const locusUid = await locus.evaluate((node) => node.__data__.uid);
+  await locus.evaluate((node) => node.dispatchEvent(new MouseEvent("click", {
+    bubbles: true,
+    shiftKey: true,
+  })));
+
+  await expect(page.locator("#plot-selection-actions")).toBeVisible();
+  await expect(page.locator("#locus-selection-summary")).toHaveText("1 locus selected");
+  await expect.poll(() => page.evaluate((uid) => {
+    const locus = [...document.querySelectorAll("g.locus")].find((node) => node.__data__?.uid === uid);
+    return locus?.querySelector("rect.locusHighlight")?.getAttribute("display");
+  }, locusUid)).toBe("inline");
+
+  await page.locator("#locus-selection-flip").click();
+  await expect.poll(() => page.evaluate((uid) =>
+    window.__demoChart.state().loci.find(([id]) => id === uid)?.[1]?.flipped || false
+  , locusUid)).toBe(true);
+  await page.locator("#selection-undo").click();
+  await expect.poll(() => page.evaluate((uid) =>
+    window.__demoChart.state().loci.find(([id]) => id === uid)?.[1]?.flipped || false
+  , locusUid)).toBe(false);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#plot-selection-actions")).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.__demoChart.locusSelection())).toEqual([]);
+});
+
+test("dragging one selected locus moves the complete locus selection", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const selected = await page.evaluate(() => {
+    const loci = window.__demoChart.data().clusters.flatMap((cluster) => cluster.loci).slice(0, 2);
+    window.__demoChart.locusSelection(loci.map((locus) => locus.uid));
+    return loci.map((locus) => locus.uid);
+  });
+  const before = await page.evaluate((ids) => {
+    const offsets = new Map(window.__demoChart.state().locusOffsets);
+    return ids.map((uid) => offsets.get(uid) || 0);
+  }, selected);
+  expect(await page.evaluate(() => window.__demoChart.locusSelection())).toEqual(selected);
+  expect(await page.locator("g.locus").first().evaluate((node) => node.__data__.uid)).toBe(selected[0]);
+  await page.locator("g.locus").first().locator("rect.hover").evaluate((node) => {
+    const bounds = node.getBoundingClientRect();
+    const x = bounds.x + 3;
+    const y = bounds.y + bounds.height / 2;
+    const mouse = (type, clientX, buttons) => new MouseEvent(type, {
+      bubbles: true, button: 0, buttons, clientX, clientY: y, view: window,
+    });
+    node.dispatchEvent(mouse("mousedown", x, 1));
+    window.dispatchEvent(mouse("mousemove", x + 40, 1));
+    window.dispatchEvent(mouse("mouseup", x + 40, 0));
+  });
+
+  const offsets = await page.evaluate((ids) => {
+    const offsets = new Map(window.__demoChart.state().locusOffsets);
+    return ids.map((uid) => offsets.get(uid) || 0);
+  }, selected);
+  const deltas = offsets.map((offset, index) => offset - before[index]);
+  expect(deltas[1]).toBe(deltas[0]);
+});
+
+test("plot batch controls stay clear of the minimap", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1&renderer=canvas&minimap=1");
+  await page.evaluate(() => {
+    const locus = window.__demoChart.data().clusters[0].loci[0];
+    window.__demoChart.locusSelection([locus.uid]);
+  });
+  const [actions, minimap] = await Promise.all([
+    page.locator("#plot-selection-actions").boundingBox(),
+    page.locator("canvas.clusterMapMinimap").boundingBox(),
+  ]);
+  expect(actions).not.toBeNull();
+  expect(minimap).not.toBeNull();
+  expect(actions.x + actions.width).toBeLessThan(minimap.x);
+});
+
 test("Focus in plot frames the selected records only when requested", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   await page.locator('[data-data-kind="genes"]').click();
