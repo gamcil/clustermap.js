@@ -74,3 +74,53 @@ test("chart normalization preserves source data and records biological coordinat
   assert.equal(data.clusters[0].loci[0].bio, undefined);
   assert.equal(data.clusters[0].loci[0].genes[0].bio, undefined);
 });
+
+test("chart normalization owns editable nested records", async () => {
+  const { normalizeChartData } = await import("../src/data/normalize.mjs");
+  const data = {
+    clusters: [{
+      uid: "cluster-a",
+      loci: [{
+        uid: "locus-a",
+        start: 0,
+        end: 100,
+        genes: [{ uid: "gene-a", start: 0, end: 20, strand: 1, metadata: { note: "source" } }],
+      }],
+    }],
+    links: [{
+      uid: "link-a",
+      query: { uid: "gene-a", metadata: { source: "query" } },
+      target: { uid: "gene-a" },
+      metadata: { note: "source" },
+    }],
+    groups: [{ uid: "group-a", genes: ["gene-a"], metadata: { note: "source" } }],
+    config: { updateGroups: false, metadata: { note: "source" } },
+  };
+
+  const normalized = normalizeChartData(data);
+  normalized.clusters[0].loci[0].genes[0].metadata.note = "edited";
+  normalized.links[0].query.metadata.source = "edited";
+  normalized.links[0].metadata.note = "edited";
+  normalized.groups[0].metadata.note = "edited";
+  normalized.config.metadata.note = "edited";
+
+  assert.deepEqual(data, {
+    clusters: [{
+      uid: "cluster-a",
+      loci: [{
+        uid: "locus-a",
+        start: 0,
+        end: 100,
+        genes: [{ uid: "gene-a", start: 0, end: 20, strand: 1, metadata: { note: "source" } }],
+      }],
+    }],
+    links: [{
+      uid: "link-a",
+      query: { uid: "gene-a", metadata: { source: "query" } },
+      target: { uid: "gene-a" },
+      metadata: { note: "source" },
+    }],
+    groups: [{ uid: "group-a", genes: ["gene-a"], metadata: { note: "source" } }],
+    config: { updateGroups: false, metadata: { note: "source" } },
+  });
+});

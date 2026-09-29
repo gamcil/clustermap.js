@@ -1,3 +1,7 @@
+function removeMissing(records, allowed) {
+  for (const uid of records.keys()) if (!allowed.has(uid)) records.delete(uid);
+}
+
 export function createChartState(data, previous = null) {
   const loci = previous?.loci || new Map();
   const genes = previous?.genes || new Map();
@@ -13,24 +17,28 @@ export function createChartState(data, previous = null) {
   };
   const clusterIds = data.clusters.map((cluster) => cluster.uid);
   const clusterIdSet = new Set(clusterIds);
+  const previousOrder = previous?.clusterOrder || [];
+  const previousOrderSet = new Set(previousOrder);
   const clusterOrder = [
-    ...(previous?.clusterOrder || []).filter((uid) => clusterIdSet.has(uid)),
-    ...clusterIds.filter((uid) => !previous?.clusterOrder?.includes(uid)),
+    ...previousOrder.filter((uid) => clusterIdSet.has(uid)),
+    ...clusterIds.filter((uid) => !previousOrderSet.has(uid)),
   ];
   if (preview.clusterOrder) {
+    const previewOrderSet = new Set(preview.clusterOrder);
     preview.clusterOrder = [
       ...preview.clusterOrder.filter((uid) => clusterIdSet.has(uid)),
-      ...clusterIds.filter((uid) => !preview.clusterOrder.includes(uid)),
+      ...clusterIds.filter((uid) => !previewOrderSet.has(uid)),
     ];
   }
   if (!preview.locusOffsets) preview.locusOffsets = new Map();
   if (!preview.loci) preview.loci = new Map();
   if (!preview.clusterPositions) preview.clusterPositions = new Map();
-  const present = new Set();
+  const locusIds = new Set();
+  const geneKeys = new Set();
   for (const cluster of data.clusters) {
     if (!clusterOffsets.has(cluster.uid)) clusterOffsets.set(cluster.uid, 0);
     for (const locus of cluster.loci) {
-      present.add(locus.uid);
+      locusIds.add(locus.uid);
       if (!loci.has(locus.uid)) {
         loci.set(locus.uid, {
           start: locus.start,
@@ -48,7 +56,7 @@ export function createChartState(data, previous = null) {
         };
         const locusBio = locus.bio || { start: locus.start, end: locus.end };
         const key = `${locus.uid}:${gene.uid}`;
-        present.add(key);
+        geneKeys.add(key);
         if (!genes.has(key)) {
           genes.set(key, {
             start: geneBio.start - locusBio.start,
@@ -59,25 +67,13 @@ export function createChartState(data, previous = null) {
       }
     }
   }
-  for (const uid of loci.keys()) {
-    if (!data.clusters.some((cluster) => cluster.loci.some((locus) => locus.uid === uid))) loci.delete(uid);
-  }
-  for (const uid of genes.keys()) if (!present.has(uid)) genes.delete(uid);
-  for (const uid of clusterOffsets.keys()) {
-    if (!clusterIdSet.has(uid)) clusterOffsets.delete(uid);
-  }
-  for (const uid of locusOffsets.keys()) {
-    if (!loci.has(uid)) locusOffsets.delete(uid);
-  }
-  for (const uid of preview.locusOffsets.keys()) {
-    if (!loci.has(uid)) preview.locusOffsets.delete(uid);
-  }
-  for (const uid of preview.clusterPositions.keys()) {
-    if (!clusterIdSet.has(uid)) preview.clusterPositions.delete(uid);
-  }
-  for (const uid of preview.loci.keys()) {
-    if (!loci.has(uid)) preview.loci.delete(uid);
-  }
+  removeMissing(loci, locusIds);
+  removeMissing(genes, geneKeys);
+  removeMissing(clusterOffsets, clusterIdSet);
+  removeMissing(locusOffsets, locusIds);
+  removeMissing(preview.locusOffsets, locusIds);
+  removeMissing(preview.clusterPositions, clusterIdSet);
+  removeMissing(preview.loci, locusIds);
   return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview };
 }
 
@@ -91,10 +87,6 @@ export function setDragging(chartState, dragging) {
 
 export function getClusterOrder(chartState) {
   return chartState.preview.clusterOrder || chartState.clusterOrder;
-}
-
-export function setClusterOrder(chartState, order) {
-  chartState.clusterOrder = [...order];
 }
 
 export function setPreviewClusterOrder(chartState, order) {
@@ -116,16 +108,6 @@ export function commitPreviewClusterOrder(chartState) {
   }
   chartState.preview.clusterPositions.clear();
   return chartState.clusterOrder;
-}
-
-export function moveClusterToIndex(chartState, uid, index) {
-  const order = [...chartState.clusterOrder];
-  const current = order.indexOf(uid);
-  if (current === -1) return order;
-  order.splice(current, 1);
-  order.splice(Math.max(0, Math.min(index, order.length)), 0, uid);
-  chartState.clusterOrder = order;
-  return order;
 }
 
 export function getClusterOffset(chartState, uid) {

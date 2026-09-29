@@ -80,6 +80,42 @@ test("automatic link groups survive presentation redraws and refresh after topol
   expect(afterDelete).toEqual([{ uid: 0, genes: ["a", "b"] }]);
 });
 
+test("chart edits do not mutate caller-owned input data", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
+  const sourceLink = await page.evaluate(() => {
+    const source = {
+      clusters: [{
+        uid: "cluster",
+        loci: [{
+          uid: "locus",
+          start: 0,
+          end: 100,
+          genes: [
+            { uid: "a", start: 0, end: 10, strand: 1 },
+            { uid: "b", start: 20, end: 30, strand: 1 },
+          ],
+        }],
+      }],
+      links: [{ uid: "link", query: { uid: "a" }, target: { uid: "b" }, identity: 0.8 }],
+      groups: [],
+      config: { updateGroups: false },
+    };
+    window.__demoChart?.data(source);
+    window.__demoChart?.patch([{
+      type: "links.update",
+      ids: ["link"],
+      changes: { label: "Edited in chart", identity: 0.9 },
+    }]);
+    return source.links[0];
+  });
+  expect(sourceLink).toEqual({
+    uid: "link",
+    query: { uid: "a" },
+    target: { uid: "b" },
+    identity: 0.8,
+  });
+});
+
 test("export data downloads the current edited model as reloadable JSON", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1&editor=1");
   await page.evaluate(() => window.__demoChart?.patch([

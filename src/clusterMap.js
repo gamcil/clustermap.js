@@ -53,6 +53,7 @@ import {
   isRasterRenderer,
   isWebGpuRenderer,
 } from "./rendererMode.mjs";
+import { chartStateFromSnapshot, serializeChartState } from "./chartStateSnapshot.mjs";
 
 let nextChartInstance = 0;
 
@@ -516,10 +517,6 @@ export default function clusterMap() {
       chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
     );
     currentData.groups = createLinkGroups(projectedLinks, currentData.groups);
-  }
-
-  function operationsChangeDerivedGroups(operations) {
-    return operations.some(({ type }) => type === "genes.delete" || type === "links.delete");
   }
 
   function emitChange(change) {
@@ -1390,61 +1387,6 @@ export default function clusterMap() {
     selection.attr("transform", `translate(${x}, ${y}) scale(${k})`);
   }
 
-  const finiteNumber = (value) => Number.isFinite(value) ? value : null;
-  const stateEntries = (value) => Array.isArray(value)
-    ? value.filter((entry) => Array.isArray(entry) && entry.length === 2 && entry[0] !== undefined)
-    : [];
-  const recordStateEntries = (value) => stateEntries(value)
-    .filter(([, entry]) => entry && typeof entry === "object" && !Array.isArray(entry));
-  const serializableState = (state) => ({
-    version: 1,
-    clusterOrder: [...state.clusterOrder],
-    clusterOffsets: [...state.clusterOffsets],
-    locusOffsets: [...state.locusOffsets],
-    loci: [...state.loci],
-    genes: [...state.genes],
-    camera: { ...state.camera },
-  });
-  const stateFromSnapshot = (data, snapshot) => {
-    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-      throw new TypeError("Chart state must be an object.");
-    }
-    const clusterIds = new Set(data.clusters.map((cluster) => cluster.uid));
-    const locusIds = new Set(data.clusters.flatMap((cluster) => cluster.loci).map((locus) => locus.uid));
-    const geneKeys = new Set(data.clusters.flatMap((cluster) => cluster.loci)
-      .flatMap((locus) => locus.genes.map((gene) => `${locus.uid}:${gene.uid}`)));
-    const restored = createChartState(data);
-    const applyOffsets = (entries, allowed, target) => stateEntries(entries).forEach(([uid, value]) => {
-      if (allowed.has(uid) && finiteNumber(value) !== null) target.set(uid, value);
-    });
-    applyOffsets(snapshot.clusterOffsets, clusterIds, restored.clusterOffsets);
-    applyOffsets(snapshot.locusOffsets, locusIds, restored.locusOffsets);
-    recordStateEntries(snapshot.loci).forEach(([uid, value]) => {
-      if (!locusIds.has(uid)) return;
-      const target = restored.loci.get(uid);
-      ["start", "end", "trimLeft", "trimRight"].forEach((key) => {
-        if (finiteNumber(value[key]) !== null) target[key] = value[key];
-      });
-      if (value.flipped !== undefined) target.flipped = Boolean(value.flipped);
-    });
-    recordStateEntries(snapshot.genes).forEach(([key, value]) => {
-      if (!geneKeys.has(key)) return;
-      const target = restored.genes.get(key);
-      ["start", "end", "strand"].forEach((property) => {
-        if (finiteNumber(value[property]) !== null) target[property] = value[property];
-      });
-    });
-    const camera = snapshot.camera || {};
-    if (Array.isArray(snapshot.clusterOrder)) {
-      const order = snapshot.clusterOrder.filter((uid) => clusterIds.has(uid));
-      restored.clusterOrder = [...new Set([...order, ...restored.clusterOrder])];
-    }
-    if (finiteNumber(camera.x) !== null && finiteNumber(camera.y) !== null && finiteNumber(camera.k) !== null && camera.k > 0) {
-      restored.camera = { x: camera.x, y: camera.y, k: camera.k };
-    }
-    return restored;
-  };
-
   my.config = function (_) {
     if (!arguments.length) return runtime.config;
     runtime.configure(_);
@@ -1463,11 +1405,11 @@ export default function clusterMap() {
   };
   /** A serializable layout and camera snapshot for project persistence. */
   my.state = function (snapshot) {
-    if (!arguments.length) return chartState ? serializableState(chartState) : null;
+    if (!arguments.length) return chartState ? serializeChartState(chartState) : null;
     if (!container || !currentData) {
       throw new Error("Cannot replace chart state before the chart has rendered.");
     }
-    chartState = stateFromSnapshot(currentData, snapshot);
+    chartState = chartStateFromSnapshot(currentData, snapshot);
     runtime.setChartState(chartState);
     hasInitialView = true;
     redraw({ animate: false });
@@ -1480,16 +1422,19 @@ export default function clusterMap() {
       throw new Error("Cannot patch chart data before the chart has rendered.");
     }
     const result = applyChartOperations(currentData, chartIndex, operations);
-    // Membership operations can create or remove groups, and topology edits
-    // can change automatic components, so refresh lookups before rendering.
-    chartIndex = createChartIndex(currentData);
-    if (groupsAreAutomatic() && operationsChangeDerivedGroups(result.operations)) {
-      refreshDerivedGroups();
+    const { effects } = result;
+    if (effects.reindex) {
       chartIndex = createChartIndex(currentData);
+      if (groupsAreAutomatic() && effects.refreshDerivedGroups) {
+        refreshDerivedGroups();
+        chartIndex = createChartIndex(currentData);
+      }
+      runtime.setChartIndex(chartIndex);
     }
-    chartState = createChartState(currentData, chartState);
-    runtime.setChartIndex(chartIndex);
-    runtime.setChartState(chartState);
+    if (effects.rebuildState) {
+      chartState = createChartState(currentData, chartState);
+      runtime.setChartState(chartState);
+    }
     redraw({ animate: false });
     emitChange({ type: "data.apply", operations: result.operations });
     return my;

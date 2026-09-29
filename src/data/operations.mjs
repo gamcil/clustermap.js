@@ -9,6 +9,29 @@ const fieldsForType = {
   "links.update": new Set(["label", "colour", "hidden", "identity"]),
 };
 
+// Most edits change records already held by the renderer, so a redraw is
+// enough. Only operations which invalidate an ID lookup or the layout state
+// ask the chart controller to rebuild those derived structures.
+const effectsForType = {
+  "genes.delete": { reindex: true, rebuildState: true, refreshDerivedGroups: true },
+  "links.delete": { reindex: true, refreshDerivedGroups: true },
+  "groups.create": { reindex: true },
+  "groups.delete": { reindex: true },
+  "groups.merge": { reindex: true },
+};
+
+function operationEffects(operations) {
+  const effects = { reindex: false, rebuildState: false, refreshDerivedGroups: false };
+  for (const { type } of operations) {
+    const next = effectsForType[type];
+    if (!next) continue;
+    if (next.reindex) effects.reindex = true;
+    if (next.rebuildState) effects.rebuildState = true;
+    if (next.refreshDerivedGroups) effects.refreshDerivedGroups = true;
+  }
+  return effects;
+}
+
 function operationError(message) {
   return new TypeError(`Invalid chart operation: ${message}`);
 }
@@ -171,9 +194,11 @@ function applyOperation(data, index, operation) {
       }));
       return;
     }
-    case "links.delete":
-      data.links = data.links.filter((link) => !operation.ids.includes(link.uid));
+    case "links.delete": {
+      const ids = new Set(operation.ids);
+      data.links = data.links.filter((link) => !ids.has(link.uid));
       return;
+    }
     case "groups.assignGenes":
       assignGenes(data.groups, operation.groupId, operation.geneIds);
       return;
@@ -184,14 +209,17 @@ function applyOperation(data, index, operation) {
       removeGenesFromGroups(data.groups, operation.geneIds);
       data.groups.push({ ...operation.group, genes: [...operation.geneIds] });
       return;
-    case "groups.delete":
-      data.groups = data.groups.filter((group) => !operation.ids.includes(group.uid));
+    case "groups.delete": {
+      const ids = new Set(operation.ids);
+      data.groups = data.groups.filter((group) => !ids.has(group.uid));
       return;
+    }
     case "groups.merge": {
       const target = data.groups.find((group) => group.uid === operation.targetId);
-      const sourceGenes = data.groups.filter((group) => operation.sourceIds.includes(group.uid)).flatMap((group) => group.genes || []);
+      const sourceIds = new Set(operation.sourceIds);
+      const sourceGenes = data.groups.filter((group) => sourceIds.has(group.uid)).flatMap((group) => group.genes || []);
       target.genes = [...new Set([...(target.genes || []), ...sourceGenes])];
-      data.groups = data.groups.filter((group) => !operation.sourceIds.includes(group.uid));
+      data.groups = data.groups.filter((group) => !sourceIds.has(group.uid));
       return;
     }
     case "groups.reorder": {
@@ -218,5 +246,5 @@ export function applyChartOperations(data, index, operations) {
   // Link-derived grouping is useful for an untouched chart, but a deliberate
   // membership edit makes the user's group assignments authoritative.
   if (hasStructuralGroupEdit) data.config = { ...(data.config || {}), updateGroups: false };
-  return { data, operations: applied };
+  return { data, operations: applied, effects: operationEffects(applied) };
 }

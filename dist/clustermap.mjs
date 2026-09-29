@@ -186,6 +186,10 @@ function filterLinks(
     .flat();
 }
 
+function removeMissing(records, allowed) {
+  for (const uid of records.keys()) if (!allowed.has(uid)) records.delete(uid);
+}
+
 function createChartState(data, previous = null) {
   const loci = previous?.loci || new Map();
   const genes = previous?.genes || new Map();
@@ -201,24 +205,28 @@ function createChartState(data, previous = null) {
   };
   const clusterIds = data.clusters.map((cluster) => cluster.uid);
   const clusterIdSet = new Set(clusterIds);
+  const previousOrder = previous?.clusterOrder || [];
+  const previousOrderSet = new Set(previousOrder);
   const clusterOrder = [
-    ...(previous?.clusterOrder || []).filter((uid) => clusterIdSet.has(uid)),
-    ...clusterIds.filter((uid) => !previous?.clusterOrder?.includes(uid)),
+    ...previousOrder.filter((uid) => clusterIdSet.has(uid)),
+    ...clusterIds.filter((uid) => !previousOrderSet.has(uid)),
   ];
   if (preview.clusterOrder) {
+    const previewOrderSet = new Set(preview.clusterOrder);
     preview.clusterOrder = [
       ...preview.clusterOrder.filter((uid) => clusterIdSet.has(uid)),
-      ...clusterIds.filter((uid) => !preview.clusterOrder.includes(uid)),
+      ...clusterIds.filter((uid) => !previewOrderSet.has(uid)),
     ];
   }
   if (!preview.locusOffsets) preview.locusOffsets = new Map();
   if (!preview.loci) preview.loci = new Map();
   if (!preview.clusterPositions) preview.clusterPositions = new Map();
-  const present = new Set();
+  const locusIds = new Set();
+  const geneKeys = new Set();
   for (const cluster of data.clusters) {
     if (!clusterOffsets.has(cluster.uid)) clusterOffsets.set(cluster.uid, 0);
     for (const locus of cluster.loci) {
-      present.add(locus.uid);
+      locusIds.add(locus.uid);
       if (!loci.has(locus.uid)) {
         loci.set(locus.uid, {
           start: locus.start,
@@ -236,7 +244,7 @@ function createChartState(data, previous = null) {
         };
         const locusBio = locus.bio || { start: locus.start, end: locus.end };
         const key = `${locus.uid}:${gene.uid}`;
-        present.add(key);
+        geneKeys.add(key);
         if (!genes.has(key)) {
           genes.set(key, {
             start: geneBio.start - locusBio.start,
@@ -247,25 +255,13 @@ function createChartState(data, previous = null) {
       }
     }
   }
-  for (const uid of loci.keys()) {
-    if (!data.clusters.some((cluster) => cluster.loci.some((locus) => locus.uid === uid))) loci.delete(uid);
-  }
-  for (const uid of genes.keys()) if (!present.has(uid)) genes.delete(uid);
-  for (const uid of clusterOffsets.keys()) {
-    if (!clusterIdSet.has(uid)) clusterOffsets.delete(uid);
-  }
-  for (const uid of locusOffsets.keys()) {
-    if (!loci.has(uid)) locusOffsets.delete(uid);
-  }
-  for (const uid of preview.locusOffsets.keys()) {
-    if (!loci.has(uid)) preview.locusOffsets.delete(uid);
-  }
-  for (const uid of preview.clusterPositions.keys()) {
-    if (!clusterIdSet.has(uid)) preview.clusterPositions.delete(uid);
-  }
-  for (const uid of preview.loci.keys()) {
-    if (!loci.has(uid)) preview.loci.delete(uid);
-  }
+  removeMissing(loci, locusIds);
+  removeMissing(genes, geneKeys);
+  removeMissing(clusterOffsets, clusterIdSet);
+  removeMissing(locusOffsets, locusIds);
+  removeMissing(preview.locusOffsets, locusIds);
+  removeMissing(preview.clusterPositions, clusterIdSet);
+  removeMissing(preview.loci, locusIds);
   return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview };
 }
 
@@ -609,6 +605,17 @@ function createChartIndex(data) {
   return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId };
 }
 
+// Chart data is JSON-like: it is also the format used for data/project export.
+// Clone plain values at the boundary so chart edits never mutate caller-owned
+// records, including nested link endpoints and user metadata.
+function cloneDataValue(value) {
+  if (Array.isArray(value)) return value.map(cloneDataValue);
+  if (!value || typeof value !== "object") return value;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneDataValue(entry)]));
+}
+
 function normalizeGene(gene, locusUid, clusterUid) {
   return {
     ...gene,
@@ -637,14 +644,15 @@ function normalizeLocus(locus, clusterUid) {
 }
 
 function normalizeChartData(data) {
+  const source = cloneDataValue(data);
   return {
-    ...data,
-    clusters: data.clusters.map((cluster) => ({
+    ...source,
+    clusters: source.clusters.map((cluster) => ({
       ...cluster,
       loci: cluster.loci.map((locus) => normalizeLocus(locus, cluster.uid)),
     })),
-    links: [...data.links],
-    groups: data.groups?.map((group) => ({
+    links: [...source.links],
+    groups: source.groups?.map((group) => ({
       ...group,
       genes: group.genes ? [...group.genes] : group.genes,
     })),
@@ -661,6 +669,29 @@ const fieldsForType = {
   "clusters.update": new Set(["label", "name"]),
   "links.update": new Set(["label", "colour", "hidden", "identity"]),
 };
+
+// Most edits change records already held by the renderer, so a redraw is
+// enough. Only operations which invalidate an ID lookup or the layout state
+// ask the chart controller to rebuild those derived structures.
+const effectsForType = {
+  "genes.delete": { reindex: true, rebuildState: true, refreshDerivedGroups: true },
+  "links.delete": { reindex: true, refreshDerivedGroups: true },
+  "groups.create": { reindex: true },
+  "groups.delete": { reindex: true },
+  "groups.merge": { reindex: true },
+};
+
+function operationEffects(operations) {
+  const effects = { reindex: false, rebuildState: false, refreshDerivedGroups: false };
+  for (const { type } of operations) {
+    const next = effectsForType[type];
+    if (!next) continue;
+    if (next.reindex) effects.reindex = true;
+    if (next.rebuildState) effects.rebuildState = true;
+    if (next.refreshDerivedGroups) effects.refreshDerivedGroups = true;
+  }
+  return effects;
+}
 
 function operationError(message) {
   return new TypeError(`Invalid chart operation: ${message}`);
@@ -824,9 +855,11 @@ function applyOperation(data, index, operation) {
       }));
       return;
     }
-    case "links.delete":
-      data.links = data.links.filter((link) => !operation.ids.includes(link.uid));
+    case "links.delete": {
+      const ids = new Set(operation.ids);
+      data.links = data.links.filter((link) => !ids.has(link.uid));
       return;
+    }
     case "groups.assignGenes":
       assignGenes(data.groups, operation.groupId, operation.geneIds);
       return;
@@ -837,14 +870,17 @@ function applyOperation(data, index, operation) {
       removeGenesFromGroups(data.groups, operation.geneIds);
       data.groups.push({ ...operation.group, genes: [...operation.geneIds] });
       return;
-    case "groups.delete":
-      data.groups = data.groups.filter((group) => !operation.ids.includes(group.uid));
+    case "groups.delete": {
+      const ids = new Set(operation.ids);
+      data.groups = data.groups.filter((group) => !ids.has(group.uid));
       return;
+    }
     case "groups.merge": {
       const target = data.groups.find((group) => group.uid === operation.targetId);
-      const sourceGenes = data.groups.filter((group) => operation.sourceIds.includes(group.uid)).flatMap((group) => group.genes || []);
+      const sourceIds = new Set(operation.sourceIds);
+      const sourceGenes = data.groups.filter((group) => sourceIds.has(group.uid)).flatMap((group) => group.genes || []);
       target.genes = [...new Set([...(target.genes || []), ...sourceGenes])];
-      data.groups = data.groups.filter((group) => !operation.sourceIds.includes(group.uid));
+      data.groups = data.groups.filter((group) => !sourceIds.has(group.uid));
       return;
     }
     case "groups.reorder": {
@@ -871,7 +907,7 @@ function applyChartOperations(data, index, operations) {
   // Link-derived grouping is useful for an untouched chart, but a deliberate
   // membership edit makes the user's group assignments authoritative.
   if (hasStructuralGroupEdit) data.config = { ...(data.config || {}), updateGroups: false };
-  return { data, operations: applied };
+  return { data, operations: applied, effects: operationEffects(applied) };
 }
 
 function validBounds$1(bounds) {
@@ -7108,6 +7144,98 @@ function createRasterInteractionBindings({
   };
 }
 
+const finiteNumber = (value) => Number.isFinite(value) ? value : null;
+const stateEntries = (value) => Array.isArray(value)
+  ? value.filter((entry) => Array.isArray(entry) && entry.length === 2 && entry[0] !== undefined)
+  : [];
+const recordStateEntries = (value) => stateEntries(value)
+  .filter(([, entry]) => entry && typeof entry === "object" && !Array.isArray(entry));
+
+function numericEntries(entries) {
+  return [...entries].filter(([, value]) => finiteNumber(value) !== null);
+}
+
+function locusSnapshot(state) {
+  return {
+    start: state.start,
+    end: state.end,
+    flipped: Boolean(state.flipped),
+    trimLeft: state.trimLeft?.uid ?? null,
+    trimRight: state.trimRight?.uid ?? null,
+  };
+}
+
+function geneSnapshot(state) {
+  return { start: state.start, end: state.end, strand: state.strand };
+}
+
+/** Return the durable, JSON-safe portion of a chart's visual state. */
+function serializeChartState(state) {
+  return {
+    version: 1,
+    clusterOrder: [...state.clusterOrder],
+    clusterOffsets: numericEntries(state.clusterOffsets),
+    locusOffsets: numericEntries(state.locusOffsets),
+    loci: [...state.loci].map(([uid, value]) => [uid, locusSnapshot(value)]),
+    genes: [...state.genes].map(([uid, value]) => [uid, geneSnapshot(value)]),
+    camera: { ...state.camera },
+  };
+}
+
+function boundaryGene(value, genes) {
+  // Early project exports stored the whole gene record. Accept those files as
+  // well as the current compact UID form.
+  const uid = value && typeof value === "object" ? value.uid : value;
+  return genes.get(uid) || null;
+}
+
+/** Restore a durable chart snapshot, ignoring records absent from this data. */
+function chartStateFromSnapshot(data, snapshot) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    throw new TypeError("Chart state must be an object.");
+  }
+  const clusterIds = new Set(data.clusters.map((cluster) => cluster.uid));
+  const loci = data.clusters.flatMap((cluster) => cluster.loci);
+  const locusIds = new Set(loci.map((locus) => locus.uid));
+  const genesByLocus = new Map(loci.map((locus) => [
+    locus.uid,
+    new Map(locus.genes.map((gene) => [gene.uid, gene])),
+  ]));
+  const geneKeys = new Set(loci.flatMap((locus) => locus.genes.map((gene) => `${locus.uid}:${gene.uid}`)));
+  const restored = createChartState(data);
+  const applyOffsets = (entries, allowed, target) => stateEntries(entries).forEach(([uid, value]) => {
+    if (allowed.has(uid) && finiteNumber(value) !== null) target.set(uid, value);
+  });
+  applyOffsets(snapshot.clusterOffsets, clusterIds, restored.clusterOffsets);
+  applyOffsets(snapshot.locusOffsets, locusIds, restored.locusOffsets);
+  recordStateEntries(snapshot.loci).forEach(([uid, value]) => {
+    if (!locusIds.has(uid)) return;
+    const target = restored.loci.get(uid);
+    ["start", "end"].forEach((key) => {
+      if (finiteNumber(value[key]) !== null) target[key] = value[key];
+    });
+    target.trimLeft = boundaryGene(value.trimLeft, genesByLocus.get(uid));
+    target.trimRight = boundaryGene(value.trimRight, genesByLocus.get(uid));
+    if (value.flipped !== undefined) target.flipped = Boolean(value.flipped);
+  });
+  recordStateEntries(snapshot.genes).forEach(([key, value]) => {
+    if (!geneKeys.has(key)) return;
+    const target = restored.genes.get(key);
+    ["start", "end", "strand"].forEach((property) => {
+      if (finiteNumber(value[property]) !== null) target[property] = value[property];
+    });
+  });
+  const camera = snapshot.camera || {};
+  if (Array.isArray(snapshot.clusterOrder)) {
+    const order = snapshot.clusterOrder.filter((uid) => clusterIds.has(uid));
+    restored.clusterOrder = [...new Set([...order, ...restored.clusterOrder])];
+  }
+  if (finiteNumber(camera.x) !== null && finiteNumber(camera.y) !== null && finiteNumber(camera.k) !== null && camera.k > 0) {
+    restored.camera = { x: camera.x, y: camera.y, k: camera.k };
+  }
+  return restored;
+}
+
 let nextChartInstance = 0;
 
 function clusterMap() {
@@ -7570,10 +7698,6 @@ function clusterMap() {
       chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
     );
     currentData.groups = createLinkGroups(projectedLinks, currentData.groups);
-  }
-
-  function operationsChangeDerivedGroups(operations) {
-    return operations.some(({ type }) => type === "genes.delete" || type === "links.delete");
   }
 
   function emitChange(change) {
@@ -8444,61 +8568,6 @@ function clusterMap() {
     selection.attr("transform", `translate(${x}, ${y}) scale(${k})`);
   }
 
-  const finiteNumber = (value) => Number.isFinite(value) ? value : null;
-  const stateEntries = (value) => Array.isArray(value)
-    ? value.filter((entry) => Array.isArray(entry) && entry.length === 2 && entry[0] !== undefined)
-    : [];
-  const recordStateEntries = (value) => stateEntries(value)
-    .filter(([, entry]) => entry && typeof entry === "object" && !Array.isArray(entry));
-  const serializableState = (state) => ({
-    version: 1,
-    clusterOrder: [...state.clusterOrder],
-    clusterOffsets: [...state.clusterOffsets],
-    locusOffsets: [...state.locusOffsets],
-    loci: [...state.loci],
-    genes: [...state.genes],
-    camera: { ...state.camera },
-  });
-  const stateFromSnapshot = (data, snapshot) => {
-    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-      throw new TypeError("Chart state must be an object.");
-    }
-    const clusterIds = new Set(data.clusters.map((cluster) => cluster.uid));
-    const locusIds = new Set(data.clusters.flatMap((cluster) => cluster.loci).map((locus) => locus.uid));
-    const geneKeys = new Set(data.clusters.flatMap((cluster) => cluster.loci)
-      .flatMap((locus) => locus.genes.map((gene) => `${locus.uid}:${gene.uid}`)));
-    const restored = createChartState(data);
-    const applyOffsets = (entries, allowed, target) => stateEntries(entries).forEach(([uid, value]) => {
-      if (allowed.has(uid) && finiteNumber(value) !== null) target.set(uid, value);
-    });
-    applyOffsets(snapshot.clusterOffsets, clusterIds, restored.clusterOffsets);
-    applyOffsets(snapshot.locusOffsets, locusIds, restored.locusOffsets);
-    recordStateEntries(snapshot.loci).forEach(([uid, value]) => {
-      if (!locusIds.has(uid)) return;
-      const target = restored.loci.get(uid);
-      ["start", "end", "trimLeft", "trimRight"].forEach((key) => {
-        if (finiteNumber(value[key]) !== null) target[key] = value[key];
-      });
-      if (value.flipped !== undefined) target.flipped = Boolean(value.flipped);
-    });
-    recordStateEntries(snapshot.genes).forEach(([key, value]) => {
-      if (!geneKeys.has(key)) return;
-      const target = restored.genes.get(key);
-      ["start", "end", "strand"].forEach((property) => {
-        if (finiteNumber(value[property]) !== null) target[property] = value[property];
-      });
-    });
-    const camera = snapshot.camera || {};
-    if (Array.isArray(snapshot.clusterOrder)) {
-      const order = snapshot.clusterOrder.filter((uid) => clusterIds.has(uid));
-      restored.clusterOrder = [...new Set([...order, ...restored.clusterOrder])];
-    }
-    if (finiteNumber(camera.x) !== null && finiteNumber(camera.y) !== null && finiteNumber(camera.k) !== null && camera.k > 0) {
-      restored.camera = { x: camera.x, y: camera.y, k: camera.k };
-    }
-    return restored;
-  };
-
   my.config = function (_) {
     if (!arguments.length) return runtime.config;
     runtime.configure(_);
@@ -8517,11 +8586,11 @@ function clusterMap() {
   };
   /** A serializable layout and camera snapshot for project persistence. */
   my.state = function (snapshot) {
-    if (!arguments.length) return chartState ? serializableState(chartState) : null;
+    if (!arguments.length) return chartState ? serializeChartState(chartState) : null;
     if (!container || !currentData) {
       throw new Error("Cannot replace chart state before the chart has rendered.");
     }
-    chartState = stateFromSnapshot(currentData, snapshot);
+    chartState = chartStateFromSnapshot(currentData, snapshot);
     runtime.setChartState(chartState);
     hasInitialView = true;
     redraw({ animate: false });
@@ -8534,16 +8603,19 @@ function clusterMap() {
       throw new Error("Cannot patch chart data before the chart has rendered.");
     }
     const result = applyChartOperations(currentData, chartIndex, operations);
-    // Membership operations can create or remove groups, and topology edits
-    // can change automatic components, so refresh lookups before rendering.
-    chartIndex = createChartIndex(currentData);
-    if (groupsAreAutomatic() && operationsChangeDerivedGroups(result.operations)) {
-      refreshDerivedGroups();
+    const { effects } = result;
+    if (effects.reindex) {
       chartIndex = createChartIndex(currentData);
+      if (groupsAreAutomatic() && effects.refreshDerivedGroups) {
+        refreshDerivedGroups();
+        chartIndex = createChartIndex(currentData);
+      }
+      runtime.setChartIndex(chartIndex);
     }
-    chartState = createChartState(currentData, chartState);
-    runtime.setChartIndex(chartIndex);
-    runtime.setChartState(chartState);
+    if (effects.rebuildState) {
+      chartState = createChartState(currentData, chartState);
+      runtime.setChartState(chartState);
+    }
     redraw({ animate: false });
     emitChange({ type: "data.apply", operations: result.operations });
     return my;

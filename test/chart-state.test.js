@@ -8,32 +8,20 @@ function dataFor(...clusterIds) {
 }
 
 test("chart state persists cluster order across data refreshes", async () => {
-  const { createChartState, getClusterOrder, setClusterOrder } = await import(
+  const { commitPreviewClusterOrder, createChartState, getClusterOrder, setPreviewClusterOrder } = await import(
     "../src/chartState.mjs"
   );
   let state = createChartState(dataFor("a", "b"));
 
   assert.deepEqual(getClusterOrder(state), ["a", "b"]);
 
-  setClusterOrder(state, ["b", "a"]);
+  setPreviewClusterOrder(state, ["b", "a"]);
+  commitPreviewClusterOrder(state);
   state = createChartState(dataFor("a", "b", "c"), state);
   assert.deepEqual(getClusterOrder(state), ["b", "a", "c"]);
 
   state = createChartState(dataFor("b", "c"), state);
   assert.deepEqual(getClusterOrder(state), ["b", "c"]);
-});
-
-test("chart state moves a cluster to a requested row", async () => {
-  const { createChartState, getClusterOrder, moveClusterToIndex } = await import(
-    "../src/chartState.mjs"
-  );
-  const state = createChartState(dataFor("a", "b", "c"));
-
-  moveClusterToIndex(state, "c", 1);
-  assert.deepEqual(getClusterOrder(state), ["a", "c", "b"]);
-
-  moveClusterToIndex(state, "a", 2);
-  assert.deepEqual(getClusterOrder(state), ["c", "b", "a"]);
 });
 
 test("chart state previews a cluster order before committing it", async () => {
@@ -120,6 +108,54 @@ test("chart state persists the camera transform across data refreshes", async ()
   setCamera(state, { x: 20, y: -10, k: 1.5 });
   state = createChartState(dataFor("a"), state);
   assert.deepEqual(getCamera(state), { x: 20, y: -10, k: 1.5 });
+});
+
+test("chart state snapshots preserve flipped trimmed loci as JSON-safe gene IDs", async () => {
+  const {
+    createChartState,
+    flipLocus,
+    getLocusState,
+    trimLocus,
+  } = await import("../src/chartState.mjs");
+  const {
+    chartStateFromSnapshot,
+    serializeChartState,
+  } = await import("../src/chartStateSnapshot.mjs");
+  const makeData = () => ({
+    clusters: [{
+      uid: "cluster-a",
+      loci: [{
+        uid: "locus-a",
+        start: 0,
+        end: 100,
+        genes: [
+          { uid: "gene-a", locusUid: "locus-a", start: 0, end: 10, strand: 1 },
+          { uid: "gene-b", locusUid: "locus-a", start: 20, end: 30, strand: 1 },
+          { uid: "gene-c", locusUid: "locus-a", start: 40, end: 50, strand: 1 },
+        ],
+      }],
+    }],
+  });
+  const data = makeData();
+  const locus = data.clusters[0].loci[0];
+  const state = createChartState(data);
+  const coordinateFor = (value) => value;
+  trimLocus(state, locus, { edge: "left", position: 20, coordinateFor, scaleGenes: true });
+  trimLocus(state, locus, { edge: "right", position: 50, coordinateFor, scaleGenes: true });
+  flipLocus(state, locus);
+
+  const snapshot = JSON.parse(JSON.stringify(serializeChartState(state)));
+  const savedLocus = new Map(snapshot.loci).get("locus-a");
+  assert.equal(savedLocus.flipped, true);
+  assert.equal(savedLocus.trimLeft, "gene-c");
+  assert.equal(savedLocus.trimRight, "gene-b");
+
+  const restoredData = makeData();
+  const restored = chartStateFromSnapshot(restoredData, snapshot);
+  assert.deepEqual(serializeChartState(restored), snapshot);
+  const restoredLocus = getLocusState(restored, restoredData.clusters[0].loci[0]);
+  assert.equal(restoredLocus.trimLeft.uid, "gene-c");
+  assert.equal(restoredLocus.trimRight.uid, "gene-b");
 });
 
 test("chart state tracks transient drag interactions", async () => {

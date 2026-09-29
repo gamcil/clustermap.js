@@ -1,3 +1,14 @@
+// Chart data is JSON-like: it is also the format used for data/project export.
+// Clone plain values at the boundary so chart edits never mutate caller-owned
+// records, including nested link endpoints and user metadata.
+function cloneDataValue(value) {
+  if (Array.isArray(value)) return value.map(cloneDataValue);
+  if (!value || typeof value !== "object") return value;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneDataValue(entry)]));
+}
+
 function normalizeGene(gene, locusUid, clusterUid) {
   return {
     ...gene,
@@ -26,14 +37,15 @@ function normalizeLocus(locus, clusterUid) {
 }
 
 export function normalizeChartData(data) {
+  const source = cloneDataValue(data);
   return {
-    ...data,
-    clusters: data.clusters.map((cluster) => ({
+    ...source,
+    clusters: source.clusters.map((cluster) => ({
       ...cluster,
       loci: cluster.loci.map((locus) => normalizeLocus(locus, cluster.uid)),
     })),
-    links: [...data.links],
-    groups: data.groups?.map((group) => ({
+    links: [...source.links],
+    groups: source.groups?.map((group) => ({
       ...group,
       genes: group.genes ? [...group.genes] : group.genes,
     })),
