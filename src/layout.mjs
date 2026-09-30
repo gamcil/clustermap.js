@@ -306,7 +306,16 @@ function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, labe
   };
 }
 
-function createLinkLayout(source, order, { genes, loci, clusters, areClustersAdjacent, scaleX, link, geneMidpoint }) {
+function createLinkLayout(source, order, {
+  genes,
+  loci,
+  clusters,
+  areClustersAdjacent,
+  scaleX,
+  link,
+  linkVisible = () => true,
+  geneMidpoint,
+}) {
   const query = genes.get(source.query.uid);
   const target = genes.get(source.target.uid);
   let anchors = null;
@@ -323,15 +332,21 @@ function createLinkLayout(source, order, { genes, loci, clusters, areClustersAdj
       geneMidpoint,
     });
   }
+  const allowed = linkVisible(source);
   return {
     source,
     order,
+    // Renderer policy (group membership, best-only reduction, hidden links)
+    // is resolved once by the runtime. Keeping it on the retained record lets
+    // all renderers, including dynamic cluster-drag previews, agree on it.
+    allowed,
     anchors,
     bounds: boundsFromLinkAnchors(anchors),
     path: getLinkPath(anchors, link),
     labelPosition: anchors ? getLinkLabelPosition(anchors, link.labelPosition) : null,
     visible:
       Boolean(anchors) &&
+      allowed &&
       !source.hidden &&
       source.identity >= link.threshold &&
       query?.visible &&
@@ -422,6 +437,7 @@ export function buildScene(
     shape,
     label,
     link,
+    linkVisible = () => true,
     clusterLabel = () => "",
     alignLabels = true,
     chrome = null,
@@ -512,6 +528,7 @@ export function buildScene(
       areClustersAdjacent: indexedAreClustersAdjacent,
       scaleX,
       link,
+      linkVisible,
       geneMidpoint,
     });
     links.set(source.uid, linkLayout);
@@ -568,6 +585,7 @@ export function patchFlippedLocusScene(
     shape,
     label,
     link,
+    linkVisible = () => true,
     clusterLabel = () => "",
     alignLabels = true,
     linksForGene = () => [],
@@ -636,6 +654,7 @@ export function patchFlippedLocusScene(
       areClustersAdjacent,
       scaleX,
       link,
+      linkVisible,
       geneMidpoint,
     });
     links.set(source.uid, layout);
@@ -838,6 +857,7 @@ export function patchAnchoredGeneScene(
       areClustersAdjacent: options.areClustersAdjacent,
       scaleX: options.scaleX,
       link: options.link,
+      linkVisible: options.linkVisible,
       geneMidpoint,
     });
     links.set(layout.source.uid, layout);

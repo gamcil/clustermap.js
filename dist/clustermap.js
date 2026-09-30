@@ -2249,7 +2249,16 @@
     };
   }
 
-  function createLinkLayout(source, order, { genes, loci, clusters, areClustersAdjacent, scaleX, link, geneMidpoint }) {
+  function createLinkLayout(source, order, {
+    genes,
+    loci,
+    clusters,
+    areClustersAdjacent,
+    scaleX,
+    link,
+    linkVisible = () => true,
+    geneMidpoint,
+  }) {
     const query = genes.get(source.query.uid);
     const target = genes.get(source.target.uid);
     let anchors = null;
@@ -2266,15 +2275,21 @@
         geneMidpoint,
       });
     }
+    const allowed = linkVisible(source);
     return {
       source,
       order,
+      // Renderer policy (group membership, best-only reduction, hidden links)
+      // is resolved once by the runtime. Keeping it on the retained record lets
+      // all renderers, including dynamic cluster-drag previews, agree on it.
+      allowed,
       anchors,
       bounds: boundsFromLinkAnchors(anchors),
       path: getLinkPath(anchors, link),
       labelPosition: anchors ? getLinkLabelPosition(anchors, link.labelPosition) : null,
       visible:
         Boolean(anchors) &&
+        allowed &&
         !source.hidden &&
         source.identity >= link.threshold &&
         query?.visible &&
@@ -2365,6 +2380,7 @@
       shape,
       label,
       link,
+      linkVisible = () => true,
       clusterLabel = () => "",
       alignLabels = true,
       chrome = null,
@@ -2455,6 +2471,7 @@
         areClustersAdjacent: indexedAreClustersAdjacent,
         scaleX,
         link,
+        linkVisible,
         geneMidpoint,
       });
       links.set(source.uid, linkLayout);
@@ -2511,6 +2528,7 @@
       shape,
       label,
       link,
+      linkVisible = () => true,
       clusterLabel = () => "",
       alignLabels = true,
       linksForGene = () => [],
@@ -2579,6 +2597,7 @@
         areClustersAdjacent,
         scaleX,
         link,
+        linkVisible,
         geneMidpoint,
       });
       links.set(source.uid, layout);
@@ -2781,6 +2800,7 @@
         areClustersAdjacent: options.areClustersAdjacent,
         scaleX: options.scaleX,
         link: options.link,
+        linkVisible: options.linkVisible,
         geneMidpoint,
       });
       links.set(layout.source.uid, layout);
@@ -3550,6 +3570,7 @@
       queryOrder !== undefined &&
       targetOrder !== undefined &&
       Math.abs(queryOrder - targetOrder) === 1 &&
+      link.allowed &&
       link.source.identity >= config.link.threshold &&
       query?.visible &&
       target?.visible;
@@ -5343,6 +5364,7 @@
   let chartState = null;
   let currentScene = null;
   let beforeGeneAnchorUpdate = null;
+  let allowedLinkIds = null;
 
   // IDs are part of the SVG surface, so they must be unique when several maps
   // are mounted on the same document. Keep the logical suffix stable: it is
@@ -5453,6 +5475,7 @@
         threshold: config.link.threshold,
         labelPosition: config.link.label.position,
       },
+      linkVisible: (link) => !allowedLinkIds || allowedLinkIds.has(link.uid),
       clusterLabel: locusText,
       alignLabels: config.cluster.alignLabels,
     };
@@ -5513,6 +5536,15 @@
   function buildChartScene(data) {
     // Scene construction is read-only. The controller synchronizes any
     // scale-dependent chart state before asking the runtime to project it.
+    // SVG historically applies this policy while binding its link elements.
+    // Keep the same result in the shared scene so Canvas and WebGPU consume the
+    // exact same best-only, threshold, membership, and hidden-link set.
+    allowedLinkIds = new Set(filterLinks(data.links, {
+      groupForGene: scales.group,
+      geneForUid: lookup.geneData,
+      bestOnly: config.link.bestOnly,
+      threshold: config.link.threshold,
+    }).map((link) => link.uid));
     currentScene = buildScene(data, {
       ...sceneProjectionOptions(),
       scaleY: scales.y,
@@ -6027,6 +6059,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       queryOrder !== undefined &&
       targetOrder !== undefined &&
       Math.abs(queryOrder - targetOrder) === 1 &&
+      link.allowed &&
       link.source.identity >= config.link.threshold
     );
   }
@@ -6492,6 +6525,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           if (
             query?.visible &&
             target?.visible &&
+            link.allowed &&
             link.source.identity >= config.link.threshold &&
             index !== undefined
           ) {

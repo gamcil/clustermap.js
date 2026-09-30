@@ -687,6 +687,7 @@ function linkGeometryForPreview(scene, link, preview, config) {
     queryOrder !== undefined &&
     targetOrder !== undefined &&
     Math.abs(queryOrder - targetOrder) === 1 &&
+    link.allowed &&
     link.source.identity >= config.link.threshold &&
     query?.visible &&
     target?.visible;

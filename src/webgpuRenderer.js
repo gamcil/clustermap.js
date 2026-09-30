@@ -358,6 +358,7 @@ function linkVisibleForPreview(scene, link, preview, config) {
     queryOrder !== undefined &&
     targetOrder !== undefined &&
     Math.abs(queryOrder - targetOrder) === 1 &&
+    link.allowed &&
     link.source.identity >= config.link.threshold
   );
 }
@@ -827,6 +828,7 @@ export async function createWebGpuRenderer(canvas) {
         if (
           query?.visible &&
           target?.visible &&
+          link.allowed &&
           link.source.identity >= config.link.threshold &&
           index !== undefined
         ) {

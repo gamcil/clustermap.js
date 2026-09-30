@@ -1,7 +1,7 @@
 import * as d3 from "d3";
 import { updateConfig } from "./utils.js";
 import { createDefaultConfig } from "./config.js";
-import { getGroupScaleValues } from "./links/groups.mjs";
+import { filterLinks, getGroupScaleValues } from "./links/groups.mjs";
 import {
   anchorGeneGroup,
   getClusterOffset,
@@ -80,6 +80,7 @@ let chartIndex = null;
 let chartState = null;
 let currentScene = null;
 let beforeGeneAnchorUpdate = null;
+let allowedLinkIds = null;
 
 // IDs are part of the SVG surface, so they must be unique when several maps
 // are mounted on the same document. Keep the logical suffix stable: it is
@@ -190,6 +191,7 @@ function sceneProjectionOptions({ areClustersAdjacent = clustersAreAdjacent } = 
       threshold: config.link.threshold,
       labelPosition: config.link.label.position,
     },
+    linkVisible: (link) => !allowedLinkIds || allowedLinkIds.has(link.uid),
     clusterLabel: locusText,
     alignLabels: config.cluster.alignLabels,
   };
@@ -250,6 +252,15 @@ function adjacencyForClusterOrder(order) {
 function buildChartScene(data) {
   // Scene construction is read-only. The controller synchronizes any
   // scale-dependent chart state before asking the runtime to project it.
+  // SVG historically applies this policy while binding its link elements.
+  // Keep the same result in the shared scene so Canvas and WebGPU consume the
+  // exact same best-only, threshold, membership, and hidden-link set.
+  allowedLinkIds = new Set(filterLinks(data.links, {
+    groupForGene: scales.group,
+    geneForUid: lookup.geneData,
+    bestOnly: config.link.bestOnly,
+    threshold: config.link.threshold,
+  }).map((link) => link.uid));
   currentScene = buildScene(data, {
     ...sceneProjectionOptions(),
     scaleY: scales.y,
