@@ -75,3 +75,44 @@ test("runtime applies best-only link visibility to the shared scene", async () =
   assert.equal(scene.links.get("higher").allowed, true);
   assert.equal(scene.links.get("higher").visible, true);
 });
+
+test("runtime accepts initial locus offsets in sequence-coordinate units", async () => {
+  const [
+    { createChartRuntime },
+    { normalizeChartData },
+    { createChartIndex },
+    { createChartState, setLocusOffset },
+  ] = await Promise.all([
+    import("../src/chartRuntime.js"),
+    import("../src/data/normalize.mjs"),
+    import("../src/data/index.mjs"),
+    import("../src/chartState.mjs"),
+  ]);
+  const data = normalizeChartData({
+    clusters: [{
+      uid: "cluster",
+      loci: [
+        { uid: "aligned", offset: -500, start: 0, end: 100, genes: [] },
+        { uid: "packed", start: 0, end: 100, genes: [] },
+      ],
+    }],
+    links: [],
+    groups: [],
+  });
+  const runtime = createChartRuntime();
+  const state = createChartState(data);
+  runtime.setChartIndex(createChartIndex(data));
+  runtime.setChartState(state);
+  runtime.updateGroups(data.groups);
+  runtime.updateScales(data);
+
+  assert.equal(
+    runtime.scales.locus("aligned"),
+    runtime.scales.x(-500) - runtime.scales.x(0)
+  );
+  assert.notEqual(runtime.scales.locus("packed"), runtime.scales.locus("aligned"));
+
+  setLocusOffset(state, "aligned", 42);
+  runtime.updateScales(data);
+  assert.equal(runtime.scales.locus("aligned"), 42);
+});

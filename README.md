@@ -147,6 +147,13 @@ the public link schema, and rejects dangling gene references.
   `plot.renderer` to `"svg"`, `"canvas"`, or `"webgpu"`.
 - `chart.data(data)` replaces data on an already-mounted chart; `chart.data()`
   returns its current normalized data.
+- A locus may include an optional numeric `offset` to provide an initial
+  horizontal alignment, for example `{ uid: "contig-a", offset: -12500, ... }`.
+  It is measured in the same sequence-coordinate units as gene and locus
+  positions—not rendered pixels—so a producer such as clinker can provide its
+  synteny layout without knowing `plot.scaleFactor`. Explicit offsets override
+  the default within-cluster packing only on first initialization; restored
+  project state and subsequent user drags take precedence.
 - `chart.patch(operations)` validates and atomically applies a batch of edits.
   Presentation operations are `genes.update` (label, colour, name),
   `groups.update` (label, subtitle, colour, hidden), `links.update` (label, colour,

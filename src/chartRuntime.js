@@ -375,7 +375,20 @@ function updateScales(data) {
     ...locusLayout(),
     locusOffset: () => 0,
   });
-  initializeLocusOffsets(chartState, domain.map((uid, index) => [uid, range[index]]));
+  // A producer such as clinker may supply an initial alignment as a locus
+  // offset in sequence-coordinate units. Convert it through the active x
+  // scale here, rather than making callers depend on plot.scaleFactor. An
+  // existing chart/project state still wins, so data refreshes never undo a
+  // user drag or restored project layout.
+  const suppliedOffsets = new Map(
+    data.clusters.flatMap((cluster) => cluster.loci)
+      .filter((locus) => Number.isFinite(locus.offset))
+      .map((locus) => [locus.uid, xDistance(scales.x, 0, locus.offset)])
+  );
+  initializeLocusOffsets(chartState, domain.map((uid, index) => [
+    uid,
+    suppliedOffsets.get(uid) ?? range[index],
+  ]));
   scales.locus.domain(domain);
   refreshLocusOffsetScale();
 }
