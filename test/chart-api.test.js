@@ -13,7 +13,13 @@ test("chart factory exposes only the supported public methods", async () => {
     assert.equal(typeof chart.config, "function");
     assert.equal(typeof chart.data, "function");
     assert.equal(typeof chart.state, "function");
+    assert.equal(typeof chart.project, "function");
     assert.equal(typeof chart.patch, "function");
+    assert.equal(typeof chart.canUndo, "function");
+    assert.equal(typeof chart.canRedo, "function");
+    assert.equal(typeof chart.undo, "function");
+    assert.equal(typeof chart.redo, "function");
+    assert.equal(typeof chart.clearHistory, "function");
     assert.equal(typeof chart.highlight, "function");
     assert.equal(typeof chart.locusSelection, "function");
     assert.equal(typeof chart.flipLoci, "function");

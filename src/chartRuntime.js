@@ -162,11 +162,6 @@ function updateIdentityScale(data) {
 // scales and visual policy. Keep that dependency bundle in one place so a
 // configuration addition cannot silently affect full builds but not retained
 // flip/anchor patches (or vice versa).
-function clustersAreAdjacent(one, two) {
-  const order = getClusterOrder(chartState);
-  return Math.abs(order.indexOf(one) - order.indexOf(two)) === 1;
-}
-
 function locusText(cluster) {
   return formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates);
 }
@@ -176,13 +171,13 @@ function locusTextForCluster(uid) {
   return cluster ? locusText(cluster) : "";
 }
 
-function sceneProjectionOptions({ areClustersAdjacent = clustersAreAdjacent } = {}) {
+function sceneProjectionOptions({ areClustersAdjacent } = {}) {
   return {
     scaleX: scales.x,
     locusOffset: scales.locus,
     getLocusState: locusState,
     getGeneState: (gene) => getGeneState(chartState, gene),
-    areClustersAdjacent,
+    areClustersAdjacent: areClustersAdjacent || (() => false),
     shape: config.gene.shape,
     label: config.gene.label,
     link: {
@@ -261,12 +256,15 @@ function buildChartScene(data) {
     bestOnly: config.link.bestOnly,
     threshold: config.link.threshold,
   }).map((link) => link.uid));
+  const clusterOrder = getClusterOrder(chartState);
   currentScene = buildScene(data, {
-    ...sceneProjectionOptions(),
+    ...sceneProjectionOptions({
+      areClustersAdjacent: adjacencyForClusterOrder(clusterOrder),
+    }),
     scaleY: scales.y,
     clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
     clusterOffset: scales.offset,
-    clusterOrder: getClusterOrder(chartState),
+    clusterOrder,
     chrome: sceneChromeOptions(data),
   });
   return currentScene;
@@ -274,7 +272,9 @@ function buildChartScene(data) {
 
 function patchFlippedLocus(previousScene, locus) {
   currentScene = patchFlippedLocusScene(previousScene, locus, {
-    ...sceneProjectionOptions(),
+    ...sceneProjectionOptions({
+      areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
+    }),
     linksForGene: lookup.linksForGene,
   });
   return currentScene;

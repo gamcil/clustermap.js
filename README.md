@@ -138,6 +138,37 @@ the public link schema, and rejects dangling gene references.
 </html>
 ```
 
+## Optional editor element
+
+The data and appearance editor is an opt-in browser component. It is separate
+from the chart entry point, so applications which only render a plot do not
+load editor code or styles.
+
+```js
+import { ClusterMap } from "clinker";
+import { defineClinkerEditor } from "clinker/editor";
+import "clinker/editor.css"; // Optional default styling.
+
+defineClinkerEditor();
+const chart = ClusterMap();
+// Mount the chart with D3 as usual, then attach the same chart instance.
+document.querySelector("clinker-editor").chart = chart;
+```
+
+```html
+<div id="plot"></div>
+<clinker-editor></clinker-editor>
+```
+
+`<clinker-editor>` uses light DOM. Omit the CSS import for an unstyled editor,
+or override the namespaced `.cm-editor` classes from an application stylesheet.
+The component never owns a separate data copy: edits call the attached chart's
+public API and its table refreshes from `chart.on("change")`.
+
+For the optional in-plot locus batch controls, import
+`mountPlotSelectionToolbar` from `clinker/editor` and call it with the mounted
+chart and a positioned plot container. It returns a cleanup function.
+
 ## Chart API
 
 `ClusterMap()` returns a callable D3 chart. Its supported methods are:
@@ -147,6 +178,11 @@ the public link schema, and rejects dangling gene references.
   `plot.renderer` to `"svg"`, `"canvas"`, or `"webgpu"`.
 - `chart.data(data)` replaces data on an already-mounted chart; `chart.data()`
   returns its current normalized data.
+- `chart.project()` returns a serializable `{ format, version, data, config,
+  state }` snapshot. Pass such a snapshot to `chart.project(project)` to restore
+  it into an already-mounted chart. Runtime callback hooks in configuration are
+  omitted because they cannot be represented in project JSON; reattach them in
+  application code after loading.
 - A locus may include an optional numeric `offset` to provide an initial
   horizontal alignment, for example `{ uid: "contig-a", offset: -12500, ... }`.
   It is measured in the same sequence-coordinate units as gene and locus
@@ -167,15 +203,22 @@ the public link schema, and rejects dangling gene references.
   `groups.delete`. They retain exclusive membership: assigning a gene to a
   group removes it from any other group, and makes the user-managed groups
   authoritative rather than regenerating them from links on redraw.
+- `chart.undo()` and `chart.redo()` reverse or reapply chart edits, appearance
+  changes, and completed plot manipulations (flips, anchors, trims, and
+  reordering drags). `chart.canUndo()` / `chart.canRedo()` expose their
+  availability, and `chart.clearHistory()` discards both stacks. Replacing data
+  or loading a project starts a fresh editing history. The chart records only
+  the affected records for deletes, rather than retaining a full data snapshot
+  after every change. History retains the latest 100 changes.
 - `colourBar.domain` controls the shared identity colour scale. Its `min` and
   `max` are normalized values from 0 to 1; set `minMode` or `maxMode` to
   `"data"` to derive that edge from the lowest or highest link identity. The
   scale clamps outside values. This changes colour mapping only;
   `link.threshold` independently controls which links are visible.
-- `chart.on("change", listener)` subscribes to data replacements, applied
-  edit batches, and locus-selection/flip events, returning an unsubscribe
-  function. This lets an external table or persistence layer stay synchronized
-  without inspecting renderer state.
+- `chart.on("change", listener)` subscribes to data, configuration, state,
+  history, and locus-selection/flip changes, returning an unsubscribe function. This
+  lets an external table or persistence layer stay synchronized without
+  inspecting renderer state.
 - `chart.highlight(geneIds)` draws a non-destructive selection outline around
   the given gene IDs in every renderer; call `chart.highlight()` to read the
   current selection or pass an empty iterable to clear it. Pass
@@ -183,7 +226,9 @@ the public link schema, and rejects dangling gene references.
 - `chart.locusSelection(ids)` sets the loci selected for batch plot operations;
   call it without arguments to read the selected IDs. Shift-clicking a locus in
   the plot uses the same selection. `chart.flipLoci(ids)` flips the supplied
-  loci, or the current locus selection when called without IDs.
+  loci, or the current locus selection when called without IDs. When a dragged
+  cluster contains a selected locus, all selected clusters reorder together,
+  retaining their relative order.
 - `chart.exportSvg({ padding })` returns the current figure as an SVG string,
   irrespective of the interactive renderer in use.
 - `chart.destroy()` releases chart-owned event handlers, animations, minimap

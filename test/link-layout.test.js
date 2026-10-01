@@ -26,23 +26,41 @@ test("link layout anchors reverse genes on their displayed left edge", async () 
 });
 
 test("link layout produces paths for ribbons and lines", async () => {
-  const { getLinkPath } = await import("../src/links/layout.mjs");
+  const { getLinkPath, sampleLinkGeometry, traceLinkPath } = await import("../src/links/layout.mjs");
   const anchors = [10, 20, 5, 30, 40, 25];
 
   assert.equal(
     getLinkPath(anchors, { asLine: false, straight: true }),
-    "M10,5 L20,5 L40,25 L30,25 L10,5"
+    "M10,5L20,5L40,25L30,25L10,5Z"
   );
   assert.equal(
     getLinkPath(anchors, { asLine: false, straight: false }),
-    "M20,5C20,15,40,15,40,25L30,25C30,15,10,15,10,5L20,5"
+    "M20,5C20,15,40,15,40,25L30,25C30,15,10,15,10,5Z"
   );
   assert.equal(
     getLinkPath(anchors, { asLine: true, straight: true }),
-    "M15,5 L35,25"
+    "M15,5L35,25"
   );
   assert.equal(
     getLinkPath(anchors, { asLine: true, straight: false }),
     "M15,5C15,15,35,15,35,25"
   );
+
+  assert.deepEqual(
+    sampleLinkGeometry(anchors, { asLine: false, straight: true }),
+    { asLine: false, upper: [[20, 5], [40, 25]], lower: [[10, 5], [30, 25]], line: [] }
+  );
+  assert.deepEqual(
+    sampleLinkGeometry(anchors, { asLine: true, straight: false, segments: 2 }).line,
+    [[15, 5], [25, 15], [35, 25]]
+  );
+
+  const commands = [];
+  traceLinkPath({
+    moveTo: (...values) => commands.push(["M", ...values]),
+    lineTo: (...values) => commands.push(["L", ...values]),
+    bezierCurveTo: (...values) => commands.push(["C", ...values]),
+    closePath: () => commands.push(["Z"]),
+  }, anchors, { asLine: false, straight: true });
+  assert.deepEqual(commands, [["M", 10, 5], ["L", 20, 5], ["L", 40, 25], ["L", 30, 25], ["L", 10, 5], ["Z"]]);
 });

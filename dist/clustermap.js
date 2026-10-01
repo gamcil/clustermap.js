@@ -2,7 +2,7 @@
   typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports, require('d3')) :
   typeof define === 'function' && define.amd ? define(['exports', 'd3'], factory) :
   (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ClusterMap = {}, global.d3));
-})(this, (function (exports, d3$1) { 'use strict';
+})(this, (function (exports, d3) { 'use strict';
 
   function _interopNamespace(e) {
     if (e && e.__esModule) return e;
@@ -22,7 +22,7 @@
     return Object.freeze(n);
   }
 
-  var d3__namespace = /*#__PURE__*/_interopNamespace(d3$1);
+  var d3__namespace = /*#__PURE__*/_interopNamespace(d3);
 
   function connectedComponents(links) {
     const parent = new Map();
@@ -160,54 +160,59 @@
     links,
     { groupForGene, geneForUid, bestOnly, threshold }
   ) {
-    const visibleLinks = links.filter(
-      (link) => {
-        // Link records remain part of the editable data even if an endpoint is
-        // temporarily absent (for example after deleting a gene). A renderer
-        // must omit such a link rather than treating that data relationship as
-        // deleted or dereferencing a missing gene below.
-        if (link.hidden || !geneForUid(link.query.uid) || !geneForUid(link.target.uid)) return false;
-        return (
-        groupForGene(link.query.uid) !== null &&
-        groupForGene(link.target.uid) !== null
-        );
-      }
-    );
+    const passing = [];
+    for (const link of links) {
+      // Link records remain part of the editable data even if an endpoint is
+      // temporarily absent (for example after deleting a gene). A renderer
+      // must omit such a link rather than treating that data relationship as
+      // deleted or dereferencing a missing gene below.
+      const query = geneForUid(link.query.uid);
+      const target = geneForUid(link.target.uid);
+      if (
+        link.hidden ||
+        !query ||
+        !target ||
+        link.identity < threshold ||
+        groupForGene(link.query.uid) === null ||
+        groupForGene(link.target.uid) === null
+      ) continue;
+      passing.push({ link, query, target });
+    }
     // Threshold decides visibility regardless of whether the optional
     // best-per-cluster-pair reduction is enabled. Colour scaling is deliberately
     // independent and is resolved by the shared identity scale.
-    const passingThreshold = visibleLinks.filter((link) => link.identity >= threshold);
-    if (!bestOnly) return passingThreshold;
+    if (!bestOnly) return passing.map(({ link }) => link);
 
-    const pairKey = (left, right) => [left, right]
-      .map((uid) => `${typeof uid}:${String(uid)}`)
-      .sort()
-      .join("|");
+    const pairKey = (left, right) => {
+      const first = `${typeof left}:${String(left)}`;
+      const second = `${typeof right}:${String(right)}`;
+      return first < second ? `${first}|${second}` : `${second}|${first}`;
+    };
     const linksByClusterPair = new Map();
-    const byIdentity = [...passingThreshold].sort((a, b) => b.identity - a.identity);
+    const byIdentity = [...passing].sort((a, b) => b.link.identity - a.link.identity);
 
-    for (const link of byIdentity) {
+    for (const { link, query, target } of byIdentity) {
       const clusterPair = pairKey(
-        geneForUid(link.query.uid).clusterUid,
-        geneForUid(link.target.uid).clusterUid
+        query.clusterUid,
+        target.clusterUid
       );
-
-      if (!linksByClusterPair.has(clusterPair)) {
-        linksByClusterPair.set(clusterPair, [link]);
-        continue;
-      }
-
-      const selected = linksByClusterPair.get(clusterPair);
-      const superseded = selected.some((candidate) => {
-        const genes = new Set([candidate.query.uid, candidate.target.uid]);
-        const sharesGene = genes.has(link.query.uid) || genes.has(link.target.uid);
-        return sharesGene && link.identity < candidate.identity;
-      });
-      if (!superseded) selected.push(link);
+      const selected = linksByClusterPair.get(clusterPair) || {
+        links: [],
+        bestIdentityForGene: new Map(),
+      };
+      const queryBest = selected.bestIdentityForGene.get(link.query.uid);
+      const targetBest = selected.bestIdentityForGene.get(link.target.uid);
+      // Equal-scoring links intentionally survive: only a strictly better link
+      // that shares an endpoint supersedes this relationship.
+      if (queryBest > link.identity || targetBest > link.identity) continue;
+      selected.links.push(link);
+      selected.bestIdentityForGene.set(link.query.uid, Math.max(queryBest ?? -Infinity, link.identity));
+      selected.bestIdentityForGene.set(link.target.uid, Math.max(targetBest ?? -Infinity, link.identity));
+      linksByClusterPair.set(clusterPair, selected);
     }
 
     return [...linksByClusterPair.values()]
-      .flat();
+      .flatMap(({ links: selected }) => selected);
   }
 
   function removeMissing(records, allowed) {
@@ -699,7 +704,9 @@
   // ask the chart controller to rebuild those derived structures.
   const effectsForType = {
     "genes.delete": { reindex: true, rebuildState: true, refreshDerivedGroups: true },
+    "genes.restore": { reindex: true, rebuildState: true, refreshDerivedGroups: true },
     "links.delete": { reindex: true, refreshDerivedGroups: true },
+    "links.restore": { reindex: true, refreshDerivedGroups: true },
     "groups.create": { reindex: true },
     "groups.delete": { reindex: true },
     "groups.merge": { reindex: true },
@@ -849,6 +856,35 @@
       }
       return { type: operation.type, ids };
     }
+    // Restore operations are generated by chart history. They deliberately are
+    // not part of the documented editing API, but keeping them serializable
+    // means undo never needs a full copy of a chart's links or genes.
+    if (operation.type === "genes.restore") {
+      if (!Array.isArray(operation.records) || !operation.records.length) {
+        throw operationError("genes.restore requires records");
+      }
+      return {
+        type: operation.type,
+        records: operation.records.map(({ locusId, index: position, gene }) => {
+          if (!index.locusById.has(locusId) || !gene || typeof gene !== "object") {
+            throw operationError("genes.restore contains an invalid record");
+          }
+          return { locusId, index: Math.max(0, Math.trunc(position) || 0), gene: structuredClone(gene) };
+        }),
+      };
+    }
+    if (operation.type === "links.restore") {
+      if (!Array.isArray(operation.records) || !operation.records.length) {
+        throw operationError("links.restore requires records");
+      }
+      return {
+        type: operation.type,
+        records: operation.records.map(({ index: position, link }) => {
+          if (!link || typeof link !== "object") throw operationError("links.restore contains an invalid record");
+          return { index: Math.max(0, Math.trunc(position) || 0), link: structuredClone(link) };
+        }),
+      };
+    }
     return validateUpdate(operation, index, groupIds) || validateStructuralGroupOperation(operation, index, groupIds);
   }
 
@@ -879,11 +915,24 @@
         }));
         return;
       }
+      case "genes.restore": {
+        const loci = index.locusById;
+        for (const { locusId, index: position, gene } of operation.records) {
+          const locus = loci.get(locusId);
+          locus.genes.splice(Math.min(position, locus.genes.length), 0, structuredClone(gene));
+        }
+        return;
+      }
       case "links.delete": {
         const ids = new Set(operation.ids);
         data.links = data.links.filter((link) => !ids.has(link.uid));
         return;
       }
+      case "links.restore":
+        for (const { index: position, link } of operation.records) {
+          data.links.splice(Math.min(position, data.links.length), 0, structuredClone(link));
+        }
+        return;
       case "groups.assignGenes":
         assignGenes(data.groups, operation.groupId, operation.geneIds);
         return;
@@ -915,6 +964,88 @@
     }
   }
 
+  function publicGroup(group) {
+    return Object.fromEntries(["uid", "label", "subtitle", "colour", "hidden"]
+      .filter((key) => key in group)
+      .map((key) => [key, structuredClone(group[key])]));
+  }
+
+  function inverseOperation(data, index, operation) {
+    const records = fieldsForType[operation.type] && recordsForOperation(index, operation.type);
+    if (records) {
+      const fields = Object.keys(operation.changes);
+      return operation.ids.map((uid) => {
+        const record = records.get(uid);
+        return {
+          type: operation.type,
+          ids: [record.uid],
+          changes: Object.fromEntries(fields.map((field) => [field, structuredClone(record[field])])),
+        };
+      });
+    }
+    if (operation.type === "genes.delete") {
+      const removed = new Set(operation.ids);
+      return [{
+        type: "genes.restore",
+        records: data.clusters.flatMap((cluster) => cluster.loci.flatMap((locus) => locus.genes
+          .map((gene, position) => removed.has(gene.uid) && { locusId: locus.uid, index: position, gene: structuredClone(gene) })
+          .filter(Boolean))),
+      }];
+    }
+    if (operation.type === "links.delete") {
+      const removed = new Set(operation.ids);
+      return [{
+        type: "links.restore",
+        records: data.links.map((link, position) => removed.has(link.uid) && { index: position, link: structuredClone(link) }).filter(Boolean),
+      }];
+    }
+    if (operation.type === "groups.reorder") {
+      return [{ type: "groups.reorder", ids: data.groups.map((group) => group.uid) }];
+    }
+    if (operation.type === "groups.create") {
+      const affected = new Set(operation.geneIds);
+      const restore = data.groups
+        .map((group) => ({ group, geneIds: (group.genes || []).filter((uid) => affected.has(uid)) }))
+        .filter(({ geneIds }) => geneIds.length);
+      return [
+        { type: "groups.delete", ids: [operation.group.uid] },
+        ...restore.map(({ group, geneIds }) => ({ type: "groups.assignGenes", groupId: group.uid, geneIds })),
+      ];
+    }
+    if (operation.type === "groups.assignGenes" || operation.type === "groups.unassignGenes") {
+      const affected = new Set(operation.geneIds);
+      const restore = data.groups
+        .map((group) => ({ group, geneIds: (group.genes || []).filter((uid) => affected.has(uid)) }))
+        .filter(({ geneIds }) => geneIds.length);
+      return [
+        { type: "groups.unassignGenes", geneIds: operation.geneIds },
+        ...restore.map(({ group, geneIds }) => ({ type: "groups.assignGenes", groupId: group.uid, geneIds })),
+      ];
+    }
+    if (operation.type === "groups.delete") {
+      const removed = new Set(operation.ids);
+      const groups = data.groups.filter((group) => removed.has(group.uid));
+      return [
+        ...groups.map((group) => ({ type: "groups.create", group: publicGroup(group), geneIds: [...(group.genes || [])] })),
+        { type: "groups.reorder", ids: data.groups.map((group) => group.uid) },
+      ];
+    }
+    if (operation.type === "groups.merge") {
+      const sourceIds = new Set(operation.sourceIds);
+      const previous = data.groups.filter((group) => sourceIds.has(group.uid) || group.uid === operation.targetId);
+      const target = previous.find((group) => group.uid === operation.targetId);
+      const sources = previous.filter((group) => group.uid !== operation.targetId);
+      const geneIds = [...new Set(previous.flatMap((group) => group.genes || []))];
+      return [
+        ...(geneIds.length ? [{ type: "groups.unassignGenes", geneIds }] : []),
+        ...(target?.genes?.length ? [{ type: "groups.assignGenes", groupId: target.uid, geneIds: [...target.genes] }] : []),
+        ...sources.map((group) => ({ type: "groups.create", group: publicGroup(group), geneIds: [...(group.genes || [])] })),
+        { type: "groups.reorder", ids: data.groups.map((group) => group.uid) },
+      ];
+    }
+    return [];
+  }
+
   /**
    * Validate then apply a serializable batch of chart edits. Structural group
    * edits are validated against a virtual group ID set first, so a malformed
@@ -927,11 +1058,15 @@
     const groupIds = new Set(index.groupById.keys());
     const applied = operations.map((operation) => validateOperation(operation, index, groupIds));
     const hasStructuralGroupEdit = applied.some((operation) => operation.type !== "groups.update" && operation.type.startsWith("groups."));
-    for (const operation of applied) applyOperation(data, index, operation);
+    const inverse = [];
+    for (const operation of applied) {
+      inverse.unshift(...inverseOperation(data, index, operation));
+      applyOperation(data, index, operation);
+    }
     // Link-derived grouping is useful for an untouched chart, but a deliberate
     // membership edit makes the user's group assignments authoritative.
     if (hasStructuralGroupEdit) data.config = { ...(data.config || {}), updateGroups: false };
-    return { data, operations: applied, effects: operationEffects(applied) };
+    return { data, operations: applied, inverse, effects: operationEffects(applied) };
   }
 
   function validBounds$1(bounds) {
@@ -1126,6 +1261,7 @@
     getClusterPosition,
     getLocusOffset,
     selectedLocusIds = () => [],
+    selectedClusterIds = () => [],
     setDragging,
     previewClusterDrag,
     commitClusterOrder,
@@ -1134,6 +1270,7 @@
     commitLocusOffset,
     previewLocusTrim,
     commitLocusTrim,
+    cancelInteraction = () => {},
     flipLocus,
   }) {
     let clusterDrag = null;
@@ -1143,9 +1280,23 @@
 
     return {
       beginClusterDrag(uid, pointerY) {
+        const order = [...getClusterOrder()];
+        const selected = new Set(selectedClusterIds());
+        // Dragging a selected cluster moves every selected cluster as one
+        // ordered block. A cluster outside the selection keeps the familiar
+        // single-row drag behaviour.
+        const uids = selected.has(uid)
+          ? order.filter((clusterUid) => selected.has(clusterUid))
+          : [uid];
         clusterDrag = {
           uid,
-          order: [...getClusterOrder()],
+          uids,
+          selected: new Set(uids),
+          order,
+          positions: new Map(uids.map((clusterUid) => [
+            clusterUid,
+            getClusterPosition(clusterUid),
+          ])),
           pointerOffset: getClusterPosition(uid) - pointerY,
         };
         setDragging(true);
@@ -1163,11 +1314,21 @@
         const currentIndex = clusterDrag.order.indexOf(clusterDrag.uid);
         let order = null;
         if (targetIndex !== currentIndex) {
-          clusterDrag.order.splice(currentIndex, 1);
-          clusterDrag.order.splice(targetIndex, 0, clusterDrag.uid);
-          order = clusterDrag.order;
+          const selectedIndex = clusterDrag.uids.indexOf(clusterDrag.uid);
+          const remaining = clusterDrag.order.filter((uid) => !clusterDrag.selected.has(uid));
+          const insertionIndex = clamp(targetIndex - selectedIndex, [0, remaining.length]);
+          order = [
+            ...remaining.slice(0, insertionIndex),
+            ...clusterDrag.uids,
+            ...remaining.slice(insertionIndex),
+          ];
+          clusterDrag.order = order;
         }
-        previewClusterDrag(clusterDrag.uid, y, order);
+        const delta = y - clusterDrag.positions.get(clusterDrag.uid);
+        const positions = new Map(
+          [...clusterDrag.positions].map(([uid, position]) => [uid, position + delta])
+        );
+        previewClusterDrag(clusterDrag.uid, y, order, positions);
       },
 
       endClusterDrag() {
@@ -1181,11 +1342,12 @@
         if (!clusterDrag) return;
         clusterDrag = null;
         setDragging(false);
+        cancelInteraction();
       },
 
       beginLocusDrag(uid, pointerX) {
-        const selected = [...selectedLocusIds()];
-        const locusUids = selected.includes(uid) ? selected : [uid];
+        const selected = new Set(selectedLocusIds());
+        const locusUids = selected.has(uid) ? [...selected] : [uid];
         locusDrag = {
           uids: locusUids,
           pointerStart: pointerX,
@@ -1219,6 +1381,7 @@
         if (!locusDrag) return;
         locusDrag = null;
         setDragging(false);
+        cancelInteraction();
       },
 
       beginLocusTrim() {
@@ -1236,6 +1399,7 @@
 
       cancelLocusTrim() {
         setDragging(false);
+        cancelInteraction();
       },
 
       flipLocus,
@@ -1773,13 +1937,13 @@
   }
 
   /** Describe temporary cluster rows without rebuilding a scene. */
-  function createClusterDragPreview(scene, { clusterUid, position, order, rows }) {
+  function createClusterDragPreview(scene, { clusterUid, position, positions, order, rows }) {
     const clusterOffsets = new Map();
     const clusterOrder = new Map();
     for (const [index, uid] of order.entries()) {
       const cluster = scene.clusters.get(uid);
       if (!cluster) continue;
-      const y = uid === clusterUid ? position : rows[index];
+      const y = positions?.get(uid) ?? (uid === clusterUid ? position : rows[index]);
       clusterOffsets.set(uid, y - cluster.y);
       clusterOrder.set(uid, index);
     }
@@ -1930,28 +2094,80 @@
     };
   }
 
-  function straightLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
-    return `M${ax1},${ay} L${ax2},${ay} L${bx2},${by} L${bx1},${by} L${ax1},${ay}`;
-  }
-
-  function sankeyLinkPath([ax1, ax2, ay, bx1, bx2, by]) {
-    const verticalMidpoint = ay + Math.abs(by - ay) / 2;
-    return `M${ax2},${ay}C${ax2},${verticalMidpoint},${bx2},${verticalMidpoint},${bx2},${by}L${bx1},${by}C${bx1},${verticalMidpoint},${ax1},${verticalMidpoint},${ax1},${ay}L${ax2},${ay}`;
-  }
-
-  function lineLinkPath([ax1, ax2, ay, bx1, bx2, by], straight) {
+  function linkPathCommands(anchors, { asLine = false, straight = false } = {}) {
+    if (!anchors) return [];
+    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
     const aMid = ax1 + (ax2 - ax1) / 2;
     const bMid = bx1 + (bx2 - bx1) / 2;
-    if (straight) return `M${aMid},${ay} L${bMid},${by}`;
-
-    const verticalMidpoint = (ay + by) / 2;
-    return `M${aMid},${ay}C${aMid},${verticalMidpoint},${bMid},${verticalMidpoint},${bMid},${by}`;
+    const middle = ay + Math.abs(by - ay) / 2;
+    if (asLine) {
+      return straight
+        ? [["M", aMid, ay], ["L", bMid, by]]
+        : [["M", aMid, ay], ["C", aMid, middle, bMid, middle, bMid, by]];
+    }
+    return straight
+      ? [["M", ax1, ay], ["L", ax2, ay], ["L", bx2, by], ["L", bx1, by], ["L", ax1, ay], ["Z"]]
+      : [
+          ["M", ax2, ay],
+          ["C", ax2, middle, bx2, middle, bx2, by],
+          ["L", bx1, by],
+          ["C", bx1, middle, ax1, middle, ax1, ay],
+          ["Z"],
+        ];
   }
 
-  function getLinkPath(anchors, { asLine, straight }) {
-    if (!anchors) return "";
-    if (asLine) return lineLinkPath(anchors, straight);
-    return straight ? straightLinkPath(anchors) : sankeyLinkPath(anchors);
+  /** Trace the same link shape used by SVG onto a Canvas context. */
+  function traceLinkPath(context, anchors, style) {
+    for (const [command, ...values] of linkPathCommands(anchors, style)) {
+      if (command === "M") context.moveTo(...values);
+      else if (command === "L") context.lineTo(...values);
+      else if (command === "C") context.bezierCurveTo(...values);
+      else context.closePath();
+    }
+  }
+
+  /**
+   * Sample a link in world coordinates for renderers that submit triangles and
+   * line segments directly rather than accepting SVG/Canvas path commands.
+   */
+  function sampleLinkGeometry(anchors, { asLine = false, straight = false, segments = 10 } = {}) {
+    if (!anchors) return { asLine, upper: [], lower: [], line: [] };
+    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+    const middle = ay + Math.abs(by - ay) / 2;
+    const pointFor = (startX, endX, amount) => straight
+      ? [startX + (endX - startX) * amount, ay + (by - ay) * amount]
+      : [
+          cubic(startX, startX, endX, endX, amount),
+          cubic(ay, middle, middle, by, amount),
+        ];
+    const count = straight ? 1 : Math.max(1, segments);
+    const samples = (startX, endX) => Array.from(
+      { length: count + 1 },
+      (_, index) => pointFor(startX, endX, index / count)
+    );
+    if (asLine) return {
+      asLine,
+      upper: [],
+      lower: [],
+      line: samples((ax1 + ax2) / 2, (bx1 + bx2) / 2),
+    };
+    return { asLine, upper: samples(ax2, bx2), lower: samples(ax1, bx1), line: [] };
+  }
+
+  function cubic(start, controlA, controlB, end, amount) {
+    const inverse = 1 - amount;
+    return (
+      inverse * inverse * inverse * start +
+      3 * inverse * inverse * amount * controlA +
+      3 * inverse * amount * amount * controlB +
+      amount * amount * amount * end
+    );
+  }
+
+  function getLinkPath(anchors, style) {
+    return linkPathCommands(anchors, style)
+      .map(([command, ...values]) => `${command}${values.join(",")}`)
+      .join("");
   }
 
   function worldPolygon(points, x, y) {
@@ -3229,34 +3445,16 @@
     ax2 += geometry.a || 0;
     bx1 += geometry.b || 0;
     bx2 += geometry.b || 0;
-    const aMid = (ax1 + ax2) / 2;
-    const bMid = (bx1 + bx2) / 2;
     const group = scales.group(source.query.uid);
     const colour = source.colour || scales.colour(group);
     const score = scales.score(source.identity);
 
     context.beginPath();
+    const adjustedAnchors = [ax1, ax2, ay, bx1, bx2, by];
+    traceLinkPath(context, adjustedAnchors, config.link);
     if (config.link.asLine) {
-      context.moveTo(aMid, ay);
-      if (config.link.straight) context.lineTo(bMid, by);
-      else {
-        const middle = (ay + by) / 2;
-        context.bezierCurveTo(aMid, middle, bMid, middle, bMid, by);
-      }
       context.strokeStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
     } else {
-      context.moveTo(ax2, ay);
-      if (config.link.straight) {
-        context.lineTo(bx2, by);
-        context.lineTo(bx1, by);
-        context.lineTo(ax1, ay);
-      } else {
-        const middle = ay + Math.abs(by - ay) / 2;
-        context.bezierCurveTo(ax2, middle, bx2, middle, bx2, by);
-        context.lineTo(bx1, by);
-        context.bezierCurveTo(bx1, middle, ax1, middle, ax1, ay);
-      }
-      context.closePath();
       context.fillStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
       context.fill();
       context.strokeStyle = source.colour || (config.link.groupColour ? colour : "black");
@@ -3276,30 +3474,9 @@
     ax2 += geometry.a || 0;
     bx1 += geometry.b || 0;
     bx2 += geometry.b || 0;
-    const aMid = (ax1 + ax2) / 2;
-    const bMid = (bx1 + bx2) / 2;
-
     context.beginPath();
-    if (config.link.asLine) {
-      context.moveTo(aMid, ay);
-      if (config.link.straight) context.lineTo(bMid, by);
-      else {
-        const middle = (ay + by) / 2;
-        context.bezierCurveTo(aMid, middle, bMid, middle, bMid, by);
-      }
-    } else {
-      context.moveTo(ax2, ay);
-      if (config.link.straight) {
-        context.lineTo(bx2, by);
-        context.lineTo(bx1, by);
-        context.lineTo(ax1, ay);
-      } else {
-        const middle = ay + Math.abs(by - ay) / 2;
-        context.bezierCurveTo(ax2, middle, bx2, middle, bx2, by);
-        context.lineTo(bx1, by);
-        context.bezierCurveTo(bx1, middle, ax1, middle, ax1, ay);
-      }
-      context.closePath();
+    traceLinkPath(context, [ax1, ax2, ay, bx1, bx2, by], config.link);
+    if (config.link.asLine) ; else {
       context.fillStyle = "rgba(22, 119, 255, 0.18)";
       context.fill();
     }
@@ -5446,11 +5623,6 @@
   // scales and visual policy. Keep that dependency bundle in one place so a
   // configuration addition cannot silently affect full builds but not retained
   // flip/anchor patches (or vice versa).
-  function clustersAreAdjacent(one, two) {
-    const order = getClusterOrder(chartState);
-    return Math.abs(order.indexOf(one) - order.indexOf(two)) === 1;
-  }
-
   function locusText(cluster) {
     return formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates);
   }
@@ -5460,13 +5632,13 @@
     return cluster ? locusText(cluster) : "";
   }
 
-  function sceneProjectionOptions({ areClustersAdjacent = clustersAreAdjacent } = {}) {
+  function sceneProjectionOptions({ areClustersAdjacent } = {}) {
     return {
       scaleX: scales.x,
       locusOffset: scales.locus,
       getLocusState: locusState,
       getGeneState: (gene) => getGeneState(chartState, gene),
-      areClustersAdjacent,
+      areClustersAdjacent: areClustersAdjacent || (() => false),
       shape: config.gene.shape,
       label: config.gene.label,
       link: {
@@ -5545,12 +5717,15 @@
       bestOnly: config.link.bestOnly,
       threshold: config.link.threshold,
     }).map((link) => link.uid));
+    const clusterOrder = getClusterOrder(chartState);
     currentScene = buildScene(data, {
-      ...sceneProjectionOptions(),
+      ...sceneProjectionOptions({
+        areClustersAdjacent: adjacencyForClusterOrder(clusterOrder),
+      }),
       scaleY: scales.y,
       clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
       clusterOffset: scales.offset,
-      clusterOrder: getClusterOrder(chartState),
+      clusterOrder,
       chrome: sceneChromeOptions(data),
     });
     return currentScene;
@@ -5558,7 +5733,9 @@
 
   function patchFlippedLocus(previousScene, locus) {
     currentScene = patchFlippedLocusScene(previousScene, locus, {
-      ...sceneProjectionOptions(),
+      ...sceneProjectionOptions({
+        areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
+      }),
       linksForGene: lookup.linksForGene,
     });
     return currentScene;
@@ -5729,7 +5906,9 @@
 struct Camera {
   transform: vec4f,
   viewport: vec2f,
-  padding: vec2f,
+  // vec4 alignment leaves two padding floats after viewport.
+  // asLine, straight, stroke width, reserved.
+  linkStyle: vec4f,
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
 struct ClusterOffsets {
@@ -5787,19 +5966,20 @@ struct StrokeInput {
 // WebGPU line-list primitives are always one *physical* pixel wide. Draw
 // gene outlines as quads instead so their configured stroke width matches
 // Canvas and SVG at every device-pixel ratio and camera scale.
-@vertex fn strokeVertex(
-  input: StrokeInput,
-  @builtin(vertex_index) vertexIndex: u32,
+fn projectStroke(
+  worldFirst: vec2f,
+  worldSecond: vec2f,
+  width: f32,
+  corner: u32,
+  colour: vec4f,
 ) -> VertexOutput {
-  let clusterOffset = clusterOffsets.values[u32(input.clusterSlot)];
-  let first = (input.first + clusterOffset) * camera.transform.z + camera.transform.xy;
-  let second = (input.second + clusterOffset) * camera.transform.z + camera.transform.xy;
+  let first = worldFirst * camera.transform.z + camera.transform.xy;
+  let second = worldSecond * camera.transform.z + camera.transform.xy;
   let delta = second - first;
   let segmentLength = max(length(delta), 0.0001);
   let direction = delta / segmentLength;
   let normal = vec2f(-direction.y, direction.x);
-  let halfWidth = input.width * camera.transform.z / 2.0;
-  let corner = vertexIndex % 6u;
+  let halfWidth = width * camera.transform.z / 2.0;
   let useSecond = corner == 1u || corner == 2u || corner == 4u;
   let positiveSide = corner == 2u || corner == 4u || corner == 5u;
   // Extending each endpoint by half a stroke joins adjacent edge quads at
@@ -5813,8 +5993,22 @@ struct StrokeInput {
     0.0,
     1.0
   );
-  output.colour = input.colour;
+  output.colour = colour;
   return output;
+}
+
+@vertex fn strokeVertex(
+  input: StrokeInput,
+  @builtin(vertex_index) vertexIndex: u32,
+) -> VertexOutput {
+  let clusterOffset = clusterOffsets.values[u32(input.clusterSlot)];
+  return projectStroke(
+    input.first + clusterOffset,
+    input.second + clusterOffset,
+    input.width,
+    vertexIndex % 6u,
+    input.colour,
+  );
 }
 
 @fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
@@ -5844,9 +6038,32 @@ fn ribbonPoint(link: LinkRecord, edge: u32, amount: f32) -> vec2f {
   let topX = select(top.x, top.y, edge == 0u) + topOffset;
   let bottomX = select(bottom.x, bottom.y, edge == 0u) + bottomOffset;
   let middle = topY + abs(bottomY - topY) / 2.0;
+  if (camera.linkStyle.y > 0.5) {
+    return vec2f(
+      mix(topX, bottomX, amount),
+      mix(topY, bottomY, amount)
+    );
+  }
   return vec2f(
     cubic(topX, topX, bottomX, bottomX, amount),
     cubic(topY, middle, middle, bottomY, amount)
+  );
+}
+
+fn linkCentrePoint(link: LinkRecord, amount: f32) -> vec2f {
+  let queryOffset = clusterOffsets.values[u32(link.query.w)];
+  let mateOffset = clusterOffsets.values[u32(link.mate.w)];
+  let queryX = (link.query.x + link.query.y) / 2.0 + queryOffset.x;
+  let mateX = (link.mate.x + link.mate.y) / 2.0 + mateOffset.x;
+  let queryY = link.query.z + queryOffset.y;
+  let mateY = link.mate.z + mateOffset.y;
+  if (camera.linkStyle.y > 0.5) {
+    return vec2f(mix(queryX, mateX, amount), mix(queryY, mateY, amount));
+  }
+  let middle = queryY + abs(mateY - queryY) / 2.0;
+  return vec2f(
+    cubic(queryX, queryX, mateX, mateX, amount),
+    cubic(queryY, middle, middle, mateY, amount)
   );
 }
 
@@ -5868,6 +6085,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   @builtin(instance_index) instanceIndex: u32
 ) -> VertexOutput {
   let link = linkRecords.values[linkIndices.values[instanceIndex]];
+  if (camera.linkStyle.x > 0.5) {
+    return projectWorld(linkCentrePoint(link, 0.0), vec4f(link.fill.rgb, 0.0));
+  }
   let segment = vertexIndex / 6u;
   let corner = vertexIndex % 6u;
   let start = f32(segment) / 10.0;
@@ -5890,27 +6110,46 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   @builtin(instance_index) instanceIndex: u32
 ) -> VertexOutput {
   let link = linkRecords.values[linkIndices.values[instanceIndex]];
-  let line = vertexIndex / 2u;
-  let endpoint = vertexIndex % 2u;
-  var edge = 0u;
-  var amount = 0.0;
-  if (line < 10u) {
-    edge = 0u;
-    amount = f32(line + endpoint) / 10.0;
-  } else if (line < 20u) {
-    edge = 1u;
-    amount = f32(line - 10u + endpoint) / 10.0;
-  } else if (line == 20u) {
-    edge = endpoint;
-  } else {
-    edge = endpoint;
-    amount = 1.0;
+  let segment = vertexIndex / 6u;
+  let corner = vertexIndex % 6u;
+  if (camera.linkStyle.x > 0.5) {
+    if (segment >= 10u) {
+      return projectWorld(linkCentrePoint(link, 0.0), vec4f(link.stroke.rgb, 0.0));
+    }
+    return projectStroke(
+      linkCentrePoint(link, f32(segment) / 10.0),
+      linkCentrePoint(link, f32(segment + 1u) / 10.0),
+      camera.linkStyle.z,
+      corner,
+      link.stroke,
+    );
   }
-  return projectWorld(ribbonPoint(link, edge, amount), link.stroke);
+  if (segment < 10u) {
+    return projectStroke(
+      ribbonPoint(link, 0u, f32(segment) / 10.0),
+      ribbonPoint(link, 0u, f32(segment + 1u) / 10.0),
+      camera.linkStyle.z,
+      corner,
+      link.stroke,
+    );
+  }
+  if (segment < 20u) {
+    return projectStroke(
+      ribbonPoint(link, 1u, f32(segment - 10u) / 10.0),
+      ribbonPoint(link, 1u, f32(segment - 9u) / 10.0),
+      camera.linkStyle.z,
+      corner,
+      link.stroke,
+    );
+  }
+  if (segment == 20u) {
+    return projectStroke(ribbonPoint(link, 0u, 0.0), ribbonPoint(link, 1u, 0.0), camera.linkStyle.z, corner, link.stroke);
+  }
+  return projectStroke(ribbonPoint(link, 0u, 1.0), ribbonPoint(link, 1u, 1.0), camera.linkStyle.z, corner, link.stroke);
 }`;
 
   function rgba(value, fallback = [0.6, 0.6, 0.6, 1]) {
-    const colour = globalThis.d3?.color?.(value);
+    const colour = d3.color(value);
     return colour
       ? [colour.r / 255, colour.g / 255, colour.b / 255, colour.opacity ?? 1]
       : fallback;
@@ -5924,11 +6163,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     pushVertex(vertices, first[0], first[1], colour, clusterSlot);
     pushVertex(vertices, second[0], second[1], colour, clusterSlot);
     pushVertex(vertices, third[0], third[1], colour, clusterSlot);
-  }
-
-  function pushLine(vertices, first, second, colour, clusterSlot = 0) {
-    pushVertex(vertices, first[0], first[1], colour, clusterSlot);
-    pushVertex(vertices, second[0], second[1], colour, clusterSlot);
   }
 
   function pushStrokeSegment(vertices, first, second, colour, clusterSlot, width) {
@@ -5965,39 +6199,33 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     }
   }
 
-  function cubic(start, controlA, controlB, end, amount) {
-    const inverse = 1 - amount;
-    return (
-      inverse * inverse * inverse * start +
-      3 * inverse * inverse * amount * controlA +
-      3 * inverse * amount * amount * controlB +
-      amount * amount * amount * end
-    );
-  }
-
   function pushLink(vertices, edges, link, colour, stroke, {
     visible = link.visible,
     anchors = link.anchors,
     segments = 10,
+    asLine = false,
+    straight = false,
+    strokeWidth = 1,
   } = {}) {
     if (!visible || !anchors) return;
-    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-    const middle = ay + Math.abs(by - ay) / 2;
-    const upper = [];
-    const lower = [];
-    for (let index = 0; index <= segments; index += 1) {
-      const amount = index / segments;
-      upper.push([cubic(ax2, ax2, bx2, bx2, amount), cubic(ay, middle, middle, by, amount)]);
-      lower.push([cubic(ax1, ax1, bx1, bx1, amount), cubic(ay, middle, middle, by, amount)]);
+    const geometry = sampleLinkGeometry(anchors, { asLine, straight, segments });
+    const strokeSegment = (first, second) => pushStrokeSegment(
+      edges, first, second, stroke, 0, strokeWidth
+    );
+    if (asLine) {
+      for (let index = 1; index < geometry.line.length; index += 1) {
+        strokeSegment(geometry.line[index - 1], geometry.line[index]);
+      }
+      return;
     }
-    for (let index = 0; index < segments; index += 1) {
-      pushTriangle(vertices, upper[index], upper[index + 1], lower[index], colour);
-      pushTriangle(vertices, upper[index + 1], lower[index + 1], lower[index], colour);
-      pushLine(edges, upper[index], upper[index + 1], stroke);
-      pushLine(edges, lower[index], lower[index + 1], stroke);
+    for (let index = 0; index < geometry.upper.length - 1; index += 1) {
+      pushTriangle(vertices, geometry.upper[index], geometry.upper[index + 1], geometry.lower[index], colour);
+      pushTriangle(vertices, geometry.upper[index + 1], geometry.lower[index + 1], geometry.lower[index], colour);
+      strokeSegment(geometry.upper[index], geometry.upper[index + 1]);
+      strokeSegment(geometry.lower[index], geometry.lower[index + 1]);
     }
-    pushLine(edges, upper[0], lower[0], stroke);
-    pushLine(edges, upper[segments], lower[segments], stroke);
+    strokeSegment(geometry.upper[0], geometry.lower[0]);
+    strokeSegment(geometry.upper.at(-1), geometry.lower.at(-1));
   }
 
   function offsetsForLocus(preview, locus) {
@@ -6118,6 +6346,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       // their vertex count constant lets a preview hide them by alpha alone.
       visible: true,
       anchors: anchorsForPreview(scene, link, preview),
+      asLine: config.link.asLine,
+      straight: config.link.straight,
+      strokeWidth: config.link.strokeWidth,
     });
     return { links: new Float32Array(fill), linkEdges: new Float32Array(edge) };
   }
@@ -6423,12 +6654,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       fragment: { module, entryPoint: "fragmentMain", targets: target },
       primitive: { topology: "triangle-list" },
     });
-    const linePipeline = await createPipeline({
-      layout: pipelineLayout,
-      vertex: { module, entryPoint: "vertexMain", buffers: vertexBuffers },
-      fragment: { module, entryPoint: "fragmentMain", targets: target },
-      primitive: { topology: "line-list" },
-    });
     const strokePipeline = await createPipeline({
       layout: pipelineLayout,
       vertex: { module, entryPoint: "strokeVertex", buffers: strokeVertexBuffers },
@@ -6447,7 +6672,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       fragment: { module, entryPoint: "fragmentMain", targets: target },
       primitive: { topology: "line-list" },
     });
-    const uniform = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const uniform = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     let clusterOffsetBuffer = device.createBuffer({
       size: 8,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -6611,7 +6836,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       geneBuffer = bufferFor(device, geneBuffer, data.genes);
       geneEdgeBuffer = bufferFor(device, geneEdgeBuffer, data.geneEdges);
       linkCount = data.links.length / 7;
-      linkEdgeCount = data.linkEdges.length / 7;
+      linkEdgeCount = data.linkEdges.length / 10;
       trackCount = data.tracks.length / 10;
       geneCount = data.genes.length / 7;
       geneEdgeCount = data.geneEdges.length / 10;
@@ -6746,7 +6971,20 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         device.queue.writeBuffer(
           uniform,
           0,
-          new Float32Array([camera.x, camera.y, camera.k, 0, width, height, 0, 0])
+          new Float32Array([
+            camera.x,
+            camera.y,
+            camera.k,
+            0,
+            width,
+            height,
+            0,
+            0,
+            config.link.asLine ? 1 : 0,
+            config.link.straight ? 1 : 0,
+            config.link.strokeWidth,
+            0,
+          ])
         );
         const encoder = device.createCommandEncoder();
         const pass = encoder.beginRenderPass({
@@ -6770,12 +7008,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         if (previewLinksActive) {
           pass.setPipeline(linkLinePipeline);
           pass.setBindGroup(0, bindGroup);
-          pass.draw(44, previewLinkCount);
+          pass.draw(132, previewLinkCount);
         } else if (linkEdgeBuffer) {
-          pass.setPipeline(linePipeline);
+          pass.setPipeline(strokePipeline);
           pass.setBindGroup(0, bindGroup);
           pass.setVertexBuffer(0, linkEdgeBuffer);
-          pass.draw(linkEdgeCount);
+          pass.draw(6, linkEdgeCount);
         }
         pass.setPipeline(strokePipeline);
         pass.setBindGroup(0, bindGroup);
@@ -7143,7 +7381,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         viewport.append("g").attr("class", "clusterMapG");
 
         currentZoom = bindCameraZoom({
-          d3,
+          d3: d3__namespace,
           surface,
           zoomExtent,
           onZoom: (event) => onZoom(event, viewport),
@@ -7202,7 +7440,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           .style("height", "100%")
           .style("outline", "none");
         currentZoom = bindCameraZoom({
-          d3,
+          d3: d3__namespace,
           surface,
           zoomExtent,
           onZoom,
@@ -7438,6 +7676,34 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   }
 
   let nextChartInstance = 0;
+  const projectFormat = "clinker-project";
+  const projectVersion = 1;
+  const historyLimit = 100;
+  const isPlainObject = (value) => Boolean(value) && value.constructor === Object;
+  const copyConfigPatch = (value) => {
+    if (Array.isArray(value)) return value.map(copyConfigPatch);
+    if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, copyConfigPatch(child)]));
+    // Configuration callbacks are valid leaves. They are immutable by reference
+    // and intentionally remain callable when an edit is undone or redone.
+    return value;
+  };
+  const previousConfigPatch = (config, patch) => Object.fromEntries(
+    Object.entries(patch || {})
+      .filter(([key]) => Object.hasOwn(config || {}, key))
+      .map(([key, value]) => [key,
+        isPlainObject(value) && isPlainObject(config[key])
+          ? previousConfigPatch(config[key], value)
+          : copyConfigPatch(config[key]),
+      ])
+  );
+  const serializableConfig = (value) => {
+    if (typeof value === "function" || value === undefined) return undefined;
+    if (Array.isArray(value)) return value.map(serializableConfig);
+    if (isPlainObject(value)) return Object.fromEntries(Object.entries(value)
+      .map(([key, child]) => [key, serializableConfig(child)])
+      .filter(([, child]) => child !== undefined));
+    return value;
+  };
 
   function clusterMap() {
     /* A ClusterMap plot. */
@@ -7482,6 +7748,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     // currently active renderer surface.
     let focusCamera = () => false;
     const changeListeners = new Set();
+    const history = [];
+    const future = [];
+    let pendingInteractionState = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
     const canvasBackend = createRetainedSceneBackend({
       render: renderCanvas,
@@ -7515,8 +7784,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       }
     });
     const anchorGene = (gene, { flipMismatchedLoci = false } = {}) => {
+      beginInteractionState();
       const result = runtime.anchorGene(gene, { flipMismatchedLoci });
       redraw();
+      commitInteractionState();
       return result;
     };
     const interactionController = createInteractionController({
@@ -7525,18 +7796,30 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       getClusterPosition: (uid) => runtime.getScene().clusters.get(uid).y,
       getLocusOffset: (uid) => getLocusOffset(chartState, uid),
       selectedLocusIds: () => [...selectedLocusIds],
-      setDragging: (dragging) => setDragging(chartState, dragging),
-      previewClusterDrag: (uid, position, order) => {
+      selectedClusterIds: () => new Set(
+        [...selectedLocusIds]
+          .map(locusForId)
+          .filter(Boolean)
+          .map((locus) => locus.clusterUid)
+      ),
+      setDragging: (dragging) => {
+        if (dragging) beginInteractionState();
+        setDragging(chartState, dragging);
+      },
+      previewClusterDrag: (uid, position, order, positions = new Map([[uid, position]])) => {
         if (clusterCommitFrame !== null) {
           cancelAnimationFrame(clusterCommitFrame);
           clusterCommitFrame = null;
         }
-        setPreviewClusterPosition(chartState, uid, position);
+        for (const [clusterUid, clusterPosition] of positions) {
+          setPreviewClusterPosition(chartState, clusterUid, clusterPosition);
+        }
         if (order) setPreviewClusterOrder(chartState, order);
         if (isRasterRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
           rasterPreview = createClusterDragPreview(runtime.getScene(), {
             clusterUid: uid,
             position,
+            positions,
             order: getClusterOrder(chartState),
             rows: runtime.scales.y.range(),
           });
@@ -7577,10 +7860,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
               redraw({ animate: false });
             });
           });
+          commitInteractionState();
           return;
         }
         clearRasterPreview();
         redraw({ animate: false });
+        commitInteractionState();
       },
       previewLocusOffset: (uid, offset) => {
         setPreviewLocusOffset(chartState, uid, offset);
@@ -7608,6 +7893,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         for (const uid of Array.isArray(ids) ? ids : [ids]) commitPreviewLocusOffset(chartState, uid);
         clearRasterPreview();
         redraw({ animate: false });
+        commitInteractionState();
       },
       previewLocusTrim: (locus, edge, position) => {
         const result = previewLocusTrim(chartState, locus, {
@@ -7645,11 +7931,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         commitPreviewLocusState(chartState, locus);
         clearRasterPreview();
         redraw({ animate: false });
+        commitInteractionState();
       },
+      cancelInteraction: () => { pendingInteractionState = null; },
       flipLocus: (locus) => {
         // A second double-click while the GPU preview is in flight must not
         // mutate the source state underneath that preview.
         if (isWebGpuRenderer(runtime.config.plot.renderer) && webgpuFlipFrame !== null) return;
+        beginInteractionState();
         flipLocus(chartState, locus);
         if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
           if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
@@ -7688,6 +7977,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             rasterPreview = null;
             webgpuFlipFrame = null;
             scheduleRasterPaint();
+            commitInteractionState();
           };
           if (!duration) {
             finish();
@@ -7715,6 +8005,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           return;
         }
         redraw();
+        commitInteractionState();
       },
     });
 
@@ -7744,6 +8035,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (!pending.targetScene) {
         runtime.synchronizeLocusLayoutState(pending.locus);
         pending.targetScene = runtime.patchFlippedLocus(pending.sourceScene, pending.locus);
+        commitInteractionState();
       }
       canvasScene = pending.targetScene;
       canvasBackend.setScene(canvasScene);
@@ -7759,6 +8051,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       canvasFlipFrame = null;
       runtime.synchronizeLocusLayoutState(pending.locus);
       pending.targetScene = runtime.patchFlippedLocus(pending.sourceScene, pending.locus);
+      commitInteractionState();
       prepareCanvasFlipBase(pending);
       // Restore and repaint the affected canvas region before the browser can
       // present a frame. The base image stays offscreen; the visible plot stays
@@ -7919,6 +8212,98 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     function emitChange(change) {
       for (const listener of changeListeners) listener({ ...change, data: currentData });
+    }
+
+    function historyStatus() {
+      return { canUndo: history.length > 0, canRedo: future.length > 0 };
+    }
+
+    function emitHistoryChange() {
+      emitChange({ type: "history.change", ...historyStatus() });
+    }
+
+    function clearHistory(emit = true) {
+      history.length = 0;
+      future.length = 0;
+      pendingInteractionState = null;
+      if (emit) emitHistoryChange();
+    }
+
+    function remember(change) {
+      history.push(change);
+      if (history.length > historyLimit) history.splice(0, history.length - historyLimit);
+      future.length = 0;
+      emitHistoryChange();
+    }
+
+    // Pointer interactions update transient preview state continuously, but are
+    // one logical edit when released. Keep the compact, exportable state before
+    // the gesture and compare it after the committed layout has synchronized.
+    function beginInteractionState() {
+      if (!pendingInteractionState && chartState && currentData) {
+        pendingInteractionState = serializeChartState(chartState, currentData);
+      }
+    }
+
+    function commitInteractionState() {
+      const before = pendingInteractionState;
+      pendingInteractionState = null;
+      if (!before || !chartState || !currentData) return;
+      const after = serializeChartState(chartState, currentData);
+      if (JSON.stringify(before) === JSON.stringify(after)) return;
+      emitChange({ type: "state.change", state: after });
+      remember({ kind: "state", undo: before, redo: after });
+    }
+
+    function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
+      if (effects.reindex || refreshAutomatic) {
+        chartIndex = createChartIndex(currentData);
+        if (groupsAreAutomatic() && (effects.refreshDerivedGroups || refreshAutomatic)) {
+          refreshDerivedGroups();
+          chartIndex = createChartIndex(currentData);
+        }
+        runtime.setChartIndex(chartIndex);
+      }
+      if (effects.rebuildState) {
+        chartState = createChartState(currentData, chartState);
+        runtime.setChartState(chartState);
+      }
+    }
+
+    function applyPatch(operations, { record = true, automaticGroups } = {}) {
+      const groupsAutomaticBefore = groupsAreAutomatic();
+      const result = applyChartOperations(currentData, chartIndex, operations);
+      if (automaticGroups !== undefined) {
+        currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
+      }
+      const groupsAutomaticAfter = groupsAreAutomatic();
+      refreshAfterPatch(result.effects, {
+        refreshAutomatic: groupsAutomaticAfter && (automaticGroups !== undefined || !groupsAutomaticBefore),
+      });
+      redraw({ animate: false });
+      emitChange({ type: "data.apply", operations: result.operations });
+      if (record) {
+        remember({
+          kind: "patch",
+          undo: result.inverse,
+          redo: result.operations,
+          groupsAutomaticBefore,
+          groupsAutomaticAfter,
+        });
+      }
+      return result;
+    }
+
+    function setState(snapshot, { record = true } = {}) {
+      pendingInteractionState = null;
+      const before = chartState ? serializeChartState(chartState, currentData) : null;
+      chartState = chartStateFromSnapshot(currentData, snapshot);
+      runtime.setChartState(chartState);
+      hasInitialView = true;
+      redraw({ animate: false });
+      const after = serializeChartState(chartState, currentData);
+      emitChange({ type: "state.replace", state: after });
+      if (record) remember({ kind: "state", undo: before, redo: after });
     }
 
     function highlightedGeneIds() {
@@ -8814,11 +9199,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     my.config = function (_) {
       if (!arguments.length) return runtime.config;
+      const before = currentData ? previousConfigPatch(runtime.config, _) : null;
       runtime.configure(_);
       // Configuration is a live part of the public chart API. Updating it after
       // mounting should have the same immediate effect as updating data, without
       // requiring consumers to re-bind the chart's normalized data themselves.
       if (container && currentData) redraw({ animate: false });
+      emitChange({ type: "config.change", config: runtime.config });
+      if (before) remember({ kind: "config", undo: before, redo: copyConfigPatch(_) });
       return my;
     };
     my.data = function (data) {
@@ -8826,6 +9214,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
       container.datum(data).call(my);
       emitChange({ type: "data.replace" });
+      clearHistory();
       return my;
     };
     /** A serializable layout and camera snapshot for project persistence. */
@@ -8834,10 +9223,38 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (!container || !currentData) {
         throw new Error("Cannot replace chart state before the chart has rendered.");
       }
-      chartState = chartStateFromSnapshot(currentData, snapshot);
-      runtime.setChartState(chartState);
-      hasInitialView = true;
-      redraw({ animate: false });
+      setState(snapshot);
+      return my;
+    };
+    /** A portable data, appearance, and layout snapshot for project persistence. */
+    my.project = function (snapshot) {
+      if (!arguments.length) {
+        return {
+          format: projectFormat,
+          version: projectVersion,
+          data: structuredClone(currentData),
+          // Projects are portable JSON, not executable application state.
+          // Callback hooks are intentionally omitted and can be reattached by
+          // the consumer after loading.
+          config: serializableConfig(runtime.config),
+          state: chartState ? serializeChartState(chartState, currentData) : null,
+        };
+      }
+      if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+        throw new TypeError("A project snapshot must be an object.");
+      }
+      if (snapshot.format !== projectFormat || snapshot.version !== projectVersion) {
+        throw new TypeError("Unsupported ClusterMap project snapshot.");
+      }
+      if (!snapshot.data || !snapshot.config) {
+        throw new TypeError("A project snapshot requires data and config.");
+      }
+      my.data(snapshot.data);
+      runtime.configure(snapshot.config);
+      if (container && currentData) redraw({ animate: false });
+      emitChange({ type: "config.change", config: runtime.config });
+      if (snapshot.state) setState(snapshot.state, { record: false });
+      clearHistory();
       return my;
     };
     // Do not name this `apply`: D3 invokes callable charts through
@@ -8846,22 +9263,45 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (!container || !currentData || !chartIndex) {
         throw new Error("Cannot patch chart data before the chart has rendered.");
       }
-      const result = applyChartOperations(currentData, chartIndex, operations);
-      const { effects } = result;
-      if (effects.reindex) {
-        chartIndex = createChartIndex(currentData);
-        if (groupsAreAutomatic() && effects.refreshDerivedGroups) {
-          refreshDerivedGroups();
-          chartIndex = createChartIndex(currentData);
-        }
-        runtime.setChartIndex(chartIndex);
+      applyPatch(operations);
+      return my;
+    };
+    my.canUndo = () => history.length > 0;
+    my.canRedo = () => future.length > 0;
+    my.clearHistory = () => {
+      clearHistory();
+      return my;
+    };
+    my.undo = () => {
+      const change = history.pop();
+      if (!change) return my;
+      if (change.kind === "patch") {
+        applyPatch(change.undo, { record: false, automaticGroups: change.groupsAutomaticBefore });
+      } else if (change.kind === "config") {
+        runtime.configure(change.undo);
+        redraw({ animate: false });
+        emitChange({ type: "config.change", config: runtime.config });
+      } else if (change.kind === "state" && change.undo) {
+        setState(change.undo, { record: false });
       }
-      if (effects.rebuildState) {
-        chartState = createChartState(currentData, chartState);
-        runtime.setChartState(chartState);
+      future.push(change);
+      emitHistoryChange();
+      return my;
+    };
+    my.redo = () => {
+      const change = future.pop();
+      if (!change) return my;
+      if (change.kind === "patch") {
+        applyPatch(change.redo, { record: false, automaticGroups: change.groupsAutomaticAfter });
+      } else if (change.kind === "config") {
+        runtime.configure(change.redo);
+        redraw({ animate: false });
+        emitChange({ type: "config.change", config: runtime.config });
+      } else if (change.kind === "state" && change.redo) {
+        setState(change.redo, { record: false });
       }
-      redraw({ animate: false });
-      emitChange({ type: "data.apply", operations: result.operations });
+      history.push(change);
+      emitHistoryChange();
       return my;
     };
     my.highlight = function (ids) {
@@ -8909,11 +9349,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         .map(locusForId)
         .filter(Boolean);
       if (!loci.length) return my;
+      const before = serializeChartState(chartState, currentData);
       flushCanvasFlip();
       clearRasterPreview();
       for (const locus of loci) flipLocus(chartState, locus);
       redraw({ animate: true });
       emitChange({ type: "loci.flip", locusIds: loci.map((locus) => locus.uid) });
+      remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
       return my;
     };
     /** Frame selected genes and/or links without changing their selection. */

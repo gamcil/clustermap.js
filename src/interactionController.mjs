@@ -6,6 +6,7 @@ export function createInteractionController({
   getClusterPosition,
   getLocusOffset,
   selectedLocusIds = () => [],
+  selectedClusterIds = () => [],
   setDragging,
   previewClusterDrag,
   commitClusterOrder,
@@ -14,6 +15,7 @@ export function createInteractionController({
   commitLocusOffset,
   previewLocusTrim,
   commitLocusTrim,
+  cancelInteraction = () => {},
   flipLocus,
 }) {
   let clusterDrag = null;
@@ -23,9 +25,23 @@ export function createInteractionController({
 
   return {
     beginClusterDrag(uid, pointerY) {
+      const order = [...getClusterOrder()];
+      const selected = new Set(selectedClusterIds());
+      // Dragging a selected cluster moves every selected cluster as one
+      // ordered block. A cluster outside the selection keeps the familiar
+      // single-row drag behaviour.
+      const uids = selected.has(uid)
+        ? order.filter((clusterUid) => selected.has(clusterUid))
+        : [uid];
       clusterDrag = {
         uid,
-        order: [...getClusterOrder()],
+        uids,
+        selected: new Set(uids),
+        order,
+        positions: new Map(uids.map((clusterUid) => [
+          clusterUid,
+          getClusterPosition(clusterUid),
+        ])),
         pointerOffset: getClusterPosition(uid) - pointerY,
       };
       setDragging(true);
@@ -43,11 +59,21 @@ export function createInteractionController({
       const currentIndex = clusterDrag.order.indexOf(clusterDrag.uid);
       let order = null;
       if (targetIndex !== currentIndex) {
-        clusterDrag.order.splice(currentIndex, 1);
-        clusterDrag.order.splice(targetIndex, 0, clusterDrag.uid);
-        order = clusterDrag.order;
+        const selectedIndex = clusterDrag.uids.indexOf(clusterDrag.uid);
+        const remaining = clusterDrag.order.filter((uid) => !clusterDrag.selected.has(uid));
+        const insertionIndex = clamp(targetIndex - selectedIndex, [0, remaining.length]);
+        order = [
+          ...remaining.slice(0, insertionIndex),
+          ...clusterDrag.uids,
+          ...remaining.slice(insertionIndex),
+        ];
+        clusterDrag.order = order;
       }
-      previewClusterDrag(clusterDrag.uid, y, order);
+      const delta = y - clusterDrag.positions.get(clusterDrag.uid);
+      const positions = new Map(
+        [...clusterDrag.positions].map(([uid, position]) => [uid, position + delta])
+      );
+      previewClusterDrag(clusterDrag.uid, y, order, positions);
     },
 
     endClusterDrag() {
@@ -61,11 +87,12 @@ export function createInteractionController({
       if (!clusterDrag) return;
       clusterDrag = null;
       setDragging(false);
+      cancelInteraction();
     },
 
     beginLocusDrag(uid, pointerX) {
-      const selected = [...selectedLocusIds()];
-      const locusUids = selected.includes(uid) ? selected : [uid];
+      const selected = new Set(selectedLocusIds());
+      const locusUids = selected.has(uid) ? [...selected] : [uid];
       locusDrag = {
         uids: locusUids,
         pointerStart: pointerX,
@@ -99,6 +126,7 @@ export function createInteractionController({
       if (!locusDrag) return;
       locusDrag = null;
       setDragging(false);
+      cancelInteraction();
     },
 
     beginLocusTrim() {
@@ -116,6 +144,7 @@ export function createInteractionController({
 
     cancelLocusTrim() {
       setDragging(false);
+      cancelInteraction();
     },
 
     flipLocus,

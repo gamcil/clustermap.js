@@ -57,6 +57,34 @@ import {
 import { chartStateFromSnapshot, serializeChartState } from "./chartStateSnapshot.mjs";
 
 let nextChartInstance = 0;
+const projectFormat = "clinker-project";
+const projectVersion = 1;
+const historyLimit = 100;
+const isPlainObject = (value) => Boolean(value) && value.constructor === Object;
+const copyConfigPatch = (value) => {
+  if (Array.isArray(value)) return value.map(copyConfigPatch);
+  if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, copyConfigPatch(child)]));
+  // Configuration callbacks are valid leaves. They are immutable by reference
+  // and intentionally remain callable when an edit is undone or redone.
+  return value;
+};
+const previousConfigPatch = (config, patch) => Object.fromEntries(
+  Object.entries(patch || {})
+    .filter(([key]) => Object.hasOwn(config || {}, key))
+    .map(([key, value]) => [key,
+      isPlainObject(value) && isPlainObject(config[key])
+        ? previousConfigPatch(config[key], value)
+        : copyConfigPatch(config[key]),
+    ])
+);
+const serializableConfig = (value) => {
+  if (typeof value === "function" || value === undefined) return undefined;
+  if (Array.isArray(value)) return value.map(serializableConfig);
+  if (isPlainObject(value)) return Object.fromEntries(Object.entries(value)
+    .map(([key, child]) => [key, serializableConfig(child)])
+    .filter(([, child]) => child !== undefined));
+  return value;
+};
 
 export default function clusterMap() {
   /* A ClusterMap plot. */
@@ -101,6 +129,9 @@ export default function clusterMap() {
   // currently active renderer surface.
   let focusCamera = () => false;
   const changeListeners = new Set();
+  const history = [];
+  const future = [];
+  let pendingInteractionState = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const canvasBackend = createRetainedSceneBackend({
     render: renderCanvas,
@@ -134,8 +165,10 @@ export default function clusterMap() {
     }
   });
   const anchorGene = (gene, { flipMismatchedLoci = false } = {}) => {
+    beginInteractionState();
     const result = runtime.anchorGene(gene, { flipMismatchedLoci });
     redraw();
+    commitInteractionState();
     return result;
   };
   const interactionController = createInteractionController({
@@ -144,18 +177,30 @@ export default function clusterMap() {
     getClusterPosition: (uid) => runtime.getScene().clusters.get(uid).y,
     getLocusOffset: (uid) => getLocusOffset(chartState, uid),
     selectedLocusIds: () => [...selectedLocusIds],
-    setDragging: (dragging) => setDragging(chartState, dragging),
-    previewClusterDrag: (uid, position, order) => {
+    selectedClusterIds: () => new Set(
+      [...selectedLocusIds]
+        .map(locusForId)
+        .filter(Boolean)
+        .map((locus) => locus.clusterUid)
+    ),
+    setDragging: (dragging) => {
+      if (dragging) beginInteractionState();
+      setDragging(chartState, dragging);
+    },
+    previewClusterDrag: (uid, position, order, positions = new Map([[uid, position]])) => {
       if (clusterCommitFrame !== null) {
         cancelAnimationFrame(clusterCommitFrame);
         clusterCommitFrame = null;
       }
-      setPreviewClusterPosition(chartState, uid, position);
+      for (const [clusterUid, clusterPosition] of positions) {
+        setPreviewClusterPosition(chartState, clusterUid, clusterPosition);
+      }
       if (order) setPreviewClusterOrder(chartState, order);
       if (isRasterRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
         rasterPreview = createClusterDragPreview(runtime.getScene(), {
           clusterUid: uid,
           position,
+          positions,
           order: getClusterOrder(chartState),
           rows: runtime.scales.y.range(),
         });
@@ -196,10 +241,12 @@ export default function clusterMap() {
             redraw({ animate: false });
           });
         });
+        commitInteractionState();
         return;
       }
       clearRasterPreview();
       redraw({ animate: false });
+      commitInteractionState();
     },
     previewLocusOffset: (uid, offset) => {
       setPreviewLocusOffset(chartState, uid, offset);
@@ -227,6 +274,7 @@ export default function clusterMap() {
       for (const uid of Array.isArray(ids) ? ids : [ids]) commitPreviewLocusOffset(chartState, uid);
       clearRasterPreview();
       redraw({ animate: false });
+      commitInteractionState();
     },
     previewLocusTrim: (locus, edge, position) => {
       const result = previewLocusTrim(chartState, locus, {
@@ -264,11 +312,14 @@ export default function clusterMap() {
       commitPreviewLocusState(chartState, locus);
       clearRasterPreview();
       redraw({ animate: false });
+      commitInteractionState();
     },
+    cancelInteraction: () => { pendingInteractionState = null; },
     flipLocus: (locus) => {
       // A second double-click while the GPU preview is in flight must not
       // mutate the source state underneath that preview.
       if (isWebGpuRenderer(runtime.config.plot.renderer) && webgpuFlipFrame !== null) return;
+      beginInteractionState();
       flipLocus(chartState, locus);
       if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
         if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
@@ -307,6 +358,7 @@ export default function clusterMap() {
           rasterPreview = null;
           webgpuFlipFrame = null;
           scheduleRasterPaint();
+          commitInteractionState();
         };
         if (!duration) {
           finish();
@@ -334,6 +386,7 @@ export default function clusterMap() {
         return;
       }
       redraw();
+      commitInteractionState();
     },
   });
 
@@ -363,6 +416,7 @@ export default function clusterMap() {
     if (!pending.targetScene) {
       runtime.synchronizeLocusLayoutState(pending.locus);
       pending.targetScene = runtime.patchFlippedLocus(pending.sourceScene, pending.locus);
+      commitInteractionState();
     }
     canvasScene = pending.targetScene;
     canvasBackend.setScene(canvasScene);
@@ -378,6 +432,7 @@ export default function clusterMap() {
     canvasFlipFrame = null;
     runtime.synchronizeLocusLayoutState(pending.locus);
     pending.targetScene = runtime.patchFlippedLocus(pending.sourceScene, pending.locus);
+    commitInteractionState();
     prepareCanvasFlipBase(pending);
     // Restore and repaint the affected canvas region before the browser can
     // present a frame. The base image stays offscreen; the visible plot stays
@@ -538,6 +593,98 @@ export default function clusterMap() {
 
   function emitChange(change) {
     for (const listener of changeListeners) listener({ ...change, data: currentData });
+  }
+
+  function historyStatus() {
+    return { canUndo: history.length > 0, canRedo: future.length > 0 };
+  }
+
+  function emitHistoryChange() {
+    emitChange({ type: "history.change", ...historyStatus() });
+  }
+
+  function clearHistory(emit = true) {
+    history.length = 0;
+    future.length = 0;
+    pendingInteractionState = null;
+    if (emit) emitHistoryChange();
+  }
+
+  function remember(change) {
+    history.push(change);
+    if (history.length > historyLimit) history.splice(0, history.length - historyLimit);
+    future.length = 0;
+    emitHistoryChange();
+  }
+
+  // Pointer interactions update transient preview state continuously, but are
+  // one logical edit when released. Keep the compact, exportable state before
+  // the gesture and compare it after the committed layout has synchronized.
+  function beginInteractionState() {
+    if (!pendingInteractionState && chartState && currentData) {
+      pendingInteractionState = serializeChartState(chartState, currentData);
+    }
+  }
+
+  function commitInteractionState() {
+    const before = pendingInteractionState;
+    pendingInteractionState = null;
+    if (!before || !chartState || !currentData) return;
+    const after = serializeChartState(chartState, currentData);
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    emitChange({ type: "state.change", state: after });
+    remember({ kind: "state", undo: before, redo: after });
+  }
+
+  function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
+    if (effects.reindex || refreshAutomatic) {
+      chartIndex = createChartIndex(currentData);
+      if (groupsAreAutomatic() && (effects.refreshDerivedGroups || refreshAutomatic)) {
+        refreshDerivedGroups();
+        chartIndex = createChartIndex(currentData);
+      }
+      runtime.setChartIndex(chartIndex);
+    }
+    if (effects.rebuildState) {
+      chartState = createChartState(currentData, chartState);
+      runtime.setChartState(chartState);
+    }
+  }
+
+  function applyPatch(operations, { record = true, automaticGroups } = {}) {
+    const groupsAutomaticBefore = groupsAreAutomatic();
+    const result = applyChartOperations(currentData, chartIndex, operations);
+    if (automaticGroups !== undefined) {
+      currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
+    }
+    const groupsAutomaticAfter = groupsAreAutomatic();
+    refreshAfterPatch(result.effects, {
+      refreshAutomatic: groupsAutomaticAfter && (automaticGroups !== undefined || !groupsAutomaticBefore),
+    });
+    redraw({ animate: false });
+    emitChange({ type: "data.apply", operations: result.operations });
+    if (record) {
+      remember({
+        kind: "patch",
+        undo: result.inverse,
+        redo: result.operations,
+        groupsAutomaticBefore,
+        groupsAutomaticAfter,
+      });
+    }
+    return result;
+  }
+
+  function setState(snapshot, { record = true } = {}) {
+    pendingInteractionState = null;
+    const before = chartState ? serializeChartState(chartState, currentData) : null;
+    chartState = chartStateFromSnapshot(currentData, snapshot);
+    runtime.setChartState(chartState);
+    hasInitialView = true;
+    redraw({ animate: false });
+    const after = serializeChartState(chartState, currentData);
+    emitChange({ type: "state.replace", state: after });
+    if (record) remember({ kind: "state", undo: before, redo: after });
   }
 
   function highlightedGeneIds() {
@@ -1433,11 +1580,14 @@ export default function clusterMap() {
 
   my.config = function (_) {
     if (!arguments.length) return runtime.config;
+    const before = currentData ? previousConfigPatch(runtime.config, _) : null;
     runtime.configure(_);
     // Configuration is a live part of the public chart API. Updating it after
     // mounting should have the same immediate effect as updating data, without
     // requiring consumers to re-bind the chart's normalized data themselves.
     if (container && currentData) redraw({ animate: false });
+    emitChange({ type: "config.change", config: runtime.config });
+    if (before) remember({ kind: "config", undo: before, redo: copyConfigPatch(_) });
     return my;
   };
   my.data = function (data) {
@@ -1445,6 +1595,7 @@ export default function clusterMap() {
     if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
     container.datum(data).call(my);
     emitChange({ type: "data.replace" });
+    clearHistory();
     return my;
   };
   /** A serializable layout and camera snapshot for project persistence. */
@@ -1453,10 +1604,38 @@ export default function clusterMap() {
     if (!container || !currentData) {
       throw new Error("Cannot replace chart state before the chart has rendered.");
     }
-    chartState = chartStateFromSnapshot(currentData, snapshot);
-    runtime.setChartState(chartState);
-    hasInitialView = true;
-    redraw({ animate: false });
+    setState(snapshot);
+    return my;
+  };
+  /** A portable data, appearance, and layout snapshot for project persistence. */
+  my.project = function (snapshot) {
+    if (!arguments.length) {
+      return {
+        format: projectFormat,
+        version: projectVersion,
+        data: structuredClone(currentData),
+        // Projects are portable JSON, not executable application state.
+        // Callback hooks are intentionally omitted and can be reattached by
+        // the consumer after loading.
+        config: serializableConfig(runtime.config),
+        state: chartState ? serializeChartState(chartState, currentData) : null,
+      };
+    }
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+      throw new TypeError("A project snapshot must be an object.");
+    }
+    if (snapshot.format !== projectFormat || snapshot.version !== projectVersion) {
+      throw new TypeError("Unsupported ClusterMap project snapshot.");
+    }
+    if (!snapshot.data || !snapshot.config) {
+      throw new TypeError("A project snapshot requires data and config.");
+    }
+    my.data(snapshot.data);
+    runtime.configure(snapshot.config);
+    if (container && currentData) redraw({ animate: false });
+    emitChange({ type: "config.change", config: runtime.config });
+    if (snapshot.state) setState(snapshot.state, { record: false });
+    clearHistory();
     return my;
   };
   // Do not name this `apply`: D3 invokes callable charts through
@@ -1465,22 +1644,45 @@ export default function clusterMap() {
     if (!container || !currentData || !chartIndex) {
       throw new Error("Cannot patch chart data before the chart has rendered.");
     }
-    const result = applyChartOperations(currentData, chartIndex, operations);
-    const { effects } = result;
-    if (effects.reindex) {
-      chartIndex = createChartIndex(currentData);
-      if (groupsAreAutomatic() && effects.refreshDerivedGroups) {
-        refreshDerivedGroups();
-        chartIndex = createChartIndex(currentData);
-      }
-      runtime.setChartIndex(chartIndex);
+    applyPatch(operations);
+    return my;
+  };
+  my.canUndo = () => history.length > 0;
+  my.canRedo = () => future.length > 0;
+  my.clearHistory = () => {
+    clearHistory();
+    return my;
+  };
+  my.undo = () => {
+    const change = history.pop();
+    if (!change) return my;
+    if (change.kind === "patch") {
+      applyPatch(change.undo, { record: false, automaticGroups: change.groupsAutomaticBefore });
+    } else if (change.kind === "config") {
+      runtime.configure(change.undo);
+      redraw({ animate: false });
+      emitChange({ type: "config.change", config: runtime.config });
+    } else if (change.kind === "state" && change.undo) {
+      setState(change.undo, { record: false });
     }
-    if (effects.rebuildState) {
-      chartState = createChartState(currentData, chartState);
-      runtime.setChartState(chartState);
+    future.push(change);
+    emitHistoryChange();
+    return my;
+  };
+  my.redo = () => {
+    const change = future.pop();
+    if (!change) return my;
+    if (change.kind === "patch") {
+      applyPatch(change.redo, { record: false, automaticGroups: change.groupsAutomaticAfter });
+    } else if (change.kind === "config") {
+      runtime.configure(change.redo);
+      redraw({ animate: false });
+      emitChange({ type: "config.change", config: runtime.config });
+    } else if (change.kind === "state" && change.redo) {
+      setState(change.redo, { record: false });
     }
-    redraw({ animate: false });
-    emitChange({ type: "data.apply", operations: result.operations });
+    history.push(change);
+    emitHistoryChange();
     return my;
   };
   my.highlight = function (ids) {
@@ -1528,11 +1730,13 @@ export default function clusterMap() {
       .map(locusForId)
       .filter(Boolean);
     if (!loci.length) return my;
+    const before = serializeChartState(chartState, currentData);
     flushCanvasFlip();
     clearRasterPreview();
     for (const locus of loci) flipLocus(chartState, locus);
     redraw({ animate: true });
     emitChange({ type: "loci.flip", locusIds: loci.map((locus) => locus.uid) });
+    remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
     return my;
   };
   /** Frame selected genes and/or links without changing their selection. */

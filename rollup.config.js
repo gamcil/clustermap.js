@@ -1,6 +1,15 @@
 import { terser } from "rollup-plugin-terser";
+import { copyFile, mkdir } from "node:fs/promises";
 
-export default {
+const copyEditorCss = {
+  name: "copy-editor-css",
+  async writeBundle() {
+    await mkdir("dist", { recursive: true });
+    await copyFile("src/editor/editor.css", "dist/editor.css");
+  },
+};
+
+const core = {
   input: "src/index.js",
   external: ["d3"],
   output: [
@@ -22,5 +31,13 @@ export default {
       globals: { d3: "d3" },
     },
   ],
-  plugins: [],
+  plugins: [copyEditorCss],
 };
+
+const editor = {
+  input: "src/editor.js",
+  external: ["d3"],
+  output: { file: "dist/editor.mjs", format: "es" },
+};
+
+export default [core, editor];

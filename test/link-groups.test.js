@@ -103,6 +103,26 @@ test("best-only filtering uses one bucket for either cluster-pair direction", as
   assert.deepEqual(filtered.map((item) => item.uid), ["higher"]);
 });
 
+test("best-only filtering retains equal-scoring links and scales within one cluster pair", async () => {
+  const { filterLinks } = await import("../src/links/groups.mjs");
+  const genes = new Map(
+    Array.from({ length: 2002 }, (_, index) => [String(index), { clusterUid: index % 2 ? "one" : "two" }])
+  );
+  const links = Array.from({ length: 1000 }, (_, index) =>
+    link(`link-${index}`, String(index * 2), String(index * 2 + 1), 0.5)
+  );
+  links.push(link("equal", "0", "3", 0.5));
+  const filtered = filterLinks(links, {
+    groupForGene: () => 0,
+    geneForUid: (uid) => genes.get(uid),
+    bestOnly: true,
+    threshold: 0,
+  });
+
+  assert.equal(filtered.length, 1001);
+  assert.ok(filtered.some((item) => item.uid === "equal"));
+});
+
 test("identity threshold applies even when best-only filtering is disabled", async () => {
   const { filterLinks } = await import("../src/links/groups.mjs");
   const genes = new Map([

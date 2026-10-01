@@ -2,6 +2,8 @@
 // It owns only dense geometric marks; Canvas/SVG remain responsible for text,
 // chrome, interaction affordances, export, and broad-browser fallback.
 
+import { color } from "d3";
+import { sampleLinkGeometry } from "./links/layout.mjs";
 import {
   clusterOffsetForPreview,
   geneVisibleForPreview,
@@ -15,7 +17,9 @@ const shader = /* wgsl */ `
 struct Camera {
   transform: vec4f,
   viewport: vec2f,
-  padding: vec2f,
+  // vec4 alignment leaves two padding floats after viewport.
+  // asLine, straight, stroke width, reserved.
+  linkStyle: vec4f,
 }
 @group(0) @binding(0) var<uniform> camera: Camera;
 struct ClusterOffsets {
@@ -73,19 +77,20 @@ struct StrokeInput {
 // WebGPU line-list primitives are always one *physical* pixel wide. Draw
 // gene outlines as quads instead so their configured stroke width matches
 // Canvas and SVG at every device-pixel ratio and camera scale.
-@vertex fn strokeVertex(
-  input: StrokeInput,
-  @builtin(vertex_index) vertexIndex: u32,
+fn projectStroke(
+  worldFirst: vec2f,
+  worldSecond: vec2f,
+  width: f32,
+  corner: u32,
+  colour: vec4f,
 ) -> VertexOutput {
-  let clusterOffset = clusterOffsets.values[u32(input.clusterSlot)];
-  let first = (input.first + clusterOffset) * camera.transform.z + camera.transform.xy;
-  let second = (input.second + clusterOffset) * camera.transform.z + camera.transform.xy;
+  let first = worldFirst * camera.transform.z + camera.transform.xy;
+  let second = worldSecond * camera.transform.z + camera.transform.xy;
   let delta = second - first;
   let segmentLength = max(length(delta), 0.0001);
   let direction = delta / segmentLength;
   let normal = vec2f(-direction.y, direction.x);
-  let halfWidth = input.width * camera.transform.z / 2.0;
-  let corner = vertexIndex % 6u;
+  let halfWidth = width * camera.transform.z / 2.0;
   let useSecond = corner == 1u || corner == 2u || corner == 4u;
   let positiveSide = corner == 2u || corner == 4u || corner == 5u;
   // Extending each endpoint by half a stroke joins adjacent edge quads at
@@ -99,8 +104,22 @@ struct StrokeInput {
     0.0,
     1.0
   );
-  output.colour = input.colour;
+  output.colour = colour;
   return output;
+}
+
+@vertex fn strokeVertex(
+  input: StrokeInput,
+  @builtin(vertex_index) vertexIndex: u32,
+) -> VertexOutput {
+  let clusterOffset = clusterOffsets.values[u32(input.clusterSlot)];
+  return projectStroke(
+    input.first + clusterOffset,
+    input.second + clusterOffset,
+    input.width,
+    vertexIndex % 6u,
+    input.colour,
+  );
 }
 
 @fragment fn fragmentMain(input: VertexOutput) -> @location(0) vec4f {
@@ -130,9 +149,32 @@ fn ribbonPoint(link: LinkRecord, edge: u32, amount: f32) -> vec2f {
   let topX = select(top.x, top.y, edge == 0u) + topOffset;
   let bottomX = select(bottom.x, bottom.y, edge == 0u) + bottomOffset;
   let middle = topY + abs(bottomY - topY) / 2.0;
+  if (camera.linkStyle.y > 0.5) {
+    return vec2f(
+      mix(topX, bottomX, amount),
+      mix(topY, bottomY, amount)
+    );
+  }
   return vec2f(
     cubic(topX, topX, bottomX, bottomX, amount),
     cubic(topY, middle, middle, bottomY, amount)
+  );
+}
+
+fn linkCentrePoint(link: LinkRecord, amount: f32) -> vec2f {
+  let queryOffset = clusterOffsets.values[u32(link.query.w)];
+  let mateOffset = clusterOffsets.values[u32(link.mate.w)];
+  let queryX = (link.query.x + link.query.y) / 2.0 + queryOffset.x;
+  let mateX = (link.mate.x + link.mate.y) / 2.0 + mateOffset.x;
+  let queryY = link.query.z + queryOffset.y;
+  let mateY = link.mate.z + mateOffset.y;
+  if (camera.linkStyle.y > 0.5) {
+    return vec2f(mix(queryX, mateX, amount), mix(queryY, mateY, amount));
+  }
+  let middle = queryY + abs(mateY - queryY) / 2.0;
+  return vec2f(
+    cubic(queryX, queryX, mateX, mateX, amount),
+    cubic(queryY, middle, middle, mateY, amount)
   );
 }
 
@@ -154,6 +196,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   @builtin(instance_index) instanceIndex: u32
 ) -> VertexOutput {
   let link = linkRecords.values[linkIndices.values[instanceIndex]];
+  if (camera.linkStyle.x > 0.5) {
+    return projectWorld(linkCentrePoint(link, 0.0), vec4f(link.fill.rgb, 0.0));
+  }
   let segment = vertexIndex / 6u;
   let corner = vertexIndex % 6u;
   let start = f32(segment) / 10.0;
@@ -176,27 +221,46 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   @builtin(instance_index) instanceIndex: u32
 ) -> VertexOutput {
   let link = linkRecords.values[linkIndices.values[instanceIndex]];
-  let line = vertexIndex / 2u;
-  let endpoint = vertexIndex % 2u;
-  var edge = 0u;
-  var amount = 0.0;
-  if (line < 10u) {
-    edge = 0u;
-    amount = f32(line + endpoint) / 10.0;
-  } else if (line < 20u) {
-    edge = 1u;
-    amount = f32(line - 10u + endpoint) / 10.0;
-  } else if (line == 20u) {
-    edge = endpoint;
-  } else {
-    edge = endpoint;
-    amount = 1.0;
+  let segment = vertexIndex / 6u;
+  let corner = vertexIndex % 6u;
+  if (camera.linkStyle.x > 0.5) {
+    if (segment >= 10u) {
+      return projectWorld(linkCentrePoint(link, 0.0), vec4f(link.stroke.rgb, 0.0));
+    }
+    return projectStroke(
+      linkCentrePoint(link, f32(segment) / 10.0),
+      linkCentrePoint(link, f32(segment + 1u) / 10.0),
+      camera.linkStyle.z,
+      corner,
+      link.stroke,
+    );
   }
-  return projectWorld(ribbonPoint(link, edge, amount), link.stroke);
+  if (segment < 10u) {
+    return projectStroke(
+      ribbonPoint(link, 0u, f32(segment) / 10.0),
+      ribbonPoint(link, 0u, f32(segment + 1u) / 10.0),
+      camera.linkStyle.z,
+      corner,
+      link.stroke,
+    );
+  }
+  if (segment < 20u) {
+    return projectStroke(
+      ribbonPoint(link, 1u, f32(segment - 10u) / 10.0),
+      ribbonPoint(link, 1u, f32(segment - 9u) / 10.0),
+      camera.linkStyle.z,
+      corner,
+      link.stroke,
+    );
+  }
+  if (segment == 20u) {
+    return projectStroke(ribbonPoint(link, 0u, 0.0), ribbonPoint(link, 1u, 0.0), camera.linkStyle.z, corner, link.stroke);
+  }
+  return projectStroke(ribbonPoint(link, 0u, 1.0), ribbonPoint(link, 1u, 1.0), camera.linkStyle.z, corner, link.stroke);
 }`;
 
 function rgba(value, fallback = [0.6, 0.6, 0.6, 1]) {
-  const colour = globalThis.d3?.color?.(value);
+  const colour = color(value);
   return colour
     ? [colour.r / 255, colour.g / 255, colour.b / 255, colour.opacity ?? 1]
     : fallback;
@@ -210,11 +274,6 @@ function pushTriangle(vertices, first, second, third, colour, clusterSlot = 0) {
   pushVertex(vertices, first[0], first[1], colour, clusterSlot);
   pushVertex(vertices, second[0], second[1], colour, clusterSlot);
   pushVertex(vertices, third[0], third[1], colour, clusterSlot);
-}
-
-function pushLine(vertices, first, second, colour, clusterSlot = 0) {
-  pushVertex(vertices, first[0], first[1], colour, clusterSlot);
-  pushVertex(vertices, second[0], second[1], colour, clusterSlot);
 }
 
 function pushStrokeSegment(vertices, first, second, colour, clusterSlot, width) {
@@ -251,39 +310,33 @@ function pushGene(
   }
 }
 
-function cubic(start, controlA, controlB, end, amount) {
-  const inverse = 1 - amount;
-  return (
-    inverse * inverse * inverse * start +
-    3 * inverse * inverse * amount * controlA +
-    3 * inverse * amount * amount * controlB +
-    amount * amount * amount * end
-  );
-}
-
 function pushLink(vertices, edges, link, colour, stroke, {
   visible = link.visible,
   anchors = link.anchors,
   segments = 10,
+  asLine = false,
+  straight = false,
+  strokeWidth = 1,
 } = {}) {
   if (!visible || !anchors) return;
-  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  const middle = ay + Math.abs(by - ay) / 2;
-  const upper = [];
-  const lower = [];
-  for (let index = 0; index <= segments; index += 1) {
-    const amount = index / segments;
-    upper.push([cubic(ax2, ax2, bx2, bx2, amount), cubic(ay, middle, middle, by, amount)]);
-    lower.push([cubic(ax1, ax1, bx1, bx1, amount), cubic(ay, middle, middle, by, amount)]);
+  const geometry = sampleLinkGeometry(anchors, { asLine, straight, segments });
+  const strokeSegment = (first, second) => pushStrokeSegment(
+    edges, first, second, stroke, 0, strokeWidth
+  );
+  if (asLine) {
+    for (let index = 1; index < geometry.line.length; index += 1) {
+      strokeSegment(geometry.line[index - 1], geometry.line[index]);
+    }
+    return;
   }
-  for (let index = 0; index < segments; index += 1) {
-    pushTriangle(vertices, upper[index], upper[index + 1], lower[index], colour);
-    pushTriangle(vertices, upper[index + 1], lower[index + 1], lower[index], colour);
-    pushLine(edges, upper[index], upper[index + 1], stroke);
-    pushLine(edges, lower[index], lower[index + 1], stroke);
+  for (let index = 0; index < geometry.upper.length - 1; index += 1) {
+    pushTriangle(vertices, geometry.upper[index], geometry.upper[index + 1], geometry.lower[index], colour);
+    pushTriangle(vertices, geometry.upper[index + 1], geometry.lower[index + 1], geometry.lower[index], colour);
+    strokeSegment(geometry.upper[index], geometry.upper[index + 1]);
+    strokeSegment(geometry.lower[index], geometry.lower[index + 1]);
   }
-  pushLine(edges, upper[0], lower[0], stroke);
-  pushLine(edges, upper[segments], lower[segments], stroke);
+  strokeSegment(geometry.upper[0], geometry.lower[0]);
+  strokeSegment(geometry.upper.at(-1), geometry.lower.at(-1));
 }
 
 function offsetsForLocus(preview, locus) {
@@ -408,6 +461,9 @@ function linkVertices(scene, link, scales, config, preview = null) {
     // their vertex count constant lets a preview hide them by alpha alone.
     visible: true,
     anchors: anchorsForPreview(scene, link, preview),
+    asLine: config.link.asLine,
+    straight: config.link.straight,
+    strokeWidth: config.link.strokeWidth,
   });
   return { links: new Float32Array(fill), linkEdges: new Float32Array(edge) };
 }
@@ -713,12 +769,6 @@ export async function createWebGpuRenderer(canvas) {
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
   });
-  const linePipeline = await createPipeline({
-    layout: pipelineLayout,
-    vertex: { module, entryPoint: "vertexMain", buffers: vertexBuffers },
-    fragment: { module, entryPoint: "fragmentMain", targets: target },
-    primitive: { topology: "line-list" },
-  });
   const strokePipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "strokeVertex", buffers: strokeVertexBuffers },
@@ -737,7 +787,7 @@ export async function createWebGpuRenderer(canvas) {
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "line-list" },
   });
-  const uniform = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const uniform = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   let clusterOffsetBuffer = device.createBuffer({
     size: 8,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -901,7 +951,7 @@ export async function createWebGpuRenderer(canvas) {
     geneBuffer = bufferFor(device, geneBuffer, data.genes);
     geneEdgeBuffer = bufferFor(device, geneEdgeBuffer, data.geneEdges);
     linkCount = data.links.length / 7;
-    linkEdgeCount = data.linkEdges.length / 7;
+    linkEdgeCount = data.linkEdges.length / 10;
     trackCount = data.tracks.length / 10;
     geneCount = data.genes.length / 7;
     geneEdgeCount = data.geneEdges.length / 10;
@@ -1036,7 +1086,20 @@ export async function createWebGpuRenderer(canvas) {
       device.queue.writeBuffer(
         uniform,
         0,
-        new Float32Array([camera.x, camera.y, camera.k, 0, width, height, 0, 0])
+        new Float32Array([
+          camera.x,
+          camera.y,
+          camera.k,
+          0,
+          width,
+          height,
+          0,
+          0,
+          config.link.asLine ? 1 : 0,
+          config.link.straight ? 1 : 0,
+          config.link.strokeWidth,
+          0,
+        ])
       );
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginRenderPass({
@@ -1060,12 +1123,12 @@ export async function createWebGpuRenderer(canvas) {
       if (previewLinksActive) {
         pass.setPipeline(linkLinePipeline);
         pass.setBindGroup(0, bindGroup);
-        pass.draw(44, previewLinkCount);
+        pass.draw(132, previewLinkCount);
       } else if (linkEdgeBuffer) {
-        pass.setPipeline(linePipeline);
+        pass.setPipeline(strokePipeline);
         pass.setBindGroup(0, bindGroup);
         pass.setVertexBuffer(0, linkEdgeBuffer);
-        pass.draw(linkEdgeCount);
+        pass.draw(6, linkEdgeCount);
       }
       pass.setPipeline(strokePipeline);
       pass.setBindGroup(0, bindGroup);

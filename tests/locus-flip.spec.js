@@ -173,6 +173,57 @@ test("double-clicking a locus reverses its gene layout", async ({ page }, testIn
     .toEqual([...before.genes].reverse().map((uid) => `gene_${uid}`));
 });
 
+test("a direct locus flip is one undoable state change", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({ plot: { transitionDuration: 0 } });
+    window.__interactionHistoryChart = chart;
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const before = await page.evaluate(() => window.__interactionHistoryChart.state());
+  const locus = page.locator("g.locus").first();
+  await locus.dblclick({ position: { x: 20, y: 11 } });
+  await expect.poll(() => page.evaluate(() => window.__interactionHistoryChart.canUndo())).toBe(true);
+
+  await page.evaluate(() => window.__interactionHistoryChart.undo());
+  await expect.poll(() => page.evaluate(() => window.__interactionHistoryChart.state())).toEqual(before);
+});
+
+test("a direct locus drag is one undoable state change", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({ plot: { transitionDuration: 0 } });
+    window.__interactionHistoryChart = chart;
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const before = await page.evaluate(() => window.__interactionHistoryChart.state());
+  const hover = page.locator("g.locus").first().locator("rect.hover");
+  const box = await hover.boundingBox();
+  if (!box) throw new Error("locus drag target is not visible");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2, { steps: 4 });
+  await page.mouse.up();
+
+  await expect.poll(() => page.evaluate(() => window.__interactionHistoryChart.canUndo())).toBe(true);
+  await page.evaluate(() => window.__interactionHistoryChart.undo());
+  await expect.poll(() => page.evaluate(() => window.__interactionHistoryChart.state())).toEqual(before);
+});
+
 test("SVG locus text updates before its flip transition finishes", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
 
@@ -439,6 +490,51 @@ test("dragging a cluster persists a snapped vertical order", async ({ page }, te
   }));
 });
 
+test("dragging a selected cluster moves its selected cluster block", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({ plot: { transitionDuration: 0 } });
+    window.__selectedClusterDragChart = chart;
+    d3.select(host).datum(data).call(chart);
+    chart.locusSelection(chart.data().clusters.slice(0, 2).map((cluster) => cluster.loci[0].uid));
+  });
+
+  const before = await page.evaluate(() => window.__selectedClusterDragChart.data().clusters.map((cluster) => cluster.uid));
+  const clusters = page.locator("g.cluster");
+  const [firstInfo, secondInfo, thirdInfo] = [
+    clusters.nth(0).locator("g.clusterInfo"),
+    clusters.nth(1).locator("g.clusterInfo"),
+    clusters.nth(2).locator("g.clusterInfo"),
+  ];
+  const [firstY, secondY, secondBox, thirdBox] = await Promise.all([
+    readTranslateY(clusters.nth(0)),
+    readTranslateY(clusters.nth(1)),
+    secondInfo.boundingBox(),
+    thirdInfo.boundingBox(),
+  ]);
+  if (!secondBox || !thirdBox) throw new Error("cluster drag targets are not visible");
+  const point = { x: secondBox.x + secondBox.width / 2, y: secondBox.y + secondBox.height / 2 };
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  await page.mouse.move(point.x, point.y + 12);
+  await expect.poll(() => readTranslateY(clusters.nth(0))).toBeGreaterThan(firstY + 1);
+  await expect.poll(() => readTranslateY(clusters.nth(1))).toBeGreaterThan(secondY + 1);
+  await page.mouse.move(thirdBox.x + thirdBox.width / 2, thirdBox.y + thirdBox.height / 2, { steps: 4 });
+  await page.mouse.up();
+
+  await expect.poll(() => page.evaluate(() => window.__selectedClusterDragChart.state().clusterOrder)).toEqual([
+    before[2],
+    before[0],
+    before[1],
+  ]);
+});
+
 test("dragging a cluster follows the pointer before it changes rows", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
 
@@ -608,15 +704,15 @@ test("trimming a moved locus uses its world-space gene boundary", async ({ page 
 test("clicking a gene aligns its matching genes across clusters", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {
-    const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+    const [{ ClusterMap }, data] = await Promise.all([
+      import("/dist/clustermap.mjs"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     // Make the second member of group 1 visibly offset from the anchor.
     Object.assign(data.clusters[1].loci[0].genes[0], { start: 2500, end: 3500 });
     const host = document.querySelector(".chart-host");
     host.replaceChildren();
-    d3.select(host).datum(data).call(clusterMap().config({ plot: { transitionDuration: 0 } }));
+    d3.select(host).datum(data).call(ClusterMap().config({ plot: { transitionDuration: 0 } }));
   });
 
   const anchor = page.locator('[id$="gene_0"] polygon.genePolygon');
@@ -753,11 +849,11 @@ test("separate chart instances keep SVG IDs and interactions isolated", async ({
     document.body.append(host);
 
     const [module, response] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/dist/clustermap.mjs"),
       fetch("/testing.json"),
     ]);
     const data = await response.json();
-    const chart = module.default().config({
+    const chart = module.ClusterMap().config({
       plot: { transitionDuration: 0 },
       link: { label: { show: true, background: true } },
     });
@@ -836,6 +932,8 @@ test("canvas renderer forwards locus double-clicks to the shared controller", as
     const { chart, data, host } = window.__canvasInteractionTest;
     chart.config({ plot: { renderer: "canvas" } });
     d3.select(host).datum(data).call(chart);
+    chart.clearHistory();
+    window.__canvasInteractionTest.beforeFlip = chart.state();
   });
   const canvas = page.locator("canvas.clusterMapCanvas");
   await expect(canvas).toBeVisible();
@@ -861,6 +959,12 @@ test("canvas renderer forwards locus double-clicks to the shared controller", as
   expect(exported).toContain('class="legend"');
   expect(exported).not.toContain('class="hover');
   expect(exported).not.toContain("visibility: hidden");
+  await expect.poll(() => page.evaluate(() => window.__canvasInteractionTest.chart.canUndo())).toBe(true);
+  await page.evaluate(() => window.__canvasInteractionTest.chart.undo());
+  await expect
+    .poll(() => page.evaluate(() => window.__canvasInteractionTest.chart.state()))
+    .toEqual(await page.evaluate(() => window.__canvasInteractionTest.beforeFlip));
+  await page.evaluate(() => window.__canvasInteractionTest.chart.redo());
 
   await page.evaluate(() => {
     const { chart, data, host } = window.__canvasInteractionTest;
@@ -910,6 +1014,48 @@ test("WebGPU renderer forwards locus interactions through its Canvas overlay", a
   await expect.poll(() => page.evaluate(() => window.__webgpuInteractionTest.chart.exportSvg())).toContain(
     "input_locus (reversed):10000-1"
   );
+});
+
+test("WebGPU respects line and straight link appearance", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "WebGPU pixel assertions run in Chromium");
+  await page.goto("http://127.0.0.1:8080/?test=1");
+  const supported = await page.evaluate(() => Boolean(navigator.gpu));
+  test.skip(!supported, "WebGPU is unavailable in this browser");
+  await page.evaluate(async () => {
+    const [{ default: clusterMap }, data] = await Promise.all([
+      import("/src/clusterMap.js"),
+      fetch("/testing.json").then((response) => response.json()),
+    ]);
+    const host = document.querySelector(".chart-host");
+    host.replaceChildren();
+    const chart = clusterMap().config({
+      plot: { renderer: "webgpu", transitionDuration: 0 },
+      link: { asLine: false, straight: false },
+    });
+    window.__webgpuLinkAppearanceChart = chart;
+    d3.select(host).datum(data).call(chart);
+  });
+
+  const canvas = await requireWebGpuCanvas(page);
+  const imageHash = async () => {
+    let hash = 0;
+    for (const byte of await canvas.screenshot()) hash = (hash * 31 + byte) >>> 0;
+    return hash;
+  };
+  const curvedRibbon = await imageHash();
+  await page.evaluate(() => window.__webgpuLinkAppearanceChart.config({ link: { straight: true } }));
+  await expect.poll(imageHash).not.toEqual(curvedRibbon);
+  const straightRibbon = await imageHash();
+  await page.evaluate(() => window.__webgpuLinkAppearanceChart.config({
+    link: { asLine: true, straight: false },
+  }));
+  await expect.poll(imageHash).not.toEqual(straightRibbon);
+  const curvedLine = await imageHash();
+  await page.evaluate(() => window.__webgpuLinkAppearanceChart.config({ link: { straight: true } }));
+  await expect.poll(imageHash).not.toEqual(curvedLine);
+  const straightLine = await imageHash();
+  await page.evaluate(() => window.__webgpuLinkAppearanceChart.config({ link: { strokeWidth: 5 } }));
+  await expect.poll(imageHash).not.toEqual(straightLine);
 });
 
 test("WebGPU aligns a matching gene without leaving the retained scene", async ({ page }) => {

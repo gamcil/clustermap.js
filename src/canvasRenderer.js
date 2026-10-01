@@ -11,6 +11,7 @@ import {
   previewOffsetsForLocus,
 } from "./scenePreview.mjs";
 import { clusterPairKey } from "./layout.mjs";
+import { traceLinkPath } from "./links/layout.mjs";
 
 /**
  * Choose Canvas backing-store resolution from the view scale.  This affects
@@ -346,34 +347,16 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   ax2 += geometry.a || 0;
   bx1 += geometry.b || 0;
   bx2 += geometry.b || 0;
-  const aMid = (ax1 + ax2) / 2;
-  const bMid = (bx1 + bx2) / 2;
   const group = scales.group(source.query.uid);
   const colour = source.colour || scales.colour(group);
   const score = scales.score(source.identity);
 
   context.beginPath();
+  const adjustedAnchors = [ax1, ax2, ay, bx1, bx2, by];
+  traceLinkPath(context, adjustedAnchors, config.link);
   if (config.link.asLine) {
-    context.moveTo(aMid, ay);
-    if (config.link.straight) context.lineTo(bMid, by);
-    else {
-      const middle = (ay + by) / 2;
-      context.bezierCurveTo(aMid, middle, bMid, middle, bMid, by);
-    }
     context.strokeStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
   } else {
-    context.moveTo(ax2, ay);
-    if (config.link.straight) {
-      context.lineTo(bx2, by);
-      context.lineTo(bx1, by);
-      context.lineTo(ax1, ay);
-    } else {
-      const middle = ay + Math.abs(by - ay) / 2;
-      context.bezierCurveTo(ax2, middle, bx2, middle, bx2, by);
-      context.lineTo(bx1, by);
-      context.bezierCurveTo(bx1, middle, ax1, middle, ax1, ay);
-    }
-    context.closePath();
     context.fillStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
     context.fill();
     context.strokeStyle = source.colour || (config.link.groupColour ? colour : "black");
@@ -393,30 +376,10 @@ function drawLinkHighlight(context, layout, source, config, geometry = {}) {
   ax2 += geometry.a || 0;
   bx1 += geometry.b || 0;
   bx2 += geometry.b || 0;
-  const aMid = (ax1 + ax2) / 2;
-  const bMid = (bx1 + bx2) / 2;
-
   context.beginPath();
+  traceLinkPath(context, [ax1, ax2, ay, bx1, bx2, by], config.link);
   if (config.link.asLine) {
-    context.moveTo(aMid, ay);
-    if (config.link.straight) context.lineTo(bMid, by);
-    else {
-      const middle = (ay + by) / 2;
-      context.bezierCurveTo(aMid, middle, bMid, middle, bMid, by);
-    }
   } else {
-    context.moveTo(ax2, ay);
-    if (config.link.straight) {
-      context.lineTo(bx2, by);
-      context.lineTo(bx1, by);
-      context.lineTo(ax1, ay);
-    } else {
-      const middle = ay + Math.abs(by - ay) / 2;
-      context.bezierCurveTo(ax2, middle, bx2, middle, bx2, by);
-      context.lineTo(bx1, by);
-      context.bezierCurveTo(bx1, middle, ax1, middle, ax1, ay);
-    }
-    context.closePath();
     context.fillStyle = "rgba(22, 119, 255, 0.18)";
     context.fill();
   }

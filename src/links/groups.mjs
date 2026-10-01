@@ -134,52 +134,57 @@ export function filterLinks(
   links,
   { groupForGene, geneForUid, bestOnly, threshold }
 ) {
-  const visibleLinks = links.filter(
-    (link) => {
-      // Link records remain part of the editable data even if an endpoint is
-      // temporarily absent (for example after deleting a gene). A renderer
-      // must omit such a link rather than treating that data relationship as
-      // deleted or dereferencing a missing gene below.
-      if (link.hidden || !geneForUid(link.query.uid) || !geneForUid(link.target.uid)) return false;
-      return (
-      groupForGene(link.query.uid) !== null &&
-      groupForGene(link.target.uid) !== null
-      );
-    }
-  );
+  const passing = [];
+  for (const link of links) {
+    // Link records remain part of the editable data even if an endpoint is
+    // temporarily absent (for example after deleting a gene). A renderer
+    // must omit such a link rather than treating that data relationship as
+    // deleted or dereferencing a missing gene below.
+    const query = geneForUid(link.query.uid);
+    const target = geneForUid(link.target.uid);
+    if (
+      link.hidden ||
+      !query ||
+      !target ||
+      link.identity < threshold ||
+      groupForGene(link.query.uid) === null ||
+      groupForGene(link.target.uid) === null
+    ) continue;
+    passing.push({ link, query, target });
+  }
   // Threshold decides visibility regardless of whether the optional
   // best-per-cluster-pair reduction is enabled. Colour scaling is deliberately
   // independent and is resolved by the shared identity scale.
-  const passingThreshold = visibleLinks.filter((link) => link.identity >= threshold);
-  if (!bestOnly) return passingThreshold;
+  if (!bestOnly) return passing.map(({ link }) => link);
 
-  const pairKey = (left, right) => [left, right]
-    .map((uid) => `${typeof uid}:${String(uid)}`)
-    .sort()
-    .join("|");
+  const pairKey = (left, right) => {
+    const first = `${typeof left}:${String(left)}`;
+    const second = `${typeof right}:${String(right)}`;
+    return first < second ? `${first}|${second}` : `${second}|${first}`;
+  };
   const linksByClusterPair = new Map();
-  const byIdentity = [...passingThreshold].sort((a, b) => b.identity - a.identity);
+  const byIdentity = [...passing].sort((a, b) => b.link.identity - a.link.identity);
 
-  for (const link of byIdentity) {
+  for (const { link, query, target } of byIdentity) {
     const clusterPair = pairKey(
-      geneForUid(link.query.uid).clusterUid,
-      geneForUid(link.target.uid).clusterUid
+      query.clusterUid,
+      target.clusterUid
     );
-
-    if (!linksByClusterPair.has(clusterPair)) {
-      linksByClusterPair.set(clusterPair, [link]);
-      continue;
-    }
-
-    const selected = linksByClusterPair.get(clusterPair);
-    const superseded = selected.some((candidate) => {
-      const genes = new Set([candidate.query.uid, candidate.target.uid]);
-      const sharesGene = genes.has(link.query.uid) || genes.has(link.target.uid);
-      return sharesGene && link.identity < candidate.identity;
-    });
-    if (!superseded) selected.push(link);
+    const selected = linksByClusterPair.get(clusterPair) || {
+      links: [],
+      bestIdentityForGene: new Map(),
+    };
+    const queryBest = selected.bestIdentityForGene.get(link.query.uid);
+    const targetBest = selected.bestIdentityForGene.get(link.target.uid);
+    // Equal-scoring links intentionally survive: only a strictly better link
+    // that shares an endpoint supersedes this relationship.
+    if (queryBest > link.identity || targetBest > link.identity) continue;
+    selected.links.push(link);
+    selected.bestIdentityForGene.set(link.query.uid, Math.max(queryBest ?? -Infinity, link.identity));
+    selected.bestIdentityForGene.set(link.target.uid, Math.max(targetBest ?? -Infinity, link.identity));
+    linksByClusterPair.set(clusterPair, selected);
   }
 
   return [...linksByClusterPair.values()]
-    .flat();
+    .flatMap(({ links: selected }) => selected);
 }

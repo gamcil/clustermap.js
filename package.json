@@ -8,6 +8,13 @@
     ".": {
       "import": "./dist/clustermap.mjs"
     },
+    "./editor": {
+      "import": "./dist/editor.mjs"
+    },
+    "./editor/element": {
+      "import": "./dist/editor.mjs"
+    },
+    "./editor.css": "./dist/editor.css",
     "./dist/clustermap.js": "./dist/clustermap.js",
     "./dist/clustermap.min.js": "./dist/clustermap.min.js"
   },

@@ -1,0 +1,112 @@
+@layer clinker-editor {
+  clinker-editor.cm-editor { display: flex; min-height: 180px; box-sizing: border-box; flex-direction: column; padding: 10px; border: 1px solid #d7dce3; border-radius: 10px; background: rgba(255, 255, 255, .98); color: #273444; font: 13px system-ui, sans-serif; }
+  clinker-editor.cm-editor[hidden] { display: none; }
+  clinker-editor.cm-editor[resizable] { overflow: hidden; }
+  clinker-editor .cm-editor__resize-handle { height: 10px; flex: 0 0 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }
+  clinker-editor .cm-editor__resize-handle::after { display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: #aaa; content: ""; }
+  clinker-editor .cm-editor__header, clinker-editor .cm-editor__toolbar, clinker-editor .cm-editor__meta, clinker-editor .cm-editor__actions { display: flex; align-items: center; gap: 8px; }
+  clinker-editor .cm-editor__header { justify-content: space-between; margin-bottom: 8px; }
+  clinker-editor .cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }
+  clinker-editor button, clinker-editor input, clinker-editor select { font: inherit; }
+  clinker-editor button, clinker-editor select, clinker-editor input:not([type="checkbox"]):not([type="color"]) { min-height: 30px; box-sizing: border-box; border: 1px solid #cbd3de; border-radius: 6px; padding: 4px 8px; background: #fff; color: inherit; }
+  clinker-editor button { cursor: pointer; }
+  clinker-editor button:hover:not(:disabled) { border-color: #78a9ed; background: #f4f8ff; }
+  clinker-editor button:disabled { color: #8993a1; background: #f5f6f8; cursor: default; }
+  clinker-editor .cm-editor__tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid #e1e5ea; }
+  clinker-editor .cm-editor__tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; }
+  clinker-editor .cm-editor__tabs button[aria-selected="true"] { border-bottom-color: #1677ff; font-weight: 600; }
+  clinker-editor .cm-editor__panel { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+  clinker-editor .cm-editor__panel[hidden] { display: none; }
+  /* These elements have layout display rules, so restate hidden explicitly. */
+  clinker-editor .cm-editor__segmented[hidden], clinker-editor .cm-editor__actions[hidden], clinker-editor .cm-editor__head[hidden] { display: none; }
+  clinker-editor .cm-editor__segmented { display: flex; padding: 3px; border: 1px solid #e0e5eb; border-radius: 7px; background: #f2f4f7; }
+  clinker-editor .cm-editor__segmented button { min-height: 28px; border: 0; background: transparent; }
+  clinker-editor .cm-editor__segmented button[aria-pressed="true"] { background: #fff; box-shadow: 0 1px 2px rgba(29,43,61,.16); font-weight: 600; }
+  clinker-editor .cm-editor__search { display: flex; min-width: 180px; flex: 1; }
+  clinker-editor .cm-editor__search input { width: 100%; }
+  clinker-editor .cm-editor__member-filter { display: flex; align-items: center; gap: 6px; margin: 7px 0 -2px; color: #526178; font-size: 12px; }
+  clinker-editor .cm-editor__member-filter[hidden] { display: none; }
+  clinker-editor .cm-editor__member-filter button, clinker-editor .cm-editor__appearance-toolbar > button { display: grid; place-items: center; width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: #64748b; font-size: 17px; line-height: 1; }
+  clinker-editor .cm-editor__actions { flex-wrap: wrap; margin: 9px 0 8px; padding: 8px 10px; border: 1px solid #dce5f2; border-radius: 8px; background: #f7faff; }
+  clinker-editor .cm-editor__actions strong { padding: 4px 7px; border-radius: 5px; background: #e7f0ff; color: #184a86; }
+  clinker-editor .cm-editor__action-group { display: flex; align-items: center; gap: 6px; }
+  clinker-editor .cm-editor__action-group + .cm-editor__action-group { border-left: 1px solid #d5e0ee; padding-left: 10px; }
+  clinker-editor .cm-editor__action-group label { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+  clinker-editor .cm-editor__action-group input[type="number"] { width: 112px; }
+  clinker-editor .cm-editor__danger { border-color: #e4aaa5; color: #b3261e; background: #fffafa; }
+  clinker-editor .cm-editor__meta { justify-content: space-between; min-height: 29px; color: #667386; font-size: 12px; }
+  clinker-editor .cm-editor__table { flex: 1; min-height: 120px; overflow: auto; }
+  clinker-editor .cm-editor__head, clinker-editor .cm-editor__row { display: grid; align-items: center; gap: 7px; min-width: 640px; padding: 0 5px; box-sizing: border-box; }
+  clinker-editor .cm-editor__head { min-height: 32px; border-bottom: 1px solid #dbe2eb; background: #f7f9fc; color: #556274; font-size: 11px; font-weight: 650; }
+  clinker-editor .cm-editor__sort { display: flex; align-items: center; gap: 2px; min-height: 24px; padding: 0; border: 0; background: transparent; color: inherit; font-size: inherit; font-weight: inherit; text-align: left; }
+  clinker-editor .cm-editor__sort:hover { border: 0; background: transparent; color: #145da8; }
+  clinker-editor .cm-editor__sort span { color: #7b8a9e; font-size: 12px; }
+  clinker-editor .cm-editor__row { min-height: 34px; border-bottom: 1px solid #eee; cursor: pointer; }
+  clinker-editor .cm-editor__row:focus-within, clinker-editor .cm-editor__row:hover, clinker-editor .cm-editor__row.is-selected { background: #f1f6ff; }
+  clinker-editor .cm-editor__row input[type="checkbox"], clinker-editor .cm-editor__tree-row input[type="checkbox"] { opacity: .45; }
+  clinker-editor .cm-editor__row:hover input[type="checkbox"], clinker-editor .cm-editor__row.is-selected input[type="checkbox"], clinker-editor .cm-editor__tree-row:hover input[type="checkbox"], clinker-editor .cm-editor__tree-row.is-selected input[type="checkbox"] { opacity: 1; }
+  clinker-editor .cm-editor__head--groups, clinker-editor .cm-editor__row--groups { grid-template-columns: 28px 28px minmax(180px, 1fr) minmax(150px, 300px) 86px 28px 46px; }
+  clinker-editor .cm-editor__head--genes, clinker-editor .cm-editor__row--genes { grid-template-columns: 28px minmax(160px, 1.3fr) minmax(100px, .85fr) minmax(110px, 1fr) minmax(100px, .85fr) 36px; }
+  clinker-editor .cm-editor__head--links, clinker-editor .cm-editor__row--links { grid-template-columns: 28px minmax(120px, 1fr) minmax(120px, 1fr) 76px minmax(150px, .95fr) minmax(120px, .8fr) 28px 46px; }
+  clinker-editor .cm-editor__tree-row { display: grid; grid-template-columns: 22px 28px minmax(180px, 1fr); align-items: center; gap: 7px; min-height: 34px; padding: 0 5px 0 calc(5px + var(--depth, 0) * 18px); border-bottom: 1px solid #eee; box-sizing: border-box; }
+  clinker-editor .cm-editor__tree-gene { grid-template-columns: 28px minmax(180px, 1fr) minmax(120px, .75fr) 36px; }
+  clinker-editor .cm-editor__tree-parent { background: #fafafa; font-weight: 550; }
+  clinker-editor .cm-editor__tree-row:hover, clinker-editor .cm-editor__tree-row.is-selected, clinker-editor .cm-editor__tree-row:focus-within { background: #f1f6ff; }
+  clinker-editor .cm-editor__tree-toggle { width: 20px; min-width: 20px; min-height: 24px; padding: 0; border: 0; background: transparent; color: #64748b; font-size: 14px; }
+  clinker-editor .cm-editor__tree-toggle:hover { background: transparent; color: #145da8; }
+  clinker-editor .cm-editor__tree-separator { color: #96a4b5; font-size: 12px; }
+  clinker-editor .cm-editor__tree-combined { display: flex; min-width: 0; align-items: center; gap: 4px; }
+  /* A hover-only pencil must not make the adjacent cluster or locus label
+     shrink. Keeping each field at its intrinsic width lets the icon push the
+     following item instead of changing the width an in-place input receives. */
+  clinker-editor .cm-editor__tree-combined > .cm-editor__editable-field { flex: 0 0 auto; }
+  clinker-editor .cm-editor__tree-combined > .cm-editor__editable-field:first-child { color: #324155; font-weight: 650; }
+  clinker-editor .cm-editor__tree-combined > .cm-editor__editable-field:nth-of-type(2) { color: #526178; font-weight: 550; }
+  clinker-editor .cm-editor__tree-combined .cm-editor-inline-input, clinker-editor .cm-editor__tree-name-with-count .cm-editor-inline-input { flex: 0 1 auto; width: auto; min-width: 8ch; }
+  clinker-editor .cm-editor__tree-combined .cm-editor-inline-input--fixed, clinker-editor .cm-editor__tree-name-with-count .cm-editor-inline-input--fixed { flex: 0 0 auto; }
+  clinker-editor .cm-editor__tree-count { color: #5f6d7f; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  clinker-editor .cm-editor__tree-name-with-count { display: flex; align-items: center; gap: 5px; min-width: 0; }
+  clinker-editor .cm-editor__tree-gene input[type="color"] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; }
+  clinker-editor .cm-editor-inline-input { width: 100%; min-width: 0; border-color: transparent !important; background: transparent !important; }
+  clinker-editor .cm-editor-inline-input:hover, clinker-editor .cm-editor-inline-input:focus { border-color: #c6d8f0 !important; background: #fff !important; }
+  clinker-editor .cm-editor-inline-input::placeholder { color: #7b8796; font-style: italic; }
+  clinker-editor .cm-editor__context { min-width: 0; overflow: hidden; color: #666; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  clinker-editor .cm-editor__visibility { display: inline-grid; place-items: center; width: 28px; min-width: 28px; min-height: 28px; padding: 0; border: 0; background: transparent; color: #64748b; }
+  clinker-editor .cm-editor__visibility:hover { background: transparent; color: #145da8; }
+  clinker-editor .cm-editor__visibility svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  clinker-editor .cm-editor__reorder { width: 24px; min-width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: #8a96a6; cursor: grab; font-size: 15px; letter-spacing: -3px; }
+  clinker-editor .cm-editor__reorder:hover, clinker-editor .cm-editor__reorder:focus-visible { background: #e7f0ff; color: #145da8; }
+  clinker-editor .cm-editor__drop-target { box-shadow: inset 0 2px #1677ff; }
+  clinker-editor .cm-editor__editable-field { position: relative; display: flex; min-width: 0; align-items: center; }
+  clinker-editor .cm-editor__editable-field .cm-editor-inline-input { flex: 1; }
+  /* This follows the generic field rule above, so fixed in-place tree inputs
+     retain the measured label width in WebKit as well as Chromium/Firefox. */
+  clinker-editor .cm-editor__tree-combined .cm-editor-inline-input--fixed, clinker-editor .cm-editor__tree-name-with-count .cm-editor-inline-input--fixed { flex: 0 0 auto; }
+  clinker-editor .cm-editor__editable-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  clinker-editor .cm-editor__editable-placeholder { color: #7b8796; font-style: italic; }
+  /* Keep edit affordances out of the resting layout.  Unlike an absolute
+     overlay, a hovered pencil occupies normal flow and cannot cover the next
+     cluster/locus label or steal its click target. */
+  clinker-editor .cm-editor__edit-icon { display: none; flex: 0 0 20px; place-items: center; width: 20px; min-width: 20px; min-height: 20px; padding: 0; border: 0; background: transparent; color: #5d82b1; }
+  clinker-editor .cm-editor__row:hover .cm-editor__edit-icon, clinker-editor .cm-editor__row:focus-within .cm-editor__edit-icon, clinker-editor .cm-editor__row.is-selected .cm-editor__edit-icon, clinker-editor .cm-editor__tree-row:hover .cm-editor__edit-icon, clinker-editor .cm-editor__tree-row:focus-within .cm-editor__edit-icon, clinker-editor .cm-editor__tree-row.is-selected .cm-editor__edit-icon { display: grid; }
+  clinker-editor .cm-editor__edit-icon:hover { background: transparent; color: #145da8; }
+  clinker-editor .cm-editor__edit-icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  clinker-editor .cm-editor__row input[type="color"] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; }
+  clinker-editor .cm-editor__empty { padding: 16px; color: #667386; text-align: center; }
+  clinker-editor .cm-editor__appearance-toolbar { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+  clinker-editor .cm-editor__appearance-toolbar > button[hidden] { display: none; }
+  clinker-editor .cm-editor__appearance { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 20px; overflow: auto; padding: 4px 0; }
+  clinker-editor .cm-editor__appearance fieldset { min-width: 0; margin: 0; border: 1px solid #ddd; border-radius: 4px; }
+  clinker-editor .cm-editor__appearance legend { padding: 0 4px; font-weight: 600; }
+  clinker-editor .cm-editor__appearance label { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+  clinker-editor .cm-editor__appearance label > span { min-width: 0; flex: 1; }
+  clinker-editor .cm-editor__appearance select, clinker-editor .cm-editor__appearance input:not([type="checkbox"]) { width: 88px; }
+  clinker-editor .cm-editor__appearance details { margin-top: 8px; border-top: 1px solid #e5e9ef; }
+  clinker-editor .cm-editor__appearance summary { padding: 7px 0 1px; color: #4f6d95; cursor: pointer; font-size: 12px; font-weight: 600; }
+  clinker-editor .cm-editor__sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+  .cm-plot-selection-toolbar { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; align-items: center; gap: 6px; padding: 7px 8px; border: 1px solid #c7d9f1; border-radius: 8px; background: rgba(255,255,255,.94); box-shadow: 0 3px 12px rgba(23,36,54,.12); color: #273444; font: 13px system-ui, sans-serif; }
+  .cm-plot-selection-toolbar[hidden] { display: none; }
+  .cm-plot-selection-toolbar strong { padding: 4px 6px; border-radius: 5px; background: #e7f0ff; color: #184a86; }
+  .cm-plot-selection-toolbar button { min-height: 28px; box-sizing: border-box; border: 1px solid #cbd3de; border-radius: 6px; padding: 3px 7px; background: #fff; color: inherit; font: inherit; cursor: pointer; }
+  .cm-plot-selection-toolbar button:hover { border-color: #78a9ed; background: #f4f8ff; }
+}

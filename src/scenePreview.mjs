@@ -273,13 +273,13 @@ export function createLocusFlipPreview(
 }
 
 /** Describe temporary cluster rows without rebuilding a scene. */
-export function createClusterDragPreview(scene, { clusterUid, position, order, rows }) {
+export function createClusterDragPreview(scene, { clusterUid, position, positions, order, rows }) {
   const clusterOffsets = new Map();
   const clusterOrder = new Map();
   for (const [index, uid] of order.entries()) {
     const cluster = scene.clusters.get(uid);
     if (!cluster) continue;
-    const y = uid === clusterUid ? position : rows[index];
+    const y = positions?.get(uid) ?? (uid === clusterUid ? position : rows[index]);
     clusterOffsets.set(uid, y - cluster.y);
     clusterOrder.set(uid, index);
   }

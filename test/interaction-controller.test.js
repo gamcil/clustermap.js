@@ -121,3 +121,38 @@ test("interaction controller drags a selected locus set by one shared delta", as
     ["commit", ["left", "right"]],
   ]);
 });
+
+test("dragging a selected cluster reorders the selected clusters together", async () => {
+  const { createInteractionController } = await import(
+    "../src/interactionController.mjs"
+  );
+  const calls = [];
+  const controller = createInteractionController({
+    clusterRows: () => [0, 50, 100, 150],
+    getClusterOrder: () => ["a", "b", "c", "d"],
+    getClusterPosition: (uid) => ({ a: 0, b: 50, c: 100, d: 150 })[uid],
+    getLocusOffset: () => 0,
+    selectedClusterIds: () => ["a", "b"],
+    setDragging: (value) => calls.push(["dragging", value]),
+    previewClusterDrag: (uid, y, order, positions) => calls.push([
+      "cluster", uid, y, order, [...positions],
+    ]),
+    commitClusterOrder: () => calls.push(["commit"]),
+    previewLocusOffset: () => {},
+    commitLocusOffset: () => {},
+    previewLocusTrim: () => {},
+    commitLocusTrim: () => {},
+    flipLocus: () => {},
+  });
+
+  controller.beginClusterDrag("b", 55);
+  controller.moveClusterDrag(130);
+  controller.endClusterDrag();
+
+  assert.deepEqual(calls, [
+    ["dragging", true],
+    ["cluster", "b", 125, ["c", "a", "b", "d"], [["a", 75], ["b", 125]]],
+    ["dragging", false],
+    ["commit"],
+  ]);
+});

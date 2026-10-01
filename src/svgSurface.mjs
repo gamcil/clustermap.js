@@ -1,6 +1,7 @@
 // Owns the persistent DOM surrounding an SVG chart. Scene joins and all chart
 // interactions remain in the SVG renderer/controller; this module only
 // establishes the SVG viewport, overlay nodes, and camera gesture binding.
+import * as d3 from "d3";
 import { bindCameraZoom, updateCameraZoom } from "./cameraZoom.mjs";
 
 export function ensureSvgSurface({
