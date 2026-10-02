@@ -1,4 +1,4 @@
-import * as d3 from "d3";
+import { select } from "d3-selection";
 import { renameText, rgbaToRgb } from "./utils.js";
 import { filterLinks } from "./links/groups.mjs";
 
@@ -123,12 +123,12 @@ export function renderSvg({
         enter
           .on("mouseenter", (event) => {
             if (!interactions.isDragging()) {
-              d3.select(event.target).select("g.hover").transition().attr("opacity", 1);
+              select(event.target).select("g.hover").transition().attr("opacity", 1);
             }
           })
           .on("mouseleave", (event) => {
             if (!interactions.isDragging()) {
-              d3.select(event.target).select("g.hover").transition().attr("opacity", 0);
+              select(event.target).select("g.hover").transition().attr("opacity", 0);
             }
           })
           .on("click", (event, locus) => {
@@ -139,7 +139,7 @@ export function renderSvg({
             // geometry. It would otherwise remain visible while the locus
             // itself animates through a flip.
             const locusNode = event.currentTarget;
-            const hover = d3.select(locusNode).select("g.hover").interrupt().attr("opacity", 0);
+            const hover = select(locusNode).select("g.hover").interrupt().attr("opacity", 0);
             // Restore the affordance only if this locus is still under the
             // pointer after its geometry transition completes.
             if (animate && config.plot.transitionDuration) {
@@ -148,7 +148,7 @@ export function renderSvg({
                 .delay(config.plot.transitionDuration)
                 .duration(0)
                 .on("end", function () {
-                  if (locusNode.matches(":hover")) d3.select(this).attr("opacity", 1);
+                  if (locusNode.matches(":hover")) select(this).attr("opacity", 1);
                 });
             }
             interactions.flipLocus(locus);
@@ -308,7 +308,7 @@ function createLocusResizeDrag({ plot, interactions }) {
   const dragged = function (event, locus) {
     interactions.moveLocusTrim(
       locus,
-      d3.select(this).classed("leftHandle") ? "left" : "right",
+      select(this).classed("leftHandle") ? "left" : "right",
       event.x
     );
   };

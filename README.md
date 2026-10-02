@@ -173,6 +173,12 @@ chart and a positioned plot container. It returns a cleanup function.
 
 `ClusterMap()` returns a callable D3 chart. Its supported methods are:
 
+The published core and editor bundles include their D3 runtime; applications
+do not need a D3 peer dependency, global `d3`, or bundler shim to import them.
+The CDN example above loads D3 only because it uses `d3.select(...).call(chart)`
+to mount the callable chart. An application may instead pass a D3 selection it
+already owns.
+
 - `chart.config(options)` merges supported configuration options and returns the
   chart; when mounted, it redraws immediately. `chart.config()` returns the current configuration. Set
   `plot.renderer` to `"svg"`, `"canvas"`, or `"webgpu"`.

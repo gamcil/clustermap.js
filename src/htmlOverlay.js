@@ -1,6 +1,7 @@
 // Browser-only tooltip lifecycle shared by any chart renderer. Menu content is
 // supplied by the caller because those controls may dispatch chart actions.
-import * as d3 from "d3";
+import { color } from "d3-color";
+import { create, select } from "d3-selection";
 
 export function createHtmlOverlay({
   tooltip,
@@ -35,7 +36,7 @@ export function createHtmlOverlay({
   };
 
   const geneContents = (gene) => {
-    const div = d3.create("div").attr("class", "tooltip-contents")
+    const div = create("div").attr("class", "tooltip-contents")
       .style("display", "flex").style("flex-direction", "column")
       .style("gap", "4px").style("width", "260px");
     div.append("label").attr("for", "gene-label-input").text("Edit label");
@@ -51,7 +52,7 @@ export function createHtmlOverlay({
     const group = div.append("div").style("margin-top", "2px");
     group.append("span").text("Similarity group: ");
     group.append("span").text(scales.name(groupId)).style("color", scales.colour(groupId)).style("font-weight", "bold");
-    const colour = d3.color(gene.colour || scales.colour(groupId));
+    const colour = color(gene.colour || scales.colour(groupId));
     const pickerColour = colour ? colour.formatHex() : "#000000";
     div.append("label").text("Choose gene colour: ").append("input")
       .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
@@ -69,7 +70,7 @@ export function createHtmlOverlay({
   };
 
   const groupContents = (group) => {
-    const div = d3.create("div").attr("class", "tooltip-contents")
+    const div = create("div").attr("class", "tooltip-contents")
       .style("display", "flex").style("flex-direction", "column");
     div.append("label").text("Edit label");
     const text = div.append("input").attr("type", "text").attr("value", group.label || group.uid);
@@ -85,7 +86,7 @@ export function createHtmlOverlay({
         .filter((uid) => uid !== undefined);
       if (sourceIds.length) actions.mergeGroups(group, sourceIds);
     });
-    const colour = d3.color(group.colour);
+    const colour = color(group.colour);
     const pickerColour = colour ? colour.formatHex() : "#000000";
     div.append("label").text("Choose group colour: ").append("input")
       .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
@@ -110,7 +111,7 @@ export function createHtmlOverlay({
       // A chart must never replace another chart's window listener. The
       // namespace is supplied by the chart runtime and is removed on redraw
       // or destroy, which also releases this overlay's closure.
-      if (windowRef) d3.select(windowRef).on(clickEvent, dismissOnOutsideClick);
+      if (windowRef) select(windowRef).on(clickEvent, dismissOnOutsideClick);
     },
     leave: () => {
       const active = document.activeElement;
@@ -125,7 +126,7 @@ export function createHtmlOverlay({
     showGeneMenu: (event, gene) => { event.preventDefault(); show(event, geneContents(gene)); },
     showGroupMenu: (event, group) => { event.preventDefault(); show(event, groupContents(group)); },
     dispose: () => {
-      if (windowRef) d3.select(windowRef).on(clickEvent, null);
+      if (windowRef) select(windowRef).on(clickEvent, null);
       tooltip.interrupt();
       hide();
     },

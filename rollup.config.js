@@ -1,4 +1,5 @@
 import { terser } from "rollup-plugin-terser";
+import { nodeResolve } from "@rollup/plugin-node-resolve";
 import { copyFile, mkdir } from "node:fs/promises";
 
 const copyEditorCss = {
@@ -9,9 +10,15 @@ const copyEditorCss = {
   },
 };
 
+const stripTrailingWhitespace = {
+  name: "strip-trailing-whitespace",
+  renderChunk(code) {
+    return { code: code.replace(/[ \t]+$/gm, ""), map: null };
+  },
+};
+
 const core = {
   input: "src/index.js",
-  external: ["d3"],
   output: [
     {
       file: "dist/clustermap.mjs",
@@ -21,23 +28,24 @@ const core = {
       file: "dist/clustermap.js",
       format: "umd",
       name: "ClusterMap",
-      globals: { d3: "d3" },
     },
     {
       file: "dist/clustermap.min.js",
       format: "umd",
       name: "ClusterMap",
       plugins: [terser()],
-      globals: { d3: "d3" },
     },
   ],
-  plugins: [copyEditorCss],
+  // The published chart is self-contained. Consumers may still use D3 to
+  // mount its callable chart, but do not need to resolve or globally expose
+  // D3 for the chart or optional editor to load.
+  plugins: [nodeResolve({ browser: true }), stripTrailingWhitespace, copyEditorCss],
 };
 
 const editor = {
   input: "src/editor.js",
-  external: ["d3"],
   output: { file: "dist/editor.mjs", format: "es" },
+  plugins: [nodeResolve({ browser: true }), stripTrailingWhitespace],
 };
 
 export default [core, editor];

@@ -1,4 +1,6 @@
-import * as d3 from "d3";
+import { select } from "d3-selection";
+import { transition as createTransition } from "d3-transition";
+import { zoomIdentity } from "d3-zoom";
 import { createLinkGroups } from "./links/groups.mjs";
 import {
   createChartState,
@@ -90,7 +92,7 @@ export default function clusterMap() {
   /* A ClusterMap plot. */
 
   let container = null;
-  let transition = d3.transition();
+  let transition = createTransition();
   let zoom = null;
   let canvasZoom = null;
   let hasInitialView = false;
@@ -552,7 +554,7 @@ export default function clusterMap() {
 
   function my(selection, options) {
     selection.each(function (data) {
-      container = d3.select(this).attr("width", "100%").attr("height", "100%");
+      container = select(this).attr("width", "100%").attr("height", "100%");
       loadData(data);
       redraw(options);
     });
@@ -712,7 +714,7 @@ export default function clusterMap() {
     canvasPreparedFlipBase = null;
 
     // Set up the shared transition
-    transition = d3.transition().duration(runtime.config.plot.transitionDuration);
+    transition = createTransition().duration(runtime.config.plot.transitionDuration);
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
@@ -766,10 +768,10 @@ export default function clusterMap() {
       },
       onZoomStart: (surface) => {
         rasterMotion.begin();
-        d3.select(surface).style("cursor", "grabbing");
+        select(surface).style("cursor", "grabbing");
       },
       onZoomEnd: (surface) => {
-        d3.select(surface).style("cursor", "grab");
+        select(surface).style("cursor", "grab");
         rasterMotion.end();
       },
     });
@@ -1370,7 +1372,7 @@ export default function clusterMap() {
         warmLocus: useCanvas ? warmCanvasFlipBase : () => {},
         beginMotion: rasterMotion.begin,
         endMotion: rasterMotion.end,
-        setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
+        setCursor: (surface, cursor) => select(surface).style("cursor", cursor),
         ...rasterBindings,
       });
       canvasZoom.filter(function (event) {
@@ -1388,15 +1390,15 @@ export default function clusterMap() {
           if (!camera || !mainCanvas) return;
           // Go through D3 rather than mutating its private __zoom state. This
           // keeps the next wheel/pan gesture continuous with minimap navigation.
-          d3.select(mainCanvas).call(
+          select(mainCanvas).call(
             canvasZoom.transform,
-            d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+            zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
           );
           paintMinimap();
         },
         beginMotion: rasterMotion.begin,
         endMotion: rasterMotion.end,
-        setCursor: (surface, cursor) => d3.select(surface).style("cursor", cursor),
+        setCursor: (surface, cursor) => select(surface).style("cursor", cursor),
       });
     }
     // The currently displayed renderer can change without changing the chart
@@ -1460,8 +1462,8 @@ export default function clusterMap() {
         constrainScale: constrainZoom,
       });
       if (!camera) return false;
-      const transform = d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k);
-      if (useRaster && canvasZoom) d3.select(node).call(canvasZoom.transform, transform);
+      const transform = zoomIdentity.translate(camera.x, camera.y).scale(camera.k);
+      if (useRaster && canvasZoom) select(node).call(canvasZoom.transform, transform);
       else if (zoom) svg.call(zoom.transform, transform);
       else setCamera(chartState, camera);
       return true;
@@ -1535,7 +1537,7 @@ export default function clusterMap() {
     });
     if (!camera) return;
 
-    svg.call(zoom.transform, d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k));
+    svg.call(zoom.transform, zoomIdentity.translate(camera.x, camera.y).scale(camera.k));
     hasInitialView = true;
   }
 
@@ -1563,9 +1565,9 @@ export default function clusterMap() {
     });
     if (!camera) return;
     if (canvasZoom) {
-      d3.select(canvas).call(
+      select(canvas).call(
         canvasZoom.transform,
-        d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+        zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
       );
     } else {
       setCamera(chartState, camera);

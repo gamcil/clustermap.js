@@ -2,7 +2,7 @@
 // It owns only dense geometric marks; Canvas/SVG remain responsible for text,
 // chrome, interaction affordances, export, and broad-browser fallback.
 
-import { color } from "d3";
+import { color } from "d3-color";
 import { sampleLinkGeometry } from "./links/layout.mjs";
 import {
   clusterOffsetForPreview,

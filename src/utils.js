@@ -1,9 +1,10 @@
-import * as d3 from "d3";
+import { color, rgb } from "d3-color";
+import { select } from "d3-selection";
 
 // Changes value of a text node to a prompted value
 export function renameText(event) {
   if (event.defaultPrevented) return;
-  let text = d3.select(event.target);
+  let text = select(event.target);
   let result = prompt("Enter new value:", text.text());
   if (result) text.text(result);
 }
@@ -24,8 +25,8 @@ export function updateConfig(target, source) {
 }
 
 export function rgbaToRgb(rgba, opacity = 0.6) {
-  let colour = d3.color(rgba).rgb();
-  return d3.rgb(
+  let colour = color(rgba).rgb();
+  return rgb(
     (1 - opacity) * 255 + opacity * colour.r,
     (1 - opacity) * 255 + opacity * colour.g,
     (1 - opacity) * 255 + opacity * colour.b

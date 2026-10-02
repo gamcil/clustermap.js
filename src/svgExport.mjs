@@ -1,4 +1,5 @@
-import * as d3 from "d3";
+import { select } from "d3-selection";
+import { transition } from "d3-transition";
 import { renderSvg } from "./svgRenderer.js";
 
 const noop = () => {};
@@ -43,7 +44,7 @@ export function exportChartSvg({
   if (!scene) throw new Error("Cannot export an SVG before the chart has rendered.");
   const namespace = "http://www.w3.org/2000/svg";
   const svgNode = documentRef.createElementNS(namespace, "svg");
-  const defs = d3.select(svgNode).append("defs");
+  const defs = select(svgNode).append("defs");
   const filter = defs
     .append("filter")
     .attr("id", "filter_solid")
@@ -53,13 +54,13 @@ export function exportChartSvg({
     .attr("height", 1);
   filter.append("feFlood").attr("flood-color", "rgba(0, 0, 0, 0.8)");
   filter.append("feComposite").attr("in", "SourceGraphic").attr("in2", "");
-  const plot = d3.select(svgNode).append("g").attr("class", "clusterMapG");
+  const plot = select(svgNode).append("g").attr("class", "clusterMapG");
   const exportIds = { ...ids, filter: "filter_solid", colourGradient: "colour-gradient" };
   renderSvg({
     plot,
     data,
     scene,
-    transition: d3.transition().duration(0),
+    transition: transition().duration(0),
     animate: false,
     config,
     scales,
@@ -71,7 +72,7 @@ export function exportChartSvg({
   // be visible as nodes in an exported publication figure.
   plot.selectAll("g.hover").remove();
 
-  d3.select(documentRef.body)
+  select(documentRef.body)
     .append(() => svgNode)
     .style("position", "fixed")
     .style("visibility", "hidden")

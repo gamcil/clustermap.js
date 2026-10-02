@@ -1,4 +1,4 @@
-import { color } from "d3";
+import { color } from "d3-color";
 
 const tagName = "clinker-editor";
 const HTMLElementBase = globalThis.HTMLElement || class {};
@@ -11,8 +11,8 @@ const escapeHtml = (value) => String(value ?? "")
 
 const labelFor = (record, fallback = "") => record?.label || record?.name || fallback;
 // Chart palettes are stored as CSS colours (often rgb(...)); colour inputs only
-// accept hexadecimal values.  D3's parser is already a peer dependency of the
-// chart and keeps editor swatches in sync with the rendered legend.
+// accept hexadecimal values. D3's parser is bundled with the chart and keeps
+// editor swatches in sync with the rendered legend.
 const colourFor = (value) => color(value || "#888888")?.formatHex() || "#888888";
 const groupMap = (data) => new Map((data?.groups || []).flatMap((group) =>
   (group.genes || []).flatMap((id) => [[id, group], [String(id), group]])

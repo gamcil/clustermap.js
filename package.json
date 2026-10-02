@@ -25,9 +25,6 @@
     "README.md",
     "LICENSE"
   ],
-  "peerDependencies": {
-    "d3": "^7.9.0"
-  },
   "scripts": {
     "build": "rollup --config",
     "import:clinker": "node scripts/import-clinker-render.mjs",
@@ -38,8 +35,9 @@
   "license": "ISC",
   "devDependencies": {
     "@playwright/test": "^1.63.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
     "@types/node": "^26.6.2",
-    "d3": "7.9.0",
+    "d3": "^7.9.0",
     "rollup": "^2.79.2",
     "rollup-plugin-terser": "^7.0.2"
   }

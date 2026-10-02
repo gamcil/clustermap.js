@@ -1,4 +1,7 @@
-import * as d3 from "d3";
+import { max as d3max, min as d3min } from "d3-array";
+import { quantize } from "d3-interpolate";
+import { scaleLinear, scaleOrdinal, scaleSequential } from "d3-scale";
+import { interpolateGreys, interpolateRainbow } from "d3-scale-chromatic";
 import { updateConfig } from "./utils.js";
 import { createDefaultConfig } from "./config.js";
 import { filterLinks, getGroupScaleValues } from "./links/groups.mjs";
@@ -129,22 +132,22 @@ function configure(options) {
 }
 
 const scales = {
-  x: d3.scaleLinear().domain([1, 1001]).range([0, config.plot.scaleFactor]),
-  y: d3.scaleOrdinal(),
-  group: d3.scaleOrdinal().unknown(null),
-  colour: d3.scaleOrdinal().unknown("#bbb"),
-  name: d3.scaleOrdinal().unknown("None"),
-  score: d3.scaleSequential(d3.interpolateGreys).domain([0, 1]),
-  offset: d3.scaleOrdinal(),
-  locus: d3.scaleOrdinal(),
+  x: scaleLinear().domain([1, 1001]).range([0, config.plot.scaleFactor]),
+  y: scaleOrdinal(),
+  group: scaleOrdinal().unknown(null),
+  colour: scaleOrdinal().unknown("#bbb"),
+  name: scaleOrdinal().unknown("None"),
+  score: scaleSequential(interpolateGreys).domain([0, 1]),
+  offset: scaleOrdinal(),
+  locus: scaleOrdinal(),
 };
 
 function updateIdentityScale(data) {
   const identities = data.links
     .map((link) => Number(link.identity))
     .filter(Number.isFinite);
-  const dataMin = identities.length ? d3.min(identities) : 0;
-  const dataMax = identities.length ? d3.max(identities) : 1;
+  const dataMin = identities.length ? d3min(identities) : 0;
+  const dataMax = identities.length ? d3max(identities) : 1;
   const domain = config.colourBar.domain;
   let min = domain.minMode === "data" ? dataMin : Number(domain.min);
   let max = domain.maxMode === "data" ? dataMax : Number(domain.max);
@@ -334,7 +337,7 @@ function updateGroups(groups) {
   const uids = groups.map((group) => group.uid);
   scales.group.domain(domain).range(range);
   scales.name.domain(uids).range(groups.map((group) => group.label));
-  const colours = d3.quantize(d3.interpolateRainbow, groups.length + 1);
+  const colours = quantize(interpolateRainbow, groups.length + 1);
   groups.forEach((group, index) => {
     if (group.colour) colours[index] = group.colour;
     else group.colour = colours[index];
