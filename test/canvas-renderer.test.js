@@ -225,6 +225,22 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   assert.ok(calls.some((call) => call[0] === "bezierCurveTo"), "retained link anchors draw in an ordinary Canvas frame");
   assert.ok(calls.some((call) => call[0] === "fillRect" && call[1] === 5 && call[2] === 0));
 
+  calls.length = 0;
+  renderCanvas({
+    canvas,
+    scene,
+    camera: { x: 2000, y: 30, k: 2 },
+    config,
+    scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
+    showLinks: false,
+    showGenes: false,
+    showChrome: false,
+  });
+  assert.ok(
+    calls.some((call) => call[0] === "fillText" && call[1] === "cluster"),
+    "cluster labels remain available when all locus geometry is culled"
+  );
+
   const highResolution = renderCanvas({
     canvas,
     scene,

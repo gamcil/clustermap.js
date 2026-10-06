@@ -1,4 +1,5 @@
 import { select } from "d3-selection";
+import { drag } from "d3-drag";
 import { renameText, rgbaToRgb } from "./utils.js";
 import { filterLinks } from "./links/groups.mjs";
 
@@ -273,8 +274,7 @@ function createClusterDrag({ plot, ids, interactions }) {
     interactions.endClusterDrag();
   };
 
-  return d3
-    .drag()
+  return drag()
     .container(function () {
       return this.parentNode.parentNode;
     })
@@ -292,8 +292,7 @@ function createLocusPositionDrag({ plot, interactions }) {
 
   const ended = () => interactions.endLocusDrag();
 
-  return d3
-    .drag()
+  return drag()
     .container(() => plot.node())
     .on("start", started)
     .on("drag", dragged)
@@ -315,8 +314,7 @@ function createLocusResizeDrag({ plot, interactions }) {
 
   const ended = (_, locus) => interactions.endLocusTrim(locus);
 
-  return d3
-    .drag()
+  return drag()
     // Keep resize and Canvas pointer coordinates in the same chart-world
     // space. The default handle-parent container reports locus-local x,
     // which becomes incorrect as soon as that locus or its cluster moves.

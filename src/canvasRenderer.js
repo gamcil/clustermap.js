@@ -1026,25 +1026,23 @@ export function renderCanvas({
   const loci = showLoci
     ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci")
     : [];
-  const labelLoci = showLoci && showClusterLabels
-    ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci", { ignoreOmit: true })
+  // Labels are the only immediate indication that a very large, initially
+  // cropped figure rendered at all. Do not derive them from culled loci: a
+  // cluster label can be on screen while every locus body is just outside the
+  // viewport. Text is inexpensive and Canvas clips truly offscreen labels.
+  const labelClusters = showLoci && showClusterLabels
+    ? recordsFor(displayScene.clusters, null, "clusters", { ignoreOmit: true })
     : [];
-  const drawnClusterLabels = new Set();
-  for (const locus of labelLoci) {
-    const cluster = displayScene.clusters.get(locus.cluster?.uid ?? locus.source.clusterUid);
-    if (!cluster) continue;
-    if (!drawnClusterLabels.has(cluster.source.uid)) {
-      drawnClusterLabels.add(cluster.source.uid);
-      drawClusterInfo(context, cluster, config, {
-        x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
-        y: clusterOffsetForPreview(preview, cluster.source.uid),
-        locusText: clusterLabelTextForPreview(
-          preview,
-          cluster.source.uid,
-          cluster.info.locusText
-        ),
-      });
-    }
+  for (const cluster of labelClusters) {
+    drawClusterInfo(context, cluster, config, {
+      x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
+      y: clusterOffsetForPreview(preview, cluster.source.uid),
+      locusText: clusterLabelTextForPreview(
+        preview,
+        cluster.source.uid,
+        cluster.info.locusText
+      ),
+    });
   }
   if (showLocusTracks) {
     for (const locus of loci) {

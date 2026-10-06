@@ -1,6 +1,6 @@
 import { select } from "d3-selection";
 import { transition as createTransition } from "d3-transition";
-import { zoomIdentity } from "d3-zoom";
+import { zoomIdentity, zoomTransform } from "d3-zoom";
 import { createLinkGroups } from "./links/groups.mjs";
 import {
   createChartState,
@@ -59,6 +59,7 @@ import {
 import { chartStateFromSnapshot, serializeChartState } from "./chartStateSnapshot.mjs";
 
 let nextChartInstance = 0;
+const d3 = { zoomIdentity, zoomTransform };
 const projectFormat = "clinker-project";
 const projectVersion = 1;
 const historyLimit = 100;
