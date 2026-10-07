@@ -133,7 +133,11 @@ export function renderSvg({
             }
           })
           .on("click", (event, locus) => {
-            if (event.shiftKey) interactions.toggleLocusSelection(locus);
+            if (event.shiftKey) {
+              interactions.toggleLocusSelection(locus, {
+                clusterRange: event.altKey ? "remove" : (event.ctrlKey || event.metaKey ? "add" : null),
+              });
+            }
           })
           .on("dblclick", (event, locus) => {
             // The hover rectangle describes pointer affordances, not locus

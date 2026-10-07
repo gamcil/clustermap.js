@@ -289,6 +289,46 @@ export function trimLocus(chartState, locus, {
   throw new Error(`Unknown locus trim edge: ${edge}`);
 }
 
+/** Trim both flanks of a locus to its displayed outermost genes. */
+export function trimLocusToGeneBounds(chartState, locus) {
+  if (!locus.genes.length) return false;
+  const genes = [...locus.genes].sort(
+    (left, right) =>
+      getGeneState(chartState, left).start - getGeneState(chartState, right).start
+  );
+  const first = genes[0];
+  const last = genes.at(-1);
+  const state = chartState.loci.get(locus.uid);
+  const start = getGeneState(chartState, first).start;
+  const end = getGeneState(chartState, last).end;
+  const changed =
+    state.start !== start ||
+    state.end !== end ||
+    state.trimLeft !== first ||
+    state.trimRight !== last;
+  if (!changed) return false;
+  Object.assign(state, { start, end, trimLeft: first, trimRight: last });
+  return true;
+}
+
+/** Restore a locus's full extent without changing its orientation or offset. */
+export function restoreLocusBounds(chartState, locus) {
+  const state = chartState.loci.get(locus.uid);
+  const changed =
+    state.start !== locus.start ||
+    state.end !== locus.end ||
+    state.trimLeft !== null ||
+    state.trimRight !== null;
+  if (!changed) return false;
+  Object.assign(state, {
+    start: locus.start,
+    end: locus.end,
+    trimLeft: null,
+    trimRight: null,
+  });
+  return true;
+}
+
 export function finalizeLocusTrim(chartState, locus) {
   const state = getLocusState(chartState, locus);
   if (state.end === locus.end) state.trimRight = null;

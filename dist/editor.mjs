@@ -1460,12 +1460,12 @@ function defineClinkerEditor() {
 let activeToolbar = null;
 
 function mountPlotSelectionToolbar(chart, container) {
-  if (!chart?.locusSelection || !chart?.flipLoci) throw new TypeError("A mounted ClusterMap chart is required.");
+  if (!chart?.locusSelection || !chart?.flipLoci || !chart?.trimLoci || !chart?.restoreLoci) throw new TypeError("A mounted ClusterMap chart is required.");
   if (!(container instanceof Element)) throw new TypeError("A plot container element is required.");
   const root = document.createElement("div");
   root.className = "cm-plot-selection-toolbar";
   root.hidden = true;
-  root.innerHTML = `<strong></strong><button type="button" data-flip>Flip selected loci</button><button type="button" data-clear>Clear</button>`;
+  root.innerHTML = `<strong></strong><button type="button" data-flip>Flip selected loci</button><button type="button" data-trim>Trim selected loci</button><button type="button" data-restore>Restore full loci</button><button type="button" data-clear>Clear</button>`;
   const summary = root.querySelector("strong");
   const sync = () => {
     const count = chart.locusSelection().length;
@@ -1475,6 +1475,8 @@ function mountPlotSelectionToolbar(chart, container) {
   const clear = () => chart.locusSelection([]);
   const activate = () => { activeToolbar = root; };
   root.querySelector("[data-flip]").addEventListener("click", () => chart.flipLoci());
+  root.querySelector("[data-trim]").addEventListener("click", () => chart.trimLoci());
+  root.querySelector("[data-restore]").addEventListener("click", () => chart.restoreLoci());
   root.querySelector("[data-clear]").addEventListener("click", clear);
   const onKeyDown = (event) => {
     if (activeToolbar !== root || event.key !== "Escape" || event.defaultPrevented || !chart.locusSelection().length) return;

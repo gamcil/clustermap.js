@@ -19,6 +19,8 @@ import {
   setPreviewClusterOrder,
   setPreviewClusterPosition,
   previewLocusTrim,
+  restoreLocusBounds,
+  trimLocusToGeneBounds,
 } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
@@ -57,6 +59,7 @@ import {
   isWebGpuRenderer,
 } from "./rendererMode.mjs";
 import { chartStateFromSnapshot, serializeChartState } from "./chartStateSnapshot.mjs";
+import { lociForClusterRange } from "./locusSelection.mjs";
 
 let nextChartInstance = 0;
 const d3 = { zoomIdentity, zoomTransform };
@@ -126,6 +129,7 @@ export default function clusterMap() {
   let highlightGeneIds = new Set();
   let highlightLinkIds = new Set();
   let selectedLocusIds = new Set();
+  let locusSelectionAnchorUid = null;
   let disposeRasterInteraction = () => {};
   let disposeOverlay = () => {};
   // Rebound on each redraw so programmatic focusing always targets the
@@ -1310,11 +1314,30 @@ export default function clusterMap() {
       endLocusTrim: interactionController.endLocusTrim,
       cancelLocusTrim: interactionController.cancelLocusTrim,
       flipLocus: interactionController.flipLocus,
-      toggleLocusSelection: (locus) => {
+      toggleLocusSelection: (locus, { clusterRange = null } = {}) => {
         const ids = new Set(selectedLocusIds);
+        const anchor = locusForId(locusSelectionAnchorUid);
+        if (clusterRange && anchor) {
+          const range = lociForClusterRange(
+            getClusterOrder(chartState),
+            chartIndex?.clusterById || new Map(),
+            anchor.clusterUid,
+            locus.clusterUid
+          );
+          if (range.length) {
+            range.forEach((uid) => {
+              if (clusterRange === "remove") ids.delete(uid);
+              else ids.add(uid);
+            });
+            my.locusSelection(ids);
+            if (ids.size) locusSelectionAnchorUid = locus.uid;
+            return;
+          }
+        }
         if (ids.has(locus.uid)) ids.delete(locus.uid);
         else ids.add(locus.uid);
         my.locusSelection(ids);
+        if (ids.size) locusSelectionAnchorUid = locus.uid;
       },
       onGeneClick: (event, gene) => {
         // Shift-click belongs to the containing locus and must not also invoke
@@ -1717,6 +1740,7 @@ export default function clusterMap() {
       [...next].every((uid) => selectedLocusIds.has(uid))
     ) return my;
     selectedLocusIds = next;
+    if (!next.size) locusSelectionAnchorUid = null;
     if (container && currentData) {
       if (isRasterRenderer(runtime.config.plot.renderer)) scheduleRasterPaint();
       else redraw({ animate: false });
@@ -1739,6 +1763,48 @@ export default function clusterMap() {
     for (const locus of loci) flipLocus(chartState, locus);
     redraw({ animate: true });
     emitChange({ type: "loci.flip", locusIds: loci.map((locus) => locus.uid) });
+    remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
+    return my;
+  };
+  /** Trim selected loci to their displayed outermost genes as one edit. */
+  my.trimLoci = function (ids = selectedLocusIds) {
+    if (!container || !currentData || !chartIndex || !chartState) {
+      throw new Error("Cannot trim loci before the chart has rendered.");
+    }
+    const loci = [...new Set(ids || [])]
+      .map(locusForId)
+      .filter(Boolean);
+    if (!loci.length) return my;
+    const before = serializeChartState(chartState, currentData);
+    flushCanvasFlip();
+    clearRasterPreview();
+    let changed = false;
+    for (const locus of loci) changed = trimLocusToGeneBounds(chartState, locus) || changed;
+    if (!changed) return my;
+    redraw({ animate: false });
+    const locusIds = loci.map((locus) => locus.uid);
+    emitChange({ type: "loci.trim", locusIds });
+    remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
+    return my;
+  };
+  /** Restore selected loci to their full bounds as one edit. */
+  my.restoreLoci = function (ids = selectedLocusIds) {
+    if (!container || !currentData || !chartIndex || !chartState) {
+      throw new Error("Cannot restore loci before the chart has rendered.");
+    }
+    const loci = [...new Set(ids || [])]
+      .map(locusForId)
+      .filter(Boolean);
+    if (!loci.length) return my;
+    const before = serializeChartState(chartState, currentData);
+    flushCanvasFlip();
+    clearRasterPreview();
+    let changed = false;
+    for (const locus of loci) changed = restoreLocusBounds(chartState, locus) || changed;
+    if (!changed) return my;
+    redraw({ animate: false });
+    const locusIds = loci.map((locus) => locus.uid);
+    emitChange({ type: "loci.restore", locusIds });
     remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
     return my;
   };

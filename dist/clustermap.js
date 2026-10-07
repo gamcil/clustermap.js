@@ -4214,6 +4214,46 @@
     throw new Error(`Unknown locus trim edge: ${edge}`);
   }
 
+  /** Trim both flanks of a locus to its displayed outermost genes. */
+  function trimLocusToGeneBounds(chartState, locus) {
+    if (!locus.genes.length) return false;
+    const genes = [...locus.genes].sort(
+      (left, right) =>
+        getGeneState(chartState, left).start - getGeneState(chartState, right).start
+    );
+    const first = genes[0];
+    const last = genes.at(-1);
+    const state = chartState.loci.get(locus.uid);
+    const start = getGeneState(chartState, first).start;
+    const end = getGeneState(chartState, last).end;
+    const changed =
+      state.start !== start ||
+      state.end !== end ||
+      state.trimLeft !== first ||
+      state.trimRight !== last;
+    if (!changed) return false;
+    Object.assign(state, { start, end, trimLeft: first, trimRight: last });
+    return true;
+  }
+
+  /** Restore a locus's full extent without changing its orientation or offset. */
+  function restoreLocusBounds(chartState, locus) {
+    const state = chartState.loci.get(locus.uid);
+    const changed =
+      state.start !== locus.start ||
+      state.end !== locus.end ||
+      state.trimLeft !== null ||
+      state.trimRight !== null;
+    if (!changed) return false;
+    Object.assign(state, {
+      start: locus.start,
+      end: locus.end,
+      trimLeft: null,
+      trimRight: null,
+    });
+    return true;
+  }
+
   function finalizeLocusTrim(chartState, locus) {
     const state = getLocusState(chartState, locus);
     if (state.end === locus.end) state.trimRight = null;
@@ -8039,7 +8079,11 @@
               }
             })
             .on("click", (event, locus) => {
-              if (event.shiftKey) interactions.toggleLocusSelection(locus);
+              if (event.shiftKey) {
+                interactions.toggleLocusSelection(locus, {
+                  clusterRange: event.altKey ? "remove" : (event.ctrlKey || event.metaKey ? "add" : null),
+                });
+              }
             })
             .on("dblclick", (event, locus) => {
               // The hover rectangle describes pointer affordances, not locus
@@ -8825,7 +8869,9 @@
             if (!target) return;
             const locusUid = locusForTarget(target);
             if (event.shiftKey && locusUid) {
-              actions.toggleLocusSelection(locusUid);
+              actions.toggleLocusSelection(locusUid, {
+                clusterRange: event.altKey ? "remove" : (event.ctrlKey || event.metaKey ? "add" : null),
+              });
               event.preventDefault();
               return;
             }
@@ -12181,7 +12227,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         legendText: interactions.legendText,
         scaleBar: interactions.setScaleBarLength,
         flipLocus: (locusUid) => interactions.flipLocus(getLocus(locusUid)),
-        toggleLocusSelection: (locusUid) => interactions.toggleLocusSelection(getLocus(locusUid)),
+        toggleLocusSelection: (locusUid, options) =>
+          interactions.toggleLocusSelection(getLocus(locusUid), options),
         geneMenu: (event, geneUid) => interactions.showGeneMenu(event, getGene(geneUid)),
         legendMenu: interactions.legendMenu,
       },
@@ -12322,6 +12369,17 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     return restored;
   }
 
+  /** Return every locus in the inclusive displayed-cluster range. */
+  function lociForClusterRange(clusterOrder, clusterById, startClusterUid, endClusterUid) {
+    const start = clusterOrder.indexOf(startClusterUid);
+    const end = clusterOrder.indexOf(endClusterUid);
+    if (start < 0 || end < 0) return [];
+    return clusterOrder
+      .slice(Math.min(start, end), Math.max(start, end) + 1)
+      .flatMap((clusterUid) => clusterById.get(clusterUid)?.loci || [])
+      .map((locus) => locus.uid);
+  }
+
   let nextChartInstance = 0;
   const d3 = { zoomIdentity: identity$2, zoomTransform: transform };
   const projectFormat = "clinker-project";
@@ -12390,6 +12448,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let highlightGeneIds = new Set();
     let highlightLinkIds = new Set();
     let selectedLocusIds = new Set();
+    let locusSelectionAnchorUid = null;
     let disposeRasterInteraction = () => {};
     let disposeOverlay = () => {};
     // Rebound on each redraw so programmatic focusing always targets the
@@ -13574,11 +13633,30 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         endLocusTrim: interactionController.endLocusTrim,
         cancelLocusTrim: interactionController.cancelLocusTrim,
         flipLocus: interactionController.flipLocus,
-        toggleLocusSelection: (locus) => {
+        toggleLocusSelection: (locus, { clusterRange = null } = {}) => {
           const ids = new Set(selectedLocusIds);
+          const anchor = locusForId(locusSelectionAnchorUid);
+          if (clusterRange && anchor) {
+            const range = lociForClusterRange(
+              getClusterOrder(chartState),
+              chartIndex?.clusterById || new Map(),
+              anchor.clusterUid,
+              locus.clusterUid
+            );
+            if (range.length) {
+              range.forEach((uid) => {
+                if (clusterRange === "remove") ids.delete(uid);
+                else ids.add(uid);
+              });
+              my.locusSelection(ids);
+              if (ids.size) locusSelectionAnchorUid = locus.uid;
+              return;
+            }
+          }
           if (ids.has(locus.uid)) ids.delete(locus.uid);
           else ids.add(locus.uid);
           my.locusSelection(ids);
+          if (ids.size) locusSelectionAnchorUid = locus.uid;
         },
         onGeneClick: (event, gene) => {
           // Shift-click belongs to the containing locus and must not also invoke
@@ -13981,6 +14059,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         [...next].every((uid) => selectedLocusIds.has(uid))
       ) return my;
       selectedLocusIds = next;
+      if (!next.size) locusSelectionAnchorUid = null;
       if (container && currentData) {
         if (isRasterRenderer(runtime.config.plot.renderer)) scheduleRasterPaint();
         else redraw({ animate: false });
@@ -14003,6 +14082,48 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       for (const locus of loci) flipLocus(chartState, locus);
       redraw({ animate: true });
       emitChange({ type: "loci.flip", locusIds: loci.map((locus) => locus.uid) });
+      remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
+      return my;
+    };
+    /** Trim selected loci to their displayed outermost genes as one edit. */
+    my.trimLoci = function (ids = selectedLocusIds) {
+      if (!container || !currentData || !chartIndex || !chartState) {
+        throw new Error("Cannot trim loci before the chart has rendered.");
+      }
+      const loci = [...new Set(ids || [])]
+        .map(locusForId)
+        .filter(Boolean);
+      if (!loci.length) return my;
+      const before = serializeChartState(chartState, currentData);
+      flushCanvasFlip();
+      clearRasterPreview();
+      let changed = false;
+      for (const locus of loci) changed = trimLocusToGeneBounds(chartState, locus) || changed;
+      if (!changed) return my;
+      redraw({ animate: false });
+      const locusIds = loci.map((locus) => locus.uid);
+      emitChange({ type: "loci.trim", locusIds });
+      remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
+      return my;
+    };
+    /** Restore selected loci to their full bounds as one edit. */
+    my.restoreLoci = function (ids = selectedLocusIds) {
+      if (!container || !currentData || !chartIndex || !chartState) {
+        throw new Error("Cannot restore loci before the chart has rendered.");
+      }
+      const loci = [...new Set(ids || [])]
+        .map(locusForId)
+        .filter(Boolean);
+      if (!loci.length) return my;
+      const before = serializeChartState(chartState, currentData);
+      flushCanvasFlip();
+      clearRasterPreview();
+      let changed = false;
+      for (const locus of loci) changed = restoreLocusBounds(chartState, locus) || changed;
+      if (!changed) return my;
+      redraw({ animate: false });
+      const locusIds = loci.map((locus) => locus.uid);
+      emitChange({ type: "loci.restore", locusIds });
       remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
       return my;
     };

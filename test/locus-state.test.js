@@ -121,6 +121,82 @@ test("trimming selects display-side gene boundaries without renderer state", asy
   assert.equal(state.loci.get(locus.uid).trimRight, locus.genes[1]);
 });
 
+test("trimming to gene bounds removes both locus flanks", async () => {
+  const { createChartState, trimLocusToGeneBounds } = await import("../src/chartState.mjs");
+  const locus = {
+    uid: "locus",
+    start: 0,
+    end: 10000,
+    genes: [
+      { uid: "a", locusUid: "locus", start: 1200, end: 2300, strand: 1 },
+      { uid: "b", locusUid: "locus", start: 5000, end: 6800, strand: -1 },
+    ],
+  };
+  const state = createChartState({ clusters: [{ loci: [locus] }] });
+
+  assert.equal(trimLocusToGeneBounds(state, locus), true);
+  assert.deepEqual(state.loci.get(locus.uid), {
+    start: 1200,
+    end: 6800,
+    flipped: false,
+    trimLeft: locus.genes[0],
+    trimRight: locus.genes[1],
+  });
+  assert.equal(trimLocusToGeneBounds(state, locus), false);
+});
+
+test("trimming to gene bounds follows displayed gene order after a flip", async () => {
+  const { createChartState, flipLocus, trimLocusToGeneBounds } = await import("../src/chartState.mjs");
+  const locus = {
+    uid: "locus",
+    start: 0,
+    end: 10000,
+    genes: [
+      { uid: "a", locusUid: "locus", start: 1200, end: 2300, strand: 1 },
+      { uid: "b", locusUid: "locus", start: 5000, end: 6800, strand: -1 },
+    ],
+  };
+  const state = createChartState({ clusters: [{ loci: [locus] }] });
+
+  flipLocus(state, locus);
+  trimLocusToGeneBounds(state, locus);
+  assert.equal(state.loci.get(locus.uid).start, 3200);
+  assert.equal(state.loci.get(locus.uid).end, 8800);
+  assert.equal(state.loci.get(locus.uid).trimLeft.uid, "b");
+  assert.equal(state.loci.get(locus.uid).trimRight.uid, "a");
+});
+
+test("restoring locus bounds preserves a flipped orientation", async () => {
+  const {
+    createChartState,
+    flipLocus,
+    restoreLocusBounds,
+    trimLocusToGeneBounds,
+  } = await import("../src/chartState.mjs");
+  const locus = {
+    uid: "locus",
+    start: 0,
+    end: 10000,
+    genes: [
+      { uid: "a", locusUid: "locus", start: 1200, end: 2300, strand: 1 },
+      { uid: "b", locusUid: "locus", start: 5000, end: 6800, strand: -1 },
+    ],
+  };
+  const state = createChartState({ clusters: [{ loci: [locus] }] });
+
+  flipLocus(state, locus);
+  trimLocusToGeneBounds(state, locus);
+  assert.equal(restoreLocusBounds(state, locus), true);
+  assert.deepEqual(state.loci.get(locus.uid), {
+    start: 0,
+    end: 10000,
+    flipped: true,
+    trimLeft: null,
+    trimRight: null,
+  });
+  assert.equal(restoreLocusBounds(state, locus), false);
+});
+
 test("trimming previews bounds without changing committed locus state", async () => {
   const {
     commitPreviewLocusState,

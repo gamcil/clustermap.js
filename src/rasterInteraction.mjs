@@ -177,7 +177,9 @@ export function createRasterInteraction({
           if (!target) return;
           const locusUid = locusForTarget(target);
           if (event.shiftKey && locusUid) {
-            actions.toggleLocusSelection(locusUid);
+            actions.toggleLocusSelection(locusUid, {
+              clusterRange: event.altKey ? "remove" : (event.ctrlKey || event.metaKey ? "add" : null),
+            });
             event.preventDefault();
             return;
           }

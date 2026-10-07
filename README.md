@@ -231,10 +231,15 @@ already owns.
   `{ genes, links }` to highlight genes and/or links independently.
 - `chart.locusSelection(ids)` sets the loci selected for batch plot operations;
   call it without arguments to read the selected IDs. Shift-clicking a locus in
-  the plot uses the same selection. `chart.flipLoci(ids)` flips the supplied
-  loci, or the current locus selection when called without IDs. When a dragged
-  cluster contains a selected locus, all selected clusters reorder together,
-  retaining their relative order.
+  the plot uses the same selection. Ctrl/Cmd+Shift-click adds, and
+  Alt/Option+Shift-click removes, every locus in the displayed cluster range
+  from the last clicked locus to the clicked one. `chart.flipLoci(ids)` flips
+  the supplied loci, or the current locus selection when called without IDs.
+  `chart.trimLoci(ids)` removes both flanks of the supplied or currently
+  selected loci, ending at their displayed outermost genes.
+  `chart.restoreLoci(ids)` restores their full bounds while retaining flips and
+  horizontal offsets. When a dragged cluster contains a selected locus, all
+  selected clusters reorder together, retaining their relative order.
 - `chart.exportSvg({ padding })` returns the current figure as an SVG string,
   irrespective of the interactive renderer in use.
 - `chart.destroy()` releases chart-owned event handlers, animations, minimap
