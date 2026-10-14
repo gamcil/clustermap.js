@@ -92,6 +92,7 @@ export function renderSvg({
           .attr("id", ids.locus)
           .attr("class", "locus");
         enter.append("line").attr("class", "trackBar").style("fill", "#111");
+        enter.append("g").attr("class", "trimIndicators").style("pointer-events", "none");
         enter
           .append("rect")
           .attr("class", "locusHighlight")
@@ -330,6 +331,10 @@ function createLocusResizeDrag({ plot, interactions }) {
 
 function updateLoci(selection, scene, config, highlightLocusIds) {
   const layout = (locus) => scene.loci.get(locus.uid);
+  // D3 transitions are used for locus geometry, but annotation joins must be
+  // performed on selections so entering/removing text does not depend on a
+  // transition's timing.
+  const base = typeof selection.selection === "function" ? selection.selection() : selection;
 
   selection.attr("transform", (locus) => {
     const { x, y } = layout(locus).transform;
@@ -367,6 +372,27 @@ function updateLoci(selection, scene, config, highlightLocusIds) {
   selection
     .select("rect.rightHandle")
     .attr("x", (locus) => layout(locus).hover.rightHandleX);
+  base
+    .select("g.trimIndicators")
+    .selectAll("text.trimIndicator")
+    .data(
+      (locus) => (config.locus.trimIndicators?.show === false ? [] : layout(locus).trimIndicators),
+      (indicator) => indicator.side
+    )
+    .join("text")
+    .attr("class", "trimIndicator")
+    .attr("x", (indicator) => indicator.x)
+    .attr("y", (indicator) => indicator.y)
+    .attr("text-anchor", (indicator) => indicator.anchor)
+    .attr("dominant-baseline", "hanging")
+    .attr("fill", "#536b88")
+    .attr("stroke", "rgba(255, 255, 255, 0.94)")
+    .attr("stroke-width", 4)
+    .attr("stroke-linejoin", "round")
+    .style("paint-order", "stroke")
+    .style("font-size", `${Math.max(8, Math.min(10, config.cluster.lociFontSize))}px`)
+    .style("font-family", config.plot.fontFamily)
+    .text((indicator) => indicator.text);
   return selection;
 }
 

@@ -81,6 +81,9 @@ const defaultConfig = {
     alignLabels: true,
   },
   locus: {
+    trimIndicators: {
+      show: true,
+    },
     trackBar: {
       colour: "#111",
       stroke: 1,

@@ -526,6 +526,26 @@ function drawLocusTrack(context, locus, viewport, config, geometry = {}) {
   context.stroke();
 }
 
+function drawLocusTrimIndicators(context, locus, config, geometry = {}) {
+  if (config.locus.trimIndicators?.show === false) return;
+  const indicators = geometry.trimIndicators || locus.trimIndicators || [];
+  if (!indicators.length) return;
+  const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
+  context.save();
+  context.fillStyle = "#536b88";
+  context.strokeStyle = "rgba(255, 255, 255, 0.94)";
+  context.lineWidth = 4;
+  context.lineJoin = "round";
+  context.font = `${Math.max(8, Math.min(10, config.cluster.lociFontSize))}px ${config.plot.fontFamily}`;
+  context.textBaseline = "top";
+  for (const indicator of indicators) {
+    context.textAlign = indicator.anchor;
+    context.strokeText(indicator.text, locus.x + indicator.x + offsetX, locus.y + indicator.y + offsetY);
+    context.fillText(indicator.text, locus.x + indicator.x + offsetX, locus.y + indicator.y + offsetY);
+  }
+  context.restore();
+}
+
 function offsetsForGene(preview, gene) {
   return previewOffsetsForLocus(preview, gene.locus);
 }
@@ -634,12 +654,15 @@ function linkGeometryForPreview(scene, link, preview, config) {
   if (preview?.type !== "cluster-drag") {
     const query = scene.genes.get(link.source.query.uid);
     const target = scene.genes.get(link.source.target.uid);
+    const visible =
+      (preview?.type === "locus-trim"
+        ? link.allowed && !link.source.hidden && link.source.identity >= config.link.threshold
+        : link.visible) &&
+      geneVisibleForPreview(preview, query) &&
+      geneVisibleForPreview(preview, target);
     return {
       ...linkOffsetsForPreview(scene, link, preview),
-      visible:
-        link.visible &&
-        geneVisibleForPreview(preview, query) &&
-        geneVisibleForPreview(preview, target),
+      visible,
     };
   }
   const query = scene.genes.get(link.source.query.uid);
@@ -1050,6 +1073,16 @@ export function renderCanvas({
         context,
         locus,
         viewport,
+        config,
+        locusGeometryForPreview(preview, locus)
+      );
+    }
+  }
+  if (showLoci) {
+    for (const locus of loci) {
+      drawLocusTrimIndicators(
+        context,
+        locus,
         config,
         locusGeometryForPreview(preview, locus)
       );

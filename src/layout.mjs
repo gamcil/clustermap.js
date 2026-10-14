@@ -10,6 +10,7 @@ import {
   getLinkPath,
 } from "./links/layout.mjs";
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
+import { createTrimIndicators } from "./loci/trimIndicators.mjs";
 
 function worldPolygon(points, x, y) {
   return points.map((point, index) => point + (index % 2 === 0 ? x : y));
@@ -239,6 +240,7 @@ function buildChrome(bounds, genes, chrome) {
 function createLocusLayout(locus, clusterLayout, {
   scaleX,
   getLocusState,
+  getGeneState,
   locusOffset,
   shape,
   geneMidpoint,
@@ -282,6 +284,13 @@ function createLocusLayout(locus, clusterLayout, {
       leftHandleX: start - 8,
       rightHandleX: end,
     },
+    trimIndicators: createTrimIndicators({
+      locus,
+      state,
+      getGeneState,
+      scaleX,
+      shape,
+    }),
     genes: [],
   };
 }
@@ -474,6 +483,7 @@ export function buildScene(
       const locusLayout = createLocusLayout(locus, clusterLayout, {
         scaleX,
         getLocusState,
+        getGeneState,
         locusOffset,
         shape,
         geneMidpoint,
@@ -603,6 +613,7 @@ export function patchFlippedLocusScene(
   const replacement = createLocusLayout(locus, cluster, {
     scaleX,
     getLocusState,
+    getGeneState,
     locusOffset,
     shape,
     geneMidpoint,

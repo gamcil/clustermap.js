@@ -5404,6 +5404,65 @@ function hitTest(scene, point) {
   return null;
 }
 
+function formatLength(length) {
+  const rounded = Math.round(length);
+  if (rounded >= 1000) {
+    const kilobases = rounded / 1000;
+    return `${Number(kilobases.toFixed(kilobases >= 10 ? 0 : 1))} kb`;
+  }
+  return `${rounded} bp`;
+}
+
+function featureText(count) {
+  return `${count} ${count === 1 ? "feature" : "features"}`;
+}
+
+/**
+ * Describe the hidden flanks of a trimmed locus in its local display space.
+ * The resulting records are deliberately renderer-neutral: SVG can use them
+ * as text nodes while Canvas and WebGPU's Canvas overlay draw the same labels.
+ */
+function createTrimIndicators({ locus, state, getGeneState, scaleX, shape = {} }) {
+  if (!locus || !state) return [];
+  const start = Number(state.start);
+  const end = Number(state.end);
+  const fullStart = Number(locus.start);
+  const fullEnd = Number(locus.end);
+  if (![start, end, fullStart, fullEnd].every(Number.isFinite)) return [];
+
+  const genes = locus.genes || [];
+  const countBefore = (boundary) =>
+    genes.filter((gene) => Number(getGeneState(gene)?.end) <= boundary).length;
+  const countAfter = (boundary) =>
+    genes.filter((gene) => Number(getGeneState(gene)?.start) >= boundary).length;
+  const y = (shape.tipHeight || 0) * 2 + (shape.bodyHeight || 0) + 4;
+  const hasLeft = start > fullStart;
+  const hasRight = end < fullEnd;
+  const indicators = [];
+
+  if (hasLeft) {
+    indicators.push({
+      side: "left",
+      x: scaleX(start) + 3,
+      y,
+      anchor: "start",
+      text: `← ${formatLength(start - fullStart)} · ${featureText(countBefore(start))}`,
+    });
+  }
+  if (hasRight) {
+    indicators.push({
+      side: "right",
+      x: scaleX(end) - 3,
+      // Keep the two flanks on distinct baselines. A 12px step suits the
+      // compact renderer font while staying within normal cluster spacing.
+      y: y + (hasLeft ? 12 : 0),
+      anchor: "end",
+      text: `${featureText(countAfter(end))} · ${formatLength(fullEnd - end)} →`,
+    });
+  }
+  return indicators;
+}
+
 function minStart(loci, startFor) {
   return Math.min(...loci.map(startFor));
 }
@@ -5516,7 +5575,7 @@ function createLocusTrimPreview(
   scene,
   locusUid,
   state,
-  { localXFor, scaleX, alignLabels, clusterLabelText = null }
+  { localXFor, scaleX, alignLabels, shape, clusterLabelText = null }
 ) {
   const locus = scene.loci.get(locusUid);
   if (!locus) return null;
@@ -5541,6 +5600,13 @@ function createLocusTrimPreview(
       leftHandleX: scaleX(state.start) - 8,
       rightHandleX: scaleX(state.end),
     },
+    trimIndicators: createTrimIndicators({
+      locus: locus.source,
+      state,
+      getGeneState: (gene) => scene.genes.get(gene.uid)?.display || gene,
+      scaleX,
+      shape,
+    }),
   };
   const locusGeometry = new Map([[locusUid, trimmed]]);
   const startFor = (candidate) =>
@@ -6140,6 +6206,7 @@ function buildChrome(bounds, genes, chrome) {
 function createLocusLayout(locus, clusterLayout, {
   scaleX,
   getLocusState,
+  getGeneState,
   locusOffset,
   shape,
   geneMidpoint,
@@ -6183,6 +6250,13 @@ function createLocusLayout(locus, clusterLayout, {
       leftHandleX: start - 8,
       rightHandleX: end,
     },
+    trimIndicators: createTrimIndicators({
+      locus,
+      state,
+      getGeneState,
+      scaleX,
+      shape,
+    }),
     genes: [],
   };
 }
@@ -6375,6 +6449,7 @@ function buildScene(
       const locusLayout = createLocusLayout(locus, clusterLayout, {
         scaleX,
         getLocusState,
+        getGeneState,
         locusOffset,
         shape,
         geneMidpoint,
@@ -6504,6 +6579,7 @@ function patchFlippedLocusScene(
   const replacement = createLocusLayout(locus, cluster, {
     scaleX,
     getLocusState,
+    getGeneState,
     locusOffset,
     shape,
     geneMidpoint,
@@ -7365,6 +7441,26 @@ function drawLocusTrack(context, locus, viewport, config, geometry = {}) {
   context.stroke();
 }
 
+function drawLocusTrimIndicators(context, locus, config, geometry = {}) {
+  if (config.locus.trimIndicators?.show === false) return;
+  const indicators = geometry.trimIndicators || locus.trimIndicators || [];
+  if (!indicators.length) return;
+  const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
+  context.save();
+  context.fillStyle = "#536b88";
+  context.strokeStyle = "rgba(255, 255, 255, 0.94)";
+  context.lineWidth = 4;
+  context.lineJoin = "round";
+  context.font = `${Math.max(8, Math.min(10, config.cluster.lociFontSize))}px ${config.plot.fontFamily}`;
+  context.textBaseline = "top";
+  for (const indicator of indicators) {
+    context.textAlign = indicator.anchor;
+    context.strokeText(indicator.text, locus.x + indicator.x + offsetX, locus.y + indicator.y + offsetY);
+    context.fillText(indicator.text, locus.x + indicator.x + offsetX, locus.y + indicator.y + offsetY);
+  }
+  context.restore();
+}
+
 function offsetsForGene(preview, gene) {
   return previewOffsetsForLocus(preview, gene.locus);
 }
@@ -7473,12 +7569,15 @@ function linkGeometryForPreview(scene, link, preview, config) {
   if (preview?.type !== "cluster-drag") {
     const query = scene.genes.get(link.source.query.uid);
     const target = scene.genes.get(link.source.target.uid);
+    const visible =
+      (preview?.type === "locus-trim"
+        ? link.allowed && !link.source.hidden && link.source.identity >= config.link.threshold
+        : link.visible) &&
+      geneVisibleForPreview(preview, query) &&
+      geneVisibleForPreview(preview, target);
     return {
       ...linkOffsetsForPreview(scene, link, preview),
-      visible:
-        link.visible &&
-        geneVisibleForPreview(preview, query) &&
-        geneVisibleForPreview(preview, target),
+      visible,
     };
   }
   const query = scene.genes.get(link.source.query.uid);
@@ -7894,6 +7993,16 @@ function renderCanvas({
       );
     }
   }
+  if (showLoci) {
+    for (const locus of loci) {
+      drawLocusTrimIndicators(
+        context,
+        locus,
+        config,
+        locusGeometryForPreview(preview, locus)
+      );
+    }
+  }
   if (highlightLocusIds?.size) {
     for (const uid of highlightLocusIds) {
       if (visible?.loci && !visible.loci.includes(uid)) continue;
@@ -8032,6 +8141,7 @@ function renderSvg({
           .attr("id", ids.locus)
           .attr("class", "locus");
         enter.append("line").attr("class", "trackBar").style("fill", "#111");
+        enter.append("g").attr("class", "trimIndicators").style("pointer-events", "none");
         enter
           .append("rect")
           .attr("class", "locusHighlight")
@@ -8270,6 +8380,10 @@ function createLocusResizeDrag({ plot, interactions }) {
 
 function updateLoci(selection, scene, config, highlightLocusIds) {
   const layout = (locus) => scene.loci.get(locus.uid);
+  // D3 transitions are used for locus geometry, but annotation joins must be
+  // performed on selections so entering/removing text does not depend on a
+  // transition's timing.
+  const base = typeof selection.selection === "function" ? selection.selection() : selection;
 
   selection.attr("transform", (locus) => {
     const { x, y } = layout(locus).transform;
@@ -8307,6 +8421,27 @@ function updateLoci(selection, scene, config, highlightLocusIds) {
   selection
     .select("rect.rightHandle")
     .attr("x", (locus) => layout(locus).hover.rightHandleX);
+  base
+    .select("g.trimIndicators")
+    .selectAll("text.trimIndicator")
+    .data(
+      (locus) => (config.locus.trimIndicators?.show === false ? [] : layout(locus).trimIndicators),
+      (indicator) => indicator.side
+    )
+    .join("text")
+    .attr("class", "trimIndicator")
+    .attr("x", (indicator) => indicator.x)
+    .attr("y", (indicator) => indicator.y)
+    .attr("text-anchor", (indicator) => indicator.anchor)
+    .attr("dominant-baseline", "hanging")
+    .attr("fill", "#536b88")
+    .attr("stroke", "rgba(255, 255, 255, 0.94)")
+    .attr("stroke-width", 4)
+    .attr("stroke-linejoin", "round")
+    .style("paint-order", "stroke")
+    .style("font-size", `${Math.max(8, Math.min(10, config.cluster.lociFontSize))}px`)
+    .style("font-family", config.plot.fontFamily)
+    .text((indicator) => indicator.text);
   return selection;
 }
 
@@ -10070,6 +10205,9 @@ const defaultConfig = {
     alignLabels: true,
   },
   locus: {
+    trimIndicators: {
+      show: true,
+    },
     trackBar: {
       colour: "#111",
       stroke: 1,
@@ -10976,6 +11114,9 @@ function linkVisibleForPreview(scene, link, preview, config) {
   const target = scene.genes.get(link.source.target.uid);
   if (!query || !target) return false;
   if (!geneVisibleForPreview(preview, query) || !geneVisibleForPreview(preview, target)) return false;
+  if (preview?.type === "locus-trim") {
+    return link.allowed && !link.source.hidden && link.source.identity >= config.link.threshold;
+  }
   if (preview?.type !== "cluster-drag") return link.visible;
   const queryOrder = preview.clusterOrder.get(query.locus.cluster.uid);
   const targetOrder = preview.clusterOrder.get(target.locus.cluster.uid);
@@ -10985,6 +11126,23 @@ function linkVisibleForPreview(scene, link, preview, config) {
     Math.abs(queryOrder - targetOrder) === 1 &&
     link.allowed &&
     link.source.identity >= config.link.threshold
+  );
+}
+
+// A committed trim can make a gene or link invisible in the retained scene.
+// Keep its GPU range while the containing locus remains trimmed: a later
+// handle drag may expand the boundary and must be able to reveal it without a
+// complete scene rebuild.
+function locusCanChangeTrimVisibility(locus) {
+  return (
+    locus?.state?.start > locus?.source?.start ||
+    locus?.state?.end < locus?.source?.end
+  );
+}
+
+function linkCanChangeTrimVisibility(scene, link) {
+  return [link.source.query.uid, link.source.target.uid].some((uid) =>
+    locusCanChangeTrimVisibility(scene.genes.get(uid)?.locus)
   );
 }
 
@@ -11025,8 +11183,8 @@ function linkVertices(scene, link, scales, config, preview = null) {
       : "black")
   );
   pushLink(fill, edge, link, visible ? colour : transparent(colour), visible ? stroke : transparent(stroke), {
-    // Records with a range were visible in the retained base scene. Keeping
-    // their vertex count constant lets a preview hide them by alpha alone.
+    // Keeping retained link records at a constant vertex count lets a trim
+    // preview toggle visibility by alpha alone.
     visible: true,
     anchors: anchorsForPreview(scene, link, preview),
     asLine: config.link.asLine,
@@ -11131,8 +11289,10 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
     [...scene.clusters.keys()].map((uid, index) => [uid, index + 1])
   );
   for (const link of scene.links.values()) {
-    // A preview never introduces a link that was absent from the base scene.
-    if (!link.visible) continue;
+    // Normally an invisible link has no reason to consume a GPU range. The
+    // exception is a link hidden solely by a committed trim: it can reappear
+    // during an expanding trim preview.
+    if (!link.visible && !linkCanChangeTrimVisibility(scene, link)) continue;
     const vertices = linkVertices(scene, link, scales, config, preview);
     ranges.links.set(link.source.uid, {
       links: append(links, vertices.links),
@@ -11140,8 +11300,10 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
     });
   }
   for (const gene of scene.genes.values()) {
-    // Trimming only hides base-visible genes, so their range is stable too.
-    if (!gene.visible) continue;
+    // Retain hidden genes belonging to committed trims so a later drag can
+    // reveal them by changing alpha in-place. Other hidden records stay out
+    // of the dense buffer as before.
+    if (!gene.visible && !locusCanChangeTrimVisibility(gene.locus)) continue;
     const vertices = geneVertices(
       gene,
       scales,
@@ -12619,6 +12781,7 @@ function clusterMap() {
           localXFor: runtime.scales.locus,
           scaleX: runtime.scales.x,
           alignLabels: runtime.config.cluster.alignLabels,
+          shape: runtime.config.gene.shape,
           clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
         });
         scheduleRasterPreview();

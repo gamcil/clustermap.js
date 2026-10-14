@@ -98,6 +98,9 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
         y: 10,
         track: { y: 11 },
         hover: { x: 0, y: -10, width: 10, height: 30, leftHandleX: -8, rightHandleX: 10 },
+        trimIndicators: [
+          { side: "left", x: 3, y: 20, anchor: "start", text: "← 2 kb · 1 feature" },
+        ],
       },
     ],
   };
@@ -195,6 +198,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
       straight: false,
       strokeWidth: 1,
       groupColour: false,
+      threshold: 0.3,
       label: { show: false, position: 0.5 },
     },
   };
@@ -224,6 +228,30 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   assert.ok(calls.some((call) => call[0] === "fill"));
   assert.ok(calls.some((call) => call[0] === "bezierCurveTo"), "retained link anchors draw in an ordinary Canvas frame");
   assert.ok(calls.some((call) => call[0] === "fillRect" && call[1] === 5 && call[2] === 0));
+  assert.ok(
+    calls.some((call) => call[0] === "fillText" && call[1] === "← 2 kb · 1 feature"),
+    "trim indicators render as Canvas text"
+  );
+
+  calls.length = 0;
+  renderedLink.visible = false;
+  renderedLink.allowed = true;
+  renderCanvas({
+    canvas,
+    scene,
+    camera: { x: 20, y: 30, k: 2 },
+    config,
+    scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
+    preview: {
+      type: "locus-trim",
+      geneVisibility: new Map([["gene", true], ["distant", true]]),
+    },
+  });
+  assert.ok(
+    calls.some((call) => call[0] === "bezierCurveTo"),
+    "an expanding trim preview restores links hidden by the committed trim"
+  );
+  renderedLink.visible = true;
 
   calls.length = 0;
   renderCanvas({

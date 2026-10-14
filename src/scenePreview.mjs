@@ -1,3 +1,5 @@
+import { createTrimIndicators } from "./loci/trimIndicators.mjs";
+
 function minStart(loci, startFor) {
   return Math.min(...loci.map(startFor));
 }
@@ -110,7 +112,7 @@ export function createLocusTrimPreview(
   scene,
   locusUid,
   state,
-  { localXFor, scaleX, alignLabels, clusterLabelText = null }
+  { localXFor, scaleX, alignLabels, shape, clusterLabelText = null }
 ) {
   const locus = scene.loci.get(locusUid);
   if (!locus) return null;
@@ -135,6 +137,13 @@ export function createLocusTrimPreview(
       leftHandleX: scaleX(state.start) - 8,
       rightHandleX: scaleX(state.end),
     },
+    trimIndicators: createTrimIndicators({
+      locus: locus.source,
+      state,
+      getGeneState: (gene) => scene.genes.get(gene.uid)?.display || gene,
+      scaleX,
+      shape,
+    }),
   };
   const locusGeometry = new Map([[locusUid, trimmed]]);
   const startFor = (candidate) =>

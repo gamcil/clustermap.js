@@ -238,7 +238,8 @@ already owns.
   `chart.trimLoci(ids)` removes both flanks of the supplied or currently
   selected loci, ending at their displayed outermost genes.
   `chart.restoreLoci(ids)` restores their full bounds while retaining flips and
-  horizontal offsets. When a dragged cluster contains a selected locus, all
+  horizontal offsets. Trimmed flanks are annotated in the plot with their
+  hidden length and feature count. When a dragged cluster contains a selected locus, all
   selected clusters reorder together, retaining their relative order.
 - `chart.exportSvg({ padding })` returns the current figure as an SVG string,
   irrespective of the interactive renderer in use.

@@ -404,6 +404,9 @@ function linkVisibleForPreview(scene, link, preview, config) {
   const target = scene.genes.get(link.source.target.uid);
   if (!query || !target) return false;
   if (!geneVisibleForPreview(preview, query) || !geneVisibleForPreview(preview, target)) return false;
+  if (preview?.type === "locus-trim") {
+    return link.allowed && !link.source.hidden && link.source.identity >= config.link.threshold;
+  }
   if (preview?.type !== "cluster-drag") return link.visible;
   const queryOrder = preview.clusterOrder.get(query.locus.cluster.uid);
   const targetOrder = preview.clusterOrder.get(target.locus.cluster.uid);
@@ -418,6 +421,23 @@ function linkVisibleForPreview(scene, link, preview, config) {
 
 function trackForPreview(preview, locus) {
   return preview?.loci?.get(locus.source.uid)?.track || locus.track;
+}
+
+// A committed trim can make a gene or link invisible in the retained scene.
+// Keep its GPU range while the containing locus remains trimmed: a later
+// handle drag may expand the boundary and must be able to reveal it without a
+// complete scene rebuild.
+function locusCanChangeTrimVisibility(locus) {
+  return (
+    locus?.state?.start > locus?.source?.start ||
+    locus?.state?.end < locus?.source?.end
+  );
+}
+
+function linkCanChangeTrimVisibility(scene, link) {
+  return [link.source.query.uid, link.source.target.uid].some((uid) =>
+    locusCanChangeTrimVisibility(scene.genes.get(uid)?.locus)
+  );
 }
 
 function transparent(colour) {
@@ -457,8 +477,8 @@ function linkVertices(scene, link, scales, config, preview = null) {
       : "black")
   );
   pushLink(fill, edge, link, visible ? colour : transparent(colour), visible ? stroke : transparent(stroke), {
-    // Records with a range were visible in the retained base scene. Keeping
-    // their vertex count constant lets a preview hide them by alpha alone.
+    // Keeping retained link records at a constant vertex count lets a trim
+    // preview toggle visibility by alpha alone.
     visible: true,
     anchors: anchorsForPreview(scene, link, preview),
     asLine: config.link.asLine,
@@ -563,8 +583,10 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
     [...scene.clusters.keys()].map((uid, index) => [uid, index + 1])
   );
   for (const link of scene.links.values()) {
-    // A preview never introduces a link that was absent from the base scene.
-    if (!link.visible) continue;
+    // Normally an invisible link has no reason to consume a GPU range. The
+    // exception is a link hidden solely by a committed trim: it can reappear
+    // during an expanding trim preview.
+    if (!link.visible && !linkCanChangeTrimVisibility(scene, link)) continue;
     const vertices = linkVertices(scene, link, scales, config, preview);
     ranges.links.set(link.source.uid, {
       links: append(links, vertices.links),
@@ -572,8 +594,10 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
     });
   }
   for (const gene of scene.genes.values()) {
-    // Trimming only hides base-visible genes, so their range is stable too.
-    if (!gene.visible) continue;
+    // Retain hidden genes belonging to committed trims so a later drag can
+    // reveal them by changing alpha in-place. Other hidden records stay out
+    // of the dense buffer as before.
+    if (!gene.visible && !locusCanChangeTrimVisibility(gene.locus)) continue;
     const vertices = geneVertices(
       gene,
       scales,

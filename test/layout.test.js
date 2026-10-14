@@ -224,6 +224,7 @@ test("scene derives world-space geometry without DOM state", async () => {
       leftHandleX: 0,
       rightHandleX: 20,
     },
+    trimIndicators: [],
   });
   assert.equal(trimPreview.geneVisibility.get("top-gene"), false);
   assert.deepEqual(trimPreview.clusterLabelOffsets, new Map([["top", 0], ["bottom", 0]]));
