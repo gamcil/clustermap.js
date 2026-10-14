@@ -5423,6 +5423,55 @@
     return `${count} ${count === 1 ? "feature" : "features"}`;
   }
 
+  const FONT_SIZE = 10;
+  const LINE_HEIGHT = 12;
+  const CHARACTER_WIDTH = FONT_SIZE * 0.56;
+
+  function indicatorBounds(locus, indicator) {
+    const width = indicator.text.length * CHARACTER_WIDTH;
+    const x = locus.x + indicator.x;
+    const left = indicator.anchor === "end" ? x - width : x;
+    return {
+      left: left - 2,
+      right: left + width + 2,
+      top: locus.y + indicator.y - 1,
+      bottom: locus.y + indicator.y + FONT_SIZE + 1,
+    };
+  }
+
+  function overlaps(one, two) {
+    return (
+      one.left < two.right && one.right > two.left &&
+      one.top < two.bottom && one.bottom > two.top
+    );
+  }
+
+  /**
+   * Assign the smallest non-overlapping vertical lane to every trim label.
+   * This keeps both labels on one locus aligned whenever they fit, while also
+   * preventing labels from separate loci in the same cluster from colliding.
+   */
+  function arrangeTrimIndicators(loci, replacements = new Map()) {
+    const arranged = new Map();
+    const placed = [];
+    for (const locus of [...loci].sort((one, two) => one.y - two.y || one.x - two.x)) {
+      const indicators = replacements.get(locus.source.uid) || locus.trimIndicators || [];
+      const positioned = [];
+      for (const indicator of indicators) {
+        const next = { ...indicator };
+        let bounds = indicatorBounds(locus, next);
+        while (placed.some((candidate) => overlaps(bounds, candidate))) {
+          next.y += LINE_HEIGHT;
+          bounds = indicatorBounds(locus, next);
+        }
+        positioned.push(next);
+        placed.push(bounds);
+      }
+      arranged.set(locus.source.uid, positioned);
+    }
+    return arranged;
+  }
+
   /**
    * Describe the hidden flanks of a trimmed locus in its local display space.
    * The resulting records are deliberately renderer-neutral: SVG can use them
@@ -5442,11 +5491,9 @@
     const countAfter = (boundary) =>
       genes.filter((gene) => Number(getGeneState(gene)?.start) >= boundary).length;
     const y = (shape.tipHeight || 0) * 2 + (shape.bodyHeight || 0) + 4;
-    const hasLeft = start > fullStart;
-    const hasRight = end < fullEnd;
     const indicators = [];
 
-    if (hasLeft) {
+    if (start > fullStart) {
       indicators.push({
         side: "left",
         x: scaleX(start) + 3,
@@ -5455,13 +5502,11 @@
         text: `← ${formatLength(start - fullStart)} · ${featureText(countBefore(start))}`,
       });
     }
-    if (hasRight) {
+    if (end < fullEnd) {
       indicators.push({
         side: "right",
         x: scaleX(end) - 3,
-        // Keep the two flanks on distinct baselines. A 12px step suits the
-        // compact renderer font while staying within normal cluster spacing.
-        y: y + (hasLeft ? 12 : 0),
+        y,
         anchor: "end",
         text: `${featureText(countAfter(end))} · ${formatLength(fullEnd - end)} →`,
       });
@@ -5615,6 +5660,11 @@
       }),
     };
     const locusGeometry = new Map([[locusUid, trimmed]]);
+    const arrangedTrimIndicators = arrangeTrimIndicators(
+      scene.loci.values(),
+      new Map([[locusUid, trimmed.trimIndicators]])
+    );
+    trimmed.trimIndicators = arrangedTrimIndicators.get(locusUid) || [];
     const startFor = (candidate) =>
       candidate.source.uid === locusUid
         ? trimmed.worldStart
@@ -6267,6 +6317,15 @@
     };
   }
 
+  function extendLocusBoundsForTrimIndicators(locus) {
+    const maxY = Math.max(
+      locus.bounds.maxY,
+      ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + 11)
+    );
+    locus.bounds = { ...locus.bounds, maxY };
+    return locus;
+  }
+
   function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, label }) {
     const display = { ...gene, ...getGeneState(gene) };
     const visible =
@@ -6488,8 +6547,32 @@
         : null;
     }
 
-    const bounds =
-      minX === Infinity ? null : { minX, maxX, minY, maxY };
+    const arrangedTrimIndicators = arrangeTrimIndicators(loci.values());
+    for (const locus of loci.values()) {
+      locus.trimIndicators = arrangedTrimIndicators.get(locus.source.uid) || [];
+      extendLocusBoundsForTrimIndicators(locus);
+    }
+    for (const cluster of clusters.values()) {
+      if (!cluster.loci.length) continue;
+      cluster.bounds = {
+        minX: Math.min(...cluster.loci.map((locus) => locus.bounds.minX)),
+        maxX: Math.max(...cluster.loci.map((locus) => locus.bounds.maxX)),
+        minY: Math.min(...cluster.loci.map((locus) => locus.bounds.minY)),
+        maxY: Math.max(...cluster.loci.map((locus) => locus.bounds.maxY)),
+      };
+    }
+    const trimIndicatorMaxY = Math.max(
+      -Infinity,
+      ...[...loci.values()].flatMap((locus) =>
+        locus.trimIndicators.map((indicator) => locus.y + indicator.y + 11)
+      )
+    );
+    const bounds = minX === Infinity ? null : {
+      minX,
+      maxX,
+      minY,
+      maxY: Math.max(maxY, trimIndicatorMaxY),
+    };
     for (const cluster of clusters.values()) {
       const clusterMinX = cluster.loci.length
         ? Math.min(...cluster.loci.map((locus) => locus.worldStart))
@@ -6590,6 +6673,13 @@
       shape,
       geneMidpoint,
     });
+    const arrangedTrimIndicators = arrangeTrimIndicators(
+      [...scene.loci.values()].map((candidate) =>
+        candidate.source.uid === locus.uid ? replacement : candidate
+      )
+    );
+    replacement.trimIndicators = arrangedTrimIndicators.get(locus.uid) || [];
+    extendLocusBoundsForTrimIndicators(replacement);
     const locusIndex = cluster.loci.findIndex((candidate) => candidate.source.uid === locus.uid);
     cluster.loci[locusIndex] = replacement;
     cluster.bounds = {
@@ -7454,8 +7544,8 @@
     const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
     context.save();
     context.fillStyle = "#536b88";
-    context.strokeStyle = "rgba(255, 255, 255, 0.94)";
-    context.lineWidth = 4;
+    context.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    context.lineWidth = 2;
     context.lineJoin = "round";
     context.font = `${Math.max(8, Math.min(10, config.cluster.lociFontSize))}px ${config.plot.fontFamily}`;
     context.textBaseline = "top";
@@ -8441,8 +8531,8 @@
       .attr("text-anchor", (indicator) => indicator.anchor)
       .attr("dominant-baseline", "hanging")
       .attr("fill", "#536b88")
-      .attr("stroke", "rgba(255, 255, 255, 0.94)")
-      .attr("stroke-width", 4)
+      .attr("stroke", "rgba(255, 255, 255, 0.9)")
+      .attr("stroke-width", 2)
       .attr("stroke-linejoin", "round")
       .style("paint-order", "stroke")
       .style("font-size", `${Math.max(8, Math.min(10, config.cluster.lociFontSize))}px`)

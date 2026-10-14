@@ -1,4 +1,4 @@
-import { createTrimIndicators } from "./loci/trimIndicators.mjs";
+import { arrangeTrimIndicators, createTrimIndicators } from "./loci/trimIndicators.mjs";
 
 function minStart(loci, startFor) {
   return Math.min(...loci.map(startFor));
@@ -146,6 +146,11 @@ export function createLocusTrimPreview(
     }),
   };
   const locusGeometry = new Map([[locusUid, trimmed]]);
+  const arrangedTrimIndicators = arrangeTrimIndicators(
+    scene.loci.values(),
+    new Map([[locusUid, trimmed.trimIndicators]])
+  );
+  trimmed.trimIndicators = arrangedTrimIndicators.get(locusUid) || [];
   const startFor = (candidate) =>
     candidate.source.uid === locusUid
       ? trimmed.worldStart

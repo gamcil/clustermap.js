@@ -533,8 +533,8 @@ function drawLocusTrimIndicators(context, locus, config, geometry = {}) {
   const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
   context.save();
   context.fillStyle = "#536b88";
-  context.strokeStyle = "rgba(255, 255, 255, 0.94)";
-  context.lineWidth = 4;
+  context.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  context.lineWidth = 2;
   context.lineJoin = "round";
   context.font = `${Math.max(8, Math.min(10, config.cluster.lociFontSize))}px ${config.plot.fontFamily}`;
   context.textBaseline = "top";

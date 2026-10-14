@@ -10,7 +10,7 @@ import {
   getLinkPath,
 } from "./links/layout.mjs";
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
-import { createTrimIndicators } from "./loci/trimIndicators.mjs";
+import { arrangeTrimIndicators, createTrimIndicators } from "./loci/trimIndicators.mjs";
 
 function worldPolygon(points, x, y) {
   return points.map((point, index) => point + (index % 2 === 0 ? x : y));
@@ -295,6 +295,15 @@ function createLocusLayout(locus, clusterLayout, {
   };
 }
 
+function extendLocusBoundsForTrimIndicators(locus) {
+  const maxY = Math.max(
+    locus.bounds.maxY,
+    ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + 11)
+  );
+  locus.bounds = { ...locus.bounds, maxY };
+  return locus;
+}
+
 function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, label }) {
   const display = { ...gene, ...getGeneState(gene) };
   const visible =
@@ -516,8 +525,32 @@ export function buildScene(
       : null;
   }
 
-  const bounds =
-    minX === Infinity ? null : { minX, maxX, minY, maxY };
+  const arrangedTrimIndicators = arrangeTrimIndicators(loci.values());
+  for (const locus of loci.values()) {
+    locus.trimIndicators = arrangedTrimIndicators.get(locus.source.uid) || [];
+    extendLocusBoundsForTrimIndicators(locus);
+  }
+  for (const cluster of clusters.values()) {
+    if (!cluster.loci.length) continue;
+    cluster.bounds = {
+      minX: Math.min(...cluster.loci.map((locus) => locus.bounds.minX)),
+      maxX: Math.max(...cluster.loci.map((locus) => locus.bounds.maxX)),
+      minY: Math.min(...cluster.loci.map((locus) => locus.bounds.minY)),
+      maxY: Math.max(...cluster.loci.map((locus) => locus.bounds.maxY)),
+    };
+  }
+  const trimIndicatorMaxY = Math.max(
+    -Infinity,
+    ...[...loci.values()].flatMap((locus) =>
+      locus.trimIndicators.map((indicator) => locus.y + indicator.y + 11)
+    )
+  );
+  const bounds = minX === Infinity ? null : {
+    minX,
+    maxX,
+    minY,
+    maxY: Math.max(maxY, trimIndicatorMaxY),
+  };
   for (const cluster of clusters.values()) {
     const clusterMinX = cluster.loci.length
       ? Math.min(...cluster.loci.map((locus) => locus.worldStart))
@@ -618,6 +651,13 @@ export function patchFlippedLocusScene(
     shape,
     geneMidpoint,
   });
+  const arrangedTrimIndicators = arrangeTrimIndicators(
+    [...scene.loci.values()].map((candidate) =>
+      candidate.source.uid === locus.uid ? replacement : candidate
+    )
+  );
+  replacement.trimIndicators = arrangedTrimIndicators.get(locus.uid) || [];
+  extendLocusBoundsForTrimIndicators(replacement);
   const locusIndex = cluster.loci.findIndex((candidate) => candidate.source.uid === locus.uid);
   cluster.loci[locusIndex] = replacement;
   cluster.bounds = {

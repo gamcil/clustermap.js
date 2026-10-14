@@ -39,7 +39,7 @@ test("trim indicators describe each hidden locus flank in display coordinates", 
       {
         side: "right",
         x: 647,
-        y: 38,
+        y: 26,
         anchor: "end",
         text: "2 features · 3.5 kb →",
       },
@@ -59,4 +59,25 @@ test("trim indicators are absent for an untrimmed locus", async () => {
     }),
     []
   );
+});
+
+test("trim indicator lanes are assigned only when labels would collide", async () => {
+  const { arrangeTrimIndicators } = await import("../src/loci/trimIndicators.mjs");
+  const label = (side, x, anchor, text) => ({ side, x, y: 26, anchor, text });
+  const first = {
+    source: { uid: "first" }, x: 0, y: 0,
+    trimIndicators: [label("left", 10, "start", "← 2 kb · 1 feature")],
+  };
+  const second = {
+    source: { uid: "second" }, x: 0, y: 0,
+    trimIndicators: [label("right", 280, "end", "2 features · 3 kb →")],
+  };
+  const separate = arrangeTrimIndicators([first, second]);
+  assert.equal(separate.get("first")[0].y, 26);
+  assert.equal(separate.get("second")[0].y, 26);
+
+  second.trimIndicators = [label("right", 100, "end", "2 features · 3 kb →")];
+  const overlapping = arrangeTrimIndicators([first, second]);
+  assert.equal(overlapping.get("first")[0].y, 26);
+  assert.equal(overlapping.get("second")[0].y, 38);
 });
