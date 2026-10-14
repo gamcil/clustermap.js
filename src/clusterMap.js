@@ -307,6 +307,7 @@ export default function clusterMap() {
           scaleX: runtime.scales.x,
           alignLabels: runtime.config.cluster.alignLabels,
           shape: runtime.config.gene.shape,
+          trimIndicatorStyle: runtime.config.locus.trimIndicators,
           clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
         });
         scheduleRasterPreview();

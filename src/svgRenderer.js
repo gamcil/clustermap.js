@@ -2,6 +2,7 @@ import { select } from "d3-selection";
 import { drag } from "d3-drag";
 import { renameText, rgbaToRgb } from "./utils.js";
 import { filterLinks } from "./links/groups.mjs";
+import { resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
 
 // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
 // host, camera viewport, and interaction state that causes a redraw.
@@ -330,6 +331,7 @@ function createLocusResizeDrag({ plot, interactions }) {
 }
 
 function updateLoci(selection, scene, config, highlightLocusIds) {
+  const trimIndicatorStyle = resolveTrimIndicatorStyle(config.locus.trimIndicators);
   const layout = (locus) => scene.loci.get(locus.uid);
   // D3 transitions are used for locus geometry, but annotation joins must be
   // performed on selections so entering/removing text does not depend on a
@@ -386,11 +388,12 @@ function updateLoci(selection, scene, config, highlightLocusIds) {
     .attr("text-anchor", (indicator) => indicator.anchor)
     .attr("dominant-baseline", "hanging")
     .attr("fill", "#536b88")
-    .attr("stroke", "rgba(255, 255, 255, 0.9)")
-    .attr("stroke-width", 2)
+    .attr("stroke", `rgba(255, 255, 255, ${trimIndicatorStyle.borderOpacity})`)
+    .attr("stroke-width", trimIndicatorStyle.borderWidth)
     .attr("stroke-linejoin", "round")
     .style("paint-order", "stroke")
-    .style("font-size", `${Math.max(8, Math.min(10, config.cluster.lociFontSize))}px`)
+    .style("font-size", `${trimIndicatorStyle.fontSize}px`)
+    .style("font-weight", trimIndicatorStyle.fontWeight)
     .style("font-family", config.plot.fontFamily)
     .text((indicator) => indicator.text);
   return selection;

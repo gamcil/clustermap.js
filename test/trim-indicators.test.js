@@ -62,7 +62,7 @@ test("trim indicators are absent for an untrimmed locus", async () => {
 });
 
 test("trim indicator lanes are assigned only when labels would collide", async () => {
-  const { arrangeTrimIndicators } = await import("../src/loci/trimIndicators.mjs");
+  const { arrangeTrimIndicators, resolveTrimIndicatorStyle } = await import("../src/loci/trimIndicators.mjs");
   const label = (side, x, anchor, text) => ({ side, x, y: 26, anchor, text });
   const first = {
     source: { uid: "first" }, x: 0, y: 0,
@@ -80,4 +80,15 @@ test("trim indicator lanes are assigned only when labels would collide", async (
   const overlapping = arrangeTrimIndicators([first, second]);
   assert.equal(overlapping.get("first")[0].y, 26);
   assert.equal(overlapping.get("second")[0].y, 38);
+
+  const largerText = arrangeTrimIndicators([first, second], new Map(), { fontSize: 16 });
+  assert.equal(largerText.get("second")[0].y, 46);
+  assert.deepEqual(resolveTrimIndicatorStyle({ fontSize: 16, fontWeight: 400 }), {
+    fontSize: 16,
+    fontWeight: 400,
+    borderWidth: 3,
+    borderOpacity: 1,
+    lineHeight: 20,
+    characterWidth: 8.96,
+  });
 });

@@ -83,6 +83,10 @@ const defaultConfig = {
   locus: {
     trimIndicators: {
       show: true,
+      fontSize: 10,
+      fontWeight: 600,
+      borderWidth: 3,
+      borderOpacity: 1,
     },
     trackBar: {
       colour: "#111",

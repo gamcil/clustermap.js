@@ -112,7 +112,7 @@ export function createLocusTrimPreview(
   scene,
   locusUid,
   state,
-  { localXFor, scaleX, alignLabels, shape, clusterLabelText = null }
+  { localXFor, scaleX, alignLabels, shape, trimIndicatorStyle = {}, clusterLabelText = null }
 ) {
   const locus = scene.loci.get(locusUid);
   if (!locus) return null;
@@ -148,7 +148,8 @@ export function createLocusTrimPreview(
   const locusGeometry = new Map([[locusUid, trimmed]]);
   const arrangedTrimIndicators = arrangeTrimIndicators(
     scene.loci.values(),
-    new Map([[locusUid, trimmed.trimIndicators]])
+    new Map([[locusUid, trimmed.trimIndicators]]),
+    trimIndicatorStyle
   );
   trimmed.trimIndicators = arrangedTrimIndicators.get(locusUid) || [];
   const startFor = (candidate) =>

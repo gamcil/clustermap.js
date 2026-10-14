@@ -12,6 +12,7 @@ import {
 } from "./scenePreview.mjs";
 import { clusterPairKey } from "./layout.mjs";
 import { traceLinkPath } from "./links/layout.mjs";
+import { resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
 
 /**
  * Choose Canvas backing-store resolution from the view scale.  This affects
@@ -528,15 +529,18 @@ function drawLocusTrack(context, locus, viewport, config, geometry = {}) {
 
 function drawLocusTrimIndicators(context, locus, config, geometry = {}) {
   if (config.locus.trimIndicators?.show === false) return;
+  const { fontSize, fontWeight, borderWidth, borderOpacity } = resolveTrimIndicatorStyle(
+    config.locus.trimIndicators
+  );
   const indicators = geometry.trimIndicators || locus.trimIndicators || [];
   if (!indicators.length) return;
   const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
   context.save();
   context.fillStyle = "#536b88";
-  context.strokeStyle = "rgba(255, 255, 255, 0.9)";
-  context.lineWidth = 2;
+  context.strokeStyle = `rgba(255, 255, 255, ${borderOpacity})`;
+  context.lineWidth = borderWidth;
   context.lineJoin = "round";
-  context.font = `${Math.max(8, Math.min(10, config.cluster.lociFontSize))}px ${config.plot.fontFamily}`;
+  context.font = `${fontWeight} ${fontSize}px ${config.plot.fontFamily}`;
   context.textBaseline = "top";
   for (const indicator of indicators) {
     context.textAlign = indicator.anchor;

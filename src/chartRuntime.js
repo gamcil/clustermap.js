@@ -192,6 +192,7 @@ function sceneProjectionOptions({ areClustersAdjacent } = {}) {
     linkVisible: (link) => !allowedLinkIds || allowedLinkIds.has(link.uid),
     clusterLabel: locusText,
     alignLabels: config.cluster.alignLabels,
+    trimIndicatorStyle: config.locus.trimIndicators,
   };
 }
 

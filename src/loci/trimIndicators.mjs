@@ -11,19 +11,38 @@ function featureText(count) {
   return `${count} ${count === 1 ? "feature" : "features"}`;
 }
 
-const FONT_SIZE = 10;
-const LINE_HEIGHT = 12;
-const CHARACTER_WIDTH = FONT_SIZE * 0.56;
+function boundedNumber(value, fallback, minimum, maximum) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
+}
 
-function indicatorBounds(locus, indicator) {
-  const width = indicator.text.length * CHARACTER_WIDTH;
+/**
+ * Shared text metrics for layout and renderers. The width estimate only
+ * chooses collision lanes; the renderer remains the source of exact glyph
+ * placement.
+ */
+export function resolveTrimIndicatorStyle(style = {}) {
+  const fontSize = boundedNumber(style.fontSize, 10, 6, 48);
+  const fontWeight = boundedNumber(style.fontWeight, 600, 100, 900);
+  return {
+    fontSize,
+    fontWeight,
+    borderWidth: boundedNumber(style.borderWidth, 3, 0, 12),
+    borderOpacity: boundedNumber(style.borderOpacity, 1, 0, 1),
+    lineHeight: Math.ceil(fontSize * 1.2),
+    characterWidth: fontSize * (fontWeight >= 600 ? 0.6 : 0.56),
+  };
+}
+
+function indicatorBounds(locus, indicator, metrics) {
+  const width = indicator.text.length * metrics.characterWidth;
   const x = locus.x + indicator.x;
   const left = indicator.anchor === "end" ? x - width : x;
   return {
     left: left - 2,
     right: left + width + 2,
     top: locus.y + indicator.y - 1,
-    bottom: locus.y + indicator.y + FONT_SIZE + 1,
+    bottom: locus.y + indicator.y + metrics.fontSize + 1,
   };
 }
 
@@ -39,7 +58,8 @@ function overlaps(one, two) {
  * This keeps both labels on one locus aligned whenever they fit, while also
  * preventing labels from separate loci in the same cluster from colliding.
  */
-export function arrangeTrimIndicators(loci, replacements = new Map()) {
+export function arrangeTrimIndicators(loci, replacements = new Map(), style = {}) {
+  const metrics = resolveTrimIndicatorStyle(style);
   const arranged = new Map();
   const placed = [];
   for (const locus of [...loci].sort((one, two) => one.y - two.y || one.x - two.x)) {
@@ -47,10 +67,10 @@ export function arrangeTrimIndicators(loci, replacements = new Map()) {
     const positioned = [];
     for (const indicator of indicators) {
       const next = { ...indicator };
-      let bounds = indicatorBounds(locus, next);
+      let bounds = indicatorBounds(locus, next, metrics);
       while (placed.some((candidate) => overlaps(bounds, candidate))) {
-        next.y += LINE_HEIGHT;
-        bounds = indicatorBounds(locus, next);
+        next.y += metrics.lineHeight;
+        bounds = indicatorBounds(locus, next, metrics);
       }
       positioned.push(next);
       placed.push(bounds);

@@ -10,7 +10,7 @@ import {
   getLinkPath,
 } from "./links/layout.mjs";
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
-import { arrangeTrimIndicators, createTrimIndicators } from "./loci/trimIndicators.mjs";
+import { arrangeTrimIndicators, createTrimIndicators, resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
 
 function worldPolygon(points, x, y) {
   return points.map((point, index) => point + (index % 2 === 0 ? x : y));
@@ -295,10 +295,11 @@ function createLocusLayout(locus, clusterLayout, {
   };
 }
 
-function extendLocusBoundsForTrimIndicators(locus) {
+function extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle) {
+  const { fontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
   const maxY = Math.max(
     locus.bounds.maxY,
-    ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + 11)
+    ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + fontSize + 1)
   );
   locus.bounds = { ...locus.bounds, maxY };
   return locus;
@@ -458,6 +459,7 @@ export function buildScene(
     linkVisible = () => true,
     clusterLabel = () => "",
     alignLabels = true,
+    trimIndicatorStyle = {},
     chrome = null,
   }
 ) {
@@ -525,10 +527,11 @@ export function buildScene(
       : null;
   }
 
-  const arrangedTrimIndicators = arrangeTrimIndicators(loci.values());
+  const { fontSize: trimIndicatorFontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
+  const arrangedTrimIndicators = arrangeTrimIndicators(loci.values(), new Map(), trimIndicatorStyle);
   for (const locus of loci.values()) {
     locus.trimIndicators = arrangedTrimIndicators.get(locus.source.uid) || [];
-    extendLocusBoundsForTrimIndicators(locus);
+    extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle);
   }
   for (const cluster of clusters.values()) {
     if (!cluster.loci.length) continue;
@@ -542,7 +545,7 @@ export function buildScene(
   const trimIndicatorMaxY = Math.max(
     -Infinity,
     ...[...loci.values()].flatMap((locus) =>
-      locus.trimIndicators.map((indicator) => locus.y + indicator.y + 11)
+      locus.trimIndicators.map((indicator) => locus.y + indicator.y + trimIndicatorFontSize + 1)
     )
   );
   const bounds = minX === Infinity ? null : {
@@ -631,6 +634,7 @@ export function patchFlippedLocusScene(
     linkVisible = () => true,
     clusterLabel = () => "",
     alignLabels = true,
+    trimIndicatorStyle = {},
     linksForGene = () => [],
   }
 ) {
@@ -654,10 +658,12 @@ export function patchFlippedLocusScene(
   const arrangedTrimIndicators = arrangeTrimIndicators(
     [...scene.loci.values()].map((candidate) =>
       candidate.source.uid === locus.uid ? replacement : candidate
-    )
+    ),
+    new Map(),
+    trimIndicatorStyle
   );
   replacement.trimIndicators = arrangedTrimIndicators.get(locus.uid) || [];
-  extendLocusBoundsForTrimIndicators(replacement);
+  extendLocusBoundsForTrimIndicators(replacement, trimIndicatorStyle);
   const locusIndex = cluster.loci.findIndex((candidate) => candidate.source.uid === locus.uid);
   cluster.loci[locusIndex] = replacement;
   cluster.bounds = {
