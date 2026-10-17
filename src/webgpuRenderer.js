@@ -476,6 +476,9 @@ function linkVertices(scene, link, scales, config, preview = null) {
       ? scales.colour(scales.group(link.source.query.uid))
       : "black")
   );
+  const opacity = link.opacity ?? 1;
+  colour[3] *= opacity;
+  stroke[3] *= opacity;
   pushLink(fill, edge, link, visible ? colour : transparent(colour), visible ? stroke : transparent(stroke), {
     // Keeping retained link records at a constant vertex count lets a trim
     // preview toggle visibility by alpha alone.

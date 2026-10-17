@@ -1,0 +1,1921 @@
+{
+  "schemaVersion": 1,
+  "coordinateSystem": "locus-relative",
+  "config": {
+    "updateGroups": false
+  },
+  "clusters": [
+    {
+      "uid": "b46a7529-6d47-45e3-a793-84af6fc6169d",
+      "name": "P. vexata CBS 129021",
+      "loci": [
+        {
+          "uid": "9e3afb20-0fcd-4165-931d-2c6a717dbc4e",
+          "name": "MCFJ01000004",
+          "start": 0,
+          "end": 22128,
+          "genes": [
+            {
+              "uid": "9f89d1fb-2542-46d7-ac5b-673112285ae7",
+              "name": "ORY67416.1",
+              "names": {
+                "locus_tag": "BCR38DRAFT_510284",
+                "note": "expressed protein",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ORY67416.1",
+                "db_xref": "GI:1183443251"
+              },
+              "start": 0,
+              "end": 9881,
+              "strand": -1
+            },
+            {
+              "uid": "9a99a06a-40d8-4cca-8802-3b55b31ea3a3",
+              "name": "ORY67417.1",
+              "names": {
+                "locus_tag": "BCR38DRAFT_426986",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ORY67417.1",
+                "db_xref": "GI:1183443252"
+              },
+              "start": 10447,
+              "end": 11349,
+              "strand": 1
+            },
+            {
+              "uid": "a0e9e5ba-ba29-4ecc-a36a-dc47b8596856",
+              "name": "ORY67418.1",
+              "names": {
+                "locus_tag": "BCR38DRAFT_426988",
+                "note": "GO_function: GO:5506; oxidoreductase activity, acting on paired donors, with incorporation or reduction of molecular oxygen - iron ion binding [Evidence 20037] [PMID 16705]; GO_process: GO:55114 - oxidation reduction",
+                "codon_start": "1",
+                "product": "putative N-alkane-inducible cytochrome P450",
+                "protein_id": "ORY67418.1",
+                "db_xref": "GI:1183443253"
+              },
+              "start": 11642,
+              "end": 13528,
+              "strand": -1
+            },
+            {
+              "uid": "0ac96603-d0c3-434a-b85b-86dcd1344151",
+              "name": "ORY67419.1",
+              "names": {
+                "locus_tag": "BCR38DRAFT_426990",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ORY67419.1",
+                "db_xref": "GI:1183443254"
+              },
+              "start": 13491,
+              "end": 15495,
+              "strand": -1
+            },
+            {
+              "uid": "d04fa4c8-a3e2-4148-8063-e38a48ba113e",
+              "name": "ORY67420.1",
+              "names": {
+                "locus_tag": "BCR38DRAFT_157791",
+                "note": "GO_function: GO:16758 - transferase activity, transferring hexosyl groups; GO_process: GO:8152 - metabolic process",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ORY67420.1",
+                "db_xref": "GI:1183443255"
+              },
+              "start": 15478,
+              "end": 17683,
+              "strand": -1
+            },
+            {
+              "uid": "411da503-4331-402d-97a6-31ed515190a1",
+              "name": "ORY67421.1",
+              "names": {
+                "locus_tag": "BCR38DRAFT_336585",
+                "note": "GO_function: GO:8270; oxidoreductase activity - zinc ion binding [PMID 16491]; GO_process: GO:55114 - oxidation reduction",
+                "codon_start": "1",
+                "product": "putative alcohol dehydrogenase",
+                "protein_id": "ORY67421.1",
+                "db_xref": "GI:1183443256"
+              },
+              "start": 17926,
+              "end": 19268,
+              "strand": 1
+            },
+            {
+              "uid": "73eea8de-0411-4e0e-a3a2-86632fde104c",
+              "name": "ORY67422.1",
+              "names": {
+                "locus_tag": "BCR38DRAFT_426995",
+                "note": "GO_function: GO:5506; oxidoreductase activity, acting on paired donors, with incorporation or reduction of molecular oxygen - iron ion binding [Evidence 20037] [PMID 16705]; GO_process: GO:55114 - oxidation reduction",
+                "codon_start": "1",
+                "product": "cytochrome P450 monooxygenase-like protein",
+                "protein_id": "ORY67422.1",
+                "db_xref": "GI:1183443257"
+              },
+              "start": 20015,
+              "end": 22128,
+              "strand": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "uid": "db437b16-2c92-4aec-8f33-7be9b422edfc",
+      "name": "A. mulundensis DSM 5745",
+      "loci": [
+        {
+          "uid": "c6cecc2e-6aab-46fa-974c-a3ad60e51219",
+          "name": "NW_020797889",
+          "start": 0,
+          "end": 27409,
+          "genes": [
+            {
+              "uid": "4b77e447-2c28-4e54-9fed-92ae2faba174",
+              "name": "XP_026607259.1",
+              "names": {
+                "locus_tag": "DSM5745_02080",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "XP_026607259.1",
+                "db_xref": "GI:1489392606"
+              },
+              "start": 0,
+              "end": 1529,
+              "strand": -1
+            },
+            {
+              "uid": "b34cc780-35b0-4a68-95a3-f40a595c3c32",
+              "name": "XP_026607260.1",
+              "names": {
+                "locus_tag": "DSM5745_02081",
+                "codon_start": "1",
+                "product": "Uncharacterized protein",
+                "protein_id": "XP_026607260.1",
+                "db_xref": "GI:1489392610"
+              },
+              "start": 1769,
+              "end": 2917,
+              "strand": 1
+            },
+            {
+              "uid": "610a57d3-048d-49f5-bfc8-8115d2bcf57b",
+              "name": "XP_026607261.1",
+              "names": {
+                "locus_tag": "DSM5745_02082",
+                "codon_start": "1",
+                "product": "Uncharacterized protein",
+                "protein_id": "XP_026607261.1",
+                "db_xref": "GI:1489392614"
+              },
+              "start": 3613,
+              "end": 5054,
+              "strand": 1
+            },
+            {
+              "uid": "30e5ad46-7a9b-496e-bd50-33207059f161",
+              "name": "XP_026607262.1",
+              "names": {
+                "locus_tag": "DSM5745_02083",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "XP_026607262.1",
+                "db_xref": "GI:1489392618"
+              },
+              "start": 5371,
+              "end": 6587,
+              "strand": -1
+            },
+            {
+              "uid": "f29c65e1-41b9-468a-a2cd-f661062714c4",
+              "name": "XP_026607263.1",
+              "names": {
+                "locus_tag": "DSM5745_02084",
+                "codon_start": "1",
+                "product": "Uncharacterized protein",
+                "protein_id": "XP_026607263.1",
+                "db_xref": "GI:1489392622"
+              },
+              "start": 7232,
+              "end": 8397,
+              "strand": -1
+            },
+            {
+              "uid": "81833360-453b-4844-b2ea-8d3b7eefef51",
+              "name": "XP_026607264.1",
+              "names": {
+                "locus_tag": "DSM5745_02085",
+                "codon_start": "1",
+                "product": "Uncharacterized protein",
+                "protein_id": "XP_026607264.1",
+                "db_xref": "GI:1489392626"
+              },
+              "start": 9011,
+              "end": 10422,
+              "strand": 1
+            },
+            {
+              "uid": "0a820da4-a8a6-4c2b-8657-bf4beef54dbc",
+              "name": "XP_026607265.1",
+              "names": {
+                "locus_tag": "DSM5745_02086",
+                "codon_start": "1",
+                "product": "Uncharacterized protein",
+                "protein_id": "XP_026607265.1",
+                "db_xref": "GI:1489392630"
+              },
+              "start": 11854,
+              "end": 13458,
+              "strand": 1
+            },
+            {
+              "uid": "37abc71f-c63f-4dae-a719-e894fb1f96bb",
+              "name": "XP_026607266.1",
+              "names": {
+                "locus_tag": "DSM5745_02087",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "XP_026607266.1",
+                "db_xref": "GI:1489392634"
+              },
+              "start": 13820,
+              "end": 14522,
+              "strand": -1
+            },
+            {
+              "uid": "e972176b-ae88-4193-967b-cb6e26482c2f",
+              "name": "XP_026607267.1",
+              "names": {
+                "locus_tag": "DSM5745_02088",
+                "codon_start": "1",
+                "product": "Uncharacterized protein",
+                "protein_id": "XP_026607267.1",
+                "db_xref": "GI:1489392638"
+              },
+              "start": 14939,
+              "end": 27409,
+              "strand": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "uid": "d26bc990-1273-4030-88f1-787c27fd8125",
+      "name": "A. alliaceus CBS 536.65",
+      "loci": [
+        {
+          "uid": "2dee81a4-86c2-4d44-af1f-74d235794103",
+          "name": "NW_022474703",
+          "start": 0,
+          "end": 27584,
+          "genes": [
+            {
+              "uid": "09a357f0-2558-4318-8095-e9bd053e7fee",
+              "name": "XP_031900573.1",
+              "names": {
+                "locus_tag": "BDW43DRAFT_77391",
+                "codon_start": "1",
+                "product": "uncharacterized protein",
+                "protein_id": "XP_031900573.1",
+                "db_xref": "GI:1800277234"
+              },
+              "start": 0,
+              "end": 1762,
+              "strand": -1
+            },
+            {
+              "uid": "37d38016-6dea-4d89-a2a3-c90dcdca8c60",
+              "name": "XP_031900574.1",
+              "names": {
+                "locus_tag": "BDW43DRAFT_319470",
+                "codon_start": "1",
+                "product": "chaperonin 10-like protein",
+                "protein_id": "XP_031900574.1",
+                "db_xref": "GI:1800277238"
+              },
+              "start": 1981,
+              "end": 3133,
+              "strand": 1
+            },
+            {
+              "uid": "c53ce185-09ca-4590-b750-747dcee0dd5f",
+              "name": "XP_031900575.1",
+              "names": {
+                "locus_tag": "BDW43DRAFT_319471",
+                "codon_start": "1",
+                "product": "cytochrome P450",
+                "protein_id": "XP_031900575.1",
+                "db_xref": "GI:1800277242"
+              },
+              "start": 3632,
+              "end": 5417,
+              "strand": 1
+            },
+            {
+              "uid": "84201ad1-15fa-443e-8cb8-0f6707f23cef",
+              "name": "XP_031900576.1",
+              "names": {
+                "locus_tag": "BDW43DRAFT_310750",
+                "codon_start": "1",
+                "product": "ankyrin repeat-containing domain protein",
+                "protein_id": "XP_031900576.1",
+                "db_xref": "GI:1800277246"
+              },
+              "start": 5619,
+              "end": 6808,
+              "strand": -1
+            },
+            {
+              "uid": "5aaf4214-bd6a-44a9-8051-21b32c0665f6",
+              "name": "XP_031900577.1",
+              "names": {
+                "locus_tag": "BDW43DRAFT_274973",
+                "codon_start": "1",
+                "product": "uncharacterized protein",
+                "protein_id": "XP_031900577.1",
+                "db_xref": "GI:1800277250"
+              },
+              "start": 7543,
+              "end": 8758,
+              "strand": -1
+            },
+            {
+              "uid": "749e98ab-8bf8-4760-9e36-08f69af73dc6",
+              "name": "XP_031900578.1",
+              "names": {
+                "locus_tag": "BDW43DRAFT_274975",
+                "codon_start": "1",
+                "product": "uncharacterized protein",
+                "protein_id": "XP_031900578.1",
+                "db_xref": "GI:1800277254"
+              },
+              "start": 9304,
+              "end": 11072,
+              "strand": 1
+            },
+            {
+              "uid": "4339c091-9afd-451a-9b48-1d88a54eddb0",
+              "name": "XP_031900579.1",
+              "names": {
+                "locus_tag": "BDW43DRAFT_319472",
+                "codon_start": "1",
+                "product": "cytochrome P450",
+                "protein_id": "XP_031900579.1",
+                "db_xref": "GI:1800277258"
+              },
+              "start": 11550,
+              "end": 13196,
+              "strand": 1
+            },
+            {
+              "uid": "4a68ab5c-e616-4b00-bb71-88e82023a471",
+              "name": "XP_031900580.1",
+              "names": {
+                "locus_tag": "BDW43DRAFT_310754",
+                "codon_start": "1",
+                "product": "uncharacterized protein",
+                "protein_id": "XP_031900580.1",
+                "db_xref": "GI:1800277262"
+              },
+              "start": 13773,
+              "end": 14371,
+              "strand": -1
+            },
+            {
+              "uid": "5435356b-5b1c-40d2-af16-27587361678d",
+              "name": "XP_031900581.1",
+              "names": {
+                "locus_tag": "BDW43DRAFT_310755",
+                "codon_start": "1",
+                "product": "uncharacterized protein",
+                "protein_id": "XP_031900581.1",
+                "db_xref": "GI:1800277284"
+              },
+              "start": 15073,
+              "end": 27584,
+              "strand": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "uid": "412a69a6-3901-4c27-b749-05c5c74b63ed",
+      "name": "A. burnettii MST-FP2249",
+      "loci": [
+        {
+          "uid": "8a15461a-d9f4-467b-98c9-9a72d0730bf1",
+          "name": "scaffold_377",
+          "start": 0,
+          "end": 27649,
+          "genes": [
+            {
+              "uid": "57d2502b-5688-48a9-b8f4-324f1c8fbedc",
+              "name": "ncbi:ETB97_008319-T1",
+              "names": {
+                "gene": "BDH2",
+                "locus_tag": "ETB97_008319",
+                "note": "EggNog:ENOG41KOG0725; COG:Q",
+                "codon_start": "1",
+                "product": "Putative diacetyl reductase [(R)-acetoin forming] 2",
+                "protein_id": "ncbi:ETB97_008319-T1",
+                "db_xref": "InterPro:IPR036291",
+                "label": "BDH2 CDS"
+              },
+              "start": 119,
+              "end": 920,
+              "strand": -1
+            },
+            {
+              "uid": "72a089d9-c508-4e19-9b39-39c4cf6ad149",
+              "name": "ncbi:ETB97_008320-T1",
+              "names": {
+                "locus_tag": "ETB97_008320",
+                "note": "TransMembrane:12 (i76-97o117-138i145-164o176-197i209-231o237-260i314- 333o353-375i396-415o421-444i456-477o489-510i); EggNog:ENOG410PFSN; COG:G; GO_component: GO:0016021 - integral component of membrane [Evidence IEA]; GO_process: GO:0055085 - transmembrane transport [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_008320-T1",
+                "db_xref": "InterPro:IPR011701",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 1515,
+              "end": 3392,
+              "strand": 1
+            },
+            {
+              "uid": "dbdb3000-e3d0-46e7-9e49-d22076d1c541",
+              "name": "ncbi:ETB97_008321-T1",
+              "names": {
+                "gene": "ATG22_3",
+                "locus_tag": "ETB97_008321",
+                "note": "TransMembrane:12 (i38-61o121-140i152-171o177-197i278-298o310-329i381- 405o417-438i450-471o486-508i520-543o549-570i); EggNog:ENOG410PICK; COG:P",
+                "codon_start": "1",
+                "product": "Autophagy protein 22",
+                "protein_id": "ncbi:ETB97_008321-T1",
+                "db_xref": "InterPro:IPR024671",
+                "label": "ATG22 3 CDS"
+              },
+              "start": 3633,
+              "end": 5600,
+              "strand": -1
+            },
+            {
+              "uid": "2b3775d9-b650-449f-bf09-eb5607fc931f",
+              "name": "ncbi:ETB97_008322-T1",
+              "names": {
+                "locus_tag": "ETB97_008322",
+                "note": "TransMembrane:1 (o20-37i)",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_008322-T1",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 6576,
+              "end": 6863,
+              "strand": 1
+            },
+            {
+              "uid": "db1fe557-e012-4d1a-a5d7-b5e6e0d602e5",
+              "name": "ncbi:ETB97_008323-T1",
+              "names": {
+                "locus_tag": "ETB97_008323",
+                "note": "TransMembrane:2 (o3097-3116i3618-3638o); EggNog:ENOG410PIJA; COG:I; GO_function: GO:0031177 - phosphopantetheine binding [Evidence IEA]; GO_function: GO:0003824 - catalytic activity [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_008323-T1",
+                "db_xref": "InterPro:IPR000873",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 7571,
+              "end": 20085,
+              "strand": -1
+            },
+            {
+              "uid": "74bd927c-2144-4ea0-b6d7-358a6f932496",
+              "name": "ncbi:ETB97_008324-T1",
+              "names": {
+                "locus_tag": "ETB97_008324",
+                "note": "EggNog:ENOG410PY30",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_008324-T1",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 20785,
+              "end": 21383,
+              "strand": 1
+            },
+            {
+              "uid": "b5d327b4-5f42-46fb-8978-0859927a9c78",
+              "name": "ncbi:ETB97_008325-T1",
+              "names": {
+                "locus_tag": "ETB97_008325",
+                "note": "SECRETED:SignalP(1-15); EggNog:ENOG410PGYE; COG:Q; GO_function: GO:0016705 - oxidoreductase activity, acting on paired donors, with incorporation or reduction of molecular oxygen [Evidence IEA]; GO_function: GO:0020037 - heme binding [Evidence IEA]; GO_function: GO:0005506 - iron ion binding [Evidence IEA]; GO_process: GO:0055114 - oxidation-reduction process [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_008325-T1",
+                "db_xref": "InterPro:IPR001128",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 21967,
+              "end": 23612,
+              "strand": -1
+            },
+            {
+              "uid": "288bb56e-0ee3-4bd7-8a8a-a5bacfaa974b",
+              "name": "ncbi:ETB97_008326-T1",
+              "names": {
+                "locus_tag": "ETB97_008326",
+                "note": "EggNog:ENOG410PTE3",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_008326-T1",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 24242,
+              "end": 25771,
+              "strand": -1
+            },
+            {
+              "uid": "cf6a83ab-52aa-45b9-a459-8cdc68920715",
+              "name": "ncbi:ETB97_008327-T1",
+              "names": {
+                "locus_tag": "ETB97_008327",
+                "note": "EggNog:ENOG41KOG0143; COG:Q; GO_function: GO:0016491 - oxidoreductase activity [Evidence IEA]; GO_process: GO:0055114 - oxidation-reduction process [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_008327-T1",
+                "db_xref": "InterPro:IPR005123",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 26467,
+              "end": 27567,
+              "strand": 1
+            }
+          ]
+        },
+        {
+          "uid": "2435109b-a064-4e5b-87f9-f72343cc02be",
+          "name": "scaffold_450",
+          "start": 0,
+          "end": 19378,
+          "genes": [
+            {
+              "uid": "9f6afc16-9a23-40ef-ba4f-af0231558929",
+              "name": "ncbi:ETB97_009426-T1",
+              "names": {
+                "locus_tag": "ETB97_009426",
+                "codon_start": "3",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_009426-T1",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 534,
+              "end": 892,
+              "strand": 1
+            },
+            {
+              "uid": "6242772c-3c18-47d4-9dd1-e91a6c05536d",
+              "name": "ncbi:ETB97_009427-T1",
+              "names": {
+                "locus_tag": "ETB97_009427",
+                "note": "CAZy:GH51; SECRETED:SignalP(1-17); EggNog:ENOG410PHNV; COG:G; GO_function: GO:0046556 - alpha-L-arabinofuranosidase activity [Evidence IEA]; GO_process: GO:0046373 - L-arabinose metabolic process [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_009427-T1",
+                "db_xref": "InterPro:IPR010720",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 2730,
+              "end": 4995,
+              "strand": 1
+            },
+            {
+              "uid": "d45944da-004e-4199-94a3-e5eea221bd8d",
+              "name": "ncbi:ETB97_009428-T1",
+              "names": {
+                "locus_tag": "ETB97_009428",
+                "note": "EggNog:ENOG410PIFV; COG:Z; GO_function: GO:0043531 - ADP binding [Evidence IEA]; GO_function: GO:0005515 - protein binding [Evidence IEA]; GO_process: GO:0006629 - lipid metabolic process [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_009428-T1",
+                "db_xref": "InterPro:IPR002182",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 6272,
+              "end": 9765,
+              "strand": 1
+            },
+            {
+              "uid": "88f68a3b-a3c5-4564-a26f-3ed69698b259",
+              "name": "ncbi:ETB97_009429-T1",
+              "names": {
+                "locus_tag": "ETB97_009429",
+                "note": "TransMembrane:12 (i111-135o141-164i176-196o202-220i241-261o273-292i313- 340o352-370i382-400o406-432i444-463o514-534i); EggNog:ENOG410PH5Q; COG:G; GO_component: GO:0016021 - integral component of membrane [Evidence IEA]; GO_process: GO:0055085 - transmembrane transport [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_009429-T1",
+                "db_xref": "InterPro:IPR011701",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 10103,
+              "end": 12030,
+              "strand": 1
+            },
+            {
+              "uid": "d3cdf25b-fcfc-4acb-b93b-4954db96d922",
+              "name": "ncbi:ETB97_009430-T1",
+              "names": {
+                "locus_tag": "ETB97_009430",
+                "note": "TransMembrane:7 (o38-61i73-99o119-141i162-182o188-209i274-296o324-343i); EggNog:ENOG41KOG1289; COG:E; GO_component: GO:0016020 - membrane [Evidence IEA]; GO_function: GO:0022857 - transmembrane transporter activity [Evidence IEA]; GO_process: GO:0055085 - transmembrane transport [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_009430-T1",
+                "db_xref": "InterPro:IPR002293",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 12896,
+              "end": 14725,
+              "strand": 1
+            },
+            {
+              "uid": "06673b9a-773d-4f8d-8010-ac7a769890a5",
+              "name": "ncbi:ETB97_009431-T1",
+              "names": {
+                "locus_tag": "ETB97_009431",
+                "note": "TransMembrane:1 (o153-174i); EggNog:ENOG410PN1E; COG:S; GO_function: GO:0016758 - transferase activity, transferring hexosyl groups [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_009431-T1",
+                "db_xref": "InterPro:IPR002213",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 15374,
+              "end": 16986,
+              "strand": -1
+            },
+            {
+              "uid": "1f78a2ae-df92-4894-9452-6c4c57ceccac",
+              "name": "ncbi:ETB97_009432-T1",
+              "names": {
+                "locus_tag": "ETB97_009432",
+                "note": "TransMembrane:1 (o364-384i); EggNog:ENOG41KOG1198; COG:C; GO_function: GO:0016491 - oxidoreductase activity [Evidence IEA]; GO_process: GO:0055114 - oxidation-reduction process [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_009432-T1",
+                "db_xref": "InterPro:IPR011032",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 17355,
+              "end": 19330,
+              "strand": 1
+            }
+          ]
+        },
+        {
+          "uid": "a17b02b0-7466-4483-9fa0-32e81ec4bba3",
+          "name": "scaffold_761",
+          "start": 0,
+          "end": 3501,
+          "genes": [
+            {
+              "uid": "df33cd44-59fa-4e6e-915a-fed4b9905535",
+              "name": "ncbi:ETB97_011798-T1",
+              "names": {
+                "locus_tag": "ETB97_011798",
+                "note": "EggNog:ENOG41KOG0157; COG:Q; GO_function: GO:0005506 - iron ion binding [Evidence IEA]; GO_function: GO:0016705 - oxidoreductase activity, acting on paired donors, with incorporation or reduction of molecular oxygen [Evidence IEA]; GO_function: GO:0020037 - heme binding [Evidence IEA]; GO_process: GO:0055114 - oxidation-reduction process [Evidence IEA]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "ncbi:ETB97_011798-T1",
+                "db_xref": "InterPro:IPR001128",
+                "label": "hypothetical protein CDS"
+              },
+              "start": 38,
+              "end": 1406,
+              "strand": 1
+            },
+            {
+              "uid": "d067a71c-94a7-437e-8100-3ded66defc97",
+              "name": "ncbi:ETB97_011799-T1",
+              "names": {
+                "gene": "ANKRD44_2",
+                "locus_tag": "ETB97_011799",
+                "note": "EggNog:ENOG410V7QW; COG:M; GO_function: GO:0005515 - protein binding [Evidence IEA]",
+                "codon_start": "1",
+                "product": "Ankyrin repeat domain-containing protein 44",
+                "protein_id": "ncbi:ETB97_011799-T1",
+                "db_xref": "InterPro:IPR002110",
+                "label": "ANKRD44 2 CDS"
+              },
+              "start": 1611,
+              "end": 2800,
+              "strand": -1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "uid": "c90dfa33-9c89-49bf-b402-ee8cc8f65009",
+      "name": "A. versicolor CBS 583.65",
+      "loci": [
+        {
+          "uid": "f7a51f34-cd20-4341-ba61-3fdcb80f03f1",
+          "name": "KV878126",
+          "start": 0,
+          "end": 24996,
+          "genes": [
+            {
+              "uid": "66e3fe6c-8d05-4c53-afa5-d512ce2a897f",
+              "name": "OJI99004.1",
+              "names": {
+                "locus_tag": "ASPVEDRAFT_97195",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "OJI99004.1",
+                "db_xref": "GI:1111712337"
+              },
+              "start": 0,
+              "end": 1355,
+              "strand": -1
+            },
+            {
+              "uid": "1b4287ef-22b4-427c-9c5d-64e9cbbf3914",
+              "name": "OJI99005.1",
+              "names": {
+                "locus_tag": "ASPVEDRAFT_126247",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "OJI99005.1",
+                "db_xref": "GI:1111712338"
+              },
+              "start": 1599,
+              "end": 2742,
+              "strand": 1
+            },
+            {
+              "uid": "fb864a0d-c5bd-4fab-be3a-df3a65d4a6aa",
+              "name": "OJI99006.1",
+              "names": {
+                "locus_tag": "ASPVEDRAFT_50570",
+                "note": "GO_function: GO:4497; iron ion binding - monooxygenase activity [Evidence 20037] [PMID 5506]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "OJI99006.1",
+                "db_xref": "GI:1111712339"
+              },
+              "start": 3115,
+              "end": 4883,
+              "strand": 1
+            },
+            {
+              "uid": "e8099064-c9ba-4aa4-a4bc-e64e834c3c38",
+              "name": "OJI99007.1",
+              "names": {
+                "locus_tag": "ASPVEDRAFT_80633",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "OJI99007.1",
+                "db_xref": "GI:1111712340"
+              },
+              "start": 6581,
+              "end": 7683,
+              "strand": -1
+            },
+            {
+              "uid": "084abff0-8872-4c66-b755-7f0edfd5ca67",
+              "name": "OJI99008.1",
+              "names": {
+                "locus_tag": "ASPVEDRAFT_25846",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "OJI99008.1",
+                "db_xref": "GI:1111712341"
+              },
+              "start": 8073,
+              "end": 9467,
+              "strand": 1
+            },
+            {
+              "uid": "c1e6664c-8869-4096-899e-0620cc10a3e7",
+              "name": "OJI99009.1",
+              "names": {
+                "locus_tag": "ASPVEDRAFT_80635",
+                "note": "GO_function: GO:4497; iron ion binding - monooxygenase activity [Evidence 20037] [PMID 5506]",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "OJI99009.1",
+                "db_xref": "GI:1111712342"
+              },
+              "start": 9734,
+              "end": 11362,
+              "strand": 1
+            },
+            {
+              "uid": "b0b5ed8f-7cb9-4893-ac15-4c00da62a6c3",
+              "name": "OJI99010.1",
+              "names": {
+                "locus_tag": "ASPVEDRAFT_495831",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "OJI99010.1",
+                "db_xref": "GI:1111712343"
+              },
+              "start": 10923,
+              "end": 12077,
+              "strand": -1
+            },
+            {
+              "uid": "ce2f4745-0b7f-487e-b799-1dd51e76c591",
+              "name": "OJI99011.1",
+              "names": {
+                "locus_tag": "ASPVEDRAFT_162657",
+                "note": "GO_function: GO:3824; cofactor binding - catalytic activity [PMID 48037]; GO_process: GO:8152 - metabolic process",
+                "codon_start": "1",
+                "product": "hypothetical protein",
+                "protein_id": "OJI99011.1",
+                "db_xref": "GI:1111712344"
+              },
+              "start": 12472,
+              "end": 24996,
+              "strand": 1
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "uid": "c1a10a0a-ef7c-4840-99a4-eb578e35db97",
+      "query": {
+        "uid": "9f89d1fb-2542-46d7-ac5b-673112285ae7"
+      },
+      "target": {
+        "uid": "e972176b-ae88-4193-967b-cb6e26482c2f"
+      },
+      "identity": 0.41843796342066236,
+      "similarity": 0.5195254572417202
+    },
+    {
+      "uid": "cbc8b091-d869-4e16-a4e4-0db1295fc959",
+      "query": {
+        "uid": "9a99a06a-40d8-4cca-8802-3b55b31ea3a3"
+      },
+      "target": {
+        "uid": "37abc71f-c63f-4dae-a719-e894fb1f96bb"
+      },
+      "identity": 0.38095238095238093,
+      "similarity": 0.5333333333333333
+    },
+    {
+      "uid": "781b76e2-af9f-44a7-baea-43c5ac742c0e",
+      "query": {
+        "uid": "a0e9e5ba-ba29-4ecc-a36a-dc47b8596856"
+      },
+      "target": {
+        "uid": "0a820da4-a8a6-4c2b-8657-bf4beef54dbc"
+      },
+      "identity": 0.4888475836431227,
+      "similarity": 0.6152416356877324
+    },
+    {
+      "uid": "5e49a5c0-ea9a-4cc3-a15f-6e892f1c11dc",
+      "query": {
+        "uid": "0ac96603-d0c3-434a-b85b-86dcd1344151"
+      },
+      "target": {
+        "uid": "81833360-453b-4844-b2ea-8d3b7eefef51"
+      },
+      "identity": 0.42201834862385323,
+      "similarity": 0.5642201834862385
+    },
+    {
+      "uid": "004ff002-6b49-4953-b86c-fa1ec7ca765c",
+      "query": {
+        "uid": "d04fa4c8-a3e2-4148-8063-e38a48ba113e"
+      },
+      "target": {
+        "uid": "4b77e447-2c28-4e54-9fed-92ae2faba174"
+      },
+      "identity": 0.40950639853747717,
+      "similarity": 0.5648994515539305
+    },
+    {
+      "uid": "0da8cc3d-b6aa-44aa-9787-30d38116a850",
+      "query": {
+        "uid": "411da503-4331-402d-97a6-31ed515190a1"
+      },
+      "target": {
+        "uid": "b34cc780-35b0-4a68-95a3-f40a595c3c32"
+      },
+      "identity": 0.6239554317548747,
+      "similarity": 0.7827298050139275
+    },
+    {
+      "uid": "d3c8bd15-de50-43ce-bf7b-87e81ef828e2",
+      "query": {
+        "uid": "73eea8de-0411-4e0e-a3a2-86632fde104c"
+      },
+      "target": {
+        "uid": "610a57d3-048d-49f5-bfc8-8115d2bcf57b"
+      },
+      "identity": 0.4761061946902655,
+      "similarity": 0.6159292035398231
+    },
+    {
+      "uid": "08c1ce0c-05bb-4240-8612-b1fadef4d869",
+      "query": {
+        "uid": "9f89d1fb-2542-46d7-ac5b-673112285ae7"
+      },
+      "target": {
+        "uid": "5435356b-5b1c-40d2-af16-27587361678d"
+      },
+      "identity": 0.4168326693227092,
+      "similarity": 0.5204183266932271
+    },
+    {
+      "uid": "3a4a7e7c-9630-419d-b6cd-b10dd70217ac",
+      "query": {
+        "uid": "9a99a06a-40d8-4cca-8802-3b55b31ea3a3"
+      },
+      "target": {
+        "uid": "4a68ab5c-e616-4b00-bb71-88e82023a471"
+      },
+      "identity": 0.47802197802197804,
+      "similarity": 0.6428571428571429
+    },
+    {
+      "uid": "11206704-04c8-418d-9d01-26ba90c74aea",
+      "query": {
+        "uid": "a0e9e5ba-ba29-4ecc-a36a-dc47b8596856"
+      },
+      "target": {
+        "uid": "4339c091-9afd-451a-9b48-1d88a54eddb0"
+      },
+      "identity": 0.5320388349514563,
+      "similarity": 0.6563106796116505
+    },
+    {
+      "uid": "494ae045-3a9e-483e-b095-6c7adac4b1f1",
+      "query": {
+        "uid": "0ac96603-d0c3-434a-b85b-86dcd1344151"
+      },
+      "target": {
+        "uid": "749e98ab-8bf8-4760-9e36-08f69af73dc6"
+      },
+      "identity": 0.42494226327944573,
+      "similarity": 0.5750577367205543
+    },
+    {
+      "uid": "28741c41-df8a-4be9-8d64-775f0c88fa12",
+      "query": {
+        "uid": "d04fa4c8-a3e2-4148-8063-e38a48ba113e"
+      },
+      "target": {
+        "uid": "09a357f0-2558-4318-8095-e9bd053e7fee"
+      },
+      "identity": 0.41495327102803736,
+      "similarity": 0.577570093457944
+    },
+    {
+      "uid": "1fe9ea0d-a6c9-40e2-898c-81fe05a5e183",
+      "query": {
+        "uid": "411da503-4331-402d-97a6-31ed515190a1"
+      },
+      "target": {
+        "uid": "37d38016-6dea-4d89-a2a3-c90dcdca8c60"
+      },
+      "identity": 0.6239554317548747,
+      "similarity": 0.7715877437325905
+    },
+    {
+      "uid": "b8acea01-224c-41e4-b424-ad49c8bfe4b4",
+      "query": {
+        "uid": "73eea8de-0411-4e0e-a3a2-86632fde104c"
+      },
+      "target": {
+        "uid": "c53ce185-09ca-4590-b750-747dcee0dd5f"
+      },
+      "identity": 0.4845360824742268,
+      "similarity": 0.6426116838487973
+    },
+    {
+      "uid": "2969bbf2-fd0d-4fd5-a225-fccc113ffa5d",
+      "query": {
+        "uid": "9f89d1fb-2542-46d7-ac5b-673112285ae7"
+      },
+      "target": {
+        "uid": "db1fe557-e012-4d1a-a5d7-b5e6e0d602e5"
+      },
+      "identity": 0.4174975074775673,
+      "similarity": 0.5211864406779662
+    },
+    {
+      "uid": "c07f05e2-da78-436e-8fc0-869df4b4eb11",
+      "query": {
+        "uid": "9a99a06a-40d8-4cca-8802-3b55b31ea3a3"
+      },
+      "target": {
+        "uid": "74bd927c-2144-4ea0-b6d7-358a6f932496"
+      },
+      "identity": 0.4835164835164835,
+      "similarity": 0.6428571428571429
+    },
+    {
+      "uid": "6dca6cef-9d3f-440b-9a96-870b597c660d",
+      "query": {
+        "uid": "a0e9e5ba-ba29-4ecc-a36a-dc47b8596856"
+      },
+      "target": {
+        "uid": "b5d327b4-5f42-46fb-8978-0859927a9c78"
+      },
+      "identity": 0.5339805825242718,
+      "similarity": 0.6563106796116505
+    },
+    {
+      "uid": "ae861972-4a85-4185-abf8-40fd51868aec",
+      "query": {
+        "uid": "0ac96603-d0c3-434a-b85b-86dcd1344151"
+      },
+      "target": {
+        "uid": "288bb56e-0ee3-4bd7-8a8a-a5bacfaa974b"
+      },
+      "identity": 0.42032332563510394,
+      "similarity": 0.558891454965358
+    },
+    {
+      "uid": "4cf4818c-adb9-414b-bf86-3caf60bb3be9",
+      "query": {
+        "uid": "d04fa4c8-a3e2-4148-8063-e38a48ba113e"
+      },
+      "target": {
+        "uid": "06673b9a-773d-4f8d-8010-ac7a769890a5"
+      },
+      "identity": 0.38632162661737524,
+      "similarity": 0.5268022181146026
+    },
+    {
+      "uid": "ebd96ba9-93e3-4b41-ad14-b43113539e65",
+      "query": {
+        "uid": "411da503-4331-402d-97a6-31ed515190a1"
+      },
+      "target": {
+        "uid": "1f78a2ae-df92-4894-9452-6c4c57ceccac"
+      },
+      "identity": 0.5209302325581395,
+      "similarity": 0.6465116279069767
+    },
+    {
+      "uid": "90daf0d4-bc2f-4716-a79f-0eee1fcc02f8",
+      "query": {
+        "uid": "73eea8de-0411-4e0e-a3a2-86632fde104c"
+      },
+      "target": {
+        "uid": "df33cd44-59fa-4e6e-915a-fed4b9905535"
+      },
+      "identity": 0.46785714285714286,
+      "similarity": 0.6107142857142858
+    },
+    {
+      "uid": "894e3193-1110-4d2a-9877-d662b9984182",
+      "query": {
+        "uid": "9f89d1fb-2542-46d7-ac5b-673112285ae7"
+      },
+      "target": {
+        "uid": "ce2f4745-0b7f-487e-b799-1dd51e76c591"
+      },
+      "identity": 0.41660470879801736,
+      "similarity": 0.516728624535316
+    },
+    {
+      "uid": "1421c198-e92c-4d20-9577-e3c2865e0afa",
+      "query": {
+        "uid": "9a99a06a-40d8-4cca-8802-3b55b31ea3a3"
+      },
+      "target": {
+        "uid": "b0b5ed8f-7cb9-4893-ac15-4c00da62a6c3"
+      },
+      "identity": 0.45454545454545453,
+      "similarity": 0.6149732620320856
+    },
+    {
+      "uid": "523d1b73-d640-40bc-a90b-71c314f538b0",
+      "query": {
+        "uid": "a0e9e5ba-ba29-4ecc-a36a-dc47b8596856"
+      },
+      "target": {
+        "uid": "c1e6664c-8869-4096-899e-0620cc10a3e7"
+      },
+      "identity": 0.5058365758754864,
+      "similarity": 0.6342412451361867
+    },
+    {
+      "uid": "c370f2f1-b9ae-4747-be40-1f97330d478b",
+      "query": {
+        "uid": "0ac96603-d0c3-434a-b85b-86dcd1344151"
+      },
+      "target": {
+        "uid": "084abff0-8872-4c66-b755-7f0edfd5ca67"
+      },
+      "identity": 0.41627906976744183,
+      "similarity": 0.5813953488372093
+    },
+    {
+      "uid": "eee7c3a9-99c7-4a2c-93af-3f384a7bfeca",
+      "query": {
+        "uid": "d04fa4c8-a3e2-4148-8063-e38a48ba113e"
+      },
+      "target": {
+        "uid": "66e3fe6c-8d05-4c53-afa5-d512ce2a897f"
+      },
+      "identity": 0.4064272211720227,
+      "similarity": 0.5500945179584121
+    },
+    {
+      "uid": "42b8f531-97da-423c-87a1-103869176562",
+      "query": {
+        "uid": "411da503-4331-402d-97a6-31ed515190a1"
+      },
+      "target": {
+        "uid": "1b4287ef-22b4-427c-9c5d-64e9cbbf3914"
+      },
+      "identity": 0.5950413223140496,
+      "similarity": 0.7520661157024794
+    },
+    {
+      "uid": "5853436e-2980-4ca8-94f2-1f2d87e336db",
+      "query": {
+        "uid": "73eea8de-0411-4e0e-a3a2-86632fde104c"
+      },
+      "target": {
+        "uid": "fb864a0d-c5bd-4fab-be3a-df3a65d4a6aa"
+      },
+      "identity": 0.492091388400703,
+      "similarity": 0.6520210896309314
+    },
+    {
+      "uid": "5bd458cf-1f25-4045-97eb-727319434f59",
+      "query": {
+        "uid": "4b77e447-2c28-4e54-9fed-92ae2faba174"
+      },
+      "target": {
+        "uid": "09a357f0-2558-4318-8095-e9bd053e7fee"
+      },
+      "identity": 0.7484909456740443,
+      "similarity": 0.8229376257545271
+    },
+    {
+      "uid": "5ed05d39-cd13-4cc0-a31a-86feba4673e3",
+      "query": {
+        "uid": "b34cc780-35b0-4a68-95a3-f40a595c3c32"
+      },
+      "target": {
+        "uid": "37d38016-6dea-4d89-a2a3-c90dcdca8c60"
+      },
+      "identity": 0.896358543417367,
+      "similarity": 0.9327731092436975
+    },
+    {
+      "uid": "a078d8de-ae96-4e7d-b452-32c02cee7795",
+      "query": {
+        "uid": "610a57d3-048d-49f5-bfc8-8115d2bcf57b"
+      },
+      "target": {
+        "uid": "c53ce185-09ca-4590-b750-747dcee0dd5f"
+      },
+      "identity": 0.7523105360443623,
+      "similarity": 0.7855822550831792
+    },
+    {
+      "uid": "012a2d24-0d2c-4268-b918-0f884f4e6f8f",
+      "query": {
+        "uid": "30e5ad46-7a9b-496e-bd50-33207059f161"
+      },
+      "target": {
+        "uid": "84201ad1-15fa-443e-8cb8-0f6707f23cef"
+      },
+      "identity": 0.6476683937823834,
+      "similarity": 0.7435233160621761
+    },
+    {
+      "uid": "7534e794-3647-42a5-9dbc-703fa4c47366",
+      "query": {
+        "uid": "f29c65e1-41b9-468a-a2cd-f661062714c4"
+      },
+      "target": {
+        "uid": "5aaf4214-bd6a-44a9-8051-21b32c0665f6"
+      },
+      "identity": 0.7027027027027027,
+      "similarity": 0.7507507507507507
+    },
+    {
+      "uid": "24fa4ea8-7be6-4f72-a354-63a3d517b058",
+      "query": {
+        "uid": "81833360-453b-4844-b2ea-8d3b7eefef51"
+      },
+      "target": {
+        "uid": "749e98ab-8bf8-4760-9e36-08f69af73dc6"
+      },
+      "identity": 0.7865429234338747,
+      "similarity": 0.8375870069605569
+    },
+    {
+      "uid": "2d91c7a7-49d2-4b72-bc7a-1f0cebbdbb12",
+      "query": {
+        "uid": "0a820da4-a8a6-4c2b-8657-bf4beef54dbc"
+      },
+      "target": {
+        "uid": "4339c091-9afd-451a-9b48-1d88a54eddb0"
+      },
+      "identity": 0.7318007662835249,
+      "similarity": 0.8160919540229885
+    },
+    {
+      "uid": "5e2616b1-12aa-46d4-9a41-a25e07f2e7fb",
+      "query": {
+        "uid": "37abc71f-c63f-4dae-a719-e894fb1f96bb"
+      },
+      "target": {
+        "uid": "4a68ab5c-e616-4b00-bb71-88e82023a471"
+      },
+      "identity": 0.5550239234449761,
+      "similarity": 0.6698564593301436
+    },
+    {
+      "uid": "85668d76-af1a-40c7-afef-a36a440810ae",
+      "query": {
+        "uid": "e972176b-ae88-4193-967b-cb6e26482c2f"
+      },
+      "target": {
+        "uid": "5435356b-5b1c-40d2-af16-27587361678d"
+      },
+      "identity": 0.7929242949035131,
+      "similarity": 0.8634339435922811
+    },
+    {
+      "uid": "bab12208-7a91-4928-940d-28ae73d0063f",
+      "query": {
+        "uid": "f29c65e1-41b9-468a-a2cd-f661062714c4"
+      },
+      "target": {
+        "uid": "cf6a83ab-52aa-45b9-a459-8cdc68920715"
+      },
+      "identity": 0.7027027027027027,
+      "similarity": 0.7507507507507507
+    },
+    {
+      "uid": "dc5d84fd-446e-4f01-a7e6-e1ea43667d5d",
+      "query": {
+        "uid": "81833360-453b-4844-b2ea-8d3b7eefef51"
+      },
+      "target": {
+        "uid": "288bb56e-0ee3-4bd7-8a8a-a5bacfaa974b"
+      },
+      "identity": 0.8033175355450237,
+      "similarity": 0.8554502369668247
+    },
+    {
+      "uid": "3005c649-a1fe-4b48-8dd9-f4edeeeb149e",
+      "query": {
+        "uid": "0a820da4-a8a6-4c2b-8657-bf4beef54dbc"
+      },
+      "target": {
+        "uid": "b5d327b4-5f42-46fb-8978-0859927a9c78"
+      },
+      "identity": 0.7241379310344828,
+      "similarity": 0.8084291187739464
+    },
+    {
+      "uid": "b96644ac-62d1-47af-b862-243ff35627de",
+      "query": {
+        "uid": "37abc71f-c63f-4dae-a719-e894fb1f96bb"
+      },
+      "target": {
+        "uid": "74bd927c-2144-4ea0-b6d7-358a6f932496"
+      },
+      "identity": 0.5598086124401914,
+      "similarity": 0.6698564593301436
+    },
+    {
+      "uid": "8fa3ae05-8b84-4d9f-9687-fd95e624cd46",
+      "query": {
+        "uid": "e972176b-ae88-4193-967b-cb6e26482c2f"
+      },
+      "target": {
+        "uid": "db1fe557-e012-4d1a-a5d7-b5e6e0d602e5"
+      },
+      "identity": 0.7951509153884215,
+      "similarity": 0.8651657595249876
+    },
+    {
+      "uid": "82bc14dc-1518-4d9c-8b91-0b3db4ca9aa8",
+      "query": {
+        "uid": "4b77e447-2c28-4e54-9fed-92ae2faba174"
+      },
+      "target": {
+        "uid": "06673b9a-773d-4f8d-8010-ac7a769890a5"
+      },
+      "identity": 0.7002012072434608,
+      "similarity": 0.7686116700201208
+    },
+    {
+      "uid": "82c030fa-1a09-49c0-9aa1-ab9829d4a92a",
+      "query": {
+        "uid": "b34cc780-35b0-4a68-95a3-f40a595c3c32"
+      },
+      "target": {
+        "uid": "1f78a2ae-df92-4894-9452-6c4c57ceccac"
+      },
+      "identity": 0.7453271028037384,
+      "similarity": 0.7733644859813084
+    },
+    {
+      "uid": "acf75eed-d5f3-4524-af42-8051bea9617f",
+      "query": {
+        "uid": "610a57d3-048d-49f5-bfc8-8115d2bcf57b"
+      },
+      "target": {
+        "uid": "df33cd44-59fa-4e6e-915a-fed4b9905535"
+      },
+      "identity": 0.8736616702355461,
+      "similarity": 0.9143468950749465
+    },
+    {
+      "uid": "9ed7a402-5a04-4aac-b9a3-e7a391867279",
+      "query": {
+        "uid": "30e5ad46-7a9b-496e-bd50-33207059f161"
+      },
+      "target": {
+        "uid": "d067a71c-94a7-437e-8100-3ded66defc97"
+      },
+      "identity": 0.6424870466321243,
+      "similarity": 0.7409326424870466
+    },
+    {
+      "uid": "d8346431-a590-4f15-a20f-b40264a2cd15",
+      "query": {
+        "uid": "4b77e447-2c28-4e54-9fed-92ae2faba174"
+      },
+      "target": {
+        "uid": "66e3fe6c-8d05-4c53-afa5-d512ce2a897f"
+      },
+      "identity": 0.6356275303643725,
+      "similarity": 0.708502024291498
+    },
+    {
+      "uid": "0e46c5c5-3a88-4d16-8df7-b89ce908bef8",
+      "query": {
+        "uid": "b34cc780-35b0-4a68-95a3-f40a595c3c32"
+      },
+      "target": {
+        "uid": "1b4287ef-22b4-427c-9c5d-64e9cbbf3914"
+      },
+      "identity": 0.8575418994413407,
+      "similarity": 0.8994413407821229
+    },
+    {
+      "uid": "9629ade1-dcc8-4d24-9054-0a4c65e2b17f",
+      "query": {
+        "uid": "610a57d3-048d-49f5-bfc8-8115d2bcf57b"
+      },
+      "target": {
+        "uid": "fb864a0d-c5bd-4fab-be3a-df3a65d4a6aa"
+      },
+      "identity": 0.6739130434782609,
+      "similarity": 0.7391304347826086
+    },
+    {
+      "uid": "c2fbc955-104e-4edb-9459-acaa8b2cfb35",
+      "query": {
+        "uid": "f29c65e1-41b9-468a-a2cd-f661062714c4"
+      },
+      "target": {
+        "uid": "e8099064-c9ba-4aa4-a4bc-e64e834c3c38"
+      },
+      "identity": 0.5875370919881305,
+      "similarity": 0.6617210682492581
+    },
+    {
+      "uid": "87c9d170-08a5-4a7d-bb90-efcf86da24c9",
+      "query": {
+        "uid": "81833360-453b-4844-b2ea-8d3b7eefef51"
+      },
+      "target": {
+        "uid": "084abff0-8872-4c66-b755-7f0edfd5ca67"
+      },
+      "identity": 0.6914414414414415,
+      "similarity": 0.7792792792792793
+    },
+    {
+      "uid": "f10ff33b-d034-4673-a413-fc18fd004355",
+      "query": {
+        "uid": "0a820da4-a8a6-4c2b-8657-bf4beef54dbc"
+      },
+      "target": {
+        "uid": "c1e6664c-8869-4096-899e-0620cc10a3e7"
+      },
+      "identity": 0.7335907335907336,
+      "similarity": 0.8108108108108109
+    },
+    {
+      "uid": "905868d7-f423-4eea-a921-2c897b28fe46",
+      "query": {
+        "uid": "37abc71f-c63f-4dae-a719-e894fb1f96bb"
+      },
+      "target": {
+        "uid": "b0b5ed8f-7cb9-4893-ac15-4c00da62a6c3"
+      },
+      "identity": 0.5550239234449761,
+      "similarity": 0.6411483253588517
+    },
+    {
+      "uid": "f540069e-4354-4702-8d0f-60eaad60c2c6",
+      "query": {
+        "uid": "e972176b-ae88-4193-967b-cb6e26482c2f"
+      },
+      "target": {
+        "uid": "ce2f4745-0b7f-487e-b799-1dd51e76c591"
+      },
+      "identity": 0.7714285714285715,
+      "similarity": 0.8485221674876847
+    },
+    {
+      "uid": "a3aaa50c-1050-4296-8a67-d5bb269b090b",
+      "query": {
+        "uid": "5aaf4214-bd6a-44a9-8051-21b32c0665f6"
+      },
+      "target": {
+        "uid": "cf6a83ab-52aa-45b9-a459-8cdc68920715"
+      },
+      "identity": 1,
+      "similarity": 1
+    },
+    {
+      "uid": "8c8a4dc9-52bd-48ae-ac14-4491235bfb42",
+      "query": {
+        "uid": "749e98ab-8bf8-4760-9e36-08f69af73dc6"
+      },
+      "target": {
+        "uid": "288bb56e-0ee3-4bd7-8a8a-a5bacfaa974b"
+      },
+      "identity": 0.9762470308788599,
+      "similarity": 0.9786223277909739
+    },
+    {
+      "uid": "ebb5126a-3e01-4b7f-bb4c-27524ed648b2",
+      "query": {
+        "uid": "4339c091-9afd-451a-9b48-1d88a54eddb0"
+      },
+      "target": {
+        "uid": "b5d327b4-5f42-46fb-8978-0859927a9c78"
+      },
+      "identity": 0.9880715705765407,
+      "similarity": 0.9900596421471173
+    },
+    {
+      "uid": "4810b6b3-c764-4488-a4ba-f6c450d7a33e",
+      "query": {
+        "uid": "4a68ab5c-e616-4b00-bb71-88e82023a471"
+      },
+      "target": {
+        "uid": "74bd927c-2144-4ea0-b6d7-358a6f932496"
+      },
+      "identity": 0.9888268156424581,
+      "similarity": 1
+    },
+    {
+      "uid": "355e9aaa-b99b-4ac6-99ad-36a333eaa377",
+      "query": {
+        "uid": "5435356b-5b1c-40d2-af16-27587361678d"
+      },
+      "target": {
+        "uid": "db1fe557-e012-4d1a-a5d7-b5e6e0d602e5"
+      },
+      "identity": 0.9937421777221527,
+      "similarity": 0.9952440550688361
+    },
+    {
+      "uid": "4efcca04-c15d-4ab7-8108-89d97ffe668e",
+      "query": {
+        "uid": "09a357f0-2558-4318-8095-e9bd053e7fee"
+      },
+      "target": {
+        "uid": "06673b9a-773d-4f8d-8010-ac7a769890a5"
+      },
+      "identity": 0.9326530612244898,
+      "similarity": 0.936734693877551
+    },
+    {
+      "uid": "b12147e8-7985-45aa-8bc4-b0b53f9b82e9",
+      "query": {
+        "uid": "37d38016-6dea-4d89-a2a3-c90dcdca8c60"
+      },
+      "target": {
+        "uid": "1f78a2ae-df92-4894-9452-6c4c57ceccac"
+      },
+      "identity": 0.8266978922716628,
+      "similarity": 0.8290398126463701
+    },
+    {
+      "uid": "2af84a1f-67ee-450d-a0d5-7aa563878c8e",
+      "query": {
+        "uid": "c53ce185-09ca-4590-b750-747dcee0dd5f"
+      },
+      "target": {
+        "uid": "df33cd44-59fa-4e6e-915a-fed4b9905535"
+      },
+      "identity": 0.8274582560296846,
+      "similarity": 0.8348794063079777
+    },
+    {
+      "uid": "06e97833-3276-4374-84ed-022ef7d705a0",
+      "query": {
+        "uid": "84201ad1-15fa-443e-8cb8-0f6707f23cef"
+      },
+      "target": {
+        "uid": "d067a71c-94a7-437e-8100-3ded66defc97"
+      },
+      "identity": 0.9838274932614556,
+      "similarity": 0.9892183288409704
+    },
+    {
+      "uid": "ad2e90ef-8866-40ef-a943-a4d16ce20455",
+      "query": {
+        "uid": "09a357f0-2558-4318-8095-e9bd053e7fee"
+      },
+      "target": {
+        "uid": "66e3fe6c-8d05-4c53-afa5-d512ce2a897f"
+      },
+      "identity": 0.6313645621181263,
+      "similarity": 0.7169042769857433
+    },
+    {
+      "uid": "87a8b7e0-c6f8-4c4e-8485-e025015635ac",
+      "query": {
+        "uid": "37d38016-6dea-4d89-a2a3-c90dcdca8c60"
+      },
+      "target": {
+        "uid": "1b4287ef-22b4-427c-9c5d-64e9cbbf3914"
+      },
+      "identity": 0.8603351955307262,
+      "similarity": 0.9078212290502793
+    },
+    {
+      "uid": "5aad2445-5db3-4336-9d51-591bd3ae5617",
+      "query": {
+        "uid": "c53ce185-09ca-4590-b750-747dcee0dd5f"
+      },
+      "target": {
+        "uid": "fb864a0d-c5bd-4fab-be3a-df3a65d4a6aa"
+      },
+      "identity": 0.7741347905282332,
+      "similarity": 0.8415300546448088
+    },
+    {
+      "uid": "a0ff3b83-1014-4c9d-9a68-7d0eb42115f1",
+      "query": {
+        "uid": "5aaf4214-bd6a-44a9-8051-21b32c0665f6"
+      },
+      "target": {
+        "uid": "e8099064-c9ba-4aa4-a4bc-e64e834c3c38"
+      },
+      "identity": 0.7085889570552147,
+      "similarity": 0.7638036809815951
+    },
+    {
+      "uid": "6bb466eb-83af-4ff8-8f96-1f6daad8c03e",
+      "query": {
+        "uid": "749e98ab-8bf8-4760-9e36-08f69af73dc6"
+      },
+      "target": {
+        "uid": "084abff0-8872-4c66-b755-7f0edfd5ca67"
+      },
+      "identity": 0.728310502283105,
+      "similarity": 0.8036529680365296
+    },
+    {
+      "uid": "c901fd7d-abcf-4e33-a1f2-16e508138e37",
+      "query": {
+        "uid": "4339c091-9afd-451a-9b48-1d88a54eddb0"
+      },
+      "target": {
+        "uid": "c1e6664c-8869-4096-899e-0620cc10a3e7"
+      },
+      "identity": 0.7346534653465346,
+      "similarity": 0.8257425742574257
+    },
+    {
+      "uid": "6852f723-63be-48e7-9e19-2ac5d45854dd",
+      "query": {
+        "uid": "4a68ab5c-e616-4b00-bb71-88e82023a471"
+      },
+      "target": {
+        "uid": "b0b5ed8f-7cb9-4893-ac15-4c00da62a6c3"
+      },
+      "identity": 0.6885245901639344,
+      "similarity": 0.8142076502732241
+    },
+    {
+      "uid": "12933e92-5bfb-4a01-8501-e6bc405c93b7",
+      "query": {
+        "uid": "5435356b-5b1c-40d2-af16-27587361678d"
+      },
+      "target": {
+        "uid": "ce2f4745-0b7f-487e-b799-1dd51e76c591"
+      },
+      "identity": 0.8005450941526263,
+      "similarity": 0.8709117938553023
+    },
+    {
+      "uid": "c5f86c1c-ce96-4f1f-88c3-d83917dae435",
+      "query": {
+        "uid": "db1fe557-e012-4d1a-a5d7-b5e6e0d602e5"
+      },
+      "target": {
+        "uid": "ce2f4745-0b7f-487e-b799-1dd51e76c591"
+      },
+      "identity": 0.8003962357602774,
+      "similarity": 0.8704804358593363
+    },
+    {
+      "uid": "ffdf7d43-5905-4778-a6d2-a0247658c7e1",
+      "query": {
+        "uid": "74bd927c-2144-4ea0-b6d7-358a6f932496"
+      },
+      "target": {
+        "uid": "b0b5ed8f-7cb9-4893-ac15-4c00da62a6c3"
+      },
+      "identity": 0.6939890710382514,
+      "similarity": 0.8142076502732241
+    },
+    {
+      "uid": "e3ca8dba-6224-4eef-9ed2-3c27f349a263",
+      "query": {
+        "uid": "b5d327b4-5f42-46fb-8978-0859927a9c78"
+      },
+      "target": {
+        "uid": "c1e6664c-8869-4096-899e-0620cc10a3e7"
+      },
+      "identity": 0.7287128712871287,
+      "similarity": 0.8198019801980198
+    },
+    {
+      "uid": "c95c2fcb-e44f-42e4-9571-763a888b5041",
+      "query": {
+        "uid": "288bb56e-0ee3-4bd7-8a8a-a5bacfaa974b"
+      },
+      "target": {
+        "uid": "084abff0-8872-4c66-b755-7f0edfd5ca67"
+      },
+      "identity": 0.7100456621004566,
+      "similarity": 0.7831050228310502
+    },
+    {
+      "uid": "cb0d1531-be4b-4393-a0c2-f5936299e62d",
+      "query": {
+        "uid": "cf6a83ab-52aa-45b9-a459-8cdc68920715"
+      },
+      "target": {
+        "uid": "e8099064-c9ba-4aa4-a4bc-e64e834c3c38"
+      },
+      "identity": 0.7085889570552147,
+      "similarity": 0.7638036809815951
+    },
+    {
+      "uid": "377b4f37-ddc2-44c6-9b24-b51aa82dc09f",
+      "query": {
+        "uid": "06673b9a-773d-4f8d-8010-ac7a769890a5"
+      },
+      "target": {
+        "uid": "66e3fe6c-8d05-4c53-afa5-d512ce2a897f"
+      },
+      "identity": 0.5804480651731161,
+      "similarity": 0.659877800407332
+    },
+    {
+      "uid": "5c2109b8-4ee2-4ad4-b52d-573d8440609f",
+      "query": {
+        "uid": "1f78a2ae-df92-4894-9452-6c4c57ceccac"
+      },
+      "target": {
+        "uid": "1b4287ef-22b4-427c-9c5d-64e9cbbf3914"
+      },
+      "identity": 0.7132867132867133,
+      "similarity": 0.752913752913753
+    },
+    {
+      "uid": "7671b329-ebf1-44f2-8b6b-3ac7912b08bf",
+      "query": {
+        "uid": "df33cd44-59fa-4e6e-915a-fed4b9905535"
+      },
+      "target": {
+        "uid": "fb864a0d-c5bd-4fab-be3a-df3a65d4a6aa"
+      },
+      "identity": 0.6788321167883211,
+      "similarity": 0.7354014598540146
+    }
+  ],
+  "groups": [
+    {
+      "uid": "dc97d5d5-08e5-4af7-a70a-27311a2511df",
+      "label": "Group 0",
+      "genes": [
+        "5435356b-5b1c-40d2-af16-27587361678d",
+        "9f89d1fb-2542-46d7-ac5b-673112285ae7",
+        "db1fe557-e012-4d1a-a5d7-b5e6e0d602e5",
+        "ce2f4745-0b7f-487e-b799-1dd51e76c591",
+        "e972176b-ae88-4193-967b-cb6e26482c2f"
+      ],
+      "hidden": false,
+      "colour": null
+    },
+    {
+      "uid": "b4a9b1c9-06d7-4322-8c87-961e35472dfc",
+      "label": "Group 1",
+      "genes": [
+        "74bd927c-2144-4ea0-b6d7-358a6f932496",
+        "37abc71f-c63f-4dae-a719-e894fb1f96bb",
+        "4a68ab5c-e616-4b00-bb71-88e82023a471",
+        "b0b5ed8f-7cb9-4893-ac15-4c00da62a6c3",
+        "9a99a06a-40d8-4cca-8802-3b55b31ea3a3"
+      ],
+      "hidden": false,
+      "colour": null
+    },
+    {
+      "uid": "3b24bb2e-c2fa-408b-8a9c-0e580a0a0443",
+      "label": "Group 2",
+      "genes": [
+        "4339c091-9afd-451a-9b48-1d88a54eddb0",
+        "c1e6664c-8869-4096-899e-0620cc10a3e7",
+        "0a820da4-a8a6-4c2b-8657-bf4beef54dbc",
+        "a0e9e5ba-ba29-4ecc-a36a-dc47b8596856",
+        "b5d327b4-5f42-46fb-8978-0859927a9c78"
+      ],
+      "hidden": false,
+      "colour": null
+    },
+    {
+      "uid": "6809a2dd-4a1b-4492-b76a-bbdc70151392",
+      "label": "Group 3",
+      "genes": [
+        "81833360-453b-4844-b2ea-8d3b7eefef51",
+        "0ac96603-d0c3-434a-b85b-86dcd1344151",
+        "288bb56e-0ee3-4bd7-8a8a-a5bacfaa974b",
+        "084abff0-8872-4c66-b755-7f0edfd5ca67",
+        "749e98ab-8bf8-4760-9e36-08f69af73dc6"
+      ],
+      "hidden": false,
+      "colour": null
+    },
+    {
+      "uid": "32ee6b5f-32e1-4ee0-9a9f-d64cc9bfac52",
+      "label": "Group 4",
+      "genes": [
+        "09a357f0-2558-4318-8095-e9bd053e7fee",
+        "66e3fe6c-8d05-4c53-afa5-d512ce2a897f",
+        "d04fa4c8-a3e2-4148-8063-e38a48ba113e",
+        "06673b9a-773d-4f8d-8010-ac7a769890a5",
+        "4b77e447-2c28-4e54-9fed-92ae2faba174"
+      ],
+      "hidden": false,
+      "colour": null
+    },
+    {
+      "uid": "d339b92b-6deb-4c4d-a6eb-6928234ad304",
+      "label": "Group 5",
+      "genes": [
+        "b34cc780-35b0-4a68-95a3-f40a595c3c32",
+        "37d38016-6dea-4d89-a2a3-c90dcdca8c60",
+        "1f78a2ae-df92-4894-9452-6c4c57ceccac",
+        "411da503-4331-402d-97a6-31ed515190a1",
+        "1b4287ef-22b4-427c-9c5d-64e9cbbf3914"
+      ],
+      "hidden": false,
+      "colour": null
+    },
+    {
+      "uid": "fdfa0bdb-eb41-45fa-930d-0690bc8746b7",
+      "label": "Group 6",
+      "genes": [
+        "73eea8de-0411-4e0e-a3a2-86632fde104c",
+        "c53ce185-09ca-4590-b750-747dcee0dd5f",
+        "df33cd44-59fa-4e6e-915a-fed4b9905535",
+        "610a57d3-048d-49f5-bfc8-8115d2bcf57b",
+        "fb864a0d-c5bd-4fab-be3a-df3a65d4a6aa"
+      ],
+      "hidden": false,
+      "colour": null
+    },
+    {
+      "uid": "eebe9074-f0b9-45ff-b97f-3a1f22f9a368",
+      "label": "Group 7",
+      "genes": [
+        "30e5ad46-7a9b-496e-bd50-33207059f161",
+        "d067a71c-94a7-437e-8100-3ded66defc97",
+        "84201ad1-15fa-443e-8cb8-0f6707f23cef"
+      ],
+      "hidden": false,
+      "colour": null
+    },
+    {
+      "uid": "d3aa9062-7a74-4d88-a402-1134961f9ea8",
+      "label": "Group 8",
+      "genes": [
+        "5aaf4214-bd6a-44a9-8051-21b32c0665f6",
+        "f29c65e1-41b9-468a-a2cd-f661062714c4",
+        "e8099064-c9ba-4aa4-a4bc-e64e834c3c38",
+        "cf6a83ab-52aa-45b9-a459-8cdc68920715"
+      ],
+      "hidden": false,
+      "colour": null
+    }
+  ],
+  "tree": {
+    "root": "root",
+    "rooted": null,
+    "nodes": [
+      {
+        "uid": "root",
+        "children": [
+          "aspergillus-clade",
+          "leaf-b46a7529-6d47-45e3-a793-84af6fc6169d"
+        ]
+      },
+      {
+        "uid": "aspergillus-clade",
+        "label": "Aspergillus clade",
+        "branchLength": 0.08,
+        "support": {
+          "value": 96.4,
+          "scale": "percent",
+          "type": "bootstrap"
+        },
+        "children": [
+          "aspergillus-pair-1",
+          "aspergillus-pair-2"
+        ]
+      },
+      {
+        "uid": "aspergillus-pair-1",
+        "branchLength": 0.04,
+        "support": {
+          "value": 98.2,
+          "scale": "percent",
+          "type": "bootstrap"
+        },
+        "children": [
+          "leaf-412a69a6-3901-4c27-b749-05c5c74b63ed",
+          "leaf-d26bc990-1273-4030-88f1-787c27fd8125"
+        ]
+      },
+      {
+        "uid": "aspergillus-pair-2",
+        "branchLength": 0.06,
+        "support": {
+          "value": 87.5,
+          "scale": "percent",
+          "type": "bootstrap"
+        },
+        "children": [
+          "leaf-db437b16-2c92-4aec-8f33-7be9b422edfc",
+          "leaf-c90dfa33-9c89-49bf-b402-ee8cc8f65009"
+        ]
+      },
+      {
+        "uid": "leaf-412a69a6-3901-4c27-b749-05c5c74b63ed",
+        "label": "A. burnettii MST-FP2249",
+        "cluster": "412a69a6-3901-4c27-b749-05c5c74b63ed",
+        "branchLength": 0.02
+      },
+      {
+        "uid": "leaf-d26bc990-1273-4030-88f1-787c27fd8125",
+        "label": "A. alliaceus CBS 536.65",
+        "cluster": "d26bc990-1273-4030-88f1-787c27fd8125",
+        "branchLength": 0.015
+      },
+      {
+        "uid": "leaf-db437b16-2c92-4aec-8f33-7be9b422edfc",
+        "label": "A. mulundensis DSM 5745",
+        "cluster": "db437b16-2c92-4aec-8f33-7be9b422edfc",
+        "branchLength": 0.025
+      },
+      {
+        "uid": "leaf-c90dfa33-9c89-49bf-b402-ee8cc8f65009",
+        "label": "A. versicolor CBS 583.65",
+        "cluster": "c90dfa33-9c89-49bf-b402-ee8cc8f65009",
+        "branchLength": 0.02
+      },
+      {
+        "uid": "leaf-b46a7529-6d47-45e3-a793-84af6fc6169d",
+        "label": "P. vexata CBS 129021",
+        "cluster": "b46a7529-6d47-45e3-a793-84af6fc6169d",
+        "branchLength": 0.25
+      }
+    ]
+  }
+}

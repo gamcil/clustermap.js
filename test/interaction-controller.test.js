@@ -33,9 +33,10 @@ test("interaction controller previews and commits drag state from world coordina
   controller.endLocusTrim({ uid: "locus" });
   controller.flipLocus({ uid: "locus" });
 
+  // Every drag preview supplies an order, including before a row is crossed.
   assert.deepEqual(calls, [
     ["dragging", true],
-    ["cluster", "a", 25, null],
+    ["cluster", "a", 25, ["a", "b", "c"]],
     ["cluster", "a", 60, ["b", "a", "c"]],
     ["dragging", false],
     ["commit-cluster"],

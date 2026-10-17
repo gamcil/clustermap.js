@@ -1,4 +1,13 @@
 const defaultConfig = {
+  tree: {
+    show: true,
+    width: 100,
+    useBranchLengths: true,
+    branch: { width: 1.5, colour: "#555" },
+    support: { show: true, fontSize: 9, precision: 1 },
+    scaleBar: { show: true },
+    leafGuide: { show: false, colour: "#999", width: 1, dash: "4 3" },
+  },
   plot: {
     transitionDuration: 250,
     renderer: "svg",

@@ -23,13 +23,15 @@
   "files": [
     "dist",
     "README.md",
+    "TREE_SCHEMA.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "rollup --config",
     "import:clinker": "node scripts/import-clinker-render.mjs",
     "test": "node --test test/*.test.js",
-    "test:baseline": "node --test test/baseline.test.js"
+    "test:baseline": "node --test test/baseline.test.js",
+    "test:tree-browser": "node test/tree-browser.mjs"
   },
   "author": "",
   "license": "ISC",

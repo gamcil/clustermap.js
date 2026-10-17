@@ -44,6 +44,13 @@ export function exportChartSvg({
   if (!scene) throw new Error("Cannot export an SVG before the chart has rendered.");
   const namespace = "http://www.w3.org/2000/svg";
   const svgNode = documentRef.createElementNS(namespace, "svg");
+  // SVG text getBBox() is unreliable while the tree is detached. Attach it
+  // invisibly before rendering so tree/label spacing uses real text metrics.
+  select(documentRef.body)
+    .append(() => svgNode)
+    .style("position", "fixed")
+    .style("visibility", "hidden")
+    .style("pointer-events", "none");
   const defs = select(svgNode).append("defs");
   const filter = defs
     .append("filter")
@@ -71,12 +78,17 @@ export function exportChartSvg({
   // Event listeners do not serialize, but hover/trim affordances would still
   // be visible as nodes in an exported publication figure.
   plot.selectAll("g.hover").remove();
-
-  select(documentRef.body)
-    .append(() => svgNode)
-    .style("position", "fixed")
-    .style("visibility", "hidden")
-    .style("pointer-events", "none");
+  // This is a static figure, so strip interaction affordances even when an
+  // element's cursor or pointer policy was set by the live renderer.
+  plot.selectAll("*").each(function () {
+    this.removeAttribute("cursor");
+    this.removeAttribute("tabindex");
+    this.removeAttribute("role");
+    this.removeAttribute("pointer-events");
+    this.style.removeProperty("cursor");
+    this.style.removeProperty("pointer-events");
+    this.classList.remove("active");
+  });
   const bounds = plot.node().getBBox();
   svgNode.remove();
   svgNode.removeAttribute("style");

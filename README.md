@@ -64,6 +64,27 @@ locus with `start: 0` and `end: 50000` contains genes whose coordinates are in
 that same `0..50000` range. Importers may preserve original genomic
 coordinates separately in a `bio` field.
 
+## Phylogenetic trees
+
+Plot data may include an optional `tree` containing a display root and a flat
+array of nodes. Internal nodes list child UIDs in display order; each leaf
+references one plotted cluster UID. Every plotted cluster must have exactly
+one leaf. See [TREE_SCHEMA.md](TREE_SCHEMA.md) for the full input contract,
+validation rules, configuration, and renderer architecture.
+
+The Clinker frontend is responsible for parsing tree files and matching leaf
+labels to cluster UIDs before passing `data.tree` to the chart. Clustermap
+validates the resolved tree and derives the initial cluster order from it.
+Click an internal node to reverse its branches, or drag clusters within the
+orders allowed by the tree. Both changes participate in undo/redo and are
+preserved in `chart.project()` snapshots.
+
+Tree appearance is configured through `chart.config({ tree: { ... } })` and
+the plot editor's Tree panel. Branch lengths are used when every incoming
+branch has a known length and the tree has a positive root-to-tip distance;
+otherwise the display falls back to a cladogram. SVG, Canvas, and the WebGPU
+Canvas overlay share tree geometry and animation. SVG export is static.
+
 ## Biological fixture
 
 `fixtures/mcaa-neighbourhoods-173.json` and
@@ -71,12 +92,20 @@ coordinates separately in a `bio` field.
 derived from Clinker render exports. The former contains 173 clusters, 7,511
 genes, 11,489 links, and 1,200 groups. The latter is a deliberately heavier
 stress case with 142 clusters, 7,359 genes, 112,320 links, and 726 groups.
-View either with the Canvas renderer:
+Load the examples locally:
 
 ```
 http://127.0.0.1:8080/?fixture=mcaa&minimap=1&minZoom=0.8
 http://127.0.0.1:8080/?fixture=pks&minimap=1&minZoom=0.8
+http://127.0.0.1:8080/?fixture=burnettii
 ```
+
+The `burnettii` example uses the five GenBank records from the Clinker examples
+to show the burnettramic acid (`bua`) gene-cluster comparison with a display
+tree. Its four *Aspergillus* leaves form two pairs within a bifurcating clade;
+the *Pseudomassariella vexata* leaf is the other root child. The topology,
+branch lengths, and support values are synthetic examples for exercising the
+viewer, not an inferred phylogeny.
 
 Regenerate a canonical fixture from a compact Clinker `clv_render` sidecar:
 

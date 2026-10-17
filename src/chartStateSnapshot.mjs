@@ -1,4 +1,4 @@
-import { createChartState } from "./chartState.mjs";
+import { createChartState, setTreeClusterOrder } from "./chartState.mjs";
 
 const finiteNumber = (value) => Number.isFinite(value) ? value : null;
 const stateEntries = (value) => Array.isArray(value)
@@ -67,7 +67,9 @@ export function serializeChartState(state, data) {
   const defaultOrder = data.clusters.map((cluster) => cluster.uid);
   return {
     version: 1,
-    clusterOrder: state.clusterOrder.length === defaultOrder.length && state.clusterOrder.every((uid, index) => uid === defaultOrder[index])
+    // Tree child order changes with edits. Keep its leaf order explicit so an
+    // undo snapshot can restore it even if it matched source cluster order.
+    clusterOrder: !data.tree && state.clusterOrder.length === defaultOrder.length && state.clusterOrder.every((uid, index) => uid === defaultOrder[index])
       ? []
       : [...state.clusterOrder],
     clusterOffsets: numericEntries(state.clusterOffsets).filter(([, value]) => value !== 0),
@@ -127,6 +129,7 @@ export function chartStateFromSnapshot(data, snapshot) {
   if (Array.isArray(snapshot.clusterOrder)) {
     const order = snapshot.clusterOrder.filter((uid) => clusterIds.has(uid));
     restored.clusterOrder = [...new Set([...order, ...restored.clusterOrder])];
+    setTreeClusterOrder(data.tree, restored.clusterOrder);
   }
   if (finiteNumber(camera.x) !== null && finiteNumber(camera.y) !== null && finiteNumber(camera.k) !== null && camera.k > 0) {
     restored.camera = { x: camera.x, y: camera.y, k: camera.k };

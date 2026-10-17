@@ -1,3 +1,5 @@
+import { isTreeOrderCompatible } from "./treeLayout.mjs";
+
 function removeMissing(records, allowed) {
   for (const uid of records.keys()) if (!allowed.has(uid)) records.delete(uid);
 }
@@ -19,7 +21,7 @@ export function createChartState(data, previous = null) {
   const clusterIdSet = new Set(clusterIds);
   const previousOrder = previous?.clusterOrder || [];
   const previousOrderSet = new Set(previousOrder);
-  const clusterOrder = [
+  const clusterOrder = data.tree ? treeClusterOrder(data.tree) : [
     ...previousOrder.filter((uid) => clusterIdSet.has(uid)),
     ...clusterIds.filter((uid) => !previousOrderSet.has(uid)),
   ];
@@ -75,6 +77,36 @@ export function createChartState(data, previous = null) {
   removeMissing(preview.clusterPositions, clusterIdSet);
   removeMissing(preview.loci, locusIds);
   return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview };
+}
+
+function treeClusterOrder(tree) {
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const result = [];
+  const visit = (uid) => {
+    const node = nodes.get(uid);
+    if (node.children) node.children.forEach(visit);
+    else result.push(node.cluster);
+  };
+  visit(tree.root);
+  return result;
+}
+
+/** Commit a compatible display order to the tree's ordered child arrays. */
+export function setTreeClusterOrder(tree, order) {
+  if (!tree) return;
+  if (!isTreeOrderCompatible(tree, order)) {
+    throw new TypeError("Cluster order must keep every tree clade contiguous.");
+  }
+  const positions = new Map(order.map((uid, index) => [uid, index]));
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const firstPosition = (uid) => {
+    const node = nodes.get(uid);
+    if (!node.children) return positions.get(node.cluster);
+    const first = new Map(node.children.map((child) => [child, firstPosition(child)]));
+    node.children.sort((a, b) => first.get(a) - first.get(b));
+    return first.get(node.children[0]);
+  };
+  firstPosition(tree.root);
 }
 
 export function isDragging(chartState) {

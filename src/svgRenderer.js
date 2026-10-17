@@ -2,6 +2,8 @@ import { select } from "d3-selection";
 import { drag } from "d3-drag";
 import { renameText, rgbaToRgb } from "./utils.js";
 import { filterLinks } from "./links/groups.mjs";
+import { getLinkPath, interpolateLinkAnchors, interpolateLinkOpacity } from "./links/layout.mjs";
+import { renderSvgTree as renderTree } from "./treeSvgRenderer.mjs";
 import { resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
 
 // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
@@ -10,6 +12,9 @@ export function renderSvg({
   plot,
   data,
   scene,
+  previousScene = null,
+  previousTree = null,
+  previousTreeScene = null,
   transition,
   animate,
   config,
@@ -71,6 +76,15 @@ export function renderSvg({
       },
       (update) => update
     );
+
+  clusters.select("text.clusterText")
+    .attr("y", 8)
+    .attr("dominant-baseline", null)
+    .style("font-size", `${config.cluster.nameFontSize}px`);
+  clusters.select("text.locusText")
+    .attr("y", 12)
+    .attr("dominant-baseline", "hanging")
+    .style("font-size", `${config.cluster.lociFontSize}px`);
 
   // A cluster drag can leave an in-flight transform transition on sibling
   // rows. Cancel it before the scene supplies their snapped final positions.
@@ -228,12 +242,12 @@ export function renderSvg({
           .style("fill", "white")
           .style("text-anchor", "middle")
           .style("font-family", config.plot.fontFamily);
-        return updateLinks(enter, scene, config, scales, ids, highlightLinkIds);
+        return updateLinks(enter, scene, previousScene, config, scales, ids, highlightLinkIds);
       },
       (update) =>
         update.call((selection) => {
           selection.classed("hidden", !config.link.show);
-          updateRender(selection).call(updateLinks, scene, config, scales, ids, highlightLinkIds);
+          updateRender(selection).call(updateLinks, scene, previousScene, config, scales, ids, highlightLinkIds);
         }),
       (exit) =>
         exit.call((selection) => {
@@ -243,6 +257,10 @@ export function renderSvg({
     );
 
   renderChrome({ plot, chrome: scene.chrome, ids, interactions });
+  renderTree(plot, data.tree, scene, config, interactions, transition, animate, {
+    previousTree,
+    previousScene: previousTreeScene,
+  });
 }
 
 function updateClusters(selection, scene, { labelsOnly = false } = {}) {
@@ -439,7 +457,7 @@ function updateGenes(selection, scene, config, scales, highlightGeneIds) {
   return selection;
 }
 
-function updateLinks(selection, scene, config, scales, ids, highlightLinkIds) {
+function updateLinks(selection, scene, previousScene, config, scales, ids, highlightLinkIds) {
   const linkLayout = (link) => scene.links.get(link.uid);
   const fill = (link) => {
     if (config.link.asLine) return "none";
@@ -456,18 +474,50 @@ function updateLinks(selection, scene, config, scales, ids, highlightLinkIds) {
     return config.link.asLine ? scales.score(link.identity) : "black";
   };
 
-  selection.attr("opacity", (link) =>
-    config.link.show && linkLayout(link)?.visible ? 1 : 0
+  const opacity = (link) => interpolateLinkOpacity(
+    previousScene?.links.get(link.uid),
+    linkLayout(link),
+    1,
+    config.link.show
   );
+  if (typeof selection.attrTween === "function") {
+    selection.attrTween("opacity", function (link) {
+      const previous = previousScene?.links.get(link.uid);
+      const next = linkLayout(link);
+      return (amount) => interpolateLinkOpacity(previous, next, amount, config.link.show);
+    });
+  } else {
+    selection.attr("opacity", opacity);
+  }
   selection
     .select("path.geneLink")
-    .attr("d", (link) => linkLayout(link)?.path || "")
+    .call((path) => {
+      if (typeof path.attrTween === "function") path.attrTween("d", function (link) {
+        const previous = previousScene?.links.get(link.uid);
+        const next = linkLayout(link);
+        return (amount) => getLinkPath(
+          interpolateLinkAnchors(previousScene, previous, scene, next, amount),
+          config.link
+        );
+      });
+      else path.attr("d", (link) => linkLayout(link)?.path || "");
+    })
     .style("fill", fill)
     .style("stroke", stroke)
     .style("stroke-width", `${config.link.strokeWidth}px`);
   selection
     .select("path.geneLinkHighlight")
-    .attr("d", (link) => linkLayout(link)?.path || "")
+    .call((path) => {
+      if (typeof path.attrTween === "function") path.attrTween("d", function (link) {
+        const previous = previousScene?.links.get(link.uid);
+        const next = linkLayout(link);
+        return (amount) => getLinkPath(
+          interpolateLinkAnchors(previousScene, previous, scene, next, amount),
+          config.link
+        );
+      });
+      else path.attr("d", (link) => linkLayout(link)?.path || "");
+    })
     .attr("display", (link) => (highlightLinkIds.has(link.uid) ? "inline" : "none"))
     .style("fill", config.link.asLine ? "none" : "rgba(22, 119, 255, 0.18)")
     .style("stroke", "#1677ff")

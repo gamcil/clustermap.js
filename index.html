@@ -59,6 +59,7 @@
       const fixture = params.get("fixture");
       const biologicalFixtures = { mcaa: "fixtures/mcaa-neighbourhoods-173.json", pks: "fixtures/pks-regions-142.json" };
       const biologicalFixture = biologicalFixtures[fixture];
+      const treeFixture = fixture === "burnettii";
       const renderer = params.get("renderer") || (fixture === "large" || biologicalFixture ? "canvas" : "svg");
       const minZoom = Number(params.get("minZoom"));
       const chart = ClusterMap().config({
@@ -68,7 +69,7 @@
         legend: { show: true, position: fixture === "large" || biologicalFixture ? "bottom" : "right", columns: biologicalFixture ? 8 : 1 },
         link: { threshold: 0.3, bestOnly: true },
       });
-      const source = fixture === "large" ? Promise.resolve(createLargeTestingData()) : biologicalFixture ? d3.json(biologicalFixture) : d3.json("testing.json");
+      const source = fixture === "large" ? Promise.resolve(createLargeTestingData()) : treeFixture ? d3.json("fixtures/bua-genbank-tree.json") : biologicalFixture ? d3.json(biologicalFixture) : d3.json("testing.json");
       const download = (blob, filename) => {
         const url = URL.createObjectURL(blob);
         const anchor = Object.assign(document.createElement("a"), { href: url, download: filename });

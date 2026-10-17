@@ -34,6 +34,30 @@ export function getLinkAnchors(
     : [ax1, ax2, ay, bx1, bx2, by];
 }
 
+export function interpolateLinkOpacity(previous, next, amount, enabled = true) {
+  const isRenderable = (link) => Boolean(enabled && link?.visible && link?.anchors);
+  const from = isRenderable(previous) ? 1 : 0;
+  const to = isRenderable(next) ? 1 : 0;
+  return from + (to - from) * amount;
+}
+
+export function interpolateLinkAnchors(previousScene, previous, nextScene, next, amount) {
+  const inQueryOrder = (scene, link) => {
+    if (!link?.anchors) return null;
+    const query = scene?.genes.get(link.source.query.uid);
+    const queryY = query?.locus?.y;
+    if (!Number.isFinite(queryY)) return link.anchors;
+    const anchors = link.anchors;
+    const queryFirst = Math.abs(anchors[2] - queryY) <= Math.abs(anchors[5] - queryY);
+    return queryFirst ? anchors : [anchors[3], anchors[4], anchors[5], anchors[0], anchors[1], anchors[2]];
+  };
+  const from = inQueryOrder(previousScene, previous);
+  const to = inQueryOrder(nextScene, next);
+  if (!from) return to;
+  if (!to) return from;
+  return to.map((value, index) => from[index] + (value - from[index]) * amount);
+}
+
 export function getLinkLabelPosition(
   [ax1, ax2, ay, bx1, bx2, by],
   position
@@ -42,7 +66,7 @@ export function getLinkLabelPosition(
   const bMid = bx1 + (bx2 - bx1) / 2;
   return {
     x: aMid + (bMid - aMid) * position,
-    y: ay + Math.abs(by - ay) * position,
+    y: ay + (by - ay) * position,
   };
 }
 
@@ -51,7 +75,7 @@ export function linkPathCommands(anchors, { asLine = false, straight = false } =
   const [ax1, ax2, ay, bx1, bx2, by] = anchors;
   const aMid = ax1 + (ax2 - ax1) / 2;
   const bMid = bx1 + (bx2 - bx1) / 2;
-  const middle = ay + Math.abs(by - ay) / 2;
+  const middle = ay + (by - ay) / 2;
   if (asLine) {
     return straight
       ? [["M", aMid, ay], ["L", bMid, by]]
@@ -85,7 +109,7 @@ export function traceLinkPath(context, anchors, style) {
 export function sampleLinkGeometry(anchors, { asLine = false, straight = false, segments = 10 } = {}) {
   if (!anchors) return { asLine, upper: [], lower: [], line: [] };
   const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  const middle = ay + Math.abs(by - ay) / 2;
+  const middle = ay + (by - ay) / 2;
   const pointFor = (startX, endX, amount) => straight
     ? [startX + (endX - startX) * amount, ay + (by - ay) * amount]
     : [

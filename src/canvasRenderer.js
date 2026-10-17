@@ -11,7 +11,9 @@ import {
   previewOffsetsForLocus,
 } from "./scenePreview.mjs";
 import { clusterPairKey } from "./layout.mjs";
-import { traceLinkPath } from "./links/layout.mjs";
+import { interpolateLinkAnchors, interpolateLinkOpacity, traceLinkPath } from "./links/layout.mjs";
+import { hitTestTreeNode, interpolateTreeLayout } from "./treeLayout.mjs";
+import { drawCanvasTree, layoutCanvasTree } from "./treeCanvasRenderer.mjs";
 import { resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
 
 /**
@@ -162,7 +164,7 @@ export function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = 
  * Scene layout deliberately records only renderer-neutral chrome extents; the
  * raster adapter owns glyph measurement for initial camera fitting.
  */
-export function canvasFigureBounds(context, scene, config) {
+export function canvasFigureBounds(context, scene, config, tree = null) {
   if (!scene?.bounds) return null;
   const bounds = { ...(scene.figureBounds || scene.bounds) };
   const include = (x, y) => {
@@ -195,6 +197,14 @@ export function canvasFigureBounds(context, scene, config) {
       ),
       cluster.y + 24
     );
+  }
+  const treeLayout = layoutCanvasTree(context, tree, scene, config, { trackAnchor: false });
+  if (treeLayout) {
+    include(treeLayout.rootBranch.x1, treeLayout.rootBranch.y1);
+    if (treeLayout.scaleBar) {
+      const { label, fontSize } = treeLayout.scaleBar;
+      include(label.x, label.y + fontSize + 3);
+    }
   }
   if (scene.chrome?.legend.visible) {
     const { legend } = scene.chrome;
@@ -304,10 +314,24 @@ function chromeHit(context, scene, point) {
   return null;
 }
 
-export function hitTestCanvas({ canvas, scene, camera, config, event }) {
+export function hitTestCanvas({ canvas, scene, camera, config, event, tree = null, treeDragging = false }) {
   const point = canvasWorldPoint(canvas, event, camera);
   const context = canvas.getContext("2d");
-  return hitTest(scene, point) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
+  return hitTest(scene, point) || treeNodeHit(context, scene, point, config, tree, treeDragging) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
+}
+
+function treeNodeHit(context, scene, point, config, tree, dragging = false) {
+  return hitTestTreeNode(layoutCanvasTree(context, tree, scene, config, { dragging }), point);
+}
+
+function drawTree(context, tree, scene, config, preview, motion) {
+  const layout = layoutCanvasTree(context, tree, scene, config, {
+    preview,
+    previousTree: motion.previousTree,
+    previousScene: motion.previousScene,
+    targetScene: motion.targetScene || scene,
+  });
+  drawCanvasTree(context, interpolateTreeLayout(layout, motion.progress));
 }
 
 function polygon(context, points) {
@@ -343,6 +367,8 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   const visible = geometry.visible ?? layout.visible;
   const anchors = geometry.anchors ?? layout.anchors;
   if (!visible || !anchors) return;
+  context.save();
+  context.globalAlpha *= layout.opacity ?? 1;
   let [ax1, ax2, ay, bx1, bx2, by] = anchors;
   ax1 += geometry.a || 0;
   ax2 += geometry.a || 0;
@@ -366,6 +392,7 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   context.stroke();
 
   drawLinkLabel(context, layout, source, config, anchors, geometry);
+  context.restore();
 }
 
 function drawLinkHighlight(context, layout, source, config, geometry = {}) {
@@ -923,10 +950,17 @@ export function interpolateCanvasScene(previous, scene, amount) {
   const links = new Map();
   for (const [uid, link] of scene.links) {
     const prior = previous.links.get(uid);
+    const opacity = interpolateLinkOpacity(prior, link, amount);
+    const anchors = interpolateLinkAnchors(previous, prior, scene, link, amount);
     links.set(uid, {
       ...link,
-      anchors: interpolateArray(prior?.anchors, link.anchors, amount),
+      // Retained scene link anchors are normalized upper-to-lower. During a
+      // row swap that reverses which endpoint is upper, so interpolate in
+      // stable query/target order to keep each end attached to its gene.
+      anchors,
       labelPosition: interpolatePosition(prior?.labelPosition, link.labelPosition, amount),
+      opacity,
+      visible: opacity > 0 && Boolean(prior?.visible || link.visible),
     });
   }
 
@@ -937,7 +971,12 @@ export function interpolateCanvasScene(previous, scene, amount) {
 export function renderCanvas({
   canvas,
   scene,
+  tree = null,
   previousScene = null,
+  previousTree = null,
+  previousTreeScene = null,
+  treeTargetScene = null,
+  treeProgress = 1,
   progress = 1,
   camera,
   config,
@@ -1042,6 +1081,12 @@ export function renderCanvas({
     if (showLinks) drawLink(context, link, link.source, config, scales, geometry);
     else drawLinkLabel(context, link, link.source, config, anchors, geometry);
   }
+  drawTree(context, tree, displayScene, config, preview, {
+    previousTree,
+    previousScene: previousTreeScene,
+    targetScene: treeTargetScene || scene,
+    progress: treeProgress,
+  });
   if (highlightLinkIds?.size) {
     for (const uid of highlightLinkIds) {
       if (visible?.links && !visible.links.includes(uid)) continue;

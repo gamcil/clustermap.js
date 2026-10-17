@@ -18,6 +18,7 @@ import {
   setPreviewLocusOffset,
   setPreviewClusterOrder,
   setPreviewClusterPosition,
+  setTreeClusterOrder,
   previewLocusTrim,
   restoreLocusBounds,
   trimLocusToGeneBounds,
@@ -32,6 +33,7 @@ import {
   canvasFigureBounds,
   canvasWorldPoint,
   hitTestCanvas,
+  interpolateCanvasScene,
   renderCanvas,
 } from "./canvasRenderer.js";
 import { renderSvg } from "./svgRenderer.js";
@@ -104,6 +106,8 @@ export default function clusterMap() {
   let canvasHoverLocusUid = null;
   let canvasScene = null;
   let canvasAnimation = null;
+  let treeAnimation = null;
+  let webgpuAnimation = null;
   let rasterPreview = null;
   let canvasPreviewScene = null;
   let canvasFlipStaticCanvas = null;
@@ -182,6 +186,7 @@ export default function clusterMap() {
     clusterRows: () => runtime.scales.y.range(),
     getClusterOrder: () => getClusterOrder(chartState),
     getClusterPosition: (uid) => runtime.getScene().clusters.get(uid).y,
+    getTree: () => currentData?.tree || null,
     getLocusOffset: (uid) => getLocusOffset(chartState, uid),
     selectedLocusIds: () => [...selectedLocusIds],
     selectedClusterIds: () => new Set(
@@ -222,6 +227,7 @@ export default function clusterMap() {
       const order = [...getClusterOrder(chartState)];
       const rows = runtime.scales.y.range();
       commitPreviewClusterOrder(chartState);
+      setTreeClusterOrder(currentData.tree, order);
       if (
         preview &&
         sourceScene &&
@@ -559,6 +565,11 @@ export default function clusterMap() {
     canvasFlipDirtyFrame = null;
   }
 
+  function stopWebGpuAnimation() {
+    if (webgpuAnimation?.frame) cancelAnimationFrame(webgpuAnimation.frame);
+    webgpuAnimation = null;
+  }
+
   function my(selection, options) {
     selection.each(function (data) {
       container = select(this).attr("width", "100%").attr("height", "100%");
@@ -725,6 +736,7 @@ export default function clusterMap() {
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
+    if (!useWebGpu) stopWebGpuAnimation();
     if (!useWebGpu && webgpuBackend.hasResources()) {
       // A renderer owns the WebGPU context for its canvas. Dispose it before
       // the chart changes backend, and invalidate any async setup that might
@@ -904,6 +916,7 @@ export default function clusterMap() {
       }
       const result = canvasBackend.paint({
         canvas: canvasNode,
+        tree: currentData.tree,
         scene:
           canvasAnimation?.scene ||
           canvasPreviewScene ||
@@ -911,6 +924,9 @@ export default function clusterMap() {
           runtime.getScene(),
         previousScene: canvasAnimation?.previousScene,
         progress: canvasAnimation?.progress,
+        previousTree: treeAnimation?.previousTree,
+        previousTreeScene: treeAnimation?.previousScene,
+        treeProgress: treeAnimation?.progress ?? 1,
         camera: getCamera(chartState),
         config: runtime.config,
         scales: runtime.scales,
@@ -933,6 +949,11 @@ export default function clusterMap() {
         renderCanvas({
           canvas: overlayNode,
           scene,
+          tree: currentData.tree,
+          previousTree: treeAnimation?.previousTree,
+          previousTreeScene: treeAnimation?.previousScene,
+          treeTargetScene: treeAnimation?.targetScene,
+          treeProgress: treeAnimation?.progress ?? 1,
           camera: getCamera(chartState),
           config: runtime.config,
           scales: runtime.scales,
@@ -987,6 +1008,7 @@ export default function clusterMap() {
     const renderFlipStaticBase = (pending, baseCanvas, bounds, pixelRatio) => {
       const renderOptions = {
         scene: pending.sourceScene,
+        tree: currentData.tree,
         camera: getCamera(chartState),
         config: runtime.config,
         scales: runtime.scales,
@@ -1241,6 +1263,7 @@ export default function clusterMap() {
     const animateCanvas = (canvasNode, scene, animate) => {
       stopCanvasAnimation();
       if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
+        treeAnimation = null;
         canvasScene = scene;
         paintCanvas(canvasNode);
         return;
@@ -1250,6 +1273,7 @@ export default function clusterMap() {
       const initialProgress = 0;
       const suppressLocusHover = false;
       const startedAt = performance.now();
+      if (treeAnimation) treeAnimation.targetScene = scene;
       const frame = (now) => {
         const elapsed = Math.min(1, (now - startedAt) / duration);
         // Matches D3's default cubic-in-out transition closely enough that
@@ -1259,12 +1283,14 @@ export default function clusterMap() {
             ? 4 * elapsed * elapsed * elapsed
             : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
         const progress = initialProgress + (1 - initialProgress) * eased;
+        if (treeAnimation) treeAnimation.progress = progress;
         canvasAnimation = { previousScene, scene, progress, frame: null, suppressLocusHover };
         paintCanvas(canvasNode);
         if (elapsed < 1) {
           canvasAnimation.frame = requestAnimationFrame(frame);
         } else {
           canvasAnimation = null;
+          treeAnimation = null;
           canvasScene = scene;
           // The final animation frame intentionally hid the stale hover
           // affordance. Repaint once with the settled scene so it returns
@@ -1273,6 +1299,37 @@ export default function clusterMap() {
         }
       };
       canvasAnimation = { previousScene, scene, progress: 0, frame: requestAnimationFrame(frame) };
+    };
+    const animateWebGpu = (canvasNode, previousScene, scene, animate) => {
+      stopWebGpuAnimation();
+      const duration = runtime.config.plot.transitionDuration;
+      if (!animate || !previousScene || !duration) {
+        treeAnimation = null;
+        webgpuBackend.setScene(scene);
+        paintWebGpu(canvasNode, scene);
+        return;
+      }
+      const startedAt = performance.now();
+      if (treeAnimation) treeAnimation.targetScene = scene;
+      const frame = (now) => {
+        const elapsed = Math.min(1, (now - startedAt) / duration);
+        const eased = elapsed < 0.5
+          ? 4 * elapsed * elapsed * elapsed
+          : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+        const displayScene = interpolateCanvasScene(previousScene, scene, eased);
+        if (treeAnimation) treeAnimation.progress = eased;
+        webgpuBackend.setScene(displayScene);
+        paintWebGpu(canvasNode, displayScene);
+        if (elapsed < 1) {
+          webgpuAnimation.frame = requestAnimationFrame(frame);
+        } else {
+          webgpuAnimation = null;
+          treeAnimation = null;
+          webgpuBackend.setScene(scene);
+          paintWebGpu(canvasNode, scene);
+        }
+      };
+      webgpuAnimation = { frame: requestAnimationFrame(frame) };
     };
     const chooseLegendColour = (group) => {
       const picker = container.select("input.colourPicker");
@@ -1307,6 +1364,27 @@ export default function clusterMap() {
       moveClusterDrag: interactionController.moveClusterDrag,
       endClusterDrag: interactionController.endClusterDrag,
       cancelClusterDrag: interactionController.cancelClusterDrag,
+      rotateTreeNode: (uid) => {
+        const node = currentData.tree?.nodes.find((entry) => entry.uid === uid);
+        if (!node?.children) return;
+        beginInteractionState();
+        treeAnimation = {
+          previousTree: {
+            ...currentData.tree,
+            nodes: currentData.tree.nodes.map((entry) => ({
+              ...entry,
+              children: entry.children ? [...entry.children] : undefined,
+            })),
+          },
+          previousScene: runtime.getScene(),
+          progress: 0,
+        };
+        node.children.reverse();
+        chartState = createChartState(currentData, chartState);
+        runtime.setChartState(chartState);
+        redraw();
+        commitInteractionState();
+      },
       beginLocusDrag: interactionController.beginLocusDrag,
       moveLocusDrag: interactionController.moveLocusDrag,
       endLocusDrag: interactionController.endLocusDrag,
@@ -1376,6 +1454,8 @@ export default function clusterMap() {
           camera: getCamera(chartState),
           config: runtime.config,
           event,
+          tree: currentData.tree,
+          treeDragging: isDragging(chartState),
         });
       const locusForTarget = (target) =>
         target?.locusUid || runtime.lookup.geneData(target?.geneUid)?.locusUid || null;
@@ -1518,14 +1598,18 @@ export default function clusterMap() {
         );
         webgpuAnchorCommit = null;
       }
-      webgpuBackend.setScene(scene);
       scheduleMinimapBase(scene);
-      paintWebGpu(canvas.node(), scene);
+      const previousScene = webgpuBackend.pendingScene;
+      animateWebGpu(canvas.node(), previousScene, scene, hasInitialView && animate);
     } else {
+      const previousScene = svgBackend.pendingScene;
       svgBackend.setScene(scene);
       svgBackend.paint({
         plot,
         data,
+        previousScene,
+        previousTree: treeAnimation?.previousTree,
+        previousTreeScene: treeAnimation?.previousScene,
         transition,
         animate: hasInitialView && animate,
         config: runtime.config,
@@ -1577,7 +1661,7 @@ export default function clusterMap() {
     const measurementCanvas = isWebGpuRenderer(runtime.config.plot.renderer)
       ? document.createElement("canvas")
       : canvas;
-    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config);
+    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, currentData.tree);
     if (!bounds) return;
 
     const camera = fitCameraForBounds({
@@ -1845,6 +1929,7 @@ export default function clusterMap() {
     clearRasterPreview();
     if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
     canvasAnimation = null;
+    stopWebGpuAnimation();
     rasterMotion.dispose();
     rasterMinimap.clear();
     webgpuBackend.destroy();

@@ -1,6 +1,7 @@
 function cursorForTarget(target) {
   if (!target) return "grab";
   if (target.action === "move-cluster") return "grab";
+  if (target.action === "tree-node") return "pointer";
   if (target.action === "move-locus") return "move";
   if (target.action.startsWith("trim-locus")) return "ew-resize";
   return "pointer";
@@ -65,6 +66,8 @@ export function createRasterInteraction({
       interactions.beginLocusTrim();
     } else if (target.action === "gene") {
       gesture = { action: target.action, geneUid: target.geneUid };
+    } else if (target.action === "tree-node") {
+      gesture = { action: target.action, nodeUid: target.nodeUid };
     } else if (target.action === "legend-colour") {
       actions.legendColour(event, target.group);
     } else if (target.action === "legend-text") {
@@ -112,6 +115,8 @@ export function createRasterInteraction({
       else interactions.cancelLocusTrim();
     } else if (finished.action === "gene") {
       actions.geneClick(event, finished.geneUid);
+    } else if (finished.action === "tree-node") {
+      actions.rotateTreeNode?.(finished.nodeUid);
     }
     if (finished.moved) endMotion();
     updateAffordance(surface, targetForEvent(surface, event));

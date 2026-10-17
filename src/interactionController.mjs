@@ -1,9 +1,12 @@
+import { isTreeOrderCompatible } from "./treeLayout.mjs";
+
 // Translates renderer-independent pointer coordinates into chart-state actions.
 // Renderers only need to forward pointer events in chart-world coordinates.
 export function createInteractionController({
   clusterRows,
   getClusterOrder,
   getClusterPosition,
+  getTree = () => null,
   getLocusOffset,
   selectedLocusIds = () => [],
   selectedClusterIds = () => [],
@@ -33,9 +36,24 @@ export function createInteractionController({
       const uids = selected.has(uid)
         ? order.filter((clusterUid) => selected.has(clusterUid))
         : [uid];
+      const remaining = order.filter((clusterUid) => !uids.includes(clusterUid));
+      const draggedIndex = uids.indexOf(uid);
+      const legalInsertions = [];
+      for (let insertion = 0; insertion <= remaining.length; insertion += 1) {
+        const candidate = [
+          ...remaining.slice(0, insertion),
+          ...uids,
+          ...remaining.slice(insertion),
+        ];
+        if (isTreeOrderCompatible(getTree(), candidate)) legalInsertions.push(insertion);
+      }
       clusterDrag = {
         uid,
         uids,
+        draggedIndex,
+        legalInsertions,
+        baseOrder: order,
+        blocked: legalInsertions.length === 0,
         selected: new Set(uids),
         order,
         positions: new Map(uids.map((clusterUid) => [
@@ -49,26 +67,47 @@ export function createInteractionController({
 
     moveClusterDrag(pointerY) {
       if (!clusterDrag) return;
+      if (clusterDrag.blocked) return;
       const range = clusterRows();
-      const y = clamp(pointerY + clusterDrag.pointerOffset, [range[0], range.at(-1)]);
-      const targetIndex = range.reduce(
-        (closest, position, index) =>
-          Math.abs(position - y) < Math.abs(range[closest] - y) ? index : closest,
-        0
-      );
-      const currentIndex = clusterDrag.order.indexOf(clusterDrag.uid);
-      let order = null;
-      if (targetIndex !== currentIndex) {
-        const selectedIndex = clusterDrag.uids.indexOf(clusterDrag.uid);
-        const remaining = clusterDrag.order.filter((uid) => !clusterDrag.selected.has(uid));
-        const insertionIndex = clamp(targetIndex - selectedIndex, [0, remaining.length]);
-        order = [
-          ...remaining.slice(0, insertionIndex),
-          ...clusterDrag.uids,
-          ...remaining.slice(insertionIndex),
-        ];
-        clusterDrag.order = order;
-      }
+      const selectedYs = [...clusterDrag.positions.values()];
+      const anchorY = clusterDrag.positions.get(clusterDrag.uid);
+      const rowMin = Math.min(...range);
+      const rowMax = Math.max(...range);
+      const extentMin = rowMin + anchorY - Math.min(...selectedYs);
+      const extentMax = rowMax - (Math.max(...selectedYs) - anchorY);
+      const legalTargets = clusterDrag.legalInsertions.map((insertion) => ({
+        insertion,
+        index: insertion + clusterDrag.draggedIndex,
+        y: range[insertion + clusterDrag.draggedIndex],
+      })).filter((candidate) => candidate.y >= extentMin && candidate.y <= extentMax);
+      if (!legalTargets.length) return;
+      const legalMin = Math.min(...legalTargets.map((candidate) => candidate.y));
+      const legalMax = Math.max(...legalTargets.map((candidate) => candidate.y));
+      // Keep the whole selected set inside the plot and stop at the first or
+      // last tree-compatible insertion. Using only the dragged row's range
+      // lets a multi-row selection overrun either boundary.
+      const allowedY = [Math.max(legalMin, extentMin), Math.min(legalMax, extentMax)];
+      const rawY = clamp(pointerY + clusterDrag.pointerOffset, allowedY);
+      const target = legalTargets.reduce((closest, candidate) =>
+        Math.abs(candidate.y - rawY) < Math.abs(closest.y - rawY) ? candidate : closest
+      , legalTargets[0]);
+      const previous = legalTargets
+        .filter((candidate) => candidate.y < target.y)
+        .at(-1);
+      const next = legalTargets.find((candidate) => candidate.y > target.y);
+      const minY = previous ? (previous.y + target.y) / 2 : legalMin;
+      const maxY = next ? (next.y + target.y) / 2 : legalMax;
+      const y = clamp(rawY, [
+        Math.max(Math.min(minY, maxY), allowedY[0]),
+        Math.min(Math.max(minY, maxY), allowedY[1]),
+      ]);
+      const remaining = clusterDrag.baseOrder.filter((uid) => !clusterDrag.selected.has(uid));
+      const order = [
+        ...remaining.slice(0, target.insertion),
+        ...clusterDrag.uids,
+        ...remaining.slice(target.insertion),
+      ];
+      clusterDrag.order = order;
       const delta = y - clusterDrag.positions.get(clusterDrag.uid);
       const positions = new Map(
         [...clusterDrag.positions].map(([uid, position]) => [uid, position + delta])

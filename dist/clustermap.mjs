@@ -3917,6 +3917,702 @@ function filterLinks(
     .flatMap(({ links: selected }) => selected);
 }
 
+function formatLength(length) {
+  const rounded = Math.round(length);
+  if (rounded >= 1000) {
+    const kilobases = rounded / 1000;
+    return `${Number(kilobases.toFixed(kilobases >= 10 ? 0 : 1))} kb`;
+  }
+  return `${rounded} bp`;
+}
+
+function featureText(count) {
+  return `${count} ${count === 1 ? "feature" : "features"}`;
+}
+
+function boundedNumber(value, fallback, minimum, maximum) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
+}
+
+/**
+ * Shared text metrics for layout and renderers. The width estimate only
+ * chooses collision lanes; the renderer remains the source of exact glyph
+ * placement.
+ */
+function resolveTrimIndicatorStyle(style = {}) {
+  const fontSize = boundedNumber(style.fontSize, 10, 6, 48);
+  const fontWeight = boundedNumber(style.fontWeight, 600, 100, 900);
+  return {
+    fontSize,
+    fontWeight,
+    borderWidth: boundedNumber(style.borderWidth, 3, 0, 12),
+    borderOpacity: boundedNumber(style.borderOpacity, 1, 0, 1),
+    lineHeight: Math.ceil(fontSize * 1.2),
+    characterWidth: fontSize * (fontWeight >= 600 ? 0.6 : 0.56),
+  };
+}
+
+function indicatorBounds(locus, indicator, metrics) {
+  const width = indicator.text.length * metrics.characterWidth;
+  const x = locus.x + indicator.x;
+  const left = indicator.anchor === "end" ? x - width : x;
+  return {
+    left: left - 2,
+    right: left + width + 2,
+    top: locus.y + indicator.y - 1,
+    bottom: locus.y + indicator.y + metrics.fontSize + 1,
+  };
+}
+
+function overlaps(one, two) {
+  return (
+    one.left < two.right && one.right > two.left &&
+    one.top < two.bottom && one.bottom > two.top
+  );
+}
+
+/**
+ * Assign the smallest non-overlapping vertical lane to every trim label.
+ * This keeps both labels on one locus aligned whenever they fit, while also
+ * preventing labels from separate loci in the same cluster from colliding.
+ */
+function arrangeTrimIndicators(loci, replacements = new Map(), style = {}) {
+  const metrics = resolveTrimIndicatorStyle(style);
+  const arranged = new Map();
+  const placed = [];
+  for (const locus of [...loci].sort((one, two) => one.y - two.y || one.x - two.x)) {
+    const indicators = replacements.get(locus.source.uid) || locus.trimIndicators || [];
+    const positioned = [];
+    for (const indicator of indicators) {
+      const next = { ...indicator };
+      let bounds = indicatorBounds(locus, next, metrics);
+      while (placed.some((candidate) => overlaps(bounds, candidate))) {
+        next.y += metrics.lineHeight;
+        bounds = indicatorBounds(locus, next, metrics);
+      }
+      positioned.push(next);
+      placed.push(bounds);
+    }
+    arranged.set(locus.source.uid, positioned);
+  }
+  return arranged;
+}
+
+/**
+ * Describe the hidden flanks of a trimmed locus in its local display space.
+ * The resulting records are deliberately renderer-neutral: SVG can use them
+ * as text nodes while Canvas and WebGPU's Canvas overlay draw the same labels.
+ */
+function createTrimIndicators({ locus, state, getGeneState, scaleX, shape = {} }) {
+  if (!locus || !state) return [];
+  const start = Number(state.start);
+  const end = Number(state.end);
+  const fullStart = Number(locus.start);
+  const fullEnd = Number(locus.end);
+  if (![start, end, fullStart, fullEnd].every(Number.isFinite)) return [];
+
+  const genes = locus.genes || [];
+  const countBefore = (boundary) =>
+    genes.filter((gene) => Number(getGeneState(gene)?.end) <= boundary).length;
+  const countAfter = (boundary) =>
+    genes.filter((gene) => Number(getGeneState(gene)?.start) >= boundary).length;
+  const y = (shape.tipHeight || 0) * 2 + (shape.bodyHeight || 0) + 4;
+  const indicators = [];
+
+  if (start > fullStart) {
+    indicators.push({
+      side: "left",
+      x: scaleX(start) + 3,
+      y,
+      anchor: "start",
+      text: `← ${formatLength(start - fullStart)} · ${featureText(countBefore(start))}`,
+    });
+  }
+  if (end < fullEnd) {
+    indicators.push({
+      side: "right",
+      x: scaleX(end) - 3,
+      y,
+      anchor: "end",
+      text: `${featureText(countAfter(end))} · ${formatLength(fullEnd - end)} →`,
+    });
+  }
+  return indicators;
+}
+
+function minStart(loci, startFor) {
+  return Math.min(...loci.map(startFor));
+}
+
+function clusterUidForLocus(locus) {
+  return locus.cluster?.uid ?? locus.cluster?.source?.uid ?? locus.source.clusterUid;
+}
+
+function clusterLabelOffsetsForStarts(
+  scene,
+  startFor,
+  alignLabels,
+  affectedClusters = scene.clusters.values()
+) {
+  const offsets = new Map();
+  if (alignLabels) {
+    const loci = [...scene.loci.values()];
+    const offset = minStart(loci, startFor) - minStart(loci, (locus) => locus.worldStart);
+    for (const cluster of scene.clusters.values()) offsets.set(cluster.source.uid, offset);
+    return offsets;
+  }
+  for (const cluster of affectedClusters) {
+    offsets.set(
+      cluster.source.uid,
+      minStart(cluster.loci, startFor) - minStart(cluster.loci, (locus) => locus.worldStart)
+    );
+  }
+  return offsets;
+}
+
+function chromeForPreview(scene, maxX) {
+  if (!scene.chrome) return null;
+  return {
+    ...scene.chrome,
+    legend: {
+      ...scene.chrome.legend,
+      position: {
+        ...scene.chrome.legend.position,
+        x:
+          scene.chrome.legend.placement === "bottom"
+            ? scene.chrome.legend.position.x
+            : scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
+      },
+    },
+  };
+}
+
+/**
+ * Describe a transient locus translation relative to an already projected
+ * scene. This is deliberately a sparse, renderer-neutral patch: it avoids
+ * rebuilding the scene while a drag is in progress.
+ */
+function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels }) {
+  const locus = scene.loci.get(locusUid);
+  if (!locus) return null;
+  const offsetX = offset - locus.localX;
+  const startFor = (candidate) =>
+    candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart;
+  const endFor = (candidate) =>
+    candidate.source.uid === locusUid ? candidate.worldEnd + offsetX : candidate.worldEnd;
+  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
+
+  return {
+    type: "locus-offset",
+    locusUid,
+    offsetX,
+    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, [
+      scene.clusters.get(locus.cluster.uid),
+    ]),
+    chrome: chromeForPreview(scene, maxX),
+  };
+}
+
+/** Describe several transient locus translations without rebuilding the scene. */
+function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
+  const locusOffsets = new Map();
+  const affectedClusters = new Set();
+  for (const [locusUid, offset] of offsets) {
+    const locus = scene.loci.get(locusUid);
+    if (!locus) continue;
+    locusOffsets.set(locusUid, offset - locus.localX);
+    const cluster = scene.clusters.get(locus.cluster.uid);
+    if (cluster) affectedClusters.add(cluster);
+  }
+  if (!locusOffsets.size) return null;
+  const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
+  const startFor = (candidate) => candidate.worldStart + offsetFor(candidate);
+  const endFor = (candidate) => candidate.worldEnd + offsetFor(candidate);
+  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
+  return {
+    type: "locus-offsets",
+    locusOffsets,
+    clusterLabelOffsets: clusterLabelOffsetsForStarts(
+      scene,
+      startFor,
+      alignLabels,
+      affectedClusters
+    ),
+    chrome: chromeForPreview(scene, maxX),
+  };
+}
+
+/**
+ * Describe a transient trim using the current scene and updated locus-scale
+ * offsets. The controller updates scales (but not the scene) before calling
+ * this, so sibling loci retain their correct packed positions without a full
+ * data-to-scene projection for every pointer event.
+ */
+function createLocusTrimPreview(
+  scene,
+  locusUid,
+  state,
+  { localXFor, scaleX, alignLabels, shape, trimIndicatorStyle = {}, clusterLabelText = null }
+) {
+  const locus = scene.loci.get(locusUid);
+  if (!locus) return null;
+
+  const locusOffsets = new Map();
+  for (const candidate of scene.loci.values()) {
+    locusOffsets.set(candidate.source.uid, localXFor(candidate.source.uid) - candidate.localX);
+  }
+  const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
+  const trimmed = {
+    worldStart: locus.x + offsetFor(locus) + scaleX(state.start),
+    worldEnd: locus.x + offsetFor(locus) + scaleX(state.end),
+    track: {
+      ...locus.track,
+      x1: scaleX(state.start),
+      x2: scaleX(state.end),
+    },
+    hover: {
+      ...locus.hover,
+      x: scaleX(state.start),
+      width: scaleX(state.end) - scaleX(state.start),
+      leftHandleX: scaleX(state.start) - 8,
+      rightHandleX: scaleX(state.end),
+    },
+    trimIndicators: createTrimIndicators({
+      locus: locus.source,
+      state,
+      getGeneState: (gene) => scene.genes.get(gene.uid)?.display || gene,
+      scaleX,
+      shape,
+    }),
+  };
+  const locusGeometry = new Map([[locusUid, trimmed]]);
+  const arrangedTrimIndicators = arrangeTrimIndicators(
+    scene.loci.values(),
+    new Map([[locusUid, trimmed.trimIndicators]]),
+    trimIndicatorStyle
+  );
+  trimmed.trimIndicators = arrangedTrimIndicators.get(locusUid) || [];
+  const startFor = (candidate) =>
+    candidate.source.uid === locusUid
+      ? trimmed.worldStart
+      : candidate.worldStart + offsetFor(candidate);
+  const endFor = (candidate) =>
+    candidate.source.uid === locusUid
+      ? trimmed.worldEnd
+      : candidate.worldEnd + offsetFor(candidate);
+  const geneVisibility = new Map();
+  for (const gene of scene.genes.values()) {
+    if (gene.locus.source.uid !== locusUid) continue;
+    geneVisibility.set(
+      gene.source.uid,
+      gene.display.start >= state.start && gene.display.end <= state.end + 1
+    );
+  }
+
+  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
+  return {
+    type: "locus-trim",
+    locusUid,
+    locusOffsets,
+    loci: locusGeometry,
+    geneVisibility,
+    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels),
+    ...(clusterLabelText === null
+      ? {}
+      : {
+          clusterLabelTexts: new Map([[
+            clusterUidForLocus(locus),
+            clusterLabelText,
+          ]]),
+        }),
+    chrome: chromeForPreview(scene, maxX),
+  };
+}
+
+// Preview patches carry layout deltas rather than cloned scenes. These
+// accessors are deliberately renderer-neutral so SVG-adjacent Canvas chrome
+// and dense WebGPU marks apply exactly the same locus and cluster movement.
+function locusOffsetForPreview(preview, locusUid) {
+  if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
+  return preview?.type === "locus-offset" && preview.locusUid === locusUid
+    ? preview.offsetX
+    : 0;
+}
+
+function clusterLabelOffsetForPreview(preview, clusterUid) {
+  return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
+}
+
+function clusterLabelTextForPreview(preview, clusterUid, fallback) {
+  return preview?.clusterLabelTexts?.get(clusterUid) ?? fallback;
+}
+
+function clusterOffsetForPreview(preview, clusterUid) {
+  return preview?.clusterOffsets?.get(clusterUid) || 0;
+}
+
+function previewOffsetsForLocus(preview, locus) {
+  if (!preview || !locus) return { x: 0, y: 0 };
+  return {
+    x: locusOffsetForPreview(preview, locus.source?.uid),
+    y: clusterOffsetForPreview(preview, locus.cluster?.uid ?? locus.source?.clusterUid),
+  };
+}
+
+function locusGeometryForPreview(preview, locus) {
+  if (preview?.type === "locus-flip") {
+    const axis = preview.axes?.get(locus.source.uid);
+    if (axis !== undefined) {
+      const flip = (x) => x + (axis * 2 - x - x) * preview.progress;
+      const start = flip(locus.worldStart);
+      const end = flip(locus.worldEnd);
+      const hoverStart = flip(locus.x + locus.hover.x);
+      const hoverEnd = flip(locus.x + locus.hover.x + locus.hover.width);
+      const left = Math.min(start, end);
+      const right = Math.max(start, end);
+      return {
+        offsets: previewOffsetsForLocus(preview, locus),
+        worldStart: left,
+        worldEnd: right,
+        track: {
+          ...locus.track,
+          x1: flip(locus.x + locus.track.x1) - locus.x,
+          x2: flip(locus.x + locus.track.x2) - locus.x,
+        },
+        hover: {
+          ...locus.hover,
+          x: Math.min(hoverStart, hoverEnd) - locus.x,
+          width: Math.abs(hoverEnd - hoverStart),
+          leftHandleX: left - locus.x - 8,
+          rightHandleX: right - locus.x,
+        },
+      };
+    }
+  }
+  const trimmed = preview?.loci?.get(locus.source.uid);
+  return {
+    offsets: previewOffsetsForLocus(preview, locus),
+    ...(trimmed || {}),
+  };
+}
+
+function geneVisibleForPreview(preview, gene) {
+  return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
+}
+
+/** Describe flip frames without re-projecting the chart. */
+function createLocusFlipPreview(
+  scene,
+  locusUid,
+  { progress = 0, clusterLabelText = null } = {}
+) {
+  const locus = scene.loci.get(locusUid);
+  if (!locus) return null;
+  return {
+    type: "locus-flip",
+    locusUid,
+    progress,
+    ...(clusterLabelText === null
+      ? {}
+      : {
+          clusterLabelTexts: new Map([[
+            clusterUidForLocus(locus),
+            clusterLabelText,
+          ]]),
+        }),
+    // The projected bounds reflect the currently displayed locus, including
+    // any committed trim. Source coordinates describe the original record and
+    // must not determine the transient flip axis.
+    axes: new Map([[locusUid, (locus.worldStart + locus.worldEnd) / 2]]),
+  };
+}
+
+/** Describe temporary cluster rows without rebuilding a scene. */
+function createClusterDragPreview(scene, { clusterUid, position, positions, order, rows }) {
+  const clusterOffsets = new Map();
+  const clusterOrder = new Map();
+  for (const [index, uid] of order.entries()) {
+    const cluster = scene.clusters.get(uid);
+    if (!cluster) continue;
+    const y = positions?.get(uid) ?? (uid === clusterUid ? position : rows[index]);
+    clusterOffsets.set(uid, y - cluster.y);
+    clusterOrder.set(uid, index);
+  }
+  return { type: "cluster-drag", clusterUid, clusterOffsets, clusterOrder };
+}
+
+const leafXAnchors = new WeakMap();
+
+/** Return whether an order keeps every tree clade contiguous. */
+function isTreeOrderCompatible(tree, order) {
+  if (!tree) return true;
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const positions = new Map(order.map((clusterUid, index) => [clusterUid, index]));
+  const descendants = new Map();
+  const collect = (uid) => {
+    if (descendants.has(uid)) return descendants.get(uid);
+    const node = nodes.get(uid);
+    if (!node) return [];
+    const clusters = node.children?.length
+      ? node.children.flatMap(collect)
+      : [node.cluster];
+    descendants.set(uid, clusters);
+    return clusters;
+  };
+  for (const node of tree.nodes) {
+    const clusters = collect(node.uid);
+    if (!clusters.length || clusters.some((uid) => !positions.has(uid))) return false;
+    const indices = clusters.map((uid) => positions.get(uid));
+    if (Math.max(...indices) - Math.min(...indices) + 1 !== indices.length) return false;
+  }
+  return order.length === positions.size && positions.size === descendants.get(tree.root)?.length;
+}
+
+/** Keep the tree in its base position until a dragged label reaches a leaf. */
+function treeLeafX(tree, proposedX, dragging = false) {
+  if (!tree || typeof tree !== "object") return proposedX;
+  if (!dragging || !leafXAnchors.has(tree)) leafXAnchors.set(tree, proposedX);
+  return Math.min(proposedX, leafXAnchors.get(tree));
+}
+
+function niceScaleValue(maxDistance) {
+  const target = maxDistance / 4;
+  const power = 10 ** Math.floor(Math.log10(target));
+  const fraction = target / power;
+  const multiplier = fraction >= 5 ? 5 : fraction >= 2 ? 2 : 1;
+  const value = multiplier * power;
+  return { value, label: String(Number(value.toPrecision(2))) };
+}
+
+/** Lay out branch x positions using lengths when every edge has one. */
+function treeHorizontalLayout(tree, leafX, width, useBranchLengths = true) {
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const distances = new Map([[tree.root, 0]]);
+  const depths = new Map([[tree.root, 0]]);
+  const visit = (uid) => {
+    const node = nodes.get(uid);
+    for (const childUid of node.children || []) {
+      const child = nodes.get(childUid);
+      distances.set(childUid, distances.get(uid) + (Number(child.branchLength) || 0));
+      depths.set(childUid, depths.get(uid) + 1);
+      visit(childUid);
+    }
+  };
+  visit(tree.root);
+  const maxDepth = Math.max(...depths.values());
+  const maxDistance = Math.max(...tree.nodes
+    .filter((node) => !node.children)
+    .map((node) => distances.get(node.uid) || 0));
+  const completeLengths = tree.nodes
+    .filter((node) => node.uid !== tree.root)
+    .every((node) => Number.isFinite(node.branchLength));
+  const proportional = useBranchLengths && completeLengths && maxDistance > 0;
+  const leftX = leafX - width;
+  const xs = new Map();
+  for (const node of tree.nodes) {
+    const position = proportional
+      ? (distances.get(node.uid) / maxDistance) * width
+      : (depths.get(node.uid) / Math.max(1, maxDepth)) * width;
+    xs.set(node.uid, leftX + position);
+  }
+  if (proportional) {
+    const scale = niceScaleValue(maxDistance);
+    return {
+      xs,
+      maxDepth,
+      maxDistance,
+      proportional,
+      scaleBarLength: (scale.value / maxDistance) * width,
+      scaleBarLabel: scale.label,
+    };
+  }
+  return {
+    xs,
+    maxDepth,
+    maxDistance,
+    proportional,
+    scaleBarLength: width / Math.max(1, maxDepth),
+    scaleBarLabel: "1 branch",
+  };
+}
+
+/** Place the tree as far right as possible without leaf tips reaching labels. */
+function treeLeafAnchorX(tree, labelStarts, width, relative, clearance = 16) {
+  if (!tree || !labelStarts?.size) return 0;
+  let anchor = Infinity;
+  for (const node of tree.nodes) {
+    if (node.children?.length) continue;
+    const labelStart = labelStarts.get(node.cluster);
+    if (!Number.isFinite(labelStart)) continue;
+    anchor = Math.min(anchor, labelStart - clearance + width - relative.get(node.uid));
+  }
+  return Number.isFinite(anchor) ? anchor : 0;
+}
+
+function treeNodeYPositions(tree, scene, leafY = (node, sourceScene) =>
+  sourceScene.clusters.get(node.cluster)?.y ?? 0
+) {
+  if (!tree || !scene) return new Map();
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const positions = new Map();
+  const yFor = (uid) => {
+    if (positions.has(uid)) return positions.get(uid);
+    const node = nodes.get(uid);
+    const children = (node.children || []).map(yFor);
+    const y = children.length
+      ? (Math.min(...children) + Math.max(...children)) / 2
+      : leafY(node, scene);
+    positions.set(uid, y);
+    return y;
+  };
+  yFor(tree.root);
+  return positions;
+}
+
+/**
+ * Build renderer-neutral tree marks after the adapter has measured labels.
+ * scene supplies displayed label positions; targetScene supplies final row
+ * positions during a retained-scene animation. Keeping these separate prevents
+ * an interpolated scene from applying the tree motion a second time.
+ */
+function layoutTree({
+  tree,
+  scene,
+  config,
+  measureLabel,
+  preview = null,
+  previousTree = null,
+  previousScene = null,
+  targetScene = scene,
+  dragging = preview?.type === "cluster-drag",
+  trackAnchor = true,
+}) {
+  if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
+  const labelStarts = new Map();
+  for (const cluster of scene.clusters.values()) {
+    const uid = cluster.source.uid;
+    const text = clusterLabelTextForPreview(preview, uid, cluster.info.locusText || "");
+    labelStarts.set(uid, cluster.x + cluster.info.x +
+      clusterLabelOffsetForPreview(preview, uid) - measureLabel(cluster, text));
+  }
+  const width = Number(config.tree.width) || 100;
+  const horizontal = treeHorizontalLayout(tree, width, width, config.tree.useBranchLengths !== false);
+  const proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
+  const leafX = trackAnchor ? treeLeafX(tree, proposedX, dragging) : proposedX;
+  const xs = new Map([...horizontal.xs].map(([uid, x]) => [uid, x + leafX - width]));
+  const leafY = (node, sourceScene) =>
+    (sourceScene.clusters.get(node.cluster)?.y ?? 0) +
+    config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2 +
+    clusterOffsetForPreview(preview, node.cluster);
+  const ys = treeNodeYPositions(tree, targetScene, leafY);
+  const previousYs = previousTree && previousScene
+    ? treeNodeYPositions(previousTree, previousScene, leafY)
+    : null;
+  const branch = {
+    colour: config.tree.branch?.colour || "#555",
+    width: Number(config.tree.branch?.width) || 1.5,
+  };
+  const guide = {
+    colour: config.tree.leafGuide?.colour || "#999",
+    width: Number(config.tree.leafGuide?.width) || 1,
+    dash: String(config.tree.leafGuide?.dash || "4 3").split(/[ ,]+/).map(Number).filter(Number.isFinite),
+  };
+  const support = {
+    fontSize: Number(config.tree.support?.fontSize) || 9,
+    fontFamily: config.plot.fontFamily,
+    colour: branch.colour,
+  };
+  const rootX = xs.get(tree.root);
+  const branches = [];
+  const stems = [];
+  const nodes = [];
+  const guides = [];
+  const supports = [];
+  for (const node of tree.nodes) {
+    const x = xs.get(node.uid);
+    if (node.children?.length) {
+      nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
+      if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children });
+      for (const child of node.children) {
+        branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child) });
+      }
+    } else if (config.tree.leafGuide?.show && Number.isFinite(labelStarts.get(node.cluster))) {
+      guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: labelStarts.get(node.cluster) });
+    }
+    if (node.uid !== tree.root && config.tree.support?.show && node.support) {
+      supports.push({
+        uid: node.uid,
+        x: x - 4,
+        text: Number(node.support.value).toFixed(config.tree.support.precision ?? 1),
+      });
+    }
+  }
+  let scaleBar = null;
+  if (config.tree.scaleBar?.show !== false) {
+    const style = scene.chrome?.scaleBar || config.scaleBar || {};
+    const height = Number(style.height) || 12;
+    const length = horizontal.scaleBarLength;
+    const y = scene.chrome?.scaleBar?.position?.y ??
+      Math.max(...[...scene.clusters.values()].map((cluster) => cluster.y)) +
+        config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight + 20;
+    scaleBar = {
+      colour: style.colour || "black",
+      strokeWidth: Number(style.strokeWidth ?? style.stroke) || 1,
+      fontSize: Number(style.fontSize) || 10,
+      fontFamily: style.fontFamily || config.plot.fontFamily,
+      lines: [
+        { x1: rootX, y1: y + height / 2, x2: rootX + length, y2: y + height / 2 },
+        { x1: rootX, y1: y, x2: rootX, y2: y + height },
+        { x1: rootX + length, y1: y, x2: rootX + length, y2: y + height },
+      ],
+      label: { x: rootX + length / 2, y: y + height + 5, text: config.tree.scaleBar?.label || horizontal.scaleBarLabel },
+    };
+  }
+  return positionTreeLayout({
+    branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
+    rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX },
+    ys, previousYs,
+  }, ys);
+}
+
+function positionTreeLayout(layout, ys) {
+  const line = (mark) => ({ ...mark, y1: ys.get(mark.nodeUid), y2: ys.get(mark.nodeUid) });
+  return {
+    ...layout,
+    rootBranch: line(layout.rootBranch),
+    branches: layout.branches.map(line),
+    stems: layout.stems.map((stem) => ({
+      ...stem,
+      y1: Math.min(...stem.children.map((uid) => ys.get(uid))),
+      y2: Math.max(...stem.children.map((uid) => ys.get(uid))),
+    })),
+    nodes: layout.nodes.map((node) => ({ ...node, y: ys.get(node.uid) })),
+    guides: layout.guides.map(line),
+    supports: layout.supports.map((label) => ({ ...label, y: ys.get(label.uid) - 4 })),
+  };
+}
+
+/** Interpolate node identities, then rebuild stems so swapped branches fold. */
+function interpolateTreeLayout(layout, progress = 1) {
+  if (!layout?.previousYs || progress >= 1) return layout;
+  const ys = new Map();
+  for (const [uid, target] of layout.ys) {
+    const from = layout.previousYs.get(uid) ?? target;
+    ys.set(uid, from + (target - from) * progress);
+  }
+  return positionTreeLayout(layout, ys);
+}
+
+function hitTestTreeNode(layout, point) {
+  for (const node of layout?.nodes || []) {
+    if (Math.hypot(point.x - node.x, point.y - node.y) <= node.hitRadius) {
+      return { action: "tree-node", nodeUid: node.uid };
+    }
+  }
+  return null;
+}
+
 function removeMissing(records, allowed) {
   for (const uid of records.keys()) if (!allowed.has(uid)) records.delete(uid);
 }
@@ -3938,7 +4634,7 @@ function createChartState(data, previous = null) {
   const clusterIdSet = new Set(clusterIds);
   const previousOrder = previous?.clusterOrder || [];
   const previousOrderSet = new Set(previousOrder);
-  const clusterOrder = [
+  const clusterOrder = data.tree ? treeClusterOrder(data.tree) : [
     ...previousOrder.filter((uid) => clusterIdSet.has(uid)),
     ...clusterIds.filter((uid) => !previousOrderSet.has(uid)),
   ];
@@ -3994,6 +4690,36 @@ function createChartState(data, previous = null) {
   removeMissing(preview.clusterPositions, clusterIdSet);
   removeMissing(preview.loci, locusIds);
   return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview };
+}
+
+function treeClusterOrder(tree) {
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const result = [];
+  const visit = (uid) => {
+    const node = nodes.get(uid);
+    if (node.children) node.children.forEach(visit);
+    else result.push(node.cluster);
+  };
+  visit(tree.root);
+  return result;
+}
+
+/** Commit a compatible display order to the tree's ordered child arrays. */
+function setTreeClusterOrder(tree, order) {
+  if (!tree) return;
+  if (!isTreeOrderCompatible(tree, order)) {
+    throw new TypeError("Cluster order must keep every tree clade contiguous.");
+  }
+  const positions = new Map(order.map((uid, index) => [uid, index]));
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const firstPosition = (uid) => {
+    const node = nodes.get(uid);
+    if (!node.children) return positions.get(node.cluster);
+    const first = new Map(node.children.map((child) => [child, firstPosition(child)]));
+    node.children.sort((a, b) => first.get(a) - first.get(b));
+    return first.get(node.children[0]);
+  };
+  firstPosition(tree.root);
 }
 
 function isDragging(chartState) {
@@ -4416,6 +5142,7 @@ function normalizeLocus(locus, clusterUid) {
 
 function normalizeChartData(data) {
   const source = cloneDataValue(data);
+  if (source.tree != null) validateTree(source.tree, source.clusters);
   return {
     ...source,
     clusters: source.clusters.map((cluster) => ({
@@ -4428,6 +5155,60 @@ function normalizeChartData(data) {
       genes: group.genes ? [...group.genes] : group.genes,
     })),
   };
+}
+
+function validateTree(tree, clusters) {
+  const fail = (message) => { throw new TypeError(`Invalid tree: ${message}`); };
+  if (!tree || typeof tree !== "object" || !Array.isArray(tree.nodes)) fail("expected an object with nodes.");
+  if (tree.rooted != null && typeof tree.rooted !== "boolean") fail("rooted must be a boolean or null.");
+  const nodes = new Map();
+  for (const node of tree.nodes) {
+    if (!node || typeof node.uid !== "string" || !node.uid.trim()) fail("node IDs must be non-empty strings.");
+    if (nodes.has(node.uid)) fail(`duplicate node ID '${node.uid}'.`);
+    nodes.set(node.uid, node);
+  }
+  if (!nodes.has(tree.root)) fail(`root '${tree.root}' does not exist.`);
+  const clusterIds = new Set(clusters.map(({ uid }) => uid));
+  const seenClusters = new Set();
+  const visited = new Set();
+  const visiting = new Set();
+  const visit = (uid, root = false) => {
+    if (visiting.has(uid)) fail(`cycle at node '${uid}'.`);
+    if (visited.has(uid)) fail(`node '${uid}' has more than one parent.`);
+    const node = nodes.get(uid);
+    if (!node) fail(`child '${uid}' does not exist.`);
+    if (node.label !== undefined && typeof node.label !== "string") fail(`label for '${uid}' must be text.`);
+    if (root && (node.branchLength !== undefined || node.support !== undefined)) fail("the root cannot have branchLength or support.");
+    if (node.branchLength !== undefined && (!Number.isFinite(node.branchLength) || node.branchLength < 0)) fail(`branchLength for '${uid}' must be finite and non-negative.`);
+    if (node.support !== undefined) {
+      const support = node.support;
+      if (!support || typeof support !== "object" || Array.isArray(support) || !Number.isFinite(support.value)) {
+        fail(`support for '${uid}' must be an object with a finite value.`);
+      }
+      if (support.scale !== undefined && !["percent", "proportion", "unspecified"].includes(support.scale)) {
+        fail(`support scale for '${uid}' must be percent, proportion or unspecified.`);
+      }
+      if ((support.scale === "percent" && (support.value < 0 || support.value > 100)) ||
+          (support.scale === "proportion" && (support.value < 0 || support.value > 1))) {
+        fail(`support for '${uid}' is outside its ${support.scale} scale.`);
+      }
+      if (support.type !== undefined && typeof support.type !== "string") fail(`support type for '${uid}' must be text.`);
+    }
+    visiting.add(uid);
+    if (node.children !== undefined) {
+      if (!Array.isArray(node.children) || !node.children.length || node.cluster !== undefined) fail(`internal node '${uid}' must have children and no cluster.`);
+      for (const child of node.children) visit(child);
+    } else {
+      if (!node.cluster || !clusterIds.has(node.cluster)) fail(`leaf '${uid}' must reference an existing cluster.`);
+      if (seenClusters.has(node.cluster)) fail(`cluster '${node.cluster}' is referenced more than once.`);
+      seenClusters.add(node.cluster);
+    }
+    visiting.delete(uid); visited.add(uid);
+  };
+  visit(tree.root, true);
+  if (visited.size !== nodes.size) fail("all nodes must be reachable from the root.");
+  if (seenClusters.size !== clusterIds.size) fail("every plotted cluster must be referenced by exactly one leaf.");
+  return tree;
 }
 
 // Public editing operations deliberately distinguish presentation updates from
@@ -5001,6 +5782,7 @@ function createInteractionController({
   clusterRows,
   getClusterOrder,
   getClusterPosition,
+  getTree = () => null,
   getLocusOffset,
   selectedLocusIds = () => [],
   selectedClusterIds = () => [],
@@ -5030,9 +5812,24 @@ function createInteractionController({
       const uids = selected.has(uid)
         ? order.filter((clusterUid) => selected.has(clusterUid))
         : [uid];
+      const remaining = order.filter((clusterUid) => !uids.includes(clusterUid));
+      const draggedIndex = uids.indexOf(uid);
+      const legalInsertions = [];
+      for (let insertion = 0; insertion <= remaining.length; insertion += 1) {
+        const candidate = [
+          ...remaining.slice(0, insertion),
+          ...uids,
+          ...remaining.slice(insertion),
+        ];
+        if (isTreeOrderCompatible(getTree(), candidate)) legalInsertions.push(insertion);
+      }
       clusterDrag = {
         uid,
         uids,
+        draggedIndex,
+        legalInsertions,
+        baseOrder: order,
+        blocked: legalInsertions.length === 0,
         selected: new Set(uids),
         order,
         positions: new Map(uids.map((clusterUid) => [
@@ -5046,26 +5843,47 @@ function createInteractionController({
 
     moveClusterDrag(pointerY) {
       if (!clusterDrag) return;
+      if (clusterDrag.blocked) return;
       const range = clusterRows();
-      const y = clamp(pointerY + clusterDrag.pointerOffset, [range[0], range.at(-1)]);
-      const targetIndex = range.reduce(
-        (closest, position, index) =>
-          Math.abs(position - y) < Math.abs(range[closest] - y) ? index : closest,
-        0
-      );
-      const currentIndex = clusterDrag.order.indexOf(clusterDrag.uid);
-      let order = null;
-      if (targetIndex !== currentIndex) {
-        const selectedIndex = clusterDrag.uids.indexOf(clusterDrag.uid);
-        const remaining = clusterDrag.order.filter((uid) => !clusterDrag.selected.has(uid));
-        const insertionIndex = clamp(targetIndex - selectedIndex, [0, remaining.length]);
-        order = [
-          ...remaining.slice(0, insertionIndex),
-          ...clusterDrag.uids,
-          ...remaining.slice(insertionIndex),
-        ];
-        clusterDrag.order = order;
-      }
+      const selectedYs = [...clusterDrag.positions.values()];
+      const anchorY = clusterDrag.positions.get(clusterDrag.uid);
+      const rowMin = Math.min(...range);
+      const rowMax = Math.max(...range);
+      const extentMin = rowMin + anchorY - Math.min(...selectedYs);
+      const extentMax = rowMax - (Math.max(...selectedYs) - anchorY);
+      const legalTargets = clusterDrag.legalInsertions.map((insertion) => ({
+        insertion,
+        index: insertion + clusterDrag.draggedIndex,
+        y: range[insertion + clusterDrag.draggedIndex],
+      })).filter((candidate) => candidate.y >= extentMin && candidate.y <= extentMax);
+      if (!legalTargets.length) return;
+      const legalMin = Math.min(...legalTargets.map((candidate) => candidate.y));
+      const legalMax = Math.max(...legalTargets.map((candidate) => candidate.y));
+      // Keep the whole selected set inside the plot and stop at the first or
+      // last tree-compatible insertion. Using only the dragged row's range
+      // lets a multi-row selection overrun either boundary.
+      const allowedY = [Math.max(legalMin, extentMin), Math.min(legalMax, extentMax)];
+      const rawY = clamp(pointerY + clusterDrag.pointerOffset, allowedY);
+      const target = legalTargets.reduce((closest, candidate) =>
+        Math.abs(candidate.y - rawY) < Math.abs(closest.y - rawY) ? candidate : closest
+      , legalTargets[0]);
+      const previous = legalTargets
+        .filter((candidate) => candidate.y < target.y)
+        .at(-1);
+      const next = legalTargets.find((candidate) => candidate.y > target.y);
+      const minY = previous ? (previous.y + target.y) / 2 : legalMin;
+      const maxY = next ? (next.y + target.y) / 2 : legalMax;
+      const y = clamp(rawY, [
+        Math.max(Math.min(minY, maxY), allowedY[0]),
+        Math.min(Math.max(minY, maxY), allowedY[1]),
+      ]);
+      const remaining = clusterDrag.baseOrder.filter((uid) => !clusterDrag.selected.has(uid));
+      const order = [
+        ...remaining.slice(0, target.insertion),
+        ...clusterDrag.uids,
+        ...remaining.slice(target.insertion),
+      ];
+      clusterDrag.order = order;
       const delta = y - clusterDrag.positions.get(clusterDrag.uid);
       const positions = new Map(
         [...clusterDrag.positions].map(([uid, position]) => [uid, position + delta])
@@ -5404,431 +6222,6 @@ function hitTest(scene, point) {
   return null;
 }
 
-function formatLength(length) {
-  const rounded = Math.round(length);
-  if (rounded >= 1000) {
-    const kilobases = rounded / 1000;
-    return `${Number(kilobases.toFixed(kilobases >= 10 ? 0 : 1))} kb`;
-  }
-  return `${rounded} bp`;
-}
-
-function featureText(count) {
-  return `${count} ${count === 1 ? "feature" : "features"}`;
-}
-
-function boundedNumber(value, fallback, minimum, maximum) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
-}
-
-/**
- * Shared text metrics for layout and renderers. The width estimate only
- * chooses collision lanes; the renderer remains the source of exact glyph
- * placement.
- */
-function resolveTrimIndicatorStyle(style = {}) {
-  const fontSize = boundedNumber(style.fontSize, 10, 6, 48);
-  const fontWeight = boundedNumber(style.fontWeight, 600, 100, 900);
-  return {
-    fontSize,
-    fontWeight,
-    borderWidth: boundedNumber(style.borderWidth, 3, 0, 12),
-    borderOpacity: boundedNumber(style.borderOpacity, 1, 0, 1),
-    lineHeight: Math.ceil(fontSize * 1.2),
-    characterWidth: fontSize * (fontWeight >= 600 ? 0.6 : 0.56),
-  };
-}
-
-function indicatorBounds(locus, indicator, metrics) {
-  const width = indicator.text.length * metrics.characterWidth;
-  const x = locus.x + indicator.x;
-  const left = indicator.anchor === "end" ? x - width : x;
-  return {
-    left: left - 2,
-    right: left + width + 2,
-    top: locus.y + indicator.y - 1,
-    bottom: locus.y + indicator.y + metrics.fontSize + 1,
-  };
-}
-
-function overlaps(one, two) {
-  return (
-    one.left < two.right && one.right > two.left &&
-    one.top < two.bottom && one.bottom > two.top
-  );
-}
-
-/**
- * Assign the smallest non-overlapping vertical lane to every trim label.
- * This keeps both labels on one locus aligned whenever they fit, while also
- * preventing labels from separate loci in the same cluster from colliding.
- */
-function arrangeTrimIndicators(loci, replacements = new Map(), style = {}) {
-  const metrics = resolveTrimIndicatorStyle(style);
-  const arranged = new Map();
-  const placed = [];
-  for (const locus of [...loci].sort((one, two) => one.y - two.y || one.x - two.x)) {
-    const indicators = replacements.get(locus.source.uid) || locus.trimIndicators || [];
-    const positioned = [];
-    for (const indicator of indicators) {
-      const next = { ...indicator };
-      let bounds = indicatorBounds(locus, next, metrics);
-      while (placed.some((candidate) => overlaps(bounds, candidate))) {
-        next.y += metrics.lineHeight;
-        bounds = indicatorBounds(locus, next, metrics);
-      }
-      positioned.push(next);
-      placed.push(bounds);
-    }
-    arranged.set(locus.source.uid, positioned);
-  }
-  return arranged;
-}
-
-/**
- * Describe the hidden flanks of a trimmed locus in its local display space.
- * The resulting records are deliberately renderer-neutral: SVG can use them
- * as text nodes while Canvas and WebGPU's Canvas overlay draw the same labels.
- */
-function createTrimIndicators({ locus, state, getGeneState, scaleX, shape = {} }) {
-  if (!locus || !state) return [];
-  const start = Number(state.start);
-  const end = Number(state.end);
-  const fullStart = Number(locus.start);
-  const fullEnd = Number(locus.end);
-  if (![start, end, fullStart, fullEnd].every(Number.isFinite)) return [];
-
-  const genes = locus.genes || [];
-  const countBefore = (boundary) =>
-    genes.filter((gene) => Number(getGeneState(gene)?.end) <= boundary).length;
-  const countAfter = (boundary) =>
-    genes.filter((gene) => Number(getGeneState(gene)?.start) >= boundary).length;
-  const y = (shape.tipHeight || 0) * 2 + (shape.bodyHeight || 0) + 4;
-  const indicators = [];
-
-  if (start > fullStart) {
-    indicators.push({
-      side: "left",
-      x: scaleX(start) + 3,
-      y,
-      anchor: "start",
-      text: `← ${formatLength(start - fullStart)} · ${featureText(countBefore(start))}`,
-    });
-  }
-  if (end < fullEnd) {
-    indicators.push({
-      side: "right",
-      x: scaleX(end) - 3,
-      y,
-      anchor: "end",
-      text: `${featureText(countAfter(end))} · ${formatLength(fullEnd - end)} →`,
-    });
-  }
-  return indicators;
-}
-
-function minStart(loci, startFor) {
-  return Math.min(...loci.map(startFor));
-}
-
-function clusterUidForLocus(locus) {
-  return locus.cluster?.uid ?? locus.cluster?.source?.uid ?? locus.source.clusterUid;
-}
-
-function clusterLabelOffsetsForStarts(
-  scene,
-  startFor,
-  alignLabels,
-  affectedClusters = scene.clusters.values()
-) {
-  const offsets = new Map();
-  if (alignLabels) {
-    const loci = [...scene.loci.values()];
-    const offset = minStart(loci, startFor) - minStart(loci, (locus) => locus.worldStart);
-    for (const cluster of scene.clusters.values()) offsets.set(cluster.source.uid, offset);
-    return offsets;
-  }
-  for (const cluster of affectedClusters) {
-    offsets.set(
-      cluster.source.uid,
-      minStart(cluster.loci, startFor) - minStart(cluster.loci, (locus) => locus.worldStart)
-    );
-  }
-  return offsets;
-}
-
-function chromeForPreview(scene, maxX) {
-  if (!scene.chrome) return null;
-  return {
-    ...scene.chrome,
-    legend: {
-      ...scene.chrome.legend,
-      position: {
-        ...scene.chrome.legend.position,
-        x:
-          scene.chrome.legend.placement === "bottom"
-            ? scene.chrome.legend.position.x
-            : scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
-      },
-    },
-  };
-}
-
-/**
- * Describe a transient locus translation relative to an already projected
- * scene. This is deliberately a sparse, renderer-neutral patch: it avoids
- * rebuilding the scene while a drag is in progress.
- */
-function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels }) {
-  const locus = scene.loci.get(locusUid);
-  if (!locus) return null;
-  const offsetX = offset - locus.localX;
-  const startFor = (candidate) =>
-    candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart;
-  const endFor = (candidate) =>
-    candidate.source.uid === locusUid ? candidate.worldEnd + offsetX : candidate.worldEnd;
-  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
-
-  return {
-    type: "locus-offset",
-    locusUid,
-    offsetX,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, [
-      scene.clusters.get(locus.cluster.uid),
-    ]),
-    chrome: chromeForPreview(scene, maxX),
-  };
-}
-
-/** Describe several transient locus translations without rebuilding the scene. */
-function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
-  const locusOffsets = new Map();
-  const affectedClusters = new Set();
-  for (const [locusUid, offset] of offsets) {
-    const locus = scene.loci.get(locusUid);
-    if (!locus) continue;
-    locusOffsets.set(locusUid, offset - locus.localX);
-    const cluster = scene.clusters.get(locus.cluster.uid);
-    if (cluster) affectedClusters.add(cluster);
-  }
-  if (!locusOffsets.size) return null;
-  const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
-  const startFor = (candidate) => candidate.worldStart + offsetFor(candidate);
-  const endFor = (candidate) => candidate.worldEnd + offsetFor(candidate);
-  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
-  return {
-    type: "locus-offsets",
-    locusOffsets,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(
-      scene,
-      startFor,
-      alignLabels,
-      affectedClusters
-    ),
-    chrome: chromeForPreview(scene, maxX),
-  };
-}
-
-/**
- * Describe a transient trim using the current scene and updated locus-scale
- * offsets. The controller updates scales (but not the scene) before calling
- * this, so sibling loci retain their correct packed positions without a full
- * data-to-scene projection for every pointer event.
- */
-function createLocusTrimPreview(
-  scene,
-  locusUid,
-  state,
-  { localXFor, scaleX, alignLabels, shape, trimIndicatorStyle = {}, clusterLabelText = null }
-) {
-  const locus = scene.loci.get(locusUid);
-  if (!locus) return null;
-
-  const locusOffsets = new Map();
-  for (const candidate of scene.loci.values()) {
-    locusOffsets.set(candidate.source.uid, localXFor(candidate.source.uid) - candidate.localX);
-  }
-  const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
-  const trimmed = {
-    worldStart: locus.x + offsetFor(locus) + scaleX(state.start),
-    worldEnd: locus.x + offsetFor(locus) + scaleX(state.end),
-    track: {
-      ...locus.track,
-      x1: scaleX(state.start),
-      x2: scaleX(state.end),
-    },
-    hover: {
-      ...locus.hover,
-      x: scaleX(state.start),
-      width: scaleX(state.end) - scaleX(state.start),
-      leftHandleX: scaleX(state.start) - 8,
-      rightHandleX: scaleX(state.end),
-    },
-    trimIndicators: createTrimIndicators({
-      locus: locus.source,
-      state,
-      getGeneState: (gene) => scene.genes.get(gene.uid)?.display || gene,
-      scaleX,
-      shape,
-    }),
-  };
-  const locusGeometry = new Map([[locusUid, trimmed]]);
-  const arrangedTrimIndicators = arrangeTrimIndicators(
-    scene.loci.values(),
-    new Map([[locusUid, trimmed.trimIndicators]]),
-    trimIndicatorStyle
-  );
-  trimmed.trimIndicators = arrangedTrimIndicators.get(locusUid) || [];
-  const startFor = (candidate) =>
-    candidate.source.uid === locusUid
-      ? trimmed.worldStart
-      : candidate.worldStart + offsetFor(candidate);
-  const endFor = (candidate) =>
-    candidate.source.uid === locusUid
-      ? trimmed.worldEnd
-      : candidate.worldEnd + offsetFor(candidate);
-  const geneVisibility = new Map();
-  for (const gene of scene.genes.values()) {
-    if (gene.locus.source.uid !== locusUid) continue;
-    geneVisibility.set(
-      gene.source.uid,
-      gene.display.start >= state.start && gene.display.end <= state.end + 1
-    );
-  }
-
-  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
-  return {
-    type: "locus-trim",
-    locusUid,
-    locusOffsets,
-    loci: locusGeometry,
-    geneVisibility,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels),
-    ...(clusterLabelText === null
-      ? {}
-      : {
-          clusterLabelTexts: new Map([[
-            clusterUidForLocus(locus),
-            clusterLabelText,
-          ]]),
-        }),
-    chrome: chromeForPreview(scene, maxX),
-  };
-}
-
-// Preview patches carry layout deltas rather than cloned scenes. These
-// accessors are deliberately renderer-neutral so SVG-adjacent Canvas chrome
-// and dense WebGPU marks apply exactly the same locus and cluster movement.
-function locusOffsetForPreview(preview, locusUid) {
-  if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
-  return preview?.type === "locus-offset" && preview.locusUid === locusUid
-    ? preview.offsetX
-    : 0;
-}
-
-function clusterLabelOffsetForPreview(preview, clusterUid) {
-  return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
-}
-
-function clusterLabelTextForPreview(preview, clusterUid, fallback) {
-  return preview?.clusterLabelTexts?.get(clusterUid) ?? fallback;
-}
-
-function clusterOffsetForPreview(preview, clusterUid) {
-  return preview?.clusterOffsets?.get(clusterUid) || 0;
-}
-
-function previewOffsetsForLocus(preview, locus) {
-  if (!preview || !locus) return { x: 0, y: 0 };
-  return {
-    x: locusOffsetForPreview(preview, locus.source?.uid),
-    y: clusterOffsetForPreview(preview, locus.cluster?.uid ?? locus.source?.clusterUid),
-  };
-}
-
-function locusGeometryForPreview(preview, locus) {
-  if (preview?.type === "locus-flip") {
-    const axis = preview.axes?.get(locus.source.uid);
-    if (axis !== undefined) {
-      const flip = (x) => x + (axis * 2 - x - x) * preview.progress;
-      const start = flip(locus.worldStart);
-      const end = flip(locus.worldEnd);
-      const hoverStart = flip(locus.x + locus.hover.x);
-      const hoverEnd = flip(locus.x + locus.hover.x + locus.hover.width);
-      const left = Math.min(start, end);
-      const right = Math.max(start, end);
-      return {
-        offsets: previewOffsetsForLocus(preview, locus),
-        worldStart: left,
-        worldEnd: right,
-        track: {
-          ...locus.track,
-          x1: flip(locus.x + locus.track.x1) - locus.x,
-          x2: flip(locus.x + locus.track.x2) - locus.x,
-        },
-        hover: {
-          ...locus.hover,
-          x: Math.min(hoverStart, hoverEnd) - locus.x,
-          width: Math.abs(hoverEnd - hoverStart),
-          leftHandleX: left - locus.x - 8,
-          rightHandleX: right - locus.x,
-        },
-      };
-    }
-  }
-  const trimmed = preview?.loci?.get(locus.source.uid);
-  return {
-    offsets: previewOffsetsForLocus(preview, locus),
-    ...(trimmed || {}),
-  };
-}
-
-function geneVisibleForPreview(preview, gene) {
-  return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
-}
-
-/** Describe flip frames without re-projecting the chart. */
-function createLocusFlipPreview(
-  scene,
-  locusUid,
-  { progress = 0, clusterLabelText = null } = {}
-) {
-  const locus = scene.loci.get(locusUid);
-  if (!locus) return null;
-  return {
-    type: "locus-flip",
-    locusUid,
-    progress,
-    ...(clusterLabelText === null
-      ? {}
-      : {
-          clusterLabelTexts: new Map([[
-            clusterUidForLocus(locus),
-            clusterLabelText,
-          ]]),
-        }),
-    // The projected bounds reflect the currently displayed locus, including
-    // any committed trim. Source coordinates describe the original record and
-    // must not determine the transient flip axis.
-    axes: new Map([[locusUid, (locus.worldStart + locus.worldEnd) / 2]]),
-  };
-}
-
-/** Describe temporary cluster rows without rebuilding a scene. */
-function createClusterDragPreview(scene, { clusterUid, position, positions, order, rows }) {
-  const clusterOffsets = new Map();
-  const clusterOrder = new Map();
-  for (const [index, uid] of order.entries()) {
-    const cluster = scene.clusters.get(uid);
-    if (!cluster) continue;
-    const y = positions?.get(uid) ?? (uid === clusterUid ? position : rows[index]);
-    clusterOffsets.set(uid, y - cluster.y);
-    clusterOrder.set(uid, index);
-  }
-  return { type: "cluster-drag", clusterUid, clusterOffsets, clusterOrder };
-}
-
 function getGenePolygonCoordinates(gene, { scaleX, shape }) {
   const scaledStart = scaleX(gene.start);
   const scaledEnd = scaleX(gene.end);
@@ -5961,6 +6354,30 @@ function getLinkAnchors(
     : [ax1, ax2, ay, bx1, bx2, by];
 }
 
+function interpolateLinkOpacity(previous, next, amount, enabled = true) {
+  const isRenderable = (link) => Boolean(enabled && link?.visible && link?.anchors);
+  const from = isRenderable(previous) ? 1 : 0;
+  const to = isRenderable(next) ? 1 : 0;
+  return from + (to - from) * amount;
+}
+
+function interpolateLinkAnchors(previousScene, previous, nextScene, next, amount) {
+  const inQueryOrder = (scene, link) => {
+    if (!link?.anchors) return null;
+    const query = scene?.genes.get(link.source.query.uid);
+    const queryY = query?.locus?.y;
+    if (!Number.isFinite(queryY)) return link.anchors;
+    const anchors = link.anchors;
+    const queryFirst = Math.abs(anchors[2] - queryY) <= Math.abs(anchors[5] - queryY);
+    return queryFirst ? anchors : [anchors[3], anchors[4], anchors[5], anchors[0], anchors[1], anchors[2]];
+  };
+  const from = inQueryOrder(previousScene, previous);
+  const to = inQueryOrder(nextScene, next);
+  if (!from) return to;
+  if (!to) return from;
+  return to.map((value, index) => from[index] + (value - from[index]) * amount);
+}
+
 function getLinkLabelPosition(
   [ax1, ax2, ay, bx1, bx2, by],
   position
@@ -5969,7 +6386,7 @@ function getLinkLabelPosition(
   const bMid = bx1 + (bx2 - bx1) / 2;
   return {
     x: aMid + (bMid - aMid) * position,
-    y: ay + Math.abs(by - ay) * position,
+    y: ay + (by - ay) * position,
   };
 }
 
@@ -5978,7 +6395,7 @@ function linkPathCommands(anchors, { asLine = false, straight = false } = {}) {
   const [ax1, ax2, ay, bx1, bx2, by] = anchors;
   const aMid = ax1 + (ax2 - ax1) / 2;
   const bMid = bx1 + (bx2 - bx1) / 2;
-  const middle = ay + Math.abs(by - ay) / 2;
+  const middle = ay + (by - ay) / 2;
   if (asLine) {
     return straight
       ? [["M", aMid, ay], ["L", bMid, by]]
@@ -6012,7 +6429,7 @@ function traceLinkPath(context, anchors, style) {
 function sampleLinkGeometry(anchors, { asLine = false, straight = false, segments = 10 } = {}) {
   if (!anchors) return { asLine, upper: [], lower: [], line: [] };
   const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  const middle = ay + Math.abs(by - ay) / 2;
+  const middle = ay + (by - ay) / 2;
   const pointFor = (startX, endX, amount) => straight
     ? [startX + (endX - startX) * amount, ay + (by - ay) * amount]
     : [
@@ -7046,6 +7463,73 @@ function patchAnchoredGeneScene(
   };
 }
 
+/** Canvas owns text metrics; all tree geometry comes from the shared layout. */
+function layoutCanvasTree(context, tree, scene, config, options = {}) {
+  if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
+  context.save();
+  try {
+    return layoutTree({
+      ...options,
+      tree, scene, config,
+      measureLabel: (cluster, locusText) => {
+        context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
+        const nameWidth = context.measureText(cluster.source.name || "").width;
+        context.font = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
+        return Math.max(nameWidth, context.measureText(locusText).width);
+      },
+    });
+  } finally {
+    context.restore();
+  }
+}
+
+function traceLines(context, lines) {
+  context.beginPath();
+  for (const line of lines) {
+    context.moveTo(line.x1, line.y1);
+    context.lineTo(line.x2, line.y2);
+  }
+  context.stroke();
+}
+
+/** Paint an already positioned tree frame, also used by the WebGPU overlay. */
+function drawCanvasTree(context, layout) {
+  if (!layout) return;
+  context.save();
+  context.strokeStyle = layout.guide.colour;
+  context.lineWidth = layout.guide.width;
+  context.setLineDash(layout.guide.dash);
+  traceLines(context, layout.guides);
+  context.setLineDash([]);
+  context.strokeStyle = layout.branch.colour;
+  context.lineWidth = layout.branch.width;
+  traceLines(context, [layout.rootBranch, ...layout.stems, ...layout.branches]);
+  context.fillStyle = "white";
+  for (const node of layout.nodes) {
+    context.beginPath();
+    context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+  context.fillStyle = layout.support.colour;
+  context.textAlign = "right";
+  context.textBaseline = "bottom";
+  context.font = `${layout.support.fontSize}px ${layout.support.fontFamily}`;
+  for (const label of layout.supports) context.fillText(label.text, label.x, label.y);
+  if (layout.scaleBar) {
+    const bar = layout.scaleBar;
+    context.strokeStyle = bar.colour;
+    context.lineWidth = bar.strokeWidth;
+    traceLines(context, bar.lines);
+    context.fillStyle = "black";
+    context.font = `${bar.fontSize}px ${bar.fontFamily}`;
+    context.textAlign = "center";
+    context.textBaseline = "top";
+    context.fillText(bar.label.text, bar.label.x, bar.label.y);
+  }
+  context.restore();
+}
+
 /**
  * Choose Canvas backing-store resolution from the view scale.  This affects
  * only raster detail: the CSS canvas size and chart-world coordinates remain
@@ -7194,7 +7678,7 @@ function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
  * Scene layout deliberately records only renderer-neutral chrome extents; the
  * raster adapter owns glyph measurement for initial camera fitting.
  */
-function canvasFigureBounds(context, scene, config) {
+function canvasFigureBounds(context, scene, config, tree = null) {
   if (!scene?.bounds) return null;
   const bounds = { ...(scene.figureBounds || scene.bounds) };
   const include = (x, y) => {
@@ -7227,6 +7711,14 @@ function canvasFigureBounds(context, scene, config) {
       ),
       cluster.y + 24
     );
+  }
+  const treeLayout = layoutCanvasTree(context, tree, scene, config, { trackAnchor: false });
+  if (treeLayout) {
+    include(treeLayout.rootBranch.x1, treeLayout.rootBranch.y1);
+    if (treeLayout.scaleBar) {
+      const { label, fontSize } = treeLayout.scaleBar;
+      include(label.x, label.y + fontSize + 3);
+    }
   }
   if (scene.chrome?.legend.visible) {
     const { legend } = scene.chrome;
@@ -7336,10 +7828,24 @@ function chromeHit(context, scene, point) {
   return null;
 }
 
-function hitTestCanvas({ canvas, scene, camera, config, event }) {
+function hitTestCanvas({ canvas, scene, camera, config, event, tree = null, treeDragging = false }) {
   const point = canvasWorldPoint(canvas, event, camera);
   const context = canvas.getContext("2d");
-  return hitTest(scene, point) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
+  return hitTest(scene, point) || treeNodeHit(context, scene, point, config, tree, treeDragging) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
+}
+
+function treeNodeHit(context, scene, point, config, tree, dragging = false) {
+  return hitTestTreeNode(layoutCanvasTree(context, tree, scene, config, { dragging }), point);
+}
+
+function drawTree(context, tree, scene, config, preview, motion) {
+  const layout = layoutCanvasTree(context, tree, scene, config, {
+    preview,
+    previousTree: motion.previousTree,
+    previousScene: motion.previousScene,
+    targetScene: motion.targetScene || scene,
+  });
+  drawCanvasTree(context, interpolateTreeLayout(layout, motion.progress));
 }
 
 function polygon(context, points) {
@@ -7375,6 +7881,8 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   const visible = geometry.visible ?? layout.visible;
   const anchors = geometry.anchors ?? layout.anchors;
   if (!visible || !anchors) return;
+  context.save();
+  context.globalAlpha *= layout.opacity ?? 1;
   let [ax1, ax2, ay, bx1, bx2, by] = anchors;
   ax1 += geometry.a || 0;
   ax2 += geometry.a || 0;
@@ -7398,6 +7906,7 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   context.stroke();
 
   drawLinkLabel(context, layout, source, config, anchors, geometry);
+  context.restore();
 }
 
 function drawLinkHighlight(context, layout, source, config, geometry = {}) {
@@ -7954,10 +8463,17 @@ function interpolateCanvasScene(previous, scene, amount) {
   const links = new Map();
   for (const [uid, link] of scene.links) {
     const prior = previous.links.get(uid);
+    const opacity = interpolateLinkOpacity(prior, link, amount);
+    const anchors = interpolateLinkAnchors(previous, prior, scene, link, amount);
     links.set(uid, {
       ...link,
-      anchors: interpolateArray(prior?.anchors, link.anchors, amount),
+      // Retained scene link anchors are normalized upper-to-lower. During a
+      // row swap that reverses which endpoint is upper, so interpolate in
+      // stable query/target order to keep each end attached to its gene.
+      anchors,
       labelPosition: interpolatePosition(prior?.labelPosition, link.labelPosition, amount),
+      opacity,
+      visible: opacity > 0 && Boolean(prior?.visible || link.visible),
     });
   }
 
@@ -7968,7 +8484,12 @@ function interpolateCanvasScene(previous, scene, amount) {
 function renderCanvas({
   canvas,
   scene,
+  tree = null,
   previousScene = null,
+  previousTree = null,
+  previousTreeScene = null,
+  treeTargetScene = null,
+  treeProgress = 1,
   progress = 1,
   camera,
   config,
@@ -8073,6 +8594,12 @@ function renderCanvas({
     if (showLinks) drawLink(context, link, link.source, config, scales, geometry);
     else drawLinkLabel(context, link, link.source, config, anchors, geometry);
   }
+  drawTree(context, tree, displayScene, config, preview, {
+    previousTree,
+    previousScene: previousTreeScene,
+    targetScene: treeTargetScene || scene,
+    progress: treeProgress,
+  });
   if (highlightLinkIds?.size) {
     for (const uid of highlightLinkIds) {
       if (visible?.links && !visible.links.includes(uid)) continue;
@@ -8172,12 +8699,97 @@ function renderCanvas({
   return { width, height, pixelRatio };
 }
 
+function positionLines(selection, lines) {
+  selection.data(lines, (line) => line.uid)
+    .attr("x1", (line) => line.x1).attr("y1", (line) => line.y1)
+    .attr("x2", (line) => line.x2).attr("y2", (line) => line.y2);
+}
+
+function positionBranches(selection, lines) {
+  selection.data(lines, (line) => line.uid)
+    .attr("d", (line) => `M${line.x1},${line.y1}H${line.x2}`);
+}
+
+/** SVG owns DOM joins and transitions; the shared layout supplies every frame. */
+function renderSvgTree(plot, tree, scene, config, interactions, transition, animate, motion = {}) {
+  const labelWidths = new Map();
+  if (tree && config.tree?.show) {
+    for (const clusterGroup of plot.selectAll("g.cluster").nodes()) {
+      let width = 0;
+      for (const selector of ["text.clusterText", "text.locusText"]) {
+        try { width = Math.max(width, clusterGroup.querySelector(selector)?.getBBox().width || 0); }
+        catch { /* SVG text must be attached for measurement. */ }
+      }
+      labelWidths.set(clusterGroup.__data__.uid, width);
+    }
+  }
+  const layout = layoutTree({
+    tree, scene, config,
+    measureLabel: (cluster) => labelWidths.get(cluster.source.uid) || 0,
+    previousTree: motion.previousTree,
+    previousScene: motion.previousScene,
+    dragging: interactions.isDragging?.() || false,
+  });
+  const group = plot.selectAll("g.phylogenetic-tree").data(layout ? [layout] : []).join("g")
+    .attr("class", "phylogenetic-tree").interrupt();
+  if (!layout) return;
+  const branchMarks = (tag, className, records) => group.selectAll(`${tag}.${className}`)
+    .data(records, (mark) => mark.uid).join(tag).attr("class", className)
+    .attr("fill", "none").attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width);
+  const root = branchMarks("path", "tree-root-stub", [layout.rootBranch]);
+  const branches = branchMarks("path", "tree-branch", layout.branches);
+  const stems = branchMarks("line", "tree-stem", layout.stems);
+  const guides = group.selectAll("line.tree-leaf-guide").data(layout.guides, (guide) => guide.uid).join("line")
+    .attr("class", "tree-leaf-guide")
+    .attr("stroke", layout.guide.colour).attr("stroke-width", layout.guide.width)
+    .attr("stroke-dasharray", layout.guide.dash.join(" ")).attr("pointer-events", "none");
+  const nodes = group.selectAll("circle.tree-node").data(layout.nodes, (node) => node.uid).join("circle")
+    .attr("class", "tree-node").attr("r", (node) => node.radius)
+    .attr("fill", "white").attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width)
+    .attr("cursor", "pointer")
+    .on("click", (event, node) => { event.stopPropagation(); interactions.rotateTreeNode?.(node.uid); });
+  const supports = group.selectAll("text.tree-support").data(layout.supports, (label) => label.uid).join("text")
+    .attr("class", "tree-support").attr("fill", layout.support.colour)
+    .attr("font-size", `${layout.support.fontSize}px`).style("font-family", layout.support.fontFamily)
+    .attr("text-anchor", "end").attr("dominant-baseline", "text-after-edge")
+    .text((label) => label.text);
+  const scale = group.selectAll("g.tree-scale-bar").data(layout.scaleBar ? [layout.scaleBar] : []).join("g")
+    .attr("class", "tree-scale-bar");
+  scale.selectAll("line").data((bar) => bar.lines).join("line")
+    .attr("x1", (line) => line.x1).attr("y1", (line) => line.y1)
+    .attr("x2", (line) => line.x2).attr("y2", (line) => line.y2)
+    .attr("stroke", layout.scaleBar?.colour).attr("stroke-width", layout.scaleBar?.strokeWidth);
+  scale.selectAll("text").data((bar) => [bar.label]).join("text")
+    .attr("x", (label) => label.x).attr("y", (label) => label.y)
+    .attr("text-anchor", "middle").attr("dominant-baseline", "hanging")
+    // Match the existing SVG clustermap scale bar, whose font size uses pt.
+    .attr("font-size", `${layout.scaleBar?.fontSize}pt`).attr("font-family", layout.scaleBar?.fontFamily)
+    .attr("fill", "black").text((label) => label.text);
+  const paintFrame = (frame) => {
+    positionBranches(root, [frame.rootBranch]);
+    positionBranches(branches, frame.branches);
+    positionLines(stems, frame.stems);
+    positionLines(guides, frame.guides);
+    nodes.data(frame.nodes, (node) => node.uid).attr("cx", (node) => node.x).attr("cy", (node) => node.y);
+    supports.data(frame.supports, (label) => label.uid).attr("x", (label) => label.x).attr("y", (label) => label.y);
+  };
+  paintFrame(interpolateTreeLayout(layout, animate ? 0 : 1));
+  if (animate && layout.previousYs) {
+    // One shared frame per tick keeps stems, labels, and nodes on the same clock.
+    group.transition(transition).tween("tree.geometry", () =>
+      (amount) => paintFrame(interpolateTreeLayout(layout, amount)));
+  }
+}
+
 // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
 // host, camera viewport, and interaction state that causes a redraw.
 function renderSvg({
   plot,
   data,
   scene,
+  previousScene = null,
+  previousTree = null,
+  previousTreeScene = null,
   transition,
   animate,
   config,
@@ -8239,6 +8851,15 @@ function renderSvg({
       },
       (update) => update
     );
+
+  clusters.select("text.clusterText")
+    .attr("y", 8)
+    .attr("dominant-baseline", null)
+    .style("font-size", `${config.cluster.nameFontSize}px`);
+  clusters.select("text.locusText")
+    .attr("y", 12)
+    .attr("dominant-baseline", "hanging")
+    .style("font-size", `${config.cluster.lociFontSize}px`);
 
   // A cluster drag can leave an in-flight transform transition on sibling
   // rows. Cancel it before the scene supplies their snapped final positions.
@@ -8396,12 +9017,12 @@ function renderSvg({
           .style("fill", "white")
           .style("text-anchor", "middle")
           .style("font-family", config.plot.fontFamily);
-        return updateLinks(enter, scene, config, scales, ids, highlightLinkIds);
+        return updateLinks(enter, scene, previousScene, config, scales, ids, highlightLinkIds);
       },
       (update) =>
         update.call((selection) => {
           selection.classed("hidden", !config.link.show);
-          updateRender(selection).call(updateLinks, scene, config, scales, ids, highlightLinkIds);
+          updateRender(selection).call(updateLinks, scene, previousScene, config, scales, ids, highlightLinkIds);
         }),
       (exit) =>
         exit.call((selection) => {
@@ -8411,6 +9032,10 @@ function renderSvg({
     );
 
   renderChrome({ plot, chrome: scene.chrome, ids, interactions });
+  renderSvgTree(plot, data.tree, scene, config, interactions, transition, animate, {
+    previousTree,
+    previousScene: previousTreeScene,
+  });
 }
 
 function updateClusters(selection, scene, { labelsOnly = false } = {}) {
@@ -8607,7 +9232,7 @@ function updateGenes(selection, scene, config, scales, highlightGeneIds) {
   return selection;
 }
 
-function updateLinks(selection, scene, config, scales, ids, highlightLinkIds) {
+function updateLinks(selection, scene, previousScene, config, scales, ids, highlightLinkIds) {
   const linkLayout = (link) => scene.links.get(link.uid);
   const fill = (link) => {
     if (config.link.asLine) return "none";
@@ -8624,18 +9249,50 @@ function updateLinks(selection, scene, config, scales, ids, highlightLinkIds) {
     return config.link.asLine ? scales.score(link.identity) : "black";
   };
 
-  selection.attr("opacity", (link) =>
-    config.link.show && linkLayout(link)?.visible ? 1 : 0
+  const opacity = (link) => interpolateLinkOpacity(
+    previousScene?.links.get(link.uid),
+    linkLayout(link),
+    1,
+    config.link.show
   );
+  if (typeof selection.attrTween === "function") {
+    selection.attrTween("opacity", function (link) {
+      const previous = previousScene?.links.get(link.uid);
+      const next = linkLayout(link);
+      return (amount) => interpolateLinkOpacity(previous, next, amount, config.link.show);
+    });
+  } else {
+    selection.attr("opacity", opacity);
+  }
   selection
     .select("path.geneLink")
-    .attr("d", (link) => linkLayout(link)?.path || "")
+    .call((path) => {
+      if (typeof path.attrTween === "function") path.attrTween("d", function (link) {
+        const previous = previousScene?.links.get(link.uid);
+        const next = linkLayout(link);
+        return (amount) => getLinkPath(
+          interpolateLinkAnchors(previousScene, previous, scene, next, amount),
+          config.link
+        );
+      });
+      else path.attr("d", (link) => linkLayout(link)?.path || "");
+    })
     .style("fill", fill)
     .style("stroke", stroke)
     .style("stroke-width", `${config.link.strokeWidth}px`);
   selection
     .select("path.geneLinkHighlight")
-    .attr("d", (link) => linkLayout(link)?.path || "")
+    .call((path) => {
+      if (typeof path.attrTween === "function") path.attrTween("d", function (link) {
+        const previous = previousScene?.links.get(link.uid);
+        const next = linkLayout(link);
+        return (amount) => getLinkPath(
+          interpolateLinkAnchors(previousScene, previous, scene, next, amount),
+          config.link
+        );
+      });
+      else path.attr("d", (link) => linkLayout(link)?.path || "");
+    })
     .attr("display", (link) => (highlightLinkIds.has(link.uid) ? "inline" : "none"))
     .style("fill", config.link.asLine ? "none" : "rgba(22, 119, 255, 0.18)")
     .style("stroke", "#1677ff")
@@ -8944,6 +9601,7 @@ function createRasterMinimap({
 function cursorForTarget(target) {
   if (!target) return "grab";
   if (target.action === "move-cluster") return "grab";
+  if (target.action === "tree-node") return "pointer";
   if (target.action === "move-locus") return "move";
   if (target.action.startsWith("trim-locus")) return "ew-resize";
   return "pointer";
@@ -9008,6 +9666,8 @@ function createRasterInteraction({
       interactions.beginLocusTrim();
     } else if (target.action === "gene") {
       gesture = { action: target.action, geneUid: target.geneUid };
+    } else if (target.action === "tree-node") {
+      gesture = { action: target.action, nodeUid: target.nodeUid };
     } else if (target.action === "legend-colour") {
       actions.legendColour(event, target.group);
     } else if (target.action === "legend-text") {
@@ -9055,6 +9715,8 @@ function createRasterInteraction({
       else interactions.cancelLocusTrim();
     } else if (finished.action === "gene") {
       actions.geneClick(event, finished.geneUid);
+    } else if (finished.action === "tree-node") {
+      actions.rotateTreeNode?.(finished.nodeUid);
     }
     if (finished.moved) endMotion();
     updateAffordance(surface, targetForEvent(surface, event));
@@ -9258,6 +9920,13 @@ function exportChartSvg({
   if (!scene) throw new Error("Cannot export an SVG before the chart has rendered.");
   const namespace = "http://www.w3.org/2000/svg";
   const svgNode = documentRef.createElementNS(namespace, "svg");
+  // SVG text getBBox() is unreliable while the tree is detached. Attach it
+  // invisibly before rendering so tree/label spacing uses real text metrics.
+  select(documentRef.body)
+    .append(() => svgNode)
+    .style("position", "fixed")
+    .style("visibility", "hidden")
+    .style("pointer-events", "none");
   const defs = select(svgNode).append("defs");
   const filter = defs
     .append("filter")
@@ -9285,12 +9954,17 @@ function exportChartSvg({
   // Event listeners do not serialize, but hover/trim affordances would still
   // be visible as nodes in an exported publication figure.
   plot.selectAll("g.hover").remove();
-
-  select(documentRef.body)
-    .append(() => svgNode)
-    .style("position", "fixed")
-    .style("visibility", "hidden")
-    .style("pointer-events", "none");
+  // This is a static figure, so strip interaction affordances even when an
+  // element's cursor or pointer policy was set by the live renderer.
+  plot.selectAll("*").each(function () {
+    this.removeAttribute("cursor");
+    this.removeAttribute("tabindex");
+    this.removeAttribute("role");
+    this.removeAttribute("pointer-events");
+    this.style.removeProperty("cursor");
+    this.style.removeProperty("pointer-events");
+    this.classList.remove("active");
+  });
   const bounds = plot.node().getBBox();
   svgNode.remove();
   svgNode.removeAttribute("style");
@@ -10245,6 +10919,15 @@ function interpolateRainbow(t) {
 }
 
 const defaultConfig = {
+  tree: {
+    show: true,
+    width: 100,
+    useBranchLengths: true,
+    branch: { width: 1.5, colour: "#555" },
+    support: { show: true, fontSize: 9, precision: 1 },
+    scaleBar: { show: true },
+    leafGuide: { show: false, colour: "#999", width: 1, dash: "4 3" },
+  },
   plot: {
     transitionDuration: 250,
     renderer: "svg",
@@ -11309,6 +11992,9 @@ function linkVertices(scene, link, scales, config, preview = null) {
       ? scales.colour(scales.group(link.source.query.uid))
       : "black")
   );
+  const opacity = link.opacity ?? 1;
+  colour[3] *= opacity;
+  stroke[3] *= opacity;
   pushLink(fill, edge, link, visible ? colour : transparent(colour), visible ? stroke : transparent(stroke), {
     // Keeping retained link records at a constant vertex count lets a trim
     // preview toggle visibility by alpha alone.
@@ -12506,6 +13192,7 @@ function createRasterInteractionBindings({
     },
     actions: {
       geneClick: (event, geneUid) => interactions.onGeneClick?.(event, getGene(geneUid)),
+      rotateTreeNode: (nodeUid) => interactions.rotateTreeNode?.(nodeUid),
       legendColour: interactions.legendColour,
       legendText: interactions.legendText,
       scaleBar: interactions.setScaleBarLength,
@@ -12585,7 +13272,9 @@ function serializeChartState(state, data) {
   const defaultOrder = data.clusters.map((cluster) => cluster.uid);
   return {
     version: 1,
-    clusterOrder: state.clusterOrder.length === defaultOrder.length && state.clusterOrder.every((uid, index) => uid === defaultOrder[index])
+    // Tree child order changes with edits. Keep its leaf order explicit so an
+    // undo snapshot can restore it even if it matched source cluster order.
+    clusterOrder: !data.tree && state.clusterOrder.length === defaultOrder.length && state.clusterOrder.every((uid, index) => uid === defaultOrder[index])
       ? []
       : [...state.clusterOrder],
     clusterOffsets: numericEntries(state.clusterOffsets).filter(([, value]) => value !== 0),
@@ -12645,6 +13334,7 @@ function chartStateFromSnapshot(data, snapshot) {
   if (Array.isArray(snapshot.clusterOrder)) {
     const order = snapshot.clusterOrder.filter((uid) => clusterIds.has(uid));
     restored.clusterOrder = [...new Set([...order, ...restored.clusterOrder])];
+    setTreeClusterOrder(data.tree, restored.clusterOrder);
   }
   if (finiteNumber(camera.x) !== null && finiteNumber(camera.y) !== null && finiteNumber(camera.k) !== null && camera.k > 0) {
     restored.camera = { x: camera.x, y: camera.y, k: camera.k };
@@ -12706,6 +13396,8 @@ function clusterMap() {
   let canvasHoverLocusUid = null;
   let canvasScene = null;
   let canvasAnimation = null;
+  let treeAnimation = null;
+  let webgpuAnimation = null;
   let rasterPreview = null;
   let canvasPreviewScene = null;
   let canvasFlipStaticCanvas = null;
@@ -12784,6 +13476,7 @@ function clusterMap() {
     clusterRows: () => runtime.scales.y.range(),
     getClusterOrder: () => getClusterOrder(chartState),
     getClusterPosition: (uid) => runtime.getScene().clusters.get(uid).y,
+    getTree: () => currentData?.tree || null,
     getLocusOffset: (uid) => getLocusOffset(chartState, uid),
     selectedLocusIds: () => [...selectedLocusIds],
     selectedClusterIds: () => new Set(
@@ -12824,6 +13517,7 @@ function clusterMap() {
       const order = [...getClusterOrder(chartState)];
       const rows = runtime.scales.y.range();
       commitPreviewClusterOrder(chartState);
+      setTreeClusterOrder(currentData.tree, order);
       if (
         preview &&
         sourceScene &&
@@ -13161,6 +13855,11 @@ function clusterMap() {
     canvasFlipDirtyFrame = null;
   }
 
+  function stopWebGpuAnimation() {
+    if (webgpuAnimation?.frame) cancelAnimationFrame(webgpuAnimation.frame);
+    webgpuAnimation = null;
+  }
+
   function my(selection, options) {
     selection.each(function (data) {
       container = select(this).attr("width", "100%").attr("height", "100%");
@@ -13327,6 +14026,7 @@ function clusterMap() {
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
+    if (!useWebGpu) stopWebGpuAnimation();
     if (!useWebGpu && webgpuBackend.hasResources()) {
       // A renderer owns the WebGPU context for its canvas. Dispose it before
       // the chart changes backend, and invalidate any async setup that might
@@ -13506,6 +14206,7 @@ function clusterMap() {
       }
       const result = canvasBackend.paint({
         canvas: canvasNode,
+        tree: currentData.tree,
         scene:
           canvasAnimation?.scene ||
           canvasPreviewScene ||
@@ -13513,6 +14214,9 @@ function clusterMap() {
           runtime.getScene(),
         previousScene: canvasAnimation?.previousScene,
         progress: canvasAnimation?.progress,
+        previousTree: treeAnimation?.previousTree,
+        previousTreeScene: treeAnimation?.previousScene,
+        treeProgress: treeAnimation?.progress ?? 1,
         camera: getCamera(chartState),
         config: runtime.config,
         scales: runtime.scales,
@@ -13535,6 +14239,11 @@ function clusterMap() {
         renderCanvas({
           canvas: overlayNode,
           scene,
+          tree: currentData.tree,
+          previousTree: treeAnimation?.previousTree,
+          previousTreeScene: treeAnimation?.previousScene,
+          treeTargetScene: treeAnimation?.targetScene,
+          treeProgress: treeAnimation?.progress ?? 1,
           camera: getCamera(chartState),
           config: runtime.config,
           scales: runtime.scales,
@@ -13589,6 +14298,7 @@ function clusterMap() {
     const renderFlipStaticBase = (pending, baseCanvas, bounds, pixelRatio) => {
       const renderOptions = {
         scene: pending.sourceScene,
+        tree: currentData.tree,
         camera: getCamera(chartState),
         config: runtime.config,
         scales: runtime.scales,
@@ -13843,6 +14553,7 @@ function clusterMap() {
     const animateCanvas = (canvasNode, scene, animate) => {
       stopCanvasAnimation();
       if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
+        treeAnimation = null;
         canvasScene = scene;
         paintCanvas(canvasNode);
         return;
@@ -13852,6 +14563,7 @@ function clusterMap() {
       const initialProgress = 0;
       const suppressLocusHover = false;
       const startedAt = performance.now();
+      if (treeAnimation) treeAnimation.targetScene = scene;
       const frame = (now) => {
         const elapsed = Math.min(1, (now - startedAt) / duration);
         // Matches D3's default cubic-in-out transition closely enough that
@@ -13861,12 +14573,14 @@ function clusterMap() {
             ? 4 * elapsed * elapsed * elapsed
             : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
         const progress = initialProgress + (1 - initialProgress) * eased;
+        if (treeAnimation) treeAnimation.progress = progress;
         canvasAnimation = { previousScene, scene, progress, frame: null, suppressLocusHover };
         paintCanvas(canvasNode);
         if (elapsed < 1) {
           canvasAnimation.frame = requestAnimationFrame(frame);
         } else {
           canvasAnimation = null;
+          treeAnimation = null;
           canvasScene = scene;
           // The final animation frame intentionally hid the stale hover
           // affordance. Repaint once with the settled scene so it returns
@@ -13875,6 +14589,37 @@ function clusterMap() {
         }
       };
       canvasAnimation = { previousScene, scene, progress: 0, frame: requestAnimationFrame(frame) };
+    };
+    const animateWebGpu = (canvasNode, previousScene, scene, animate) => {
+      stopWebGpuAnimation();
+      const duration = runtime.config.plot.transitionDuration;
+      if (!animate || !previousScene || !duration) {
+        treeAnimation = null;
+        webgpuBackend.setScene(scene);
+        paintWebGpu(canvasNode, scene);
+        return;
+      }
+      const startedAt = performance.now();
+      if (treeAnimation) treeAnimation.targetScene = scene;
+      const frame = (now) => {
+        const elapsed = Math.min(1, (now - startedAt) / duration);
+        const eased = elapsed < 0.5
+          ? 4 * elapsed * elapsed * elapsed
+          : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+        const displayScene = interpolateCanvasScene(previousScene, scene, eased);
+        if (treeAnimation) treeAnimation.progress = eased;
+        webgpuBackend.setScene(displayScene);
+        paintWebGpu(canvasNode, displayScene);
+        if (elapsed < 1) {
+          webgpuAnimation.frame = requestAnimationFrame(frame);
+        } else {
+          webgpuAnimation = null;
+          treeAnimation = null;
+          webgpuBackend.setScene(scene);
+          paintWebGpu(canvasNode, scene);
+        }
+      };
+      webgpuAnimation = { frame: requestAnimationFrame(frame) };
     };
     const chooseLegendColour = (group) => {
       const picker = container.select("input.colourPicker");
@@ -13909,6 +14654,27 @@ function clusterMap() {
       moveClusterDrag: interactionController.moveClusterDrag,
       endClusterDrag: interactionController.endClusterDrag,
       cancelClusterDrag: interactionController.cancelClusterDrag,
+      rotateTreeNode: (uid) => {
+        const node = currentData.tree?.nodes.find((entry) => entry.uid === uid);
+        if (!node?.children) return;
+        beginInteractionState();
+        treeAnimation = {
+          previousTree: {
+            ...currentData.tree,
+            nodes: currentData.tree.nodes.map((entry) => ({
+              ...entry,
+              children: entry.children ? [...entry.children] : undefined,
+            })),
+          },
+          previousScene: runtime.getScene(),
+          progress: 0,
+        };
+        node.children.reverse();
+        chartState = createChartState(currentData, chartState);
+        runtime.setChartState(chartState);
+        redraw();
+        commitInteractionState();
+      },
       beginLocusDrag: interactionController.beginLocusDrag,
       moveLocusDrag: interactionController.moveLocusDrag,
       endLocusDrag: interactionController.endLocusDrag,
@@ -13978,6 +14744,8 @@ function clusterMap() {
           camera: getCamera(chartState),
           config: runtime.config,
           event,
+          tree: currentData.tree,
+          treeDragging: isDragging(chartState),
         });
       const locusForTarget = (target) =>
         target?.locusUid || runtime.lookup.geneData(target?.geneUid)?.locusUid || null;
@@ -14120,14 +14888,18 @@ function clusterMap() {
         );
         webgpuAnchorCommit = null;
       }
-      webgpuBackend.setScene(scene);
       scheduleMinimapBase(scene);
-      paintWebGpu(canvas.node(), scene);
+      const previousScene = webgpuBackend.pendingScene;
+      animateWebGpu(canvas.node(), previousScene, scene, hasInitialView && animate);
     } else {
+      const previousScene = svgBackend.pendingScene;
       svgBackend.setScene(scene);
       svgBackend.paint({
         plot,
         data,
+        previousScene,
+        previousTree: treeAnimation?.previousTree,
+        previousTreeScene: treeAnimation?.previousScene,
         transition: transition$1,
         animate: hasInitialView && animate,
         config: runtime.config,
@@ -14179,7 +14951,7 @@ function clusterMap() {
     const measurementCanvas = isWebGpuRenderer(runtime.config.plot.renderer)
       ? document.createElement("canvas")
       : canvas;
-    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config);
+    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, currentData.tree);
     if (!bounds) return;
 
     const camera = fitCameraForBounds({
@@ -14447,6 +15219,7 @@ function clusterMap() {
     clearRasterPreview();
     if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
     canvasAnimation = null;
+    stopWebGpuAnimation();
     rasterMotion.dispose();
     rasterMinimap.clear();
     webgpuBackend.destroy();

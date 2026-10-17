@@ -1,0 +1,272 @@
+import { clusterLabelOffsetForPreview, clusterLabelTextForPreview, clusterOffsetForPreview } from "./scenePreview.mjs";
+
+const leafXAnchors = new WeakMap();
+
+/** Return whether an order keeps every tree clade contiguous. */
+export function isTreeOrderCompatible(tree, order) {
+  if (!tree) return true;
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const positions = new Map(order.map((clusterUid, index) => [clusterUid, index]));
+  const descendants = new Map();
+  const collect = (uid) => {
+    if (descendants.has(uid)) return descendants.get(uid);
+    const node = nodes.get(uid);
+    if (!node) return [];
+    const clusters = node.children?.length
+      ? node.children.flatMap(collect)
+      : [node.cluster];
+    descendants.set(uid, clusters);
+    return clusters;
+  };
+  for (const node of tree.nodes) {
+    const clusters = collect(node.uid);
+    if (!clusters.length || clusters.some((uid) => !positions.has(uid))) return false;
+    const indices = clusters.map((uid) => positions.get(uid));
+    if (Math.max(...indices) - Math.min(...indices) + 1 !== indices.length) return false;
+  }
+  return order.length === positions.size && positions.size === descendants.get(tree.root)?.length;
+}
+
+/** Keep the tree in its base position until a dragged label reaches a leaf. */
+function treeLeafX(tree, proposedX, dragging = false) {
+  if (!tree || typeof tree !== "object") return proposedX;
+  if (!dragging || !leafXAnchors.has(tree)) leafXAnchors.set(tree, proposedX);
+  return Math.min(proposedX, leafXAnchors.get(tree));
+}
+
+function niceScaleValue(maxDistance) {
+  const target = maxDistance / 4;
+  const power = 10 ** Math.floor(Math.log10(target));
+  const fraction = target / power;
+  const multiplier = fraction >= 5 ? 5 : fraction >= 2 ? 2 : 1;
+  const value = multiplier * power;
+  return { value, label: String(Number(value.toPrecision(2))) };
+}
+
+/** Lay out branch x positions using lengths when every edge has one. */
+export function treeHorizontalLayout(tree, leafX, width, useBranchLengths = true) {
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const distances = new Map([[tree.root, 0]]);
+  const depths = new Map([[tree.root, 0]]);
+  const visit = (uid) => {
+    const node = nodes.get(uid);
+    for (const childUid of node.children || []) {
+      const child = nodes.get(childUid);
+      distances.set(childUid, distances.get(uid) + (Number(child.branchLength) || 0));
+      depths.set(childUid, depths.get(uid) + 1);
+      visit(childUid);
+    }
+  };
+  visit(tree.root);
+  const maxDepth = Math.max(...depths.values());
+  const maxDistance = Math.max(...tree.nodes
+    .filter((node) => !node.children)
+    .map((node) => distances.get(node.uid) || 0));
+  const completeLengths = tree.nodes
+    .filter((node) => node.uid !== tree.root)
+    .every((node) => Number.isFinite(node.branchLength));
+  const proportional = useBranchLengths && completeLengths && maxDistance > 0;
+  const leftX = leafX - width;
+  const xs = new Map();
+  for (const node of tree.nodes) {
+    const position = proportional
+      ? (distances.get(node.uid) / maxDistance) * width
+      : (depths.get(node.uid) / Math.max(1, maxDepth)) * width;
+    xs.set(node.uid, leftX + position);
+  }
+  if (proportional) {
+    const scale = niceScaleValue(maxDistance);
+    return {
+      xs,
+      maxDepth,
+      maxDistance,
+      proportional,
+      scaleBarLength: (scale.value / maxDistance) * width,
+      scaleBarLabel: scale.label,
+    };
+  }
+  return {
+    xs,
+    maxDepth,
+    maxDistance,
+    proportional,
+    scaleBarLength: width / Math.max(1, maxDepth),
+    scaleBarLabel: "1 branch",
+  };
+}
+
+/** Place the tree as far right as possible without leaf tips reaching labels. */
+function treeLeafAnchorX(tree, labelStarts, width, relative, clearance = 16) {
+  if (!tree || !labelStarts?.size) return 0;
+  let anchor = Infinity;
+  for (const node of tree.nodes) {
+    if (node.children?.length) continue;
+    const labelStart = labelStarts.get(node.cluster);
+    if (!Number.isFinite(labelStart)) continue;
+    anchor = Math.min(anchor, labelStart - clearance + width - relative.get(node.uid));
+  }
+  return Number.isFinite(anchor) ? anchor : 0;
+}
+
+export function treeNodeYPositions(tree, scene, leafY = (node, sourceScene) =>
+  sourceScene.clusters.get(node.cluster)?.y ?? 0
+) {
+  if (!tree || !scene) return new Map();
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const positions = new Map();
+  const yFor = (uid) => {
+    if (positions.has(uid)) return positions.get(uid);
+    const node = nodes.get(uid);
+    const children = (node.children || []).map(yFor);
+    const y = children.length
+      ? (Math.min(...children) + Math.max(...children)) / 2
+      : leafY(node, scene);
+    positions.set(uid, y);
+    return y;
+  };
+  yFor(tree.root);
+  return positions;
+}
+
+/**
+ * Build renderer-neutral tree marks after the adapter has measured labels.
+ * scene supplies displayed label positions; targetScene supplies final row
+ * positions during a retained-scene animation. Keeping these separate prevents
+ * an interpolated scene from applying the tree motion a second time.
+ */
+export function layoutTree({
+  tree,
+  scene,
+  config,
+  measureLabel,
+  preview = null,
+  previousTree = null,
+  previousScene = null,
+  targetScene = scene,
+  dragging = preview?.type === "cluster-drag",
+  trackAnchor = true,
+}) {
+  if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
+  const labelStarts = new Map();
+  for (const cluster of scene.clusters.values()) {
+    const uid = cluster.source.uid;
+    const text = clusterLabelTextForPreview(preview, uid, cluster.info.locusText || "");
+    labelStarts.set(uid, cluster.x + cluster.info.x +
+      clusterLabelOffsetForPreview(preview, uid) - measureLabel(cluster, text));
+  }
+  const width = Number(config.tree.width) || 100;
+  const horizontal = treeHorizontalLayout(tree, width, width, config.tree.useBranchLengths !== false);
+  const proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
+  const leafX = trackAnchor ? treeLeafX(tree, proposedX, dragging) : proposedX;
+  const xs = new Map([...horizontal.xs].map(([uid, x]) => [uid, x + leafX - width]));
+  const leafY = (node, sourceScene) =>
+    (sourceScene.clusters.get(node.cluster)?.y ?? 0) +
+    config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2 +
+    clusterOffsetForPreview(preview, node.cluster);
+  const ys = treeNodeYPositions(tree, targetScene, leafY);
+  const previousYs = previousTree && previousScene
+    ? treeNodeYPositions(previousTree, previousScene, leafY)
+    : null;
+  const branch = {
+    colour: config.tree.branch?.colour || "#555",
+    width: Number(config.tree.branch?.width) || 1.5,
+  };
+  const guide = {
+    colour: config.tree.leafGuide?.colour || "#999",
+    width: Number(config.tree.leafGuide?.width) || 1,
+    dash: String(config.tree.leafGuide?.dash || "4 3").split(/[ ,]+/).map(Number).filter(Number.isFinite),
+  };
+  const support = {
+    fontSize: Number(config.tree.support?.fontSize) || 9,
+    fontFamily: config.plot.fontFamily,
+    colour: branch.colour,
+  };
+  const rootX = xs.get(tree.root);
+  const branches = [];
+  const stems = [];
+  const nodes = [];
+  const guides = [];
+  const supports = [];
+  for (const node of tree.nodes) {
+    const x = xs.get(node.uid);
+    if (node.children?.length) {
+      nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
+      if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children });
+      for (const child of node.children) {
+        branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child) });
+      }
+    } else if (config.tree.leafGuide?.show && Number.isFinite(labelStarts.get(node.cluster))) {
+      guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: labelStarts.get(node.cluster) });
+    }
+    if (node.uid !== tree.root && config.tree.support?.show && node.support) {
+      supports.push({
+        uid: node.uid,
+        x: x - 4,
+        text: Number(node.support.value).toFixed(config.tree.support.precision ?? 1),
+      });
+    }
+  }
+  let scaleBar = null;
+  if (config.tree.scaleBar?.show !== false) {
+    const style = scene.chrome?.scaleBar || config.scaleBar || {};
+    const height = Number(style.height) || 12;
+    const length = horizontal.scaleBarLength;
+    const y = scene.chrome?.scaleBar?.position?.y ??
+      Math.max(...[...scene.clusters.values()].map((cluster) => cluster.y)) +
+        config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight + 20;
+    scaleBar = {
+      colour: style.colour || "black",
+      strokeWidth: Number(style.strokeWidth ?? style.stroke) || 1,
+      fontSize: Number(style.fontSize) || 10,
+      fontFamily: style.fontFamily || config.plot.fontFamily,
+      lines: [
+        { x1: rootX, y1: y + height / 2, x2: rootX + length, y2: y + height / 2 },
+        { x1: rootX, y1: y, x2: rootX, y2: y + height },
+        { x1: rootX + length, y1: y, x2: rootX + length, y2: y + height },
+      ],
+      label: { x: rootX + length / 2, y: y + height + 5, text: config.tree.scaleBar?.label || horizontal.scaleBarLabel },
+    };
+  }
+  return positionTreeLayout({
+    branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
+    rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX },
+    ys, previousYs,
+  }, ys);
+}
+
+function positionTreeLayout(layout, ys) {
+  const line = (mark) => ({ ...mark, y1: ys.get(mark.nodeUid), y2: ys.get(mark.nodeUid) });
+  return {
+    ...layout,
+    rootBranch: line(layout.rootBranch),
+    branches: layout.branches.map(line),
+    stems: layout.stems.map((stem) => ({
+      ...stem,
+      y1: Math.min(...stem.children.map((uid) => ys.get(uid))),
+      y2: Math.max(...stem.children.map((uid) => ys.get(uid))),
+    })),
+    nodes: layout.nodes.map((node) => ({ ...node, y: ys.get(node.uid) })),
+    guides: layout.guides.map(line),
+    supports: layout.supports.map((label) => ({ ...label, y: ys.get(label.uid) - 4 })),
+  };
+}
+
+/** Interpolate node identities, then rebuild stems so swapped branches fold. */
+export function interpolateTreeLayout(layout, progress = 1) {
+  if (!layout?.previousYs || progress >= 1) return layout;
+  const ys = new Map();
+  for (const [uid, target] of layout.ys) {
+    const from = layout.previousYs.get(uid) ?? target;
+    ys.set(uid, from + (target - from) * progress);
+  }
+  return positionTreeLayout(layout, ys);
+}
+
+export function hitTestTreeNode(layout, point) {
+  for (const node of layout?.nodes || []) {
+    if (Math.hypot(point.x - node.x, point.y - node.y) <= node.hitRadius) {
+      return { action: "tree-node", nodeUid: node.uid };
+    }
+  }
+  return null;
+}
