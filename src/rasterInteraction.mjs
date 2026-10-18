@@ -137,6 +137,7 @@ export function createRasterInteraction({
         activeSurface === surface || surface?.ownerDocument?.activeElement === surface;
       const keydown = (event) => {
         if (event.code !== "Space") return;
+        if (event.target?.closest?.("input, textarea, select, button, [contenteditable='true']")) return;
         spaceDown = true;
         if (!isActive()) return;
         panMode = true;
@@ -209,7 +210,10 @@ export function createRasterInteraction({
         })
         .on("contextmenu.canvasInteraction", function (event) {
           const target = targetForEvent(this, event);
-          if (target?.action === "gene") {
+          if (target?.action === "tree-node") {
+            event.preventDefault(); event.stopPropagation();
+            actions.treeMenu?.(event, target.nodeUid);
+          } else if (target?.action === "gene") {
             event.preventDefault();
             actions.geneMenu(event, target.geneUid);
           } else if (target?.action === "legend-text") {

@@ -1,0 +1,216 @@
+{
+  "clusters": [
+    {
+      "uid": "a",
+      "name": "Example A",
+      "loci": [
+        {
+          "uid": "locus-a",
+          "name": "sequence_a",
+          "start": 0,
+          "end": 10000,
+          "genes": [
+            {
+              "uid": "gene-a",
+              "start": 1000,
+              "end": 6500,
+              "strand": 1,
+              "name": "Example gene"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "uid": "b",
+      "name": "Example B",
+      "loci": [
+        {
+          "uid": "locus-b",
+          "name": "sequence_b",
+          "start": 0,
+          "end": 10000,
+          "genes": [
+            {
+              "uid": "gene-b",
+              "start": 1000,
+              "end": 6700,
+              "strand": 1,
+              "name": "Example gene"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "uid": "c",
+      "name": "Example C",
+      "loci": [
+        {
+          "uid": "locus-c",
+          "name": "sequence_c",
+          "start": 0,
+          "end": 10000,
+          "genes": [
+            {
+              "uid": "gene-c",
+              "start": 1000,
+              "end": 6900,
+              "strand": 1,
+              "name": "Example gene"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "uid": "d",
+      "name": "Example D",
+      "loci": [
+        {
+          "uid": "locus-d",
+          "name": "sequence_d",
+          "start": 0,
+          "end": 10000,
+          "genes": [
+            {
+              "uid": "gene-d",
+              "start": 1000,
+              "end": 7100,
+              "strand": 1,
+              "name": "Example gene"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "uid": "e",
+      "name": "Example E",
+      "loci": [
+        {
+          "uid": "locus-e",
+          "name": "sequence_e",
+          "start": 0,
+          "end": 10000,
+          "genes": [
+            {
+              "uid": "gene-e",
+              "start": 1000,
+              "end": 7300,
+              "strand": 1,
+              "name": "Example gene"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [
+    {
+      "uid": "group",
+      "label": "Example genes",
+      "colour": "#267c9e",
+      "genes": [
+        "gene-a",
+        "gene-b",
+        "gene-c",
+        "gene-d",
+        "gene-e"
+      ]
+    }
+  ],
+  "tree": {
+    "root": "root",
+    "distance": {
+      "kind": "mergeHeight",
+      "label": "Illustrative merge height"
+    },
+    "presentation": {
+      "colouring": {
+        "mode": "cutHeight",
+        "cutHeight": 5,
+        "showCutLine": true
+      },
+      "nodes": {
+        "x": {
+          "label": {
+            "text": "Example clade",
+            "fontWeight": 700
+          }
+        }
+      }
+    },
+    "nodes": [
+      {
+        "uid": "root",
+        "children": [
+          "ingroup",
+          "e"
+        ]
+      },
+      {
+        "uid": "ingroup",
+        "children": [
+          "x",
+          "y"
+        ],
+        "branchLength": 3,
+        "support": {
+          "value": 96.4,
+          "scale": "percent"
+        }
+      },
+      {
+        "uid": "x",
+        "children": [
+          "a",
+          "b"
+        ],
+        "branchLength": 5,
+        "support": {
+          "value": 98.2,
+          "scale": "percent"
+        }
+      },
+      {
+        "uid": "y",
+        "children": [
+          "c",
+          "d"
+        ],
+        "branchLength": 3,
+        "support": {
+          "value": 87.5,
+          "scale": "percent"
+        }
+      },
+      {
+        "uid": "a",
+        "cluster": "a",
+        "branchLength": 2
+      },
+      {
+        "uid": "b",
+        "cluster": "b",
+        "branchLength": 2
+      },
+      {
+        "uid": "c",
+        "cluster": "c",
+        "branchLength": 4
+      },
+      {
+        "uid": "d",
+        "cluster": "d",
+        "branchLength": 4
+      },
+      {
+        "uid": "e",
+        "cluster": "e",
+        "branchLength": 10
+      }
+    ]
+  }
+}

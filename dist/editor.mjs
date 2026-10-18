@@ -404,6 +404,423 @@ function hsl2rgb(h, m1, m2) {
       : m1) * 255;
 }
 
+const TREE_COLOURING_DEFAULTS = {
+  mode: "none",
+  cutHeight: "auto",
+  palette: ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"],
+  showCutLine: false,
+};
+const metricsCache = new WeakMap();
+const stylesCache = new WeakMap();
+const fail = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
+const object = (value) => value && typeof value === "object" && !Array.isArray(value);
+const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+function fields(value, allowed, where) {
+  if (!object(value)) fail(`${where} must be an object.`);
+  for (const key of Object.keys(value)) if (!allowed.includes(key)) fail(`${where}.${key} is unsupported.`);
+}
+function colour(value, where) {
+  if (typeof value !== "string" || !color(value)) fail(`${where} must be a valid colour.`);
+}
+function positive(value, where) {
+  if (!Number.isFinite(value) || value <= 0) fail(`${where} must be finite and positive.`);
+}
+function validateTreeColouring(policy) {
+  if (policy === undefined) return;
+  fields(policy, ["mode", "cutHeight", "palette", "showCutLine"], "colouring");
+  if (own(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail("colouring.mode must be none or cutHeight.");
+  if (own(policy, "cutHeight") && policy.cutHeight !== "auto" && (!Number.isFinite(policy.cutHeight) || policy.cutHeight < 0)) {
+    fail('colouring.cutHeight must be "auto" or a finite non-negative number.');
+  }
+  if (own(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail("colouring.showCutLine must be boolean.");
+  if (own(policy, "palette")) {
+    if (!Array.isArray(policy.palette) || !policy.palette.length) fail("colouring.palette must be a non-empty colour array.");
+    policy.palette.forEach((entry) => colour(entry, "colouring.palette"));
+  }
+}
+
+/** Biological distances and canonical ID order survive child rotation unchanged. */
+function treeMetrics(tree) {
+  if (metricsCache.has(tree)) return metricsCache.get(tree);
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const parents = new Map();
+  const distances = new Map([[tree.root, 0]]);
+  let complete = true;
+  const visit = (uid) => {
+    for (const child of nodes.get(uid).children || []) {
+      const length = nodes.get(child).branchLength;
+      if (!Number.isFinite(length) || length < 0) complete = false;
+      parents.set(child, uid);
+      distances.set(child, distances.get(uid) + (Number.isFinite(length) ? length : 0));
+      visit(child);
+    }
+  };
+  visit(tree.root);
+  const tips = tree.nodes.filter((node) => !node.children);
+  const height = Math.max(0, ...tips.map((node) => distances.get(node.uid)));
+  // Absolute 1e-12 plus relative 1e-9 tolerance, measured in input distance units.
+  const tolerance = 1e-12 + 1e-9 * height;
+  const ultrametric = complete && tips.every((node) => Math.abs(distances.get(node.uid) - height) <= tolerance);
+  const result = {
+    nodes, parents, height, ultrametric,
+    heights: new Map([...distances].map(([uid, distance]) => [uid, Math.max(0, height - distance)])),
+    canonical: [...tree.nodes].sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0),
+  };
+  metricsCache.set(tree, result);
+  return result;
+}
+
+function validateBranch(style, where) {
+  fields(style, ["colour", "width"], where);
+  if (own(style, "colour")) colour(style.colour, `${where}.colour`);
+  if (own(style, "width")) positive(style.width, `${where}.width`);
+}
+
+/** Validate optional data fields and the effective tree/config colouring policy. */
+function validateTreePresentation(tree, config = {}) {
+  validateTreeColouring(config.colouring);
+  if (!tree) return;
+  if (tree.distance !== undefined) {
+    fields(tree.distance, ["kind", "label"], "distance");
+    if (tree.distance.kind !== "mergeHeight") fail("distance.kind must be mergeHeight.");
+    if (own(tree.distance, "label") && typeof tree.distance.label !== "string") fail("distance.label must be text.");
+  }
+  const presentation = tree.presentation;
+  if (presentation !== undefined) {
+    fields(presentation, ["colouring", "subtrees", "nodes"], "presentation");
+    validateTreeColouring(presentation.colouring);
+    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    for (const scope of ["subtrees", "nodes"]) {
+      if (presentation[scope] === undefined) continue;
+      if (!object(presentation[scope])) fail(`presentation.${scope} must be a node-ID dictionary.`);
+      for (const [uid, record] of Object.entries(presentation[scope])) {
+        const node = nodes.get(uid);
+        if (!node) fail(`presentation.${scope} refers to unknown node '${uid}'.`);
+        fields(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
+        if (scope === "subtrees" && !node.children) fail(`subtree '${uid}' must be an internal node.`);
+        if (record.branch !== undefined) {
+          if (scope === "nodes" && uid === tree.root) fail("the display root has no incoming edge to style.");
+          validateBranch(record.branch, `${scope}.${uid}.branch`);
+        }
+        if (record.label !== undefined) {
+          if (!node.children) fail(`annotation '${uid}' must belong to an internal node.`);
+          const label = record.label;
+          fields(label, ["text", "colour", "fontSize", "fontWeight", "fontStyle"], `nodes.${uid}.label`);
+          if (own(label, "text") && typeof label.text !== "string") fail(`annotation '${uid}' text must be a string.`);
+          if (own(label, "colour")) colour(label.colour, `annotation '${uid}' colour`);
+          if (own(label, "fontSize")) positive(label.fontSize, `annotation '${uid}' fontSize`);
+          if (own(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail("annotation fontWeight must be 400 or 700.");
+          if (own(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail("annotation fontStyle must be normal or italic.");
+        }
+      }
+    }
+  }
+  const policy = { ...TREE_COLOURING_DEFAULTS, ...config.colouring, ...presentation?.colouring };
+  if (policy.mode === "cutHeight") {
+    if (tree.distance?.kind !== "mergeHeight") fail("cutHeight colouring requires distance.kind = mergeHeight.");
+    if (!treeMetrics(tree).ultrametric) fail("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
+  }
+}
+
+/** Resolve properties once per presentation/config revision, never per tween. */
+function resolveTreePresentation(tree, config = {}) {
+  const defaults = { ...TREE_COLOURING_DEFAULTS, ...config.colouring };
+  const signature = JSON.stringify([config.branch?.colour, config.branch?.width, defaults]);
+  const cached = stylesCache.get(tree);
+  if (cached && cached.presentation === tree.presentation && cached.signature === signature) return cached.value;
+  validateTreePresentation(tree, config);
+  const metrics = treeMetrics(tree);
+  const policy = { ...defaults, ...tree.presentation?.colouring };
+  const threshold = policy.cutHeight === "auto" ? metrics.height * 0.7 : policy.cutHeight;
+  const groups = new Map();
+  if (policy.mode === "cutHeight" && threshold > 0) {
+    for (const node of metrics.canonical) {
+      if (!node.children || metrics.heights.get(node.uid) >= threshold) continue;
+      const parent = metrics.parents.get(node.uid);
+      if (parent === undefined || metrics.heights.get(parent) >= threshold) {
+        groups.set(node.uid, policy.palette[groups.size % policy.palette.length]);
+      }
+    }
+  }
+  const base = { colour: config.branch?.colour || "#555", width: Number(config.branch?.width) || 1.5 };
+  const branches = new Map();
+  const stems = new Map();
+  const annotations = new Map();
+  const visit = (uid, inherited = {}, groupColour = null) => {
+    const node = metrics.nodes.get(uid);
+    const automatic = groups.get(uid) || groupColour;
+    const subtree = { ...inherited, ...tree.presentation?.subtrees?.[uid]?.branch };
+    const mergeStyle = { ...base, ...(automatic ? { colour: automatic } : {}), ...subtree };
+    if (node.children) stems.set(uid, mergeStyle);
+    const label = tree.presentation?.nodes?.[uid]?.label;
+    if (label?.text) annotations.set(uid, { colour: "#333", fontSize: 10, fontWeight: 400, fontStyle: "normal", ...label });
+    for (const child of node.children || []) {
+      branches.set(child, { ...mergeStyle, ...tree.presentation?.nodes?.[child]?.branch });
+      visit(child, subtree, automatic);
+    }
+  };
+  visit(tree.root);
+  const value = { base, branches, stems, annotations, policy, height: metrics.height, threshold, metric: policy.mode === "cutHeight" };
+  stylesCache.set(tree, { presentation: tree.presentation, signature, value });
+  return value;
+}
+
+// Structural styles and the same neutral controls used by the plot editor.
+function installTreeControlsStyle(doc) {
+  if (doc.getElementById("clustermap-tree-controls-style")) return;
+  const style = doc.createElement("style");
+  style.id = "clustermap-tree-controls-style";
+  style.textContent = `
+.cm-tree-controls { font:inherit; color:inherit; text-align:left; }
+.cm-tree-controls * { box-sizing:border-box; }
+.cm-tree-controls [hidden] { display:none!important; }
+.cm-tree-controls fieldset { min-width:0; margin:0 0 10px; padding:8px; border:1px solid #ddd; border-radius:4px; }
+.cm-tree-controls legend { padding:0 4px; font-weight:600; }
+.cm-tree-controls button, .cm-tree-controls input, .cm-tree-controls select { font:inherit; color:inherit; }
+.cm-tree-controls button, .cm-tree-controls select, .cm-tree-controls input:not([type=checkbox]):not([type=color]):not([type=range]) { min-height:30px; border:1px solid #cbd3de; border-radius:6px; padding:4px 8px; background:#fff; }
+.cm-tree-controls button { cursor:pointer; }
+.cm-tree-controls button:hover:not(:disabled) { border-color:#78a9ed; background:#f4f8ff; }
+.cm-tree-controls button:disabled { color:#8993a1; background:#f5f6f8; cursor:default; }
+.cm-tree-controls button[aria-pressed=true] { font-weight:600; }
+.cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:6px; margin:6px 0; }
+.cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }
+.cm-tree-controls input[type=number] { width:64px; min-width:0; }
+.cm-tree-controls input[type=range] { width:100%; }
+.cm-tree-controls select { width:132px; min-width:0; }
+.cm-tree-controls input[type=color] { width:30px; height:24px; padding:0; border:0; background:transparent; cursor:pointer; }
+.cm-tree-controls .cm-tree-heading { font-weight:600; margin-bottom:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-tree-controls .cm-tree-branch-row { display:grid; grid-template-columns:minmax(0,1fr) 30px 64px 28px; gap:6px; align-items:center; margin:8px 0; }
+.cm-tree-controls .cm-tree-reset { width:28px; padding:2px; min-height:26px; }
+.cm-tree-controls .cm-tree-wide { display:block; }
+.cm-tree-controls .cm-tree-wide > span { display:block; margin-bottom:4px; }
+.cm-tree-controls .cm-tree-wide input, .cm-tree-controls .cm-tree-wide select { width:100%; }
+.cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }
+.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid #e5e9ef; margin:10px 0; }
+.cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:10px; }
+.cm-tree-controls [role=status]:empty { display:none; }
+.cm-tree-controls [role=status] { color:#a13c46; margin:6px 0 0; }
+.cm-tree-controls--popover { width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font-size:12px; line-height:1.3; }
+.cm-tree-controls--popover .cm-tree-heading { font-size:12px; margin-bottom:6px; }
+.cm-tree-controls--popover button, .cm-tree-controls--popover input:not([type=checkbox]):not([type=color]) { min-height:24px; padding:2px 5px; border-radius:4px; }
+.cm-tree-controls--popover input[type=number] { width:52px; }
+.cm-tree-controls--popover input[type=color] { width:24px; height:20px; }
+.cm-tree-controls--popover input[type=checkbox] { width:12px; height:12px; margin:0; }
+.cm-tree-controls--popover .cm-tree-branch-row { grid-template-columns:minmax(0,1fr) 24px 52px 22px; gap:5px; margin:5px 0; }
+.cm-tree-controls--popover .cm-tree-reset { width:22px; min-height:22px; padding:0; }
+.cm-tree-controls--popover .cm-tree-row { margin:4px 0; gap:4px; }
+.cm-tree-controls--popover .cm-tree-format { gap:5px; }
+.cm-tree-controls--popover .cm-tree-separator { margin:6px 0; }
+.cm-tree-controls--popover .cm-tree-actions { margin-top:6px; }
+`.replaceAll(".cm-tree-controls", ".cm-tree-controls.cm-tree-controls");
+  doc.head.append(style);
+}
+
+/** Policy settings and node popovers share the same compact editing form. */
+function createTreeControls({ tree, config, patch, preview, rotate, clusters = [], nodeUid = null,
+  policy = true, onResize, document: doc = globalThis.document }) {
+  installTreeControlsStyle(doc);
+  const element = (tag, parent, text, className) => {
+    const node = doc.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    parent?.append(node);
+    return node;
+  };
+  const container = element("div", null, undefined, `cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
+  const message = element("p"); message.setAttribute("role", "status");
+  const run = (action) => { try { action(); message.textContent = ""; } catch (error) { message.textContent = error.message; } };
+  const button = (parent, title, action, className) => {
+    const node = element("button", parent, title, className); node.type = "button";
+    node.onclick = () => run(action); return node;
+  };
+  const section = (title) => { const field = element("fieldset", container); element("legend", field, title); return field; };
+  const input = (parent, title, type, value, options = {}) => {
+    const row = element("label", parent, undefined, "cm-tree-row");
+    element("span", row, title);
+    const control = element("input", row); control.type = type;
+    if (type === "checkbox") control.checked = Boolean(value); else control.value = value ?? "";
+    Object.assign(control, options); return control;
+  };
+  const reset = (scope, uid) => patch([{ type: "tree.presentation.reset", scope, ...(uid ? { ids: [uid] } : {}) }]);
+  const resolved = resolveTreePresentation(tree, config);
+
+  let compatible = tree.distance?.kind === "mergeHeight";
+  try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...resolved.policy, mode: "cutHeight" } } }, config); }
+  catch { compatible = false; }
+  if (policy && compatible) {
+    const field = section("Clade colouring");
+    const effective = resolved.policy;
+    const change = (changes) => [{ type: "tree.presentation.update", scope: "tree", changes: { colouring: changes } }];
+    const enabled = input(field, "Colour clades", "checkbox", effective.mode === "cutHeight");
+    enabled.onchange = () => run(() => patch(change({ mode: enabled.checked ? "cutHeight" : "none" })));
+    const options = element("div", field); options.hidden = !enabled.checked;
+    const actual = effective.cutHeight === "auto" ? resolved.height * 0.7 : effective.cutHeight;
+    const number = input(options, "Cut height", "number", actual, { min: "0", step: "any" });
+    number.onchange = () => run(() => patch(change({ cutHeight: Number(number.value) })));
+    const slider = element("input", options); slider.type = "range";
+    Object.assign(slider, { min: "0", max: String(Math.max(resolved.height, actual) || 1), step: String(resolved.height / 1000 || 0.001), value: actual });
+    slider.setAttribute("aria-label", "Preview cut height");
+    let cancelled = false;
+    const cancel = () => { cancelled = true; preview?.(null); slider.value = actual; number.value = actual; };
+    slider.oninput = () => run(() => { cancelled = false; number.value = slider.value; preview?.(change({ cutHeight: Number(slider.value) })); });
+    slider.onchange = () => { if (!cancelled) run(() => patch(change({ cutHeight: Number(slider.value) }))); };
+    slider.onkeydown = (event) => { if (event.key === "Escape") { cancel(); event.preventDefault(); } };
+    slider.onpointercancel = cancel;
+    const auto = button(number.parentElement, "Auto", () => patch(change({ cutHeight: "auto" })));
+    auto.title = "Use automatic cut height (70%)";
+    auto.setAttribute("aria-pressed", String(effective.cutHeight === "auto"));
+    const palettes = [
+      ["Muted", ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"]],
+      ["Colorblind friendly", ["#0072b2", "#e69f00", "#009e73", "#cc79a7", "#d55e00", "#56b4e9"]],
+    ];
+    if (!palettes.some(([, colours]) => JSON.stringify(colours) === JSON.stringify(effective.palette))) palettes.unshift(["Custom", effective.palette]);
+    const paletteRow = element("label", options, undefined, "cm-tree-row"); element("span", paletteRow, "Palette");
+    const select = element("select", paletteRow); select.setAttribute("aria-label", "Clade palette");
+    palettes.forEach(([name, colours], index) => { const option = element("option", select, name); option.value = index; option.selected = JSON.stringify(colours) === JSON.stringify(effective.palette); });
+    select.onchange = () => run(() => patch(change({ palette: palettes[Number(select.value)][1] })));
+    const line = input(options, "Show cut line", "checkbox", effective.showCutLine);
+    line.onchange = () => run(() => patch(change({ showCutLine: line.checked })));
+  }
+
+  if (policy) {
+    const resetAll = button(container, "Reset all manual styles", () => reset("manual"));
+    resetAll.title = "Clear manual tree styles and labels; keep automatic clade colouring.";
+    resetAll.disabled = !Object.keys(tree.presentation?.nodes || {}).length && !Object.keys(tree.presentation?.subtrees || {}).length;
+    container.append(message);
+    return container;
+  }
+
+  const nodesById = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const clusterNames = new Map(clusters.map((cluster) => [cluster.uid, cluster.name || cluster.label || cluster.uid]));
+  const descriptions = new Map();
+  const describe = (uid) => {
+    if (descriptions.has(uid)) return descriptions.get(uid);
+    const node = nodesById.get(uid);
+    const children = node.children?.map(describe);
+    const info = children ? { count: children.reduce((sum, child) => sum + child.count, 0), labels: children.flatMap((child) => child.labels).slice(0, 2) }
+      : { count: 1, labels: [node.label || clusterNames.get(node.cluster) || node.cluster] };
+    descriptions.set(uid, info);
+    return info;
+  };
+  const titleFor = (uid) => {
+    const node = nodesById.get(uid);
+    if (node.label) return node.label;
+    const { count, labels } = describe(uid);
+    return uid === tree.root ? `All ${count} clusters` : `${labels.join(" + ")}${count > 2 ? ` + ${count - 2} more` : ""}`;
+  };
+  const uid = nodesById.get(nodeUid)?.children ? nodeUid : nodesById.get(tree.root)?.children ? tree.root : null;
+  const host = element("div", container);
+
+  const colourInput = (parent, title, value, fallback, onChange) => {
+    const picker = element("input", parent); picker.type = "color";
+    const initial = color(value || fallback)?.formatHex() || "#555555";
+    let override = value ?? null;
+    const refresh = () => {
+      picker.value = color(override || fallback)?.formatHex() || initial;
+      picker.title = `${title}${override === null ? " (inherited)" : ""}`;
+    };
+    picker.setAttribute("aria-label", title); refresh();
+    picker.oninput = () => {
+      if (picker.value === override) return;
+      run(() => { onChange(picker.value); override = picker.value; picker.title = title; });
+    };
+    picker.onchange = picker.oninput;
+    return { reset: () => { override = null; refresh(); } };
+  };
+  const liveNumber = (control, onChange) => {
+    let previous = control.value === "" ? null : Number(control.value);
+    control.oninput = () => {
+      if (!control.validity.valid) return;
+      const next = control.value === "" ? null : Number(control.value);
+      if (next === previous) return;
+      run(() => { onChange(next); previous = next; });
+    };
+    control.onchange = control.oninput;
+    return (value = "") => { control.value = value; previous = value === "" ? null : Number(value); };
+  };
+  const resetButton = (parent, title, action) => {
+    const control = button(parent, "↺", action, "cm-tree-reset");
+    control.title = title; control.setAttribute("aria-label", title); return control;
+  };
+  function renderNode() {
+    if (!host || !uid) return;
+    host.replaceChildren();
+    host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
+    const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
+    button(host, "Rotate branches", () => rotate(uid));
+    const inheritedBranch = (scope) => {
+      const collection = scope === "subtree" ? "subtrees" : "nodes";
+      const records = tree.presentation?.[collection] || {};
+      const record = { ...records[uid] }; delete record.branch;
+      const inherited = resolveTreePresentation({ ...tree, presentation: {
+        ...tree.presentation, [collection]: { ...records, [uid]: record },
+      } }, config);
+      return (scope === "subtree" ? inherited.stems : inherited.branches).get(uid) || inherited.base;
+    };
+    const branchControls = (scope, title, style, fallback) => {
+      const row = element("div", host, undefined, "cm-tree-branch-row");
+      const name = element("span", row, title);
+      name.title = scope === "subtree" ? "Branches within this clade, excluding its incoming branch." : "Only the horizontal branch entering this node.";
+      const update = (branch) => patch([{ type: "tree.presentation.update", scope, ids: [uid], changes: { branch } }]);
+      const colour = colourInput(row, `${title} colour`, style?.colour, fallback.colour, (colour) => update({ colour }));
+      const width = element("input", row); width.type = "number";
+      Object.assign(width, { min: "0.1", step: "any", value: style?.width ?? fallback.width });
+      width.setAttribute("aria-label", `${title} thickness`); width.title = "Thickness (px); leave blank to inherit";
+      const clearWidth = liveNumber(width, (width) => update({ width }));
+      width.onblur = () => {
+        if (width.value !== "") return;
+        const current = resolveTreePresentation(tree, config);
+        clearWidth((scope === "subtree" ? current.stems : current.branches).get(uid)?.width ?? current.base.width);
+      };
+      resetButton(row, `Reset ${title.toLowerCase()} style`, () => { update(null); colour.reset(); clearWidth(fallback.width); });
+    };
+    branchControls("subtree", "Subtree", tree.presentation?.subtrees?.[uid]?.branch, inheritedBranch("subtree"));
+    const record = tree.presentation?.nodes?.[uid] || {};
+    if (uid !== tree.root) branchControls("node", "Incoming branch", record.branch, inheritedBranch("node"));
+    element("hr", host, undefined, "cm-tree-separator");
+    const label = record.label || {};
+    const text = input(host, "Label", "text", label.text, { placeholder: "Clade label" });
+    text.setAttribute("aria-label", "Annotation text"); text.parentElement.classList.add("cm-tree-wide");
+    const updateLabel = (label) => patch([{ type: "tree.presentation.update", scope: "node", ids: [uid], changes: { label } }]);
+    let previousText = text.value;
+    text.oninput = () => {
+      if (text.value === previousText) return;
+      run(() => { updateLabel({ text: text.value || null }); previousText = text.value; });
+    };
+    const formatting = element("div", host, undefined, "cm-tree-format");
+    const colour = colourInput(formatting, "Text colour", label.colour, "#333", (colour) => updateLabel({ colour }));
+    const size = element("input", formatting); size.type = "number";
+    Object.assign(size, { min: "1", step: "any", value: label.fontSize ?? "", placeholder: "10" });
+    size.setAttribute("aria-label", "Text size"); size.title = "Text size (px); leave blank to inherit";
+    const bold = input(formatting, "Bold", "checkbox", label.fontWeight === 700);
+    const italic = input(formatting, "Italic", "checkbox", label.fontStyle === "italic");
+    const clearSize = liveNumber(size, (fontSize) => updateLabel({ fontSize }));
+    bold.onchange = () => run(() => updateLabel({ fontWeight: bold.checked ? 700 : null }));
+    italic.onchange = () => run(() => updateLabel({ fontStyle: italic.checked ? "italic" : null }));
+    resetButton(formatting, "Clear label and formatting", () => {
+      updateLabel(null);
+      text.value = ""; previousText = ""; colour.reset(); clearSize(); bold.checked = false; italic.checked = false;
+    });
+    const actions = element("div", host, undefined, "cm-tree-actions");
+    const resetNode = button(actions, "Reset", () => {
+      if (tree.presentation?.subtrees?.[uid] || tree.presentation?.nodes?.[uid]) {
+        patch([
+          { type: "tree.presentation.reset", scope: "subtree", ids: [uid] },
+          { type: "tree.presentation.reset", scope: "node", ids: [uid] },
+        ]);
+      }
+      renderNode();
+      host.querySelector(".cm-tree-actions button")?.focus({ preventScroll: true });
+    });
+    resetNode.title = "Reset this node's subtree style, incoming branch and label; keep descendant overrides and automatic colouring.";
+    onResize?.();
+  }
+  renderNode();
+  container.append(message);
+  return container;
+}
+
 const tagName = "clinker-editor";
 const HTMLElementBase = globalThis.HTMLElement || class {};
 
@@ -483,6 +900,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   }
 
   disconnectedCallback() {
+    this.#chart?.previewTreePresentation?.(null);
     this.#unsubscribe?.();
     this.#unsubscribe = null;
     this.#cancelHover();
@@ -492,6 +910,7 @@ class ClinkerEditorElement extends HTMLElementBase {
 
   set chart(value) {
     if (value === this.#chart) return;
+    this.#chart?.previewTreePresentation?.(null);
     this.#unsubscribe?.();
     this.#unsubscribe = null;
     this.#chart = value || null;
@@ -568,6 +987,7 @@ class ClinkerEditorElement extends HTMLElementBase {
       }
       if (change.type === "data.apply" || change.type === "data.replace") this.#renderData();
       else if (change.type === "config.change") this.#renderAppearance();
+      if (change.type === "data.replace" || (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.presentation.")))) this.#renderAppearance();
       if (change.type === "history.change") this.#renderHistory();
     });
   }
@@ -1441,6 +1861,13 @@ class ClinkerEditorElement extends HTMLElementBase {
       return `<fieldset><legend>${section}</legend>${general.map(renderField).join("")}${advanced.length ? `<details data-appearance-section="${sectionKey}"${expandAdvanced ? " open" : ""}><summary>Advanced</summary>${advanced.map(renderField).join("")}</details>` : ""}</fieldset>`;
     });
     container.innerHTML = matchingSections.join("") || `<p class="cm-editor__empty">No appearance settings match “${escapeHtml(this.#appearanceFilter)}”.</p>`;
+    const tree = this.#chart.data()?.tree;
+    if (tree && (!this.#appearanceFilter || /tree|clade|colour|color|annotation|branch|cut|palette/.test(this.#appearanceFilter))) {
+      const controls = createTreeControls({ tree, config: config.tree,
+        patch: (ops) => this.#chart.patch(ops), preview: (ops) => this.#chart.previewTreePresentation(ops),
+        rotate: (uid) => this.#chart.rotateTreeNode(uid), document: this.ownerDocument });
+      container.append(controls);
+    }
   }
 }
 

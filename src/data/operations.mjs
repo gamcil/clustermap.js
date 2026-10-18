@@ -1,3 +1,5 @@
+import { isTreeOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../treeOperations.mjs";
+
 // Public editing operations deliberately distinguish presentation updates from
 // structural group edits. Group membership is exclusive: assigning a gene to
 // one group removes it from every other group.
@@ -361,15 +363,23 @@ function inverseOperation(data, index, operation) {
  * edits are validated against a virtual group ID set first, so a malformed
  * later operation cannot leave earlier records partially modified.
  */
-export function applyChartOperations(data, index, operations) {
+export function applyChartOperations(data, index, operations, treeConfig = {}) {
   if (!Array.isArray(operations) || !operations.length) {
     throw operationError("operations must be a non-empty array");
   }
   const groupIds = new Set(index.groupById.keys());
-  const applied = operations.map((operation) => validateOperation(operation, index, groupIds));
+  const applied = operations.map((operation) => isTreeOperation(operation)
+    ? normalizeTreeOperation(data.tree, operation)
+    : validateOperation(operation, index, groupIds));
+  validateTreeOperationBatch(data.tree, applied, treeConfig);
   const hasStructuralGroupEdit = applied.some((operation) => operation.type !== "groups.update" && operation.type.startsWith("groups."));
   const inverse = [];
   for (const operation of applied) {
+    if (isTreeOperation(operation)) {
+      inverse.unshift(inverseTreeOperation(data.tree));
+      applyTreeOperation(data.tree, operation);
+      continue;
+    }
     inverse.unshift(...inverseOperation(data, index, operation));
     applyOperation(data, index, operation);
   }

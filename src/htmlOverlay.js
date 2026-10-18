@@ -2,6 +2,7 @@
 // supplied by the caller because those controls may dispatch chart actions.
 import { color } from "d3-color";
 import { create, select } from "d3-selection";
+import { createTreeControls } from "./treeControls.mjs";
 
 export function createHtmlOverlay({
   tooltip,
@@ -11,28 +12,43 @@ export function createHtmlOverlay({
 }) {
   const windowRef = tooltip.node()?.ownerDocument?.defaultView;
   const clickEvent = `click${eventNamespace}`;
+  const keyEvent = `keydown${eventNamespace}`;
+  let focusTarget = null;
+  let treeMenu = false;
+  let menuTree = null;
 
-  const hide = () =>
-    tooltip.style("opacity", 0).style("pointer-events", "none");
+  const hide = (returnFocus = false) => {
+    tooltip.style("opacity", 0).style("pointer-events", "none").attr("aria-hidden", "true").property("inert", true);
+    const wasTreeMenu = treeMenu;
+    treeMenu = false;
+    menuTree = null;
+    if (returnFocus && focusTarget?.isConnected) focusTarget.focus?.({ preventScroll: true });
+    focusTarget = null;
+    if (wasTreeMenu) tooltip.html("");
+  };
 
   const dismissOnOutsideClick = (event) => {
     const node = tooltip.node();
-    if (!node || event.target === node || node.contains(event.target)) return;
+    if (!node || event.target === node || node.contains(event.target) || event.composedPath?.().includes(node)) return;
     hide();
   };
 
-  const show = (event, contents) => {
-    tooltip.html("").append(() => contents.node());
+  const position = (event) => {
     const bounds = tooltip.node().getBoundingClientRect();
     const rect = event.target?.getBoundingClientRect?.();
     const x = event.clientX ?? (rect ? rect.x + rect.width / 2 : 0);
     const y = event.clientY ?? (rect ? rect.y + rect.height : 0);
     tooltip
       .interrupt()
-      .style("left", `${x - bounds.width / 2}px`)
-      .style("top", `${y + 12}px`)
+      .style("left", `${Math.max(8, Math.min(x - bounds.width / 2, (windowRef?.innerWidth || Infinity) - bounds.width - 8))}px`)
+      .style("top", `${Math.max(8, Math.min(y + 12, (windowRef?.innerHeight || Infinity) - bounds.height - 8))}px`)
       .style("opacity", 1)
       .style("pointer-events", "all");
+  };
+  const show = (event, contents) => {
+    tooltip.html("").append(() => contents.node());
+    tooltip.attr("aria-hidden", null).property("inert", false).style("position", "fixed");
+    position(event);
   };
 
   const geneContents = (gene) => {
@@ -103,9 +119,11 @@ export function createHtmlOverlay({
   };
 
   return {
+    isTreeMenuOpen: (tree) => treeMenu && menuTree === tree,
     enter: () => {
       tooltip
         .interrupt()
+        .attr("aria-hidden", null).property("inert", false)
         .style("opacity", 1)
         .style("pointer-events", "all");
       // A chart must never replace another chart's window listener. The
@@ -114,6 +132,7 @@ export function createHtmlOverlay({
       if (windowRef) select(windowRef).on(clickEvent, dismissOnOutsideClick);
     },
     leave: () => {
+      if (treeMenu) return;
       const active = document.activeElement;
       if (active?.tagName === "INPUT" && tooltip.node().contains(active)) return;
       tooltip
@@ -125,10 +144,26 @@ export function createHtmlOverlay({
     show,
     showGeneMenu: (event, gene) => { event.preventDefault(); show(event, geneContents(gene)); },
     showGroupMenu: (event, group) => { event.preventDefault(); show(event, groupContents(group)); },
+    showTreeMenu: (event, uid) => {
+      event.preventDefault(); event.stopPropagation();
+      focusTarget = event.target;
+      const options = actions.treeControls();
+      menuTree = options.tree;
+      const controls = createTreeControls({ ...options, nodeUid: uid, policy: false,
+        onResize: () => { if (treeMenu) position(event); } });
+      show(event, select(controls));
+      treeMenu = true;
+      if (windowRef) {
+        select(windowRef).on(clickEvent, dismissOnOutsideClick).on(keyEvent, (key) => {
+          if (key.key === "Escape" && treeMenu) { key.preventDefault(); hide(true); }
+        });
+      }
+      controls.querySelector("button, input, select")?.focus({ preventScroll: true });
+    },
     dispose: () => {
-      if (windowRef) select(windowRef).on(clickEvent, null);
+      if (windowRef) select(windowRef).on(clickEvent, null).on(keyEvent, null);
       tooltip.interrupt();
-      hide();
+      hide(treeMenu);
     },
   };
 }

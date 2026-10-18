@@ -1,3 +1,5 @@
+import { validateTreePresentation } from "../treePresentation.mjs";
+
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned
 // records, including nested link endpoints and user metadata.
@@ -36,9 +38,12 @@ function normalizeLocus(locus, clusterUid) {
   };
 }
 
-export function normalizeChartData(data) {
+export function normalizeChartData(data, treeConfig = {}) {
   const source = cloneDataValue(data);
-  if (source.tree != null) validateTree(source.tree, source.clusters);
+  if (source.tree != null) {
+    validateTree(source.tree, source.clusters);
+    validateTreePresentation(source.tree, treeConfig);
+  }
   return {
     ...source,
     clusters: source.clusters.map((cluster) => ({
@@ -104,5 +109,6 @@ export function validateTree(tree, clusters) {
   visit(tree.root, true);
   if (visited.size !== nodes.size) fail("all nodes must be reachable from the root.");
   if (seenClusters.size !== clusterIds.size) fail("every plotted cluster must be referenced by exactly one leaf.");
+  validateTreePresentation(tree);
   return tree;
 }

@@ -200,7 +200,8 @@ export function canvasFigureBounds(context, scene, config, tree = null) {
   }
   const treeLayout = layoutCanvasTree(context, tree, scene, config, { trackAnchor: false });
   if (treeLayout) {
-    include(treeLayout.rootBranch.x1, treeLayout.rootBranch.y1);
+    include(treeLayout.bounds.minX, treeLayout.bounds.minY);
+    include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
     if (treeLayout.scaleBar) {
       const { label, fontSize } = treeLayout.scaleBar;
       include(label.x, label.y + fontSize + 3);
@@ -330,6 +331,7 @@ function drawTree(context, tree, scene, config, preview, motion) {
     previousTree: motion.previousTree,
     previousScene: motion.previousScene,
     targetScene: motion.targetScene || scene,
+    trackAnchor: motion.trackAnchor,
   });
   drawCanvasTree(context, interpolateTreeLayout(layout, motion.progress));
 }
@@ -977,6 +979,7 @@ export function renderCanvas({
   previousTreeScene = null,
   treeTargetScene = null,
   treeProgress = 1,
+  treeTrackAnchor = true,
   progress = 1,
   camera,
   config,
@@ -1082,6 +1085,7 @@ export function renderCanvas({
     else drawLinkLabel(context, link, link.source, config, anchors, geometry);
   }
   drawTree(context, tree, displayScene, config, preview, {
+    trackAnchor: treeTrackAnchor,
     previousTree,
     previousScene: previousTreeScene,
     targetScene: treeTargetScene || scene,

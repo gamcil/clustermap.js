@@ -4,6 +4,7 @@ import { scaleLinear, scaleOrdinal, scaleSequential } from "d3-scale";
 import { interpolateGreys, interpolateRainbow } from "d3-scale-chromatic";
 import { updateConfig } from "./utils.js";
 import { createDefaultConfig } from "./config.js";
+import { validateTreeColouring, validateTreePresentation } from "./treePresentation.mjs";
 import { filterLinks, getGroupScaleValues } from "./links/groups.mjs";
 import {
   anchorGeneGroup,
@@ -123,11 +124,20 @@ const lookup = {
   linksForGene: (uid) => chartIndex?.linksByGeneId.get(uid) || [],
 };
 
-function configure(options) {
-  const renderer = options?.plot?.renderer;
-  if (renderer !== undefined && !isRendererMode(renderer)) {
-    throw new TypeError(`Unknown plot renderer: ${renderer}. Expected svg, canvas, or webgpu.`);
+function validateConfiguration(options, tree = null) {
+  validateTreeColouring(options?.tree?.colouring);
+  const candidate = createDefaultConfig();
+  updateConfig(candidate, config);
+  updateConfig(candidate, options);
+  if (!isRendererMode(candidate.plot.renderer)) {
+    throw new TypeError(`Unknown plot renderer: ${candidate.plot.renderer}. Expected svg, canvas, or webgpu.`);
   }
+  validateTreePresentation(tree, candidate.tree);
+  return candidate;
+}
+
+function configure(options, tree = null) {
+  validateConfiguration(options, tree);
   updateConfig(config, options);
 }
 
@@ -400,6 +410,7 @@ function updateScales(data) {
 return {
   config,
   configure,
+  validateConfiguration,
   lookup,
   ids,
   locusTextForCluster,

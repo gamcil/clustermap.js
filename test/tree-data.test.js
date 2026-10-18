@@ -83,8 +83,8 @@ test("unary nodes, multifurcations, unknown lengths and unspecified support rema
   assert.doesNotThrow(() => normalizeChartData(data));
 });
 
-test("both tree fixtures satisfy the public input contract", async () => {
-  for (const name of ["testing-with-tree", "bua-genbank-tree"]) {
+test("tree fixtures satisfy the public input contract", async () => {
+  for (const name of ["testing-with-tree", "bua-genbank-tree", "tree-styling"]) {
     const fixture = JSON.parse(await readFile(new URL(`../fixtures/${name}.json`, import.meta.url)));
     const normalized = normalizeChartData(fixture);
     assert.equal(getClusterOrder(createChartState(normalized)).length, fixture.clusters.length);

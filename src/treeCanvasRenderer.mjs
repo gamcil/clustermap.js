@@ -8,6 +8,11 @@ export function layoutCanvasTree(context, tree, scene, config, options = {}) {
     return layoutTree({
       ...options,
       tree, scene, config,
+      measureText: (text, style) => {
+        context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize}px ${style.fontFamily}`;
+        const metrics = context.measureText(text);
+        return { width: metrics.width, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
+      },
       measureLabel: (cluster, locusText) => {
         context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
         const nameWidth = context.measureText(cluster.source.name || "").width;
@@ -38,9 +43,34 @@ export function drawCanvasTree(context, layout) {
   context.setLineDash(layout.guide.dash);
   traceLines(context, layout.guides);
   context.setLineDash([]);
+  if (layout.cutLine) {
+    const cut = layout.cutLine;
+    context.strokeStyle = cut.colour;
+    context.lineWidth = cut.width;
+    context.setLineDash([4, 3]);
+    traceLines(context, [cut]);
+    context.setLineDash([]);
+    context.fillStyle = cut.colour;
+    context.font = `${cut.label.fontSize}px ${cut.label.fontFamily}`;
+    context.textAlign = "center";
+    context.textBaseline = "bottom";
+    context.fillText(cut.label.text, cut.label.x, cut.label.y);
+  }
+  const groups = new Map();
+  for (const mark of [layout.rootBranch, ...layout.stems, ...layout.branches]) {
+    const key = `${mark.style.colour}:${mark.style.width}:${mark.lineCap || "butt"}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(mark);
+  }
+  for (const lines of groups.values()) {
+    context.strokeStyle = lines[0].style.colour;
+    context.lineWidth = lines[0].style.width;
+    context.lineCap = lines[0].lineCap || "butt";
+    traceLines(context, lines);
+  }
+  context.lineCap = "butt";
   context.strokeStyle = layout.branch.colour;
   context.lineWidth = layout.branch.width;
-  traceLines(context, [layout.rootBranch, ...layout.stems, ...layout.branches]);
   context.fillStyle = "white";
   for (const node of layout.nodes) {
     context.beginPath();
@@ -53,6 +83,13 @@ export function drawCanvasTree(context, layout) {
   context.textBaseline = "bottom";
   context.font = `${layout.support.fontSize}px ${layout.support.fontFamily}`;
   for (const label of layout.supports) context.fillText(label.text, label.x, label.y);
+  for (const label of layout.annotations) {
+    context.fillStyle = label.colour;
+    context.textAlign = "left";
+    context.textBaseline = "top";
+    context.font = `${label.fontStyle} ${label.fontWeight} ${label.fontSize}px ${label.fontFamily}`;
+    context.fillText(label.text, label.x, label.y);
+  }
   if (layout.scaleBar) {
     const bar = layout.scaleBar;
     context.strokeStyle = bar.colour;

@@ -136,5 +136,117 @@ test("tree edits, history, projects, and static export through the public chart 
     assert.equal(position[1], exportResult.canvas.nodes[index][1]);
   });
   assert.deepEqual(exportResult.unchangedInput, original.data.tree, "chart edits never mutate caller-owned tree data");
+
+  const styled = await page.evaluate(async () => {
+    const data = await (await fetch("/fixtures/tree-styling.json")).json();
+    testChart.config({ plot: { renderer: "svg" } });
+    testChart.data(data);
+    testChart.clearHistory();
+    return testChart.project();
+  });
+  const shapeStyles = () => page.evaluate(() => [...document.querySelectorAll("#plot .tree-branch, #plot .tree-stem")]
+    .map((node) => ({ uid: node.__data__.uid, colour: node.getAttribute("stroke"), width: node.getAttribute("stroke-width") })));
+  const automatic = await shapeStyles();
+  assert.equal(automatic.find((mark) => mark.uid === "x:a").colour, "#267c9e");
+  assert.equal(automatic.find((mark) => mark.uid === "y:c").colour, "#d7752d");
+  assert.equal(await page.locator("#plot g.tree-cut").count(), 1);
+  const annotated = await page.evaluate(() => {
+    testChart.patch([
+      { type: "tree.presentation.update", scope: "subtree", ids: ["x"], changes: { branch: { width: 4, colour: "#ff00aa" } } },
+      { type: "tree.presentation.update", scope: "node", ids: ["x"], changes: { label: { text: "<script>plain text</script>", fontStyle: "italic" } } },
+    ]);
+    return testChart.project();
+  });
+  assert.deepEqual(await page.evaluate(() => { testChart.undo(); return testChart.project(); }), styled);
+  assert.deepEqual(await page.evaluate(() => { testChart.redo(); return testChart.project(); }), annotated);
+  assert.equal(await page.locator("#plot text.tree-annotation").textContent(), "<script>plain text</script>");
+  assert.equal(await page.locator("#plot text.tree-annotation script").count(), 0);
+  const atomic = await page.evaluate(() => {
+    const before = JSON.stringify(testChart.project());
+    let errors = 0;
+    try { testChart.patch([{ type: "tree.presentation.update", scope: "node", ids: ["root"], changes: { branch: { width: 2 } } }]); } catch { errors++; }
+    const bad = testChart.project(); bad.data.tree.distance.kind = "invalid";
+    try { testChart.project(bad); } catch { errors++; }
+    try { testChart.config({ tree: { colouring: { palette: [] } } }); } catch { errors++; }
+    return { errors, unchanged: JSON.stringify(testChart.project()) === before };
+  });
+  assert.deepEqual(atomic, { errors: 3, unchanged: true });
+  const preview = await page.evaluate(() => {
+    const before = testChart.project();
+    const operations = (cutHeight) => [{ type: "tree.presentation.update", scope: "tree", changes: { colouring: { cutHeight } } }];
+    testChart.previewTreePresentation(operations(1));
+    testChart.previewTreePresentation(operations(4));
+    const savedDuringPreview = testChart.project();
+    testChart.patch(operations(4));
+    const after = testChart.project();
+    testChart.undo();
+    return { before, savedDuringPreview, after, undone: testChart.project() };
+  });
+  assert.deepEqual(preview.savedDuringPreview, preview.before);
+  assert.deepEqual(preview.undone, preview.before, "a sequence of previews commits as one undo step");
+  assert.equal(preview.after.data.tree.presentation.colouring.cutHeight, 4);
+
+  const nodeCircle = page.locator("#plot circle.tree-node");
+  await nodeCircle.first().dispatchEvent("contextmenu", { clientX: 200, clientY: 200 });
+  await page.getByRole("button", { name: "Reset", exact: true }).waitFor({ state: "visible" });
+  assert.deepEqual(await page.evaluate(() => testChart.project()), annotated, "right-click does not rotate or pan");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.getByRole("button", { name: "Reset", exact: true }).isVisible(), false);
+  assert.equal(await page.evaluate(() => document.activeElement.matches("circle.tree-node")), true);
+  await page.keyboard.press("Shift+F10");
+  assert.equal(await page.getByRole("button", { name: "Reset", exact: true }).isVisible(), true);
+  await page.keyboard.press("Escape");
+
+  const rootPoint = await nodeCircle.first().evaluate((node) => {
+    const point = new DOMPoint(+node.getAttribute("cx"), +node.getAttribute("cy")).matrixTransform(node.getScreenCTM());
+    return { x: point.x, y: point.y };
+  });
+  const parity = await page.evaluate(() => {
+    const inspect = () => {
+      const doc = new DOMParser().parseFromString(testChart.exportSvg(), "image/svg+xml");
+      return { labels: [...doc.querySelectorAll("text.tree-annotation")].map((label) => ({ text: label.textContent, size: label.getAttribute("font-size"), style: label.getAttribute("font-style") })),
+        styles: [...doc.querySelectorAll(".tree-branch, .tree-stem")].map((mark) => [mark.getAttribute("stroke"), mark.getAttribute("stroke-width")]),
+        interactive: doc.querySelectorAll("[tabindex], [role], [cursor], [aria-label], script").length };
+    };
+    const svg = inspect();
+    const strokes = [];
+    const stroke = CanvasRenderingContext2D.prototype.stroke;
+    CanvasRenderingContext2D.prototype.stroke = function (...args) { strokes.push([this.strokeStyle, this.lineWidth]); return stroke.apply(this, args); };
+    try { testChart.config({ plot: { renderer: "canvas", minimap: { show: true } } }); }
+    finally { CanvasRenderingContext2D.prototype.stroke = stroke; }
+    return { svg, canvas: inspect(), strokes };
+  });
+  assert.deepEqual(parity.svg, parity.canvas);
+  assert.equal(parity.svg.interactive, 0);
+  assert.ok(parity.strokes.some(([colour, width]) => colour === "#ff00aa" && width === 4), "Canvas draws resolved subtree style");
+  assert.deepEqual(parity.svg.labels, [{ text: "<script>plain text</script>", size: "10", style: "italic" }]);
+  const beforeRasterMenu = await page.evaluate(() => testChart.project());
+  await page.mouse.click(rootPoint.x, rootPoint.y, { button: "right" });
+  await page.getByRole("button", { name: "Reset", exact: true }).waitFor({ state: "visible" });
+  assert.deepEqual(await page.evaluate(() => testChart.project()), beforeRasterMenu);
+  await page.getByLabel("Annotation text", { exact: true }).fill("Raster clade");
+  assert.equal(await page.getByLabel("Annotation text", { exact: true }).inputValue(), "Raster clade", "Text editing keeps the node menu open");
+  assert.equal(await page.evaluate(() => testChart.data().tree.presentation.nodes.root.label.text), "Raster clade");
+  assert.deepEqual(await page.evaluate(() => { testChart.undo(); return testChart.project(); }), beforeRasterMenu);
+  const persisted = await page.evaluate(() => {
+    const project = JSON.parse(JSON.stringify(testChart.project()));
+    testChart.project(project);
+    return { project, reloaded: testChart.project() };
+  });
+  assert.deepEqual(persisted.project, persisted.reloaded);
+
+  await page.evaluate(async () => {
+    const { defineClinkerEditor } = await import("/dist/editor.mjs");
+    defineClinkerEditor();
+    const editor = document.createElement("clinker-editor"); document.body.append(editor); editor.chart = testChart;
+  });
+  await page.getByRole("tab", { name: "Appearance", exact: true }).click();
+  const editor = page.locator("clinker-editor");
+  const slider = editor.getByLabel("Preview cut height", { exact: true });
+  await slider.evaluate((node) => { node.value = 2; node.dispatchEvent(new Event("input", { bubbles: true })); });
+  await slider.evaluate((node) => { node.value = 3; node.dispatchEvent(new Event("input", { bubbles: true })); node.dispatchEvent(new Event("change", { bubbles: true })); });
+  assert.equal(await page.evaluate(() => testChart.data().tree.presentation.colouring.cutHeight), 3);
+  await page.evaluate(() => testChart.undo());
+  assert.equal(await page.evaluate(() => testChart.data().tree.presentation.colouring.cutHeight), 5);
   assert.deepEqual(errors, []);
 });

@@ -1,6 +1,9 @@
+import { TREE_COLOURING_DEFAULTS } from "./treePresentation.mjs";
+
 const defaultConfig = {
   tree: {
     show: true,
+    colouring: TREE_COLOURING_DEFAULTS,
     width: 100,
     useBranchLengths: true,
     branch: { width: 1.5, colour: "#555" },

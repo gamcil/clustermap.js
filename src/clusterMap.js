@@ -26,6 +26,7 @@ import {
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
 import { applyChartOperations } from "./data/operations.mjs";
+import { isTreeOperation, inverseTreeOperation, applyTreeOperation } from "./treeOperations.mjs";
 import { fitCameraForBounds } from "./camera.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
@@ -129,6 +130,7 @@ export default function clusterMap() {
   let prepareCanvasFlipBase = () => {};
   let warmCanvasFlipBase = () => {};
   let currentData = null;
+  let rotateTreeNode = () => {};
   let chartIndex = null;
   let highlightGeneIds = new Set();
   let highlightLinkIds = new Set();
@@ -136,6 +138,14 @@ export default function clusterMap() {
   let locusSelectionAnchorUid = null;
   let disposeRasterInteraction = () => {};
   let disposeOverlay = () => {};
+  let retainedOverlay = null;
+  let updatingTreeMenu = false;
+  function updateFromTreeMenu(action) {
+    const previous = updatingTreeMenu;
+    updatingTreeMenu = true;
+    try { return action(); }
+    finally { updatingTreeMenu = previous; }
+  }
   // Rebound on each redraw so programmatic focusing always targets the
   // currently active renderer surface.
   let focusCamera = () => false;
@@ -579,7 +589,9 @@ export default function clusterMap() {
   }
 
   function loadData(data) {
-    currentData = normalizeChartData(data);
+    const prepared = normalizeChartData(data, runtime.config.tree);
+    cancelTreePresentationPreview();
+    currentData = prepared;
     chartIndex = createChartIndex(currentData);
     refreshDerivedGroups();
     // Generated groups are part of the editable model, so index them after
@@ -673,13 +685,14 @@ export default function clusterMap() {
 
   function applyPatch(operations, { record = true, automaticGroups } = {}) {
     const groupsAutomaticBefore = groupsAreAutomatic();
-    const result = applyChartOperations(currentData, chartIndex, operations);
-    if (automaticGroups !== undefined) {
+    const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
+    const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
+    if (restoringAutomatic) {
       currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
     }
     const groupsAutomaticAfter = groupsAreAutomatic();
     refreshAfterPatch(result.effects, {
-      refreshAutomatic: groupsAutomaticAfter && (automaticGroups !== undefined || !groupsAutomaticBefore),
+      refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
     });
     redraw({ animate: false });
     emitChange({ type: "data.apply", operations: result.operations });
@@ -693,6 +706,14 @@ export default function clusterMap() {
       });
     }
     return result;
+  }
+
+  let treePresentationPreview = null;
+  function cancelTreePresentationPreview() {
+    if (!treePresentationPreview) return false;
+    if (currentData?.tree === treePresentationPreview.tree) applyTreeOperation(currentData.tree, treePresentationPreview.undo);
+    treePresentationPreview = null;
+    return true;
   }
 
   function setState(snapshot, { record = true } = {}) {
@@ -724,8 +745,11 @@ export default function clusterMap() {
     if (!currentData || !container) return;
     disposeRasterInteraction();
     disposeRasterInteraction = () => {};
-    disposeOverlay();
-    disposeOverlay = () => {};
+    if (!updatingTreeMenu || !retainedOverlay?.isTreeMenuOpen(currentData.tree)) {
+      disposeOverlay();
+      disposeOverlay = () => {};
+      retainedOverlay = null;
+    }
     const data = currentData;
     if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
     canvasFlipWarmFrame = null;
@@ -797,12 +821,15 @@ export default function clusterMap() {
     const { canvas, webgpuOverlay, minimap } = rasterSurface;
     canvasZoom = rasterSurface.zoom;
     svg.style("display", useRaster ? "none" : null);
-    const overlay = createHtmlOverlay({
+    const overlay = retainedOverlay || createHtmlOverlay({
       tooltip: svgSurface.tooltip,
       scales: runtime.scales,
       eventNamespace: `.${runtime.ids.root}-tooltip`,
       actions: {
         redraw,
+        treeControls: () => ({ tree: currentData.tree, clusters: currentData.clusters, config: runtime.config.tree,
+          patch: (ops) => updateFromTreeMenu(() => my.patch(ops)),
+          rotate: (uid) => updateFromTreeMenu(() => rotateTreeNode(uid)) }),
         updateGene: (gene, changes) => my.patch([
           { type: "genes.update", ids: [gene.uid], changes },
         ]),
@@ -820,6 +847,7 @@ export default function clusterMap() {
         getGroups: () => data.groups,
       },
     });
+    retainedOverlay = overlay;
     disposeOverlay = overlay.dispose;
     container
       .select("div.tooltip")
@@ -1212,11 +1240,13 @@ export default function clusterMap() {
         };
       });
     };
+    let minimapScene = null;
+    let minimapMeasurement = null;
     const paintMinimap = () => {
       rasterMinimap.paint({
         minimap: minimap.node(),
         surface: canvas.node(),
-        scene: runtime.getScene(),
+        scene: minimapScene || runtime.getScene(),
         options: minimapOptions,
         camera: getCamera(chartState),
         pixelRatio: globalThis.devicePixelRatio || 1,
@@ -1224,6 +1254,11 @@ export default function clusterMap() {
     };
     scheduleMinimapBase = (scene) => {
       if (!showMinimap) return;
+      if (currentData.tree && runtime.config.tree.show) {
+        minimapMeasurement ||= document.createElement("canvas").getContext("2d");
+        scene = { ...scene, figureBounds: canvasFigureBounds(minimapMeasurement, scene, runtime.config, currentData.tree) };
+      }
+      minimapScene = scene;
       rasterMinimap.scheduleBase({
         scene,
         minimap: minimap.node(),
@@ -1231,6 +1266,8 @@ export default function clusterMap() {
         renderBase: ({ canvas: baseCanvas, scene: overviewScene, projection }) => {
           renderCanvas({
             canvas: baseCanvas,
+            tree: currentData.tree,
+            treeTrackAnchor: false,
             // A full ribbon overview becomes an opaque field for dense maps.
             // Keep the structured, coloured gene raster by default; callers
             // can opt links back in for sparse figures.
@@ -1425,6 +1462,7 @@ export default function clusterMap() {
         if (event.shiftKey) return;
         (runtime.config.gene.shape.onClick || ((_, record) => anchorGene(record)))(event, gene);
       },
+      showTreeMenu: overlay.showTreeMenu,
       showGeneMenu: overlay.showGeneMenu,
       showGroupMenu: overlay.showGroupMenu,
       setScaleBarLength,
@@ -1443,6 +1481,7 @@ export default function clusterMap() {
         handler(event, group);
       },
     };
+    rotateTreeNode = rendererInteractions.rotateTreeNode;
     if (useRaster) {
       const targetForEvent = (canvasNode, event) =>
         hitTestCanvas({
@@ -1488,7 +1527,7 @@ export default function clusterMap() {
 
       rasterMinimap.bind(minimap, {
         getSurface: () => canvas.node(),
-        getScene: runtime.getScene,
+        getScene: () => minimapScene || runtime.getScene(),
         getCamera: () => getCamera(chartState),
         options: minimapOptions,
         moveCamera: (camera) => {
@@ -1692,8 +1731,9 @@ export default function clusterMap() {
 
   my.config = function (_) {
     if (!arguments.length) return runtime.config;
+    cancelTreePresentationPreview();
     const before = currentData ? previousConfigPatch(runtime.config, _) : null;
-    runtime.configure(_);
+    runtime.configure(_, currentData?.tree);
     // Configuration is a live part of the public chart API. Updating it after
     // mounting should have the same immediate effect as updating data, without
     // requiring consumers to re-bind the chart's normalized data themselves.
@@ -1705,6 +1745,7 @@ export default function clusterMap() {
   my.data = function (data) {
     if (!arguments.length) return currentData;
     if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
+    cancelTreePresentationPreview();
     container.datum(data).call(my);
     emitChange({ type: "data.replace" });
     clearHistory();
@@ -1722,10 +1763,12 @@ export default function clusterMap() {
   /** A portable data, appearance, and layout snapshot for project persistence. */
   my.project = function (snapshot) {
     if (!arguments.length) {
+      const data = structuredClone(currentData);
+      if (treePresentationPreview && data?.tree) applyTreeOperation(data.tree, treePresentationPreview.undo);
       return {
         format: projectFormat,
         version: projectVersion,
-        data: structuredClone(currentData),
+        data,
         // Projects are portable JSON, not executable application state.
         // Callback hooks are intentionally omitted and can be reattached by
         // the consumer after loading.
@@ -1742,8 +1785,12 @@ export default function clusterMap() {
     if (!snapshot.data || !snapshot.config) {
       throw new TypeError("A project snapshot requires data and config.");
     }
-    my.data(snapshot.data);
-    runtime.configure(snapshot.config);
+    const prepared = normalizeChartData(snapshot.data);
+    runtime.validateConfiguration(snapshot.config, prepared.tree);
+    if (snapshot.state) chartStateFromSnapshot(prepared, snapshot.state);
+    // Validate the incoming pair before changing either live data or settings.
+    runtime.configure(snapshot.config, prepared.tree);
+    my.data(prepared);
     if (container && currentData) redraw({ animate: false });
     emitChange({ type: "config.change", config: runtime.config });
     if (snapshot.state) setState(snapshot.state, { record: false });
@@ -1756,7 +1803,27 @@ export default function clusterMap() {
     if (!container || !currentData || !chartIndex) {
       throw new Error("Cannot patch chart data before the chart has rendered.");
     }
+    cancelTreePresentationPreview();
     applyPatch(operations);
+    return my;
+  };
+  my.rotateTreeNode = (uid) => { cancelTreePresentationPreview(); rotateTreeNode(uid); return my; };
+  /** Transient tree styles; patch commits once, null cancels the preview. */
+  my.previewTreePresentation = (operations) => {
+    const tree = currentData?.tree;
+    if (!operations && !treePresentationPreview) return my;
+    if (!tree) throw new Error("Tree presentation preview requires a loaded tree.");
+    if (operations && (!Array.isArray(operations) || operations.some((op) => !isTreeOperation(op)))) {
+      throw new TypeError("Only tree presentation operations can be previewed.");
+    }
+    cancelTreePresentationPreview();
+    if (operations) {
+      const undo = inverseTreeOperation(tree);
+      try { applyChartOperations(currentData, chartIndex, operations, runtime.config.tree); }
+      catch (error) { redraw({ animate: false }); throw error; }
+      treePresentationPreview = { tree, undo };
+    }
+    redraw({ animate: false });
     return my;
   };
   my.canUndo = () => history.length > 0;
@@ -1766,12 +1833,13 @@ export default function clusterMap() {
     return my;
   };
   my.undo = () => {
+    const cancelled = cancelTreePresentationPreview();
     const change = history.pop();
-    if (!change) return my;
+    if (!change) { if (cancelled) redraw({ animate: false }); return my; }
     if (change.kind === "patch") {
       applyPatch(change.undo, { record: false, automaticGroups: change.groupsAutomaticBefore });
     } else if (change.kind === "config") {
-      runtime.configure(change.undo);
+      runtime.configure(change.undo, currentData?.tree);
       redraw({ animate: false });
       emitChange({ type: "config.change", config: runtime.config });
     } else if (change.kind === "state" && change.undo) {
@@ -1782,12 +1850,13 @@ export default function clusterMap() {
     return my;
   };
   my.redo = () => {
+    const cancelled = cancelTreePresentationPreview();
     const change = future.pop();
-    if (!change) return my;
+    if (!change) { if (cancelled) redraw({ animate: false }); return my; }
     if (change.kind === "patch") {
       applyPatch(change.redo, { record: false, automaticGroups: change.groupsAutomaticAfter });
     } else if (change.kind === "config") {
-      runtime.configure(change.redo);
+      runtime.configure(change.redo, currentData?.tree);
       redraw({ animate: false });
       emitChange({ type: "config.change", config: runtime.config });
     } else if (change.kind === "state" && change.redo) {
@@ -1922,10 +1991,13 @@ export default function clusterMap() {
     });
   };
   my.destroy = () => {
+    cancelTreePresentationPreview();
+    rotateTreeNode = () => {};
     disposeRasterInteraction();
     disposeRasterInteraction = () => {};
     disposeOverlay();
     disposeOverlay = () => {};
+    retainedOverlay = null;
     clearRasterPreview();
     if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
     canvasAnimation = null;

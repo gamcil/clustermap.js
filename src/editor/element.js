@@ -1,4 +1,5 @@
 import { color } from "d3-color";
+import { createTreeControls } from "../treeControls.mjs";
 
 const tagName = "clinker-editor";
 const HTMLElementBase = globalThis.HTMLElement || class {};
@@ -79,6 +80,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   disconnectedCallback() {
+    this.#chart?.previewTreePresentation?.(null);
     this.#unsubscribe?.();
     this.#unsubscribe = null;
     this.#cancelHover();
@@ -88,6 +90,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
 
   set chart(value) {
     if (value === this.#chart) return;
+    this.#chart?.previewTreePresentation?.(null);
     this.#unsubscribe?.();
     this.#unsubscribe = null;
     this.#chart = value || null;
@@ -164,6 +167,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
       }
       if (change.type === "data.apply" || change.type === "data.replace") this.#renderData();
       else if (change.type === "config.change") this.#renderAppearance();
+      if (change.type === "data.replace" || (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.presentation.")))) this.#renderAppearance();
       if (change.type === "history.change") this.#renderHistory();
     });
   }
@@ -1037,6 +1041,13 @@ export class ClinkerEditorElement extends HTMLElementBase {
       return `<fieldset><legend>${section}</legend>${general.map(renderField).join("")}${advanced.length ? `<details data-appearance-section="${sectionKey}"${expandAdvanced ? " open" : ""}><summary>Advanced</summary>${advanced.map(renderField).join("")}</details>` : ""}</fieldset>`;
     });
     container.innerHTML = matchingSections.join("") || `<p class="cm-editor__empty">No appearance settings match “${escapeHtml(this.#appearanceFilter)}”.</p>`;
+    const tree = this.#chart.data()?.tree;
+    if (tree && (!this.#appearanceFilter || /tree|clade|colour|color|annotation|branch|cut|palette/.test(this.#appearanceFilter))) {
+      const controls = createTreeControls({ tree, config: config.tree,
+        patch: (ops) => this.#chart.patch(ops), preview: (ops) => this.#chart.previewTreePresentation(ops),
+        rotate: (uid) => this.#chart.rotateTreeNode(uid), document: this.ownerDocument });
+      container.append(controls);
+    }
   }
 }
 

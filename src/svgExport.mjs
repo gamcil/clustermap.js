@@ -84,6 +84,7 @@ export function exportChartSvg({
     this.removeAttribute("cursor");
     this.removeAttribute("tabindex");
     this.removeAttribute("role");
+    this.removeAttribute("aria-label");
     this.removeAttribute("pointer-events");
     this.style.removeProperty("cursor");
     this.style.removeProperty("pointer-events");

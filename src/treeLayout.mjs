@@ -1,5 +1,7 @@
 import { clusterLabelOffsetForPreview, clusterLabelTextForPreview, clusterOffsetForPreview } from "./scenePreview.mjs";
 
+import { resolveTreePresentation } from "./treePresentation.mjs";
+
 const leafXAnchors = new WeakMap();
 
 /** Return whether an order keeps every tree clade contiguous. */
@@ -139,6 +141,7 @@ export function layoutTree({
   scene,
   config,
   measureLabel,
+  measureText = (text, style) => ({ width: text.length * style.fontSize * 0.6, height: style.fontSize }),
   preview = null,
   previousTree = null,
   previousScene = null,
@@ -156,9 +159,6 @@ export function layoutTree({
   }
   const width = Number(config.tree.width) || 100;
   const horizontal = treeHorizontalLayout(tree, width, width, config.tree.useBranchLengths !== false);
-  const proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
-  const leafX = trackAnchor ? treeLeafX(tree, proposedX, dragging) : proposedX;
-  const xs = new Map([...horizontal.xs].map(([uid, x]) => [uid, x + leafX - width]));
   const leafY = (node, sourceScene) =>
     (sourceScene.clusters.get(node.cluster)?.y ?? 0) +
     config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2 +
@@ -167,10 +167,33 @@ export function layoutTree({
   const previousYs = previousTree && previousScene
     ? treeNodeYPositions(previousTree, previousScene, leafY)
     : null;
-  const branch = {
-    colour: config.tree.branch?.colour || "#555",
-    width: Number(config.tree.branch?.width) || 1.5,
-  };
+  const presentation = resolveTreePresentation(tree, config.tree);
+  const branch = presentation.base;
+  const annotations = [...presentation.annotations].map(([uid, style]) => {
+    const font = { ...style, fontFamily: config.plot.fontFamily };
+    return { uid, ...font, ...measureText(style.text, font), x: horizontal.xs.get(uid) + 6, y: ys.get(uid) + 6 };
+  });
+  let proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
+  const rows = [...scene.clusters.values()].map((cluster) => {
+    const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
+    return { top: y + 8 - (config.cluster?.nameFontSize ?? 12), bottom: y + 12 + (config.cluster?.lociFontSize ?? 10), start: labelStarts.get(cluster.source.uid) };
+  }).sort((a, b) => a.top - b.top);
+  for (const label of annotations) {
+    let low = 0, high = rows.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (rows[middle].bottom < label.y) low = middle + 1;
+      else high = middle;
+    }
+    for (let index = low; index < rows.length; index++) {
+      const row = rows[index];
+      if (row.top > label.y + label.height) break;
+      if (row.bottom >= label.y) proposedX = Math.min(proposedX, row.start - 16 + width - label.x - label.width);
+    }
+  }
+  const leafX = trackAnchor ? treeLeafX(tree, proposedX, dragging) : proposedX;
+  const xs = new Map([...horizontal.xs].map(([uid, x]) => [uid, x + leafX - width]));
+  for (const label of annotations) label.x += leafX - width;
   const guide = {
     colour: config.tree.leafGuide?.colour || "#999",
     width: Number(config.tree.leafGuide?.width) || 1,
@@ -191,9 +214,11 @@ export function layoutTree({
     const x = xs.get(node.uid);
     if (node.children?.length) {
       nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
-      if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children });
+      // Stems and horizontal edges are separate marks. Square stem caps fill
+      // the outer corners without extending leaf tips or changing distances.
+      if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children, style: presentation.stems.get(node.uid), lineCap: "square" });
       for (const child of node.children) {
-        branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child) });
+        branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child), style: presentation.branches.get(child) });
       }
     } else if (config.tree.leafGuide?.show && Number.isFinite(labelStarts.get(node.cluster))) {
       guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: labelStarts.get(node.cluster) });
@@ -227,16 +252,27 @@ export function layoutTree({
       label: { x: rootX + length / 2, y: y + height + 5, text: config.tree.scaleBar?.label || horizontal.scaleBarLabel },
     };
   }
+  let cutLine = null;
+  if (presentation.metric && presentation.policy.showCutLine && horizontal.proportional &&
+      presentation.threshold <= presentation.height && presentation.height > 0) {
+    const x = rootX + width * (1 - presentation.threshold / presentation.height);
+    const leafYs = tree.nodes.filter((node) => !node.children).map((node) => ys.get(node.uid));
+    cutLine = {
+      x1: x, x2: x, y1: Math.min(...leafYs), y2: Math.max(...leafYs),
+      colour: branch.colour, width: 1,
+      label: { x, y: Math.min(...leafYs) - 8, text: String(Number(presentation.threshold.toPrecision(6))), fontSize: support.fontSize, fontFamily: support.fontFamily },
+    };
+  }
   return positionTreeLayout({
-    branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
-    rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX },
+    cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
+    rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX, style: branch },
     ys, previousYs,
   }, ys);
 }
 
 function positionTreeLayout(layout, ys) {
   const line = (mark) => ({ ...mark, y1: ys.get(mark.nodeUid), y2: ys.get(mark.nodeUid) });
-  return {
+  const frame = {
     ...layout,
     rootBranch: line(layout.rootBranch),
     branches: layout.branches.map(line),
@@ -248,7 +284,17 @@ function positionTreeLayout(layout, ys) {
     nodes: layout.nodes.map((node) => ({ ...node, y: ys.get(node.uid) })),
     guides: layout.guides.map(line),
     supports: layout.supports.map((label) => ({ ...label, y: ys.get(label.uid) - 4 })),
+    annotations: layout.annotations.map((label) => ({ ...label, y: ys.get(label.uid) + 6 })),
   };
+  const points = [frame.rootBranch, ...frame.branches, ...frame.stems].flatMap((mark) => [[mark.x1, mark.y1], [mark.x2, mark.y2]]);
+  for (const label of frame.annotations) points.push([label.x, label.y], [label.x + label.width, label.y + label.height]);
+  if (frame.cutLine) points.push([frame.cutLine.label.x, frame.cutLine.label.y - frame.cutLine.label.fontSize]);
+  if (frame.scaleBar) points.push([frame.scaleBar.label.x, frame.scaleBar.label.y + frame.scaleBar.fontSize]);
+  frame.bounds = {
+    minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
+    minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)),
+  };
+  return frame;
 }
 
 /** Interpolate node identities, then rebuild stems so swapped branches fold. */

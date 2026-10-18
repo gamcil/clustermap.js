@@ -85,6 +85,13 @@ branch has a known length and the tree has a positive root-to-tip distance;
 otherwise the display falls back to a cladogram. SVG, Canvas, and the WebGPU
 Canvas overlay share tree geometry and animation. SVG export is static.
 
+Merge-height dendrograms can opt into cut-height clade colouring through
+`tree.distance` and `tree.presentation.colouring`. Sparse subtree/incoming-edge
+styles and plain-text node annotations use undoable `chart.patch()` operations.
+The appearance editor and internal-node context menu provide the same controls.
+See [the styling contract](TREE_SCHEMA.md#colouring-and-annotations) and try
+`?fixture=tree-styling&renderer=canvas` for an illustrative example.
+
 ## Biological fixture
 
 `fixtures/mcaa-neighbourhoods-173.json` and

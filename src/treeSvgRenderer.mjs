@@ -26,6 +26,12 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
   }
   const layout = layoutTree({
     tree, scene, config,
+    measureText: (text, style) => {
+      const node = plot.append("text").text(text).attr("font-family", style.fontFamily)
+        .attr("font-size", style.fontSize).attr("font-weight", style.fontWeight).attr("font-style", style.fontStyle);
+      try { const box = node.node().getBBox(); return { width: box.width, height: Math.max(box.height, style.fontSize) }; }
+      finally { node.remove(); }
+    },
     measureLabel: (cluster) => labelWidths.get(cluster.source.uid) || 0,
     previousTree: motion.previousTree,
     previousScene: motion.previousScene,
@@ -36,7 +42,18 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
   if (!layout) return;
   const branchMarks = (tag, className, records) => group.selectAll(`${tag}.${className}`)
     .data(records, (mark) => mark.uid).join(tag).attr("class", className)
-    .attr("fill", "none").attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width);
+    .attr("fill", "none").attr("stroke", (mark) => mark.style.colour).attr("stroke-width", (mark) => mark.style.width)
+    .attr("stroke-linecap", (mark) => mark.lineCap || "butt");
+  const cut = group.selectAll("g.tree-cut").data(layout.cutLine ? [layout.cutLine] : []).join("g")
+    .attr("class", "tree-cut").attr("pointer-events", "none");
+  cut.selectAll("line").data((line) => [line]).join("line")
+    .attr("x1", (line) => line.x1).attr("x2", (line) => line.x2)
+    .attr("y1", (line) => line.y1).attr("y2", (line) => line.y2)
+    .attr("stroke", (line) => line.colour).attr("stroke-width", (line) => line.width).attr("stroke-dasharray", "4 3");
+  cut.selectAll("text").data((line) => [line]).join("text")
+    .attr("x", (line) => line.label.x).attr("y", (line) => line.label.y)
+    .attr("font-size", (line) => `${line.label.fontSize}px`).attr("font-family", (line) => line.label.fontFamily)
+    .attr("text-anchor", "middle").attr("fill", (line) => line.colour).text((line) => line.label.text);
   const root = branchMarks("path", "tree-root-stub", [layout.rootBranch]);
   const branches = branchMarks("path", "tree-branch", layout.branches);
   const stems = branchMarks("line", "tree-stem", layout.stems);
@@ -48,12 +65,23 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     .attr("class", "tree-node").attr("r", (node) => node.radius)
     .attr("fill", "white").attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width)
     .attr("cursor", "pointer")
+    .attr("tabindex", 0).attr("role", "button").attr("aria-label", (node) => `Tree node ${node.uid}: rotate children or open context menu`)
+    .on("contextmenu", (event, node) => interactions.showTreeMenu?.(event, node.uid))
+    .on("keydown", (event, node) => {
+      if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) interactions.showTreeMenu?.(event, node.uid);
+      else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); interactions.rotateTreeNode?.(node.uid); }
+    })
     .on("click", (event, node) => { event.stopPropagation(); interactions.rotateTreeNode?.(node.uid); });
   const supports = group.selectAll("text.tree-support").data(layout.supports, (label) => label.uid).join("text")
     .attr("class", "tree-support").attr("fill", layout.support.colour)
     .attr("font-size", `${layout.support.fontSize}px`).style("font-family", layout.support.fontFamily)
     .attr("text-anchor", "end").attr("dominant-baseline", "text-after-edge")
     .text((label) => label.text);
+  const annotations = group.selectAll("text.tree-annotation").data(layout.annotations, (label) => label.uid).join("text")
+    .attr("class", "tree-annotation").attr("dominant-baseline", "hanging")
+    .attr("font-family", (label) => label.fontFamily).attr("font-size", (label) => label.fontSize)
+    .attr("font-weight", (label) => label.fontWeight).attr("font-style", (label) => label.fontStyle)
+    .attr("fill", (label) => label.colour).text((label) => label.text);
   const scale = group.selectAll("g.tree-scale-bar").data(layout.scaleBar ? [layout.scaleBar] : []).join("g")
     .attr("class", "tree-scale-bar");
   scale.selectAll("line").data((bar) => bar.lines).join("line")
@@ -72,6 +100,7 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     positionLines(stems, frame.stems);
     positionLines(guides, frame.guides);
     nodes.data(frame.nodes, (node) => node.uid).attr("cx", (node) => node.x).attr("cy", (node) => node.y);
+    annotations.data(frame.annotations, (label) => label.uid).attr("x", (label) => label.x).attr("y", (label) => label.y);
     supports.data(frame.supports, (label) => label.uid).attr("x", (label) => label.x).attr("y", (label) => label.y);
   };
   paintFrame(interpolateTreeLayout(layout, animate ? 0 : 1));

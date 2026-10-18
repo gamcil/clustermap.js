@@ -124,3 +124,38 @@ test("tree scales inherit clustermap styling and fall back to depth when lengths
   assert.equal(mark(cladogram.guides, "a").x1, mark(cladogram.guides, "b").x1);
   assert.equal(build({ config: { tree: { show: false } } }), null);
 });
+
+test("resolved styles and annotations survive interpolation and contribute measured bounds", () => {
+  const { tree, scene, build, reorderedScene } = example();
+  tree.presentation = {
+    subtrees: { pair: { branch: { colour: "purple", width: 4 } } },
+    nodes: { pair: { label: { text: "Clade", fontSize: 60, fontWeight: 700 } } },
+  };
+  const previousTree = structuredClone(tree);
+  const before = build({ measureText: () => ({ width: 350, height: 60 }) });
+  tree.nodes[0].children.reverse();
+  const layout = build({ scene: reorderedScene(["c", "a", "b"]), previousTree, previousScene: scene, measureText: () => ({ width: 350, height: 60 }) });
+  const frame = interpolateTreeLayout(layout, 0.5);
+  assert.deepEqual(mark(frame.stems, "pair").style, { colour: "purple", width: 4 });
+  assert.deepEqual(mark(frame.branches, "pair:a").style, { colour: "purple", width: 4 });
+  assert.equal(frame.annotations[0].y, mark(frame.nodes, "pair").y + 6);
+  assert.ok(frame.bounds.maxX >= frame.annotations[0].x + 350);
+  assert.ok(before.annotations[0].x + 350 <= 500 - 16, "wide annotations leave clearance before overlapping cluster labels");
+});
+
+test("metric cut line follows true height and is hidden in cladogram mode or above the root", () => {
+  const { tree, config, build } = example();
+  tree.distance = { kind: "mergeHeight" };
+  tree.nodes.find((node) => node.uid === "b").branchLength = 0.1;
+  tree.nodes.find((node) => node.uid === "c").branchLength = 0.3;
+  tree.presentation = { colouring: { mode: "cutHeight", cutHeight: 0.15, showCutLine: true } };
+  const layout = build();
+  assert.ok(Math.abs(layout.cutLine.x1 - (layout.rootBranch.x2 + config.tree.width / 2)) < 1e-10);
+  assert.equal(layout.cutLine.label.text, "0.15");
+  config.tree.useBranchLengths = false;
+  assert.equal(build().cutLine, null);
+  assert.notEqual(mark(build().stems, "pair").style.colour, "#555");
+  config.tree.useBranchLengths = true;
+  tree.presentation = { colouring: { mode: "cutHeight", cutHeight: 1, showCutLine: true } };
+  assert.equal(build().cutLine, null);
+});

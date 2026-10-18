@@ -57,7 +57,7 @@
       const params = new URLSearchParams(location.search);
       const testMode = params.has("test");
       const fixture = params.get("fixture");
-      const biologicalFixtures = { mcaa: "fixtures/mcaa-neighbourhoods-173.json", pks: "fixtures/pks-regions-142.json" };
+      const biologicalFixtures = { mcaa: "fixtures/mcaa-neighbourhoods-173.json", pks: "fixtures/pks-regions-142.json", "tree-styling": "fixtures/tree-styling.json" };
       const biologicalFixture = biologicalFixtures[fixture];
       const treeFixture = fixture === "burnettii";
       const renderer = params.get("renderer") || (fixture === "large" || biologicalFixture ? "canvas" : "svg");

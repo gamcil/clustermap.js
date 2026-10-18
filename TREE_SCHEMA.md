@@ -250,3 +250,149 @@ After `npm run build`, run `npm run test:tree-browser` for browser checks of
 node flips, undo/redo, public project save/load, and static SVG export. The
 browser check uses local files and requires Playwright Chromium to be installed
 (`npx playwright install chromium`).
+
+## Colouring and annotations
+
+Trees optionally carry descriptive distance metadata and sparse presentation
+settings. All existing tree fields retain their meaning. Unstyled trees retain
+neutral branches by default.
+
+```ts
+interface PlotTree {
+  // ...root, rooted, nodes as above
+  distance?: { kind: "mergeHeight"; label?: string };
+  presentation?: {
+    colouring?: Partial<TreeColouring>;
+    subtrees?: Record<string, { branch?: BranchStyle }>;
+    nodes?: Record<string, { branch?: BranchStyle; label?: AnnotationLabel }>;
+  };
+}
+interface TreeColouring {
+  mode: "none" | "cutHeight";
+  cutHeight: number | "auto";
+  palette: string[];
+  showCutLine: boolean;
+}
+interface BranchStyle { colour?: string; width?: number }
+interface AnnotationLabel {
+  text?: string;
+  colour?: string;
+  fontSize?: number;
+  fontWeight?: 400 | 700;
+  fontStyle?: "normal" | "italic";
+}
+```
+
+Dictionary keys are stable tree-node UIDs. Subtree overrides and annotations
+require internal nodes; incoming-edge overrides also support leaves. Widths
+and font sizes must be finite and positive; colours must be valid CSS colours.
+Unknown fields/references and invalid effective policies are rejected before
+replacing the active figure. Caller data is cloned.
+
+### Automatic cut colouring
+
+`tree.colouring` configuration supplies shared defaults: `mode: "none"`,
+`cutHeight: "auto"`, a six-colour categorical palette, and `showCutLine: false`.
+Per-tree `presentation.colouring` overrides those defaults. Store tree-specific
+choices there, particularly when switching between imported and computed trees.
+`distance.label` is descriptive text for the cut control, not an executable
+clustering method.
+
+Cut colouring requires `distance.kind: "mergeHeight"`, complete nonnegative
+incoming lengths (except the root), and equal root-to-tip distances within
+`1e-12 + 1e-9 × H`, where H is the largest root-to-tip distance. Metadata does
+not change geometry or infer branch lengths. Arbitrary phylogenies remain
+supported with colouring mode `none`.
+
+Node height is H minus root depth. A merge strictly below the threshold colours
+its vertical connector and outgoing edges. Its incoming edge stays neutral
+when its parent is at/above the cut. Singletons have no merge mark. Ties remain
+neutral; zero is neutral; a cut above H colours the whole tree. `"auto"` resolves
+to `0.7 × H`, including zero for a zero-height tree. This string differs from
+the draft plan's `null`: **null is reserved for removing patch overrides**.
+Persisted presentation values cannot be null.
+
+Palette assignment uses stable node IDs, so rotating branches preserves colours.
+Automatic colours are derived, never written into manual override records.
+The optional cut line shows the actual distance value; it is hidden when
+branch-length scaling is disabled or the threshold exceeds H.
+
+### Style scope and precedence
+
+Styles resolve property by property:
+
+1. Global `tree.branch` defaults.
+2. Automatic merge/clade colour.
+3. Inherited manual subtree overrides (nearest override for each property).
+4. Explicit incoming-edge override for the child.
+
+`subtrees[uid].branch` includes that node's vertical connector and descendant
+branches, excluding its incoming edge. `nodes[uid].branch` affects only its
+incoming horizontal edge. The display root has no incoming edge; its decorative
+stub retains the global style. Width-only overrides preserve inherited colours.
+Markers and support text retain their own appearance.
+
+Annotations are separate from original node names and support values. They use
+plain text below/right of the node, with defaults `#333`, 10px, regular, normal,
+and the plot font family. Their measured bounds affect tree placement, camera
+fitting, the raster minimap and static SVG export. SVG, Canvas and the WebGPU
+Canvas overlay consume the same resolved branch and annotation records.
+
+### Editing API and history
+
+Use patch operations; do not replace chart data for style edits:
+
+```js
+chart.patch([{
+  type: "tree.presentation.update", scope: "tree",
+  changes: { colouring: { mode: "cutHeight", cutHeight: 0.4, showCutLine: true } }
+}]);
+chart.patch([{
+  type: "tree.presentation.update", scope: "subtree", ids: ["node-1"],
+  changes: { branch: { colour: "#267c9e", width: 2 } }
+}, {
+  type: "tree.presentation.update", scope: "node", ids: ["node-1"],
+  changes: { label: { text: "Clade A", fontWeight: 700 } }
+}]);
+// Remove only this colour override, restoring automatic/inherited colour:
+chart.patch([{
+  type: "tree.presentation.update", scope: "subtree", ids: ["node-1"],
+  changes: { branch: { colour: null } }
+}]);
+chart.patch([{ type: "tree.presentation.reset", scope: "subtree", ids: ["node-1"] }]);
+chart.patch([{ type: "tree.presentation.reset", scope: "node", ids: ["node-1"] }]);
+chart.patch([{ type: "tree.presentation.reset", scope: "manual" }]);
+```
+
+Updates deep-merge sparse fields. Patch-only null removes a field; empty records
+are pruned. Resetting a subtree removes only its own override, preserving child
+overrides. Resetting all manual styles preserves the colouring policy. A batch
+validates atomically and is one undo step; undo restores field absence exactly.
+These operations do not rebuild gene/group indexes, change tree topology or
+alter locus positions. Styling travels with the tree in `chart.project()`.
+
+`chart.previewTreePresentation(operations)` replaces the current transient tree
+style preview without adding history. `chart.patch(operations)` ends the preview
+and commits against the original state; `chart.previewTreePresentation(null)`
+cancels it. Project snapshots omit the preview. The appearance slider uses this
+API to produce one undo step per completed gesture. Configuration changes,
+undo/redo, data replacement and destruction also cancel previews.
+
+`chart.rotateTreeNode(uid)` exposes the same undoable child rotation as clicking
+a node. The optional editor shows clade colouring only for compatible merge-height
+trees, revealing cut/palette controls when colouring is enabled. Resetting all
+manual styles lives in tree settings. Right-click an internal node for a compact
+form with subtree and incoming-branch controls and label formatting visible
+together. Colour swatches can be edited directly; the reset arrow beside each
+branch row clears its overrides, and blank thickness inherits. Controls update
+the plot immediately through undoable patches, keeping the menu and input focus
+in place while editing. The menu's Reset button removes this node's own
+subtree style, incoming-branch override and label in one undoable edit, preserving
+independent descendant overrides and the automatic colouring policy.
+SVG nodes also support the context-menu key or Shift+F10. Escape closes the menu
+and returns focus. These controls and interactive attributes are excluded from
+SVG export.
+
+Try `?fixture=tree-styling&renderer=canvas` (or `svg`/`webgpu`) for a small
+illustrative bifurcating merge-height tree with an outgroup and annotated clade.
+Its distances are demonstration data, not inferred biological relationships.

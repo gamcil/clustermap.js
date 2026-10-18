@@ -1946,7 +1946,7 @@ function interpolateNumber$1(a, b) {
   };
 }
 
-function object(a, b) {
+function object$2(a, b) {
   var i = {},
       c = {},
       k;
@@ -2040,7 +2040,7 @@ function interpolate$1(a, b) {
       : b instanceof Date ? date
       : isNumberArray(b) ? numberArray
       : Array.isArray(b) ? genericArray
-      : typeof b.valueOf !== "function" && typeof b.toString !== "function" || isNaN(b) ? object
+      : typeof b.valueOf !== "function" && typeof b.toString !== "function" || isNaN(b) ? object$2
       : interpolateNumber$1)(a, b);
 }
 
@@ -4342,6 +4342,171 @@ function createClusterDragPreview(scene, { clusterUid, position, positions, orde
   return { type: "cluster-drag", clusterUid, clusterOffsets, clusterOrder };
 }
 
+const TREE_COLOURING_DEFAULTS = {
+  mode: "none",
+  cutHeight: "auto",
+  palette: ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"],
+  showCutLine: false,
+};
+const metricsCache = new WeakMap();
+const stylesCache = new WeakMap();
+const fail$1 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
+const object$1 = (value) => value && typeof value === "object" && !Array.isArray(value);
+const own$1 = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+function fields(value, allowed, where) {
+  if (!object$1(value)) fail$1(`${where} must be an object.`);
+  for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$1(`${where}.${key} is unsupported.`);
+}
+function colour(value, where) {
+  if (typeof value !== "string" || !color(value)) fail$1(`${where} must be a valid colour.`);
+}
+function positive(value, where) {
+  if (!Number.isFinite(value) || value <= 0) fail$1(`${where} must be finite and positive.`);
+}
+function validateTreeColouring(policy) {
+  if (policy === undefined) return;
+  fields(policy, ["mode", "cutHeight", "palette", "showCutLine"], "colouring");
+  if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$1("colouring.mode must be none or cutHeight.");
+  if (own$1(policy, "cutHeight") && policy.cutHeight !== "auto" && (!Number.isFinite(policy.cutHeight) || policy.cutHeight < 0)) {
+    fail$1('colouring.cutHeight must be "auto" or a finite non-negative number.');
+  }
+  if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$1("colouring.showCutLine must be boolean.");
+  if (own$1(policy, "palette")) {
+    if (!Array.isArray(policy.palette) || !policy.palette.length) fail$1("colouring.palette must be a non-empty colour array.");
+    policy.palette.forEach((entry) => colour(entry, "colouring.palette"));
+  }
+}
+
+/** Biological distances and canonical ID order survive child rotation unchanged. */
+function treeMetrics(tree) {
+  if (metricsCache.has(tree)) return metricsCache.get(tree);
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const parents = new Map();
+  const distances = new Map([[tree.root, 0]]);
+  let complete = true;
+  const visit = (uid) => {
+    for (const child of nodes.get(uid).children || []) {
+      const length = nodes.get(child).branchLength;
+      if (!Number.isFinite(length) || length < 0) complete = false;
+      parents.set(child, uid);
+      distances.set(child, distances.get(uid) + (Number.isFinite(length) ? length : 0));
+      visit(child);
+    }
+  };
+  visit(tree.root);
+  const tips = tree.nodes.filter((node) => !node.children);
+  const height = Math.max(0, ...tips.map((node) => distances.get(node.uid)));
+  // Absolute 1e-12 plus relative 1e-9 tolerance, measured in input distance units.
+  const tolerance = 1e-12 + 1e-9 * height;
+  const ultrametric = complete && tips.every((node) => Math.abs(distances.get(node.uid) - height) <= tolerance);
+  const result = {
+    nodes, parents, height, ultrametric,
+    heights: new Map([...distances].map(([uid, distance]) => [uid, Math.max(0, height - distance)])),
+    canonical: [...tree.nodes].sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0),
+  };
+  metricsCache.set(tree, result);
+  return result;
+}
+
+function validateBranch(style, where) {
+  fields(style, ["colour", "width"], where);
+  if (own$1(style, "colour")) colour(style.colour, `${where}.colour`);
+  if (own$1(style, "width")) positive(style.width, `${where}.width`);
+}
+
+/** Validate optional data fields and the effective tree/config colouring policy. */
+function validateTreePresentation(tree, config = {}) {
+  validateTreeColouring(config.colouring);
+  if (!tree) return;
+  if (tree.distance !== undefined) {
+    fields(tree.distance, ["kind", "label"], "distance");
+    if (tree.distance.kind !== "mergeHeight") fail$1("distance.kind must be mergeHeight.");
+    if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$1("distance.label must be text.");
+  }
+  const presentation = tree.presentation;
+  if (presentation !== undefined) {
+    fields(presentation, ["colouring", "subtrees", "nodes"], "presentation");
+    validateTreeColouring(presentation.colouring);
+    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    for (const scope of ["subtrees", "nodes"]) {
+      if (presentation[scope] === undefined) continue;
+      if (!object$1(presentation[scope])) fail$1(`presentation.${scope} must be a node-ID dictionary.`);
+      for (const [uid, record] of Object.entries(presentation[scope])) {
+        const node = nodes.get(uid);
+        if (!node) fail$1(`presentation.${scope} refers to unknown node '${uid}'.`);
+        fields(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
+        if (scope === "subtrees" && !node.children) fail$1(`subtree '${uid}' must be an internal node.`);
+        if (record.branch !== undefined) {
+          if (scope === "nodes" && uid === tree.root) fail$1("the display root has no incoming edge to style.");
+          validateBranch(record.branch, `${scope}.${uid}.branch`);
+        }
+        if (record.label !== undefined) {
+          if (!node.children) fail$1(`annotation '${uid}' must belong to an internal node.`);
+          const label = record.label;
+          fields(label, ["text", "colour", "fontSize", "fontWeight", "fontStyle"], `nodes.${uid}.label`);
+          if (own$1(label, "text") && typeof label.text !== "string") fail$1(`annotation '${uid}' text must be a string.`);
+          if (own$1(label, "colour")) colour(label.colour, `annotation '${uid}' colour`);
+          if (own$1(label, "fontSize")) positive(label.fontSize, `annotation '${uid}' fontSize`);
+          if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$1("annotation fontWeight must be 400 or 700.");
+          if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$1("annotation fontStyle must be normal or italic.");
+        }
+      }
+    }
+  }
+  const policy = { ...TREE_COLOURING_DEFAULTS, ...config.colouring, ...presentation?.colouring };
+  if (policy.mode === "cutHeight") {
+    if (tree.distance?.kind !== "mergeHeight") fail$1("cutHeight colouring requires distance.kind = mergeHeight.");
+    if (!treeMetrics(tree).ultrametric) fail$1("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
+  }
+}
+
+function invalidateTreePresentation(tree) {
+  if (tree) stylesCache.delete(tree);
+}
+
+/** Resolve properties once per presentation/config revision, never per tween. */
+function resolveTreePresentation(tree, config = {}) {
+  const defaults = { ...TREE_COLOURING_DEFAULTS, ...config.colouring };
+  const signature = JSON.stringify([config.branch?.colour, config.branch?.width, defaults]);
+  const cached = stylesCache.get(tree);
+  if (cached && cached.presentation === tree.presentation && cached.signature === signature) return cached.value;
+  validateTreePresentation(tree, config);
+  const metrics = treeMetrics(tree);
+  const policy = { ...defaults, ...tree.presentation?.colouring };
+  const threshold = policy.cutHeight === "auto" ? metrics.height * 0.7 : policy.cutHeight;
+  const groups = new Map();
+  if (policy.mode === "cutHeight" && threshold > 0) {
+    for (const node of metrics.canonical) {
+      if (!node.children || metrics.heights.get(node.uid) >= threshold) continue;
+      const parent = metrics.parents.get(node.uid);
+      if (parent === undefined || metrics.heights.get(parent) >= threshold) {
+        groups.set(node.uid, policy.palette[groups.size % policy.palette.length]);
+      }
+    }
+  }
+  const base = { colour: config.branch?.colour || "#555", width: Number(config.branch?.width) || 1.5 };
+  const branches = new Map();
+  const stems = new Map();
+  const annotations = new Map();
+  const visit = (uid, inherited = {}, groupColour = null) => {
+    const node = metrics.nodes.get(uid);
+    const automatic = groups.get(uid) || groupColour;
+    const subtree = { ...inherited, ...tree.presentation?.subtrees?.[uid]?.branch };
+    const mergeStyle = { ...base, ...(automatic ? { colour: automatic } : {}), ...subtree };
+    if (node.children) stems.set(uid, mergeStyle);
+    const label = tree.presentation?.nodes?.[uid]?.label;
+    if (label?.text) annotations.set(uid, { colour: "#333", fontSize: 10, fontWeight: 400, fontStyle: "normal", ...label });
+    for (const child of node.children || []) {
+      branches.set(child, { ...mergeStyle, ...tree.presentation?.nodes?.[child]?.branch });
+      visit(child, subtree, automatic);
+    }
+  };
+  visit(tree.root);
+  const value = { base, branches, stems, annotations, policy, height: metrics.height, threshold, metric: policy.mode === "cutHeight" };
+  stylesCache.set(tree, { presentation: tree.presentation, signature, value });
+  return value;
+}
+
 const leafXAnchors = new WeakMap();
 
 /** Return whether an order keeps every tree clade contiguous. */
@@ -4481,6 +4646,7 @@ function layoutTree({
   scene,
   config,
   measureLabel,
+  measureText = (text, style) => ({ width: text.length * style.fontSize * 0.6, height: style.fontSize }),
   preview = null,
   previousTree = null,
   previousScene = null,
@@ -4498,9 +4664,6 @@ function layoutTree({
   }
   const width = Number(config.tree.width) || 100;
   const horizontal = treeHorizontalLayout(tree, width, width, config.tree.useBranchLengths !== false);
-  const proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
-  const leafX = trackAnchor ? treeLeafX(tree, proposedX, dragging) : proposedX;
-  const xs = new Map([...horizontal.xs].map(([uid, x]) => [uid, x + leafX - width]));
   const leafY = (node, sourceScene) =>
     (sourceScene.clusters.get(node.cluster)?.y ?? 0) +
     config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2 +
@@ -4509,10 +4672,33 @@ function layoutTree({
   const previousYs = previousTree && previousScene
     ? treeNodeYPositions(previousTree, previousScene, leafY)
     : null;
-  const branch = {
-    colour: config.tree.branch?.colour || "#555",
-    width: Number(config.tree.branch?.width) || 1.5,
-  };
+  const presentation = resolveTreePresentation(tree, config.tree);
+  const branch = presentation.base;
+  const annotations = [...presentation.annotations].map(([uid, style]) => {
+    const font = { ...style, fontFamily: config.plot.fontFamily };
+    return { uid, ...font, ...measureText(style.text, font), x: horizontal.xs.get(uid) + 6, y: ys.get(uid) + 6 };
+  });
+  let proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
+  const rows = [...scene.clusters.values()].map((cluster) => {
+    const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
+    return { top: y + 8 - (config.cluster?.nameFontSize ?? 12), bottom: y + 12 + (config.cluster?.lociFontSize ?? 10), start: labelStarts.get(cluster.source.uid) };
+  }).sort((a, b) => a.top - b.top);
+  for (const label of annotations) {
+    let low = 0, high = rows.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (rows[middle].bottom < label.y) low = middle + 1;
+      else high = middle;
+    }
+    for (let index = low; index < rows.length; index++) {
+      const row = rows[index];
+      if (row.top > label.y + label.height) break;
+      if (row.bottom >= label.y) proposedX = Math.min(proposedX, row.start - 16 + width - label.x - label.width);
+    }
+  }
+  const leafX = trackAnchor ? treeLeafX(tree, proposedX, dragging) : proposedX;
+  const xs = new Map([...horizontal.xs].map(([uid, x]) => [uid, x + leafX - width]));
+  for (const label of annotations) label.x += leafX - width;
   const guide = {
     colour: config.tree.leafGuide?.colour || "#999",
     width: Number(config.tree.leafGuide?.width) || 1,
@@ -4533,9 +4719,11 @@ function layoutTree({
     const x = xs.get(node.uid);
     if (node.children?.length) {
       nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
-      if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children });
+      // Stems and horizontal edges are separate marks. Square stem caps fill
+      // the outer corners without extending leaf tips or changing distances.
+      if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children, style: presentation.stems.get(node.uid), lineCap: "square" });
       for (const child of node.children) {
-        branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child) });
+        branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child), style: presentation.branches.get(child) });
       }
     } else if (config.tree.leafGuide?.show && Number.isFinite(labelStarts.get(node.cluster))) {
       guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: labelStarts.get(node.cluster) });
@@ -4569,16 +4757,27 @@ function layoutTree({
       label: { x: rootX + length / 2, y: y + height + 5, text: config.tree.scaleBar?.label || horizontal.scaleBarLabel },
     };
   }
+  let cutLine = null;
+  if (presentation.metric && presentation.policy.showCutLine && horizontal.proportional &&
+      presentation.threshold <= presentation.height && presentation.height > 0) {
+    const x = rootX + width * (1 - presentation.threshold / presentation.height);
+    const leafYs = tree.nodes.filter((node) => !node.children).map((node) => ys.get(node.uid));
+    cutLine = {
+      x1: x, x2: x, y1: Math.min(...leafYs), y2: Math.max(...leafYs),
+      colour: branch.colour, width: 1,
+      label: { x, y: Math.min(...leafYs) - 8, text: String(Number(presentation.threshold.toPrecision(6))), fontSize: support.fontSize, fontFamily: support.fontFamily },
+    };
+  }
   return positionTreeLayout({
-    branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
-    rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX },
+    cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
+    rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX, style: branch },
     ys, previousYs,
   }, ys);
 }
 
 function positionTreeLayout(layout, ys) {
   const line = (mark) => ({ ...mark, y1: ys.get(mark.nodeUid), y2: ys.get(mark.nodeUid) });
-  return {
+  const frame = {
     ...layout,
     rootBranch: line(layout.rootBranch),
     branches: layout.branches.map(line),
@@ -4590,7 +4789,17 @@ function positionTreeLayout(layout, ys) {
     nodes: layout.nodes.map((node) => ({ ...node, y: ys.get(node.uid) })),
     guides: layout.guides.map(line),
     supports: layout.supports.map((label) => ({ ...label, y: ys.get(label.uid) - 4 })),
+    annotations: layout.annotations.map((label) => ({ ...label, y: ys.get(label.uid) + 6 })),
   };
+  const points = [frame.rootBranch, ...frame.branches, ...frame.stems].flatMap((mark) => [[mark.x1, mark.y1], [mark.x2, mark.y2]]);
+  for (const label of frame.annotations) points.push([label.x, label.y], [label.x + label.width, label.y + label.height]);
+  if (frame.cutLine) points.push([frame.cutLine.label.x, frame.cutLine.label.y - frame.cutLine.label.fontSize]);
+  if (frame.scaleBar) points.push([frame.scaleBar.label.x, frame.scaleBar.label.y + frame.scaleBar.fontSize]);
+  frame.bounds = {
+    minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
+    minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)),
+  };
+  return frame;
 }
 
 /** Interpolate node identities, then rebuild stems so swapped branches fold. */
@@ -5140,9 +5349,12 @@ function normalizeLocus(locus, clusterUid) {
   };
 }
 
-function normalizeChartData(data) {
+function normalizeChartData(data, treeConfig = {}) {
   const source = cloneDataValue(data);
-  if (source.tree != null) validateTree(source.tree, source.clusters);
+  if (source.tree != null) {
+    validateTree(source.tree, source.clusters);
+    validateTreePresentation(source.tree, treeConfig);
+  }
   return {
     ...source,
     clusters: source.clusters.map((cluster) => ({
@@ -5208,7 +5420,107 @@ function validateTree(tree, clusters) {
   visit(tree.root, true);
   if (visited.size !== nodes.size) fail("all nodes must be reachable from the root.");
   if (seenClusters.size !== clusterIds.size) fail("every plotted cluster must be referenced by exactly one leaf.");
+  validateTreePresentation(tree);
   return tree;
+}
+
+const fail = (message) => { throw new TypeError(`Invalid chart operation: ${message}`); };
+const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+const object = (value) => value && typeof value === "object" && !Array.isArray(value);
+const types = new Set(["tree.presentation.update", "tree.presentation.reset", "tree.presentation.restore"]);
+const isTreeOperation = (operation) => types.has(operation?.type);
+
+function normalizeTreeOperation(tree, operation) {
+  if (!tree) fail("tree presentation edits require a loaded tree.");
+  if (operation.type === "tree.presentation.restore") {
+    return { type: operation.type, ...(own(operation, "presentation") ? { presentation: structuredClone(operation.presentation) } : {}) };
+  }
+  const { type, scope } = operation;
+  if (!["tree", "node", "subtree", "manual"].includes(scope)) fail("unknown tree presentation scope.");
+  if (scope === "manual" && type !== "tree.presentation.reset") fail("manual scope is only for resetting all manual styles.");
+  if (scope === "tree" && type === "tree.presentation.reset") fail("use manual scope to reset all manual styles; update colouring to reset its policy.");
+  let ids;
+  if (["node", "subtree"].includes(scope)) {
+    if (!Array.isArray(operation.ids) || !operation.ids.length) fail(`${scope} scope requires node IDs.`);
+    ids = [...new Set(operation.ids)];
+    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    for (const uid of ids) {
+      if (!nodes.has(uid)) fail(`unknown tree node '${uid}'.`);
+      if (scope === "subtree" && !nodes.get(uid).children) fail(`subtree '${uid}' is not internal.`);
+    }
+  } else if (operation.ids !== undefined) fail(`${scope} scope does not accept ids.`);
+  const result = { type, scope, ...(ids ? { ids } : {}) };
+  if (type === "tree.presentation.update") {
+    if (!object(operation.changes) || !Object.keys(operation.changes).length) fail("tree presentation updates require changes.");
+    const allowed = scope === "tree" ? ["colouring"] : scope === "subtree" ? ["branch"] : ["branch", "label"];
+    if (Object.keys(operation.changes).some((key) => !allowed.includes(key))) fail("unsupported tree presentation update field.");
+    const fields = { branch: ["colour", "width"], label: ["text", "colour", "fontSize", "fontWeight", "fontStyle"], colouring: ["mode", "cutHeight", "palette", "showCutLine"] };
+    for (const [key, value] of Object.entries(operation.changes)) {
+      if (value === null) continue;
+      if (!object(value) || Object.keys(value).some((field) => !fields[key].includes(field))) {
+        fail(`unsupported ${key} fields in tree presentation update.`);
+      }
+    }
+    result.changes = structuredClone(operation.changes);
+  }
+  return result;
+}
+
+// Construct own properties rather than assigning UID keys onto prototypes.
+function mergeSparse(previous, changes) {
+  const entries = new Map(Object.entries(object(previous) ? previous : {}));
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === null) entries.delete(key);
+    else if (object(value)) {
+      const merged = mergeSparse(entries.get(key), value);
+      if (Object.keys(merged).length) entries.set(key, merged);
+      else entries.delete(key);
+    } else entries.set(key, structuredClone(value));
+  }
+  return Object.fromEntries(entries);
+}
+
+function applyTreeOperation(tree, operation) {
+  if (operation.type === "tree.presentation.restore") {
+    if (own(operation, "presentation")) tree.presentation = structuredClone(operation.presentation);
+    else delete tree.presentation;
+  } else {
+    let presentation = structuredClone(tree.presentation || {});
+    if (operation.scope === "manual") {
+      delete presentation.nodes;
+      delete presentation.subtrees;
+    } else if (operation.scope === "tree") presentation = mergeSparse(presentation, operation.changes);
+    else {
+      const key = operation.scope === "node" ? "nodes" : "subtrees";
+      const records = new Map(Object.entries(presentation[key] || {}));
+      for (const uid of operation.ids) {
+        if (operation.type === "tree.presentation.reset") records.delete(uid);
+        else {
+          const record = mergeSparse(records.get(uid), operation.changes);
+          if (Object.keys(record).length) records.set(uid, record);
+          else records.delete(uid);
+        }
+      }
+      if (records.size) presentation[key] = Object.fromEntries(records);
+      else delete presentation[key];
+    }
+    if (Object.keys(presentation).length) tree.presentation = presentation;
+    else delete tree.presentation;
+  }
+  invalidateTreePresentation(tree);
+}
+
+function inverseTreeOperation(tree) {
+  return { type: "tree.presentation.restore", ...(own(tree, "presentation") ? { presentation: structuredClone(tree.presentation) } : {}) };
+}
+
+function validateTreeOperationBatch(tree, operations, config) {
+  if (!operations.some(isTreeOperation)) return;
+  const draft = { ...tree, ...(own(tree, "presentation") ? { presentation: structuredClone(tree.presentation) } : {}) };
+  for (const operation of operations.filter(isTreeOperation)) {
+    applyTreeOperation(draft, operation);
+    validateTreePresentation(draft, config);
+  }
 }
 
 // Public editing operations deliberately distinguish presentation updates from
@@ -5574,15 +5886,23 @@ function inverseOperation(data, index, operation) {
  * edits are validated against a virtual group ID set first, so a malformed
  * later operation cannot leave earlier records partially modified.
  */
-function applyChartOperations(data, index, operations) {
+function applyChartOperations(data, index, operations, treeConfig = {}) {
   if (!Array.isArray(operations) || !operations.length) {
     throw operationError("operations must be a non-empty array");
   }
   const groupIds = new Set(index.groupById.keys());
-  const applied = operations.map((operation) => validateOperation(operation, index, groupIds));
+  const applied = operations.map((operation) => isTreeOperation(operation)
+    ? normalizeTreeOperation(data.tree, operation)
+    : validateOperation(operation, index, groupIds));
+  validateTreeOperationBatch(data.tree, applied, treeConfig);
   const hasStructuralGroupEdit = applied.some((operation) => operation.type !== "groups.update" && operation.type.startsWith("groups."));
   const inverse = [];
   for (const operation of applied) {
+    if (isTreeOperation(operation)) {
+      inverse.unshift(inverseTreeOperation(data.tree));
+      applyTreeOperation(data.tree, operation);
+      continue;
+    }
     inverse.unshift(...inverseOperation(data, index, operation));
     applyOperation(data, index, operation);
   }
@@ -5644,6 +5964,262 @@ function fitCameraForBounds({
   };
 }
 
+// Structural styles and the same neutral controls used by the plot editor.
+function installTreeControlsStyle(doc) {
+  if (doc.getElementById("clustermap-tree-controls-style")) return;
+  const style = doc.createElement("style");
+  style.id = "clustermap-tree-controls-style";
+  style.textContent = `
+.cm-tree-controls { font:inherit; color:inherit; text-align:left; }
+.cm-tree-controls * { box-sizing:border-box; }
+.cm-tree-controls [hidden] { display:none!important; }
+.cm-tree-controls fieldset { min-width:0; margin:0 0 10px; padding:8px; border:1px solid #ddd; border-radius:4px; }
+.cm-tree-controls legend { padding:0 4px; font-weight:600; }
+.cm-tree-controls button, .cm-tree-controls input, .cm-tree-controls select { font:inherit; color:inherit; }
+.cm-tree-controls button, .cm-tree-controls select, .cm-tree-controls input:not([type=checkbox]):not([type=color]):not([type=range]) { min-height:30px; border:1px solid #cbd3de; border-radius:6px; padding:4px 8px; background:#fff; }
+.cm-tree-controls button { cursor:pointer; }
+.cm-tree-controls button:hover:not(:disabled) { border-color:#78a9ed; background:#f4f8ff; }
+.cm-tree-controls button:disabled { color:#8993a1; background:#f5f6f8; cursor:default; }
+.cm-tree-controls button[aria-pressed=true] { font-weight:600; }
+.cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:6px; margin:6px 0; }
+.cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }
+.cm-tree-controls input[type=number] { width:64px; min-width:0; }
+.cm-tree-controls input[type=range] { width:100%; }
+.cm-tree-controls select { width:132px; min-width:0; }
+.cm-tree-controls input[type=color] { width:30px; height:24px; padding:0; border:0; background:transparent; cursor:pointer; }
+.cm-tree-controls .cm-tree-heading { font-weight:600; margin-bottom:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-tree-controls .cm-tree-branch-row { display:grid; grid-template-columns:minmax(0,1fr) 30px 64px 28px; gap:6px; align-items:center; margin:8px 0; }
+.cm-tree-controls .cm-tree-reset { width:28px; padding:2px; min-height:26px; }
+.cm-tree-controls .cm-tree-wide { display:block; }
+.cm-tree-controls .cm-tree-wide > span { display:block; margin-bottom:4px; }
+.cm-tree-controls .cm-tree-wide input, .cm-tree-controls .cm-tree-wide select { width:100%; }
+.cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }
+.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid #e5e9ef; margin:10px 0; }
+.cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:10px; }
+.cm-tree-controls [role=status]:empty { display:none; }
+.cm-tree-controls [role=status] { color:#a13c46; margin:6px 0 0; }
+.cm-tree-controls--popover { width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font-size:12px; line-height:1.3; }
+.cm-tree-controls--popover .cm-tree-heading { font-size:12px; margin-bottom:6px; }
+.cm-tree-controls--popover button, .cm-tree-controls--popover input:not([type=checkbox]):not([type=color]) { min-height:24px; padding:2px 5px; border-radius:4px; }
+.cm-tree-controls--popover input[type=number] { width:52px; }
+.cm-tree-controls--popover input[type=color] { width:24px; height:20px; }
+.cm-tree-controls--popover input[type=checkbox] { width:12px; height:12px; margin:0; }
+.cm-tree-controls--popover .cm-tree-branch-row { grid-template-columns:minmax(0,1fr) 24px 52px 22px; gap:5px; margin:5px 0; }
+.cm-tree-controls--popover .cm-tree-reset { width:22px; min-height:22px; padding:0; }
+.cm-tree-controls--popover .cm-tree-row { margin:4px 0; gap:4px; }
+.cm-tree-controls--popover .cm-tree-format { gap:5px; }
+.cm-tree-controls--popover .cm-tree-separator { margin:6px 0; }
+.cm-tree-controls--popover .cm-tree-actions { margin-top:6px; }
+`.replaceAll(".cm-tree-controls", ".cm-tree-controls.cm-tree-controls");
+  doc.head.append(style);
+}
+
+/** Policy settings and node popovers share the same compact editing form. */
+function createTreeControls({ tree, config, patch, preview, rotate, clusters = [], nodeUid = null,
+  policy = true, onResize, document: doc = globalThis.document }) {
+  installTreeControlsStyle(doc);
+  const element = (tag, parent, text, className) => {
+    const node = doc.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    parent?.append(node);
+    return node;
+  };
+  const container = element("div", null, undefined, `cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
+  const message = element("p"); message.setAttribute("role", "status");
+  const run = (action) => { try { action(); message.textContent = ""; } catch (error) { message.textContent = error.message; } };
+  const button = (parent, title, action, className) => {
+    const node = element("button", parent, title, className); node.type = "button";
+    node.onclick = () => run(action); return node;
+  };
+  const section = (title) => { const field = element("fieldset", container); element("legend", field, title); return field; };
+  const input = (parent, title, type, value, options = {}) => {
+    const row = element("label", parent, undefined, "cm-tree-row");
+    element("span", row, title);
+    const control = element("input", row); control.type = type;
+    if (type === "checkbox") control.checked = Boolean(value); else control.value = value ?? "";
+    Object.assign(control, options); return control;
+  };
+  const reset = (scope, uid) => patch([{ type: "tree.presentation.reset", scope, ...(uid ? { ids: [uid] } : {}) }]);
+  const resolved = resolveTreePresentation(tree, config);
+
+  let compatible = tree.distance?.kind === "mergeHeight";
+  try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...resolved.policy, mode: "cutHeight" } } }, config); }
+  catch { compatible = false; }
+  if (policy && compatible) {
+    const field = section("Clade colouring");
+    const effective = resolved.policy;
+    const change = (changes) => [{ type: "tree.presentation.update", scope: "tree", changes: { colouring: changes } }];
+    const enabled = input(field, "Colour clades", "checkbox", effective.mode === "cutHeight");
+    enabled.onchange = () => run(() => patch(change({ mode: enabled.checked ? "cutHeight" : "none" })));
+    const options = element("div", field); options.hidden = !enabled.checked;
+    const actual = effective.cutHeight === "auto" ? resolved.height * 0.7 : effective.cutHeight;
+    const number = input(options, "Cut height", "number", actual, { min: "0", step: "any" });
+    number.onchange = () => run(() => patch(change({ cutHeight: Number(number.value) })));
+    const slider = element("input", options); slider.type = "range";
+    Object.assign(slider, { min: "0", max: String(Math.max(resolved.height, actual) || 1), step: String(resolved.height / 1000 || 0.001), value: actual });
+    slider.setAttribute("aria-label", "Preview cut height");
+    let cancelled = false;
+    const cancel = () => { cancelled = true; preview?.(null); slider.value = actual; number.value = actual; };
+    slider.oninput = () => run(() => { cancelled = false; number.value = slider.value; preview?.(change({ cutHeight: Number(slider.value) })); });
+    slider.onchange = () => { if (!cancelled) run(() => patch(change({ cutHeight: Number(slider.value) }))); };
+    slider.onkeydown = (event) => { if (event.key === "Escape") { cancel(); event.preventDefault(); } };
+    slider.onpointercancel = cancel;
+    const auto = button(number.parentElement, "Auto", () => patch(change({ cutHeight: "auto" })));
+    auto.title = "Use automatic cut height (70%)";
+    auto.setAttribute("aria-pressed", String(effective.cutHeight === "auto"));
+    const palettes = [
+      ["Muted", ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"]],
+      ["Colorblind friendly", ["#0072b2", "#e69f00", "#009e73", "#cc79a7", "#d55e00", "#56b4e9"]],
+    ];
+    if (!palettes.some(([, colours]) => JSON.stringify(colours) === JSON.stringify(effective.palette))) palettes.unshift(["Custom", effective.palette]);
+    const paletteRow = element("label", options, undefined, "cm-tree-row"); element("span", paletteRow, "Palette");
+    const select = element("select", paletteRow); select.setAttribute("aria-label", "Clade palette");
+    palettes.forEach(([name, colours], index) => { const option = element("option", select, name); option.value = index; option.selected = JSON.stringify(colours) === JSON.stringify(effective.palette); });
+    select.onchange = () => run(() => patch(change({ palette: palettes[Number(select.value)][1] })));
+    const line = input(options, "Show cut line", "checkbox", effective.showCutLine);
+    line.onchange = () => run(() => patch(change({ showCutLine: line.checked })));
+  }
+
+  if (policy) {
+    const resetAll = button(container, "Reset all manual styles", () => reset("manual"));
+    resetAll.title = "Clear manual tree styles and labels; keep automatic clade colouring.";
+    resetAll.disabled = !Object.keys(tree.presentation?.nodes || {}).length && !Object.keys(tree.presentation?.subtrees || {}).length;
+    container.append(message);
+    return container;
+  }
+
+  const nodesById = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const clusterNames = new Map(clusters.map((cluster) => [cluster.uid, cluster.name || cluster.label || cluster.uid]));
+  const descriptions = new Map();
+  const describe = (uid) => {
+    if (descriptions.has(uid)) return descriptions.get(uid);
+    const node = nodesById.get(uid);
+    const children = node.children?.map(describe);
+    const info = children ? { count: children.reduce((sum, child) => sum + child.count, 0), labels: children.flatMap((child) => child.labels).slice(0, 2) }
+      : { count: 1, labels: [node.label || clusterNames.get(node.cluster) || node.cluster] };
+    descriptions.set(uid, info);
+    return info;
+  };
+  const titleFor = (uid) => {
+    const node = nodesById.get(uid);
+    if (node.label) return node.label;
+    const { count, labels } = describe(uid);
+    return uid === tree.root ? `All ${count} clusters` : `${labels.join(" + ")}${count > 2 ? ` + ${count - 2} more` : ""}`;
+  };
+  const uid = nodesById.get(nodeUid)?.children ? nodeUid : nodesById.get(tree.root)?.children ? tree.root : null;
+  const host = element("div", container);
+
+  const colourInput = (parent, title, value, fallback, onChange) => {
+    const picker = element("input", parent); picker.type = "color";
+    const initial = color(value || fallback)?.formatHex() || "#555555";
+    let override = value ?? null;
+    const refresh = () => {
+      picker.value = color(override || fallback)?.formatHex() || initial;
+      picker.title = `${title}${override === null ? " (inherited)" : ""}`;
+    };
+    picker.setAttribute("aria-label", title); refresh();
+    picker.oninput = () => {
+      if (picker.value === override) return;
+      run(() => { onChange(picker.value); override = picker.value; picker.title = title; });
+    };
+    picker.onchange = picker.oninput;
+    return { reset: () => { override = null; refresh(); } };
+  };
+  const liveNumber = (control, onChange) => {
+    let previous = control.value === "" ? null : Number(control.value);
+    control.oninput = () => {
+      if (!control.validity.valid) return;
+      const next = control.value === "" ? null : Number(control.value);
+      if (next === previous) return;
+      run(() => { onChange(next); previous = next; });
+    };
+    control.onchange = control.oninput;
+    return (value = "") => { control.value = value; previous = value === "" ? null : Number(value); };
+  };
+  const resetButton = (parent, title, action) => {
+    const control = button(parent, "↺", action, "cm-tree-reset");
+    control.title = title; control.setAttribute("aria-label", title); return control;
+  };
+  function renderNode() {
+    if (!host || !uid) return;
+    host.replaceChildren();
+    host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
+    const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
+    button(host, "Rotate branches", () => rotate(uid));
+    const inheritedBranch = (scope) => {
+      const collection = scope === "subtree" ? "subtrees" : "nodes";
+      const records = tree.presentation?.[collection] || {};
+      const record = { ...records[uid] }; delete record.branch;
+      const inherited = resolveTreePresentation({ ...tree, presentation: {
+        ...tree.presentation, [collection]: { ...records, [uid]: record },
+      } }, config);
+      return (scope === "subtree" ? inherited.stems : inherited.branches).get(uid) || inherited.base;
+    };
+    const branchControls = (scope, title, style, fallback) => {
+      const row = element("div", host, undefined, "cm-tree-branch-row");
+      const name = element("span", row, title);
+      name.title = scope === "subtree" ? "Branches within this clade, excluding its incoming branch." : "Only the horizontal branch entering this node.";
+      const update = (branch) => patch([{ type: "tree.presentation.update", scope, ids: [uid], changes: { branch } }]);
+      const colour = colourInput(row, `${title} colour`, style?.colour, fallback.colour, (colour) => update({ colour }));
+      const width = element("input", row); width.type = "number";
+      Object.assign(width, { min: "0.1", step: "any", value: style?.width ?? fallback.width });
+      width.setAttribute("aria-label", `${title} thickness`); width.title = "Thickness (px); leave blank to inherit";
+      const clearWidth = liveNumber(width, (width) => update({ width }));
+      width.onblur = () => {
+        if (width.value !== "") return;
+        const current = resolveTreePresentation(tree, config);
+        clearWidth((scope === "subtree" ? current.stems : current.branches).get(uid)?.width ?? current.base.width);
+      };
+      resetButton(row, `Reset ${title.toLowerCase()} style`, () => { update(null); colour.reset(); clearWidth(fallback.width); });
+    };
+    branchControls("subtree", "Subtree", tree.presentation?.subtrees?.[uid]?.branch, inheritedBranch("subtree"));
+    const record = tree.presentation?.nodes?.[uid] || {};
+    if (uid !== tree.root) branchControls("node", "Incoming branch", record.branch, inheritedBranch("node"));
+    element("hr", host, undefined, "cm-tree-separator");
+    const label = record.label || {};
+    const text = input(host, "Label", "text", label.text, { placeholder: "Clade label" });
+    text.setAttribute("aria-label", "Annotation text"); text.parentElement.classList.add("cm-tree-wide");
+    const updateLabel = (label) => patch([{ type: "tree.presentation.update", scope: "node", ids: [uid], changes: { label } }]);
+    let previousText = text.value;
+    text.oninput = () => {
+      if (text.value === previousText) return;
+      run(() => { updateLabel({ text: text.value || null }); previousText = text.value; });
+    };
+    const formatting = element("div", host, undefined, "cm-tree-format");
+    const colour = colourInput(formatting, "Text colour", label.colour, "#333", (colour) => updateLabel({ colour }));
+    const size = element("input", formatting); size.type = "number";
+    Object.assign(size, { min: "1", step: "any", value: label.fontSize ?? "", placeholder: "10" });
+    size.setAttribute("aria-label", "Text size"); size.title = "Text size (px); leave blank to inherit";
+    const bold = input(formatting, "Bold", "checkbox", label.fontWeight === 700);
+    const italic = input(formatting, "Italic", "checkbox", label.fontStyle === "italic");
+    const clearSize = liveNumber(size, (fontSize) => updateLabel({ fontSize }));
+    bold.onchange = () => run(() => updateLabel({ fontWeight: bold.checked ? 700 : null }));
+    italic.onchange = () => run(() => updateLabel({ fontStyle: italic.checked ? "italic" : null }));
+    resetButton(formatting, "Clear label and formatting", () => {
+      updateLabel(null);
+      text.value = ""; previousText = ""; colour.reset(); clearSize(); bold.checked = false; italic.checked = false;
+    });
+    const actions = element("div", host, undefined, "cm-tree-actions");
+    const resetNode = button(actions, "Reset", () => {
+      if (tree.presentation?.subtrees?.[uid] || tree.presentation?.nodes?.[uid]) {
+        patch([
+          { type: "tree.presentation.reset", scope: "subtree", ids: [uid] },
+          { type: "tree.presentation.reset", scope: "node", ids: [uid] },
+        ]);
+      }
+      renderNode();
+      host.querySelector(".cm-tree-actions button")?.focus({ preventScroll: true });
+    });
+    resetNode.title = "Reset this node's subtree style, incoming branch and label; keep descendant overrides and automatic colouring.";
+    onResize?.();
+  }
+  renderNode();
+  container.append(message);
+  return container;
+}
+
 // Browser-only tooltip lifecycle shared by any chart renderer. Menu content is
 
 function createHtmlOverlay({
@@ -5654,28 +6230,43 @@ function createHtmlOverlay({
 }) {
   const windowRef = tooltip.node()?.ownerDocument?.defaultView;
   const clickEvent = `click${eventNamespace}`;
+  const keyEvent = `keydown${eventNamespace}`;
+  let focusTarget = null;
+  let treeMenu = false;
+  let menuTree = null;
 
-  const hide = () =>
-    tooltip.style("opacity", 0).style("pointer-events", "none");
+  const hide = (returnFocus = false) => {
+    tooltip.style("opacity", 0).style("pointer-events", "none").attr("aria-hidden", "true").property("inert", true);
+    const wasTreeMenu = treeMenu;
+    treeMenu = false;
+    menuTree = null;
+    if (returnFocus && focusTarget?.isConnected) focusTarget.focus?.({ preventScroll: true });
+    focusTarget = null;
+    if (wasTreeMenu) tooltip.html("");
+  };
 
   const dismissOnOutsideClick = (event) => {
     const node = tooltip.node();
-    if (!node || event.target === node || node.contains(event.target)) return;
+    if (!node || event.target === node || node.contains(event.target) || event.composedPath?.().includes(node)) return;
     hide();
   };
 
-  const show = (event, contents) => {
-    tooltip.html("").append(() => contents.node());
+  const position = (event) => {
     const bounds = tooltip.node().getBoundingClientRect();
     const rect = event.target?.getBoundingClientRect?.();
     const x = event.clientX ?? (rect ? rect.x + rect.width / 2 : 0);
     const y = event.clientY ?? (rect ? rect.y + rect.height : 0);
     tooltip
       .interrupt()
-      .style("left", `${x - bounds.width / 2}px`)
-      .style("top", `${y + 12}px`)
+      .style("left", `${Math.max(8, Math.min(x - bounds.width / 2, (windowRef?.innerWidth || Infinity) - bounds.width - 8))}px`)
+      .style("top", `${Math.max(8, Math.min(y + 12, (windowRef?.innerHeight || Infinity) - bounds.height - 8))}px`)
       .style("opacity", 1)
       .style("pointer-events", "all");
+  };
+  const show = (event, contents) => {
+    tooltip.html("").append(() => contents.node());
+    tooltip.attr("aria-hidden", null).property("inert", false).style("position", "fixed");
+    position(event);
   };
 
   const geneContents = (gene) => {
@@ -5746,9 +6337,11 @@ function createHtmlOverlay({
   };
 
   return {
+    isTreeMenuOpen: (tree) => treeMenu && menuTree === tree,
     enter: () => {
       tooltip
         .interrupt()
+        .attr("aria-hidden", null).property("inert", false)
         .style("opacity", 1)
         .style("pointer-events", "all");
       // A chart must never replace another chart's window listener. The
@@ -5757,6 +6350,7 @@ function createHtmlOverlay({
       if (windowRef) select(windowRef).on(clickEvent, dismissOnOutsideClick);
     },
     leave: () => {
+      if (treeMenu) return;
       const active = document.activeElement;
       if (active?.tagName === "INPUT" && tooltip.node().contains(active)) return;
       tooltip
@@ -5768,10 +6362,26 @@ function createHtmlOverlay({
     show,
     showGeneMenu: (event, gene) => { event.preventDefault(); show(event, geneContents(gene)); },
     showGroupMenu: (event, group) => { event.preventDefault(); show(event, groupContents(group)); },
+    showTreeMenu: (event, uid) => {
+      event.preventDefault(); event.stopPropagation();
+      focusTarget = event.target;
+      const options = actions.treeControls();
+      menuTree = options.tree;
+      const controls = createTreeControls({ ...options, nodeUid: uid, policy: false,
+        onResize: () => { if (treeMenu) position(event); } });
+      show(event, select(controls));
+      treeMenu = true;
+      if (windowRef) {
+        select(windowRef).on(clickEvent, dismissOnOutsideClick).on(keyEvent, (key) => {
+          if (key.key === "Escape" && treeMenu) { key.preventDefault(); hide(true); }
+        });
+      }
+      controls.querySelector("button, input, select")?.focus({ preventScroll: true });
+    },
     dispose: () => {
-      if (windowRef) select(windowRef).on(clickEvent, null);
+      if (windowRef) select(windowRef).on(clickEvent, null).on(keyEvent, null);
       tooltip.interrupt();
-      hide();
+      hide(treeMenu);
     },
   };
 }
@@ -7471,6 +8081,11 @@ function layoutCanvasTree(context, tree, scene, config, options = {}) {
     return layoutTree({
       ...options,
       tree, scene, config,
+      measureText: (text, style) => {
+        context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize}px ${style.fontFamily}`;
+        const metrics = context.measureText(text);
+        return { width: metrics.width, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
+      },
       measureLabel: (cluster, locusText) => {
         context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
         const nameWidth = context.measureText(cluster.source.name || "").width;
@@ -7501,9 +8116,34 @@ function drawCanvasTree(context, layout) {
   context.setLineDash(layout.guide.dash);
   traceLines(context, layout.guides);
   context.setLineDash([]);
+  if (layout.cutLine) {
+    const cut = layout.cutLine;
+    context.strokeStyle = cut.colour;
+    context.lineWidth = cut.width;
+    context.setLineDash([4, 3]);
+    traceLines(context, [cut]);
+    context.setLineDash([]);
+    context.fillStyle = cut.colour;
+    context.font = `${cut.label.fontSize}px ${cut.label.fontFamily}`;
+    context.textAlign = "center";
+    context.textBaseline = "bottom";
+    context.fillText(cut.label.text, cut.label.x, cut.label.y);
+  }
+  const groups = new Map();
+  for (const mark of [layout.rootBranch, ...layout.stems, ...layout.branches]) {
+    const key = `${mark.style.colour}:${mark.style.width}:${mark.lineCap || "butt"}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(mark);
+  }
+  for (const lines of groups.values()) {
+    context.strokeStyle = lines[0].style.colour;
+    context.lineWidth = lines[0].style.width;
+    context.lineCap = lines[0].lineCap || "butt";
+    traceLines(context, lines);
+  }
+  context.lineCap = "butt";
   context.strokeStyle = layout.branch.colour;
   context.lineWidth = layout.branch.width;
-  traceLines(context, [layout.rootBranch, ...layout.stems, ...layout.branches]);
   context.fillStyle = "white";
   for (const node of layout.nodes) {
     context.beginPath();
@@ -7516,6 +8156,13 @@ function drawCanvasTree(context, layout) {
   context.textBaseline = "bottom";
   context.font = `${layout.support.fontSize}px ${layout.support.fontFamily}`;
   for (const label of layout.supports) context.fillText(label.text, label.x, label.y);
+  for (const label of layout.annotations) {
+    context.fillStyle = label.colour;
+    context.textAlign = "left";
+    context.textBaseline = "top";
+    context.font = `${label.fontStyle} ${label.fontWeight} ${label.fontSize}px ${label.fontFamily}`;
+    context.fillText(label.text, label.x, label.y);
+  }
   if (layout.scaleBar) {
     const bar = layout.scaleBar;
     context.strokeStyle = bar.colour;
@@ -7714,7 +8361,8 @@ function canvasFigureBounds(context, scene, config, tree = null) {
   }
   const treeLayout = layoutCanvasTree(context, tree, scene, config, { trackAnchor: false });
   if (treeLayout) {
-    include(treeLayout.rootBranch.x1, treeLayout.rootBranch.y1);
+    include(treeLayout.bounds.minX, treeLayout.bounds.minY);
+    include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
     if (treeLayout.scaleBar) {
       const { label, fontSize } = treeLayout.scaleBar;
       include(label.x, label.y + fontSize + 3);
@@ -7844,6 +8492,7 @@ function drawTree(context, tree, scene, config, preview, motion) {
     previousTree: motion.previousTree,
     previousScene: motion.previousScene,
     targetScene: motion.targetScene || scene,
+    trackAnchor: motion.trackAnchor,
   });
   drawCanvasTree(context, interpolateTreeLayout(layout, motion.progress));
 }
@@ -8490,6 +9139,7 @@ function renderCanvas({
   previousTreeScene = null,
   treeTargetScene = null,
   treeProgress = 1,
+  treeTrackAnchor = true,
   progress = 1,
   camera,
   config,
@@ -8595,6 +9245,7 @@ function renderCanvas({
     else drawLinkLabel(context, link, link.source, config, anchors, geometry);
   }
   drawTree(context, tree, displayScene, config, preview, {
+    trackAnchor: treeTrackAnchor,
     previousTree,
     previousScene: previousTreeScene,
     targetScene: treeTargetScene || scene,
@@ -8725,6 +9376,12 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
   }
   const layout = layoutTree({
     tree, scene, config,
+    measureText: (text, style) => {
+      const node = plot.append("text").text(text).attr("font-family", style.fontFamily)
+        .attr("font-size", style.fontSize).attr("font-weight", style.fontWeight).attr("font-style", style.fontStyle);
+      try { const box = node.node().getBBox(); return { width: box.width, height: Math.max(box.height, style.fontSize) }; }
+      finally { node.remove(); }
+    },
     measureLabel: (cluster) => labelWidths.get(cluster.source.uid) || 0,
     previousTree: motion.previousTree,
     previousScene: motion.previousScene,
@@ -8735,7 +9392,18 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
   if (!layout) return;
   const branchMarks = (tag, className, records) => group.selectAll(`${tag}.${className}`)
     .data(records, (mark) => mark.uid).join(tag).attr("class", className)
-    .attr("fill", "none").attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width);
+    .attr("fill", "none").attr("stroke", (mark) => mark.style.colour).attr("stroke-width", (mark) => mark.style.width)
+    .attr("stroke-linecap", (mark) => mark.lineCap || "butt");
+  const cut = group.selectAll("g.tree-cut").data(layout.cutLine ? [layout.cutLine] : []).join("g")
+    .attr("class", "tree-cut").attr("pointer-events", "none");
+  cut.selectAll("line").data((line) => [line]).join("line")
+    .attr("x1", (line) => line.x1).attr("x2", (line) => line.x2)
+    .attr("y1", (line) => line.y1).attr("y2", (line) => line.y2)
+    .attr("stroke", (line) => line.colour).attr("stroke-width", (line) => line.width).attr("stroke-dasharray", "4 3");
+  cut.selectAll("text").data((line) => [line]).join("text")
+    .attr("x", (line) => line.label.x).attr("y", (line) => line.label.y)
+    .attr("font-size", (line) => `${line.label.fontSize}px`).attr("font-family", (line) => line.label.fontFamily)
+    .attr("text-anchor", "middle").attr("fill", (line) => line.colour).text((line) => line.label.text);
   const root = branchMarks("path", "tree-root-stub", [layout.rootBranch]);
   const branches = branchMarks("path", "tree-branch", layout.branches);
   const stems = branchMarks("line", "tree-stem", layout.stems);
@@ -8747,12 +9415,23 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
     .attr("class", "tree-node").attr("r", (node) => node.radius)
     .attr("fill", "white").attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width)
     .attr("cursor", "pointer")
+    .attr("tabindex", 0).attr("role", "button").attr("aria-label", (node) => `Tree node ${node.uid}: rotate children or open context menu`)
+    .on("contextmenu", (event, node) => interactions.showTreeMenu?.(event, node.uid))
+    .on("keydown", (event, node) => {
+      if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) interactions.showTreeMenu?.(event, node.uid);
+      else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); interactions.rotateTreeNode?.(node.uid); }
+    })
     .on("click", (event, node) => { event.stopPropagation(); interactions.rotateTreeNode?.(node.uid); });
   const supports = group.selectAll("text.tree-support").data(layout.supports, (label) => label.uid).join("text")
     .attr("class", "tree-support").attr("fill", layout.support.colour)
     .attr("font-size", `${layout.support.fontSize}px`).style("font-family", layout.support.fontFamily)
     .attr("text-anchor", "end").attr("dominant-baseline", "text-after-edge")
     .text((label) => label.text);
+  const annotations = group.selectAll("text.tree-annotation").data(layout.annotations, (label) => label.uid).join("text")
+    .attr("class", "tree-annotation").attr("dominant-baseline", "hanging")
+    .attr("font-family", (label) => label.fontFamily).attr("font-size", (label) => label.fontSize)
+    .attr("font-weight", (label) => label.fontWeight).attr("font-style", (label) => label.fontStyle)
+    .attr("fill", (label) => label.colour).text((label) => label.text);
   const scale = group.selectAll("g.tree-scale-bar").data(layout.scaleBar ? [layout.scaleBar] : []).join("g")
     .attr("class", "tree-scale-bar");
   scale.selectAll("line").data((bar) => bar.lines).join("line")
@@ -8771,6 +9450,7 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
     positionLines(stems, frame.stems);
     positionLines(guides, frame.guides);
     nodes.data(frame.nodes, (node) => node.uid).attr("cx", (node) => node.x).attr("cy", (node) => node.y);
+    annotations.data(frame.annotations, (label) => label.uid).attr("x", (label) => label.x).attr("y", (label) => label.y);
     supports.data(frame.supports, (label) => label.uid).attr("x", (label) => label.x).attr("y", (label) => label.y);
   };
   paintFrame(interpolateTreeLayout(layout, animate ? 0 : 1));
@@ -9737,6 +10417,7 @@ function createRasterInteraction({
         activeSurface === surface || surface?.ownerDocument?.activeElement === surface;
       const keydown = (event) => {
         if (event.code !== "Space") return;
+        if (event.target?.closest?.("input, textarea, select, button, [contenteditable='true']")) return;
         spaceDown = true;
         if (!isActive()) return;
         panMode = true;
@@ -9809,7 +10490,10 @@ function createRasterInteraction({
         })
         .on("contextmenu.canvasInteraction", function (event) {
           const target = targetForEvent(this, event);
-          if (target?.action === "gene") {
+          if (target?.action === "tree-node") {
+            event.preventDefault(); event.stopPropagation();
+            actions.treeMenu?.(event, target.nodeUid);
+          } else if (target?.action === "gene") {
             event.preventDefault();
             actions.geneMenu(event, target.geneUid);
           } else if (target?.action === "legend-text") {
@@ -9960,6 +10644,7 @@ function exportChartSvg({
     this.removeAttribute("cursor");
     this.removeAttribute("tabindex");
     this.removeAttribute("role");
+    this.removeAttribute("aria-label");
     this.removeAttribute("pointer-events");
     this.style.removeProperty("cursor");
     this.style.removeProperty("pointer-events");
@@ -10921,6 +11606,7 @@ function interpolateRainbow(t) {
 const defaultConfig = {
   tree: {
     show: true,
+    colouring: TREE_COLOURING_DEFAULTS,
     width: 100,
     useBranchLengths: true,
     branch: { width: 1.5, colour: "#555" },
@@ -11211,11 +11897,20 @@ const lookup = {
   linksForGene: (uid) => chartIndex?.linksByGeneId.get(uid) || [],
 };
 
-function configure(options) {
-  const renderer = options?.plot?.renderer;
-  if (renderer !== undefined && !isRendererMode(renderer)) {
-    throw new TypeError(`Unknown plot renderer: ${renderer}. Expected svg, canvas, or webgpu.`);
+function validateConfiguration(options, tree = null) {
+  validateTreeColouring(options?.tree?.colouring);
+  const candidate = createDefaultConfig();
+  updateConfig(candidate, config);
+  updateConfig(candidate, options);
+  if (!isRendererMode(candidate.plot.renderer)) {
+    throw new TypeError(`Unknown plot renderer: ${candidate.plot.renderer}. Expected svg, canvas, or webgpu.`);
   }
+  validateTreePresentation(tree, candidate.tree);
+  return candidate;
+}
+
+function configure(options, tree = null) {
+  validateConfiguration(options, tree);
   updateConfig(config, options);
 }
 
@@ -11488,6 +12183,7 @@ function updateScales(data) {
 return {
   config,
   configure,
+  validateConfiguration,
   lookup,
   ids,
   locusTextForCluster,
@@ -13193,6 +13889,7 @@ function createRasterInteractionBindings({
     actions: {
       geneClick: (event, geneUid) => interactions.onGeneClick?.(event, getGene(geneUid)),
       rotateTreeNode: (nodeUid) => interactions.rotateTreeNode?.(nodeUid),
+      treeMenu: interactions.showTreeMenu,
       legendColour: interactions.legendColour,
       legendText: interactions.legendText,
       scaleBar: interactions.setScaleBarLength,
@@ -13419,6 +14116,7 @@ function clusterMap() {
   let prepareCanvasFlipBase = () => {};
   let warmCanvasFlipBase = () => {};
   let currentData = null;
+  let rotateTreeNode = () => {};
   let chartIndex = null;
   let highlightGeneIds = new Set();
   let highlightLinkIds = new Set();
@@ -13426,6 +14124,14 @@ function clusterMap() {
   let locusSelectionAnchorUid = null;
   let disposeRasterInteraction = () => {};
   let disposeOverlay = () => {};
+  let retainedOverlay = null;
+  let updatingTreeMenu = false;
+  function updateFromTreeMenu(action) {
+    const previous = updatingTreeMenu;
+    updatingTreeMenu = true;
+    try { return action(); }
+    finally { updatingTreeMenu = previous; }
+  }
   // Rebound on each redraw so programmatic focusing always targets the
   // currently active renderer surface.
   let focusCamera = () => false;
@@ -13869,7 +14575,9 @@ function clusterMap() {
   }
 
   function loadData(data) {
-    currentData = normalizeChartData(data);
+    const prepared = normalizeChartData(data, runtime.config.tree);
+    cancelTreePresentationPreview();
+    currentData = prepared;
     chartIndex = createChartIndex(currentData);
     refreshDerivedGroups();
     // Generated groups are part of the editable model, so index them after
@@ -13963,13 +14671,14 @@ function clusterMap() {
 
   function applyPatch(operations, { record = true, automaticGroups } = {}) {
     const groupsAutomaticBefore = groupsAreAutomatic();
-    const result = applyChartOperations(currentData, chartIndex, operations);
-    if (automaticGroups !== undefined) {
+    const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
+    const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
+    if (restoringAutomatic) {
       currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
     }
     const groupsAutomaticAfter = groupsAreAutomatic();
     refreshAfterPatch(result.effects, {
-      refreshAutomatic: groupsAutomaticAfter && (automaticGroups !== undefined || !groupsAutomaticBefore),
+      refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
     });
     redraw({ animate: false });
     emitChange({ type: "data.apply", operations: result.operations });
@@ -13983,6 +14692,14 @@ function clusterMap() {
       });
     }
     return result;
+  }
+
+  let treePresentationPreview = null;
+  function cancelTreePresentationPreview() {
+    if (!treePresentationPreview) return false;
+    if (currentData?.tree === treePresentationPreview.tree) applyTreeOperation(currentData.tree, treePresentationPreview.undo);
+    treePresentationPreview = null;
+    return true;
   }
 
   function setState(snapshot, { record = true } = {}) {
@@ -14014,8 +14731,11 @@ function clusterMap() {
     if (!currentData || !container) return;
     disposeRasterInteraction();
     disposeRasterInteraction = () => {};
-    disposeOverlay();
-    disposeOverlay = () => {};
+    if (!updatingTreeMenu || !retainedOverlay?.isTreeMenuOpen(currentData.tree)) {
+      disposeOverlay();
+      disposeOverlay = () => {};
+      retainedOverlay = null;
+    }
     const data = currentData;
     if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
     canvasFlipWarmFrame = null;
@@ -14087,12 +14807,15 @@ function clusterMap() {
     const { canvas, webgpuOverlay, minimap } = rasterSurface;
     canvasZoom = rasterSurface.zoom;
     svg.style("display", useRaster ? "none" : null);
-    const overlay = createHtmlOverlay({
+    const overlay = retainedOverlay || createHtmlOverlay({
       tooltip: svgSurface.tooltip,
       scales: runtime.scales,
       eventNamespace: `.${runtime.ids.root}-tooltip`,
       actions: {
         redraw,
+        treeControls: () => ({ tree: currentData.tree, clusters: currentData.clusters, config: runtime.config.tree,
+          patch: (ops) => updateFromTreeMenu(() => my.patch(ops)),
+          rotate: (uid) => updateFromTreeMenu(() => rotateTreeNode(uid)) }),
         updateGene: (gene, changes) => my.patch([
           { type: "genes.update", ids: [gene.uid], changes },
         ]),
@@ -14110,6 +14833,7 @@ function clusterMap() {
         getGroups: () => data.groups,
       },
     });
+    retainedOverlay = overlay;
     disposeOverlay = overlay.dispose;
     container
       .select("div.tooltip")
@@ -14502,11 +15226,13 @@ function clusterMap() {
         };
       });
     };
+    let minimapScene = null;
+    let minimapMeasurement = null;
     const paintMinimap = () => {
       rasterMinimap.paint({
         minimap: minimap.node(),
         surface: canvas.node(),
-        scene: runtime.getScene(),
+        scene: minimapScene || runtime.getScene(),
         options: minimapOptions,
         camera: getCamera(chartState),
         pixelRatio: globalThis.devicePixelRatio || 1,
@@ -14514,6 +15240,11 @@ function clusterMap() {
     };
     scheduleMinimapBase = (scene) => {
       if (!showMinimap) return;
+      if (currentData.tree && runtime.config.tree.show) {
+        minimapMeasurement ||= document.createElement("canvas").getContext("2d");
+        scene = { ...scene, figureBounds: canvasFigureBounds(minimapMeasurement, scene, runtime.config, currentData.tree) };
+      }
+      minimapScene = scene;
       rasterMinimap.scheduleBase({
         scene,
         minimap: minimap.node(),
@@ -14521,6 +15252,8 @@ function clusterMap() {
         renderBase: ({ canvas: baseCanvas, scene: overviewScene, projection }) => {
           renderCanvas({
             canvas: baseCanvas,
+            tree: currentData.tree,
+            treeTrackAnchor: false,
             // A full ribbon overview becomes an opaque field for dense maps.
             // Keep the structured, coloured gene raster by default; callers
             // can opt links back in for sparse figures.
@@ -14715,6 +15448,7 @@ function clusterMap() {
         if (event.shiftKey) return;
         (runtime.config.gene.shape.onClick || ((_, record) => anchorGene(record)))(event, gene);
       },
+      showTreeMenu: overlay.showTreeMenu,
       showGeneMenu: overlay.showGeneMenu,
       showGroupMenu: overlay.showGroupMenu,
       setScaleBarLength,
@@ -14733,6 +15467,7 @@ function clusterMap() {
         handler(event, group);
       },
     };
+    rotateTreeNode = rendererInteractions.rotateTreeNode;
     if (useRaster) {
       const targetForEvent = (canvasNode, event) =>
         hitTestCanvas({
@@ -14778,7 +15513,7 @@ function clusterMap() {
 
       rasterMinimap.bind(minimap, {
         getSurface: () => canvas.node(),
-        getScene: runtime.getScene,
+        getScene: () => minimapScene || runtime.getScene(),
         getCamera: () => getCamera(chartState),
         options: minimapOptions,
         moveCamera: (camera) => {
@@ -14982,8 +15717,9 @@ function clusterMap() {
 
   my.config = function (_) {
     if (!arguments.length) return runtime.config;
+    cancelTreePresentationPreview();
     const before = currentData ? previousConfigPatch(runtime.config, _) : null;
-    runtime.configure(_);
+    runtime.configure(_, currentData?.tree);
     // Configuration is a live part of the public chart API. Updating it after
     // mounting should have the same immediate effect as updating data, without
     // requiring consumers to re-bind the chart's normalized data themselves.
@@ -14995,6 +15731,7 @@ function clusterMap() {
   my.data = function (data) {
     if (!arguments.length) return currentData;
     if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
+    cancelTreePresentationPreview();
     container.datum(data).call(my);
     emitChange({ type: "data.replace" });
     clearHistory();
@@ -15012,10 +15749,12 @@ function clusterMap() {
   /** A portable data, appearance, and layout snapshot for project persistence. */
   my.project = function (snapshot) {
     if (!arguments.length) {
+      const data = structuredClone(currentData);
+      if (treePresentationPreview && data?.tree) applyTreeOperation(data.tree, treePresentationPreview.undo);
       return {
         format: projectFormat,
         version: projectVersion,
-        data: structuredClone(currentData),
+        data,
         // Projects are portable JSON, not executable application state.
         // Callback hooks are intentionally omitted and can be reattached by
         // the consumer after loading.
@@ -15032,8 +15771,12 @@ function clusterMap() {
     if (!snapshot.data || !snapshot.config) {
       throw new TypeError("A project snapshot requires data and config.");
     }
-    my.data(snapshot.data);
-    runtime.configure(snapshot.config);
+    const prepared = normalizeChartData(snapshot.data);
+    runtime.validateConfiguration(snapshot.config, prepared.tree);
+    if (snapshot.state) chartStateFromSnapshot(prepared, snapshot.state);
+    // Validate the incoming pair before changing either live data or settings.
+    runtime.configure(snapshot.config, prepared.tree);
+    my.data(prepared);
     if (container && currentData) redraw({ animate: false });
     emitChange({ type: "config.change", config: runtime.config });
     if (snapshot.state) setState(snapshot.state, { record: false });
@@ -15046,7 +15789,27 @@ function clusterMap() {
     if (!container || !currentData || !chartIndex) {
       throw new Error("Cannot patch chart data before the chart has rendered.");
     }
+    cancelTreePresentationPreview();
     applyPatch(operations);
+    return my;
+  };
+  my.rotateTreeNode = (uid) => { cancelTreePresentationPreview(); rotateTreeNode(uid); return my; };
+  /** Transient tree styles; patch commits once, null cancels the preview. */
+  my.previewTreePresentation = (operations) => {
+    const tree = currentData?.tree;
+    if (!operations && !treePresentationPreview) return my;
+    if (!tree) throw new Error("Tree presentation preview requires a loaded tree.");
+    if (operations && (!Array.isArray(operations) || operations.some((op) => !isTreeOperation(op)))) {
+      throw new TypeError("Only tree presentation operations can be previewed.");
+    }
+    cancelTreePresentationPreview();
+    if (operations) {
+      const undo = inverseTreeOperation(tree);
+      try { applyChartOperations(currentData, chartIndex, operations, runtime.config.tree); }
+      catch (error) { redraw({ animate: false }); throw error; }
+      treePresentationPreview = { tree, undo };
+    }
+    redraw({ animate: false });
     return my;
   };
   my.canUndo = () => history.length > 0;
@@ -15056,12 +15819,13 @@ function clusterMap() {
     return my;
   };
   my.undo = () => {
+    const cancelled = cancelTreePresentationPreview();
     const change = history.pop();
-    if (!change) return my;
+    if (!change) { if (cancelled) redraw({ animate: false }); return my; }
     if (change.kind === "patch") {
       applyPatch(change.undo, { record: false, automaticGroups: change.groupsAutomaticBefore });
     } else if (change.kind === "config") {
-      runtime.configure(change.undo);
+      runtime.configure(change.undo, currentData?.tree);
       redraw({ animate: false });
       emitChange({ type: "config.change", config: runtime.config });
     } else if (change.kind === "state" && change.undo) {
@@ -15072,12 +15836,13 @@ function clusterMap() {
     return my;
   };
   my.redo = () => {
+    const cancelled = cancelTreePresentationPreview();
     const change = future.pop();
-    if (!change) return my;
+    if (!change) { if (cancelled) redraw({ animate: false }); return my; }
     if (change.kind === "patch") {
       applyPatch(change.redo, { record: false, automaticGroups: change.groupsAutomaticAfter });
     } else if (change.kind === "config") {
-      runtime.configure(change.redo);
+      runtime.configure(change.redo, currentData?.tree);
       redraw({ animate: false });
       emitChange({ type: "config.change", config: runtime.config });
     } else if (change.kind === "state" && change.redo) {
@@ -15212,10 +15977,13 @@ function clusterMap() {
     });
   };
   my.destroy = () => {
+    cancelTreePresentationPreview();
+    rotateTreeNode = () => {};
     disposeRasterInteraction();
     disposeRasterInteraction = () => {};
     disposeOverlay();
     disposeOverlay = () => {};
+    retainedOverlay = null;
     clearRasterPreview();
     if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
     canvasAnimation = null;
