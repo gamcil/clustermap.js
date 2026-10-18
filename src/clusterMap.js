@@ -130,6 +130,7 @@ export default function clusterMap() {
   let prepareCanvasFlipBase = () => {};
   let warmCanvasFlipBase = () => {};
   let currentData = null;
+  let figureMeasurementContext = null;
   let rotateTreeNode = () => {};
   let chartIndex = null;
   let highlightGeneIds = new Set();
@@ -1978,6 +1979,13 @@ export default function clusterMap() {
     changeListeners.add(listener);
     return () => changeListeners.delete(listener);
   };
+  /** Latest computed layout, excluding transient animation and drag geometry. */
+  my.figureBounds = () => {
+    const scene = runtime.getScene();
+    if (!container || !scene?.bounds) return null;
+    figureMeasurementContext ||= container.node().ownerDocument.createElement("canvas").getContext("2d");
+    return canvasFigureBounds(figureMeasurementContext, scene, runtime.config, currentData.tree);
+  };
   my.exportSvg = ({ padding = 20 } = {}) => {
     flushCanvasFlip();
     return exportChartSvg({
@@ -2019,6 +2027,7 @@ export default function clusterMap() {
       .interrupt()
       .remove();
     container = null;
+    figureMeasurementContext = null;
     zoom = null;
     canvasZoom = null;
     hasInitialView = false;

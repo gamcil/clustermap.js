@@ -108,10 +108,98 @@ test("tree edits, history, projects, and static export through the public chart 
     chart.project(saved);
     const result = chart.project();
     chart.destroy();
+    if (chart.figureBounds() !== null) throw new Error("Destroyed charts must have no figure bounds.");
     host.remove();
     return result;
   }, saved);
   assert.deepEqual(fresh, saved, "a newly mounted chart loads the same project");
+
+  const duringFlip = await page.evaluate(() => {
+    const original = testChart.project();
+    const gene = [...document.querySelectorAll("#plot polygon.genePolygon")].find((node) => getComputedStyle(node.parentElement).display !== "none");
+    const box = gene.getBBox();
+    const point = new DOMPoint(box.x + box.width / 2, box.y + box.height / 2).matrixTransform(gene.getScreenCTM());
+    testChart.config({ plot: { renderer: "canvas", transitionDuration: 2000 } });
+    testChart.clearHistory();
+    const beforeFlip = JSON.stringify(testChart.state());
+    const request = window.requestAnimationFrame, cancel = window.cancelAnimationFrame;
+    let cancelled = 0;
+    window.requestAnimationFrame = () => 987654321;
+    window.cancelAnimationFrame = () => { cancelled++; };
+    let result;
+    try {
+      document.querySelector("#plot canvas.clusterMapCanvas").dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: point.x, clientY: point.y }));
+      const before = JSON.stringify(testChart.project());
+      const hadHistory = testChart.canUndo();
+      cancelled = 0;
+      const changes = [];
+      const unsubscribe = testChart.on("change", (change) => changes.push(change.type));
+      const bounds = testChart.figureBounds();
+      unsubscribe();
+      result = { bounds, started: beforeFlip !== JSON.stringify(testChart.state()), cancelled, changes,
+        unchanged: before === JSON.stringify(testChart.project()), historyUnchanged: hadHistory === testChart.canUndo() };
+    } finally {
+      window.requestAnimationFrame = request; window.cancelAnimationFrame = cancel;
+      testChart.project(original);
+    }
+    return result;
+  });
+  assert.equal(duringFlip.started, true, "exercise a deferred locus flip before its target layout exists");
+  assert.equal(duringFlip.cancelled, 0, "measurement does not finish or cancel flip work");
+  assert.deepEqual(duringFlip.changes, []);
+  assert.equal(duringFlip.unchanged && duringFlip.historyUnchanged, true);
+
+  const envelopes = await page.evaluate(() => {
+    const before = testChart.project();
+    const observer = new MutationObserver(() => {});
+    observer.observe(document.body, { childList: true, subtree: true });
+    const svg = testChart.figureBounds();
+    const mutations = observer.takeRecords().length;
+    observer.disconnect();
+    const unchanged = JSON.stringify(before) === JSON.stringify(testChart.project());
+    testChart.config({ plot: { renderer: "canvas" } });
+    const canvas = testChart.figureBounds();
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    let visible2d = 0;
+    HTMLCanvasElement.prototype.getContext = function (type, ...args) {
+      if (type === "2d" && this.matches("canvas.clusterMapCanvas[data-renderer=webgpu]")) visible2d++;
+      return getContext.call(this, type, ...args);
+    };
+    let webgpu;
+    try {
+      testChart.config({ plot: { renderer: "webgpu" } });
+      webgpu = testChart.figureBounds();
+      testChart.config({ plot: { renderer: "canvas" } });
+    } finally { HTMLCanvasElement.prototype.getContext = getContext; }
+    testChart.config({ tree: { show: false } });
+    const hidden = testChart.figureBounds();
+    testChart.config({ tree: { show: true } });
+    return { svg, canvas, webgpu, visible2d, hidden, unchanged, mutations };
+  });
+  assert.equal(envelopes.mutations, 0, "bounds measurement creates no figure DOM");
+  assert.equal(envelopes.unchanged, true, "bounds measurement preserves data, state and config");
+  assert.deepEqual(envelopes.svg, envelopes.canvas);
+  assert.deepEqual(envelopes.webgpu, envelopes.canvas);
+  assert.equal(envelopes.visible2d, 0, "measurement never acquires a 2D context on the WebGPU surface");
+  assert.ok(Object.values(envelopes.canvas).every(Number.isFinite));
+  assert.ok(envelopes.canvas.minX < envelopes.hidden.minX, "bounds include the visible tree");
+
+  const annotationEnvelope = await page.evaluate(() => {
+    const original = testChart.project();
+    const baseline = testChart.figureBounds();
+    baseline.minX = Infinity;
+    const fresh = testChart.figureBounds();
+    testChart.patch([{ type: "tree.presentation.update", scope: "node", ids: [original.data.tree.root],
+      changes: { label: { text: "Long annotation ".repeat(40), fontSize: 80, fontStyle: "italic" } } }]);
+    const annotated = testChart.figureBounds();
+    testChart.config({ tree: { show: false } });
+    const hidden = testChart.figureBounds();
+    testChart.project(original);
+    return { fresh, annotated, hidden };
+  });
+  assert.ok(Number.isFinite(annotationEnvelope.fresh.minX), "callers receive fresh, independent bounds");
+  assert.ok(annotationEnvelope.annotated.maxX - annotationEnvelope.annotated.minX > envelopes.canvas.maxX - envelopes.canvas.minX);
+  assert.deepEqual(annotationEnvelope.hidden, envelopes.hidden, "hidden annotations do not extend the envelope");
 
   const exportResult = await page.evaluate(() => {
     const inspect = (svg) => {

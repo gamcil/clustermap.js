@@ -4735,10 +4735,11 @@
         guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: labelStarts.get(node.cluster) });
       }
       if (node.uid !== tree.root && config.tree.support?.show && node.support) {
+        const text = Number(node.support.value).toFixed(config.tree.support.precision ?? 1);
         supports.push({
           uid: node.uid,
           x: x - 4,
-          text: Number(node.support.value).toFixed(config.tree.support.precision ?? 1),
+          text, ...measureText(text, support),
         });
       }
     }
@@ -4762,6 +4763,9 @@
         ],
         label: { x: rootX + length / 2, y: y + height + 5, text: config.tree.scaleBar?.label || horizontal.scaleBarLabel },
       };
+      // SVG scale labels use points; Canvas uses pixels. Measure the larger
+      // size for a common envelope without changing either renderer's drawing.
+      Object.assign(scaleBar.label, measureText(scaleBar.label.text, { ...scaleBar, fontSize: scaleBar.fontSize * 4 / 3 }));
     }
     let cutLine = null;
     if (presentation.metric && presentation.policy.showCutLine && horizontal.proportional &&
@@ -4773,6 +4777,7 @@
         colour: branch.colour, width: 1,
         label: { x, y: Math.min(...leafYs) - 8, text: String(Number(presentation.threshold.toPrecision(6))), fontSize: support.fontSize, fontFamily: support.fontFamily },
       };
+      Object.assign(cutLine.label, measureText(cutLine.label.text, cutLine.label));
     }
     return positionTreeLayout({
       cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
@@ -4797,10 +4802,32 @@
       supports: layout.supports.map((label) => ({ ...label, y: ys.get(label.uid) - 4 })),
       annotations: layout.annotations.map((label) => ({ ...label, y: ys.get(label.uid) + 6 })),
     };
-    const points = [frame.rootBranch, ...frame.branches, ...frame.stems].flatMap((mark) => [[mark.x1, mark.y1], [mark.x2, mark.y2]]);
-    for (const label of frame.annotations) points.push([label.x, label.y], [label.x + label.width, label.y + label.height]);
-    if (frame.cutLine) points.push([frame.cutLine.label.x, frame.cutLine.label.y - frame.cutLine.label.fontSize]);
-    if (frame.scaleBar) points.push([frame.scaleBar.label.x, frame.scaleBar.label.y + frame.scaleBar.fontSize]);
+    const points = [];
+    const includeLine = (mark, width = mark.style?.width || 1) => {
+      const half = width / 2;
+      const extendX = mark.x1 === mark.x2 || mark.lineCap === "square" ? half : 0;
+      const extendY = mark.y1 === mark.y2 || mark.lineCap === "square" ? half : 0;
+      points.push([Math.min(mark.x1, mark.x2) - extendX, Math.min(mark.y1, mark.y2) - extendY],
+        [Math.max(mark.x1, mark.x2) + extendX, Math.max(mark.y1, mark.y2) + extendY]);
+    };
+    for (const mark of [frame.rootBranch, ...frame.branches, ...frame.stems]) includeLine(mark);
+    for (const mark of frame.guides) includeLine(mark, frame.guide.width);
+    for (const node of frame.nodes) {
+      const radius = node.radius + frame.branch.width / 2;
+      points.push([node.x - radius, node.y - radius], [node.x + radius, node.y + radius]);
+    }
+    for (const label of frame.annotations) points.push([label.x - (label.overhang || 0), label.y], [label.x + label.width, label.y + label.height]);
+    for (const label of frame.supports) points.push([label.x - label.width, label.y - label.height], [label.x + (label.overhang || 0), label.y]);
+    if (frame.cutLine) {
+      includeLine(frame.cutLine, frame.cutLine.width);
+      const label = frame.cutLine.label;
+      points.push([label.x - label.width / 2, label.y - label.height], [label.x + label.width / 2, label.y]);
+    }
+    if (frame.scaleBar) {
+      for (const mark of frame.scaleBar.lines) includeLine(mark, frame.scaleBar.strokeWidth);
+      const label = frame.scaleBar.label;
+      points.push([label.x - label.width / 2, label.y], [label.x + label.width / 2, label.y + label.height]);
+    }
     frame.bounds = {
       minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
       minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)),
@@ -8088,9 +8115,12 @@
         ...options,
         tree, scene, config,
         measureText: (text, style) => {
-          context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize}px ${style.fontFamily}`;
+          context.font = `${style.fontStyle || "normal"} ${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`;
+          context.textAlign = "left";
+          context.textBaseline = "alphabetic";
           const metrics = context.measureText(text);
-          return { width: metrics.width, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
+          const overhang = Math.max(0, metrics.actualBoundingBoxLeft || 0, (metrics.actualBoundingBoxRight || 0) - metrics.width);
+          return { width: metrics.width + overhang * 2, overhang, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
         },
         measureLabel: (cluster, locusText) => {
           context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
@@ -8340,63 +8370,102 @@
       bounds.minY = Math.min(bounds.minY, y);
       bounds.maxY = Math.max(bounds.maxY, y);
     };
-    const textWidth = (text, font) => {
+    const includeText = (text, x, y, { fontSize, fontFamily = config.plot.fontFamily,
+      fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
+      if (!text) return;
       context.save();
-      context.font = font;
-      const width = context.measureText(text || "").width;
+      context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+      context.textAlign = align;
+      context.textBaseline = baseline;
+      const metrics = context.measureText(String(text));
       context.restore();
-      return width;
+      const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
+      const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
+      const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
+      const x2 = Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight : left + metrics.width;
+      const y1 = Number.isFinite(metrics.actualBoundingBoxAscent) ? -metrics.actualBoundingBoxAscent : top;
+      const y2 = Number.isFinite(metrics.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : top + fontSize * 1.25;
+      const radians = rotation * Math.PI / 180;
+      const cos = Math.cos(radians), sin = Math.sin(radians);
+      for (const [tx, ty] of [[x1, y1], [x1, y2], [x2, y1], [x2, y2]]) {
+        const px = x + tx * cos - ty * sin, py = y + tx * sin + ty * cos;
+        include(px - border / 2, py - border / 2);
+        include(px + border / 2, py + border / 2);
+      }
     };
 
+    // Structural scene bounds already enclose loci, gene polygons and ribbons.
+    // Add stroke extent without walking every homology link when labels are off.
+    const halfStroke = Math.max(config.gene.shape.strokeWidth || 0, config.locus.trackBar.stroke || 0,
+      config.link.show ? config.link.strokeWidth || 0 : 0) / 2;
+    include(scene.bounds.minX - halfStroke, scene.bounds.minY - halfStroke);
+    include(scene.bounds.maxX + halfStroke, scene.bounds.maxY + halfStroke);
     for (const cluster of scene.clusters.values()) {
-      const anchorX = cluster.x + cluster.info.x;
-      include(
-        anchorX - textWidth(
-          cluster.source.name,
-          `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`
-        ),
-        cluster.y + 8
-      );
-      include(
-        anchorX - textWidth(
-          cluster.info.locusText,
-          `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`
-        ),
-        cluster.y + 24
-      );
+      const x = cluster.x + cluster.info.x;
+      includeText(cluster.source.name, x, cluster.y + 8,
+        { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right" });
+      includeText(cluster.info.locusText, x, cluster.y + 12,
+        { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
+    }
+    if (config.gene.label.show) {
+      for (const gene of scene.genes.values()) {
+        if (!gene.visible) continue;
+        includeText(gene.source.label || gene.source.name || gene.source.uid,
+          gene.locus.x + gene.label.x, gene.locus.y + gene.label.y,
+          { fontSize: config.gene.label.fontSize, align: config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor, rotation: gene.label.rotation });
+      }
+    }
+    if (config.link.show && config.link.label.show) {
+      for (const link of scene.links.values()) {
+        if (!link.visible || !link.labelPosition) continue;
+        includeText(link.source.label ?? link.source.identity.toFixed(2), link.labelPosition.x, link.labelPosition.y,
+          { fontSize: config.link.label.fontSize, align: "center" });
+      }
+    }
+    if (config.locus.trimIndicators?.show !== false) {
+      const style = resolveTrimIndicatorStyle(config.locus.trimIndicators);
+      for (const locus of scene.loci.values()) {
+        for (const indicator of locus.trimIndicators || []) {
+          includeText(indicator.text, locus.x + indicator.x, locus.y + indicator.y,
+            { fontSize: style.fontSize, fontWeight: style.fontWeight, align: indicator.anchor, baseline: "top", border: style.borderWidth });
+        }
+      }
     }
     const treeLayout = layoutCanvasTree(context, tree, scene, config, { trackAnchor: false });
     if (treeLayout) {
       include(treeLayout.bounds.minX, treeLayout.bounds.minY);
       include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
-      if (treeLayout.scaleBar) {
-        const { label, fontSize } = treeLayout.scaleBar;
-        include(label.x, label.y + fontSize + 3);
-      }
     }
     if (scene.chrome?.legend.visible) {
-      const { legend } = scene.chrome;
-      const entryHeight = legend.entryHeight || legend.fontSize;
-      const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
+      const legend = scene.chrome.legend;
+      const subtitleSize = legend.subtitleFontSize || Math.max(10, legend.fontSize * 0.72);
       for (const item of legend.items) {
-        include(
-          legend.position.x +
-            item.textX +
-            Math.max(
-              textWidth(item.label, `${legend.fontSize}px ${legend.fontFamily}`),
-              textWidth(item.subtitle, `${subtitleFontSize}px ${legend.fontFamily}`)
-            ),
-          legend.position.y + item.y + (item.subtitle ? entryHeight : legend.fontSize)
-        );
+        const x = legend.position.x + item.x, y = legend.position.y + item.y + item.circleY;
+        include(x - item.radius, y - item.radius);
+        include(x + item.radius, y + item.radius);
+        includeText(item.label, legend.position.x + item.textX, legend.position.y + item.y + item.textY,
+          { fontSize: legend.fontSize, fontFamily: legend.fontFamily, baseline: "middle" });
+        includeText(item.subtitle, legend.position.x + item.textX, legend.position.y + item.y + item.subtitleY,
+          { fontSize: subtitleSize, fontFamily: legend.fontFamily, baseline: "middle" });
       }
     }
     if (scene.chrome?.scaleBar.visible) {
-      const { scaleBar } = scene.chrome;
-      include(scaleBar.position.x + scaleBar.length, scaleBar.position.y + scaleBar.height + 20);
+      const bar = scene.chrome.scaleBar;
+      const half = bar.strokeWidth / 2;
+      include(bar.position.x - half, bar.position.y - half);
+      include(bar.position.x + bar.length + half, bar.position.y + bar.height + half);
+      includeText(bar.label, bar.position.x + bar.length / 2, bar.position.y + bar.height + 5,
+        { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
     }
     if (scene.chrome?.colourBar.visible) {
-      const { colourBar } = scene.chrome;
-      include(colourBar.position.x + colourBar.width, colourBar.position.y + colourBar.height + 20);
+      const bar = scene.chrome.colourBar;
+      include(bar.position.x - 0.5, bar.position.y - 0.5);
+      include(bar.position.x + bar.width + 0.5, bar.position.y + bar.height + 0.5);
+      const font = { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, baseline: "top" };
+      const y = bar.position.y + bar.height + 5;
+      includeText(bar.label, bar.position.x + bar.width / 2, y, { ...font, align: "center" });
+      includeText(bar.startLabel, bar.position.x, y, font);
+      includeText(bar.endLabel, bar.position.x + bar.width, y, { ...font, align: "right" });
     }
     return bounds;
   }
@@ -14122,6 +14191,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let prepareCanvasFlipBase = () => {};
     let warmCanvasFlipBase = () => {};
     let currentData = null;
+    let figureMeasurementContext = null;
     let rotateTreeNode = () => {};
     let chartIndex = null;
     let highlightGeneIds = new Set();
@@ -15970,6 +16040,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       changeListeners.add(listener);
       return () => changeListeners.delete(listener);
     };
+    /** Latest computed layout, excluding transient animation and drag geometry. */
+    my.figureBounds = () => {
+      const scene = runtime.getScene();
+      if (!container || !scene?.bounds) return null;
+      figureMeasurementContext ||= container.node().ownerDocument.createElement("canvas").getContext("2d");
+      return canvasFigureBounds(figureMeasurementContext, scene, runtime.config, currentData.tree);
+    };
     my.exportSvg = ({ padding = 20 } = {}) => {
       flushCanvasFlip();
       return exportChartSvg({
@@ -16011,6 +16088,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         .interrupt()
         .remove();
       container = null;
+      figureMeasurementContext = null;
       zoom = null;
       canvasZoom = null;
       hasInitialView = false;

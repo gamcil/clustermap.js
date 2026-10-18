@@ -30,6 +30,8 @@ test("chart factory exposes only the supported public methods", async () => {
     assert.equal(typeof chart.focus, "function");
     assert.equal(typeof chart.on, "function");
     assert.equal(typeof chart.exportSvg, "function");
+    assert.equal(typeof chart.figureBounds, "function");
+    assert.equal(chart.figureBounds(), null);
     assert.equal(typeof chart.destroy, "function");
     assert.equal(chart.config({ plot: { renderer: "canvas" } }), chart);
     assert.equal(chart.config().plot.renderer, "canvas");

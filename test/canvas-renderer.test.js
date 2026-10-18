@@ -205,9 +205,9 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   scene.bounds = { minX: 0, maxX: 20, minY: 10, maxY: 30 };
   assert.deepEqual(canvasFigureBounds(context, scene, config), {
     minX: -85,
-    maxX: 45,
-    minY: 10,
-    maxY: 34,
+    maxX: 1028, // Include the distant gene label even outside the viewport.
+    minY: 0,
+    maxY: 44, // Include the trim-indicator text and its border.
   });
 
   const result = renderCanvas({

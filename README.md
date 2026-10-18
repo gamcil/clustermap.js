@@ -277,6 +277,18 @@ already owns.
   horizontal offsets. Trimmed flanks are annotated in the plot with their
   hidden length and feature count. When a dragged cluster contains a selected locus, all
   selected clusters reorder together, retaining their relative order.
+- `chart.figureBounds()` returns a fresh, unpadded `{ minX, minY, maxX, maxY }`
+  envelope in scene/world coordinates, independent of the camera and viewport,
+  or `null` before mounting and after destruction. It includes visible labels,
+  legends, scale bars and the tree using Canvas text metrics across SVG, Canvas
+  and WebGPU. It creates no SVG and changes no data, camera, selection, history
+  or animation state. It measures the latest fully computed layout: ordinary
+  transitions use their target layout, deferred locus flips use the last
+  computed layout until their target is ready, and temporary drag geometry is
+  excluded. Current appearance and tree-annotation settings are included.
+  Use it for viewport fitting and overflow detection; exact SVG `getBBox()`
+  equality is not guaranteed. The detached measurement context is reused,
+  while geometry and text metrics are measured afresh on each call.
 - `chart.exportSvg({ padding })` returns the current figure as an SVG string,
   irrespective of the interactive renderer in use.
 - `chart.destroy()` releases chart-owned event handlers, animations, minimap

@@ -32,6 +32,24 @@ function example() {
 
 const mark = (marks, uid) => marks.find((value) => value.uid === uid);
 
+test("tree envelopes include support text, markers, square caps and measured scale labels", () => {
+  const { tree, config, build } = example();
+  config.tree.support.fontSize = 70;
+  config.tree.branch = { width: 100, colour: "black" };
+  const layout = build();
+  const stem = mark(layout.stems, "pair");
+  const label = layout.supports[0];
+  assert.ok(layout.bounds.minX <= label.x - label.width);
+  assert.ok(layout.bounds.minY <= stem.y1 - 50);
+  assert.ok(layout.bounds.maxY >= stem.y2 + 50);
+  assert.ok(layout.bounds.minX <= layout.nodes[0].x - 54);
+  config.tree.scaleBar = { label: "A very long tree scale label" };
+  const scale = build();
+  assert.ok(scale.bounds.minX <= scale.scaleBar.label.x - scale.scaleBar.label.width / 2);
+  tree.nodes[1].support.value = 0;
+  assert.ok(Number.isFinite(build().bounds.minX));
+});
+
 test("the first leaf/label collision positions a proportional tree, independent of its longest branch", () => {
   const { build } = example();
   const layout = build();

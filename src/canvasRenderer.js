@@ -173,63 +173,102 @@ export function canvasFigureBounds(context, scene, config, tree = null) {
     bounds.minY = Math.min(bounds.minY, y);
     bounds.maxY = Math.max(bounds.maxY, y);
   };
-  const textWidth = (text, font) => {
+  const includeText = (text, x, y, { fontSize, fontFamily = config.plot.fontFamily,
+    fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
+    if (!text) return;
     context.save();
-    context.font = font;
-    const width = context.measureText(text || "").width;
+    context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    context.textAlign = align;
+    context.textBaseline = baseline;
+    const metrics = context.measureText(String(text));
     context.restore();
-    return width;
+    const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
+    const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
+    const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
+    const x2 = Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight : left + metrics.width;
+    const y1 = Number.isFinite(metrics.actualBoundingBoxAscent) ? -metrics.actualBoundingBoxAscent : top;
+    const y2 = Number.isFinite(metrics.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : top + fontSize * 1.25;
+    const radians = rotation * Math.PI / 180;
+    const cos = Math.cos(radians), sin = Math.sin(radians);
+    for (const [tx, ty] of [[x1, y1], [x1, y2], [x2, y1], [x2, y2]]) {
+      const px = x + tx * cos - ty * sin, py = y + tx * sin + ty * cos;
+      include(px - border / 2, py - border / 2);
+      include(px + border / 2, py + border / 2);
+    }
   };
 
+  // Structural scene bounds already enclose loci, gene polygons and ribbons.
+  // Add stroke extent without walking every homology link when labels are off.
+  const halfStroke = Math.max(config.gene.shape.strokeWidth || 0, config.locus.trackBar.stroke || 0,
+    config.link.show ? config.link.strokeWidth || 0 : 0) / 2;
+  include(scene.bounds.minX - halfStroke, scene.bounds.minY - halfStroke);
+  include(scene.bounds.maxX + halfStroke, scene.bounds.maxY + halfStroke);
   for (const cluster of scene.clusters.values()) {
-    const anchorX = cluster.x + cluster.info.x;
-    include(
-      anchorX - textWidth(
-        cluster.source.name,
-        `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`
-      ),
-      cluster.y + 8
-    );
-    include(
-      anchorX - textWidth(
-        cluster.info.locusText,
-        `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`
-      ),
-      cluster.y + 24
-    );
+    const x = cluster.x + cluster.info.x;
+    includeText(cluster.source.name, x, cluster.y + 8,
+      { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right" });
+    includeText(cluster.info.locusText, x, cluster.y + 12,
+      { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
+  }
+  if (config.gene.label.show) {
+    for (const gene of scene.genes.values()) {
+      if (!gene.visible) continue;
+      includeText(gene.source.label || gene.source.name || gene.source.uid,
+        gene.locus.x + gene.label.x, gene.locus.y + gene.label.y,
+        { fontSize: config.gene.label.fontSize, align: config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor, rotation: gene.label.rotation });
+    }
+  }
+  if (config.link.show && config.link.label.show) {
+    for (const link of scene.links.values()) {
+      if (!link.visible || !link.labelPosition) continue;
+      includeText(link.source.label ?? link.source.identity.toFixed(2), link.labelPosition.x, link.labelPosition.y,
+        { fontSize: config.link.label.fontSize, align: "center" });
+    }
+  }
+  if (config.locus.trimIndicators?.show !== false) {
+    const style = resolveTrimIndicatorStyle(config.locus.trimIndicators);
+    for (const locus of scene.loci.values()) {
+      for (const indicator of locus.trimIndicators || []) {
+        includeText(indicator.text, locus.x + indicator.x, locus.y + indicator.y,
+          { fontSize: style.fontSize, fontWeight: style.fontWeight, align: indicator.anchor, baseline: "top", border: style.borderWidth });
+      }
+    }
   }
   const treeLayout = layoutCanvasTree(context, tree, scene, config, { trackAnchor: false });
   if (treeLayout) {
     include(treeLayout.bounds.minX, treeLayout.bounds.minY);
     include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
-    if (treeLayout.scaleBar) {
-      const { label, fontSize } = treeLayout.scaleBar;
-      include(label.x, label.y + fontSize + 3);
-    }
   }
   if (scene.chrome?.legend.visible) {
-    const { legend } = scene.chrome;
-    const entryHeight = legend.entryHeight || legend.fontSize;
-    const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
+    const legend = scene.chrome.legend;
+    const subtitleSize = legend.subtitleFontSize || Math.max(10, legend.fontSize * 0.72);
     for (const item of legend.items) {
-      include(
-        legend.position.x +
-          item.textX +
-          Math.max(
-            textWidth(item.label, `${legend.fontSize}px ${legend.fontFamily}`),
-            textWidth(item.subtitle, `${subtitleFontSize}px ${legend.fontFamily}`)
-          ),
-        legend.position.y + item.y + (item.subtitle ? entryHeight : legend.fontSize)
-      );
+      const x = legend.position.x + item.x, y = legend.position.y + item.y + item.circleY;
+      include(x - item.radius, y - item.radius);
+      include(x + item.radius, y + item.radius);
+      includeText(item.label, legend.position.x + item.textX, legend.position.y + item.y + item.textY,
+        { fontSize: legend.fontSize, fontFamily: legend.fontFamily, baseline: "middle" });
+      includeText(item.subtitle, legend.position.x + item.textX, legend.position.y + item.y + item.subtitleY,
+        { fontSize: subtitleSize, fontFamily: legend.fontFamily, baseline: "middle" });
     }
   }
   if (scene.chrome?.scaleBar.visible) {
-    const { scaleBar } = scene.chrome;
-    include(scaleBar.position.x + scaleBar.length, scaleBar.position.y + scaleBar.height + 20);
+    const bar = scene.chrome.scaleBar;
+    const half = bar.strokeWidth / 2;
+    include(bar.position.x - half, bar.position.y - half);
+    include(bar.position.x + bar.length + half, bar.position.y + bar.height + half);
+    includeText(bar.label, bar.position.x + bar.length / 2, bar.position.y + bar.height + 5,
+      { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
   }
   if (scene.chrome?.colourBar.visible) {
-    const { colourBar } = scene.chrome;
-    include(colourBar.position.x + colourBar.width, colourBar.position.y + colourBar.height + 20);
+    const bar = scene.chrome.colourBar;
+    include(bar.position.x - 0.5, bar.position.y - 0.5);
+    include(bar.position.x + bar.width + 0.5, bar.position.y + bar.height + 0.5);
+    const font = { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, baseline: "top" };
+    const y = bar.position.y + bar.height + 5;
+    includeText(bar.label, bar.position.x + bar.width / 2, y, { ...font, align: "center" });
+    includeText(bar.startLabel, bar.position.x, y, font);
+    includeText(bar.endLabel, bar.position.x + bar.width, y, { ...font, align: "right" });
   }
   return bounds;
 }

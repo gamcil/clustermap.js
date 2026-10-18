@@ -9,9 +9,12 @@ export function layoutCanvasTree(context, tree, scene, config, options = {}) {
       ...options,
       tree, scene, config,
       measureText: (text, style) => {
-        context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize}px ${style.fontFamily}`;
+        context.font = `${style.fontStyle || "normal"} ${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`;
+        context.textAlign = "left";
+        context.textBaseline = "alphabetic";
         const metrics = context.measureText(text);
-        return { width: metrics.width, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
+        const overhang = Math.max(0, metrics.actualBoundingBoxLeft || 0, (metrics.actualBoundingBoxRight || 0) - metrics.width);
+        return { width: metrics.width + overhang * 2, overhang, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
       },
       measureLabel: (cluster, locusText) => {
         context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;

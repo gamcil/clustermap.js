@@ -224,10 +224,11 @@ export function layoutTree({
       guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: labelStarts.get(node.cluster) });
     }
     if (node.uid !== tree.root && config.tree.support?.show && node.support) {
+      const text = Number(node.support.value).toFixed(config.tree.support.precision ?? 1);
       supports.push({
         uid: node.uid,
         x: x - 4,
-        text: Number(node.support.value).toFixed(config.tree.support.precision ?? 1),
+        text, ...measureText(text, support),
       });
     }
   }
@@ -251,6 +252,9 @@ export function layoutTree({
       ],
       label: { x: rootX + length / 2, y: y + height + 5, text: config.tree.scaleBar?.label || horizontal.scaleBarLabel },
     };
+    // SVG scale labels use points; Canvas uses pixels. Measure the larger
+    // size for a common envelope without changing either renderer's drawing.
+    Object.assign(scaleBar.label, measureText(scaleBar.label.text, { ...scaleBar, fontSize: scaleBar.fontSize * 4 / 3 }));
   }
   let cutLine = null;
   if (presentation.metric && presentation.policy.showCutLine && horizontal.proportional &&
@@ -262,6 +266,7 @@ export function layoutTree({
       colour: branch.colour, width: 1,
       label: { x, y: Math.min(...leafYs) - 8, text: String(Number(presentation.threshold.toPrecision(6))), fontSize: support.fontSize, fontFamily: support.fontFamily },
     };
+    Object.assign(cutLine.label, measureText(cutLine.label.text, cutLine.label));
   }
   return positionTreeLayout({
     cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
@@ -286,10 +291,32 @@ function positionTreeLayout(layout, ys) {
     supports: layout.supports.map((label) => ({ ...label, y: ys.get(label.uid) - 4 })),
     annotations: layout.annotations.map((label) => ({ ...label, y: ys.get(label.uid) + 6 })),
   };
-  const points = [frame.rootBranch, ...frame.branches, ...frame.stems].flatMap((mark) => [[mark.x1, mark.y1], [mark.x2, mark.y2]]);
-  for (const label of frame.annotations) points.push([label.x, label.y], [label.x + label.width, label.y + label.height]);
-  if (frame.cutLine) points.push([frame.cutLine.label.x, frame.cutLine.label.y - frame.cutLine.label.fontSize]);
-  if (frame.scaleBar) points.push([frame.scaleBar.label.x, frame.scaleBar.label.y + frame.scaleBar.fontSize]);
+  const points = [];
+  const includeLine = (mark, width = mark.style?.width || 1) => {
+    const half = width / 2;
+    const extendX = mark.x1 === mark.x2 || mark.lineCap === "square" ? half : 0;
+    const extendY = mark.y1 === mark.y2 || mark.lineCap === "square" ? half : 0;
+    points.push([Math.min(mark.x1, mark.x2) - extendX, Math.min(mark.y1, mark.y2) - extendY],
+      [Math.max(mark.x1, mark.x2) + extendX, Math.max(mark.y1, mark.y2) + extendY]);
+  };
+  for (const mark of [frame.rootBranch, ...frame.branches, ...frame.stems]) includeLine(mark);
+  for (const mark of frame.guides) includeLine(mark, frame.guide.width);
+  for (const node of frame.nodes) {
+    const radius = node.radius + frame.branch.width / 2;
+    points.push([node.x - radius, node.y - radius], [node.x + radius, node.y + radius]);
+  }
+  for (const label of frame.annotations) points.push([label.x - (label.overhang || 0), label.y], [label.x + label.width, label.y + label.height]);
+  for (const label of frame.supports) points.push([label.x - label.width, label.y - label.height], [label.x + (label.overhang || 0), label.y]);
+  if (frame.cutLine) {
+    includeLine(frame.cutLine, frame.cutLine.width);
+    const label = frame.cutLine.label;
+    points.push([label.x - label.width / 2, label.y - label.height], [label.x + label.width / 2, label.y]);
+  }
+  if (frame.scaleBar) {
+    for (const mark of frame.scaleBar.lines) includeLine(mark, frame.scaleBar.strokeWidth);
+    const label = frame.scaleBar.label;
+    points.push([label.x - label.width / 2, label.y], [label.x + label.width / 2, label.y + label.height]);
+  }
   frame.bounds = {
     minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
     minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)),
