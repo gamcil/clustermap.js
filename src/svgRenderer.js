@@ -2,9 +2,17 @@ import { select } from "d3-selection";
 import { drag } from "d3-drag";
 import { renameText, rgbaToRgb } from "./utils.js";
 import { filterLinks } from "./links/groups.mjs";
-import { getLinkPath, interpolateLinkAnchors, interpolateLinkOpacity } from "./links/layout.mjs";
+import { getLinkPath, getLinkLabelPosition, interpolateLinkAnchors, interpolateLinkOpacity } from "./links/layout.mjs";
 import { renderSvgTree as renderTree } from "./treeSvgRenderer.mjs";
 import { resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
+
+import {
+  clusterLabelOffsetForPreview, clusterLabelTextForPreview, clusterOffsetForPreview,
+  geneGeometryForPreview, genePolygonForPreview, geneVisibleForPreview,
+  linkGeometryForPreview, locusGeometryForPreview, recordsForPreview,
+} from "./scenePreview.mjs";
+
+const previewStates = new WeakMap();
 
 // Owns the D3 joins for chart-world SVG. The chart controller owns the SVG
 // host, camera viewport, and interaction state that causes a redraw.
@@ -12,6 +20,7 @@ export function renderSvg({
   plot,
   data,
   scene,
+  preview = null,
   previousScene = null,
   previousTree = null,
   previousTreeScene = null,
@@ -26,6 +35,9 @@ export function renderSvg({
   highlightLinkIds = new Set(),
   highlightLocusIds = new Set(),
 }) {
+  if (preview) return renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
+    highlightGeneIds, highlightLocusIds });
+  previewStates.delete(plot.node());
   const linkGroup = plot
     .selectAll("g.links")
     .data([data])
@@ -263,20 +275,95 @@ export function renderSvg({
   });
 }
 
-function updateClusters(selection, scene, { labelsOnly = false } = {}) {
+// Apply renderer-neutral patches to retained SVG elements. Geometry, adjacency,
+// visibility, and label movement come from the same accessors as raster marks.
+function renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
+  highlightGeneIds, highlightLocusIds }) {
+  const current = recordsForPreview(scene, preview, { includeClusters: true });
+  // Select the node directly: selection.select() would replace its bound datum
+  // with the plot datum, and UID strings need not be valid CSS identifiers.
+  const element = (id) => select(plot.node().ownerDocument.getElementById(id));
+  const previous = previewStates.get(plot.node());
+  const affected = (kind) => new Set([
+    ...current[kind], ...(previous?.scene === scene ? previous.records[kind] : []),
+  ]);
+  updateClusters(plot.selectAll("g.cluster").interrupt(), scene, { preview });
+
+  // DOM parents carry row and locus translations. Only trim/flip previews need
+  // per-gene geometry; ordinary dragging never rewrites the gene polygons.
+  const loci = new Map();
+  for (const uid of affected("loci")) {
+    const locus = scene.loci.get(uid);
+    if (!locus) continue;
+    const geometry = locusGeometryForPreview(preview, locus);
+    loci.set(uid, { ...locus, ...geometry,
+      transform: { x: locus.transform.x + geometry.offsets.x, y: locus.transform.y },
+    });
+  }
+  const projected = { ...scene, loci: { get: (uid) => loci.get(uid) || scene.loci.get(uid) } };
+  for (const uid of loci.keys()) {
+    const group = element(ids.locus({ uid })).interrupt();
+    updateLoci(group, projected, config, highlightLocusIds);
+    if (preview.type === "locus-flip") group.select("g.hover").interrupt().attr("opacity", 0);
+  }
+  if ([preview.type, previous?.type].some((type) => type === "locus-trim" || type === "locus-flip")) {
+    const genes = new Map();
+    for (const uid of affected("genes")) {
+      const gene = scene.genes.get(uid);
+      if (!gene) continue;
+      const geometry = geneGeometryForPreview(preview, gene);
+      const polygon = geometry.flipAxis === undefined ? gene.localPolygon
+        : genePolygonForPreview(preview, gene, { includeClusterOffset: false })
+          .map((value, index) => value - (index % 2 ? gene.locus.y : gene.locus.x));
+      genes.set(uid, { ...gene, localPolygon: polygon, visible: geneVisibleForPreview(preview, gene),
+        labelTransform: geometry.labelX === undefined ? gene.labelTransform
+          : `translate(${geometry.labelX - gene.locus.x}, ${gene.label.y}) rotate(${gene.label.rotation})`,
+      });
+    }
+    const geneScene = { ...scene, genes: { get: (uid) => genes.get(uid) || scene.genes.get(uid) } };
+    for (const uid of genes.keys()) {
+      updateGenes(element(ids.gene({ uid })).interrupt(), geneScene, config, scales, highlightGeneIds);
+    }
+  }
+  // Include last frame's records so branches/links that leave the affected set
+  // are restored to their retained positions rather than left behind.
+  for (const uid of affected("links")) {
+    const link = scene.links.get(uid);
+    if (!link) continue;
+    const geometry = linkGeometryForPreview(scene, link, preview, config);
+    const anchors = geometry.anchors ?? link.anchors;
+    const visible = config.link.show && geometry.visible && anchors;
+    const group = element(ids.link(link.source)).interrupt().attr("opacity", visible ? link.opacity ?? 1 : 0);
+    if (!visible) continue;
+    const adjusted = [...anchors];
+    adjusted[0] += geometry.a || 0; adjusted[1] += geometry.a || 0;
+    adjusted[3] += geometry.b || 0; adjusted[4] += geometry.b || 0;
+    group.selectAll("path.geneLink,path.geneLinkHighlight").interrupt().attr("d", getLinkPath(adjusted, config.link));
+    if (config.link.label.show) {
+      const label = getLinkLabelPosition(adjusted, config.link.label.position);
+      group.select("text.geneLinkLabel").attr("x", label.x).attr("y", label.y)
+        .attr("opacity", 1);
+    }
+  }
+  renderChrome({ plot, chrome: preview.chrome || scene.chrome, ids, interactions });
+  renderTree(plot, data.tree, scene, config, interactions, null, false, { preview });
+  previewStates.set(plot.node(), { scene, records: current, type: preview.type });
+}
+
+function updateClusters(selection, scene, { labelsOnly = false, preview = null } = {}) {
   const layout = (cluster) => scene.clusters.get(cluster.uid);
   if (!labelsOnly) {
     selection.attr("transform", (cluster) => {
       const { x, y } = layout(cluster);
-      return `translate(${x}, ${y})`;
+      return `translate(${x}, ${y + clusterOffsetForPreview(preview, cluster.uid)})`;
     });
     selection.selectAll("g.clusterInfo").attr("transform", (cluster) => {
       const { x, y } = layout(cluster).info;
-      return `translate(${x}, ${y})`;
+      return `translate(${x + clusterLabelOffsetForPreview(preview, cluster.uid)}, ${y})`;
     });
   }
   selection.selectAll("text.locusText").each(function (cluster) {
-    const text = layout(cluster).info.locusText;
+    const text = clusterLabelTextForPreview(preview, cluster.uid, layout(cluster).info.locusText);
     if (this.textContent !== text) this.textContent = text;
   });
   return selection;

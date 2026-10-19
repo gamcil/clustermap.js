@@ -218,6 +218,11 @@ already owns.
 - `chart.config(options)` merges supported configuration options and returns the
   chart; when mounted, it redraws immediately. `chart.config()` returns the current configuration. Set
   `plot.renderer` to `"svg"`, `"canvas"`, or `"webgpu"`.
+- `plot.adaptiveResolution` defaults to `true`: Canvas can reduce its backing
+  resolution during gestures and when zoomed out. Set it to `false` to keep
+  Canvas at the device pixel ratio throughout. WebGPU always uses the device
+  pixel ratio and four-sample antialiasing for shape edges. The rendering
+  benchmark disables adaptive resolution by default.
 - `chart.data(data)` replaces data on an already-mounted chart; `chart.data()`
   returns its current normalized data.
 - `chart.project()` returns a serializable `{ format, version, data, config,
@@ -297,6 +302,15 @@ already owns.
 Scenes, interaction state, and renderer backends are deliberately internal;
 all backends consume the same projected scene through the chart controller.
 
+Geometry edits use the shared `patchScene` operation in `src/layout.mjs`.
+Locus moves (including batch selections), flips, trims, anchoring and cluster
+reordering update affected records and their incident links in one pass.
+Translations reuse local geometry; flips and trims reproject changed loci.
+The same operation updates labels, trim indicators, bounds, plot decorations,
+and hit-testing indexes, and returns changed IDs for renderer buffer updates.
+Data or appearance changes use a full scene build. Scene patching is internal
+and does not change the public chart API.
+
 For a bundler-based application, import the ESM package entry directly. D3 is
 declared as a peer dependency and is imported by the library:
 
@@ -311,3 +325,4 @@ browser bundles for script-tag usage and expect a global D3 v7 instance. This
 is the appropriate artifact for applications, such as the Python-packaged
 Clinker frontend, that bundle the library as a static browser asset; the ESM
 entry is intended for modern JavaScript bundlers.
+

@@ -2,12 +2,14 @@ import { rgbaToRgb } from "./utils.js";
 import { hitTest } from "./hitTest.mjs";
 import { queryViewportOrdered } from "./spatialIndex.mjs";
 import {
+  offsetsForGene,
+  geneGeometryForPreview,
+  linkGeometryForPreview,
   clusterLabelOffsetForPreview,
   clusterLabelTextForPreview,
   clusterOffsetForPreview,
   geneVisibleForPreview,
   locusGeometryForPreview,
-  locusOffsetForPreview,
   previewOffsetsForLocus,
 } from "./scenePreview.mjs";
 import { clusterPairKey } from "./layout.mjs";
@@ -618,140 +620,6 @@ function drawLocusTrimIndicators(context, locus, config, geometry = {}) {
   context.restore();
 }
 
-function offsetsForGene(preview, gene) {
-  return previewOffsetsForLocus(preview, gene.locus);
-}
-
-function flipAxisForGene(preview, gene) {
-  return preview?.type === "locus-flip"
-    ? preview.axes?.get(gene?.locus?.source?.uid)
-    : undefined;
-}
-
-function geneGeometryForPreview(preview, gene) {
-  const axis = flipAxisForGene(preview, gene);
-  if (axis === undefined) return {};
-  const progress = preview.progress;
-  const flipScale = 1 - 2 * progress;
-  const flip = (x) => axis + (x - axis) * flipScale;
-  return {
-    flipAxis: axis,
-    flipScale,
-    labelX: flip(gene.locus.x + gene.label.x),
-  };
-}
-
-function linkOffsetsForPreview(scene, link, preview) {
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
-  const offsetForGene = (gene) =>
-    locusOffsetForPreview(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
-  const queryOffset = offsetForGene(query);
-  const targetOffset = offsetForGene(target);
-  // Link anchors are ordered from the upper locus to the lower one, not from
-  // source.query to source.target.
-  return query?.locus?.y <= target?.locus?.y
-    ? { a: queryOffset, b: targetOffset }
-    : { a: targetOffset, b: queryOffset };
-}
-
-function previewLinkAnchors(scene, link, preview) {
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
-  if (!query || !target) return null;
-  const anchorForGene = (gene) => {
-    const offsets = offsetsForGene(preview, gene);
-    // Bounds are calculated when the retained scene is built and equal the
-    // polygon's horizontal extent. Reusing them avoids a vertex scan for each
-    // animated link endpoint on every frame.
-    let minX = gene.bounds?.minX;
-    let maxX = gene.bounds?.maxX;
-    // Retain support for compact third-party scenes that only expose a
-    // polygon. Production scenes always take the cached-bounds path above.
-    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
-      minX = Infinity;
-      maxX = -Infinity;
-      for (let index = 0; index < gene.polygon.length; index += 2) {
-        minX = Math.min(minX, gene.polygon[index]);
-        maxX = Math.max(maxX, gene.polygon[index]);
-      }
-    }
-    minX += offsets.x;
-    maxX += offsets.x;
-    const forward = gene.display.strand === 1;
-    const axis = flipAxisForGene(preview, gene);
-    if (axis === undefined) {
-      return [
-        forward ? minX : maxX,
-        forward ? maxX : minX,
-        gene.locus.y + gene.locus.track.y + offsets.y,
-      ];
-    }
-    const progress = preview.progress;
-    const targetMin = axis * 2 - maxX;
-    const targetMax = axis * 2 - minX;
-    const from = forward ? [minX, maxX] : [maxX, minX];
-    const to = forward ? [targetMax, targetMin] : [targetMin, targetMax];
-    return [
-      from[0] + (to[0] - from[0]) * progress,
-      from[1] + (to[1] - from[1]) * progress,
-      gene.locus.y + gene.locus.track.y + offsets.y,
-    ];
-  };
-  const queryAnchor = anchorForGene(query);
-  const targetAnchor = anchorForGene(target);
-  return queryAnchor[2] <= targetAnchor[2]
-    ? [...queryAnchor, ...targetAnchor]
-    : [...targetAnchor, ...queryAnchor];
-}
-
-function linkGeometryForPreview(scene, link, preview, config) {
-  if (preview?.type === "locus-flip") {
-    const query = scene.genes.get(link.source.query.uid);
-    const target = scene.genes.get(link.source.target.uid);
-    const affected =
-      query?.locus?.source?.uid === preview.locusUid ||
-      target?.locus?.source?.uid === preview.locusUid;
-    return {
-      visible:
-        link.visible &&
-        geneVisibleForPreview(preview, query) &&
-        geneVisibleForPreview(preview, target),
-      // Most visible links do not touch the locus being reflected. Reusing
-      // their retained anchors keeps a flip frame proportional to affected
-      // links instead of recalculating every link in the viewport.
-      anchors: affected ? previewLinkAnchors(scene, link, preview) : link.anchors,
-    };
-  }
-  if (preview?.type !== "cluster-drag") {
-    const query = scene.genes.get(link.source.query.uid);
-    const target = scene.genes.get(link.source.target.uid);
-    const visible =
-      (preview?.type === "locus-trim"
-        ? link.allowed && !link.source.hidden && link.source.identity >= config.link.threshold
-        : link.visible) &&
-      geneVisibleForPreview(preview, query) &&
-      geneVisibleForPreview(preview, target);
-    return {
-      ...linkOffsetsForPreview(scene, link, preview),
-      visible,
-    };
-  }
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
-  const queryOrder = preview.clusterOrder.get(query?.locus?.cluster?.uid);
-  const targetOrder = preview.clusterOrder.get(target?.locus?.cluster?.uid);
-  const visible =
-    queryOrder !== undefined &&
-    targetOrder !== undefined &&
-    Math.abs(queryOrder - targetOrder) === 1 &&
-    link.allowed &&
-    link.source.identity >= config.link.threshold &&
-    query?.visible &&
-    target?.visible;
-  return { visible, anchors: visible ? previewLinkAnchors(scene, link, preview) : null };
-}
-
 function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
   return (
     !viewport ||
@@ -1046,6 +914,11 @@ export function renderCanvas({
   showClusterLabels = true,
   showChrome = true,
 }) {
+  // Resolve label visibility before querying or projecting records. The
+  // WebGPU overlay requests labels without bodies; disabled labels should
+  // not cause otherwise unused gene/link passes on every interaction frame.
+  showGeneLabels = showGeneLabels && config.gene.label.show;
+  showLinkLabels = showLinkLabels && config.link.label.show;
   const displayScene = interpolateCanvasScene(previousScene, scene, progress);
   const context = canvas.getContext("2d");
   const bounds = dimensions || canvas.getBoundingClientRect();

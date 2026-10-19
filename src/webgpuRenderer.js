@@ -5,6 +5,10 @@
 import { color } from "d3-color";
 import { sampleLinkGeometry } from "./links/layout.mjs";
 import {
+  genePolygonForPreview,
+  linkVisibleForPreview,
+  previewLinkAnchors,
+  recordsForPreview,
   clusterOffsetForPreview,
   geneVisibleForPreview,
   locusGeometryForPreview,
@@ -40,11 +44,31 @@ struct LinkIndices {
 }
 @group(0) @binding(2) var<storage, read> linkRecords: LinkRecords;
 @group(0) @binding(3) var<storage, read> linkIndices: LinkIndices;
+struct LocusTransforms {
+  // x translation, reserved, x scale, flip axis (in retained coordinates).
+  values: array<vec4f>,
+}
+@group(0) @binding(4) var<storage, read> locusTransforms: LocusTransforms;
+
+fn transformPoint(point: vec2f, slot: u32) -> vec2f {
+  let transform = locusTransforms.values[slot];
+  return vec2f(
+    transform.w + (point.x - transform.w) * transform.z + transform.x,
+    point.y,
+  ) + clusterOffsets.values[slot];
+}
+
+fn transformEndpoint(endpoint: vec4f) -> vec4f {
+  let slot = u32(endpoint.w);
+  let first = transformPoint(vec2f(endpoint.x, endpoint.z), slot);
+  let second = transformPoint(vec2f(endpoint.y, endpoint.z), slot);
+  return vec4f(first.x, second.x, first.y, endpoint.w);
+}
 
 struct VertexInput {
   @location(0) position: vec2f,
   @location(1) colour: vec4f,
-  @location(2) clusterSlot: f32,
+  @location(2) transformSlot: f32,
 }
 struct VertexOutput {
   @builtin(position) position: vec4f,
@@ -55,13 +79,12 @@ struct StrokeInput {
   @location(0) first: vec2f,
   @location(1) second: vec2f,
   @location(2) colour: vec4f,
-  @location(3) clusterSlot: f32,
+  @location(3) transformSlot: f32,
   @location(4) width: f32,
 }
 
 @vertex fn vertexMain(input: VertexInput) -> VertexOutput {
-  let clusterOffset = clusterOffsets.values[u32(input.clusterSlot)];
-  let screen = (input.position + clusterOffset)
+  let screen = transformPoint(input.position, u32(input.transformSlot))
     * camera.transform.z + camera.transform.xy;
   var output: VertexOutput;
   output.position = vec4f(
@@ -112,10 +135,9 @@ fn projectStroke(
   input: StrokeInput,
   @builtin(vertex_index) vertexIndex: u32,
 ) -> VertexOutput {
-  let clusterOffset = clusterOffsets.values[u32(input.clusterSlot)];
   return projectStroke(
-    input.first + clusterOffset,
-    input.second + clusterOffset,
+    transformPoint(input.first, u32(input.transformSlot)),
+    transformPoint(input.second, u32(input.transformSlot)),
     input.width,
     vertexIndex % 6u,
     input.colour,
@@ -135,19 +157,15 @@ fn cubic(start: f32, controlA: f32, controlB: f32, end: f32, amount: f32) -> f32
 }
 
 fn ribbonPoint(link: LinkRecord, edge: u32, amount: f32) -> vec2f {
-  let queryOffset = clusterOffsets.values[u32(link.query.w)];
-  let mateOffset = clusterOffsets.values[u32(link.mate.w)];
-  let queryY = link.query.z + queryOffset.y;
-  let mateY = link.mate.z + mateOffset.y;
-  let queryIsTop = queryY <= mateY;
-  let top = select(link.mate, link.query, queryIsTop);
-  let bottom = select(link.query, link.mate, queryIsTop);
-  let topY = select(mateY, queryY, queryIsTop);
-  let bottomY = select(queryY, mateY, queryIsTop);
-  let topOffset = select(mateOffset.x, queryOffset.x, queryIsTop);
-  let bottomOffset = select(queryOffset.x, mateOffset.x, queryIsTop);
-  let topX = select(top.x, top.y, edge == 0u) + topOffset;
-  let bottomX = select(bottom.x, bottom.y, edge == 0u) + bottomOffset;
+  let query = transformEndpoint(link.query);
+  let mate = transformEndpoint(link.mate);
+  let queryIsTop = query.z <= mate.z;
+  let top = select(mate, query, queryIsTop);
+  let bottom = select(query, mate, queryIsTop);
+  let topY = top.z;
+  let bottomY = bottom.z;
+  let topX = select(top.x, top.y, edge == 0u);
+  let bottomX = select(bottom.x, bottom.y, edge == 0u);
   let middle = topY + abs(bottomY - topY) / 2.0;
   if (camera.linkStyle.y > 0.5) {
     return vec2f(
@@ -162,16 +180,16 @@ fn ribbonPoint(link: LinkRecord, edge: u32, amount: f32) -> vec2f {
 }
 
 fn linkCentrePoint(link: LinkRecord, amount: f32) -> vec2f {
-  let queryOffset = clusterOffsets.values[u32(link.query.w)];
-  let mateOffset = clusterOffsets.values[u32(link.mate.w)];
-  let queryX = (link.query.x + link.query.y) / 2.0 + queryOffset.x;
-  let mateX = (link.mate.x + link.mate.y) / 2.0 + mateOffset.x;
-  let queryY = link.query.z + queryOffset.y;
-  let mateY = link.mate.z + mateOffset.y;
+  let query = transformEndpoint(link.query);
+  let mate = transformEndpoint(link.mate);
+  let queryX = (query.x + query.y) / 2.0;
+  let mateX = (mate.x + mate.y) / 2.0;
+  let queryY = query.z;
+  let mateY = mate.z;
   if (camera.linkStyle.y > 0.5) {
     return vec2f(mix(queryX, mateX, amount), mix(queryY, mateY, amount));
   }
-  let middle = queryY + abs(mateY - queryY) / 2.0;
+  let middle = (queryY + mateY) / 2.0;
   return vec2f(
     cubic(queryX, queryX, mateX, mateX, amount),
     cubic(queryY, middle, middle, mateY, amount)
@@ -339,90 +357,6 @@ function pushLink(vertices, edges, link, colour, stroke, {
   strokeSegment(geometry.upper.at(-1), geometry.lower.at(-1));
 }
 
-function offsetsForLocus(preview, locus) {
-  return previewOffsetsForLocus(preview, locus);
-}
-
-function polygonForPreview(preview, gene) {
-  const { x, y } = offsetsForLocus(preview, gene.locus);
-  // Cluster-drag offsets are applied by the vertex shader. Keep only the
-  // locus-local x adjustment in these retained gene coordinates.
-  const bakedY = preview?.type === "cluster-drag" ? 0 : y;
-  const axis = preview?.type === "locus-flip"
-    ? preview.axes?.get(gene.locus.source.uid)
-    : undefined;
-  if (!x && !y && axis === undefined) return gene.polygon;
-  const scale = axis === undefined ? 1 : 1 - 2 * preview.progress;
-  return gene.polygon.map((coordinate, index) =>
-    index % 2
-      ? coordinate + bakedY
-      : (axis === undefined ? coordinate : axis + (coordinate - axis) * scale) + x
-  );
-}
-
-function anchorsForPreview(scene, link, preview) {
-  if (!preview) return link.anchors;
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
-  if (!query || !target) return null;
-  const anchorForGene = (gene) => {
-    const offsets = offsetsForLocus(preview, gene.locus);
-    const forward = gene.display.strand === 1;
-    const minX = gene.bounds.minX + offsets.x;
-    const maxX = gene.bounds.maxX + offsets.x;
-    const axis = preview?.type === "locus-flip"
-      ? preview.axes?.get(gene.locus.source.uid)
-      : undefined;
-    if (axis !== undefined) {
-      const progress = preview.progress;
-      const targetMin = axis * 2 - maxX;
-      const targetMax = axis * 2 - minX;
-      const from = forward ? [minX, maxX] : [maxX, minX];
-      const to = forward ? [targetMax, targetMin] : [targetMin, targetMax];
-      return [
-        from[0] + (to[0] - from[0]) * progress,
-        from[1] + (to[1] - from[1]) * progress,
-        gene.locus.y + gene.locus.track.y + offsets.y,
-      ];
-    }
-    return [
-      forward ? minX : maxX,
-      forward ? maxX : minX,
-      gene.locus.y + gene.locus.track.y + offsets.y,
-    ];
-  };
-  const queryAnchor = anchorForGene(query);
-  const targetAnchor = anchorForGene(target);
-  return queryAnchor[2] <= targetAnchor[2]
-    ? [...queryAnchor, ...targetAnchor]
-    : [...targetAnchor, ...queryAnchor];
-}
-
-function linkVisibleForPreview(scene, link, preview, config) {
-  if (!preview) return link.visible;
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
-  if (!query || !target) return false;
-  if (!geneVisibleForPreview(preview, query) || !geneVisibleForPreview(preview, target)) return false;
-  if (preview?.type === "locus-trim") {
-    return link.allowed && !link.source.hidden && link.source.identity >= config.link.threshold;
-  }
-  if (preview?.type !== "cluster-drag") return link.visible;
-  const queryOrder = preview.clusterOrder.get(query.locus.cluster.uid);
-  const targetOrder = preview.clusterOrder.get(target.locus.cluster.uid);
-  return (
-    queryOrder !== undefined &&
-    targetOrder !== undefined &&
-    Math.abs(queryOrder - targetOrder) === 1 &&
-    link.allowed &&
-    link.source.identity >= config.link.threshold
-  );
-}
-
-function trackForPreview(preview, locus) {
-  return preview?.loci?.get(locus.source.uid)?.track || locus.track;
-}
-
 // A committed trim can make a gene or link invisible in the retained scene.
 // Keep its GPU range while the containing locus remains trimmed: a later
 // handle drag may expand the boundary and must be able to reveal it without a
@@ -454,7 +388,7 @@ function geneVertices(gene, scales, preview = null, clusterSlot = 0, strokeWidth
     edge,
     gene,
     visible ? colour : transparent(colour),
-    polygonForPreview(preview, gene),
+    genePolygonForPreview(preview, gene, { includeClusterOffset: false }),
     visible ? [0, 0, 0, 1] : [0, 0, 0, 0],
     clusterSlot,
     strokeWidth
@@ -483,7 +417,7 @@ function linkVertices(scene, link, scales, config, preview = null) {
     // Keeping retained link records at a constant vertex count lets a trim
     // preview toggle visibility by alpha alone.
     visible: true,
-    anchors: anchorsForPreview(scene, link, preview),
+    anchors: preview ? previewLinkAnchors(scene, link, preview) : link.anchors,
     asLine: config.link.asLine,
     straight: config.link.straight,
     strokeWidth: config.link.strokeWidth,
@@ -501,7 +435,7 @@ function linkEndpointForGpu(gene, clusterSlot, offsetX = 0, offsetY = 0) {
   ];
 }
 
-function linkRecordForGpu(scene, link, scales, config, clusterSlots, clusterOffsetX = () => 0, clusterOffsetY = () => 0) {
+function linkRecordForGpu(scene, link, scales, config, locusSlots, clusterOffsetX = () => 0, clusterOffsetY = () => 0) {
   const query = scene.genes.get(link.source.query.uid);
   const target = scene.genes.get(link.source.target.uid);
   if (!query || !target) return null;
@@ -515,16 +449,18 @@ function linkRecordForGpu(scene, link, scales, config, clusterSlots, clusterOffs
       ? scales.colour(scales.group(link.source.query.uid))
       : "black")
   );
+  fill[3] *= link.opacity ?? 1;
+  stroke[3] *= link.opacity ?? 1;
   return new Float32Array([
     ...linkEndpointForGpu(
       query,
-      clusterSlots.get(query.locus.cluster.uid),
+      locusSlots.get(query.locus.source.uid),
       clusterOffsetX(query.locus.cluster.uid),
       clusterOffsetY(query.locus.cluster.uid)
     ),
     ...linkEndpointForGpu(
       target,
-      clusterSlots.get(target.locus.cluster.uid),
+      locusSlots.get(target.locus.source.uid),
       clusterOffsetX(target.locus.cluster.uid),
       clusterOffsetY(target.locus.cluster.uid)
     ),
@@ -533,11 +469,11 @@ function linkRecordForGpu(scene, link, scales, config, clusterSlots, clusterOffs
   ]);
 }
 
-function buildLinkRecords(scene, scales, config, clusterSlots) {
+function buildLinkRecords(scene, scales, config, locusSlots) {
   const values = [];
   const indexByUid = new Map();
   for (const link of scene.links.values()) {
-    const record = linkRecordForGpu(scene, link, scales, config, clusterSlots);
+    const record = linkRecordForGpu(scene, link, scales, config, locusSlots);
     if (!record) continue;
     indexByUid.set(link.source.uid, indexByUid.size);
     values.push(...record);
@@ -592,6 +528,13 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
   const slots = clusterSlots || new Map(
     [...scene.clusters.keys()].map((uid, index) => [uid, index + 1])
   );
+  // Each locus gets one slot shared by its genes, track, and link endpoints.
+  // Cluster slots retain committed translations; locus slots inherit them.
+  const locusSlots = new Map();
+  let nextSlot = slots.size + 1;
+  for (const uid of scene.loci.keys()) {
+    locusSlots.set(uid, nextSlot++);
+  }
   for (const link of scene.links.values()) {
     // Normally an invisible link has no reason to consume a GPU range. The
     // exception is a link hidden solely by a committed trim: it can reappear
@@ -612,7 +555,7 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
       gene,
       scales,
       preview,
-      slots.get(gene.locus.cluster.uid),
+      locusSlots.get(gene.locus.source.uid),
       config.gene.shape.strokeWidth
     );
     ranges.genes.set(gene.source.uid, {
@@ -622,7 +565,7 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
   }
   for (const locus of scene.loci.values()) {
     ranges.loci.set(locus.source.uid, {
-      tracks: append(tracks, trackVertices(locus, config, preview, slots.get(locus.cluster.uid))),
+      tracks: append(tracks, trackVertices(locus, config, preview, locusSlots.get(locus.source.uid))),
     });
   }
   return {
@@ -635,7 +578,13 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
     },
     ranges,
     clusterSlots: slots,
+    locusSlots,
+    slotCount: nextSlot,
   };
+}
+
+function isLocusTransformPreview(preview) {
+  return ["locus-offset", "locus-offsets", "locus-flip"].includes(preview?.type);
 }
 
 function viewportForCamera(camera, width, height, overscan = 20) {
@@ -677,49 +626,6 @@ function visibleClusterPreviewPairs(scene, preview, viewport) {
     }
   }
   return pairs;
-}
-
-function recordsForPreview(scene, preview) {
-  if (!preview) return null;
-  if (preview.type === "cluster-drag") {
-    return {
-      // Genes, tracks, and instanced link ribbons all resolve their row
-      // offsets on the GPU, leaving only a compact visible-link index list to
-      // upload while the pointer moves.
-      loci: new Set(),
-      genes: new Set(),
-      links: new Set(),
-      full: false,
-      clusterOffsets: true,
-    };
-  }
-  const loci = new Set();
-  if (preview.type === "locus-offset") loci.add(preview.locusUid);
-  if (preview.type === "locus-offsets") {
-    for (const locusUid of preview.locusOffsets.keys()) loci.add(locusUid);
-  }
-  if (preview.type === "locus-flip") loci.add(preview.locusUid);
-  if (preview.type === "locus-trim") {
-    const trimmed = scene.loci.get(preview.locusUid);
-    const clusterUid = trimmed?.cluster.uid;
-    // getLocusScaleValues packs loci independently within each cluster. A
-    // trim can therefore shift every sibling locus even when its individual
-    // offset happens to be zero in a particular preview frame.
-    for (const locus of scene.loci.values()) {
-      if (locus.cluster.uid === clusterUid) loci.add(locus.source.uid);
-    }
-  }
-  const genes = new Set();
-  for (const gene of scene.genes.values()) {
-    if (loci.has(gene.locus.source.uid)) genes.add(gene.source.uid);
-  }
-  const links = new Set();
-  for (const link of scene.links.values()) {
-    if (genes.has(link.source.query.uid) || genes.has(link.source.target.uid)) {
-      links.add(link.source.uid);
-    }
-  }
-  return { loci, genes, links, full: false };
 }
 
 function bufferFor(device, existing, data) {
@@ -784,6 +690,7 @@ export async function createWebGpuRenderer(canvas) {
       { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
       { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
       { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+      { binding: 4, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
     ],
   });
   const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
@@ -797,29 +704,36 @@ export async function createWebGpuRenderer(canvas) {
   const createPipeline = device.createRenderPipelineAsync
     ? (descriptor) => device.createRenderPipelineAsync(descriptor)
     : (descriptor) => Promise.resolve(device.createRenderPipeline(descriptor));
+  // Canvas/SVG smooth shape edges by default. Use multisampling for comparable
+  // WebGPU edge quality without reducing the requested backing resolution.
+  const multisample = { count: 4 };
   const pipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "vertexMain", buffers: vertexBuffers },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
+    multisample,
   });
   const strokePipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "strokeVertex", buffers: strokeVertexBuffers },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
+    multisample,
   });
   const linkPipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "linkFillVertex" },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
+    multisample,
   });
   const linkLinePipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "linkEdgeVertex" },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
-    primitive: { topology: "line-list" },
+    primitive: { topology: "triangle-list" },
+    multisample,
   });
   const uniform = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   let clusterOffsetBuffer = device.createBuffer({
@@ -840,6 +754,11 @@ export async function createWebGpuRenderer(canvas) {
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
   let linkIndexCapacity = 1;
+  let locusTransformBuffer = device.createBuffer({
+    size: 16,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  let locusTransformCapacity = 1;
   const createBindGroup = () => device.createBindGroup({
     layout: bindGroupLayout,
     entries: [
@@ -847,6 +766,7 @@ export async function createWebGpuRenderer(canvas) {
       { binding: 1, resource: { buffer: clusterOffsetBuffer } },
       { binding: 2, resource: { buffer: linkRecordBuffer } },
       { binding: 3, resource: { buffer: linkIndexBuffer } },
+      { binding: 4, resource: { buffer: locusTransformBuffer } },
     ],
   });
   let bindGroup = createBindGroup();
@@ -870,6 +790,7 @@ export async function createWebGpuRenderer(canvas) {
   let geometry = null;
   let patchedRecords = null;
   let configured = false;
+  let multisampleTexture = null;
 
   const resizeStorageBuffer = (buffer, capacity, values) => {
     if (values.byteLength <= capacity * 4) return { buffer, capacity, resized: false };
@@ -937,7 +858,7 @@ export async function createWebGpuRenderer(canvas) {
   };
 
   const updateClusterOffsets = (nextPreview) => {
-    const size = Math.max(1, geometry?.clusterSlots?.size + 1 || 1);
+    const size = geometry?.slotCount || 1;
     if (size > clusterOffsetCapacity) {
       clusterOffsetBuffer.destroy();
       clusterOffsetBuffer = device.createBuffer({
@@ -956,7 +877,47 @@ export async function createWebGpuRenderer(canvas) {
         if (slot !== undefined) offsets[slot * 2 + 1] += offset;
       }
     }
+    // Locus slots inherit their cluster's retained and transient translation.
+    for (const [uid, slot] of geometry?.locusSlots || []) {
+      const locus = scene?.loci.get(uid);
+      const clusterSlot = geometry.clusterSlots.get(locus?.cluster.uid);
+      offsets[slot * 2] = offsets[clusterSlot * 2];
+      offsets[slot * 2 + 1] = offsets[clusterSlot * 2 + 1];
+    }
     device.queue.writeBuffer(clusterOffsetBuffer, 0, offsets);
+  };
+
+  const updateLocusTransforms = (nextPreview) => {
+    const size = geometry?.slotCount || 1;
+    if (size > locusTransformCapacity) {
+      locusTransformBuffer.destroy();
+      locusTransformBuffer = device.createBuffer({
+        size: size * 16,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      locusTransformCapacity = size;
+      bindGroup = createBindGroup();
+    }
+    const transforms = new Float32Array(locusTransformCapacity * 4);
+    for (let slot = 0; slot < locusTransformCapacity; slot++) transforms[slot * 4 + 2] = 1;
+    if (isLocusTransformPreview(nextPreview)) {
+      const ids = nextPreview.type === "locus-offsets"
+        ? nextPreview.locusOffsets.keys() : [nextPreview.locusUid];
+      for (const uid of ids) {
+        const slot = geometry.locusSlots.get(uid);
+        if (slot === undefined) continue;
+        const offset = locusOffsetForPreview(nextPreview, uid);
+        transforms[slot * 4] = offset;
+        const axis = nextPreview.axes?.get(uid);
+        if (axis !== undefined) {
+          const locus = scene.loci.get(uid);
+          const clusterSlot = geometry.clusterSlots.get(locus.cluster.uid);
+          transforms[slot * 4 + 2] = 1 - 2 * nextPreview.progress;
+          transforms[slot * 4 + 3] = axis - clusterBaseOffsets[clusterSlot * 2];
+        }
+      }
+    }
+    device.queue.writeBuffer(locusTransformBuffer, 0, transforms);
   };
 
   const bufferForName = (name) => ({
@@ -1025,13 +986,12 @@ export async function createWebGpuRenderer(canvas) {
     }
   };
   const applyPreview = (nextPreview, scales, config, viewport) => {
-    // A committed cluster reorder retains the old GPU geometry plus row
-    // offsets. Materialize it only when another kind of edit needs direct
-    // per-record geometry in the new scene coordinates.
-    if (retainedClusterGeometry && nextPreview?.type !== "cluster-drag") {
+    // Translations and flips compose with retained cluster offsets. Trimming
+    // still needs direct geometry in the current scene coordinates.
+    if (retainedClusterGeometry && nextPreview?.type === "locus-trim") {
       geometry = buildGeometry(scene, scales, config);
       uploadGeometry(geometry);
-      uploadLinkRecords(buildLinkRecords(scene, scales, config, geometry.clusterSlots));
+      uploadLinkRecords(buildLinkRecords(scene, scales, config, geometry.locusSlots));
       resetRetainedClusterGeometry();
       updateClusterOffsets(null);
     }
@@ -1039,9 +999,21 @@ export async function createWebGpuRenderer(canvas) {
     // so the retained base link buffer never needs restoring or rewriting.
     if (!patchedRecords?.clusterOffsets) restorePreview(patchedRecords);
     updateClusterOffsets(nextPreview);
+    updateLocusTransforms(nextPreview);
+    if (isLocusTransformPreview(nextPreview)) {
+      // Reuse retained polygons and shader-generated ribbons. No per-gene or
+      // per-link vertices are generated/uploaded while dragging or flipping.
+      if (!previewLinksActive || preview?.type === "cluster-drag" || patchedRecords) {
+        uploadPreviewLinkIndices(visibleLinkIndices());
+      }
+      previewLinksActive = true;
+      patchedRecords = null;
+      return;
+    }
     patchedRecords = recordsForPreview(scene, nextPreview);
     if (!patchedRecords || !geometry) {
-      previewLinksActive = false;
+      previewLinksActive = retainedClusterGeometry;
+      if (previewLinksActive) uploadPreviewLinkIndices(visibleLinkIndices());
       return;
     }
     if (patchedRecords.clusterOffsets) {
@@ -1070,7 +1042,7 @@ export async function createWebGpuRenderer(canvas) {
         gene,
         scales,
         nextPreview,
-        geometry.clusterSlots.get(gene.locus.cluster.uid),
+        geometry.locusSlots.get(gene.locus.source.uid),
         config.gene.shape.strokeWidth
       );
       write("genes", ranges.genes, vertices.genes);
@@ -1083,7 +1055,7 @@ export async function createWebGpuRenderer(canvas) {
         write(
           "tracks",
           ranges.tracks,
-          trackVertices(locus, config, nextPreview, geometry.clusterSlots.get(locus.cluster.uid))
+          trackVertices(locus, config, nextPreview, geometry.locusSlots.get(locus.source.uid))
         );
       }
     }
@@ -1110,7 +1082,7 @@ export async function createWebGpuRenderer(canvas) {
     for (const uid of loci) {
       const locus = nextScene.loci.get(uid);
       if (!locus) continue;
-      const slot = geometry.clusterSlots.get(locus.cluster.uid);
+      const slot = geometry.locusSlots.get(uid);
       const x = baseFor(locus.cluster.uid, 0), y = baseFor(locus.cluster.uid, 1);
       for (const gene of locus.genes) {
         affectedGenes.add(gene.source.uid);
@@ -1122,11 +1094,15 @@ export async function createWebGpuRenderer(canvas) {
         commit("geneEdges", ranges.geneEdges, translateVertices(vertices.geneEdges, x, y, 10));
       }
       const ranges = geometry.ranges.loci.get(uid);
-      commit("tracks", ranges?.tracks, translateVertices(trackVertices(locus, config, null, slot), x, y, 10));
+      commit("tracks", ranges?.tracks, translateVertices(trackVertices(locus, config, null, geometry.locusSlots.get(uid)), x, y, 10));
     }
     // Both regular ribbons and the retained cluster-movement path must see the
     // new endpoints. Only links incident to edited loci need replacing.
-    for (const link of nextScene.links.values()) {
+    const changedLinks = nextScene.changes?.links;
+    const incidentLinks = changedLinks
+      ? [...changedLinks].map((uid) => nextScene.links.get(uid))
+      : nextScene.links.values();
+    for (const link of incidentLinks) {
       if (!affectedGenes.has(link.source.query.uid) && !affectedGenes.has(link.source.target.uid)) continue;
       const ranges = geometry.ranges.links.get(link.source.uid);
       if (ranges && !retainedClusterGeometry) {
@@ -1136,7 +1112,7 @@ export async function createWebGpuRenderer(canvas) {
       }
       const index = linkRecordIndexByUid.get(link.source.uid);
       if (index === undefined) continue;
-      const record = linkRecordForGpu(nextScene, link, scales, config, geometry.clusterSlots,
+      const record = linkRecordForGpu(nextScene, link, scales, config, geometry.locusSlots,
         (uid) => baseFor(uid, 0), (uid) => baseFor(uid, 1));
       if (record) device.queue.writeBuffer(linkRecordBuffer, index * 16 * 4, record);
     }
@@ -1146,6 +1122,7 @@ export async function createWebGpuRenderer(canvas) {
     patchedRecords = null;
     clusterPreviewIndexCache = new Map();
     updateClusterOffsets(null);
+    updateLocusTransforms(null);
     previewLinksActive = retainedClusterGeometry;
     if (previewLinksActive) uploadPreviewLinkIndices(visibleLinkIndices());
     return true;
@@ -1162,15 +1139,23 @@ export async function createWebGpuRenderer(canvas) {
       }
       if (resized || !configured) {
         context.configure({ device, format, alphaMode: "premultiplied" });
+        multisampleTexture?.destroy();
+        multisampleTexture = device.createTexture({
+          size: [pixelWidth, pixelHeight],
+          format,
+          sampleCount: multisample.count,
+          usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
         configured = true;
       }
       if (scene !== nextScene) {
         geometry = buildGeometry(nextScene, scales, config);
         uploadGeometry(geometry);
-        uploadLinkRecords(buildLinkRecords(nextScene, scales, config, geometry.clusterSlots));
+        uploadLinkRecords(buildLinkRecords(nextScene, scales, config, geometry.locusSlots));
         resetRetainedClusterGeometry();
-        updateClusterOffsets(null);
         scene = nextScene;
+        updateClusterOffsets(null);
+        updateLocusTransforms(null);
         preview = null;
         patchedRecords = null;
         previewLinksActive = false;
@@ -1200,10 +1185,11 @@ export async function createWebGpuRenderer(canvas) {
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginRenderPass({
         colorAttachments: [{
-          view: context.getCurrentTexture().createView(),
+          view: multisampleTexture.createView(),
+          resolveTarget: context.getCurrentTexture().createView(),
           clearValue: { r: 1, g: 1, b: 1, a: 1 },
           loadOp: "clear",
-          storeOp: "store",
+          storeOp: "discard",
         }],
       });
       pass.setPipeline(pipeline);
@@ -1269,6 +1255,7 @@ export async function createWebGpuRenderer(canvas) {
       retainedClusterGeometry = true;
       clusterPreviewIndexCache = new Map();
       updateClusterOffsets(null);
+      updateLocusTransforms(null);
       uploadPreviewLinkIndices(visibleLinkIndices());
       previewLinksActive = true;
       return true;
@@ -1278,6 +1265,7 @@ export async function createWebGpuRenderer(canvas) {
     },
     adoptLocusChanges: adoptLocusChanges,
     destroy() {
+      multisampleTexture?.destroy();
       linkBuffer?.destroy();
       linkEdgeBuffer?.destroy();
       linkRecordBuffer.destroy();
@@ -1286,6 +1274,7 @@ export async function createWebGpuRenderer(canvas) {
       geneBuffer?.destroy();
       geneEdgeBuffer?.destroy();
       clusterOffsetBuffer.destroy();
+      locusTransformBuffer.destroy();
       uniform.destroy();
       device.destroy();
     },

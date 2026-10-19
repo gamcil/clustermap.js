@@ -14,6 +14,9 @@ const defaultConfig = {
   plot: {
     transitionDuration: 250,
     renderer: "svg",
+    // Canvas may reduce resolution during motion and at small zoom scales.
+    // Disable for fixed-resolution output or renderer comparisons.
+    adaptiveResolution: true,
     minZoom: 0,
     maxZoom: 8,
     minimap: {

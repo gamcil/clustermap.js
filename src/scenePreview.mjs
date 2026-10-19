@@ -190,8 +190,8 @@ export function createLocusTrimPreview(
 }
 
 // Preview patches carry layout deltas rather than cloned scenes. These
-// accessors are deliberately renderer-neutral so SVG-adjacent Canvas chrome
-// and dense WebGPU marks apply exactly the same locus and cluster movement.
+// accessors keep SVG, Canvas chrome, and dense WebGPU marks on the same
+// locus, cluster, and link geometry.
 export function locusOffsetForPreview(preview, locusUid) {
   if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
   return preview?.type === "locus-offset" && preview.locusUid === locusUid
@@ -299,4 +299,195 @@ export function createClusterDragPreview(scene, { clusterUid, position, position
     clusterOrder.set(uid, index);
   }
   return { type: "cluster-drag", clusterUid, clusterOffsets, clusterOrder };
+}
+
+export function offsetsForGene(preview, gene) {
+  return previewOffsetsForLocus(preview, gene.locus);
+}
+
+function flipAxisForGene(preview, gene) {
+  return preview?.type === "locus-flip"
+    ? preview.axes?.get(gene?.locus?.source?.uid)
+    : undefined;
+}
+
+export function geneGeometryForPreview(preview, gene) {
+  const axis = flipAxisForGene(preview, gene);
+  if (axis === undefined) return {};
+  const progress = preview.progress;
+  const flipScale = 1 - 2 * progress;
+  const flip = (x) => axis + (x - axis) * flipScale;
+  return {
+    flipAxis: axis,
+    flipScale,
+    labelX: flip(gene.locus.x + gene.label.x),
+  };
+}
+
+function linkOffsetsForPreview(scene, link, preview) {
+  const query = scene.genes.get(link.source.query.uid);
+  const target = scene.genes.get(link.source.target.uid);
+  const offsetForGene = (gene) =>
+    locusOffsetForPreview(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
+  const queryOffset = offsetForGene(query);
+  const targetOffset = offsetForGene(target);
+  // Link anchors are ordered from the upper locus to the lower one, not from
+  // source.query to source.target.
+  return query?.locus?.y <= target?.locus?.y
+    ? { a: queryOffset, b: targetOffset }
+    : { a: targetOffset, b: queryOffset };
+}
+
+export function previewLinkAnchors(scene, link, preview) {
+  const query = scene.genes.get(link.source.query.uid);
+  const target = scene.genes.get(link.source.target.uid);
+  if (!query || !target) return null;
+  const anchorForGene = (gene) => {
+    const offsets = offsetsForGene(preview, gene);
+    // Bounds are calculated when the retained scene is built and equal the
+    // polygon's horizontal extent. Reusing them avoids a vertex scan for each
+    // animated link endpoint on every frame.
+    let minX = gene.bounds?.minX;
+    let maxX = gene.bounds?.maxX;
+    // Retain support for compact third-party scenes that only expose a
+    // polygon. Production scenes always take the cached-bounds path above.
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+      minX = Infinity;
+      maxX = -Infinity;
+      for (let index = 0; index < gene.polygon.length; index += 2) {
+        minX = Math.min(minX, gene.polygon[index]);
+        maxX = Math.max(maxX, gene.polygon[index]);
+      }
+    }
+    minX += offsets.x;
+    maxX += offsets.x;
+    const forward = gene.display.strand === 1;
+    const axis = flipAxisForGene(preview, gene);
+    if (axis === undefined) {
+      return [
+        forward ? minX : maxX,
+        forward ? maxX : minX,
+        gene.locus.y + gene.locus.track.y + offsets.y,
+      ];
+    }
+    const progress = preview.progress;
+    const targetMin = axis * 2 - maxX;
+    const targetMax = axis * 2 - minX;
+    const from = forward ? [minX, maxX] : [maxX, minX];
+    const to = forward ? [targetMax, targetMin] : [targetMin, targetMax];
+    return [
+      from[0] + (to[0] - from[0]) * progress,
+      from[1] + (to[1] - from[1]) * progress,
+      gene.locus.y + gene.locus.track.y + offsets.y,
+    ];
+  };
+  const queryAnchor = anchorForGene(query);
+  const targetAnchor = anchorForGene(target);
+  return queryAnchor[2] <= targetAnchor[2]
+    ? [...queryAnchor, ...targetAnchor]
+    : [...targetAnchor, ...queryAnchor];
+}
+
+export function linkGeometryForPreview(scene, link, preview, config) {
+  const visible = linkVisibleForPreview(scene, link, preview, config);
+  if (preview?.type === "cluster-drag" || preview?.type === "locus-flip") {
+    const query = scene.genes.get(link.source.query.uid);
+    const target = scene.genes.get(link.source.target.uid);
+    const affected = preview.type === "cluster-drag" ||
+      query?.locus?.source?.uid === preview.locusUid ||
+      target?.locus?.source?.uid === preview.locusUid;
+    return { visible, anchors: visible && affected ? previewLinkAnchors(scene, link, preview) : link.anchors };
+  }
+  return { ...linkOffsetsForPreview(scene, link, preview), visible };
+}
+
+export function linkVisibleForPreview(scene, link, preview, config) {
+  if (!preview) return link.visible;
+  const query = scene.genes.get(link.source.query.uid);
+  const target = scene.genes.get(link.source.target.uid);
+  if (!query || !target) return false;
+  if (!geneVisibleForPreview(preview, query) || !geneVisibleForPreview(preview, target)) return false;
+  if (preview?.type === "locus-trim") {
+    return link.allowed && !link.source.hidden && link.source.identity >= config.link.threshold;
+  }
+  if (preview?.type !== "cluster-drag") return link.visible;
+  const queryOrder = preview.clusterOrder.get(query.locus.cluster.uid);
+  const targetOrder = preview.clusterOrder.get(target.locus.cluster.uid);
+  return (
+    queryOrder !== undefined &&
+    targetOrder !== undefined &&
+    Math.abs(queryOrder - targetOrder) === 1 &&
+    link.allowed &&
+    link.source.identity >= config.link.threshold
+  );
+}
+
+
+export function recordsForPreview(scene, preview, { includeClusters = false } = {}) {
+  if (!preview) return null;
+  if (preview.type === "cluster-drag" && !includeClusters) {
+    return {
+      // Genes, tracks, and instanced link ribbons all resolve their row
+      // offsets on the GPU, leaving only a compact visible-link index list to
+      // upload while the pointer moves.
+      loci: new Set(),
+      genes: new Set(),
+      links: new Set(),
+      full: false,
+      clusterOffsets: true,
+    };
+  }
+  const loci = new Set();
+  if (preview.type === "cluster-drag") {
+    for (const locus of scene.loci.values()) {
+      if (clusterOffsetForPreview(preview, locus.cluster.uid)) loci.add(locus.source.uid);
+    }
+  }
+  if (preview.type === "locus-offset") loci.add(preview.locusUid);
+  if (preview.type === "locus-offsets") {
+    for (const locusUid of preview.locusOffsets.keys()) loci.add(locusUid);
+  }
+  if (preview.type === "locus-flip") loci.add(preview.locusUid);
+  if (preview.type === "locus-trim") {
+    const trimmed = scene.loci.get(preview.locusUid);
+    const clusterUid = trimmed?.cluster.uid;
+    // getLocusScaleValues packs loci independently within each cluster. A
+    // trim can therefore shift every sibling locus even when its individual
+    // offset happens to be zero in a particular preview frame.
+    for (const locus of scene.loci.values()) {
+      if (locus.cluster.uid === clusterUid) loci.add(locus.source.uid);
+    }
+  }
+  const genes = new Set();
+  for (const uid of loci) {
+    for (const gene of scene.loci.get(uid)?.genes || []) genes.add(gene.source.uid);
+  }
+  const links = new Set();
+  if (scene.linksByGene) {
+    for (const uid of genes) {
+      for (const link of scene.linksByGene.get(uid) || []) links.add(link.uid);
+    }
+  } else {
+    for (const link of scene.links.values()) {
+      if (genes.has(link.source.query.uid) || genes.has(link.source.target.uid)) links.add(link.source.uid);
+    }
+  }
+  return { loci, genes, links, full: false };
+}
+
+
+export function genePolygonForPreview(preview, gene, { includeClusterOffset = true } = {}) {
+  const { x, y } = previewOffsetsForLocus(preview, gene.locus);
+  // Retained GPU vertices and SVG children apply cluster rows at their parent.
+  const bakedY = includeClusterOffset ? y : 0;
+  const axis = preview?.type === "locus-flip"
+    ? preview.axes?.get(gene.locus.source.uid)
+    : undefined;
+  if (!x && !y && axis === undefined) return gene.polygon;
+  const scale = axis === undefined ? 1 : 1 - 2 * preview.progress;
+  return gene.polygon.map((coordinate, index) =>
+    index % 2
+      ? coordinate + bakedY
+      : (axis === undefined ? coordinate : axis + (coordinate - axis) * scale) + x
+  );
 }

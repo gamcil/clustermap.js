@@ -27,8 +27,7 @@ import {
 } from "./loci/layout.mjs";
 import {
   buildScene,
-  patchAnchoredGeneScene,
-  patchFlippedLocusScene,
+  patchScene,
 } from "./layout.mjs";
 import { isRendererMode } from "./rendererMode.mjs";
 
@@ -58,7 +57,7 @@ function locusLayout() {
   };
 }
 
-function synchronizeLocusLayoutState(locus) {
+function synchronizeLocusLayoutState(locus, { refresh = true } = {}) {
   const { oldStart } = synchronizeLocusState(
     chartState,
     locus,
@@ -70,13 +69,15 @@ function synchronizeLocusLayoutState(locus) {
     getCommittedLocusOffset(chartState, locus.uid) +
       xDistance(scales.x, locusState(locus).start, oldStart)
   );
-  refreshLocusOffsetScale();
+  if (refresh) refreshLocusOffsetScale();
 }
 
-function synchronizeLocusLayoutStates(data) {
-  data.clusters.forEach((cluster) =>
-    cluster.loci.forEach((locus) => synchronizeLocusLayoutState(locus))
-  );
+function synchronizeLocusLayoutStates(data, locusIds = null) {
+  const loci = locusIds
+    ? [...locusIds].map(lookup.locusData).filter(Boolean)
+    : data.clusters.flatMap((cluster) => cluster.loci);
+  for (const locus of loci) synchronizeLocusLayoutState(locus, { refresh: false });
+  refreshLocusOffsetScale();
 }
 
 const config = createDefaultConfig();
@@ -284,22 +285,31 @@ function buildChartScene(data) {
   return currentScene;
 }
 
-function patchFlippedLocus(previousScene, locus) {
-  currentScene = patchFlippedLocusScene(previousScene, locus, {
+function patchChartScene(previousScene, changes = {}, data) {
+  const loci = new Set(changes.loci || []);
+  const clusters = new Set(changes.clusters || []);
+  // Packing, tree rotations and state changes can affect neighbours beyond
+  // the explicit edit. Compare only the cheap locus/cluster state here, never
+  // re-project all genes or repeat biological link filtering.
+  for (const [uid, cluster] of previousScene.clusters) {
+    if (cluster.x !== scales.offset(uid) || cluster.y !== getClusterPosition(chartState, uid, scales.y(uid))) {
+      clusters.add(uid);
+    }
+  }
+  for (const [uid, locus] of previousScene.loci) {
+    const state = locusState(locus.source);
+    if (locus.localX !== scales.locus(uid) ||
+        state.start !== locus.state.start || state.end !== locus.state.end ||
+        state.flipped !== locus.state.flipped) loci.add(uid);
+  }
+  currentScene = patchScene(previousScene, { loci, clusters }, {
     ...sceneProjectionOptions({
       areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
     }),
+    clusterOffset: scales.offset,
+    clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
     linksForGene: lookup.linksForGene,
-  });
-  return currentScene;
-}
-
-function patchGeneAnchor(previousScene, changes, flippedLoci) {
-  currentScene = patchAnchoredGeneScene(previousScene, { changes, flippedLoci }, {
-    ...sceneProjectionOptions({
-      areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
-    }),
-    linksForGene: lookup.linksForGene,
+    chrome: sceneChromeOptions(data),
   });
   return currentScene;
 }
@@ -367,7 +377,7 @@ function rescaleRanges(oldX) {
   refreshLocusOffsetScale();
 }
 
-function updateScales(data) {
+function updateScales(data, { geometryOnly = false } = {}) {
   const oldX = scales.x.copy();
   scales.x.range([0, config.plot.scaleFactor]);
   // Reproject dependent ranges only when the x-scale range actually changes.
@@ -381,7 +391,7 @@ function updateScales(data) {
   const body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
   scales.y.range(data.clusters.map((cluster, index) => index * (config.cluster.spacing + body)));
 
-  updateIdentityScale(data);
+  if (!geometryOnly) updateIdentityScale(data);
 
   scales.offset.domain(data.clusters.map((cluster) => cluster.uid));
   refreshClusterOffsetScale();
@@ -423,8 +433,7 @@ return {
   updateGroups,
   getScene,
   buildScene: buildChartScene,
-  patchFlippedLocus,
-  patchGeneAnchor,
+  patchScene: patchChartScene,
   setBeforeGeneAnchorUpdate,
   anchorGene,
 };

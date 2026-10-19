@@ -9,6 +9,7 @@ export function createRasterMotion({
   schedulePaint,
   getCamera,
   getRenderer,
+  getAdaptiveResolution = () => true,
   devicePixelRatio = () => globalThis.devicePixelRatio || 1,
   setTimer = globalThis.setTimeout,
   clearTimer = globalThis.clearTimeout,
@@ -40,7 +41,7 @@ export function createRasterMotion({
 
     pixelRatio() {
       const ratio = devicePixelRatio();
-      if (getRenderer() === "webgpu") return ratio;
+      if (getRenderer() === "webgpu" || !getAdaptiveResolution()) return ratio;
       return canvasPixelRatioForCamera({ camera: getCamera(), moving, devicePixelRatio: ratio });
     },
 

@@ -50,10 +50,12 @@ export function createSpatialIndex(
   const orderById = new Map();
   let order = 0;
   for (const [id, bounds] of records) {
-    if (!validBounds(bounds)) continue;
-    boundsById.set(id, bounds);
+    // Retain painter order even for currently invisible records. A scene
+    // patch may reveal their bounds later (e.g. a newly adjacent link).
     orderById.set(id, order);
     order += 1;
+    if (!validBounds(bounds)) continue;
+    boundsById.set(id, bounds);
     for (const key of cellsForBounds(bounds, { cellWidth, cellHeight })) {
       if (!cells.has(key)) cells.set(key, new Set());
       cells.get(key).add(id);

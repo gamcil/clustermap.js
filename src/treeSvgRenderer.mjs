@@ -25,7 +25,7 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     }
   }
   const layout = layoutTree({
-    tree, scene, config,
+    tree, scene, config, preview: motion.preview,
     measureText: (text, style) => {
       const node = plot.append("text").text(text).attr("font-family", style.fontFamily)
         .attr("font-size", style.fontSize).attr("font-weight", style.fontWeight).attr("font-style", style.fontStyle);
@@ -35,7 +35,7 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     measureLabel: (cluster) => labelWidths.get(cluster.source.uid) || 0,
     previousTree: motion.previousTree,
     previousScene: motion.previousScene,
-    dragging: interactions.isDragging?.() || false,
+    dragging: motion.preview ? motion.preview.type === "cluster-drag" : interactions.isDragging?.() || false,
   });
   const group = plot.selectAll("g.phylogenetic-tree").data(layout ? [layout] : []).join("g")
     .attr("class", "phylogenetic-tree").interrupt();

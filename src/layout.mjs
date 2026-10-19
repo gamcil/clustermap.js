@@ -245,7 +245,7 @@ function createLocusLayout(locus, clusterLayout, {
   shape,
   geneMidpoint,
 }) {
-  const state = getLocusState(locus);
+  const state = { ...getLocusState(locus) };
   const localX = locusOffset(locus.uid);
   const start = scaleX(state.start);
   const end = scaleX(state.end);
@@ -284,13 +284,7 @@ function createLocusLayout(locus, clusterLayout, {
       leftHandleX: start - 8,
       rightHandleX: end,
     },
-    trimIndicators: createTrimIndicators({
-      locus,
-      state,
-      getGeneState,
-      scaleX,
-      shape,
-    }),
+    trimIndicators: createTrimIndicators({ locus, state, getGeneState, scaleX, shape }),
     genes: [],
   };
 }
@@ -298,7 +292,7 @@ function createLocusLayout(locus, clusterLayout, {
 function extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle) {
   const { fontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
   const maxY = Math.max(
-    locus.bounds.maxY,
+    locus.y + locus.hover.y + locus.hover.height,
     ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + fontSize + 1)
   );
   locus.bounds = { ...locus.bounds, maxY };
@@ -468,6 +462,7 @@ export function buildScene(
   const genes = new Map();
   const links = new Map();
   const linksByClusterPair = new Map();
+  const linksByGene = new Map();
   // Projection receives the current order from the stateful runtime. Index it
   // once so each link can test adjacency without searching that order array.
   // The callback remains the generic fallback for direct scene consumers.
@@ -479,10 +474,6 @@ export function buildScene(
     return Math.abs(clusterOrderIndex.get(one) - clusterOrderIndex.get(two)) === 1;
   };
   const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
 
   for (const cluster of data.clusters) {
     const x = clusterOffset(cluster.uid);
@@ -501,10 +492,6 @@ export function buildScene(
       });
       loci.set(locus.uid, locusLayout);
       clusterLayout.loci.push(locusLayout);
-      minX = Math.min(minX, locusLayout.worldStart);
-      maxX = Math.max(maxX, locusLayout.worldEnd);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y + shape.tipHeight * 2 + shape.bodyHeight);
 
       for (const gene of locus.genes) {
         const geneLayout = createGeneLayout(gene, locusLayout, {
@@ -517,53 +504,18 @@ export function buildScene(
         locusLayout.genes.push(geneLayout);
       }
     }
-    clusterLayout.bounds = clusterLayout.loci.length
-      ? {
-          minX: Math.min(...clusterLayout.loci.map((locus) => locus.bounds.minX)),
-          maxX: Math.max(...clusterLayout.loci.map((locus) => locus.bounds.maxX)),
-          minY: Math.min(...clusterLayout.loci.map((locus) => locus.bounds.minY)),
-          maxY: Math.max(...clusterLayout.loci.map((locus) => locus.bounds.maxY)),
-        }
-      : null;
   }
 
-  const { fontSize: trimIndicatorFontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
   const arrangedTrimIndicators = arrangeTrimIndicators(loci.values(), new Map(), trimIndicatorStyle);
   for (const locus of loci.values()) {
+    locus.rawTrimIndicators = locus.trimIndicators;
     locus.trimIndicators = arrangedTrimIndicators.get(locus.source.uid) || [];
     extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle);
   }
+  const bounds = sceneBounds(loci, { shape, trimIndicatorStyle });
   for (const cluster of clusters.values()) {
-    if (!cluster.loci.length) continue;
-    cluster.bounds = {
-      minX: Math.min(...cluster.loci.map((locus) => locus.bounds.minX)),
-      maxX: Math.max(...cluster.loci.map((locus) => locus.bounds.maxX)),
-      minY: Math.min(...cluster.loci.map((locus) => locus.bounds.minY)),
-      maxY: Math.max(...cluster.loci.map((locus) => locus.bounds.maxY)),
-    };
-  }
-  const trimIndicatorMaxY = Math.max(
-    -Infinity,
-    ...[...loci.values()].flatMap((locus) =>
-      locus.trimIndicators.map((indicator) => locus.y + indicator.y + trimIndicatorFontSize + 1)
-    )
-  );
-  const bounds = minX === Infinity ? null : {
-    minX,
-    maxX,
-    minY,
-    maxY: Math.max(maxY, trimIndicatorMaxY),
-  };
-  for (const cluster of clusters.values()) {
-    const clusterMinX = cluster.loci.length
-      ? Math.min(...cluster.loci.map((locus) => locus.worldStart))
-      : cluster.x;
-    const labelX = (alignLabels && bounds ? bounds.minX : clusterMinX) - cluster.x - 10;
-    cluster.info = {
-      x: labelX,
-      y: 0,
-      locusText: clusterLabel(cluster.source),
-    };
+    cluster.bounds = boundsForLoci(cluster.loci);
+    cluster.info = clusterInfo(cluster, bounds, { alignLabels, clusterLabel });
   }
 
   for (const [order, source] of data.links.entries()) {
@@ -578,6 +530,10 @@ export function buildScene(
       geneMidpoint,
     });
     links.set(source.uid, linkLayout);
+    for (const uid of new Set([source.query.uid, source.target.uid])) {
+      if (!linksByGene.has(uid)) linksByGene.set(uid, []);
+      linksByGene.get(uid).push(source);
+    }
     const query = genes.get(source.query.uid);
     const target = genes.get(source.target.uid);
     if (query && target) {
@@ -596,6 +552,7 @@ export function buildScene(
     genes,
     links,
     linksByClusterPair,
+    linksByGene,
     bounds,
     figureBounds: figureBoundsForChrome(bounds, chromeLayout),
     index: {
@@ -614,397 +571,252 @@ export function buildScene(
   };
 }
 
-/**
- * Apply the geometry consequences of one committed locus flip to a retained
- * scene. Clusters outside the locus and links not incident to one of its
- * genes are structurally shared with the prior scene.
- */
-export function patchFlippedLocusScene(
-  scene,
-  locus,
-  {
-    scaleX,
-    locusOffset,
-    getLocusState,
-    getGeneState,
-    areClustersAdjacent,
-    shape,
-    label,
-    link,
-    linkVisible = () => true,
-    clusterLabel = () => "",
-    alignLabels = true,
-    trimIndicatorStyle = {},
-    linksForGene = () => [],
-  }
-) {
-  const previousLocus = scene.loci.get(locus.uid);
-  if (!previousLocus) return scene;
-  const previousCluster = scene.clusters.get(previousLocus.cluster.uid);
-  if (!previousCluster) return scene;
-
-  const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
-  const clusters = new Map(scene.clusters);
-  const cluster = { ...previousCluster, loci: [...previousCluster.loci] };
-  clusters.set(cluster.source.uid, cluster);
-  const replacement = createLocusLayout(locus, cluster, {
-    scaleX,
-    getLocusState,
-    getGeneState,
-    locusOffset,
-    shape,
-    geneMidpoint,
-  });
-  const arrangedTrimIndicators = arrangeTrimIndicators(
-    [...scene.loci.values()].map((candidate) =>
-      candidate.source.uid === locus.uid ? replacement : candidate
-    ),
-    new Map(),
-    trimIndicatorStyle
-  );
-  replacement.trimIndicators = arrangedTrimIndicators.get(locus.uid) || [];
-  extendLocusBoundsForTrimIndicators(replacement, trimIndicatorStyle);
-  const locusIndex = cluster.loci.findIndex((candidate) => candidate.source.uid === locus.uid);
-  cluster.loci[locusIndex] = replacement;
-  cluster.bounds = {
-    minX: Math.min(...cluster.loci.map((candidate) => candidate.bounds.minX)),
-    maxX: Math.max(...cluster.loci.map((candidate) => candidate.bounds.maxX)),
-    minY: Math.min(...cluster.loci.map((candidate) => candidate.bounds.minY)),
-    maxY: Math.max(...cluster.loci.map((candidate) => candidate.bounds.maxY)),
+function translateBounds(bounds, x, y = 0) {
+  if (!bounds) return bounds;
+  return {
+    minX: bounds.minX + x, maxX: bounds.maxX + x,
+    minY: bounds.minY + y, maxY: bounds.maxY + y,
   };
-  const clusterStart = Math.min(...cluster.loci.map((candidate) => candidate.worldStart));
-  cluster.info = {
-    x: (alignLabels && scene.bounds ? scene.bounds.minX : clusterStart) - cluster.x - 10,
+}
+
+function boundsForLoci(loci) {
+  const bounds = loci.map((locus) => locus.bounds).filter(Boolean);
+  return bounds.length ? {
+    minX: Math.min(...bounds.map((bounds) => bounds.minX)),
+    maxX: Math.max(...bounds.map((bounds) => bounds.maxX)),
+    minY: Math.min(...bounds.map((bounds) => bounds.minY)),
+    maxY: Math.max(...bounds.map((bounds) => bounds.maxY)),
+  } : null;
+}
+
+function sceneBounds(loci, { shape, trimIndicatorStyle = {} }) {
+  const { fontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
+  let bounds = null;
+  for (const locus of loci.values()) {
+    const maxY = Math.max(
+      locus.y + shape.tipHeight * 2 + shape.bodyHeight,
+      ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + fontSize + 1)
+    );
+    const next = {
+      minX: locus.worldStart, maxX: locus.worldEnd, minY: locus.y, maxY,
+    };
+    bounds = bounds ? extendBounds(bounds, next.minX, next.maxX, next.minY, next.maxY) : next;
+  }
+  return bounds;
+}
+
+function clusterInfo(cluster, bounds, { alignLabels = true, clusterLabel = () => "" }) {
+  const start = cluster.loci.length
+    ? Math.min(...cluster.loci.map((locus) => locus.worldStart)) : cluster.x;
+  return {
+    x: (alignLabels && bounds ? bounds.minX : start) - cluster.x - 10,
     y: 0,
     locusText: clusterLabel(cluster.source),
   };
+}
 
-  const loci = new Map(scene.loci);
-  loci.set(locus.uid, replacement);
-  const genes = new Map(scene.genes);
-  const changedGenes = [];
-  for (const gene of locus.genes) {
-    const layout = createGeneLayout(gene, replacement, {
-      scaleX,
-      getGeneState,
-      shape,
-      label,
-    });
-    genes.set(gene.uid, layout);
-    replacement.genes.push(layout);
-    changedGenes.push([gene.uid, layout]);
-  }
+function updateSpatialIndex(index, changedEntries, entriesForRebuild) {
+  // Dense changes (e.g. a large reorder) are cheaper to rebuild than to patch
+  // cell by cell. Construct the complete entry list only on that path.
+  return changedEntries.length > (index?.boundsById.size || 0) / 4
+    ? createSpatialIndex(entriesForRebuild())
+    : patchSpatialIndex(index, changedEntries);
+}
 
-  const links = new Map(scene.links);
-  const changedSources = new Map();
-  for (const gene of locus.genes) {
-    for (const source of linksForGene(gene.uid)) changedSources.set(source.uid, source);
-  }
-  const changedLinks = [];
-  for (const source of changedSources.values()) {
-    const previous = links.get(source.uid);
-    if (!previous) continue;
-    const layout = createLinkLayout(source, previous.order, {
-      genes,
-      loci,
-      clusters,
-      areClustersAdjacent,
-      scaleX,
-      link,
-      linkVisible,
-      geneMidpoint,
-    });
-    links.set(source.uid, layout);
-    changedLinks.push([source.uid, layout]);
-  }
-
-  const locusRegions = new Map(scene.hitRegions.loci);
-  const replacementLocusRegions = createLocusHitRegions(replacement);
-  locusRegions.set(locus.uid, replacementLocusRegions);
-  const geneRegions = new Map(scene.hitRegions.genes);
-  for (const [uid, gene] of changedGenes) {
-    const region = createGeneHitRegion(gene);
-    if (region) geneRegions.set(uid, region);
-    else geneRegions.delete(uid);
-  }
-  const changedGeneIds = new Set(changedGenes.map(([uid]) => uid));
-  const all = scene.hitRegions.all.filter(
-    (region) => region.locusUid !== locus.uid && !changedGeneIds.has(region.geneUid)
-  );
-  all.push(
-    replacementLocusRegions.move,
-    replacementLocusRegions.trimLeft,
-    replacementLocusRegions.trimRight,
-    ...changedGenes
-      .map(([uid]) => geneRegions.get(uid))
-      .filter(Boolean)
-  );
-  const hitRegions = { all, loci: locusRegions, genes: geneRegions };
-
+function repositionChrome(chrome, bounds, previousBounds) {
+  if (!chrome || !bounds) return null;
+  const dy = bounds.maxY - previousBounds.maxY;
   return {
-    ...scene,
-    clusters,
-    loci,
-    genes,
-    links,
-    index: {
-      ...scene.index,
-      genes: patchSpatialIndex(
-        scene.index.genes,
-        changedGenes.map(([uid, gene]) => [uid, gene.bounds])
-      ),
-      loci: patchSpatialIndex(scene.index.loci, [[locus.uid, replacement.bounds]]),
-      links: patchSpatialIndex(
-        scene.index.links,
-        changedLinks.map(([uid, layout]) => [uid, layout.bounds])
-      ),
-      hitLoci: patchSpatialIndex(scene.index.hitLoci, [
-        [
-          locus.uid,
-          boundsFromRegions([
-            replacementLocusRegions.move,
-            replacementLocusRegions.trimLeft,
-            replacementLocusRegions.trimRight,
-          ]),
-        ],
-      ]),
-    },
-    hitRegions,
+    ...chrome,
+    legend: { ...chrome.legend, position: legendPositionForBounds(bounds, chrome.legend) },
+    scaleBar: { ...chrome.scaleBar, position: {
+      ...chrome.scaleBar.position, y: chrome.scaleBar.position.y + dy,
+    } },
+    colourBar: { ...chrome.colourBar, position: {
+      ...chrome.colourBar.position, y: chrome.colourBar.position.y + dy,
+    } },
   };
-}
-
-function translateBounds(bounds, x) {
-  if (!bounds) return bounds;
-  return {
-    ...bounds,
-    minX: bounds.minX + x,
-    maxX: bounds.maxX + x,
-  };
-}
-
-function translatePolygon(points, x) {
-  return points.map((point, index) => (index % 2 === 0 ? point + x : point));
-}
-
-function sceneBounds(loci) {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const locus of loci.values()) {
-    minX = Math.min(minX, locus.bounds.minX);
-    maxX = Math.max(maxX, locus.bounds.maxX);
-    minY = Math.min(minY, locus.bounds.minY);
-    maxY = Math.max(maxY, locus.bounds.maxY);
-  }
-  return minX === Infinity ? null : { minX, maxX, minY, maxY };
-}
-
-function updateSpatialIndex(index, changedEntries, allEntries) {
-  // Copy-on-write cell patches are excellent for a locus edit, but anchoring
-  // often shifts most clusters. At that point cloning each touched cell is
-  // more expensive than building a compact index from the already-patched
-  // records.
-  if (changedEntries.length > (index?.boundsById.size || 0) / 4) {
-    return createSpatialIndex(allEntries);
-  }
-  return patchSpatialIndex(index, changedEntries);
 }
 
 /**
- * Apply a committed gene-anchor action without re-projecting unrelated chart
- * records. Anchoring shifts whole clusters; only their loci, genes, hit
- * regions, and incident links need new world-space geometry. A mismatched
- * strand may additionally flip one or more loci, which reuses the focused
- * locus patch above before applying the cluster translations.
+ * Commit geometry edits to an existing renderer-neutral scene. IDs and data
+ * membership must be unchanged; use buildScene for data/configuration changes.
+ * Explicit loci cover flips/trims, clusters cover translations/reorders, and
+ * the caller supplies current authoritative state/scales rather than deltas.
+ * Unchanged records are shared. All changed links, bounds, labels, chrome and
+ * hit indexes are finalized once, including for batch edits.
  */
-export function patchAnchoredGeneScene(
-  scene,
-  { changes = [], flippedLoci = new Set() },
-  options
-) {
-  let patched = scene;
-  for (const locusUid of flippedLoci) {
-    const locus = patched.loci.get(locusUid)?.source;
-    if (locus) patched = patchFlippedLocusScene(patched, locus, options);
+export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = {}, options) {
+  if (!scene) return scene;
+  const {
+    scaleX, shape, label, getGeneState, getLocusState, locusOffset,
+    clusterOffset = (uid) => scene.clusters.get(uid).x,
+    clusterPosition = (uid) => scene.clusters.get(uid).y,
+    linksForGene, trimIndicatorStyle = {},
+  } = options;
+  const requestedLoci = new Set(locusIds);
+  const requestedClusters = new Set(clusterIds);
+  for (const uid of requestedClusters) {
+    for (const locus of scene.clusters.get(uid)?.loci || []) requestedLoci.add(locus.source.uid);
+  }
+  for (const uid of requestedLoci) {
+    const locus = scene.loci.get(uid);
+    if (locus) requestedClusters.add(locus.cluster.uid);
+  }
+  if (!requestedLoci.size) return scene;
+
+  const clusters = new Map(scene.clusters);
+  const loci = new Map(scene.loci);
+  const genes = new Map(scene.genes);
+  const changedLoci = new Set();
+  const changedGenes = new Set();
+  let visibilityChanged = false;
+  const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
+  for (const uid of requestedClusters) {
+    const previous = clusters.get(uid);
+    if (previous) clusters.set(uid, {
+      ...previous, x: clusterOffset(uid), y: clusterPosition(uid), loci: [...previous.loci],
+    });
+  }
+  for (const uid of requestedLoci) {
+    const previous = scene.loci.get(uid);
+    if (!previous) continue;
+    const cluster = clusters.get(previous.cluster.uid);
+    const state = getLocusState(previous.source);
+    const localX = locusOffset(uid);
+    const dx = cluster.x + localX - previous.x, dy = cluster.y - previous.y;
+    const translated = state.start === previous.state.start && state.end === previous.state.end &&
+      state.flipped === previous.state.flipped;
+    const locus = translated ? {
+      ...previous, state: { ...state }, localX, x: previous.x + dx, y: previous.y + dy,
+      worldStart: previous.worldStart + dx, worldEnd: previous.worldEnd + dx,
+      bounds: translateBounds(previous.bounds, dx, dy),
+      transform: { x: localX, y: 0 }, genes: [],
+      trimIndicators: previous.rawTrimIndicators || previous.trimIndicators,
+    } : createLocusLayout(previous.source, cluster, { ...options, geneMidpoint });
+    locus.rawTrimIndicators = locus.trimIndicators;
+    for (const source of locus.source.genes) {
+      const previousGene = scene.genes.get(source.uid);
+      const gene = translated && previousGene ? {
+        ...previousGene, locus,
+        polygon: worldPolygon(previousGene.polygon, dx, dy),
+        bounds: translateBounds(previousGene.bounds, dx, dy),
+      } : createGeneLayout(source, locus, { scaleX, getGeneState, shape, label });
+      if (gene.visible !== previousGene?.visible) visibilityChanged = true;
+      genes.set(source.uid, gene);
+      locus.genes.push(gene);
+      changedGenes.add(source.uid);
+    }
+    loci.set(uid, locus);
+    changedLoci.add(uid);
   }
 
-  const offsets = new Map(
-    changes
-      .filter(({ offset }) => offset)
-      .map(({ clusterUid, offset }) => [clusterUid, offset])
-  );
-  if (!offsets.size) return patched;
-
-  const clusters = new Map(patched.clusters);
-  const loci = new Map(patched.loci);
-  const genes = new Map(patched.genes);
-  const changedLocusIds = new Set(flippedLoci);
-  const changedGeneIds = new Set();
-
-  for (const locusUid of flippedLoci) {
-    for (const gene of loci.get(locusUid)?.genes || []) changedGeneIds.add(gene.source.uid);
-  }
-
-  for (const [clusterUid, offset] of offsets) {
-    const previousCluster = patched.clusters.get(clusterUid);
-    if (!previousCluster) continue;
-    const cluster = {
-      ...previousCluster,
-      x: previousCluster.x + offset,
-      bounds: translateBounds(previousCluster.bounds, offset),
-      loci: [],
-    };
-    clusters.set(clusterUid, cluster);
-
-    for (const previousLocus of previousCluster.loci) {
-      const locus = {
-        ...previousLocus,
-        x: previousLocus.x + offset,
-        worldStart: previousLocus.worldStart + offset,
-        worldEnd: previousLocus.worldEnd + offset,
-        bounds: translateBounds(previousLocus.bounds, offset),
-        genes: [],
-      };
-      loci.set(locus.source.uid, locus);
-      cluster.loci.push(locus);
-      changedLocusIds.add(locus.source.uid);
-
-      for (const previousGene of previousLocus.genes) {
-        const gene = {
-          ...previousGene,
-          locus,
-          polygon: translatePolygon(previousGene.polygon, offset),
-          bounds: translateBounds(previousGene.bounds, offset),
-        };
+  // Moving a trimmed locus can also change a neighbour's indicator placement.
+  // Reflow the small indicator set from its original local rows, retaining all
+  // other locus/gene geometry when only an indicator row changes.
+  const rawIndicators = new Map([...loci].map(([uid, locus]) =>
+    [uid, locus.rawTrimIndicators || locus.trimIndicators]
+  ));
+  const arranged = arrangeTrimIndicators(loci.values(), rawIndicators, trimIndicatorStyle);
+  for (const [uid, previous] of loci) {
+    const indicators = arranged.get(uid) || [];
+    if (!changedLoci.has(uid) && JSON.stringify(indicators) === JSON.stringify(previous.trimIndicators)) continue;
+    const locus = changedLoci.has(uid) ? previous : { ...previous, genes: [] };
+    locus.rawTrimIndicators = rawIndicators.get(uid);
+    locus.trimIndicators = indicators;
+    extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle);
+    if (!changedLoci.has(uid)) {
+      for (const previousGene of previous.genes) {
+        const gene = { ...previousGene, locus };
         genes.set(gene.source.uid, gene);
         locus.genes.push(gene);
-        changedGeneIds.add(gene.source.uid);
       }
+      loci.set(uid, locus);
+      requestedClusters.add(locus.cluster.uid);
+      const cluster = clusters.get(locus.cluster.uid);
+      if (cluster === scene.clusters.get(locus.cluster.uid)) clusters.set(locus.cluster.uid, { ...cluster });
+    }
+    changedLoci.add(uid);
+  }
+  for (const uid of requestedClusters) {
+    const cluster = clusters.get(uid);
+    if (!cluster) continue;
+    cluster.loci = cluster.loci.map((locus) => loci.get(locus.source.uid));
+    cluster.bounds = boundsForLoci(cluster.loci);
+  }
+  const bounds = sceneBounds(loci, options);
+  for (const [uid, cluster] of clusters) {
+    const info = clusterInfo(cluster, bounds, options);
+    if (info.x !== cluster.info.x || info.locusText !== cluster.info.locusText) {
+      clusters.set(uid, { ...cluster, info });
     }
   }
 
-  const bounds = sceneBounds(loci);
-  for (const [uid, previousCluster] of clusters) {
-    const clusterStart = Math.min(...previousCluster.loci.map((locus) => locus.worldStart));
-    const labelX =
-      (options.alignLabels && bounds ? bounds.minX : clusterStart) - previousCluster.x - 10;
-    clusters.set(uid, {
-      ...previousCluster,
-      info: {
-        ...previousCluster.info,
-        x: labelX,
-        locusText: options.clusterLabel(previousCluster.source),
-      },
-    });
-  }
-
-  const geneMidpoint = options.shape.tipHeight + options.shape.bodyHeight / 2;
-  const links = new Map(patched.links);
-  const changedLinks = [];
-  for (const previousLink of patched.links.values()) {
-    if (
-      !changedGeneIds.has(previousLink.source.query.uid) &&
-      !changedGeneIds.has(previousLink.source.target.uid)
-    ) continue;
-    const layout = createLinkLayout(previousLink.source, previousLink.order, {
-      genes,
-      loci,
-      clusters,
-      areClustersAdjacent: options.areClustersAdjacent,
-      scaleX: options.scaleX,
-      link: options.link,
-      linkVisible: options.linkVisible,
-      geneMidpoint,
-    });
-    links.set(layout.source.uid, layout);
-    changedLinks.push([layout.source.uid, layout]);
-  }
-
-  const locusRegions = new Map(patched.hitRegions.loci);
-  const geneRegions = new Map(patched.hitRegions.genes);
-  for (const locusUid of changedLocusIds) {
-    const locus = loci.get(locusUid);
-    if (locus) locusRegions.set(locusUid, createLocusHitRegions(locus));
-  }
-  for (const geneUid of changedGeneIds) {
-    const gene = genes.get(geneUid);
-    const region = gene && createGeneHitRegion(gene);
-    if (region) geneRegions.set(geneUid, region);
-    else geneRegions.delete(geneUid);
-  }
-  const all = [];
-  for (const region of patched.hitRegions.all) {
-    if (changedLocusIds.has(region.locusUid)) {
-      if (region.action === "move-locus") {
-        const replacement = locusRegions.get(region.locusUid);
-        all.push(replacement.move, replacement.trimLeft, replacement.trimRight);
+  const sources = new Map();
+  if (linksForGene || scene.linksByGene) {
+    for (const uid of changedGenes) {
+      for (const source of linksForGene ? linksForGene(uid) : scene.linksByGene.get(uid) || []) {
+        sources.set(source.uid, source);
       }
-      continue;
     }
-    if (changedGeneIds.has(region.geneUid)) {
-      const replacement = geneRegions.get(region.geneUid);
-      if (replacement) all.push(replacement);
-      continue;
+  } else {
+    // Generic scene consumers may not have a data lookup. Runtime callers use
+    // their retained incident-link index and never take this scan path.
+    for (const { source } of scene.links.values()) {
+      if (changedGenes.has(source.query.uid) || changedGenes.has(source.target.uid)) sources.set(source.uid, source);
     }
-    all.push(region);
   }
-  const hitRegions = { all, loci: locusRegions, genes: geneRegions };
+  const links = new Map(scene.links);
+  for (const source of sources.values()) {
+    const previous = links.get(source.uid);
+    if (previous) links.set(source.uid, createLinkLayout(source, previous.order, {
+      ...options, genes, loci, clusters, geneMidpoint,
+    }));
+  }
 
-  const changedLoci = [...changedLocusIds]
-    .map((uid) => [uid, loci.get(uid)?.bounds])
-    .filter(([, locusBounds]) => locusBounds);
-  const changedGenes = [...changedGeneIds]
-    .map((uid) => [uid, genes.get(uid)?.bounds])
-    .filter(([, geneBounds]) => geneBounds);
-  const chrome = patched.chrome
-    ? {
-        ...patched.chrome,
-        legend: {
-          ...patched.chrome.legend,
-          position: legendPositionForBounds(bounds, patched.chrome.legend),
-        },
-      }
-    : null;
-
-  return {
-    ...patched,
-    clusters,
-    loci,
-    genes,
-    links,
-    bounds,
-    figureBounds: figureBoundsForChrome(bounds, chrome),
-    index: {
-      ...patched.index,
-      genes: updateSpatialIndex(
-        patched.index.genes,
-        changedGenes,
-        [...genes].map(([uid, gene]) => [uid, gene.bounds])
-      ),
-      loci: updateSpatialIndex(
-        patched.index.loci,
-        changedLoci,
-        [...loci].map(([uid, locus]) => [uid, locus.bounds])
-      ),
-      links: updateSpatialIndex(
-        patched.index.links,
-        changedLinks.map(([uid, layout]) => [uid, layout.bounds]),
-        [...links].map(([uid, layout]) => [uid, layout.bounds])
-      ),
-      hitLoci: updateSpatialIndex(
-        patched.index.hitLoci,
-        changedLoci.map(([uid]) => {
-          const regions = locusRegions.get(uid);
-          return [uid, boundsFromRegions([regions.move, regions.trimLeft, regions.trimRight])];
-        }),
-        [...locusRegions].map(([uid, regions]) => [
-          uid,
-          boundsFromRegions([regions.move, regions.trimLeft, regions.trimRight]),
-        ])
-      ),
-    },
-    hitRegions,
-    chrome,
+  const locusRegions = new Map(scene.hitRegions.loci);
+  const geneRegions = new Map(scene.hitRegions.genes);
+  for (const uid of changedLoci) locusRegions.set(uid, createLocusHitRegions(loci.get(uid)));
+  for (const uid of changedGenes) {
+    const region = createGeneHitRegion(genes.get(uid));
+    if (region) geneRegions.set(uid, region);
+    else geneRegions.delete(uid);
+  }
+  const hitRegions = {
+    loci: locusRegions, genes: geneRegions,
+    // Match full-build hit order: all locus handles, then visible genes.
+    all: [...locusRegions.values()].flatMap(({ move, trimLeft, trimRight }) => [move, trimLeft, trimRight])
+      .concat([...genes.keys()].map((uid) => geneRegions.get(uid)).filter(Boolean)),
   };
+  const entries = (records, ids, boundsFor = (record) => record.bounds) =>
+    [...ids].map((uid) => [uid, boundsFor(records.get(uid))]);
+  const hitBounds = (regions) => boundsFromRegions([regions.move, regions.trimLeft, regions.trimRight]);
+  const chrome = visibilityChanged && options.chrome
+    ? buildChrome(bounds, genes, options.chrome)
+    : repositionChrome(scene.chrome, bounds, scene.bounds);
+  return {
+    ...scene, clusters, loci, genes, links, bounds, chrome, hitRegions,
+    figureBounds: figureBoundsForChrome(bounds, chrome),
+    changes: { loci: changedLoci, genes: changedGenes, links: new Set(sources.keys()), clusters: requestedClusters },
+    index: {
+      genes: updateSpatialIndex(scene.index.genes, entries(genes, changedGenes), () => entries(genes, genes.keys())),
+      loci: updateSpatialIndex(scene.index.loci, entries(loci, changedLoci), () => entries(loci, loci.keys())),
+      links: updateSpatialIndex(scene.index.links, entries(links, sources.keys()), () => entries(links, links.keys())),
+      hitLoci: updateSpatialIndex(scene.index.hitLoci, entries(locusRegions, changedLoci, hitBounds),
+        () => entries(locusRegions, locusRegions.keys(), hitBounds)),
+    },
+  };
+}
+
+// Compatibility entry points delegate to the same patch/finalization path.
+export function patchFlippedLocusScene(scene, locus, options) {
+  return patchScene(scene, { loci: [locus.uid] }, options);
+}
+
+export function patchAnchoredGeneScene(scene, { changes = [], flippedLoci = [] }, options) {
+  const offsets = new Map(changes.map(({ clusterUid, offset }) => [clusterUid, offset]));
+  return patchScene(scene, { loci: flippedLoci, clusters: offsets.keys() }, {
+    ...options,
+    clusterOffset: (uid) => scene.clusters.get(uid).x + (offsets.get(uid) || 0),
+  });
 }
