@@ -1,0 +1,166 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Clustermap INP benchmark</title>
+<style>
+body{margin:0}#plot{width:1440px;height:900px;position:relative}
+/* v1 has no show flags for these; keep chrome matched at full-plot zoom. */
+#plot g.legend,#plot g.scaleBar,#plot g.colourBar{display:none}
+</style>
+<div id="plot"></div>
+<script src="/node_modules/d3-v1/dist/d3.min.js"></script>
+<script type="module">
+import { onINP } from "/node_modules/web-vitals/dist/web-vitals.js";
+import { views } from "./views.mjs";
+
+// web-vitals owns all INP collection and calculation. No custom timing metric.
+window.inp = null;
+onINP((metric) => {
+  window.inp = { value: metric.value, entries: metric.entries.map((e) => e.toJSON()) };
+}, { reportAllChanges: true, durationThreshold: 16 });
+
+const params = new URLSearchParams(location.search);
+const legacy = params.get("version") === "v1";
+const renderer = params.get("renderer") || "svg";
+const factory = legacy ? (await import("/baseline/src/clusterMap.js")).default
+  : (await import("/dist/clustermap.mjs")).ClusterMap;
+const api = legacy ? await import("/baseline/src/api.js") : null;
+const view = views[params.get("view") || "standard"];
+const CAMERA = view.camera;
+const viewport = { width: innerWidth, height: innerHeight };
+Object.assign(document.querySelector("#plot").style,
+  { width: `${viewport.width}px`, height: `${viewport.height}px` });
+const STEP = 62;
+const config = {
+  plot: { transitionDuration: 0, scaleFactor: 15, fontFamily: "Arial, sans-serif" },
+  cluster: { spacing: 40, alignLabels: true },
+  gene: { label: { show: false } },
+  link: { show: true, threshold: 0, bestOnly: false, straight: true, label: { show: false } },
+  legend: { show: false }, scaleBar: { show: false }, colourBar: { show: false },
+};
+if (!legacy) {
+  Object.assign(config.plot, { renderer, adaptiveResolution: false, minimap: { show: false } });
+  config.locus = { trimIndicators: { show: false } };
+}
+let chart, surface, initialOffset;
+let hidden = false;
+document.addEventListener("visibilitychange", () => { hidden ||= document.hidden; });
+// One counter proves that WebGPU actually submits drawing work.
+let gpuSubmissions = 0;
+if (globalThis.GPUQueue) {
+  const submit = GPUQueue.prototype.submit;
+  GPUQueue.prototype.submit = function (...args) {
+    const result = submit.apply(this, args);
+    gpuSubmissions++;
+    return result;
+  };
+}
+// RAF cadence is a smoothness proxy, not a presentation or input-latency clock.
+const frameIntervals = [];
+let frameRequest = null, lastFrame = null;
+function sampleFrame(now) {
+  if (lastFrame !== null) frameIntervals.push(now - lastFrame);
+  lastFrame = now;
+  frameRequest = requestAnimationFrame(sampleFrame);
+}
+async function startFrames() {
+  if (frameRequest !== null) throw new Error("Frame sampler already active");
+  await new Promise((resolve) => {
+    frameRequest = requestAnimationFrame((now) => { sampleFrame(now); resolve(); });
+  });
+}
+async function stopFrames() {
+  // Include the first animation callback after the final input handler.
+  await new Promise(requestAnimationFrame);
+  cancelAnimationFrame(frameRequest);
+  frameRequest = null;
+  lastFrame = null;
+}
+function frameResult() {
+  const sorted = [...frameIntervals].sort((a, b) => a - b);
+  return { p95: sorted.length ? sorted[Math.ceil(sorted.length * .95) - 1] : null,
+    count: sorted.length, intervals: frameIntervals };
+}
+const paint = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+function state() {
+  const { x, y, k } = surface.__zoom;
+  if (legacy) return { camera: { x, y, k }, order: api.scales.y.domain(),
+    flipped: chart.data().clusters[2].loci[0]._flipped,
+    locusOffset: api.scales.locus("large-locus-2") };
+  const value = chart.state();
+  return { camera: { x, y, k },
+    order: value.clusterOrder.length ? value.clusterOrder : chart.data().clusters.map((c) => c.uid),
+    flipped: value.loci.find(([uid]) => uid === "large-locus-2")?.[1].flipped || false,
+    locusOffset: value.locusOffsets.find(([uid]) => uid === "large-locus-2")?.[1] || 0 };
+}
+function targets() {
+  if (legacy || renderer === "svg") {
+    const group = [...document.querySelectorAll("g.cluster")].find((g) => g.__data__.uid === "large-cluster-2");
+    const label = group.querySelector(".clusterText").getBoundingClientRect();
+    const track = group.querySelector(".trackBar").getBoundingClientRect();
+    return { label: { x: label.right - 25 * CAMERA.k, y: label.y + label.height / 2 },
+      locus: { x: track.x + 15 * CAMERA.k, y: track.y } }; // Track gap avoids gene anchoring.
+  }
+  const current = state(), row = current.order.indexOf("large-cluster-2");
+  return { label: { x: CAMERA.x - 34 * CAMERA.k, y: CAMERA.y + (row * STEP + 4) * CAMERA.k },
+    locus: { x: CAMERA.x + (16 + current.locusOffset - initialOffset) * CAMERA.k, y: CAMERA.y + (row * STEP + 11) * CAMERA.k } };
+}
+function graphics() {
+  if (hidden || document.hidden) throw new Error("Benchmark page was hidden");
+  const overlay = document.querySelector("canvas.clusterMapWebGpuOverlay");
+  if (!legacy && renderer !== "svg") {
+    if ([surface, overlay].filter(Boolean).some((canvas) =>
+      canvas.width !== Math.round(viewport.width * devicePixelRatio) || canvas.height !== Math.round(viewport.height * devicePixelRatio))) {
+      throw new Error("Raster backing resolution differs from requested device scale factor");
+    }
+    if (renderer === "webgpu" && (surface.dataset.webgpu !== "active" || !surface.getContext("webgpu"))) {
+      throw new Error("WebGPU unavailable or using a fallback");
+    }
+  }
+  return { renderer, devicePixelRatio, width: surface.width?.baseVal?.value ?? surface.width,
+    height: surface.height?.baseVal?.value ?? surface.height,
+    contextAttributes: !legacy && renderer === "canvas" ? surface.getContext("2d").getContextAttributes() : null,
+    overlay: overlay ? { width: overlay.width, height: overlay.height,
+      contextAttributes: overlay.getContext("2d").getContextAttributes() } : null, gpuSubmissions };
+}
+async function settle() {
+  // Wheel acknowledgements can precede gesture completion.
+  const deadline = performance.now() + 15000;
+  do {
+    d3.timerFlush();
+    await paint();
+    if (performance.now() > deadline) throw new Error("Gesture did not settle");
+  } while (surface.__zooming);
+  return graphics();
+}
+window.benchmark = {
+  state, targets, graphics, settle, startFrames, stopFrames,
+  async mount() {
+    const response = await fetch("/bench/data.json", { cache: "no-store" });
+    if (!response.ok) throw new Error(`Fixture HTTP ${response.status}`);
+    chart = factory().config(config);
+    d3.select("#plot").datum(await response.json()).call(chart);
+    surface = document.querySelector(legacy || renderer === "svg" ? "svg.clusterMap" : "canvas.clusterMapCanvas");
+    if (!legacy && renderer === "webgpu") {
+      const deadline = performance.now() + 15000;
+      while (surface.dataset.webgpu === "initializing" && performance.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    if (legacy) {
+      surface.__zoom = d3.zoomIdentity.translate(CAMERA.x, CAMERA.y).scale(CAMERA.k);
+      d3.select(surface).select(".clusterMapG").attr("transform", surface.__zoom);
+    } else chart.state({ ...chart.state(), camera: CAMERA });
+    await settle();
+    initialOffset = state().locusOffset;
+    return { state: state(), graphics: graphics(), config };
+  },
+  async result() {
+    await settle();
+    // Allow web-vitals' observer and idle callbacks to report the last input.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => requestIdleCallback(() => setTimeout(resolve, 0), { timeout: 1000 }));
+    return { inp: window.inp, frames: frameResult(), state: state(), graphics: graphics() };
+  },
+};
+window.benchmarkReady = true;
+</script>

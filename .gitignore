@@ -8,3 +8,6 @@ node_modules/
 /playwright/.auth/
 
 .DS_Store
+
+# Local rendering benchmark outputs
+/benchmark-results/

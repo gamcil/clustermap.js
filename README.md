@@ -326,3 +326,13 @@ is the appropriate artifact for applications, such as the Python-packaged
 Clinker frontend, that bundle the library as a static browser asset; the ESM
 entry is intended for modern JavaScript bundlers.
 
+## Rendering benchmark
+
+Run `npm run bench:rendering` (three repetitions by default) to compare the
+original SVG chart with the current SVG, normal Canvas, Canvas with 2D
+acceleration disabled, and WebGPU renderers. The Playwright harness records one INP per pan/zoom/drag/flip/reorder workflow directly through
+`web-vitals`, plus the 95th-percentile animation frame interval during continuous
+gestures, with contributing events and environment metadata.
+Use `--fixture larger` for 20,000 genes and 19,800 links (twice the default).
+The demo also supports `?fixture=larger&renderer=webgpu` or `&renderer=canvas`.
+See [benchmark usage and limitations](bench/README.md).

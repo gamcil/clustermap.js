@@ -1,15 +1,21 @@
-const CLUSTER_COUNT = 100;
-const GENES_PER_CLUSTER = 100;
+export const SYNTHETIC_FIXTURES = {
+  large: { clusterCount: 100, genesPerCluster: 100 },
+  larger: { clusterCount: 100, genesPerCluster: 200 },
+};
 const GROUP_COUNT = 10;
 const GENE_WIDTH = 700;
 const GENE_SPACING = 1200;
 
 /**
  * A deterministic, reasonably dense data set for exercising Canvas viewport
- * culling. It contains 10,000 genes and 9,900 links, but only the clusters
- * within the current viewport should be painted by the Canvas renderer.
+ * culling. Defaults to 10,000 genes and 9,900 links. The larger preset doubles
+ * genes per row so both fixtures fit the same full-plot benchmark camera.
  */
-export function createLargeTestingData() {
+export function createLargeTestingData({ clusterCount = 100, genesPerCluster = 100 } = {}) {
+  if (!Number.isInteger(clusterCount) || clusterCount < 1 ||
+      !Number.isInteger(genesPerCluster) || genesPerCluster < 1) {
+    throw new RangeError("Synthetic fixture dimensions must be positive integers");
+  }
   const groups = Array.from({ length: GROUP_COUNT }, (_, index) => ({
     uid: `large-group-${index}`,
     label: `homology group ${index + 1}`,
@@ -18,10 +24,10 @@ export function createLargeTestingData() {
   const clusters = [];
   const links = [];
 
-  for (let clusterIndex = 0; clusterIndex < CLUSTER_COUNT; clusterIndex += 1) {
+  for (let clusterIndex = 0; clusterIndex < clusterCount; clusterIndex += 1) {
     const clusterUid = `large-cluster-${clusterIndex}`;
     const locusUid = `large-locus-${clusterIndex}`;
-    const genes = Array.from({ length: GENES_PER_CLUSTER }, (_, geneIndex) => {
+    const genes = Array.from({ length: genesPerCluster }, (_, geneIndex) => {
       const uid = `large-gene-${clusterIndex}-${geneIndex}`;
       groups[geneIndex % GROUP_COUNT].genes.push(uid);
       return {
@@ -41,14 +47,14 @@ export function createLargeTestingData() {
           uid: locusUid,
           name: `contig_${String(clusterIndex + 1).padStart(3, "0")}`,
           start: 0,
-          end: (GENES_PER_CLUSTER - 1) * GENE_SPACING + GENE_WIDTH,
+          end: (genesPerCluster - 1) * GENE_SPACING + GENE_WIDTH,
           genes,
         },
       ],
     });
 
     if (clusterIndex === 0) continue;
-    for (let geneIndex = 0; geneIndex < GENES_PER_CLUSTER; geneIndex += 1) {
+    for (let geneIndex = 0; geneIndex < genesPerCluster; geneIndex += 1) {
       links.push({
         uid: `large-link-${clusterIndex - 1}-${clusterIndex}-${geneIndex}`,
         target: { uid: `large-gene-${clusterIndex - 1}-${geneIndex}` },
@@ -59,7 +65,7 @@ export function createLargeTestingData() {
     }
   }
 
-  // Groups are already explicit and stable. Recomputing them from nearly ten
-  // thousand links would benchmark group discovery rather than Canvas culling.
+  // Groups are explicit and stable; recomputing them would benchmark group
+  // discovery rather than renderer responsiveness.
   return { clusters, links, groups, config: { updateGroups: false } };
 }
