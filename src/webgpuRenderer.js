@@ -491,17 +491,17 @@ function linkVertices(scene, link, scales, config, preview = null) {
   return { links: new Float32Array(fill), linkEdges: new Float32Array(edge) };
 }
 
-function linkEndpointForGpu(gene, clusterSlot, offsetX = 0) {
+function linkEndpointForGpu(gene, clusterSlot, offsetX = 0, offsetY = 0) {
   const forward = gene.display.strand === 1;
   return [
     (forward ? gene.bounds.minX : gene.bounds.maxX) - offsetX,
     (forward ? gene.bounds.maxX : gene.bounds.minX) - offsetX,
-    gene.locus.y + gene.locus.track.y,
+    gene.locus.y + gene.locus.track.y - offsetY,
     clusterSlot,
   ];
 }
 
-function linkRecordForGpu(scene, link, scales, config, clusterSlots, clusterOffsetX = () => 0) {
+function linkRecordForGpu(scene, link, scales, config, clusterSlots, clusterOffsetX = () => 0, clusterOffsetY = () => 0) {
   const query = scene.genes.get(link.source.query.uid);
   const target = scene.genes.get(link.source.target.uid);
   if (!query || !target) return null;
@@ -519,12 +519,14 @@ function linkRecordForGpu(scene, link, scales, config, clusterSlots, clusterOffs
     ...linkEndpointForGpu(
       query,
       clusterSlots.get(query.locus.cluster.uid),
-      clusterOffsetX(query.locus.cluster.uid)
+      clusterOffsetX(query.locus.cluster.uid),
+      clusterOffsetY(query.locus.cluster.uid)
     ),
     ...linkEndpointForGpu(
       target,
       clusterSlots.get(target.locus.cluster.uid),
-      clusterOffsetX(target.locus.cluster.uid)
+      clusterOffsetX(target.locus.cluster.uid),
+      clusterOffsetY(target.locus.cluster.uid)
     ),
     ...fill,
     ...stroke,
@@ -566,11 +568,16 @@ function append(target, values) {
   return range;
 }
 
-function translateVertexX(values, offsetX) {
-  if (!offsetX) return values;
+function translateVertices(values, offsetX, offsetY, stride) {
+  if (!offsetX && !offsetY) return values;
   const translated = new Float32Array(values);
-  for (let index = 0; index < translated.length; index += 7) {
+  for (let index = 0; index < translated.length; index += stride) {
     translated[index] -= offsetX;
+    translated[index + 1] -= offsetY;
+    if (stride === 10) {
+      translated[index + 2] -= offsetX;
+      translated[index + 3] -= offsetY;
+    }
   }
   return translated;
 }
@@ -1082,6 +1089,68 @@ export async function createWebGpuRenderer(canvas) {
     }
   };
 
+  // Commit sparse locus edits into both the GPU buffers and the CPU baseline.
+  // Future previews can then restore these records without rebuilding the chart.
+  const adoptLocusChanges = (nextScene, sourceScene, { offsets = [], loci = [], scales, config }) => {
+    if (!geometry || scene !== sourceScene) return false;
+    for (const [uid, offset] of offsets) {
+      const slot = geometry.clusterSlots.get(uid);
+      if (slot !== undefined) clusterBaseOffsets[slot * 2] += offset;
+    }
+    const baseFor = (uid, axis) => {
+      const slot = geometry.clusterSlots.get(uid);
+      return slot === undefined ? 0 : clusterBaseOffsets[slot * 2 + axis];
+    };
+    const commit = (name, range, values) => {
+      if (!range) return;
+      geometry.data[name].set(values, range.offset);
+      write(name, range, values);
+    };
+    const affectedGenes = new Set();
+    for (const uid of loci) {
+      const locus = nextScene.loci.get(uid);
+      if (!locus) continue;
+      const slot = geometry.clusterSlots.get(locus.cluster.uid);
+      const x = baseFor(locus.cluster.uid, 0), y = baseFor(locus.cluster.uid, 1);
+      for (const gene of locus.genes) {
+        affectedGenes.add(gene.source.uid);
+        const ranges = geometry.ranges.genes.get(gene.source.uid);
+        const target = nextScene.genes.get(gene.source.uid);
+        if (!ranges || !target) continue;
+        const vertices = geneVertices(target, scales, null, slot, config.gene.shape.strokeWidth);
+        commit("genes", ranges.genes, translateVertices(vertices.genes, x, y, 7));
+        commit("geneEdges", ranges.geneEdges, translateVertices(vertices.geneEdges, x, y, 10));
+      }
+      const ranges = geometry.ranges.loci.get(uid);
+      commit("tracks", ranges?.tracks, translateVertices(trackVertices(locus, config, null, slot), x, y, 10));
+    }
+    // Both regular ribbons and the retained cluster-movement path must see the
+    // new endpoints. Only links incident to edited loci need replacing.
+    for (const link of nextScene.links.values()) {
+      if (!affectedGenes.has(link.source.query.uid) && !affectedGenes.has(link.source.target.uid)) continue;
+      const ranges = geometry.ranges.links.get(link.source.uid);
+      if (ranges && !retainedClusterGeometry) {
+        const vertices = linkVertices(nextScene, link, scales, config);
+        commit("links", ranges.links, vertices.links);
+        commit("linkEdges", ranges.linkEdges, vertices.linkEdges);
+      }
+      const index = linkRecordIndexByUid.get(link.source.uid);
+      if (index === undefined) continue;
+      const record = linkRecordForGpu(nextScene, link, scales, config, geometry.clusterSlots,
+        (uid) => baseFor(uid, 0), (uid) => baseFor(uid, 1));
+      if (record) device.queue.writeBuffer(linkRecordBuffer, index * 16 * 4, record);
+    }
+    if ([...offsets].some(([, offset]) => offset)) retainedClusterGeometry = true;
+    scene = nextScene;
+    preview = null;
+    patchedRecords = null;
+    clusterPreviewIndexCache = new Map();
+    updateClusterOffsets(null);
+    previewLinksActive = retainedClusterGeometry;
+    if (previewLinksActive) uploadPreviewLinkIndices(visibleLinkIndices());
+    return true;
+  };
+
   return {
     render({ nextScene, preview: nextPreview = null, camera, scales, config, width, height, pixelRatio }) {
       const pixelWidth = Math.max(1, Math.round(width * pixelRatio));
@@ -1204,83 +1273,10 @@ export async function createWebGpuRenderer(canvas) {
       previewLinksActive = true;
       return true;
     },
-    adoptGeneAnchor(nextScene, sourceScene, { offsets, flippedLoci }) {
-      if (!geometry || scene !== sourceScene) return false;
-
-      // First establish the new cluster-coordinate baseline. Target scene
-      // geometry is absolute, so sparse replacements below remove this base
-      // again before the vertex shader reapplies it.
-      for (const [uid, offset] of offsets || []) {
-        const slot = geometry.clusterSlots.get(uid);
-        if (slot !== undefined) clusterBaseOffsets[slot * 2] += offset;
-      }
-      const baseXForCluster = (uid) => {
-        const slot = geometry.clusterSlots.get(uid);
-        return slot === undefined ? 0 : clusterBaseOffsets[slot * 2];
-      };
-
-      const affectedGenes = new Set();
-      for (const locusUid of flippedLoci || []) {
-        const locus = nextScene.loci.get(locusUid);
-        if (!locus) continue;
-        const clusterSlot = geometry.clusterSlots.get(locus.cluster.uid);
-        const offsetX = baseXForCluster(locus.cluster.uid);
-        for (const gene of locus.genes) {
-          const targetGene = nextScene.genes.get(gene.source.uid);
-          const ranges = geometry.ranges.genes.get(gene.source.uid);
-          if (!targetGene || !ranges || clusterSlot === undefined) continue;
-          const vertices = geneVertices(
-            targetGene,
-            scales,
-            null,
-            clusterSlot,
-            config.gene.shape.strokeWidth
-          );
-          write("genes", ranges.genes, translateVertexX(vertices.genes, offsetX));
-          write("geneEdges", ranges.geneEdges, translateVertexX(vertices.geneEdges, offsetX));
-          affectedGenes.add(gene.source.uid);
-        }
-        const ranges = geometry.ranges.loci.get(locusUid);
-        if (ranges && clusterSlot !== undefined) {
-          write(
-            "tracks",
-            ranges.tracks,
-            translateVertexX(trackVertices(locus, config, null, clusterSlot), offsetX)
-          );
-        }
-      }
-
-      // Ribbons are already instanced for retained cluster movement. Patch
-      // only endpoints whose loci flipped, rather than rebuilding records for
-      // every link in a large chart.
-      for (const link of nextScene.links.values()) {
-        if (
-          !affectedGenes.has(link.source.query.uid) &&
-          !affectedGenes.has(link.source.target.uid)
-        ) continue;
-        const index = linkRecordIndexByUid.get(link.source.uid);
-        if (index === undefined) continue;
-        const record = linkRecordForGpu(
-          nextScene,
-          link,
-          scales,
-          config,
-          geometry.clusterSlots,
-          baseXForCluster
-        );
-        if (record) device.queue.writeBuffer(linkRecordBuffer, index * 16 * 4, record);
-      }
-
-      scene = nextScene;
-      preview = null;
-      patchedRecords = null;
-      retainedClusterGeometry = true;
-      clusterPreviewIndexCache = new Map();
-      updateClusterOffsets(null);
-      uploadPreviewLinkIndices(visibleLinkIndices());
-      previewLinksActive = true;
-      return true;
+    adoptGeneAnchor(nextScene, sourceScene, { flippedLoci, ...options }) {
+      return adoptLocusChanges(nextScene, sourceScene, { ...options, loci: flippedLoci });
     },
+    adoptLocusChanges: adoptLocusChanges,
     destroy() {
       linkBuffer?.destroy();
       linkEdgeBuffer?.destroy();

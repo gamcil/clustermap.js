@@ -104,6 +104,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
     },
     adoptClusterOrder: (...args) => renderer?.adoptClusterOrder(...args) || false,
     adoptGeneAnchor: (...args) => renderer?.adoptGeneAnchor(...args) || false,
+    adoptLocusChanges: (...args) => renderer?.adoptLocusChanges(...args) || false,
     destroy: () => {
       generation += 1;
       renderer?.destroy();

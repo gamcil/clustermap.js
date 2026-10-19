@@ -125,6 +125,7 @@ export default function clusterMap() {
   let clusterCommitFrame = null;
   let webgpuClusterCommit = null;
   let webgpuAnchorCommit = null;
+  let webgpuLocusCommit = null;
   let anchorSceneCommit = null;
   let scheduleMinimapBase = () => {};
   let prepareCanvasFlipBase = () => {};
@@ -295,7 +296,11 @@ export default function clusterMap() {
       redraw({ animate: false });
     },
     commitLocusOffset: (ids) => {
-      for (const uid of Array.isArray(ids) ? ids : [ids]) commitPreviewLocusOffset(chartState, uid);
+      const loci = Array.isArray(ids) ? ids : [ids];
+      if (isWebGpuRenderer(runtime.config.plot.renderer)) {
+        webgpuLocusCommit = { sourceScene: runtime.getScene(), loci };
+      }
+      for (const uid of loci) commitPreviewLocusOffset(chartState, uid);
       clearRasterPreview();
       redraw({ animate: false });
       commitInteractionState();
@@ -380,7 +385,11 @@ export default function clusterMap() {
         const duration = runtime.config.plot.transitionDuration;
         const finish = () => {
           runtime.synchronizeLocusLayoutState(locus);
-          webgpuBackend.setScene(runtime.patchFlippedLocus(sourceScene, locus));
+          const targetScene = runtime.patchFlippedLocus(sourceScene, locus);
+          webgpuBackend.adoptLocusChanges(targetScene, sourceScene, {
+            loci: [locus.uid], scales: runtime.scales, config: runtime.config,
+          });
+          webgpuBackend.setScene(targetScene);
           rasterPreview = null;
           webgpuFlipFrame = null;
           scheduleRasterPaint();
@@ -769,6 +778,7 @@ export default function clusterMap() {
       webgpuBackend.destroy();
       webgpuClusterCommit = null;
       webgpuAnchorCommit = null;
+      webgpuLocusCommit = null;
       anchorSceneCommit = null;
     }
     if (!useCanvas) canvasBackend.destroy();
@@ -1634,9 +1644,15 @@ export default function clusterMap() {
         webgpuBackend.adoptGeneAnchor(
           scene,
           webgpuAnchorCommit.sourceScene,
-          webgpuAnchorCommit
+          { ...webgpuAnchorCommit, scales: runtime.scales, config: runtime.config }
         );
         webgpuAnchorCommit = null;
+      }
+      if (webgpuLocusCommit) {
+        webgpuBackend.adoptLocusChanges(scene, webgpuLocusCommit.sourceScene, {
+          loci: webgpuLocusCommit.loci, scales: runtime.scales, config: runtime.config,
+        });
+        webgpuLocusCommit = null;
       }
       scheduleMinimapBase(scene);
       const previousScene = webgpuBackend.pendingScene;
@@ -2039,6 +2055,7 @@ export default function clusterMap() {
     warmCanvasFlipBase = () => {};
     webgpuClusterCommit = null;
     webgpuAnchorCommit = null;
+    webgpuLocusCommit = null;
     anchorSceneCommit = null;
     chartIndex = null;
     highlightGeneIds.clear();
