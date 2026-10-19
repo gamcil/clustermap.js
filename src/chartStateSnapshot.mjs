@@ -25,28 +25,33 @@ function geneSnapshot(state) {
   return { start: state.start, end: state.end, strand: state.strand };
 }
 
-function defaultGeneStates(data) {
-  const states = new Map();
-  data.clusters.forEach((cluster) => cluster.loci.forEach((locus) => {
-    const locusBio = locus.bio || { start: locus.start, end: locus.end };
-    locus.genes.forEach((gene) => {
-      const geneBio = gene.bio || { start: gene.start, end: gene.end, strand: gene.strand };
-      states.set(`${locus.uid}:${gene.uid}`, {
-        start: geneBio.start - locusBio.start,
-        end: geneBio.end - locusBio.start,
-        strand: geneBio.strand,
-      });
-    });
-  }));
-  return states;
+function createSnapshotBaseline(data) {
+  const genes = new Map();
+  const loci = new Map();
+  const clusterOrder = [];
+  for (const cluster of data.clusters) {
+    clusterOrder.push(cluster.uid);
+    for (const locus of cluster.loci) {
+      loci.set(locus.uid, { start: locus.start, end: locus.end });
+      const locusBio = locus.bio || locus;
+      for (const gene of locus.genes) {
+        const geneBio = gene.bio || gene;
+        genes.set(`${locus.uid}:${gene.uid}`, {
+          start: geneBio.start - locusBio.start,
+          end: geneBio.end - locusBio.start,
+          strand: geneBio.strand,
+        });
+      }
+    }
+  }
+  return { genes, loci, clusterOrder };
 }
 
 function sameState(left, right) {
   return left && right && left.start === right.start && left.end === right.end && left.strand === right.strand;
 }
 
-function changedLocusEntries(state, data) {
-  const loci = new Map(data.clusters.flatMap((cluster) => cluster.loci).map((locus) => [locus.uid, locus]));
+function changedLocusEntries(state, loci) {
   return [...state.loci]
     .filter(([uid, value]) => {
       const locus = loci.get(uid);
@@ -61,10 +66,12 @@ function changedLocusEntries(state, data) {
     .map(([uid, value]) => [uid, locusSnapshot(value)]);
 }
 
-/** Return the durable, JSON-safe portion of a chart's visual state. */
-export function serializeChartState(state, data) {
-  const defaults = defaultGeneStates(data);
-  const defaultOrder = data.clusters.map((cluster) => cluster.uid);
+function snapshotFromBaseline(state, data, baseline) {
+  const defaultOrder = baseline.clusterOrder;
+  const genes = [];
+  for (const [uid, value] of state.genes) {
+    if (!sameState(value, baseline.genes.get(uid))) genes.push([uid, geneSnapshot(value)]);
+  }
   return {
     version: 1,
     // Tree child order changes with edits. Keep its leaf order explicit so an
@@ -74,11 +81,36 @@ export function serializeChartState(state, data) {
       : [...state.clusterOrder],
     clusterOffsets: numericEntries(state.clusterOffsets).filter(([, value]) => value !== 0),
     locusOffsets: numericEntries(state.locusOffsets).filter(([, value]) => value !== 0),
-    loci: changedLocusEntries(state, data),
-    genes: [...state.genes]
-      .filter(([uid, value]) => !sameState(value, defaults.get(uid)))
-      .map(([uid, value]) => [uid, geneSnapshot(value)]),
+    loci: changedLocusEntries(state, baseline.loci),
+    genes,
     camera: { ...state.camera },
+  };
+}
+
+/** Return a JSON-safe snapshot without retaining a cache for standalone callers. */
+export function serializeChartState(state, data) {
+  return snapshotFromBaseline(state, data, createSnapshotBaseline(data));
+}
+
+/**
+ * One baseline per chart, shared by history, state reads, and project exports.
+ * reset(data) rebuilds eagerly, including for in-place source edits; reset()
+ * releases the cache. Geometry/state-only edits do not invalidate the baseline.
+ * Returned snapshots own their values and never retain the baseline Maps.
+ */
+export function createChartStateSerializer() {
+  let source = null;
+  let baseline = null;
+  function reset(data = null) {
+    source = data;
+    baseline = data ? createSnapshotBaseline(data) : null;
+  }
+  return {
+    reset,
+    serialize(state, data) {
+      if (source !== data || !baseline) reset(data);
+      return snapshotFromBaseline(state, data, baseline);
+    },
   };
 }
 

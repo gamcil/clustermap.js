@@ -1065,6 +1065,31 @@ export async function createWebGpuRenderer(canvas) {
   // Future previews can then restore these records without rebuilding the chart.
   const adoptLocusChanges = (nextScene, sourceScene, { offsets = [], loci = [], scales, config }) => {
     if (!geometry || scene !== sourceScene) return false;
+    const affectedGenes = new Set();
+    for (const uid of loci) {
+      const locus = nextScene.loci.get(uid);
+      if (!locus || !geometry.locusSlots.has(uid)) return false;
+      for (const gene of locus.genes) {
+        affectedGenes.add(gene.source.uid);
+        // Trims normally retain hidden ranges for subsequent expansion. If
+        // geometry was omitted earlier, let the ordinary render rebuild it
+        // rather than silently dropping a newly revealed gene.
+        if (gene.visible && !geometry.ranges.genes.has(gene.source.uid)) return false;
+      }
+    }
+    const incidentLinks = [];
+    for (const uid of nextScene.changes?.links || nextScene.links.keys()) {
+      const link = nextScene.links.get(uid);
+      if (link && (affectedGenes.has(link.source.query.uid) || affectedGenes.has(link.source.target.uid))) {
+        incidentLinks.push(link);
+      }
+    }
+    for (const link of incidentLinks) {
+      if (!link.visible) continue;
+      if (!linkRecordIndexByUid.has(link.source.uid)) return false;
+      const ranges = geometry.ranges.links.get(link.source.uid);
+      if (!retainedClusterGeometry && !ranges?.links.length && !ranges?.linkEdges.length) return false;
+    }
     for (const [uid, offset] of offsets) {
       const slot = geometry.clusterSlots.get(uid);
       if (slot !== undefined) clusterBaseOffsets[slot * 2] += offset;
@@ -1078,14 +1103,12 @@ export async function createWebGpuRenderer(canvas) {
       geometry.data[name].set(values, range.offset);
       write(name, range, values);
     };
-    const affectedGenes = new Set();
     for (const uid of loci) {
       const locus = nextScene.loci.get(uid);
       if (!locus) continue;
       const slot = geometry.locusSlots.get(uid);
       const x = baseFor(locus.cluster.uid, 0), y = baseFor(locus.cluster.uid, 1);
       for (const gene of locus.genes) {
-        affectedGenes.add(gene.source.uid);
         const ranges = geometry.ranges.genes.get(gene.source.uid);
         const target = nextScene.genes.get(gene.source.uid);
         if (!ranges || !target) continue;
@@ -1098,12 +1121,7 @@ export async function createWebGpuRenderer(canvas) {
     }
     // Both regular ribbons and the retained cluster-movement path must see the
     // new endpoints. Only links incident to edited loci need replacing.
-    const changedLinks = nextScene.changes?.links;
-    const incidentLinks = changedLinks
-      ? [...changedLinks].map((uid) => nextScene.links.get(uid))
-      : nextScene.links.values();
     for (const link of incidentLinks) {
-      if (!affectedGenes.has(link.source.query.uid) && !affectedGenes.has(link.source.target.uid)) continue;
       const ranges = geometry.ranges.links.get(link.source.uid);
       if (ranges && !retainedClusterGeometry) {
         const vertices = linkVertices(nextScene, link, scales, config);

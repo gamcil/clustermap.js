@@ -4208,8 +4208,7 @@
         ? trimmed.worldEnd
         : candidate.worldEnd + offsetFor(candidate);
     const geneVisibility = new Map();
-    for (const gene of scene.genes.values()) {
-      if (gene.locus.source.uid !== locusUid) continue;
+    for (const gene of locus.genes) {
       geneVisibility.set(
         gene.source.uid,
         gene.display.start >= state.start && gene.display.end <= state.end + 1
@@ -13310,6 +13309,31 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     // Future previews can then restore these records without rebuilding the chart.
     const adoptLocusChanges = (nextScene, sourceScene, { offsets = [], loci = [], scales, config }) => {
       if (!geometry || scene !== sourceScene) return false;
+      const affectedGenes = new Set();
+      for (const uid of loci) {
+        const locus = nextScene.loci.get(uid);
+        if (!locus || !geometry.locusSlots.has(uid)) return false;
+        for (const gene of locus.genes) {
+          affectedGenes.add(gene.source.uid);
+          // Trims normally retain hidden ranges for subsequent expansion. If
+          // geometry was omitted earlier, let the ordinary render rebuild it
+          // rather than silently dropping a newly revealed gene.
+          if (gene.visible && !geometry.ranges.genes.has(gene.source.uid)) return false;
+        }
+      }
+      const incidentLinks = [];
+      for (const uid of nextScene.changes?.links || nextScene.links.keys()) {
+        const link = nextScene.links.get(uid);
+        if (link && (affectedGenes.has(link.source.query.uid) || affectedGenes.has(link.source.target.uid))) {
+          incidentLinks.push(link);
+        }
+      }
+      for (const link of incidentLinks) {
+        if (!link.visible) continue;
+        if (!linkRecordIndexByUid.has(link.source.uid)) return false;
+        const ranges = geometry.ranges.links.get(link.source.uid);
+        if (!retainedClusterGeometry && !ranges?.links.length && !ranges?.linkEdges.length) return false;
+      }
       for (const [uid, offset] of offsets) {
         const slot = geometry.clusterSlots.get(uid);
         if (slot !== undefined) clusterBaseOffsets[slot * 2] += offset;
@@ -13323,14 +13347,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         geometry.data[name].set(values, range.offset);
         write(name, range, values);
       };
-      const affectedGenes = new Set();
       for (const uid of loci) {
         const locus = nextScene.loci.get(uid);
         if (!locus) continue;
         const slot = geometry.locusSlots.get(uid);
         const x = baseFor(locus.cluster.uid, 0), y = baseFor(locus.cluster.uid, 1);
         for (const gene of locus.genes) {
-          affectedGenes.add(gene.source.uid);
           const ranges = geometry.ranges.genes.get(gene.source.uid);
           const target = nextScene.genes.get(gene.source.uid);
           if (!ranges || !target) continue;
@@ -13343,12 +13365,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       }
       // Both regular ribbons and the retained cluster-movement path must see the
       // new endpoints. Only links incident to edited loci need replacing.
-      const changedLinks = nextScene.changes?.links;
-      const incidentLinks = changedLinks
-        ? [...changedLinks].map((uid) => nextScene.links.get(uid))
-        : nextScene.links.values();
       for (const link of incidentLinks) {
-        if (!affectedGenes.has(link.source.query.uid) && !affectedGenes.has(link.source.target.uid)) continue;
         const ranges = geometry.ranges.links.get(link.source.uid);
         if (ranges && !retainedClusterGeometry) {
           const vertices = linkVertices(nextScene, link, scales, config);
@@ -13946,28 +13963,33 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     return { start: state.start, end: state.end, strand: state.strand };
   }
 
-  function defaultGeneStates(data) {
-    const states = new Map();
-    data.clusters.forEach((cluster) => cluster.loci.forEach((locus) => {
-      const locusBio = locus.bio || { start: locus.start, end: locus.end };
-      locus.genes.forEach((gene) => {
-        const geneBio = gene.bio || { start: gene.start, end: gene.end, strand: gene.strand };
-        states.set(`${locus.uid}:${gene.uid}`, {
-          start: geneBio.start - locusBio.start,
-          end: geneBio.end - locusBio.start,
-          strand: geneBio.strand,
-        });
-      });
-    }));
-    return states;
+  function createSnapshotBaseline(data) {
+    const genes = new Map();
+    const loci = new Map();
+    const clusterOrder = [];
+    for (const cluster of data.clusters) {
+      clusterOrder.push(cluster.uid);
+      for (const locus of cluster.loci) {
+        loci.set(locus.uid, { start: locus.start, end: locus.end });
+        const locusBio = locus.bio || locus;
+        for (const gene of locus.genes) {
+          const geneBio = gene.bio || gene;
+          genes.set(`${locus.uid}:${gene.uid}`, {
+            start: geneBio.start - locusBio.start,
+            end: geneBio.end - locusBio.start,
+            strand: geneBio.strand,
+          });
+        }
+      }
+    }
+    return { genes, loci, clusterOrder };
   }
 
   function sameState(left, right) {
     return left && right && left.start === right.start && left.end === right.end && left.strand === right.strand;
   }
 
-  function changedLocusEntries(state, data) {
-    const loci = new Map(data.clusters.flatMap((cluster) => cluster.loci).map((locus) => [locus.uid, locus]));
+  function changedLocusEntries(state, loci) {
     return [...state.loci]
       .filter(([uid, value]) => {
         const locus = loci.get(uid);
@@ -13982,10 +14004,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       .map(([uid, value]) => [uid, locusSnapshot(value)]);
   }
 
-  /** Return the durable, JSON-safe portion of a chart's visual state. */
-  function serializeChartState(state, data) {
-    const defaults = defaultGeneStates(data);
-    const defaultOrder = data.clusters.map((cluster) => cluster.uid);
+  function snapshotFromBaseline(state, data, baseline) {
+    const defaultOrder = baseline.clusterOrder;
+    const genes = [];
+    for (const [uid, value] of state.genes) {
+      if (!sameState(value, baseline.genes.get(uid))) genes.push([uid, geneSnapshot(value)]);
+    }
     return {
       version: 1,
       // Tree child order changes with edits. Keep its leaf order explicit so an
@@ -13995,11 +14019,31 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         : [...state.clusterOrder],
       clusterOffsets: numericEntries(state.clusterOffsets).filter(([, value]) => value !== 0),
       locusOffsets: numericEntries(state.locusOffsets).filter(([, value]) => value !== 0),
-      loci: changedLocusEntries(state, data),
-      genes: [...state.genes]
-        .filter(([uid, value]) => !sameState(value, defaults.get(uid)))
-        .map(([uid, value]) => [uid, geneSnapshot(value)]),
+      loci: changedLocusEntries(state, baseline.loci),
+      genes,
       camera: { ...state.camera },
+    };
+  }
+
+  /**
+   * One baseline per chart, shared by history, state reads, and project exports.
+   * reset(data) rebuilds eagerly, including for in-place source edits; reset()
+   * releases the cache. Geometry/state-only edits do not invalidate the baseline.
+   * Returned snapshots own their values and never retain the baseline Maps.
+   */
+  function createChartStateSerializer() {
+    let source = null;
+    let baseline = null;
+    function reset(data = null) {
+      source = data;
+      baseline = data ? createSnapshotBaseline(data) : null;
+    }
+    return {
+      reset,
+      serialize(state, data) {
+        if (source !== data || !baseline) reset(data);
+        return snapshotFromBaseline(state, data, baseline);
+      },
     };
   }
 
@@ -14159,6 +14203,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const changeListeners = new Set();
     const history = [];
     const future = [];
+    const stateSnapshots = createChartStateSerializer();
     let pendingInteractionState = null;
     const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
     const canvasBackend = createRetainedSceneBackend({
@@ -14307,14 +14352,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       },
       commitLocusOffset: (ids) => {
         const loci = Array.isArray(ids) ? ids : [ids];
-        if (runtime.getScene()) sceneCommit = { sourceScene: runtime.getScene(), changes: { loci } };
-        if (isWebGpuRenderer(runtime.config.plot.renderer)) {
-          webgpuLocusCommit = { sourceScene: runtime.getScene(), loci };
-        }
-        for (const uid of loci) commitPreviewLocusOffset(chartState, uid);
-        clearScenePreview();
-        redraw({ animate: false });
-        commitInteractionState();
+        commitLocusEdit(loci, () => {
+          for (const uid of loci) commitPreviewLocusOffset(chartState, uid);
+        });
       },
       previewLocusTrim: (locus, edge, position) => {
         const result = previewLocusTrim(chartState, locus, {
@@ -14334,7 +14374,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           // Updating scales is inexpensive and gives the sparse projection the
           // packed x offsets for this temporary locus state. Deliberately avoid
           // rebuilding data, indexes, or the complete scene until release.
-          runtime.updateScales(currentData);
+          runtime.updateScales(currentData, { geometryOnly: true });
           scenePreview = createLocusTrimPreview(runtime.getScene(), locus.uid, result.state, {
             localXFor: runtime.scales.locus,
             scaleX: runtime.scales.x,
@@ -14350,12 +14390,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         return result;
       },
       commitLocusTrim: (locus) => {
-        if (runtime.getScene()) sceneCommit = { sourceScene: runtime.getScene(), changes: { loci: [locus.uid] } };
-        finalizeLocusTrim(chartState, locus);
-        commitPreviewLocusState(chartState, locus);
-        clearScenePreview();
-        redraw({ animate: false });
-        commitInteractionState();
+        commitLocusEdit([locus.uid], () => {
+          finalizeLocusTrim(chartState, locus);
+          commitPreviewLocusState(chartState, locus);
+        });
       },
       cancelInteraction: () => { pendingInteractionState = null; },
       flipLocus: (locus) => {
@@ -14438,6 +14476,20 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         commitInteractionState();
       },
     });
+
+    function commitLocusEdit(loci, updateState) {
+      const sourceScene = runtime.getScene();
+      if (sourceScene) {
+        sceneCommit = { sourceScene, changes: { loci } };
+        if (isWebGpuRenderer(runtime.config.plot.renderer)) {
+          webgpuLocusCommit = { sourceScene, loci };
+        }
+      }
+      updateState();
+      clearScenePreview();
+      redraw({ animate: false });
+      commitInteractionState();
+    }
 
     function clearScenePreview() {
       if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
@@ -14621,6 +14673,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     function loadData(data) {
       invalidateSceneCommit();
+      stateSnapshots.reset();
       const prepared = normalizeChartData(data, runtime.config.tree);
       cancelTreePresentationPreview();
       currentData = prepared;
@@ -14635,6 +14688,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       chartState = createChartState(currentData, chartState);
       runtime.setChartIndex(chartIndex);
       runtime.setChartState(chartState);
+      stateSnapshots.reset(currentData);
     }
 
     function groupsAreAutomatic(data = currentData) {
@@ -14686,7 +14740,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     // the gesture and compare it after the committed layout has synchronized.
     function beginInteractionState() {
       if (!pendingInteractionState && chartState && currentData) {
-        pendingInteractionState = serializeChartState(chartState, currentData);
+        pendingInteractionState = stateSnapshots.serialize(chartState, currentData);
       }
     }
 
@@ -14694,7 +14748,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const before = pendingInteractionState;
       pendingInteractionState = null;
       if (!before || !chartState || !currentData) return;
-      const after = serializeChartState(chartState, currentData);
+      const after = stateSnapshots.serialize(chartState, currentData);
       if (JSON.stringify(before) === JSON.stringify(after)) return;
       emitChange({ type: "state.change", state: after });
       remember({ kind: "state", undo: before, redo: after });
@@ -14713,10 +14767,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         chartState = createChartState(currentData, chartState);
         runtime.setChartState(chartState);
       }
+      stateSnapshots.reset(currentData);
     }
 
     function applyPatch(operations, { record = true, automaticGroups } = {}) {
       invalidateSceneCommit();
+      // Source edits may mutate currentData in place. Identity alone cannot
+      // invalidate the cached biological defaults, including on undo/redo.
+      stateSnapshots.reset();
       const groupsAutomaticBefore = groupsAreAutomatic();
       const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
       const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
@@ -14752,12 +14810,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     function setState(snapshot, { record = true } = {}) {
       invalidateSceneCommit();
       pendingInteractionState = null;
-      const before = chartState ? serializeChartState(chartState, currentData) : null;
+      const before = chartState ? stateSnapshots.serialize(chartState, currentData) : null;
       chartState = chartStateFromSnapshot(currentData, snapshot);
       runtime.setChartState(chartState);
       hasInitialView = true;
       redraw({ animate: false });
-      const after = serializeChartState(chartState, currentData);
+      const after = stateSnapshots.serialize(chartState, currentData);
       emitChange({ type: "state.replace", state: after });
       if (record) remember({ kind: "state", undo: before, redo: after });
     }
@@ -15667,7 +15725,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         }
         if (webgpuLocusCommit) {
           webgpuBackend.adoptLocusChanges(scene, webgpuLocusCommit.sourceScene, {
-            loci: webgpuLocusCommit.loci, scales: runtime.scales, config: runtime.config,
+            // Trimming can repack sibling loci; adopt the complete scene patch,
+            // not just the locus whose handle was dragged.
+            loci: scene.changes?.loci || webgpuLocusCommit.loci,
+            scales: runtime.scales, config: runtime.config,
           });
           webgpuLocusCommit = null;
         }
@@ -15792,7 +15853,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     };
     /** A serializable layout and camera snapshot for project persistence. */
     my.state = function (snapshot) {
-      if (!arguments.length) return chartState ? serializeChartState(chartState, currentData) : null;
+      if (!arguments.length) return chartState ? stateSnapshots.serialize(chartState, currentData) : null;
       if (!container || !currentData) {
         throw new Error("Cannot replace chart state before the chart has rendered.");
       }
@@ -15812,7 +15873,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           // Callback hooks are intentionally omitted and can be reattached by
           // the consumer after loading.
           config: serializableConfig(runtime.config),
-          state: chartState ? serializeChartState(chartState, currentData) : null,
+          state: chartState ? stateSnapshots.serialize(chartState, currentData) : null,
         };
       }
       if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
@@ -15951,13 +16012,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         .map(locusForId)
         .filter(Boolean);
       if (!loci.length) return my;
-      const before = serializeChartState(chartState, currentData);
+      const before = stateSnapshots.serialize(chartState, currentData);
       flushCanvasFlip();
       clearScenePreview();
       for (const locus of loci) flipLocus(chartState, locus);
       redraw({ animate: true });
       emitChange({ type: "loci.flip", locusIds: loci.map((locus) => locus.uid) });
-      remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
+      remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
       return my;
     };
     /** Trim selected loci to their displayed outermost genes as one edit. */
@@ -15969,7 +16030,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         .map(locusForId)
         .filter(Boolean);
       if (!loci.length) return my;
-      const before = serializeChartState(chartState, currentData);
+      const before = stateSnapshots.serialize(chartState, currentData);
       flushCanvasFlip();
       clearScenePreview();
       let changed = false;
@@ -15978,7 +16039,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       redraw({ animate: false });
       const locusIds = loci.map((locus) => locus.uid);
       emitChange({ type: "loci.trim", locusIds });
-      remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
+      remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
       return my;
     };
     /** Restore selected loci to their full bounds as one edit. */
@@ -15990,7 +16051,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         .map(locusForId)
         .filter(Boolean);
       if (!loci.length) return my;
-      const before = serializeChartState(chartState, currentData);
+      const before = stateSnapshots.serialize(chartState, currentData);
       flushCanvasFlip();
       clearScenePreview();
       let changed = false;
@@ -15999,7 +16060,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       redraw({ animate: false });
       const locusIds = loci.map((locus) => locus.uid);
       emitChange({ type: "loci.restore", locusIds });
-      remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
+      remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
       return my;
     };
     /** Frame selected genes and/or links without changing their selection. */
@@ -16037,6 +16098,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       });
     };
     my.destroy = () => {
+      stateSnapshots.reset();
       cancelTreePresentationPreview();
       rotateTreeNode = () => {};
       disposeRasterInteraction();

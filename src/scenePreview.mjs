@@ -161,8 +161,7 @@ export function createLocusTrimPreview(
       ? trimmed.worldEnd
       : candidate.worldEnd + offsetFor(candidate);
   const geneVisibility = new Map();
-  for (const gene of scene.genes.values()) {
-    if (gene.locus.source.uid !== locusUid) continue;
+  for (const gene of locus.genes) {
     geneVisibility.set(
       gene.source.uid,
       gene.display.start >= state.start && gene.display.end <= state.end + 1

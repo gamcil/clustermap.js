@@ -61,7 +61,7 @@ import {
   isRasterRenderer,
   isWebGpuRenderer,
 } from "./rendererMode.mjs";
-import { chartStateFromSnapshot, serializeChartState } from "./chartStateSnapshot.mjs";
+import { chartStateFromSnapshot, createChartStateSerializer } from "./chartStateSnapshot.mjs";
 import { lociForClusterRange } from "./locusSelection.mjs";
 
 let nextChartInstance = 0;
@@ -154,6 +154,7 @@ export default function clusterMap() {
   const changeListeners = new Set();
   const history = [];
   const future = [];
+  const stateSnapshots = createChartStateSerializer();
   let pendingInteractionState = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
   const canvasBackend = createRetainedSceneBackend({
@@ -302,14 +303,9 @@ export default function clusterMap() {
     },
     commitLocusOffset: (ids) => {
       const loci = Array.isArray(ids) ? ids : [ids];
-      if (runtime.getScene()) sceneCommit = { sourceScene: runtime.getScene(), changes: { loci } };
-      if (isWebGpuRenderer(runtime.config.plot.renderer)) {
-        webgpuLocusCommit = { sourceScene: runtime.getScene(), loci };
-      }
-      for (const uid of loci) commitPreviewLocusOffset(chartState, uid);
-      clearScenePreview();
-      redraw({ animate: false });
-      commitInteractionState();
+      commitLocusEdit(loci, () => {
+        for (const uid of loci) commitPreviewLocusOffset(chartState, uid);
+      });
     },
     previewLocusTrim: (locus, edge, position) => {
       const result = previewLocusTrim(chartState, locus, {
@@ -329,7 +325,7 @@ export default function clusterMap() {
         // Updating scales is inexpensive and gives the sparse projection the
         // packed x offsets for this temporary locus state. Deliberately avoid
         // rebuilding data, indexes, or the complete scene until release.
-        runtime.updateScales(currentData);
+        runtime.updateScales(currentData, { geometryOnly: true });
         scenePreview = createLocusTrimPreview(runtime.getScene(), locus.uid, result.state, {
           localXFor: runtime.scales.locus,
           scaleX: runtime.scales.x,
@@ -345,12 +341,10 @@ export default function clusterMap() {
       return result;
     },
     commitLocusTrim: (locus) => {
-      if (runtime.getScene()) sceneCommit = { sourceScene: runtime.getScene(), changes: { loci: [locus.uid] } };
-      finalizeLocusTrim(chartState, locus);
-      commitPreviewLocusState(chartState, locus);
-      clearScenePreview();
-      redraw({ animate: false });
-      commitInteractionState();
+      commitLocusEdit([locus.uid], () => {
+        finalizeLocusTrim(chartState, locus);
+        commitPreviewLocusState(chartState, locus);
+      });
     },
     cancelInteraction: () => { pendingInteractionState = null; },
     flipLocus: (locus) => {
@@ -433,6 +427,20 @@ export default function clusterMap() {
       commitInteractionState();
     },
   });
+
+  function commitLocusEdit(loci, updateState) {
+    const sourceScene = runtime.getScene();
+    if (sourceScene) {
+      sceneCommit = { sourceScene, changes: { loci } };
+      if (isWebGpuRenderer(runtime.config.plot.renderer)) {
+        webgpuLocusCommit = { sourceScene, loci };
+      }
+    }
+    updateState();
+    clearScenePreview();
+    redraw({ animate: false });
+    commitInteractionState();
+  }
 
   function clearScenePreview() {
     if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
@@ -616,6 +624,7 @@ export default function clusterMap() {
 
   function loadData(data) {
     invalidateSceneCommit();
+    stateSnapshots.reset();
     const prepared = normalizeChartData(data, runtime.config.tree);
     cancelTreePresentationPreview();
     currentData = prepared;
@@ -630,6 +639,7 @@ export default function clusterMap() {
     chartState = createChartState(currentData, chartState);
     runtime.setChartIndex(chartIndex);
     runtime.setChartState(chartState);
+    stateSnapshots.reset(currentData);
   }
 
   function groupsAreAutomatic(data = currentData) {
@@ -681,7 +691,7 @@ export default function clusterMap() {
   // the gesture and compare it after the committed layout has synchronized.
   function beginInteractionState() {
     if (!pendingInteractionState && chartState && currentData) {
-      pendingInteractionState = serializeChartState(chartState, currentData);
+      pendingInteractionState = stateSnapshots.serialize(chartState, currentData);
     }
   }
 
@@ -689,7 +699,7 @@ export default function clusterMap() {
     const before = pendingInteractionState;
     pendingInteractionState = null;
     if (!before || !chartState || !currentData) return;
-    const after = serializeChartState(chartState, currentData);
+    const after = stateSnapshots.serialize(chartState, currentData);
     if (JSON.stringify(before) === JSON.stringify(after)) return;
     emitChange({ type: "state.change", state: after });
     remember({ kind: "state", undo: before, redo: after });
@@ -708,10 +718,14 @@ export default function clusterMap() {
       chartState = createChartState(currentData, chartState);
       runtime.setChartState(chartState);
     }
+    stateSnapshots.reset(currentData);
   }
 
   function applyPatch(operations, { record = true, automaticGroups } = {}) {
     invalidateSceneCommit();
+    // Source edits may mutate currentData in place. Identity alone cannot
+    // invalidate the cached biological defaults, including on undo/redo.
+    stateSnapshots.reset();
     const groupsAutomaticBefore = groupsAreAutomatic();
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
     const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
@@ -747,12 +761,12 @@ export default function clusterMap() {
   function setState(snapshot, { record = true } = {}) {
     invalidateSceneCommit();
     pendingInteractionState = null;
-    const before = chartState ? serializeChartState(chartState, currentData) : null;
+    const before = chartState ? stateSnapshots.serialize(chartState, currentData) : null;
     chartState = chartStateFromSnapshot(currentData, snapshot);
     runtime.setChartState(chartState);
     hasInitialView = true;
     redraw({ animate: false });
-    const after = serializeChartState(chartState, currentData);
+    const after = stateSnapshots.serialize(chartState, currentData);
     emitChange({ type: "state.replace", state: after });
     if (record) remember({ kind: "state", undo: before, redo: after });
   }
@@ -1662,7 +1676,10 @@ export default function clusterMap() {
       }
       if (webgpuLocusCommit) {
         webgpuBackend.adoptLocusChanges(scene, webgpuLocusCommit.sourceScene, {
-          loci: webgpuLocusCommit.loci, scales: runtime.scales, config: runtime.config,
+          // Trimming can repack sibling loci; adopt the complete scene patch,
+          // not just the locus whose handle was dragged.
+          loci: scene.changes?.loci || webgpuLocusCommit.loci,
+          scales: runtime.scales, config: runtime.config,
         });
         webgpuLocusCommit = null;
       }
@@ -1787,7 +1804,7 @@ export default function clusterMap() {
   };
   /** A serializable layout and camera snapshot for project persistence. */
   my.state = function (snapshot) {
-    if (!arguments.length) return chartState ? serializeChartState(chartState, currentData) : null;
+    if (!arguments.length) return chartState ? stateSnapshots.serialize(chartState, currentData) : null;
     if (!container || !currentData) {
       throw new Error("Cannot replace chart state before the chart has rendered.");
     }
@@ -1807,7 +1824,7 @@ export default function clusterMap() {
         // Callback hooks are intentionally omitted and can be reattached by
         // the consumer after loading.
         config: serializableConfig(runtime.config),
-        state: chartState ? serializeChartState(chartState, currentData) : null,
+        state: chartState ? stateSnapshots.serialize(chartState, currentData) : null,
       };
     }
     if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
@@ -1946,13 +1963,13 @@ export default function clusterMap() {
       .map(locusForId)
       .filter(Boolean);
     if (!loci.length) return my;
-    const before = serializeChartState(chartState, currentData);
+    const before = stateSnapshots.serialize(chartState, currentData);
     flushCanvasFlip();
     clearScenePreview();
     for (const locus of loci) flipLocus(chartState, locus);
     redraw({ animate: true });
     emitChange({ type: "loci.flip", locusIds: loci.map((locus) => locus.uid) });
-    remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
+    remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
     return my;
   };
   /** Trim selected loci to their displayed outermost genes as one edit. */
@@ -1964,7 +1981,7 @@ export default function clusterMap() {
       .map(locusForId)
       .filter(Boolean);
     if (!loci.length) return my;
-    const before = serializeChartState(chartState, currentData);
+    const before = stateSnapshots.serialize(chartState, currentData);
     flushCanvasFlip();
     clearScenePreview();
     let changed = false;
@@ -1973,7 +1990,7 @@ export default function clusterMap() {
     redraw({ animate: false });
     const locusIds = loci.map((locus) => locus.uid);
     emitChange({ type: "loci.trim", locusIds });
-    remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
+    remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
     return my;
   };
   /** Restore selected loci to their full bounds as one edit. */
@@ -1985,7 +2002,7 @@ export default function clusterMap() {
       .map(locusForId)
       .filter(Boolean);
     if (!loci.length) return my;
-    const before = serializeChartState(chartState, currentData);
+    const before = stateSnapshots.serialize(chartState, currentData);
     flushCanvasFlip();
     clearScenePreview();
     let changed = false;
@@ -1994,7 +2011,7 @@ export default function clusterMap() {
     redraw({ animate: false });
     const locusIds = loci.map((locus) => locus.uid);
     emitChange({ type: "loci.restore", locusIds });
-    remember({ kind: "state", undo: before, redo: serializeChartState(chartState, currentData) });
+    remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
     return my;
   };
   /** Frame selected genes and/or links without changing their selection. */
@@ -2032,6 +2049,7 @@ export default function clusterMap() {
     });
   };
   my.destroy = () => {
+    stateSnapshots.reset();
     cancelTreePresentationPreview();
     rotateTreeNode = () => {};
     disposeRasterInteraction();

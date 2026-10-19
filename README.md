@@ -311,6 +311,11 @@ and hit-testing indexes, and returns changed IDs for renderer buffer updates.
 Data or appearance changes use a full scene build. Scene patching is internal
 and does not change the public chart API.
 
+History, state reads, and project exports share one source-state baseline per
+chart. Data loads and source edits rebuild it; geometry-only interactions reuse
+it, and chart destruction releases it. Snapshots still contain only deviations
+from source state and never include the cached baseline.
+
 For a bundler-based application, import the ESM package entry directly. D3 is
 declared as a peer dependency and is imported by the library:
 
