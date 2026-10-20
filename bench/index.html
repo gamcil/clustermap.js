@@ -83,25 +83,41 @@ function frameResult() {
 const paint = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 function state() {
   const { x, y, k } = surface.__zoom;
-  if (legacy) return { camera: { x, y, k }, order: api.scales.y.domain(),
-    flipped: chart.data().clusters[2].loci[0]._flipped,
-    locusOffset: api.scales.locus("large-locus-2") };
+  const locus = chart.data().clusters.find((cluster) => cluster.uid === "large-cluster-2").loci[0];
+  if (legacy) {
+    const start = locus._start ?? locus.start, end = locus._end ?? locus.end;
+    return { camera: { x, y, k }, order: api.scales.y.domain(),
+      flipped: locus._flipped, locusOffset: api.scales.locus(locus.uid),
+      locusStart: start, locusEnd: end,
+      visibleGeneCount: locus.genes.filter((gene) => gene.start >= start && gene.end <= end + 1).length };
+  }
   const value = chart.state();
+  const locusState = value.loci.find(([uid]) => uid === locus.uid)?.[1] || locus;
+  const geneStates = new Map(value.genes);
   return { camera: { x, y, k },
     order: value.clusterOrder.length ? value.clusterOrder : chart.data().clusters.map((c) => c.uid),
-    flipped: value.loci.find(([uid]) => uid === "large-locus-2")?.[1].flipped || false,
-    locusOffset: value.locusOffsets.find(([uid]) => uid === "large-locus-2")?.[1] || 0 };
+    flipped: locusState.flipped || false,
+    locusOffset: value.locusOffsets.find(([uid]) => uid === locus.uid)?.[1] || 0,
+    locusStart: locusState.start, locusEnd: locusState.end,
+    visibleGeneCount: locus.genes.filter((gene) => {
+      const display = geneStates.get(`${locus.uid}:${gene.uid}`) || gene;
+      return display.start >= locusState.start && display.end <= locusState.end + 1;
+    }).length };
 }
 function targets() {
   if (legacy || renderer === "svg") {
     const group = [...document.querySelectorAll("g.cluster")].find((g) => g.__data__.uid === "large-cluster-2");
     const label = group.querySelector(".clusterText").getBoundingClientRect();
     const track = group.querySelector(".trackBar").getBoundingClientRect();
+    const handle = group.querySelector(".leftHandle").getBoundingClientRect();
     return { label: { x: label.right - 25 * CAMERA.k, y: label.y + label.height / 2 },
+      trimLeft: { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 },
       locus: { x: track.x + 15 * CAMERA.k, y: track.y } }; // Track gap avoids gene anchoring.
   }
   const current = state(), row = current.order.indexOf("large-cluster-2");
   return { label: { x: CAMERA.x - 34 * CAMERA.k, y: CAMERA.y + (row * STEP + 4) * CAMERA.k },
+    trimLeft: { x: CAMERA.x + (current.locusOffset + (current.locusStart - 1) * config.plot.scaleFactor / 1000 - 4) * CAMERA.k,
+      y: CAMERA.y + (row * STEP + 11) * CAMERA.k },
     locus: { x: CAMERA.x + (16 + current.locusOffset - initialOffset) * CAMERA.k, y: CAMERA.y + (row * STEP + 11) * CAMERA.k } };
 }
 function graphics() {

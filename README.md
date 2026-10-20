@@ -363,7 +363,7 @@ entry is intended for modern JavaScript bundlers.
 
 Run `npm run bench:rendering` (three repetitions by default) to compare the
 original SVG chart with the current SVG, normal Canvas, Canvas with 2D
-acceleration disabled, and WebGPU renderers. The Playwright harness records one INP per pan/zoom/drag/flip/reorder workflow directly through
+acceleration disabled, and WebGPU renderers. The Playwright harness records one INP per pan/zoom/drag/flip/trim/reorder workflow directly through
 `web-vitals`, plus the 95th-percentile animation frame interval during continuous
 gestures, with contributing events and environment metadata.
 Use `--fixture larger` for 20,000 genes and 19,800 links (twice the default).

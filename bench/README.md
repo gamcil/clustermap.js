@@ -27,12 +27,17 @@ zoom, extra genes primarily extend beyond the viewport; overview displays all
 Fixture name, dimensions, counts, and data hash are saved in metadata; CSV rows
 also identify the fixture. This selection does not multiply the default run count.
 
-**Pan out/back → zoom out/back → drag locus → flip locus → reorder cluster.**
+**Pan out/back → zoom out/back → drag locus → flip locus → trim locus → reorder cluster.**
+
+The trim drags the left handle past 20 genes (360px in standard view, 54px in
+overview), using the same input steps as the other drags. It verifies the exact
+snapped start boundary, unchanged end/orientation, and removal of exactly 20
+visible genes. All implementations perform this through real pointer input.
 
 The page directly imports `onINP` from **web-vitals 5.1.0**. Its reported value
 measures discrete interaction responsiveness. A small `requestAnimationFrame`
 sampler also records the **95th-percentile frame interval** across pan, zoom,
-locus drag, and cluster drag gestures. The sampler runs from the first animation
+locus drag, trim, and cluster drag gestures. The sampler runs from the first animation
 callback before each gesture through the first callback after release; wheel
 sampling includes D3's gesture completion. Flip clicks, setup, screenshots, and
 between-gesture waits are excluded from frame sampling. Intervals from separate
@@ -100,12 +105,14 @@ Canvas cases by `implementation` and `canvas_acceleration`.
   slow renderers can take longer to process the same sequence. This is a
   repeatable action sequence, not a fixed-rate input or throughput benchmark.
   View and gesture settings are shared in `views.mjs` and recorded in metadata.
-- Pan/zoom movement, locus offset/orientation, and final cluster order are
+- Pan/zoom movement, locus offset/orientation, trim boundaries/visible gene count, and final cluster order are
   verified. Configured transitions are zero, but v1 retains its hardcoded 250ms
   peer-row animations during dragging.
 
 `--output PATH` chooses a new/empty results directory. `--repeats 1 --smoke`
-reduces each drag to six steps and each zoom to one wheel input for a functional check. `--headless` is available
+reduces pan/locus/trim drags to six steps and each zoom to one wheel input for a
+functional check. Cluster reordering retains its normal step count so v1 does
+not skip rows. `--headless` is available
 for diagnostics; WebGPU may not be available there.
 `--screenshots` saves full and detail images after measurement for checking
 visual consistency, without adding screenshot work to the INP measurement.
@@ -125,6 +132,22 @@ For diagnosis only, `--profile` records a Chrome DevTools CPU profile per
 workflow. Profiling adds overhead; these runs are marked in metadata and should
 not be combined with ordinary benchmark results.
 
+Use `--implementation v2/webgpu` (or another implementation name from the CSV)
+to run only one renderer case. `--trace` additionally saves a Chrome Performance
+trace, including browser rendering work. Both diagnostic modes add `bench:*`
+action markers to identify pan, zoom, locus drag/flip/trim, and cluster drag phases.
+For a single diagnostic run:
+
+```sh
+npm run bench:rendering -- --fixture larger --view standard --repeats 1 \
+  --implementation v2/webgpu --profile --trace
+```
+
+Load `run-001.trace.json` in Chrome DevTools' Performance panel. The adjacent
+JSON contains action marker times and INP entries; `run-001.cpuprofile` contains
+the JavaScript sampling profile. Traced timings are diagnostic, not benchmark
+comparisons.
+
 Overview now fits the entire plot (zoom 0.15). Earlier format-6 runs used zoom
 0.35 and shorter gestures; treat these as different workloads.
 
@@ -137,6 +160,10 @@ remain the default. Format-8 results describe the earlier shorter workflow.
 
 Format-10 adds selectable synthetic fixture sizes; `large` retains the original
 data. Compare results using the recorded fixture, view, and gesture settings.
+
+Format-11 adds the verified trim drag to the workflow and frame sampler. Later
+cluster reordering therefore operates on a trimmed locus. Treat this as a new
+workload; do not pool its timings with earlier workflows that omitted trimming.
 
 ## Renderer optimization status
 
