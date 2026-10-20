@@ -11,6 +11,7 @@ import {
 } from "./links/layout.mjs";
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
 import { arrangeTrimIndicators, createTrimIndicators, resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
+import { layoutAnnotationPanels, annotationFigureBounds, annotationChromeRightEdge } from "./annotations.mjs";
 
 function worldPolygon(points, x, y) {
   return points.map((point, index) => point + (index % 2 === 0 ? x : y));
@@ -455,6 +456,9 @@ export function buildScene(
     alignLabels = true,
     trimIndicatorStyle = {},
     chrome = null,
+    fontFamily = "sans-serif",
+    measureText = null,
+    annotationsEnabled = false,
   }
 ) {
   const clusters = new Map();
@@ -546,6 +550,8 @@ export function buildScene(
 
   const hitRegions = buildHitRegions(loci, genes);
   const chromeLayout = buildChrome(bounds, genes, chrome);
+  const annotations = projectSceneAnnotations(data.annotationPanels, clusters, bounds, chromeLayout,
+    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText });
   return {
     clusters,
     loci,
@@ -554,7 +560,7 @@ export function buildScene(
     linksByClusterPair,
     linksByGene,
     bounds,
-    figureBounds: figureBoundsForChrome(bounds, chromeLayout),
+    ...annotations,
     index: {
       genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
       loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
@@ -636,6 +642,46 @@ function repositionChrome(chrome, bounds, previousBounds) {
       ...chrome.colourBar.position, y: chrome.colourBar.position.y + dy,
     } },
   };
+}
+
+const emptyAnnotationPanels = Object.freeze([]);
+
+// Data/configuration builds project cells; geometry-only commits retain them.
+// This is the single placement path for both kinds of scene update.
+function projectSceneAnnotations(definitions, clusters, bounds, chrome, options, previous = null) {
+  const annotationPanelData = options.annotationsEnabled ? definitions : undefined;
+  const visible = annotationPanelData?.some((panel) => panel.show !== false);
+  const annotationChromeRight = visible ? annotationChromeRightEdge(chrome, options.measureText) : -Infinity;
+  const annotationAnchorX = Math.max(bounds?.maxX ?? 0, annotationChromeRight);
+  let annotationPanels = emptyAnnotationPanels;
+  if (visible) {
+    if (previous?.annotationPanelData === annotationPanelData) {
+      const dx = annotationAnchorX - previous.annotationAnchorX;
+      annotationPanels = dx ? previous.annotationPanels.map((panel) => ({ ...panel, x: panel.x + dx })) : previous.annotationPanels;
+    } else {
+      annotationPanels = layoutAnnotationPanels(annotationPanelData, clusters, bounds,
+        { ...options, anchorX: annotationAnchorX, previousPanels: previous?.annotationPanels });
+    }
+    placeLegendAfterAnnotations(chrome, annotationPanels);
+  }
+  return { annotationPanelData, annotationPanels, annotationAnchorX, annotationChromeRight,
+    figureBounds: annotationFigureBounds(figureBoundsForChrome(bounds, chrome), annotationPanels, clusters) };
+}
+
+/** Presentation/data edits to annotations leave synteny and its indexes intact. */
+export function patchAnnotationScene(scene, definitions, options) {
+  const chrome = repositionChrome(scene.chrome, scene.bounds, scene.bounds);
+  return { ...scene, chrome,
+    ...projectSceneAnnotations(definitions, scene.clusters, scene.bounds, chrome,
+      { ...options, rowOffset: options.shape.tipHeight + options.shape.bodyHeight / 2 }, scene),
+    changes: { annotationsOnly: true } };
+}
+
+function placeLegendAfterAnnotations(chrome, panels) {
+  if (chrome?.legend.placement === "right" && panels.length) {
+    const right = Math.max(...panels.map((panel) => panel.x + panel.extentWidth));
+    chrome.legend.position = { ...chrome.legend.position, x: right + chrome.legend.marginLeft };
+  }
 }
 
 /**
@@ -794,9 +840,10 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
   const chrome = visibilityChanged && options.chrome
     ? buildChrome(bounds, genes, options.chrome)
     : repositionChrome(scene.chrome, bounds, scene.bounds);
+  const annotations = projectSceneAnnotations(scene.annotationPanelData, clusters, bounds, chrome,
+    { ...options, rowOffset: geneMidpoint }, scene);
   return {
-    ...scene, clusters, loci, genes, links, bounds, chrome, hitRegions,
-    figureBounds: figureBoundsForChrome(bounds, chrome),
+    ...scene, clusters, loci, genes, links, bounds, chrome, hitRegions, ...annotations,
     changes: { loci: changedLoci, genes: changedGenes, links: new Set(sources.keys()), clusters: requestedClusters },
     index: {
       genes: updateSpatialIndex(scene.index.genes, entries(genes, changedGenes), () => entries(genes, genes.keys())),

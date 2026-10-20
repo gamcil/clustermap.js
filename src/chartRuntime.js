@@ -28,13 +28,14 @@ import {
 import {
   buildScene,
   patchScene,
+  patchAnnotationScene,
 } from "./layout.mjs";
 import { isRendererMode } from "./rendererMode.mjs";
 
 // This is deliberately one factory per chart, not a collection of tiny API
 // factories: configuration, scales, indexes, and mutable scene state must not
 // leak between independently mounted maps.
-export function createChartRuntime({ idPrefix = "" } = {}) {
+export function createChartRuntime({ idPrefix = "", measureText = null } = {}) {
 function refreshClusterOffsetScale() {
   scales.offset.range(
     scales.offset.domain().map((uid) => getClusterOffset(chartState, uid))
@@ -130,6 +131,9 @@ function validateConfiguration(options, tree = null) {
   const candidate = createDefaultConfig();
   updateConfig(candidate, config);
   updateConfig(candidate, options);
+  if (typeof candidate.annotations?.enabled !== "boolean") {
+    throw new TypeError("annotations.enabled must be a boolean.");
+  }
   if (!isRendererMode(candidate.plot.renderer)) {
     throw new TypeError(`Unknown plot renderer: ${candidate.plot.renderer}. Expected svg, canvas, or webgpu.`);
   }
@@ -204,6 +208,9 @@ function sceneProjectionOptions({ areClustersAdjacent } = {}) {
     clusterLabel: locusText,
     alignLabels: config.cluster.alignLabels,
     trimIndicatorStyle: config.locus.trimIndicators,
+    fontFamily: config.plot.fontFamily,
+    measureText,
+    annotationsEnabled: config.annotations.enabled,
   };
 }
 
@@ -434,6 +441,10 @@ return {
   getScene,
   buildScene: buildChartScene,
   patchScene: patchChartScene,
+  patchAnnotations(previousScene, data) {
+    currentScene = patchAnnotationScene(previousScene, data.annotationPanels, sceneProjectionOptions());
+    return currentScene;
+  },
   setBeforeGeneAnchorUpdate,
   anchorGene,
 };

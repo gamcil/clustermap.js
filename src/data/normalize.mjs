@@ -1,4 +1,5 @@
 import { validateTreePresentation } from "../treePresentation.mjs";
+import { validateAnnotationPanels } from "../annotations.mjs";
 
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned
@@ -40,6 +41,7 @@ function normalizeLocus(locus, clusterUid) {
 
 export function normalizeChartData(data, treeConfig = {}) {
   const source = cloneDataValue(data);
+  validateAnnotationPanels(source.annotationPanels, source.clusters);
   if (source.tree != null) {
     validateTree(source.tree, source.clusters);
     validateTreePresentation(source.tree, treeConfig);

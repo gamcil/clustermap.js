@@ -1,8 +1,9 @@
 // Deliberately small, direct WebGPU renderer for the renderer-neutral scene.
-// It owns only dense geometric marks; Canvas/SVG remain responsible for text,
-// chrome, interaction affordances, export, and broad-browser fallback.
+// It owns dense geometric marks and annotation rectangles. Canvas still draws
+// text and other decorations; SVG provides static export.
 
 import { color } from "d3-color";
+import { worldViewport } from "./camera.mjs";
 import { sampleLinkGeometry } from "./links/layout.mjs";
 import {
   genePolygonForPreview,
@@ -16,9 +17,11 @@ import {
   previewOffsetsForLocus,
 } from "./scenePreview.mjs";
 import { clusterPairKey } from "./layout.mjs";
+import { annotationOffsetForPreview, annotationPanelsForFrame, annotationPanelsInViewport } from "./annotations.mjs";
 
 const shader = /* wgsl */ `
 struct Camera {
+  // camera x/y, zoom, shared annotation x offset.
   transform: vec4f,
   viewport: vec2f,
   // vec4 alignment leaves two padding floats after viewport.
@@ -73,6 +76,29 @@ struct VertexInput {
 struct VertexOutput {
   @builtin(position) position: vec4f,
   @location(0) colour: vec4f,
+}
+
+struct RectangleInput {
+  @location(0) rect: vec4f,
+  @location(1) colour: vec4f,
+  @location(2) rowSlot: f32,
+}
+
+@vertex fn rectangleVertex(input: RectangleInput, @builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+  var corners = array<vec2f, 6>(
+    vec2f(0.0, 0.0), vec2f(1.0, 0.0), vec2f(0.0, 1.0),
+    vec2f(0.0, 1.0), vec2f(1.0, 0.0), vec2f(1.0, 1.0),
+  );
+  // Annotation columns stay aligned when a cluster moves horizontally; only
+  // its row translation is inherited. Locus flips never reflect heatmaps.
+  let offset = vec2f(camera.transform.w, clusterOffsets.values[u32(input.rowSlot)].y);
+  let world = input.rect.xy + corners[vertexIndex] * input.rect.zw + offset;
+  let screen = world * camera.transform.z + camera.transform.xy;
+  var output: VertexOutput;
+  output.position = vec4f(screen.x / camera.viewport.x * 2.0 - 1.0,
+    1.0 - screen.y / camera.viewport.y * 2.0, 0.0, 1.0);
+  output.colour = input.colour;
+  return output;
 }
 
 struct StrokeInput {
@@ -278,9 +304,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 }`;
 
 function rgba(value, fallback = [0.6, 0.6, 0.6, 1]) {
-  const colour = color(value);
+  const colour = color(value)?.rgb();
   return colour
-    ? [colour.r / 255, colour.g / 255, colour.b / 255, colour.opacity ?? 1]
+    ? [Number.isFinite(colour.r) ? colour.r / 255 : 0,
+      Number.isFinite(colour.g) ? colour.g / 255 : 0,
+      Number.isFinite(colour.b) ? colour.b / 255 : 0, colour.opacity ?? 1]
     : fallback;
 }
 
@@ -588,13 +616,7 @@ function isLocusTransformPreview(preview) {
 }
 
 function viewportForCamera(camera, width, height, overscan = 20) {
-  const margin = overscan / camera.k;
-  return {
-    minX: -camera.x / camera.k - margin,
-    maxX: (width - camera.x) / camera.k + margin,
-    minY: -camera.y / camera.k - margin,
-    maxY: (height - camera.y) / camera.k + margin,
-  };
+  return worldViewport(camera, { width, height }, overscan);
 }
 
 function boundsInViewport(bounds, viewport, offsetY = 0) {
@@ -735,6 +757,23 @@ export async function createWebGpuRenderer(canvas) {
     primitive: { topology: "triangle-list" },
     multisample,
   });
+  // Annotation-only pipeline: ordinary synteny charts never compile it.
+  let rectanglePipeline = null;
+  const rectanglePipelineDescriptor = {
+    layout: pipelineLayout,
+    vertex: { module, entryPoint: "rectangleVertex", buffers: [{
+      arrayStride: 36,
+      stepMode: "instance",
+      attributes: [
+        { shaderLocation: 0, offset: 0, format: "float32x4" },
+        { shaderLocation: 1, offset: 16, format: "float32x4" },
+        { shaderLocation: 2, offset: 32, format: "float32" },
+      ],
+    }] },
+    fragment: { module, entryPoint: "fragmentMain", targets: target },
+    primitive: { topology: "triangle-list" },
+    multisample,
+  };
   const uniform = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   let clusterOffsetBuffer = device.createBuffer({
     size: 8,
@@ -791,6 +830,95 @@ export async function createWebGpuRenderer(canvas) {
   let patchedRecords = null;
   let configured = false;
   let multisampleTexture = null;
+  let annotationBuffer = null, annotationKeyBuffer = null;
+  let annotationCount = 0, annotationKeyCount = 0;
+  let annotationPanels = null, annotationKeyPreview = null;
+  const annotationRows = new Map(), annotationKeys = new Map();
+
+  const appendRectangle = (values, rect, x, y, slot = 0) => {
+    values.push(x + rect.x, y + rect.y, rect.width, rect.height, ...rgba(rect.fill), slot);
+  };
+  const updateAnnotations = (nextPreview) => {
+    if (!scene.annotationPanels?.length) {
+      annotationBuffer?.destroy(); annotationKeyBuffer?.destroy();
+      annotationBuffer = annotationKeyBuffer = null;
+      annotationCount = annotationKeyCount = 0;
+      annotationPanels = scene.annotationPanels; annotationKeyPreview = null;
+      annotationRows.clear(); annotationKeys.clear();
+      return;
+    }
+    const changed = annotationPanels !== scene.annotationPanels;
+    const cellsChanged = changed && (!annotationPanels || annotationPanels.length !== scene.annotationPanels.length ||
+      scene.annotationPanels.some((panel, i) => {
+        const before = annotationPanels[i];
+        return panel.uid !== before.uid || panel.rows !== before.rows || panel.x !== before.x || panel.rowOffset !== before.rowOffset;
+      }));
+    if (changed) annotationPanels = scene.annotationPanels;
+    if (cellsChanged) {
+      annotationRows.clear();
+      const values = [];
+      for (const panel of annotationPanels || []) {
+        const rows = new Map(); annotationRows.set(panel.uid, rows);
+        for (const row of panel.rows) {
+          const offsets = [];
+          const slot = geometry.clusterSlots.get(row.uid);
+          // Retained gene geometry may still use an earlier row order. Remove
+          // that baseline from new cell instances before the GPU adds it back.
+          const y = scene.clusters.get(row.uid).y + panel.rowOffset - clusterBaseOffsets[slot * 2 + 1];
+          for (const cell of row.cells) {
+            offsets.push(values.length / 9);
+            for (const rect of cell.rects) appendRectangle(values, rect, panel.x, y, slot);
+          }
+          offsets.push(values.length / 9); rows.set(row.uid, offsets);
+        }
+      }
+      annotationCount = values.length / 9;
+      if (annotationCount) annotationBuffer = bufferFor(device, annotationBuffer, new Float32Array(values));
+    }
+    // Keys follow the current bottom row. Only this small buffer changes
+    // during a row drag; cells remain retained and use cluster transforms.
+    const keyPreview = nextPreview?.type === "cluster-drag" ? nextPreview : null;
+    if (changed || annotationKeyPreview !== keyPreview) {
+      annotationKeyPreview = keyPreview;
+      annotationKeys.clear();
+      const values = [];
+      for (const panel of annotationPanelsForFrame(scene, keyPreview)) {
+        annotationKeys.set(panel.uid, values.length / 9);
+        for (const rect of panel.rects) appendRectangle(values, rect, panel.x, 0);
+      }
+      annotationKeyCount = values.length / 9;
+      if (annotationKeyCount) annotationKeyBuffer = bufferFor(device, annotationKeyBuffer, new Float32Array(values));
+    }
+  };
+
+  const annotationDrawRanges = (nextPreview, viewport) => {
+    const bounds = scene.figureBounds;
+    if (!nextPreview && bounds && viewport.minX <= bounds.minX && viewport.maxX >= bounds.maxX &&
+        viewport.minY <= bounds.minY && viewport.maxY >= bounds.maxY) {
+      return { cells: annotationCount ? [[0, annotationCount]] : [], keys: annotationKeyCount ? [[0, annotationKeyCount]] : [] };
+    }
+    const cells = [], keys = [];
+    for (const panel of annotationPanelsInViewport(scene, nextPreview, viewport, { labels: false })) {
+      const rows = annotationRows.get(panel.uid);
+      for (const row of panel.rows) {
+        const offsets = rows.get(row.uid);
+        cells.push([offsets[row.firstCell], offsets[row.lastCell]]);
+      }
+      const base = annotationKeys.get(panel.uid);
+      for (const rect of panel.rects) keys.push([base + rect.keyIndex, base + rect.keyIndex + 1]);
+    }
+    const merge = (ranges) => {
+      ranges.sort((a, b) => a[0] - b[0]);
+      const result = [];
+      for (const range of ranges) {
+        const last = result[result.length - 1];
+        if (last && last[1] >= range[0]) last[1] = Math.max(last[1], range[1]);
+        else if (range[1] > range[0]) result.push(range);
+      }
+      return result;
+    };
+    return { cells: merge(cells), keys: merge(keys) };
+  };
 
   const resizeStorageBuffer = (buffer, capacity, values) => {
     if (values.byteLength <= capacity * 4) return { buffer, capacity, resized: false };
@@ -961,6 +1089,7 @@ export async function createWebGpuRenderer(canvas) {
     retainedClusterGeometry = false;
     clusterBaseOffsets.fill(0);
     previewLinksActive = false;
+    annotationPanels = null;
   };
   const restorePreview = (records) => {
     if (!records || !geometry) return;
@@ -1166,6 +1295,11 @@ export async function createWebGpuRenderer(canvas) {
         });
         configured = true;
       }
+      if (scene !== nextScene && nextScene.genes === scene?.genes && nextScene.links === scene?.links &&
+          nextScene.loci === scene?.loci && nextScene.clusters === scene?.clusters) {
+        // Annotation-only edits retain all biological geometry and GPU buffers.
+        scene = nextScene;
+      }
       if (scene !== nextScene) {
         geometry = buildGeometry(nextScene, scales, config);
         uploadGeometry(geometry);
@@ -1182,6 +1316,7 @@ export async function createWebGpuRenderer(canvas) {
         applyPreview(nextPreview, scales, config, viewportForCamera(camera, width, height));
         preview = nextPreview;
       }
+      updateAnnotations(nextPreview);
       device.queue.writeBuffer(
         uniform,
         0,
@@ -1189,7 +1324,7 @@ export async function createWebGpuRenderer(canvas) {
           camera.x,
           camera.y,
           camera.k,
-          0,
+          annotationOffsetForPreview(scene, nextPreview),
           width,
           height,
           0,
@@ -1248,6 +1383,22 @@ export async function createWebGpuRenderer(canvas) {
         pass.setVertexBuffer(0, geneEdgeBuffer);
         pass.draw(6, geneEdgeCount);
       }
+      if (annotationCount || annotationKeyCount) {
+        const ranges = annotationDrawRanges(nextPreview, viewportForCamera(camera, width, height));
+        if (ranges.cells.length || ranges.keys.length) {
+          rectanglePipeline ||= device.createRenderPipeline(rectanglePipelineDescriptor);
+          pass.setPipeline(rectanglePipeline);
+          pass.setBindGroup(0, bindGroup);
+          if (ranges.cells.length) {
+            pass.setVertexBuffer(0, annotationBuffer);
+            for (const [first, end] of ranges.cells) pass.draw(6, end - first, 0, first);
+          }
+          if (ranges.keys.length) {
+            pass.setVertexBuffer(0, annotationKeyBuffer);
+            for (const [first, end] of ranges.keys) pass.draw(6, end - first, 0, first);
+          }
+        }
+      }
       pass.end();
       device.queue.submit([encoder.finish()]);
     },
@@ -1291,6 +1442,8 @@ export async function createWebGpuRenderer(canvas) {
       trackBuffer?.destroy();
       geneBuffer?.destroy();
       geneEdgeBuffer?.destroy();
+      annotationBuffer?.destroy();
+      annotationKeyBuffer?.destroy();
       clusterOffsetBuffer.destroy();
       locusTransformBuffer.destroy();
       uniform.destroy();

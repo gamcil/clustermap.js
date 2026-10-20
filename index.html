@@ -58,8 +58,10 @@
       const testMode = params.has("test");
       const fixture = params.get("fixture");
       const syntheticFixture = Object.hasOwn(SYNTHETIC_FIXTURES, fixture) ? SYNTHETIC_FIXTURES[fixture] : null;
-      const biologicalFixtures = { mcaa: "fixtures/mcaa-neighbourhoods-173.json", pks: "fixtures/pks-regions-142.json", "tree-styling": "fixtures/tree-styling.json" };
+      const biologicalFixtures = { mcaa: "fixtures/mcaa-neighbourhoods-173.json", pks: "fixtures/pks-regions-142.json", "tree-styling": "fixtures/tree-styling.json", heatmap: "fixtures/heatmap.json" };
       const biologicalFixture = biologicalFixtures[fixture];
+      const projectFixtures = { "heatmap-project": "fixtures/clinker-project-heatmap.json" };
+      const projectFixture = projectFixtures[fixture];
       const treeFixture = fixture === "burnettii";
       const renderer = params.get("renderer") || (syntheticFixture || biologicalFixture ? "canvas" : "svg");
       const minZoom = Number(params.get("minZoom"));
@@ -70,7 +72,7 @@
         legend: { show: true, position: syntheticFixture || biologicalFixture ? "bottom" : "right", columns: biologicalFixture ? 8 : 1 },
         link: { threshold: 0.3, bestOnly: true },
       });
-      const source = syntheticFixture ? Promise.resolve(createLargeTestingData(syntheticFixture)) : treeFixture ? d3.json("fixtures/bua-genbank-tree.json") : biologicalFixture ? d3.json(biologicalFixture) : d3.json("testing.json");
+      const source = projectFixture ? d3.json(projectFixture) : syntheticFixture ? Promise.resolve(createLargeTestingData(syntheticFixture)) : treeFixture ? d3.json("fixtures/bua-genbank-tree.json") : biologicalFixture ? d3.json(biologicalFixture) : d3.json("testing.json");
       const download = (blob, filename) => {
         const url = URL.createObjectURL(blob);
         const anchor = Object.assign(document.createElement("a"), { href: url, download: filename });
@@ -106,9 +108,21 @@
       defineClinkerEditor();
       const editor = document.querySelector("clinker-editor");
       const status = document.querySelector("#data-import-status");
-      source.then((data) => {
+      source.then((loaded) => {
+        const project = loaded.format === "clinker-project" ? loaded : null;
+        const data = project ? project.data : loaded;
+        if (project) chart.config({ ...project.config, plot: {
+          ...project.config.plot,
+          renderer: params.get("renderer") || project.config.plot.renderer,
+          ...(testMode ? { transitionDuration: 0 } : {}),
+          ...(params.has("minZoom") ? { minZoom } : {}),
+          ...(params.has("minimap") ? { minimap: { ...project.config.plot.minimap, show: true } } : {}),
+        } });
+        // Annotation examples opt in explicitly; ordinary charts remain synteny-only.
+        if (fixture === "heatmap" || fixture === "heatmap-project") chart.config({ annotations: { enabled: true } });
         if (testMode) { window.__demoChart = chart; window.d3 = d3; }
         d3.select("#plot").selectAll("div").data([data]).join("div").attr("class", "chart-host").call(chart);
+        if (project?.state) chart.state(project.state);
         editor.chart = chart;
         mountPlotSelectionToolbar(chart, document.querySelector("#workspace"));
         document.querySelector("#btn-editor").addEventListener("click", () => {

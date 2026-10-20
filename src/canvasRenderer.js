@@ -1,5 +1,6 @@
 import { rgbaToRgb } from "./utils.js";
 import { hitTest } from "./hitTest.mjs";
+import { worldViewport } from "./camera.mjs";
 import { queryViewportOrdered } from "./spatialIndex.mjs";
 import {
   offsetsForGene,
@@ -17,6 +18,8 @@ import { interpolateLinkAnchors, interpolateLinkOpacity, traceLinkPath } from ".
 import { hitTestTreeNode, interpolateTreeLayout } from "./treeLayout.mjs";
 import { drawCanvasTree, layoutCanvasTree } from "./treeCanvasRenderer.mjs";
 import { resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
+import { annotationPanelsForFrame } from "./annotations.mjs";
+import { drawCanvasAnnotations } from "./annotationRenderers.mjs";
 
 /**
  * Choose Canvas backing-store resolution from the view scale.  This affects
@@ -151,14 +154,7 @@ export function canvasWorldPoint(canvas, event, camera) {
  * screen-space margin prevents records from popping at its edge while panning.
  */
 export function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
-  const bounds = dimensions || canvas.getBoundingClientRect();
-  const margin = overscan / camera.k;
-  return {
-    minX: -camera.x / camera.k - margin,
-    maxX: (bounds.width - camera.x) / camera.k + margin,
-    minY: -camera.y / camera.k - margin,
-    maxY: (bounds.height - camera.y) / camera.k + margin,
-  };
+  return worldViewport(camera, dimensions || canvas.getBoundingClientRect(), overscan);
 }
 
 /**
@@ -240,6 +236,11 @@ export function canvasFigureBounds(context, scene, config, tree = null) {
   if (treeLayout) {
     include(treeLayout.bounds.minX, treeLayout.bounds.minY);
     include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
+  }
+  for (const panel of annotationPanelsForFrame(scene)) {
+    for (const item of panel.texts) includeText(item.text, panel.x + item.x, item.y,
+      { fontSize: panel.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
+        align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
   }
   if (scene.chrome?.legend.visible) {
     const legend = scene.chrome.legend;
@@ -873,7 +874,10 @@ export function interpolateCanvasScene(previous, scene, amount) {
     });
   }
 
-  return { ...scene, clusters, loci, genes, links };
+  const priorPanels = new Map((previous.annotationPanels || []).map((panel) => [panel.uid, panel]));
+  const annotationPanels = (scene.annotationPanels || []).map((panel) => ({ ...panel,
+    x: interpolateNumber(priorPanels.get(panel.uid)?.x ?? panel.x, panel.x, amount) }));
+  return { ...scene, clusters, loci, genes, links, annotationPanels };
 }
 
 /** Draw a renderer-neutral chart scene into a Canvas 2D context. */
@@ -913,6 +917,7 @@ export function renderCanvas({
   highlightLocusIds = null,
   showClusterLabels = true,
   showChrome = true,
+  showAnnotationGeometry = true,
 }) {
   // Resolve label visibility before querying or projecting records. The
   // WebGPU overlay requests labels without bodies; disabled labels should
@@ -1092,6 +1097,7 @@ export function renderCanvas({
       );
     }
   }
+  if (showChrome) drawCanvasAnnotations(context, displayScene, preview, { showGeometry: showAnnotationGeometry, viewport });
   if (showChrome && displayScene.chrome) {
     const chrome = preview?.chrome || displayScene.chrome;
     drawLegend(context, chrome.legend);

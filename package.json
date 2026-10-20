@@ -24,6 +24,7 @@
     "dist",
     "README.md",
     "TREE_SCHEMA.md",
+    "ANNOTATION_SCHEMA.md",
     "LICENSE"
   ],
   "scripts": {

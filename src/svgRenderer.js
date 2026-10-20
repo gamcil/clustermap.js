@@ -5,6 +5,7 @@ import { filterLinks } from "./links/groups.mjs";
 import { getLinkPath, getLinkLabelPosition, interpolateLinkAnchors, interpolateLinkOpacity } from "./links/layout.mjs";
 import { renderSvgTree as renderTree } from "./treeSvgRenderer.mjs";
 import { resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
+import { renderSvgAnnotations } from "./annotationRenderers.mjs";
 
 import {
   clusterLabelOffsetForPreview, clusterLabelTextForPreview, clusterOffsetForPreview,
@@ -20,6 +21,8 @@ export function renderSvg({
   plot,
   data,
   scene,
+  annotationsOnly = false,
+  annotationViewport = null,
   preview = null,
   previousScene = null,
   previousTree = null,
@@ -38,6 +41,11 @@ export function renderSvg({
   if (preview) return renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
     highlightGeneIds, highlightLocusIds });
   previewStates.delete(plot.node());
+  if (annotationsOnly) {
+    renderChrome({ plot, chrome: scene.chrome, ids, interactions });
+    renderSvgAnnotations(plot, scene, { viewport: annotationViewport });
+    return;
+  }
   const linkGroup = plot
     .selectAll("g.links")
     .data([data])
@@ -269,6 +277,7 @@ export function renderSvg({
     );
 
   renderChrome({ plot, chrome: scene.chrome, ids, interactions });
+  renderSvgAnnotations(plot, scene, { transition, animate, viewport: annotationViewport });
   renderTree(plot, data.tree, scene, config, interactions, transition, animate, {
     previousTree,
     previousScene: previousTreeScene,
@@ -346,6 +355,7 @@ function renderPreview({ plot, data, scene, preview, config, scales, ids, intera
     }
   }
   renderChrome({ plot, chrome: preview.chrome || scene.chrome, ids, interactions });
+  renderSvgAnnotations(plot, scene, { preview });
   renderTree(plot, data.tree, scene, config, interactions, null, false, { preview });
   previewStates.set(plot.node(), { scene, records: current, type: preview.type });
 }

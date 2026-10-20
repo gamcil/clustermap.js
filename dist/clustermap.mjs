@@ -4073,6 +4073,7 @@ function clusterLabelOffsetsForStarts(
 
 function chromeForPreview(scene, maxX) {
   if (!scene.chrome) return null;
+  const dx = scene.annotationPanels?.length ? annotationOffsetForPreview(scene, { contentMaxX: maxX }) : maxX - scene.bounds.maxX;
   return {
     ...scene.chrome,
     legend: {
@@ -4082,10 +4083,20 @@ function chromeForPreview(scene, maxX) {
         x:
           scene.chrome.legend.placement === "bottom"
             ? scene.chrome.legend.position.x
-            : scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
+            : scene.chrome.legend.position.x + dx,
       },
     },
   };
+}
+
+/** Keep the annotation group beyond stationary scales while loci move. */
+function annotationOffsetForPreview(scene, preview) {
+  if (!scene.annotationPanels?.length || preview?.contentMaxX === undefined) return 0;
+  let right = -Infinity;
+  for (const locus of scene.loci.values()) right = Math.max(right, locus.worldEnd);
+  const movingRight = scene.bounds.maxX + preview.contentMaxX - right;
+  return Math.max(movingRight, scene.annotationChromeRight ?? -Infinity) -
+    (scene.annotationAnchorX ?? scene.bounds.maxX);
 }
 
 /**
@@ -4105,6 +4116,7 @@ function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels }) {
 
   return {
     type: "locus-offset",
+    contentMaxX: maxX,
     locusUid,
     offsetX,
     clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, [
@@ -4132,6 +4144,7 @@ function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
   const maxX = Math.max(...[...scene.loci.values()].map(endFor));
   return {
     type: "locus-offsets",
+    contentMaxX: maxX,
     locusOffsets,
     clusterLabelOffsets: clusterLabelOffsetsForStarts(
       scene,
@@ -4212,6 +4225,7 @@ function createLocusTrimPreview(
   const maxX = Math.max(...[...scene.loci.values()].map(endFor));
   return {
     type: "locus-trim",
+    contentMaxX: maxX,
     locusUid,
     locusOffsets,
     loci: locusGeometry,
@@ -4540,29 +4554,29 @@ const TREE_COLOURING_DEFAULTS = {
 };
 const metricsCache = new WeakMap();
 const stylesCache = new WeakMap();
-const fail$1 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
+const fail$2 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
 const object$1 = (value) => value && typeof value === "object" && !Array.isArray(value);
 const own$1 = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
-function fields(value, allowed, where) {
-  if (!object$1(value)) fail$1(`${where} must be an object.`);
-  for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$1(`${where}.${key} is unsupported.`);
+function fields$1(value, allowed, where) {
+  if (!object$1(value)) fail$2(`${where} must be an object.`);
+  for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$2(`${where}.${key} is unsupported.`);
 }
 function colour(value, where) {
-  if (typeof value !== "string" || !color(value)) fail$1(`${where} must be a valid colour.`);
+  if (typeof value !== "string" || !color(value)) fail$2(`${where} must be a valid colour.`);
 }
 function positive(value, where) {
-  if (!Number.isFinite(value) || value <= 0) fail$1(`${where} must be finite and positive.`);
+  if (!Number.isFinite(value) || value <= 0) fail$2(`${where} must be finite and positive.`);
 }
 function validateTreeColouring(policy) {
   if (policy === undefined) return;
-  fields(policy, ["mode", "cutHeight", "palette", "showCutLine"], "colouring");
-  if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$1("colouring.mode must be none or cutHeight.");
+  fields$1(policy, ["mode", "cutHeight", "palette", "showCutLine"], "colouring");
+  if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$2("colouring.mode must be none or cutHeight.");
   if (own$1(policy, "cutHeight") && policy.cutHeight !== "auto" && (!Number.isFinite(policy.cutHeight) || policy.cutHeight < 0)) {
-    fail$1('colouring.cutHeight must be "auto" or a finite non-negative number.');
+    fail$2('colouring.cutHeight must be "auto" or a finite non-negative number.');
   }
-  if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$1("colouring.showCutLine must be boolean.");
+  if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$2("colouring.showCutLine must be boolean.");
   if (own$1(policy, "palette")) {
-    if (!Array.isArray(policy.palette) || !policy.palette.length) fail$1("colouring.palette must be a non-empty colour array.");
+    if (!Array.isArray(policy.palette) || !policy.palette.length) fail$2("colouring.palette must be a non-empty colour array.");
     policy.palette.forEach((entry) => colour(entry, "colouring.palette"));
   }
 }
@@ -4599,7 +4613,7 @@ function treeMetrics(tree) {
 }
 
 function validateBranch(style, where) {
-  fields(style, ["colour", "width"], where);
+  fields$1(style, ["colour", "width"], where);
   if (own$1(style, "colour")) colour(style.colour, `${where}.colour`);
   if (own$1(style, "width")) positive(style.width, `${where}.width`);
 }
@@ -4609,44 +4623,44 @@ function validateTreePresentation(tree, config = {}) {
   validateTreeColouring(config.colouring);
   if (!tree) return;
   if (tree.distance !== undefined) {
-    fields(tree.distance, ["kind", "label"], "distance");
-    if (tree.distance.kind !== "mergeHeight") fail$1("distance.kind must be mergeHeight.");
-    if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$1("distance.label must be text.");
+    fields$1(tree.distance, ["kind", "label"], "distance");
+    if (tree.distance.kind !== "mergeHeight") fail$2("distance.kind must be mergeHeight.");
+    if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$2("distance.label must be text.");
   }
   const presentation = tree.presentation;
   if (presentation !== undefined) {
-    fields(presentation, ["colouring", "subtrees", "nodes"], "presentation");
+    fields$1(presentation, ["colouring", "subtrees", "nodes"], "presentation");
     validateTreeColouring(presentation.colouring);
     const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
     for (const scope of ["subtrees", "nodes"]) {
       if (presentation[scope] === undefined) continue;
-      if (!object$1(presentation[scope])) fail$1(`presentation.${scope} must be a node-ID dictionary.`);
+      if (!object$1(presentation[scope])) fail$2(`presentation.${scope} must be a node-ID dictionary.`);
       for (const [uid, record] of Object.entries(presentation[scope])) {
         const node = nodes.get(uid);
-        if (!node) fail$1(`presentation.${scope} refers to unknown node '${uid}'.`);
-        fields(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
-        if (scope === "subtrees" && !node.children) fail$1(`subtree '${uid}' must be an internal node.`);
+        if (!node) fail$2(`presentation.${scope} refers to unknown node '${uid}'.`);
+        fields$1(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
+        if (scope === "subtrees" && !node.children) fail$2(`subtree '${uid}' must be an internal node.`);
         if (record.branch !== undefined) {
-          if (scope === "nodes" && uid === tree.root) fail$1("the display root has no incoming edge to style.");
+          if (scope === "nodes" && uid === tree.root) fail$2("the display root has no incoming edge to style.");
           validateBranch(record.branch, `${scope}.${uid}.branch`);
         }
         if (record.label !== undefined) {
-          if (!node.children) fail$1(`annotation '${uid}' must belong to an internal node.`);
+          if (!node.children) fail$2(`annotation '${uid}' must belong to an internal node.`);
           const label = record.label;
-          fields(label, ["text", "colour", "fontSize", "fontWeight", "fontStyle"], `nodes.${uid}.label`);
-          if (own$1(label, "text") && typeof label.text !== "string") fail$1(`annotation '${uid}' text must be a string.`);
+          fields$1(label, ["text", "colour", "fontSize", "fontWeight", "fontStyle"], `nodes.${uid}.label`);
+          if (own$1(label, "text") && typeof label.text !== "string") fail$2(`annotation '${uid}' text must be a string.`);
           if (own$1(label, "colour")) colour(label.colour, `annotation '${uid}' colour`);
           if (own$1(label, "fontSize")) positive(label.fontSize, `annotation '${uid}' fontSize`);
-          if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$1("annotation fontWeight must be 400 or 700.");
-          if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$1("annotation fontStyle must be normal or italic.");
+          if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$2("annotation fontWeight must be 400 or 700.");
+          if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$2("annotation fontStyle must be normal or italic.");
         }
       }
     }
   }
   const policy = { ...TREE_COLOURING_DEFAULTS, ...config.colouring, ...presentation?.colouring };
   if (policy.mode === "cutHeight") {
-    if (tree.distance?.kind !== "mergeHeight") fail$1("cutHeight colouring requires distance.kind = mergeHeight.");
-    if (!treeMetrics(tree).ultrametric) fail$1("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
+    if (tree.distance?.kind !== "mergeHeight") fail$2("cutHeight colouring requires distance.kind = mergeHeight.");
+    if (!treeMetrics(tree).ultrametric) fail$2("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
   }
 }
 
@@ -5528,6 +5542,1329 @@ function createChartIndex(data) {
   return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId };
 }
 
+function ascending(a, b) {
+  return a == null || b == null ? NaN : a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
+}
+
+function descending(a, b) {
+  return a == null || b == null ? NaN
+    : b < a ? -1
+    : b > a ? 1
+    : b >= a ? 0
+    : NaN;
+}
+
+function bisector(f) {
+  let compare1, compare2, delta;
+
+  // If an accessor is specified, promote it to a comparator. In this case we
+  // can test whether the search value is (self-) comparable. We can’t do this
+  // for a comparator (except for specific, known comparators) because we can’t
+  // tell if the comparator is symmetric, and an asymmetric comparator can’t be
+  // used to test whether a single value is comparable.
+  if (f.length !== 2) {
+    compare1 = ascending;
+    compare2 = (d, x) => ascending(f(d), x);
+    delta = (d, x) => f(d) - x;
+  } else {
+    compare1 = f === ascending || f === descending ? f : zero;
+    compare2 = f;
+    delta = f;
+  }
+
+  function left(a, x, lo = 0, hi = a.length) {
+    if (lo < hi) {
+      if (compare1(x, x) !== 0) return hi;
+      do {
+        const mid = (lo + hi) >>> 1;
+        if (compare2(a[mid], x) < 0) lo = mid + 1;
+        else hi = mid;
+      } while (lo < hi);
+    }
+    return lo;
+  }
+
+  function right(a, x, lo = 0, hi = a.length) {
+    if (lo < hi) {
+      if (compare1(x, x) !== 0) return hi;
+      do {
+        const mid = (lo + hi) >>> 1;
+        if (compare2(a[mid], x) <= 0) lo = mid + 1;
+        else hi = mid;
+      } while (lo < hi);
+    }
+    return lo;
+  }
+
+  function center(a, x, lo = 0, hi = a.length) {
+    const i = left(a, x, lo, hi - 1);
+    return i > lo && delta(a[i - 1], x) > -delta(a[i], x) ? i - 1 : i;
+  }
+
+  return {left, center, right};
+}
+
+function zero() {
+  return 0;
+}
+
+function number$1(x) {
+  return x === null ? NaN : +x;
+}
+
+const ascendingBisect = bisector(ascending);
+const bisectRight = ascendingBisect.right;
+bisector(number$1).center;
+var bisect = bisectRight;
+
+class InternMap extends Map {
+  constructor(entries, key = keyof) {
+    super();
+    Object.defineProperties(this, {_intern: {value: new Map()}, _key: {value: key}});
+    if (entries != null) for (const [key, value] of entries) this.set(key, value);
+  }
+  get(key) {
+    return super.get(intern_get(this, key));
+  }
+  has(key) {
+    return super.has(intern_get(this, key));
+  }
+  set(key, value) {
+    return super.set(intern_set(this, key), value);
+  }
+  delete(key) {
+    return super.delete(intern_delete(this, key));
+  }
+}
+
+function intern_get({_intern, _key}, value) {
+  const key = _key(value);
+  return _intern.has(key) ? _intern.get(key) : value;
+}
+
+function intern_set({_intern, _key}, value) {
+  const key = _key(value);
+  if (_intern.has(key)) return _intern.get(key);
+  _intern.set(key, value);
+  return value;
+}
+
+function intern_delete({_intern, _key}, value) {
+  const key = _key(value);
+  if (_intern.has(key)) {
+    value = _intern.get(key);
+    _intern.delete(key);
+  }
+  return value;
+}
+
+function keyof(value) {
+  return value !== null && typeof value === "object" ? value.valueOf() : value;
+}
+
+const e10 = Math.sqrt(50),
+    e5 = Math.sqrt(10),
+    e2 = Math.sqrt(2);
+
+function tickSpec(start, stop, count) {
+  const step = (stop - start) / Math.max(0, count),
+      power = Math.floor(Math.log10(step)),
+      error = step / Math.pow(10, power),
+      factor = error >= e10 ? 10 : error >= e5 ? 5 : error >= e2 ? 2 : 1;
+  let i1, i2, inc;
+  if (power < 0) {
+    inc = Math.pow(10, -power) / factor;
+    i1 = Math.round(start * inc);
+    i2 = Math.round(stop * inc);
+    if (i1 / inc < start) ++i1;
+    if (i2 / inc > stop) --i2;
+    inc = -inc;
+  } else {
+    inc = Math.pow(10, power) * factor;
+    i1 = Math.round(start / inc);
+    i2 = Math.round(stop / inc);
+    if (i1 * inc < start) ++i1;
+    if (i2 * inc > stop) --i2;
+  }
+  if (i2 < i1 && 0.5 <= count && count < 2) return tickSpec(start, stop, count * 2);
+  return [i1, i2, inc];
+}
+
+function ticks(start, stop, count) {
+  stop = +stop, start = +start, count = +count;
+  if (!(count > 0)) return [];
+  if (start === stop) return [start];
+  const reverse = stop < start, [i1, i2, inc] = reverse ? tickSpec(stop, start, count) : tickSpec(start, stop, count);
+  if (!(i2 >= i1)) return [];
+  const n = i2 - i1 + 1, ticks = new Array(n);
+  if (reverse) {
+    if (inc < 0) for (let i = 0; i < n; ++i) ticks[i] = (i2 - i) / -inc;
+    else for (let i = 0; i < n; ++i) ticks[i] = (i2 - i) * inc;
+  } else {
+    if (inc < 0) for (let i = 0; i < n; ++i) ticks[i] = (i1 + i) / -inc;
+    else for (let i = 0; i < n; ++i) ticks[i] = (i1 + i) * inc;
+  }
+  return ticks;
+}
+
+function tickIncrement(start, stop, count) {
+  stop = +stop, start = +start, count = +count;
+  return tickSpec(start, stop, count)[2];
+}
+
+function tickStep(start, stop, count) {
+  stop = +stop, start = +start, count = +count;
+  const reverse = stop < start, inc = reverse ? tickIncrement(stop, start, count) : tickIncrement(start, stop, count);
+  return (reverse ? -1 : 1) * (inc < 0 ? 1 / -inc : inc);
+}
+
+function max(values, valueof) {
+  let max;
+  if (valueof === undefined) {
+    for (const value of values) {
+      if (value != null
+          && (max < value || (max === undefined && value >= value))) {
+        max = value;
+      }
+    }
+  } else {
+    let index = -1;
+    for (let value of values) {
+      if ((value = valueof(value, ++index, values)) != null
+          && (max < value || (max === undefined && value >= value))) {
+        max = value;
+      }
+    }
+  }
+  return max;
+}
+
+function min(values, valueof) {
+  let min;
+  if (valueof === undefined) {
+    for (const value of values) {
+      if (value != null
+          && (min > value || (min === undefined && value >= value))) {
+        min = value;
+      }
+    }
+  } else {
+    let index = -1;
+    for (let value of values) {
+      if ((value = valueof(value, ++index, values)) != null
+          && (min > value || (min === undefined && value >= value))) {
+        min = value;
+      }
+    }
+  }
+  return min;
+}
+
+function initRange(domain, range) {
+  switch (arguments.length) {
+    case 0: break;
+    case 1: this.range(domain); break;
+    default: this.range(range).domain(domain); break;
+  }
+  return this;
+}
+
+function initInterpolator(domain, interpolator) {
+  switch (arguments.length) {
+    case 0: break;
+    case 1: {
+      if (typeof domain === "function") this.interpolator(domain);
+      else this.range(domain);
+      break;
+    }
+    default: {
+      this.domain(domain);
+      if (typeof interpolator === "function") this.interpolator(interpolator);
+      else this.range(interpolator);
+      break;
+    }
+  }
+  return this;
+}
+
+const implicit = Symbol("implicit");
+
+function ordinal() {
+  var index = new InternMap(),
+      domain = [],
+      range = [],
+      unknown = implicit;
+
+  function scale(d) {
+    let i = index.get(d);
+    if (i === undefined) {
+      if (unknown !== implicit) return unknown;
+      index.set(d, i = domain.push(d) - 1);
+    }
+    return range[i % range.length];
+  }
+
+  scale.domain = function(_) {
+    if (!arguments.length) return domain.slice();
+    domain = [], index = new InternMap();
+    for (const value of _) {
+      if (index.has(value)) continue;
+      index.set(value, domain.push(value) - 1);
+    }
+    return scale;
+  };
+
+  scale.range = function(_) {
+    return arguments.length ? (range = Array.from(_), scale) : range.slice();
+  };
+
+  scale.unknown = function(_) {
+    return arguments.length ? (unknown = _, scale) : unknown;
+  };
+
+  scale.copy = function() {
+    return ordinal(domain, range).unknown(unknown);
+  };
+
+  initRange.apply(scale, arguments);
+
+  return scale;
+}
+
+function constants(x) {
+  return function() {
+    return x;
+  };
+}
+
+function number(x) {
+  return +x;
+}
+
+var unit = [0, 1];
+
+function identity$1(x) {
+  return x;
+}
+
+function normalize(a, b) {
+  return (b -= (a = +a))
+      ? function(x) { return (x - a) / b; }
+      : constants(isNaN(b) ? NaN : 0.5);
+}
+
+function clamper(a, b) {
+  var t;
+  if (a > b) t = a, a = b, b = t;
+  return function(x) { return Math.max(a, Math.min(b, x)); };
+}
+
+// normalize(a, b)(x) takes a domain value x in [a,b] and returns the corresponding parameter t in [0,1].
+// interpolate(a, b)(t) takes a parameter t in [0,1] and returns the corresponding range value x in [a,b].
+function bimap(domain, range, interpolate) {
+  var d0 = domain[0], d1 = domain[1], r0 = range[0], r1 = range[1];
+  if (d1 < d0) d0 = normalize(d1, d0), r0 = interpolate(r1, r0);
+  else d0 = normalize(d0, d1), r0 = interpolate(r0, r1);
+  return function(x) { return r0(d0(x)); };
+}
+
+function polymap(domain, range, interpolate) {
+  var j = Math.min(domain.length, range.length) - 1,
+      d = new Array(j),
+      r = new Array(j),
+      i = -1;
+
+  // Reverse descending domains.
+  if (domain[j] < domain[0]) {
+    domain = domain.slice().reverse();
+    range = range.slice().reverse();
+  }
+
+  while (++i < j) {
+    d[i] = normalize(domain[i], domain[i + 1]);
+    r[i] = interpolate(range[i], range[i + 1]);
+  }
+
+  return function(x) {
+    var i = bisect(domain, x, 1, j) - 1;
+    return r[i](d[i](x));
+  };
+}
+
+function copy$1(source, target) {
+  return target
+      .domain(source.domain())
+      .range(source.range())
+      .interpolate(source.interpolate())
+      .clamp(source.clamp())
+      .unknown(source.unknown());
+}
+
+function transformer$1() {
+  var domain = unit,
+      range = unit,
+      interpolate = interpolate$1,
+      transform,
+      untransform,
+      unknown,
+      clamp = identity$1,
+      piecewise,
+      output,
+      input;
+
+  function rescale() {
+    var n = Math.min(domain.length, range.length);
+    if (clamp !== identity$1) clamp = clamper(domain[0], domain[n - 1]);
+    piecewise = n > 2 ? polymap : bimap;
+    output = input = null;
+    return scale;
+  }
+
+  function scale(x) {
+    return x == null || isNaN(x = +x) ? unknown : (output || (output = piecewise(domain.map(transform), range, interpolate)))(transform(clamp(x)));
+  }
+
+  scale.invert = function(y) {
+    return clamp(untransform((input || (input = piecewise(range, domain.map(transform), interpolateNumber$1)))(y)));
+  };
+
+  scale.domain = function(_) {
+    return arguments.length ? (domain = Array.from(_, number), rescale()) : domain.slice();
+  };
+
+  scale.range = function(_) {
+    return arguments.length ? (range = Array.from(_), rescale()) : range.slice();
+  };
+
+  scale.rangeRound = function(_) {
+    return range = Array.from(_), interpolate = interpolateRound, rescale();
+  };
+
+  scale.clamp = function(_) {
+    return arguments.length ? (clamp = _ ? true : identity$1, rescale()) : clamp !== identity$1;
+  };
+
+  scale.interpolate = function(_) {
+    return arguments.length ? (interpolate = _, rescale()) : interpolate;
+  };
+
+  scale.unknown = function(_) {
+    return arguments.length ? (unknown = _, scale) : unknown;
+  };
+
+  return function(t, u) {
+    transform = t, untransform = u;
+    return rescale();
+  };
+}
+
+function continuous() {
+  return transformer$1()(identity$1, identity$1);
+}
+
+function formatDecimal(x) {
+  return Math.abs(x = Math.round(x)) >= 1e21
+      ? x.toLocaleString("en").replace(/,/g, "")
+      : x.toString(10);
+}
+
+// Computes the decimal coefficient and exponent of the specified number x with
+// significant digits p, where x is positive and p is in [1, 21] or undefined.
+// For example, formatDecimalParts(1.23) returns ["123", 0].
+function formatDecimalParts(x, p) {
+  if (!isFinite(x) || x === 0) return null; // NaN, ±Infinity, ±0
+  var i = (x = p ? x.toExponential(p - 1) : x.toExponential()).indexOf("e"), coefficient = x.slice(0, i);
+
+  // The string returned by toExponential either has the form \d\.\d+e[-+]\d+
+  // (e.g., 1.2e+3) or the form \de[-+]\d+ (e.g., 1e+3).
+  return [
+    coefficient.length > 1 ? coefficient[0] + coefficient.slice(2) : coefficient,
+    +x.slice(i + 1)
+  ];
+}
+
+function exponent(x) {
+  return x = formatDecimalParts(Math.abs(x)), x ? x[1] : NaN;
+}
+
+function formatGroup(grouping, thousands) {
+  return function(value, width) {
+    var i = value.length,
+        t = [],
+        j = 0,
+        g = grouping[0],
+        length = 0;
+
+    while (i > 0 && g > 0) {
+      if (length + g + 1 > width) g = Math.max(1, width - length);
+      t.push(value.substring(i -= g, i + g));
+      if ((length += g + 1) > width) break;
+      g = grouping[j = (j + 1) % grouping.length];
+    }
+
+    return t.reverse().join(thousands);
+  };
+}
+
+function formatNumerals(numerals) {
+  return function(value) {
+    return value.replace(/[0-9]/g, function(i) {
+      return numerals[+i];
+    });
+  };
+}
+
+// [[fill]align][sign][symbol][0][width][,][.precision][~][type]
+var re = /^(?:(.)?([<>=^]))?([+\-( ])?([$#])?(0)?(\d+)?(,)?(\.\d+)?(~)?([a-z%])?$/i;
+
+function formatSpecifier(specifier) {
+  if (!(match = re.exec(specifier))) throw new Error("invalid format: " + specifier);
+  var match;
+  return new FormatSpecifier({
+    fill: match[1],
+    align: match[2],
+    sign: match[3],
+    symbol: match[4],
+    zero: match[5],
+    width: match[6],
+    comma: match[7],
+    precision: match[8] && match[8].slice(1),
+    trim: match[9],
+    type: match[10]
+  });
+}
+
+formatSpecifier.prototype = FormatSpecifier.prototype; // instanceof
+
+function FormatSpecifier(specifier) {
+  this.fill = specifier.fill === undefined ? " " : specifier.fill + "";
+  this.align = specifier.align === undefined ? ">" : specifier.align + "";
+  this.sign = specifier.sign === undefined ? "-" : specifier.sign + "";
+  this.symbol = specifier.symbol === undefined ? "" : specifier.symbol + "";
+  this.zero = !!specifier.zero;
+  this.width = specifier.width === undefined ? undefined : +specifier.width;
+  this.comma = !!specifier.comma;
+  this.precision = specifier.precision === undefined ? undefined : +specifier.precision;
+  this.trim = !!specifier.trim;
+  this.type = specifier.type === undefined ? "" : specifier.type + "";
+}
+
+FormatSpecifier.prototype.toString = function() {
+  return this.fill
+      + this.align
+      + this.sign
+      + this.symbol
+      + (this.zero ? "0" : "")
+      + (this.width === undefined ? "" : Math.max(1, this.width | 0))
+      + (this.comma ? "," : "")
+      + (this.precision === undefined ? "" : "." + Math.max(0, this.precision | 0))
+      + (this.trim ? "~" : "")
+      + this.type;
+};
+
+// Trims insignificant zeros, e.g., replaces 1.2000k with 1.2k.
+function formatTrim(s) {
+  out: for (var n = s.length, i = 1, i0 = -1, i1; i < n; ++i) {
+    switch (s[i]) {
+      case ".": i0 = i1 = i; break;
+      case "0": if (i0 === 0) i0 = i; i1 = i; break;
+      default: if (!+s[i]) break out; if (i0 > 0) i0 = 0; break;
+    }
+  }
+  return i0 > 0 ? s.slice(0, i0) + s.slice(i1 + 1) : s;
+}
+
+var prefixExponent;
+
+function formatPrefixAuto(x, p) {
+  var d = formatDecimalParts(x, p);
+  if (!d) return prefixExponent = undefined, x.toPrecision(p);
+  var coefficient = d[0],
+      exponent = d[1],
+      i = exponent - (prefixExponent = Math.max(-8, Math.min(8, Math.floor(exponent / 3))) * 3) + 1,
+      n = coefficient.length;
+  return i === n ? coefficient
+      : i > n ? coefficient + new Array(i - n + 1).join("0")
+      : i > 0 ? coefficient.slice(0, i) + "." + coefficient.slice(i)
+      : "0." + new Array(1 - i).join("0") + formatDecimalParts(x, Math.max(0, p + i - 1))[0]; // less than 1y!
+}
+
+function formatRounded(x, p) {
+  var d = formatDecimalParts(x, p);
+  if (!d) return x + "";
+  var coefficient = d[0],
+      exponent = d[1];
+  return exponent < 0 ? "0." + new Array(-exponent).join("0") + coefficient
+      : coefficient.length > exponent + 1 ? coefficient.slice(0, exponent + 1) + "." + coefficient.slice(exponent + 1)
+      : coefficient + new Array(exponent - coefficient.length + 2).join("0");
+}
+
+var formatTypes = {
+  "%": (x, p) => (x * 100).toFixed(p),
+  "b": (x) => Math.round(x).toString(2),
+  "c": (x) => x + "",
+  "d": formatDecimal,
+  "e": (x, p) => x.toExponential(p),
+  "f": (x, p) => x.toFixed(p),
+  "g": (x, p) => x.toPrecision(p),
+  "o": (x) => Math.round(x).toString(8),
+  "p": (x, p) => formatRounded(x * 100, p),
+  "r": formatRounded,
+  "s": formatPrefixAuto,
+  "X": (x) => Math.round(x).toString(16).toUpperCase(),
+  "x": (x) => Math.round(x).toString(16)
+};
+
+function identity(x) {
+  return x;
+}
+
+var map = Array.prototype.map,
+    prefixes = ["y","z","a","f","p","n","µ","m","","k","M","G","T","P","E","Z","Y"];
+
+function formatLocale(locale) {
+  var group = locale.grouping === undefined || locale.thousands === undefined ? identity : formatGroup(map.call(locale.grouping, Number), locale.thousands + ""),
+      currencyPrefix = locale.currency === undefined ? "" : locale.currency[0] + "",
+      currencySuffix = locale.currency === undefined ? "" : locale.currency[1] + "",
+      decimal = locale.decimal === undefined ? "." : locale.decimal + "",
+      numerals = locale.numerals === undefined ? identity : formatNumerals(map.call(locale.numerals, String)),
+      percent = locale.percent === undefined ? "%" : locale.percent + "",
+      minus = locale.minus === undefined ? "−" : locale.minus + "",
+      nan = locale.nan === undefined ? "NaN" : locale.nan + "";
+
+  function newFormat(specifier, options) {
+    specifier = formatSpecifier(specifier);
+
+    var fill = specifier.fill,
+        align = specifier.align,
+        sign = specifier.sign,
+        symbol = specifier.symbol,
+        zero = specifier.zero,
+        width = specifier.width,
+        comma = specifier.comma,
+        precision = specifier.precision,
+        trim = specifier.trim,
+        type = specifier.type;
+
+    // The "n" type is an alias for ",g".
+    if (type === "n") comma = true, type = "g";
+
+    // The "" type, and any invalid type, is an alias for ".12~g".
+    else if (!formatTypes[type]) precision === undefined && (precision = 12), trim = true, type = "g";
+
+    // If zero fill is specified, padding goes after sign and before digits.
+    if (zero || (fill === "0" && align === "=")) zero = true, fill = "0", align = "=";
+
+    // Compute the prefix and suffix.
+    // For SI-prefix, the suffix is lazily computed.
+    var prefix = (options && options.prefix !== undefined ? options.prefix : "") + (symbol === "$" ? currencyPrefix : symbol === "#" && /[boxX]/.test(type) ? "0" + type.toLowerCase() : ""),
+        suffix = (symbol === "$" ? currencySuffix : /[%p]/.test(type) ? percent : "") + (options && options.suffix !== undefined ? options.suffix : "");
+
+    // What format function should we use?
+    // Is this an integer type?
+    // Can this type generate exponential notation?
+    var formatType = formatTypes[type],
+        maybeSuffix = /[defgprs%]/.test(type);
+
+    // Set the default precision if not specified,
+    // or clamp the specified precision to the supported range.
+    // For significant precision, it must be in [1, 21].
+    // For fixed precision, it must be in [0, 20].
+    precision = precision === undefined ? 6
+        : /[gprs]/.test(type) ? Math.max(1, Math.min(21, precision))
+        : Math.max(0, Math.min(20, precision));
+
+    function format(value) {
+      var valuePrefix = prefix,
+          valueSuffix = suffix,
+          i, n, c;
+
+      if (type === "c") {
+        valueSuffix = formatType(value) + valueSuffix;
+        value = "";
+      } else {
+        value = +value;
+
+        // Determine the sign. -0 is not less than 0, but 1 / -0 is!
+        var valueNegative = value < 0 || 1 / value < 0;
+
+        // Perform the initial formatting.
+        value = isNaN(value) ? nan : formatType(Math.abs(value), precision);
+
+        // Trim insignificant zeros.
+        if (trim) value = formatTrim(value);
+
+        // If a negative value rounds to zero after formatting, and no explicit positive sign is requested, hide the sign.
+        if (valueNegative && +value === 0 && sign !== "+") valueNegative = false;
+
+        // Compute the prefix and suffix.
+        valuePrefix = (valueNegative ? (sign === "(" ? sign : minus) : sign === "-" || sign === "(" ? "" : sign) + valuePrefix;
+        valueSuffix = (type === "s" && !isNaN(value) && prefixExponent !== undefined ? prefixes[8 + prefixExponent / 3] : "") + valueSuffix + (valueNegative && sign === "(" ? ")" : "");
+
+        // Break the formatted value into the integer “value” part that can be
+        // grouped, and fractional or exponential “suffix” part that is not.
+        if (maybeSuffix) {
+          i = -1, n = value.length;
+          while (++i < n) {
+            if (c = value.charCodeAt(i), 48 > c || c > 57) {
+              valueSuffix = (c === 46 ? decimal + value.slice(i + 1) : value.slice(i)) + valueSuffix;
+              value = value.slice(0, i);
+              break;
+            }
+          }
+        }
+      }
+
+      // If the fill character is not "0", grouping is applied before padding.
+      if (comma && !zero) value = group(value, Infinity);
+
+      // Compute the padding.
+      var length = valuePrefix.length + value.length + valueSuffix.length,
+          padding = length < width ? new Array(width - length + 1).join(fill) : "";
+
+      // If the fill character is "0", grouping is applied after padding.
+      if (comma && zero) value = group(padding + value, padding.length ? width - valueSuffix.length : Infinity), padding = "";
+
+      // Reconstruct the final output based on the desired alignment.
+      switch (align) {
+        case "<": value = valuePrefix + value + valueSuffix + padding; break;
+        case "=": value = valuePrefix + padding + value + valueSuffix; break;
+        case "^": value = padding.slice(0, length = padding.length >> 1) + valuePrefix + value + valueSuffix + padding.slice(length); break;
+        default: value = padding + valuePrefix + value + valueSuffix; break;
+      }
+
+      return numerals(value);
+    }
+
+    format.toString = function() {
+      return specifier + "";
+    };
+
+    return format;
+  }
+
+  function formatPrefix(specifier, value) {
+    var e = Math.max(-8, Math.min(8, Math.floor(exponent(value) / 3))) * 3,
+        k = Math.pow(10, -e),
+        f = newFormat((specifier = formatSpecifier(specifier), specifier.type = "f", specifier), {suffix: prefixes[8 + e / 3]});
+    return function(value) {
+      return f(k * value);
+    };
+  }
+
+  return {
+    format: newFormat,
+    formatPrefix: formatPrefix
+  };
+}
+
+var locale;
+var format;
+var formatPrefix;
+
+defaultLocale({
+  thousands: ",",
+  grouping: [3],
+  currency: ["$", ""]
+});
+
+function defaultLocale(definition) {
+  locale = formatLocale(definition);
+  format = locale.format;
+  formatPrefix = locale.formatPrefix;
+  return locale;
+}
+
+function precisionFixed(step) {
+  return Math.max(0, -exponent(Math.abs(step)));
+}
+
+function precisionPrefix(step, value) {
+  return Math.max(0, Math.max(-8, Math.min(8, Math.floor(exponent(value) / 3))) * 3 - exponent(Math.abs(step)));
+}
+
+function precisionRound(step, max) {
+  step = Math.abs(step), max = Math.abs(max) - step;
+  return Math.max(0, exponent(max) - exponent(step)) + 1;
+}
+
+function tickFormat(start, stop, count, specifier) {
+  var step = tickStep(start, stop, count),
+      precision;
+  specifier = formatSpecifier(specifier == null ? ",f" : specifier);
+  switch (specifier.type) {
+    case "s": {
+      var value = Math.max(Math.abs(start), Math.abs(stop));
+      if (specifier.precision == null && !isNaN(precision = precisionPrefix(step, value))) specifier.precision = precision;
+      return formatPrefix(specifier, value);
+    }
+    case "":
+    case "e":
+    case "g":
+    case "p":
+    case "r": {
+      if (specifier.precision == null && !isNaN(precision = precisionRound(step, Math.max(Math.abs(start), Math.abs(stop))))) specifier.precision = precision - (specifier.type === "e");
+      break;
+    }
+    case "f":
+    case "%": {
+      if (specifier.precision == null && !isNaN(precision = precisionFixed(step))) specifier.precision = precision - (specifier.type === "%") * 2;
+      break;
+    }
+  }
+  return format(specifier);
+}
+
+function linearish(scale) {
+  var domain = scale.domain;
+
+  scale.ticks = function(count) {
+    var d = domain();
+    return ticks(d[0], d[d.length - 1], count == null ? 10 : count);
+  };
+
+  scale.tickFormat = function(count, specifier) {
+    var d = domain();
+    return tickFormat(d[0], d[d.length - 1], count == null ? 10 : count, specifier);
+  };
+
+  scale.nice = function(count) {
+    if (count == null) count = 10;
+
+    var d = domain();
+    var i0 = 0;
+    var i1 = d.length - 1;
+    var start = d[i0];
+    var stop = d[i1];
+    var prestep;
+    var step;
+    var maxIter = 10;
+
+    if (stop < start) {
+      step = start, start = stop, stop = step;
+      step = i0, i0 = i1, i1 = step;
+    }
+
+    while (maxIter-- > 0) {
+      step = tickIncrement(start, stop, count);
+      if (step === prestep) {
+        d[i0] = start;
+        d[i1] = stop;
+        return domain(d);
+      } else if (step > 0) {
+        start = Math.floor(start / step) * step;
+        stop = Math.ceil(stop / step) * step;
+      } else if (step < 0) {
+        start = Math.ceil(start * step) / step;
+        stop = Math.floor(stop * step) / step;
+      } else {
+        break;
+      }
+      prestep = step;
+    }
+
+    return scale;
+  };
+
+  return scale;
+}
+
+function linear() {
+  var scale = continuous();
+
+  scale.copy = function() {
+    return copy$1(scale, linear());
+  };
+
+  initRange.apply(scale, arguments);
+
+  return linearish(scale);
+}
+
+function transformer() {
+  var x0 = 0,
+      x1 = 1,
+      t0,
+      t1,
+      k10,
+      transform,
+      interpolator = identity$1,
+      clamp = false,
+      unknown;
+
+  function scale(x) {
+    return x == null || isNaN(x = +x) ? unknown : interpolator(k10 === 0 ? 0.5 : (x = (transform(x) - t0) * k10, clamp ? Math.max(0, Math.min(1, x)) : x));
+  }
+
+  scale.domain = function(_) {
+    return arguments.length ? ([x0, x1] = _, t0 = transform(x0 = +x0), t1 = transform(x1 = +x1), k10 = t0 === t1 ? 0 : 1 / (t1 - t0), scale) : [x0, x1];
+  };
+
+  scale.clamp = function(_) {
+    return arguments.length ? (clamp = !!_, scale) : clamp;
+  };
+
+  scale.interpolator = function(_) {
+    return arguments.length ? (interpolator = _, scale) : interpolator;
+  };
+
+  function range(interpolate) {
+    return function(_) {
+      var r0, r1;
+      return arguments.length ? ([r0, r1] = _, interpolator = interpolate(r0, r1), scale) : [interpolator(0), interpolator(1)];
+    };
+  }
+
+  scale.range = range(interpolate$1);
+
+  scale.rangeRound = range(interpolateRound);
+
+  scale.unknown = function(_) {
+    return arguments.length ? (unknown = _, scale) : unknown;
+  };
+
+  return function(t) {
+    transform = t, t0 = t(x0), t1 = t(x1), k10 = t0 === t1 ? 0 : 1 / (t1 - t0);
+    return scale;
+  };
+}
+
+function copy(source, target) {
+  return target
+      .domain(source.domain())
+      .interpolator(source.interpolator())
+      .clamp(source.clamp())
+      .unknown(source.unknown());
+}
+
+function sequential$1() {
+  var scale = linearish(transformer()(identity$1));
+
+  scale.copy = function() {
+    return copy(scale, sequential$1());
+  };
+
+  return initInterpolator.apply(scale, arguments);
+}
+
+const sequential = ["#f7fbff", "#08306b"];
+const categorical = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377", "#bbbbbb"];
+const ANNOTATION_DEFAULTS = Object.freeze({ cellWidth: 32, cellHeight: 20, gap: 24,
+  fontSize: 10, headingRotation: -60, missingColour: "#eeeeee",
+  cellGap: 0, cellBorderWidth: 0, cellBorderColour: "#ffffff", width: 120, colour: "#267c9e" });
+const ANNOTATION_PALETTES = {
+  Blue: sequential,
+  "Blue–red": ["#2166ac", "#f7f7f7", "#b2182b"],
+  Viridis: ["#440154", "#21918c", "#fde725"],
+  Qualitative: categorical,
+};
+
+// Validate at the JSON boundary; renderers only consume projected records.
+function validateAnnotationPanels(panels, clusters, { previousPanels = null } = {}) {
+  if (panels == null) return;
+  const fail = (message) => { throw new TypeError(`Invalid annotationPanels: ${message}`); };
+  if (!Array.isArray(panels)) fail("expected an array.");
+  const ids = new Set(), previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
+  let clusterIds;
+  for (const panel of panels) {
+    if (!panel || typeof panel !== "object") fail("each panel must be an object.");
+    if (typeof panel.uid !== "string" || !panel.uid.trim() || ids.has(panel.uid)) fail("panels require unique, non-empty uid strings.");
+    ids.add(panel.uid);
+    const before = previous.get(panel.uid);
+    if (before === panel) continue;
+    if (!["heatmap", "bar"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap or bar.`);
+    if (panel.title != null && typeof panel.title !== "string") fail("title must be text.");
+    for (const key of ["show", "showKey", "showColumnLabels"]) {
+      if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
+    }
+    if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
+    if (!Array.isArray(panel.columns) || !panel.columns.length ||
+        panel.columns.some((column) => typeof column !== "string" || !column.trim()) ||
+        new Set(panel.columns).size !== panel.columns.length) fail("columns must be unique, non-empty strings.");
+    if (panel.type === "bar" && panel.columns.length !== 1) fail("bar panels require exactly one column.");
+    if (!panel.values || typeof panel.values !== "object" || Array.isArray(panel.values)) fail("values must map cluster IDs to row arrays.");
+    for (const key of ["cellWidth", "cellHeight", "fontSize", "width"]) {
+      if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
+    }
+    if (panel.gap !== undefined && (!Number.isFinite(panel.gap) || panel.gap < 0)) fail("gap must be non-negative.");
+    for (const key of ["cellGap", "cellBorderWidth"]) {
+      if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] < 0)) fail(`${key} must be non-negative.`);
+    }
+    if ((panel.cellGap ?? 0) >= Math.min(panel.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth,
+      panel.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight)) fail("cellGap must be smaller than cellWidth and cellHeight.");
+    if (panel.cellBorderColour !== undefined && (typeof panel.cellBorderColour !== "string" || !color(panel.cellBorderColour))) fail("cellBorderColour must be a CSS colour.");
+    if (panel.colour !== undefined && (typeof panel.colour !== "string" || !color(panel.colour))) fail("colour must be a CSS colour.");
+    const scale = panel.scale ?? {};
+    if (!scale || typeof scale !== "object" || Array.isArray(scale)) fail("scale must be an object.");
+    const type = scale.type ?? "continuous";
+    if (panel.type === "bar" && type !== "continuous") fail("bar panels require a continuous scale.");
+    if (!["continuous", "categorical"].includes(type)) fail("scale.type must be continuous or categorical.");
+    if (scale.colours !== undefined && (!Array.isArray(scale.colours) || !scale.colours.length ||
+        scale.colours.some((value) => typeof value !== "string" || !color(value)))) fail("scale.colours must contain valid CSS colours.");
+    if (type === "continuous" && scale.colours?.length < 2) fail("continuous scales need at least two colours.");
+    if (panel.missingColour !== undefined && (typeof panel.missingColour !== "string" || !color(panel.missingColour))) fail("missingColour must be a CSS colour.");
+    if (scale.domain !== undefined) {
+      if (!Array.isArray(scale.domain) || !scale.domain.length) fail("scale.domain must be a non-empty array.");
+      if (type === "continuous" && (scale.domain.length !== 2 || !scale.domain.every(Number.isFinite) || scale.domain[0] >= scale.domain[1])) fail("continuous domain must be [min, max] with min < max.");
+      if (panel.type === "bar" && (scale.domain[0] > 0 || scale.domain[1] < 0)) fail("bar domains must include zero.");
+      if (type === "categorical" && (scale.domain.some((value) => typeof value !== "string") || new Set(scale.domain).size !== scale.domain.length)) fail("categorical domain must contain unique strings.");
+    }
+    // Presentation changes leave the matrix valid unless they change its
+    // shape, value type or allowed categories. JSON loading always checks it.
+    const oldScale = before?.scale ?? {};
+    const sameCategories = sameArray(oldScale.domain, scale.domain);
+    if (before?.values === panel.values && before.columns.length === panel.columns.length &&
+        (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories)) continue;
+    clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
+    const categories = type === "categorical" && scale.domain ? new Set(scale.domain) : null;
+    for (const [uid, values] of Object.entries(panel.values)) {
+      if (!clusterIds.has(uid)) fail(`unknown cluster '${uid}'.`);
+      if (!Array.isArray(values) || values.length !== panel.columns.length) fail(`row '${uid}' must have one value per column.`);
+      for (const value of values) {
+        if (value === null) continue;
+        if (type === "continuous" ? !Number.isFinite(value) : typeof value !== "string") fail(`invalid ${type} value in row '${uid}'.`);
+        if (categories && !categories.has(value)) fail(`category '${value}' is absent from scale.domain.`);
+      }
+    }
+  }
+}
+
+const numberLabel = (value) => Number(value.toPrecision(3)).toString();
+const text = (value, x, y, extra = {}) => ({ text: String(value), x, y, anchor: "start", ...extra });
+
+function textBounds(value, fontSize, fontFamily, measureText, { weight = 400, rotation = 0, anchor = "start" } = {}) {
+  const metrics = measureText?.(String(value), { fontSize, fontFamily, fontWeight: weight });
+  const width = metrics?.width ?? String(value).length * fontSize * 0.6;
+  const shift = anchor === "end" ? -width : anchor === "middle" ? -width / 2 : 0;
+  const left = -(metrics?.actualBoundingBoxLeft ?? 0) + shift;
+  const right = (metrics?.actualBoundingBoxRight ?? width) + shift;
+  const top = -(metrics?.actualBoundingBoxAscent ?? fontSize * 0.8);
+  const bottom = metrics?.actualBoundingBoxDescent ?? fontSize * 0.2;
+  const angle = rotation * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
+  const points = [[left, top], [right, top], [left, bottom], [right, bottom]]
+    .map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
+  return { minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
+    minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)) };
+}
+
+/** Right edge of cluster decorations, excluding a right legend placed after annotations. */
+function annotationChromeRightEdge(chrome, measureText = null) {
+  let right = -Infinity;
+  const bar = chrome?.scaleBar, identity = chrome?.colourBar, legend = chrome?.legend;
+  if (bar?.visible) {
+    const label = textBounds(bar.label, bar.fontSize * 4 / 3, bar.fontFamily, measureText, { anchor: "middle" });
+    right = Math.max(right, bar.position.x + bar.length + (bar.strokeWidth || 0) / 2,
+      bar.position.x + bar.length / 2 + label.maxX);
+  }
+  if (identity?.visible) {
+    const label = textBounds(identity.label, identity.fontSize * 4 / 3, identity.fontFamily, measureText, { anchor: "middle" });
+    const start = textBounds(identity.startLabel, identity.fontSize * 4 / 3, identity.fontFamily, measureText);
+    right = Math.max(right, identity.position.x + identity.width + 0.5,
+      identity.position.x + identity.width / 2 + label.maxX, identity.position.x + start.maxX);
+  }
+  if (legend?.visible && legend.placement === "bottom") {
+    for (const item of legend.items) {
+      const label = textBounds(item.label, legend.fontSize, legend.fontFamily, measureText);
+      const subtitle = textBounds(item.subtitle || "", legend.subtitleFontSize, legend.fontFamily, measureText);
+      right = Math.max(right, legend.position.x + item.x + item.radius,
+        legend.position.x + item.textX + Math.max(label.maxX, subtitle.maxX));
+    }
+  }
+  return right;
+}
+
+// Values are replaced at data boundaries and shared by presentation edits.
+// Retain only their inferred domain, not a second flattened copy of the matrix.
+const domainCache = new WeakMap();
+function inferredDomain(values, type, isBar) {
+  let cached = domainCache.get(values);
+  if (!cached) { cached = {}; domainCache.set(values, cached); }
+  const key = type === "categorical" ? "categories" : isBar ? "bars" : "numeric";
+  if (cached[key]) return cached[key];
+  const categories = new Set();
+  let min = Infinity, max = -Infinity, count = 0;
+  for (const row of Object.values(values)) for (const value of row) {
+    if (value === null) continue;
+    count++;
+    if (type === "categorical") categories.add(value);
+    else { min = Math.min(min, value); max = Math.max(max, value); }
+  }
+  if (isBar) { min = Math.min(0, min); max = Math.max(0, max); }
+  return cached[key] = type === "categorical" ? [...categories]
+    : !count || isBar && min === max ? [0, 1]
+    : min === max ? [min - 0.5, max + 0.5] : [min, max];
+}
+
+/** Resolve scales identically for layout and the appearance editor. */
+function resolveAnnotationScale(source) {
+  const scale = source.scale ?? {}, type = scale.type ?? "continuous";
+  const domain = scale.domain ?? inferredDomain(source.values, type, source.type === "bar");
+  const colours = scale.colours ?? (type === "continuous" ? sequential : categorical);
+  const colour = type === "categorical"
+    ? ordinal(domain, colours).unknown(source.missingColour ?? "#eeeeee")
+    : linear().domain(colours.map((_, i) => domain[0] + (domain[1] - domain[0]) * i / (colours.length - 1))).range(colours).clamp(true);
+  return { type, domain, colours, colour };
+}
+
+// Draw the fill and a non-overlapping inset border ring using ordinary rects.
+// All backends consume the same primitives, including instanced WebGPU cells.
+function cellRectangles(rect, borderWidth, borderColour) {
+  const result = [rect];
+  const width = Math.min(borderWidth, rect.width / 2, rect.height / 2);
+  if (!width) return result;
+  const { x, y, width: w, height: h } = rect;
+  result.push(
+    { x, y, width: w, height: width, fill: borderColour },
+    { x, y: y + h - width, width: w, height: width, fill: borderColour },
+  );
+  if (h > width * 2) result.push(
+    { x, y: y + width, width, height: h - width * 2, fill: borderColour },
+    { x: x + w - width, y: y + width, width, height: h - width * 2, fill: borderColour },
+  );
+  return result;
+}
+
+function barRectangles(value, position, width, height, fill, missingColour, borderWidth, borderColour) {
+  const zero = position(0);
+  if (value === null) {
+    const markerWidth = Math.min(6, width);
+    return [{ x: Math.max(0, Math.min(width - markerWidth, zero - markerWidth / 2)),
+      y: -height / 2, width: markerWidth, height, fill: missingColour }];
+  }
+  const end = position(value);
+  // The baseline remains visible for zero values and when bars are narrower
+  // than a pixel. It is a rectangle, so all renderers share its geometry.
+  const rects = [{ x: Math.max(0, Math.min(width - Math.min(1, width), zero - 0.5)),
+    y: -height / 2, width: Math.min(1, width), height, fill: "#999999" }];
+  if (end !== zero) rects.push(...cellRectangles({ x: Math.min(zero, end), y: -height / 2,
+    width: Math.abs(end - zero), height, fill }, borderWidth, borderColour));
+  return rects;
+}
+
+const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
+  one.length === two.length && one.every((value, index) => value === two[index]);
+function sameCellDefinition(before, after) {
+  return before && before.values === after.values && sameArray(before.columns, after.columns) &&
+    ["type", "width", "cellWidth", "cellHeight", "cellGap", "cellBorderWidth", "cellBorderColour", "colour", "missingColour"]
+      .every((field) => before[field] === after[field]) &&
+    before.scale?.type === after.scale?.type && sameArray(before.scale?.domain, after.scale?.domain) &&
+    sameArray(before.scale?.colours, after.scale?.colours);
+}
+
+/** Project JSON annotations once, using the same row coordinates as loci. */
+function layoutAnnotationPanels(definitions, clusters, bounds,
+  { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null } = {}) {
+  if (!definitions?.length || !bounds || !clusters.size) return [];
+  const previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
+  let x = anchorX;
+  return definitions.filter((source) => source.show !== false).map((source) => {
+    const before = previous.get(source.uid);
+    x += source.gap ?? ANNOTATION_DEFAULTS.gap;
+    if (before?.definition === source && before.fontFamily === fontFamily && before.rowOffset === rowOffset) {
+      const panel = before.x === x ? before : { ...before, x };
+      x += panel.width;
+      return panel;
+    }
+    const isBar = source.type === "bar";
+    const cellWidth = isBar ? source.width ?? ANNOTATION_DEFAULTS.width : source.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth;
+    const cellHeight = source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight;
+    const fontSize = source.fontSize ?? ANNOTATION_DEFAULTS.fontSize, width = cellWidth * source.columns.length;
+    const { type, domain, colour } = resolveAnnotationScale(source);
+    const cellGap = isBar ? 0 : source.cellGap ?? ANNOTATION_DEFAULTS.cellGap;
+    const borderWidth = source.cellBorderWidth ?? ANNOTATION_DEFAULTS.cellBorderWidth;
+    const borderColour = source.cellBorderColour ?? ANNOTATION_DEFAULTS.cellBorderColour;
+    const position = isBar ? linear().domain(domain).range([0, width]).clamp(true) : null;
+    const rows = sameCellDefinition(before?.definition, source) ? before.rows : [...clusters.keys()].map((uid) => ({ uid, cells: source.columns.map((_, i) => {
+      const value = Object.hasOwn(source.values, uid) ? source.values[uid][i] : null;
+      const rect = { x: i * cellWidth + cellGap / 2, y: -cellHeight / 2 + cellGap / 2,
+        width: cellWidth - cellGap, height: cellHeight - cellGap,
+        fill: value === null ? source.missingColour ?? "#eeeeee" : colour(value) };
+      return { ...rect, value, column: source.columns[i], columnIndex: i,
+        rects: isBar ? barRectangles(value, position, width, cellHeight,
+          source.colour ?? ANNOTATION_DEFAULTS.colour, source.missingColour ?? ANNOTATION_DEFAULTS.missingColour,
+          borderWidth, borderColour) : cellRectangles(rect, borderWidth, borderColour) };
+    }) }));
+    const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
+    const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation }));
+    for (const item of header) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
+    const headingHeight = Math.max(0, ...header.map((item) => -item.bounds.minY));
+    let titleDescent = 0;
+    if ((source.title ?? source.uid) !== "") {
+      const title = text(source.title ?? source.uid, 0, 0, { weight: 700, kind: "title" });
+      title.bounds = textBounds(title.text, fontSize, fontFamily, measureText, title);
+      titleDescent = Math.max(0, title.bounds.maxY);
+      header.push(title);
+    }
+    const footer = [], key = [];
+    if (source.showKey !== false && isBar) {
+      key.push({ x: 0, y: 0, width, height: 1, fill: "#555555" });
+      const ticks = position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40))));
+      if (!ticks.includes(0)) ticks.push(0);
+      for (const value of ticks.sort((a, b) => a - b)) {
+        const tickX = position(value);
+        key.push({ x: Math.max(0, Math.min(width - Math.min(1, width), tickX - 0.5)), y: 0,
+          width: Math.min(1, width), height: 5, fill: "#555555" });
+        footer.push(text(numberLabel(value), tickX, fontSize + 9,
+          { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
+      }
+    } else if (source.showKey !== false && type === "continuous") {
+      for (let i = 0; i < 32; i++) key.push({ x: i * width / 32, y: 0, width: width / 32 + 0.1, height: 8,
+        fill: colour(domain[0] + (domain[1] - domain[0]) * i / 31) });
+      footer.push(text(numberLabel(domain[0]), 0, 8 + fontSize + 3),
+        text(numberLabel(domain[1]), width, 8 + fontSize + 3, { anchor: "end" }));
+    } else if (source.showKey !== false) domain.forEach((category, i) => {
+      key.push({ x: 0, y: i * (fontSize + 6), width: 10, height: 10, fill: colour(category) });
+      footer.push(text(category, 15, i * (fontSize + 6) + 9));
+    });
+    for (const item of footer) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
+    const panel = { uid: source.uid, definition: source, title: source.title ?? source.uid, x, width, cellHeight, headingHeight, titleDescent, rowOffset, rows, header, footer, key, fontSize, fontFamily };
+    // Text overhang contributes to figure bounds, not inter-panel spacing.
+    panel.extentWidth = Math.max(width,
+      ...header.map((item) => item.x + item.bounds.maxX),
+      ...footer.map((item) => item.x + item.bounds.maxX));
+    x += panel.width;
+    return panel;
+  });
+}
+
+// Keep the static projection and only the latest preview per scene. Weak keys
+// let retired scenes go; a long drag cannot accumulate preview snapshots.
+const frameCache = new WeakMap();
+const emptyFrames = Object.freeze([]);
+const rowIndexes = new WeakMap();
+
+function annotationBoundsVisible(bounds, viewport) {
+  return !viewport || bounds.minX <= viewport.maxX && bounds.maxX >= viewport.minX &&
+    bounds.minY <= viewport.maxY && bounds.maxY >= viewport.minY;
+}
+
+function rowBoundary(rows, y, upper = false) {
+  let low = 0, high = rows.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (rows[mid].y < y || upper && rows[mid].y === y) low = mid + 1; else high = mid;
+  }
+  return low;
+}
+
+/** Cull shared records, retaining source cells and their contiguous column range. */
+function annotationPanelsInViewport(scene, preview, viewport, { geometry = true, labels = true } = {}) {
+  const panels = annotationPanelsForFrame(scene, preview);
+  if (!viewport) return panels;
+  const visible = [];
+  for (const panel of panels) {
+    const texts = labels ? panel.texts.filter((item) => annotationBoundsVisible({
+      minX: panel.x + item.x + item.bounds.minX, maxX: panel.x + item.x + item.bounds.maxX,
+      minY: item.y + item.bounds.minY, maxY: item.y + item.bounds.maxY }, viewport)) : emptyFrames;
+    const rects = geometry ? panel.rects.filter((rect) => annotationBoundsVisible({
+      minX: panel.x + rect.x, maxX: panel.x + rect.x + rect.width,
+      minY: rect.y, maxY: rect.y + rect.height }, viewport)) : emptyFrames;
+    let rows = emptyFrames;
+    if (geometry && panel.x <= viewport.maxX && panel.x + panel.width >= viewport.minX) {
+      let sorted = rowIndexes.get(panel);
+      if (!sorted) { sorted = [...panel.rows].sort((a, b) => a.y - b.y); rowIndexes.set(panel, sorted); }
+      const first = rowBoundary(sorted, viewport.minY - panel.cellHeight / 2);
+      const last = rowBoundary(sorted, viewport.maxY + panel.cellHeight / 2, true);
+      const count = panel.rows[0]?.cells.length || 1, cellWidth = panel.width / count;
+      const firstCell = Math.max(0, Math.floor((viewport.minX - panel.x) / cellWidth));
+      const lastCell = Math.min(count, Math.floor((viewport.maxX - panel.x) / cellWidth) + 1);
+      rows = sorted.slice(first, last).map((row) => ({ ...row, firstCell, lastCell }));
+    }
+    if (rows.length || rects.length || texts.length) visible.push({ ...panel, rows, rects, texts });
+  }
+  return visible;
+}
+
+/** Read-only frame records shared by rendering, bounds and hit testing. */
+function annotationPanelsForFrame(scene, preview = null) {
+  if (!scene.annotationPanels?.length) return emptyFrames;
+  let cached = frameCache.get(scene);
+  if (!cached) { cached = {}; frameCache.set(scene, cached); }
+  if (!preview && cached.static) return cached.static;
+  if (preview && cached.preview === preview) return cached.frame;
+  const frames = projectAnnotationFrame(scene, preview);
+  if (!preview) cached.static = frames;
+  else { cached.preview = preview; cached.frame = frames; }
+  return frames;
+}
+
+function projectAnnotationFrame(scene, preview) {
+  const dx = annotationOffsetForPreview(scene, preview);
+  // Shared header and key baselines keep every panel aligned, including when
+  // their labels, font sizes or cell heights differ.
+  const cellHeight = Math.max(...scene.annotationPanels.map((panel) => panel.cellHeight));
+  const headingHeight = Math.max(...scene.annotationPanels.map((panel) => panel.headingHeight));
+  const titleDescent = Math.max(...scene.annotationPanels.map((panel) => panel.titleDescent));
+  const titleOffset = headingHeight > 0 ? headingHeight + 6 + titleDescent : 0;
+  const frames = scene.annotationPanels.map((panel) => {
+    const rows = panel.rows.map((row) => ({ ...row,
+      y: scene.clusters.get(row.uid).y + panel.rowOffset + clusterOffsetForPreview(preview, row.uid) }));
+    let minY = Infinity, maxY = -Infinity;
+    for (const row of rows) { minY = Math.min(minY, row.y); maxY = Math.max(maxY, row.y); }
+    const top = minY - cellHeight / 2 - 10, bottom = maxY + cellHeight / 2 + 20;
+    return { ...panel, x: panel.x + dx, rows,
+      texts: [...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
+        ...panel.footer.map((item) => ({ ...item, y: item.y + bottom }))],
+      rects: panel.key.map((item, keyIndex) => ({ ...item, keyIndex, y: item.y + bottom })) };
+  });
+  let minY = Infinity, maxY = -Infinity;
+  for (const frame of frames) {
+    const bounds = annotationPanelBounds(frame);
+    minY = Math.min(minY, bounds.minY); maxY = Math.max(maxY, bounds.maxY);
+  }
+  return frames.map((frame) => ({ ...frame, verticalBounds: { minY, maxY } }));
+}
+
+function annotationFigureBounds(bounds, panels, clusters) {
+  if (!bounds || !panels.length) return bounds;
+  const result = { ...bounds };
+  for (const panel of annotationPanelsForFrame({ annotationPanels: panels, clusters })) {
+    const area = annotationPanelBounds(panel);
+    result.maxX = Math.max(result.maxX, panel.x + panel.extentWidth);
+    result.minY = Math.min(result.minY, area.minY);
+    result.maxY = Math.max(result.maxY, area.maxY);
+  }
+  return result;
+}
+
+/** Panel area includes whitespace between rows, headings and the colour key. */
+function annotationPanelBounds(panel) {
+  const bounds = { minX: panel.x, maxX: panel.x + panel.width, minY: Infinity, maxY: -Infinity };
+  if (panel.verticalBounds) return { ...bounds, ...panel.verticalBounds };
+  for (const item of panel.texts) {
+    bounds.minY = Math.min(bounds.minY, item.y + item.bounds.minY);
+    bounds.maxY = Math.max(bounds.maxY, item.y + item.bounds.maxY);
+  }
+  for (const rect of panel.rects) {
+    bounds.minY = Math.min(bounds.minY, rect.y);
+    bounds.maxY = Math.max(bounds.maxY, rect.y + rect.height);
+  }
+  for (const row of panel.rows) {
+    bounds.minY = Math.min(bounds.minY, row.y - panel.cellHeight / 2);
+    bounds.maxY = Math.max(bounds.maxY, row.y + panel.cellHeight / 2);
+  }
+  return bounds;
+}
+
+/** Shared cell hit testing, independent of DOM elements or raster backends. */
+function hitTestAnnotationCell(scene, point, preview = null) {
+  if (!scene?.annotationPanels?.length) return null;
+  const panels = annotationPanelsForFrame(scene, preview);
+  for (let index = panels.length - 1; index >= 0; index--) {
+    const panel = panels[index];
+    if (point.x < panel.x || point.x > panel.x + panel.width) continue;
+    for (const row of panel.rows) {
+      if (Math.abs(point.y - row.y) > panel.cellHeight / 2) continue;
+      const cell = row.cells.find((cell) => point.x >= panel.x + cell.x && point.x <= panel.x + cell.x + cell.width &&
+        point.y >= row.y + cell.y && point.y <= row.y + cell.y + cell.height);
+      if (cell) return { panelUid: panel.uid, title: panel.title, clusterUid: row.uid,
+        clusterName: scene.clusters.get(row.uid).source.name || row.uid,
+        column: cell.column, value: cell.value };
+    }
+  }
+  return null;
+}
+
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned
 // records, including nested link endpoints and user metadata.
@@ -5568,6 +6905,7 @@ function normalizeLocus(locus, clusterUid) {
 
 function normalizeChartData(data, treeConfig = {}) {
   const source = cloneDataValue(data);
+  validateAnnotationPanels(source.annotationPanels, source.clusters);
   if (source.tree != null) {
     validateTree(source.tree, source.clusters);
     validateTreePresentation(source.tree, treeConfig);
@@ -5639,6 +6977,170 @@ function validateTree(tree, clusters) {
   if (seenClusters.size !== clusterIds.size) fail("every plotted cluster must be referenced by exactly one leaf.");
   validateTreePresentation(tree);
   return tree;
+}
+
+const fields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
+  "fontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
+  "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour"]);
+const fail$1 = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
+
+const isAnnotationOperation = (operation) => typeof operation?.type === "string" && operation.type.startsWith("annotationPanels.");
+
+function normalizeAnnotationOperation(data, operation) {
+  const known = new Set((data.annotationPanels || []).map((panel) => panel.uid));
+  if (operation.type === "annotationPanels.create") {
+    if (!operation.panel || typeof operation.panel.uid !== "string" || !operation.panel.uid.trim() || known.has(operation.panel.uid)) fail$1("create requires a new, non-empty panel uid.");
+    const index = operation.index ?? known.size;
+    if (!Number.isInteger(index) || index < 0 || index > known.size) fail$1("index must be a valid panel insertion position.");
+    return { type: operation.type, panel: structuredClone(operation.panel), index };
+  }
+  if (operation.type === "annotationPanels.reorder") {
+    if (!Array.isArray(operation.ids) || operation.ids.length !== known.size || new Set(operation.ids).size !== known.size ||
+        operation.ids.some((uid) => !known.has(uid))) fail$1("reorder must contain every panel uid exactly once.");
+    return { type: operation.type, ids: [...operation.ids] };
+  }
+  if (operation.type === "annotationPanels.delete") {
+    if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$1("delete requires existing panel IDs.");
+    return { type: operation.type, ids: [...new Set(operation.ids)] };
+  }
+  if (operation.type === "annotationPanels.replaceStyle") {
+    if (!known.has(operation.uid) || !operation.style || typeof operation.style !== "object" ||
+        Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !fields.has(key))) fail$1("replaceStyle requires an existing panel and supported style fields.");
+    return { type: operation.type, uid: operation.uid, style: structuredClone(operation.style) };
+  }
+  if (operation.type !== "annotationPanels.update") fail$1(`unsupported type '${operation.type}'.`);
+  if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$1("ids must reference existing panels.");
+  const changes = operation.changes;
+  if (!changes || typeof changes !== "object" || Array.isArray(changes) || !Object.keys(changes).length ||
+      Object.keys(changes).some((key) => !fields.has(key))) fail$1("changes contains unsupported fields.");
+  return { type: operation.type, ids: [...new Set(operation.ids)], changes: structuredClone(changes) };
+}
+
+function applyAnnotationOperation(data, operation) {
+  const panels = data.annotationPanels || [];
+  if (operation.type === "annotationPanels.create") {
+    data.annotationPanels = [...panels];
+    data.annotationPanels.splice(operation.index, 0, structuredClone(operation.panel));
+    return;
+  }
+  if (operation.type === "annotationPanels.delete") {
+    data.annotationPanels = panels.filter((panel) => !operation.ids.includes(panel.uid));
+    return;
+  }
+  if (operation.type === "annotationPanels.reorder") {
+    const byId = new Map(panels.map((panel) => [panel.uid, panel]));
+    data.annotationPanels = operation.ids.map((uid) => byId.get(uid));
+    return;
+  }
+  data.annotationPanels = panels.map((panel) => operation.type === "annotationPanels.replaceStyle"
+    ? panel.uid === operation.uid ? {
+      ...Object.fromEntries(Object.entries(panel).filter(([key]) => !fields.has(key))),
+      ...structuredClone(operation.style),
+    } : panel
+    : operation.ids.includes(panel.uid) ? { ...panel, ...structuredClone(operation.changes) } : panel);
+}
+
+function inverseAnnotationOperation(data, operation) {
+  if (operation.type === "annotationPanels.create") return [{ type: "annotationPanels.delete", ids: [operation.panel.uid] }];
+  if (operation.type === "annotationPanels.reorder") return [{ type: operation.type, ids: (data.annotationPanels || []).map((panel) => panel.uid) }];
+  if (operation.type === "annotationPanels.delete") return data.annotationPanels.flatMap((panel, index) =>
+    operation.ids.includes(panel.uid) ? [{ type: "annotationPanels.create", panel: structuredClone(panel), index }] : []);
+  const ids = operation.type === "annotationPanels.replaceStyle" ? [operation.uid] : operation.ids;
+  return data.annotationPanels.filter((panel) => ids.includes(panel.uid))
+    .map((panel) => ({ type: "annotationPanels.replaceStyle", uid: panel.uid,
+      style: structuredClone(Object.fromEntries(Object.entries(panel).filter(([key]) => fields.has(key)))) }));
+}
+
+// The operation normalizer has already built this private candidate array.
+function validateAnnotationChanges(data, panels) {
+  if (panels === data.annotationPanels) return;
+  validateAnnotationPanels(panels, data.clusters, { previousPanels: data.annotationPanels });
+}
+
+const svgViews = new WeakMap();
+
+const sameItems = (one, two) => one.length === two.length && one.every((item, i) => item === two[i]);
+const sameView = (one, two) => one.length === two.length && one.every((panel, i) => {
+  const next = two[i];
+  return panel.uid === next.uid && sameItems(panel.texts, next.texts) && sameItems(panel.rects, next.rects) &&
+    panel.rows.length === next.rows.length && panel.rows.every((row, index) =>
+      row.uid === next.rows[index].uid && row.firstCell === next.rows[index].firstCell && row.lastCell === next.rows[index].lastCell);
+});
+
+/** Camera motion only changes SVG joins when the visible row/column set changes. */
+function updateSvgAnnotationViewport(plot, scene, preview, viewport) {
+  if (!scene || plot.empty()) return;
+  const panels = annotationPanelsInViewport(scene, preview, viewport), before = svgViews.get(plot.node());
+  if (before?.scene === scene && before.preview === preview && sameView(before.panels, panels)) return;
+  renderSvgAnnotations(plot, scene, { preview, panels });
+}
+
+function renderSvgAnnotations(plot, scene, { preview = null, transition = null, animate = false,
+  viewport = null, panels: projected = null } = {}) {
+  const view = projected || annotationPanelsInViewport(scene, preview, animate ? null : viewport);
+  if (animate) svgViews.delete(plot.node());
+  else svgViews.set(plot.node(), { scene, preview, panels: view });
+  if (!scene.annotationPanels?.length) {
+    plot.selectAll("g.annotationPanels").remove();
+    return;
+  }
+  const moving = (selection) => animate ? selection.transition(transition) : selection.interrupt();
+  const panels = plot.selectAll("g.annotationPanels").data([null]).join("g")
+    .attr("class", "annotationPanels").attr("pointer-events", "none")
+    .selectAll("g.annotationPanel").data(view, (panel) => panel.uid)
+    .join("g").attr("class", "annotationPanel")
+    .attr("font-family", (panel) => panel.fontFamily).attr("font-size", (panel) => panel.fontSize);
+  moving(panels).attr("transform", (panel) => `translate(${panel.x},0)`);
+  panels.each(function (panel) {
+    const group = select(this);
+    const rows = group.selectAll("g.annotationRow").data(panel.rows, (row) => row.uid).join("g")
+      .attr("class", "annotationRow");
+    moving(rows).attr("transform", (row) => `translate(0,${row.y})`);
+    const cells = rows.selectAll("rect").data((row) =>
+      row.cells.slice(row.firstCell ?? 0, row.lastCell ?? row.cells.length).flatMap((cell) => cell.rects)).join("rect");
+    const key = group.selectAll("g.annotationKey").data([null]).join("g")
+      .attr("class", "annotationKey").selectAll("rect").data(panel.rects).join("rect");
+    for (const rects of [cells, key]) moving(rects)
+      .attr("x", (item) => item.x).attr("y", (item) => item.y)
+      .attr("width", (item) => item.width).attr("height", (item) => item.height).attr("fill", (item) => item.fill);
+    const texts = group.selectAll("text").data(panel.texts).join("text")
+      .text((item) => item.text).attr("text-anchor", (item) => item.anchor)
+      .attr("font-weight", (item) => item.weight || 400).attr("fill", "#333333");
+    moving(texts).attr("transform", (item) => `translate(${item.x},${item.y}) rotate(${item.rotation || 0})`);
+  });
+}
+
+function drawCanvasAnnotations(context, scene, preview = null, { showGeometry = true, viewport = null } = {}) {
+  for (const panel of annotationPanelsInViewport(scene, preview, viewport, { geometry: showGeometry })) {
+    context.save();
+    context.translate(panel.x, 0);
+    const rect = (item) => {
+      context.fillStyle = item.fill;
+      context.fillRect(item.x, item.y, item.width, item.height);
+    };
+    if (showGeometry) {
+      for (const row of panel.rows) {
+        context.save(); context.translate(0, row.y);
+        for (let i = row.firstCell ?? 0; i < (row.lastCell ?? row.cells.length); i++) {
+          for (const part of row.cells[i].rects) rect(part);
+        }
+        context.restore();
+      }
+      for (const item of panel.rects) rect(item);
+    }
+    for (const item of panel.texts) {
+      context.save();
+      context.translate(item.x, item.y);
+      context.rotate((item.rotation || 0) * Math.PI / 180);
+      context.font = `${item.weight || 400} ${panel.fontSize}px ${panel.fontFamily}`;
+      context.fillStyle = "#333333";
+      context.textAlign = item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left";
+      context.textBaseline = "alphabetic";
+      context.fillText(item.text, 0, 0);
+      context.restore();
+    }
+    context.restore();
+  }
 }
 
 const fail = (message) => { throw new TypeError(`Invalid chart operation: ${message}`); };
@@ -6108,13 +7610,26 @@ function applyChartOperations(data, index, operations, treeConfig = {}) {
     throw operationError("operations must be a non-empty array");
   }
   const groupIds = new Set(index.groupById.keys());
-  const applied = operations.map((operation) => isTreeOperation(operation)
-    ? normalizeTreeOperation(data.tree, operation)
-    : validateOperation(operation, index, groupIds));
+  const annotationDraft = { annotationPanels: data.annotationPanels };
+  const applied = operations.map((operation) => {
+    if (isTreeOperation(operation)) return normalizeTreeOperation(data.tree, operation);
+    if (isAnnotationOperation(operation)) {
+      const normalized = normalizeAnnotationOperation(annotationDraft, operation);
+      applyAnnotationOperation(annotationDraft, normalized);
+      return normalized;
+    }
+    return validateOperation(operation, index, groupIds);
+  });
   validateTreeOperationBatch(data.tree, applied, treeConfig);
+  validateAnnotationChanges(data, annotationDraft.annotationPanels);
   const hasStructuralGroupEdit = applied.some((operation) => operation.type !== "groups.update" && operation.type.startsWith("groups."));
   const inverse = [];
   for (const operation of applied) {
+    if (isAnnotationOperation(operation)) {
+      inverse.unshift(...inverseAnnotationOperation(data, operation));
+      applyAnnotationOperation(data, operation);
+      continue;
+    }
     if (isTreeOperation(operation)) {
       inverse.unshift(inverseTreeOperation(data.tree));
       applyTreeOperation(data.tree, operation);
@@ -6139,6 +7654,17 @@ function validBounds$1(bounds) {
     bounds.maxX > bounds.minX &&
     bounds.maxY > bounds.minY
   );
+}
+
+/** Camera-visible world rectangle, with overscan measured in screen pixels. */
+function worldViewport(camera, { width, height }, overscan = 20) {
+  const margin = overscan / camera.k;
+  return {
+    minX: -camera.x / camera.k - margin,
+    maxX: (width - camera.x) / camera.k + margin,
+    minY: -camera.y / camera.k - margin,
+    maxY: (height - camera.y) / camera.k + margin,
+  };
 }
 
 /**
@@ -7738,6 +9264,9 @@ function buildScene(
     alignLabels = true,
     trimIndicatorStyle = {},
     chrome = null,
+    fontFamily = "sans-serif",
+    measureText = null,
+    annotationsEnabled = false,
   }
 ) {
   const clusters = new Map();
@@ -7829,6 +9358,8 @@ function buildScene(
 
   const hitRegions = buildHitRegions(loci, genes);
   const chromeLayout = buildChrome(bounds, genes, chrome);
+  const annotations = projectSceneAnnotations(data.annotationPanels, clusters, bounds, chromeLayout,
+    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText });
   return {
     clusters,
     loci,
@@ -7837,7 +9368,7 @@ function buildScene(
     linksByClusterPair,
     linksByGene,
     bounds,
-    figureBounds: figureBoundsForChrome(bounds, chromeLayout),
+    ...annotations,
     index: {
       genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
       loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
@@ -7919,6 +9450,46 @@ function repositionChrome(chrome, bounds, previousBounds) {
       ...chrome.colourBar.position, y: chrome.colourBar.position.y + dy,
     } },
   };
+}
+
+const emptyAnnotationPanels = Object.freeze([]);
+
+// Data/configuration builds project cells; geometry-only commits retain them.
+// This is the single placement path for both kinds of scene update.
+function projectSceneAnnotations(definitions, clusters, bounds, chrome, options, previous = null) {
+  const annotationPanelData = options.annotationsEnabled ? definitions : undefined;
+  const visible = annotationPanelData?.some((panel) => panel.show !== false);
+  const annotationChromeRight = visible ? annotationChromeRightEdge(chrome, options.measureText) : -Infinity;
+  const annotationAnchorX = Math.max(bounds?.maxX ?? 0, annotationChromeRight);
+  let annotationPanels = emptyAnnotationPanels;
+  if (visible) {
+    if (previous?.annotationPanelData === annotationPanelData) {
+      const dx = annotationAnchorX - previous.annotationAnchorX;
+      annotationPanels = dx ? previous.annotationPanels.map((panel) => ({ ...panel, x: panel.x + dx })) : previous.annotationPanels;
+    } else {
+      annotationPanels = layoutAnnotationPanels(annotationPanelData, clusters, bounds,
+        { ...options, anchorX: annotationAnchorX, previousPanels: previous?.annotationPanels });
+    }
+    placeLegendAfterAnnotations(chrome, annotationPanels);
+  }
+  return { annotationPanelData, annotationPanels, annotationAnchorX, annotationChromeRight,
+    figureBounds: annotationFigureBounds(figureBoundsForChrome(bounds, chrome), annotationPanels, clusters) };
+}
+
+/** Presentation/data edits to annotations leave synteny and its indexes intact. */
+function patchAnnotationScene(scene, definitions, options) {
+  const chrome = repositionChrome(scene.chrome, scene.bounds, scene.bounds);
+  return { ...scene, chrome,
+    ...projectSceneAnnotations(definitions, scene.clusters, scene.bounds, chrome,
+      { ...options, rowOffset: options.shape.tipHeight + options.shape.bodyHeight / 2 }, scene),
+    changes: { annotationsOnly: true } };
+}
+
+function placeLegendAfterAnnotations(chrome, panels) {
+  if (chrome?.legend.placement === "right" && panels.length) {
+    const right = Math.max(...panels.map((panel) => panel.x + panel.extentWidth));
+    chrome.legend.position = { ...chrome.legend.position, x: right + chrome.legend.marginLeft };
+  }
 }
 
 /**
@@ -8077,9 +9648,10 @@ function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = 
   const chrome = visibilityChanged && options.chrome
     ? buildChrome(bounds, genes, options.chrome)
     : repositionChrome(scene.chrome, bounds, scene.bounds);
+  const annotations = projectSceneAnnotations(scene.annotationPanelData, clusters, bounds, chrome,
+    { ...options, rowOffset: geneMidpoint }, scene);
   return {
-    ...scene, clusters, loci, genes, links, bounds, chrome, hitRegions,
-    figureBounds: figureBoundsForChrome(bounds, chrome),
+    ...scene, clusters, loci, genes, links, bounds, chrome, hitRegions, ...annotations,
     changes: { loci: changedLoci, genes: changedGenes, links: new Set(sources.keys()), clusters: requestedClusters },
     index: {
       genes: updateSpatialIndex(scene.index.genes, entries(genes, changedGenes), () => entries(genes, genes.keys())),
@@ -8331,14 +9903,7 @@ function canvasWorldPoint(canvas, event, camera) {
  * screen-space margin prevents records from popping at its edge while panning.
  */
 function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
-  const bounds = dimensions || canvas.getBoundingClientRect();
-  const margin = overscan / camera.k;
-  return {
-    minX: -camera.x / camera.k - margin,
-    maxX: (bounds.width - camera.x) / camera.k + margin,
-    minY: -camera.y / camera.k - margin,
-    maxY: (bounds.height - camera.y) / camera.k + margin,
-  };
+  return worldViewport(camera, dimensions || canvas.getBoundingClientRect(), overscan);
 }
 
 /**
@@ -8420,6 +9985,11 @@ function canvasFigureBounds(context, scene, config, tree = null) {
   if (treeLayout) {
     include(treeLayout.bounds.minX, treeLayout.bounds.minY);
     include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
+  }
+  for (const panel of annotationPanelsForFrame(scene)) {
+    for (const item of panel.texts) includeText(item.text, panel.x + item.x, item.y,
+      { fontSize: panel.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
+        align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
   }
   if (scene.chrome?.legend.visible) {
     const legend = scene.chrome.legend;
@@ -9052,7 +10622,10 @@ function interpolateCanvasScene(previous, scene, amount) {
     });
   }
 
-  return { ...scene, clusters, loci, genes, links };
+  const priorPanels = new Map((previous.annotationPanels || []).map((panel) => [panel.uid, panel]));
+  const annotationPanels = (scene.annotationPanels || []).map((panel) => ({ ...panel,
+    x: interpolateNumber(priorPanels.get(panel.uid)?.x ?? panel.x, panel.x, amount) }));
+  return { ...scene, clusters, loci, genes, links, annotationPanels };
 }
 
 /** Draw a renderer-neutral chart scene into a Canvas 2D context. */
@@ -9092,6 +10665,7 @@ function renderCanvas({
   highlightLocusIds = null,
   showClusterLabels = true,
   showChrome = true,
+  showAnnotationGeometry = true,
 }) {
   // Resolve label visibility before querying or projecting records. The
   // WebGPU overlay requests labels without bodies; disabled labels should
@@ -9271,6 +10845,7 @@ function renderCanvas({
       );
     }
   }
+  if (showChrome) drawCanvasAnnotations(context, displayScene, preview, { showGeometry: showAnnotationGeometry, viewport });
   if (showChrome && displayScene.chrome) {
     const chrome = preview?.chrome || displayScene.chrome;
     drawLegend(context, chrome.legend);
@@ -9400,6 +10975,8 @@ function renderSvg({
   plot,
   data,
   scene,
+  annotationsOnly = false,
+  annotationViewport = null,
   preview = null,
   previousScene = null,
   previousTree = null,
@@ -9418,6 +10995,11 @@ function renderSvg({
   if (preview) return renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
     highlightGeneIds, highlightLocusIds });
   previewStates.delete(plot.node());
+  if (annotationsOnly) {
+    renderChrome({ plot, chrome: scene.chrome, ids, interactions });
+    renderSvgAnnotations(plot, scene, { viewport: annotationViewport });
+    return;
+  }
   const linkGroup = plot
     .selectAll("g.links")
     .data([data])
@@ -9649,6 +11231,7 @@ function renderSvg({
     );
 
   renderChrome({ plot, chrome: scene.chrome, ids, interactions });
+  renderSvgAnnotations(plot, scene, { transition, animate, viewport: annotationViewport });
   renderSvgTree(plot, data.tree, scene, config, interactions, transition, animate, {
     previousTree,
     previousScene: previousTreeScene,
@@ -9726,6 +11309,7 @@ function renderPreview({ plot, data, scene, preview, config, scales, ids, intera
     }
   }
   renderChrome({ plot, chrome: preview.chrome || scene.chrome, ids, interactions });
+  renderSvgAnnotations(plot, scene, { preview });
   renderSvgTree(plot, data.tree, scene, config, interactions, null, false, { preview });
   previewStates.set(plot.node(), { scene, records: current, type: preview.type });
 }
@@ -10676,911 +12260,6 @@ function exportChartSvg({
   return new XMLSerializer().serializeToString(svgNode);
 }
 
-function ascending(a, b) {
-  return a == null || b == null ? NaN : a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
-}
-
-function descending(a, b) {
-  return a == null || b == null ? NaN
-    : b < a ? -1
-    : b > a ? 1
-    : b >= a ? 0
-    : NaN;
-}
-
-function bisector(f) {
-  let compare1, compare2, delta;
-
-  // If an accessor is specified, promote it to a comparator. In this case we
-  // can test whether the search value is (self-) comparable. We can’t do this
-  // for a comparator (except for specific, known comparators) because we can’t
-  // tell if the comparator is symmetric, and an asymmetric comparator can’t be
-  // used to test whether a single value is comparable.
-  if (f.length !== 2) {
-    compare1 = ascending;
-    compare2 = (d, x) => ascending(f(d), x);
-    delta = (d, x) => f(d) - x;
-  } else {
-    compare1 = f === ascending || f === descending ? f : zero;
-    compare2 = f;
-    delta = f;
-  }
-
-  function left(a, x, lo = 0, hi = a.length) {
-    if (lo < hi) {
-      if (compare1(x, x) !== 0) return hi;
-      do {
-        const mid = (lo + hi) >>> 1;
-        if (compare2(a[mid], x) < 0) lo = mid + 1;
-        else hi = mid;
-      } while (lo < hi);
-    }
-    return lo;
-  }
-
-  function right(a, x, lo = 0, hi = a.length) {
-    if (lo < hi) {
-      if (compare1(x, x) !== 0) return hi;
-      do {
-        const mid = (lo + hi) >>> 1;
-        if (compare2(a[mid], x) <= 0) lo = mid + 1;
-        else hi = mid;
-      } while (lo < hi);
-    }
-    return lo;
-  }
-
-  function center(a, x, lo = 0, hi = a.length) {
-    const i = left(a, x, lo, hi - 1);
-    return i > lo && delta(a[i - 1], x) > -delta(a[i], x) ? i - 1 : i;
-  }
-
-  return {left, center, right};
-}
-
-function zero() {
-  return 0;
-}
-
-function number$1(x) {
-  return x === null ? NaN : +x;
-}
-
-const ascendingBisect = bisector(ascending);
-const bisectRight = ascendingBisect.right;
-bisector(number$1).center;
-var bisect = bisectRight;
-
-class InternMap extends Map {
-  constructor(entries, key = keyof) {
-    super();
-    Object.defineProperties(this, {_intern: {value: new Map()}, _key: {value: key}});
-    if (entries != null) for (const [key, value] of entries) this.set(key, value);
-  }
-  get(key) {
-    return super.get(intern_get(this, key));
-  }
-  has(key) {
-    return super.has(intern_get(this, key));
-  }
-  set(key, value) {
-    return super.set(intern_set(this, key), value);
-  }
-  delete(key) {
-    return super.delete(intern_delete(this, key));
-  }
-}
-
-function intern_get({_intern, _key}, value) {
-  const key = _key(value);
-  return _intern.has(key) ? _intern.get(key) : value;
-}
-
-function intern_set({_intern, _key}, value) {
-  const key = _key(value);
-  if (_intern.has(key)) return _intern.get(key);
-  _intern.set(key, value);
-  return value;
-}
-
-function intern_delete({_intern, _key}, value) {
-  const key = _key(value);
-  if (_intern.has(key)) {
-    value = _intern.get(key);
-    _intern.delete(key);
-  }
-  return value;
-}
-
-function keyof(value) {
-  return value !== null && typeof value === "object" ? value.valueOf() : value;
-}
-
-const e10 = Math.sqrt(50),
-    e5 = Math.sqrt(10),
-    e2 = Math.sqrt(2);
-
-function tickSpec(start, stop, count) {
-  const step = (stop - start) / Math.max(0, count),
-      power = Math.floor(Math.log10(step)),
-      error = step / Math.pow(10, power),
-      factor = error >= e10 ? 10 : error >= e5 ? 5 : error >= e2 ? 2 : 1;
-  let i1, i2, inc;
-  if (power < 0) {
-    inc = Math.pow(10, -power) / factor;
-    i1 = Math.round(start * inc);
-    i2 = Math.round(stop * inc);
-    if (i1 / inc < start) ++i1;
-    if (i2 / inc > stop) --i2;
-    inc = -inc;
-  } else {
-    inc = Math.pow(10, power) * factor;
-    i1 = Math.round(start / inc);
-    i2 = Math.round(stop / inc);
-    if (i1 * inc < start) ++i1;
-    if (i2 * inc > stop) --i2;
-  }
-  if (i2 < i1 && 0.5 <= count && count < 2) return tickSpec(start, stop, count * 2);
-  return [i1, i2, inc];
-}
-
-function ticks(start, stop, count) {
-  stop = +stop, start = +start, count = +count;
-  if (!(count > 0)) return [];
-  if (start === stop) return [start];
-  const reverse = stop < start, [i1, i2, inc] = reverse ? tickSpec(stop, start, count) : tickSpec(start, stop, count);
-  if (!(i2 >= i1)) return [];
-  const n = i2 - i1 + 1, ticks = new Array(n);
-  if (reverse) {
-    if (inc < 0) for (let i = 0; i < n; ++i) ticks[i] = (i2 - i) / -inc;
-    else for (let i = 0; i < n; ++i) ticks[i] = (i2 - i) * inc;
-  } else {
-    if (inc < 0) for (let i = 0; i < n; ++i) ticks[i] = (i1 + i) / -inc;
-    else for (let i = 0; i < n; ++i) ticks[i] = (i1 + i) * inc;
-  }
-  return ticks;
-}
-
-function tickIncrement(start, stop, count) {
-  stop = +stop, start = +start, count = +count;
-  return tickSpec(start, stop, count)[2];
-}
-
-function tickStep(start, stop, count) {
-  stop = +stop, start = +start, count = +count;
-  const reverse = stop < start, inc = reverse ? tickIncrement(stop, start, count) : tickIncrement(start, stop, count);
-  return (reverse ? -1 : 1) * (inc < 0 ? 1 / -inc : inc);
-}
-
-function max(values, valueof) {
-  let max;
-  if (valueof === undefined) {
-    for (const value of values) {
-      if (value != null
-          && (max < value || (max === undefined && value >= value))) {
-        max = value;
-      }
-    }
-  } else {
-    let index = -1;
-    for (let value of values) {
-      if ((value = valueof(value, ++index, values)) != null
-          && (max < value || (max === undefined && value >= value))) {
-        max = value;
-      }
-    }
-  }
-  return max;
-}
-
-function min(values, valueof) {
-  let min;
-  if (valueof === undefined) {
-    for (const value of values) {
-      if (value != null
-          && (min > value || (min === undefined && value >= value))) {
-        min = value;
-      }
-    }
-  } else {
-    let index = -1;
-    for (let value of values) {
-      if ((value = valueof(value, ++index, values)) != null
-          && (min > value || (min === undefined && value >= value))) {
-        min = value;
-      }
-    }
-  }
-  return min;
-}
-
-function initRange(domain, range) {
-  switch (arguments.length) {
-    case 0: break;
-    case 1: this.range(domain); break;
-    default: this.range(range).domain(domain); break;
-  }
-  return this;
-}
-
-function initInterpolator(domain, interpolator) {
-  switch (arguments.length) {
-    case 0: break;
-    case 1: {
-      if (typeof domain === "function") this.interpolator(domain);
-      else this.range(domain);
-      break;
-    }
-    default: {
-      this.domain(domain);
-      if (typeof interpolator === "function") this.interpolator(interpolator);
-      else this.range(interpolator);
-      break;
-    }
-  }
-  return this;
-}
-
-const implicit = Symbol("implicit");
-
-function ordinal() {
-  var index = new InternMap(),
-      domain = [],
-      range = [],
-      unknown = implicit;
-
-  function scale(d) {
-    let i = index.get(d);
-    if (i === undefined) {
-      if (unknown !== implicit) return unknown;
-      index.set(d, i = domain.push(d) - 1);
-    }
-    return range[i % range.length];
-  }
-
-  scale.domain = function(_) {
-    if (!arguments.length) return domain.slice();
-    domain = [], index = new InternMap();
-    for (const value of _) {
-      if (index.has(value)) continue;
-      index.set(value, domain.push(value) - 1);
-    }
-    return scale;
-  };
-
-  scale.range = function(_) {
-    return arguments.length ? (range = Array.from(_), scale) : range.slice();
-  };
-
-  scale.unknown = function(_) {
-    return arguments.length ? (unknown = _, scale) : unknown;
-  };
-
-  scale.copy = function() {
-    return ordinal(domain, range).unknown(unknown);
-  };
-
-  initRange.apply(scale, arguments);
-
-  return scale;
-}
-
-function constants(x) {
-  return function() {
-    return x;
-  };
-}
-
-function number(x) {
-  return +x;
-}
-
-var unit = [0, 1];
-
-function identity$1(x) {
-  return x;
-}
-
-function normalize(a, b) {
-  return (b -= (a = +a))
-      ? function(x) { return (x - a) / b; }
-      : constants(isNaN(b) ? NaN : 0.5);
-}
-
-function clamper(a, b) {
-  var t;
-  if (a > b) t = a, a = b, b = t;
-  return function(x) { return Math.max(a, Math.min(b, x)); };
-}
-
-// normalize(a, b)(x) takes a domain value x in [a,b] and returns the corresponding parameter t in [0,1].
-// interpolate(a, b)(t) takes a parameter t in [0,1] and returns the corresponding range value x in [a,b].
-function bimap(domain, range, interpolate) {
-  var d0 = domain[0], d1 = domain[1], r0 = range[0], r1 = range[1];
-  if (d1 < d0) d0 = normalize(d1, d0), r0 = interpolate(r1, r0);
-  else d0 = normalize(d0, d1), r0 = interpolate(r0, r1);
-  return function(x) { return r0(d0(x)); };
-}
-
-function polymap(domain, range, interpolate) {
-  var j = Math.min(domain.length, range.length) - 1,
-      d = new Array(j),
-      r = new Array(j),
-      i = -1;
-
-  // Reverse descending domains.
-  if (domain[j] < domain[0]) {
-    domain = domain.slice().reverse();
-    range = range.slice().reverse();
-  }
-
-  while (++i < j) {
-    d[i] = normalize(domain[i], domain[i + 1]);
-    r[i] = interpolate(range[i], range[i + 1]);
-  }
-
-  return function(x) {
-    var i = bisect(domain, x, 1, j) - 1;
-    return r[i](d[i](x));
-  };
-}
-
-function copy$1(source, target) {
-  return target
-      .domain(source.domain())
-      .range(source.range())
-      .interpolate(source.interpolate())
-      .clamp(source.clamp())
-      .unknown(source.unknown());
-}
-
-function transformer$1() {
-  var domain = unit,
-      range = unit,
-      interpolate = interpolate$1,
-      transform,
-      untransform,
-      unknown,
-      clamp = identity$1,
-      piecewise,
-      output,
-      input;
-
-  function rescale() {
-    var n = Math.min(domain.length, range.length);
-    if (clamp !== identity$1) clamp = clamper(domain[0], domain[n - 1]);
-    piecewise = n > 2 ? polymap : bimap;
-    output = input = null;
-    return scale;
-  }
-
-  function scale(x) {
-    return x == null || isNaN(x = +x) ? unknown : (output || (output = piecewise(domain.map(transform), range, interpolate)))(transform(clamp(x)));
-  }
-
-  scale.invert = function(y) {
-    return clamp(untransform((input || (input = piecewise(range, domain.map(transform), interpolateNumber$1)))(y)));
-  };
-
-  scale.domain = function(_) {
-    return arguments.length ? (domain = Array.from(_, number), rescale()) : domain.slice();
-  };
-
-  scale.range = function(_) {
-    return arguments.length ? (range = Array.from(_), rescale()) : range.slice();
-  };
-
-  scale.rangeRound = function(_) {
-    return range = Array.from(_), interpolate = interpolateRound, rescale();
-  };
-
-  scale.clamp = function(_) {
-    return arguments.length ? (clamp = _ ? true : identity$1, rescale()) : clamp !== identity$1;
-  };
-
-  scale.interpolate = function(_) {
-    return arguments.length ? (interpolate = _, rescale()) : interpolate;
-  };
-
-  scale.unknown = function(_) {
-    return arguments.length ? (unknown = _, scale) : unknown;
-  };
-
-  return function(t, u) {
-    transform = t, untransform = u;
-    return rescale();
-  };
-}
-
-function continuous() {
-  return transformer$1()(identity$1, identity$1);
-}
-
-function formatDecimal(x) {
-  return Math.abs(x = Math.round(x)) >= 1e21
-      ? x.toLocaleString("en").replace(/,/g, "")
-      : x.toString(10);
-}
-
-// Computes the decimal coefficient and exponent of the specified number x with
-// significant digits p, where x is positive and p is in [1, 21] or undefined.
-// For example, formatDecimalParts(1.23) returns ["123", 0].
-function formatDecimalParts(x, p) {
-  if (!isFinite(x) || x === 0) return null; // NaN, ±Infinity, ±0
-  var i = (x = p ? x.toExponential(p - 1) : x.toExponential()).indexOf("e"), coefficient = x.slice(0, i);
-
-  // The string returned by toExponential either has the form \d\.\d+e[-+]\d+
-  // (e.g., 1.2e+3) or the form \de[-+]\d+ (e.g., 1e+3).
-  return [
-    coefficient.length > 1 ? coefficient[0] + coefficient.slice(2) : coefficient,
-    +x.slice(i + 1)
-  ];
-}
-
-function exponent(x) {
-  return x = formatDecimalParts(Math.abs(x)), x ? x[1] : NaN;
-}
-
-function formatGroup(grouping, thousands) {
-  return function(value, width) {
-    var i = value.length,
-        t = [],
-        j = 0,
-        g = grouping[0],
-        length = 0;
-
-    while (i > 0 && g > 0) {
-      if (length + g + 1 > width) g = Math.max(1, width - length);
-      t.push(value.substring(i -= g, i + g));
-      if ((length += g + 1) > width) break;
-      g = grouping[j = (j + 1) % grouping.length];
-    }
-
-    return t.reverse().join(thousands);
-  };
-}
-
-function formatNumerals(numerals) {
-  return function(value) {
-    return value.replace(/[0-9]/g, function(i) {
-      return numerals[+i];
-    });
-  };
-}
-
-// [[fill]align][sign][symbol][0][width][,][.precision][~][type]
-var re = /^(?:(.)?([<>=^]))?([+\-( ])?([$#])?(0)?(\d+)?(,)?(\.\d+)?(~)?([a-z%])?$/i;
-
-function formatSpecifier(specifier) {
-  if (!(match = re.exec(specifier))) throw new Error("invalid format: " + specifier);
-  var match;
-  return new FormatSpecifier({
-    fill: match[1],
-    align: match[2],
-    sign: match[3],
-    symbol: match[4],
-    zero: match[5],
-    width: match[6],
-    comma: match[7],
-    precision: match[8] && match[8].slice(1),
-    trim: match[9],
-    type: match[10]
-  });
-}
-
-formatSpecifier.prototype = FormatSpecifier.prototype; // instanceof
-
-function FormatSpecifier(specifier) {
-  this.fill = specifier.fill === undefined ? " " : specifier.fill + "";
-  this.align = specifier.align === undefined ? ">" : specifier.align + "";
-  this.sign = specifier.sign === undefined ? "-" : specifier.sign + "";
-  this.symbol = specifier.symbol === undefined ? "" : specifier.symbol + "";
-  this.zero = !!specifier.zero;
-  this.width = specifier.width === undefined ? undefined : +specifier.width;
-  this.comma = !!specifier.comma;
-  this.precision = specifier.precision === undefined ? undefined : +specifier.precision;
-  this.trim = !!specifier.trim;
-  this.type = specifier.type === undefined ? "" : specifier.type + "";
-}
-
-FormatSpecifier.prototype.toString = function() {
-  return this.fill
-      + this.align
-      + this.sign
-      + this.symbol
-      + (this.zero ? "0" : "")
-      + (this.width === undefined ? "" : Math.max(1, this.width | 0))
-      + (this.comma ? "," : "")
-      + (this.precision === undefined ? "" : "." + Math.max(0, this.precision | 0))
-      + (this.trim ? "~" : "")
-      + this.type;
-};
-
-// Trims insignificant zeros, e.g., replaces 1.2000k with 1.2k.
-function formatTrim(s) {
-  out: for (var n = s.length, i = 1, i0 = -1, i1; i < n; ++i) {
-    switch (s[i]) {
-      case ".": i0 = i1 = i; break;
-      case "0": if (i0 === 0) i0 = i; i1 = i; break;
-      default: if (!+s[i]) break out; if (i0 > 0) i0 = 0; break;
-    }
-  }
-  return i0 > 0 ? s.slice(0, i0) + s.slice(i1 + 1) : s;
-}
-
-var prefixExponent;
-
-function formatPrefixAuto(x, p) {
-  var d = formatDecimalParts(x, p);
-  if (!d) return prefixExponent = undefined, x.toPrecision(p);
-  var coefficient = d[0],
-      exponent = d[1],
-      i = exponent - (prefixExponent = Math.max(-8, Math.min(8, Math.floor(exponent / 3))) * 3) + 1,
-      n = coefficient.length;
-  return i === n ? coefficient
-      : i > n ? coefficient + new Array(i - n + 1).join("0")
-      : i > 0 ? coefficient.slice(0, i) + "." + coefficient.slice(i)
-      : "0." + new Array(1 - i).join("0") + formatDecimalParts(x, Math.max(0, p + i - 1))[0]; // less than 1y!
-}
-
-function formatRounded(x, p) {
-  var d = formatDecimalParts(x, p);
-  if (!d) return x + "";
-  var coefficient = d[0],
-      exponent = d[1];
-  return exponent < 0 ? "0." + new Array(-exponent).join("0") + coefficient
-      : coefficient.length > exponent + 1 ? coefficient.slice(0, exponent + 1) + "." + coefficient.slice(exponent + 1)
-      : coefficient + new Array(exponent - coefficient.length + 2).join("0");
-}
-
-var formatTypes = {
-  "%": (x, p) => (x * 100).toFixed(p),
-  "b": (x) => Math.round(x).toString(2),
-  "c": (x) => x + "",
-  "d": formatDecimal,
-  "e": (x, p) => x.toExponential(p),
-  "f": (x, p) => x.toFixed(p),
-  "g": (x, p) => x.toPrecision(p),
-  "o": (x) => Math.round(x).toString(8),
-  "p": (x, p) => formatRounded(x * 100, p),
-  "r": formatRounded,
-  "s": formatPrefixAuto,
-  "X": (x) => Math.round(x).toString(16).toUpperCase(),
-  "x": (x) => Math.round(x).toString(16)
-};
-
-function identity(x) {
-  return x;
-}
-
-var map = Array.prototype.map,
-    prefixes = ["y","z","a","f","p","n","µ","m","","k","M","G","T","P","E","Z","Y"];
-
-function formatLocale(locale) {
-  var group = locale.grouping === undefined || locale.thousands === undefined ? identity : formatGroup(map.call(locale.grouping, Number), locale.thousands + ""),
-      currencyPrefix = locale.currency === undefined ? "" : locale.currency[0] + "",
-      currencySuffix = locale.currency === undefined ? "" : locale.currency[1] + "",
-      decimal = locale.decimal === undefined ? "." : locale.decimal + "",
-      numerals = locale.numerals === undefined ? identity : formatNumerals(map.call(locale.numerals, String)),
-      percent = locale.percent === undefined ? "%" : locale.percent + "",
-      minus = locale.minus === undefined ? "−" : locale.minus + "",
-      nan = locale.nan === undefined ? "NaN" : locale.nan + "";
-
-  function newFormat(specifier, options) {
-    specifier = formatSpecifier(specifier);
-
-    var fill = specifier.fill,
-        align = specifier.align,
-        sign = specifier.sign,
-        symbol = specifier.symbol,
-        zero = specifier.zero,
-        width = specifier.width,
-        comma = specifier.comma,
-        precision = specifier.precision,
-        trim = specifier.trim,
-        type = specifier.type;
-
-    // The "n" type is an alias for ",g".
-    if (type === "n") comma = true, type = "g";
-
-    // The "" type, and any invalid type, is an alias for ".12~g".
-    else if (!formatTypes[type]) precision === undefined && (precision = 12), trim = true, type = "g";
-
-    // If zero fill is specified, padding goes after sign and before digits.
-    if (zero || (fill === "0" && align === "=")) zero = true, fill = "0", align = "=";
-
-    // Compute the prefix and suffix.
-    // For SI-prefix, the suffix is lazily computed.
-    var prefix = (options && options.prefix !== undefined ? options.prefix : "") + (symbol === "$" ? currencyPrefix : symbol === "#" && /[boxX]/.test(type) ? "0" + type.toLowerCase() : ""),
-        suffix = (symbol === "$" ? currencySuffix : /[%p]/.test(type) ? percent : "") + (options && options.suffix !== undefined ? options.suffix : "");
-
-    // What format function should we use?
-    // Is this an integer type?
-    // Can this type generate exponential notation?
-    var formatType = formatTypes[type],
-        maybeSuffix = /[defgprs%]/.test(type);
-
-    // Set the default precision if not specified,
-    // or clamp the specified precision to the supported range.
-    // For significant precision, it must be in [1, 21].
-    // For fixed precision, it must be in [0, 20].
-    precision = precision === undefined ? 6
-        : /[gprs]/.test(type) ? Math.max(1, Math.min(21, precision))
-        : Math.max(0, Math.min(20, precision));
-
-    function format(value) {
-      var valuePrefix = prefix,
-          valueSuffix = suffix,
-          i, n, c;
-
-      if (type === "c") {
-        valueSuffix = formatType(value) + valueSuffix;
-        value = "";
-      } else {
-        value = +value;
-
-        // Determine the sign. -0 is not less than 0, but 1 / -0 is!
-        var valueNegative = value < 0 || 1 / value < 0;
-
-        // Perform the initial formatting.
-        value = isNaN(value) ? nan : formatType(Math.abs(value), precision);
-
-        // Trim insignificant zeros.
-        if (trim) value = formatTrim(value);
-
-        // If a negative value rounds to zero after formatting, and no explicit positive sign is requested, hide the sign.
-        if (valueNegative && +value === 0 && sign !== "+") valueNegative = false;
-
-        // Compute the prefix and suffix.
-        valuePrefix = (valueNegative ? (sign === "(" ? sign : minus) : sign === "-" || sign === "(" ? "" : sign) + valuePrefix;
-        valueSuffix = (type === "s" && !isNaN(value) && prefixExponent !== undefined ? prefixes[8 + prefixExponent / 3] : "") + valueSuffix + (valueNegative && sign === "(" ? ")" : "");
-
-        // Break the formatted value into the integer “value” part that can be
-        // grouped, and fractional or exponential “suffix” part that is not.
-        if (maybeSuffix) {
-          i = -1, n = value.length;
-          while (++i < n) {
-            if (c = value.charCodeAt(i), 48 > c || c > 57) {
-              valueSuffix = (c === 46 ? decimal + value.slice(i + 1) : value.slice(i)) + valueSuffix;
-              value = value.slice(0, i);
-              break;
-            }
-          }
-        }
-      }
-
-      // If the fill character is not "0", grouping is applied before padding.
-      if (comma && !zero) value = group(value, Infinity);
-
-      // Compute the padding.
-      var length = valuePrefix.length + value.length + valueSuffix.length,
-          padding = length < width ? new Array(width - length + 1).join(fill) : "";
-
-      // If the fill character is "0", grouping is applied after padding.
-      if (comma && zero) value = group(padding + value, padding.length ? width - valueSuffix.length : Infinity), padding = "";
-
-      // Reconstruct the final output based on the desired alignment.
-      switch (align) {
-        case "<": value = valuePrefix + value + valueSuffix + padding; break;
-        case "=": value = valuePrefix + padding + value + valueSuffix; break;
-        case "^": value = padding.slice(0, length = padding.length >> 1) + valuePrefix + value + valueSuffix + padding.slice(length); break;
-        default: value = padding + valuePrefix + value + valueSuffix; break;
-      }
-
-      return numerals(value);
-    }
-
-    format.toString = function() {
-      return specifier + "";
-    };
-
-    return format;
-  }
-
-  function formatPrefix(specifier, value) {
-    var e = Math.max(-8, Math.min(8, Math.floor(exponent(value) / 3))) * 3,
-        k = Math.pow(10, -e),
-        f = newFormat((specifier = formatSpecifier(specifier), specifier.type = "f", specifier), {suffix: prefixes[8 + e / 3]});
-    return function(value) {
-      return f(k * value);
-    };
-  }
-
-  return {
-    format: newFormat,
-    formatPrefix: formatPrefix
-  };
-}
-
-var locale;
-var format;
-var formatPrefix;
-
-defaultLocale({
-  thousands: ",",
-  grouping: [3],
-  currency: ["$", ""]
-});
-
-function defaultLocale(definition) {
-  locale = formatLocale(definition);
-  format = locale.format;
-  formatPrefix = locale.formatPrefix;
-  return locale;
-}
-
-function precisionFixed(step) {
-  return Math.max(0, -exponent(Math.abs(step)));
-}
-
-function precisionPrefix(step, value) {
-  return Math.max(0, Math.max(-8, Math.min(8, Math.floor(exponent(value) / 3))) * 3 - exponent(Math.abs(step)));
-}
-
-function precisionRound(step, max) {
-  step = Math.abs(step), max = Math.abs(max) - step;
-  return Math.max(0, exponent(max) - exponent(step)) + 1;
-}
-
-function tickFormat(start, stop, count, specifier) {
-  var step = tickStep(start, stop, count),
-      precision;
-  specifier = formatSpecifier(specifier == null ? ",f" : specifier);
-  switch (specifier.type) {
-    case "s": {
-      var value = Math.max(Math.abs(start), Math.abs(stop));
-      if (specifier.precision == null && !isNaN(precision = precisionPrefix(step, value))) specifier.precision = precision;
-      return formatPrefix(specifier, value);
-    }
-    case "":
-    case "e":
-    case "g":
-    case "p":
-    case "r": {
-      if (specifier.precision == null && !isNaN(precision = precisionRound(step, Math.max(Math.abs(start), Math.abs(stop))))) specifier.precision = precision - (specifier.type === "e");
-      break;
-    }
-    case "f":
-    case "%": {
-      if (specifier.precision == null && !isNaN(precision = precisionFixed(step))) specifier.precision = precision - (specifier.type === "%") * 2;
-      break;
-    }
-  }
-  return format(specifier);
-}
-
-function linearish(scale) {
-  var domain = scale.domain;
-
-  scale.ticks = function(count) {
-    var d = domain();
-    return ticks(d[0], d[d.length - 1], count == null ? 10 : count);
-  };
-
-  scale.tickFormat = function(count, specifier) {
-    var d = domain();
-    return tickFormat(d[0], d[d.length - 1], count == null ? 10 : count, specifier);
-  };
-
-  scale.nice = function(count) {
-    if (count == null) count = 10;
-
-    var d = domain();
-    var i0 = 0;
-    var i1 = d.length - 1;
-    var start = d[i0];
-    var stop = d[i1];
-    var prestep;
-    var step;
-    var maxIter = 10;
-
-    if (stop < start) {
-      step = start, start = stop, stop = step;
-      step = i0, i0 = i1, i1 = step;
-    }
-
-    while (maxIter-- > 0) {
-      step = tickIncrement(start, stop, count);
-      if (step === prestep) {
-        d[i0] = start;
-        d[i1] = stop;
-        return domain(d);
-      } else if (step > 0) {
-        start = Math.floor(start / step) * step;
-        stop = Math.ceil(stop / step) * step;
-      } else if (step < 0) {
-        start = Math.ceil(start * step) / step;
-        stop = Math.floor(stop * step) / step;
-      } else {
-        break;
-      }
-      prestep = step;
-    }
-
-    return scale;
-  };
-
-  return scale;
-}
-
-function linear() {
-  var scale = continuous();
-
-  scale.copy = function() {
-    return copy$1(scale, linear());
-  };
-
-  initRange.apply(scale, arguments);
-
-  return linearish(scale);
-}
-
-function transformer() {
-  var x0 = 0,
-      x1 = 1,
-      t0,
-      t1,
-      k10,
-      transform,
-      interpolator = identity$1,
-      clamp = false,
-      unknown;
-
-  function scale(x) {
-    return x == null || isNaN(x = +x) ? unknown : interpolator(k10 === 0 ? 0.5 : (x = (transform(x) - t0) * k10, clamp ? Math.max(0, Math.min(1, x)) : x));
-  }
-
-  scale.domain = function(_) {
-    return arguments.length ? ([x0, x1] = _, t0 = transform(x0 = +x0), t1 = transform(x1 = +x1), k10 = t0 === t1 ? 0 : 1 / (t1 - t0), scale) : [x0, x1];
-  };
-
-  scale.clamp = function(_) {
-    return arguments.length ? (clamp = !!_, scale) : clamp;
-  };
-
-  scale.interpolator = function(_) {
-    return arguments.length ? (interpolator = _, scale) : interpolator;
-  };
-
-  function range(interpolate) {
-    return function(_) {
-      var r0, r1;
-      return arguments.length ? ([r0, r1] = _, interpolator = interpolate(r0, r1), scale) : [interpolator(0), interpolator(1)];
-    };
-  }
-
-  scale.range = range(interpolate$1);
-
-  scale.rangeRound = range(interpolateRound);
-
-  scale.unknown = function(_) {
-    return arguments.length ? (unknown = _, scale) : unknown;
-  };
-
-  return function(t) {
-    transform = t, t0 = t(x0), t1 = t(x1), k10 = t0 === t1 ? 0 : 1 / (t1 - t0);
-    return scale;
-  };
-}
-
-function copy(source, target) {
-  return target
-      .domain(source.domain())
-      .interpolator(source.interpolator())
-      .clamp(source.clamp())
-      .unknown(source.unknown());
-}
-
-function sequential() {
-  var scale = linearish(transformer()(identity$1));
-
-  scale.copy = function() {
-    return copy(scale, sequential());
-  };
-
-  return initInterpolator.apply(scale, arguments);
-}
-
 function colors(specifier) {
   var n = specifier.length / 6 | 0, colors = new Array(n), i = 0;
   while (i < n) colors[i] = "#" + specifier.slice(i * 6, ++i * 6);
@@ -11617,6 +12296,8 @@ function interpolateRainbow(t) {
 }
 
 const defaultConfig = {
+  // Optional row-aligned metadata panels. Synteny remains the default view.
+  annotations: { enabled: false },
   tree: {
     show: true,
     colouring: TREE_COLOURING_DEFAULTS,
@@ -11824,7 +12505,7 @@ function isRasterRenderer(renderer) {
 // This is deliberately one factory per chart, not a collection of tiny API
 // factories: configuration, scales, indexes, and mutable scene state must not
 // leak between independently mounted maps.
-function createChartRuntime({ idPrefix = "" } = {}) {
+function createChartRuntime({ idPrefix = "", measureText = null } = {}) {
 function refreshClusterOffsetScale() {
   scales.offset.range(
     scales.offset.domain().map((uid) => getClusterOffset(chartState, uid))
@@ -11920,6 +12601,9 @@ function validateConfiguration(options, tree = null) {
   const candidate = createDefaultConfig();
   updateConfig(candidate, config);
   updateConfig(candidate, options);
+  if (typeof candidate.annotations?.enabled !== "boolean") {
+    throw new TypeError("annotations.enabled must be a boolean.");
+  }
   if (!isRendererMode(candidate.plot.renderer)) {
     throw new TypeError(`Unknown plot renderer: ${candidate.plot.renderer}. Expected svg, canvas, or webgpu.`);
   }
@@ -11938,7 +12622,7 @@ const scales = {
   group: ordinal().unknown(null),
   colour: ordinal().unknown("#bbb"),
   name: ordinal().unknown("None"),
-  score: sequential(interpolateGreys).domain([0, 1]),
+  score: sequential$1(interpolateGreys).domain([0, 1]),
   offset: ordinal(),
   locus: ordinal(),
 };
@@ -11994,6 +12678,9 @@ function sceneProjectionOptions({ areClustersAdjacent } = {}) {
     clusterLabel: locusText,
     alignLabels: config.cluster.alignLabels,
     trimIndicatorStyle: config.locus.trimIndicators,
+    fontFamily: config.plot.fontFamily,
+    measureText,
+    annotationsEnabled: config.annotations.enabled,
   };
 }
 
@@ -12224,6 +12911,10 @@ return {
   getScene,
   buildScene: buildChartScene,
   patchScene: patchChartScene,
+  patchAnnotations(previousScene, data) {
+    currentScene = patchAnnotationScene(previousScene, data.annotationPanels, sceneProjectionOptions());
+    return currentScene;
+  },
   setBeforeGeneAnchorUpdate,
   anchorGene,
 };
@@ -12257,6 +12948,7 @@ function createRetainedSceneBackend({ render, surface }) {
 
 const shader = /* wgsl */ `
 struct Camera {
+  // camera x/y, zoom, shared annotation x offset.
   transform: vec4f,
   viewport: vec2f,
   // vec4 alignment leaves two padding floats after viewport.
@@ -12311,6 +13003,29 @@ struct VertexInput {
 struct VertexOutput {
   @builtin(position) position: vec4f,
   @location(0) colour: vec4f,
+}
+
+struct RectangleInput {
+  @location(0) rect: vec4f,
+  @location(1) colour: vec4f,
+  @location(2) rowSlot: f32,
+}
+
+@vertex fn rectangleVertex(input: RectangleInput, @builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+  var corners = array<vec2f, 6>(
+    vec2f(0.0, 0.0), vec2f(1.0, 0.0), vec2f(0.0, 1.0),
+    vec2f(0.0, 1.0), vec2f(1.0, 0.0), vec2f(1.0, 1.0),
+  );
+  // Annotation columns stay aligned when a cluster moves horizontally; only
+  // its row translation is inherited. Locus flips never reflect heatmaps.
+  let offset = vec2f(camera.transform.w, clusterOffsets.values[u32(input.rowSlot)].y);
+  let world = input.rect.xy + corners[vertexIndex] * input.rect.zw + offset;
+  let screen = world * camera.transform.z + camera.transform.xy;
+  var output: VertexOutput;
+  output.position = vec4f(screen.x / camera.viewport.x * 2.0 - 1.0,
+    1.0 - screen.y / camera.viewport.y * 2.0, 0.0, 1.0);
+  output.colour = input.colour;
+  return output;
 }
 
 struct StrokeInput {
@@ -12516,9 +13231,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 }`;
 
 function rgba(value, fallback = [0.6, 0.6, 0.6, 1]) {
-  const colour = color(value);
+  const colour = color(value)?.rgb();
   return colour
-    ? [colour.r / 255, colour.g / 255, colour.b / 255, colour.opacity ?? 1]
+    ? [Number.isFinite(colour.r) ? colour.r / 255 : 0,
+      Number.isFinite(colour.g) ? colour.g / 255 : 0,
+      Number.isFinite(colour.b) ? colour.b / 255 : 0, colour.opacity ?? 1]
     : fallback;
 }
 
@@ -12826,13 +13543,7 @@ function isLocusTransformPreview(preview) {
 }
 
 function viewportForCamera(camera, width, height, overscan = 20) {
-  const margin = overscan / camera.k;
-  return {
-    minX: -camera.x / camera.k - margin,
-    maxX: (width - camera.x) / camera.k + margin,
-    minY: -camera.y / camera.k - margin,
-    maxY: (height - camera.y) / camera.k + margin,
-  };
+  return worldViewport(camera, { width, height }, overscan);
 }
 
 function boundsInViewport(bounds, viewport, offsetY = 0) {
@@ -12973,6 +13684,23 @@ async function createWebGpuRenderer(canvas) {
     primitive: { topology: "triangle-list" },
     multisample,
   });
+  // Annotation-only pipeline: ordinary synteny charts never compile it.
+  let rectanglePipeline = null;
+  const rectanglePipelineDescriptor = {
+    layout: pipelineLayout,
+    vertex: { module, entryPoint: "rectangleVertex", buffers: [{
+      arrayStride: 36,
+      stepMode: "instance",
+      attributes: [
+        { shaderLocation: 0, offset: 0, format: "float32x4" },
+        { shaderLocation: 1, offset: 16, format: "float32x4" },
+        { shaderLocation: 2, offset: 32, format: "float32" },
+      ],
+    }] },
+    fragment: { module, entryPoint: "fragmentMain", targets: target },
+    primitive: { topology: "triangle-list" },
+    multisample,
+  };
   const uniform = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   let clusterOffsetBuffer = device.createBuffer({
     size: 8,
@@ -13029,6 +13757,95 @@ async function createWebGpuRenderer(canvas) {
   let patchedRecords = null;
   let configured = false;
   let multisampleTexture = null;
+  let annotationBuffer = null, annotationKeyBuffer = null;
+  let annotationCount = 0, annotationKeyCount = 0;
+  let annotationPanels = null, annotationKeyPreview = null;
+  const annotationRows = new Map(), annotationKeys = new Map();
+
+  const appendRectangle = (values, rect, x, y, slot = 0) => {
+    values.push(x + rect.x, y + rect.y, rect.width, rect.height, ...rgba(rect.fill), slot);
+  };
+  const updateAnnotations = (nextPreview) => {
+    if (!scene.annotationPanels?.length) {
+      annotationBuffer?.destroy(); annotationKeyBuffer?.destroy();
+      annotationBuffer = annotationKeyBuffer = null;
+      annotationCount = annotationKeyCount = 0;
+      annotationPanels = scene.annotationPanels; annotationKeyPreview = null;
+      annotationRows.clear(); annotationKeys.clear();
+      return;
+    }
+    const changed = annotationPanels !== scene.annotationPanels;
+    const cellsChanged = changed && (!annotationPanels || annotationPanels.length !== scene.annotationPanels.length ||
+      scene.annotationPanels.some((panel, i) => {
+        const before = annotationPanels[i];
+        return panel.uid !== before.uid || panel.rows !== before.rows || panel.x !== before.x || panel.rowOffset !== before.rowOffset;
+      }));
+    if (changed) annotationPanels = scene.annotationPanels;
+    if (cellsChanged) {
+      annotationRows.clear();
+      const values = [];
+      for (const panel of annotationPanels || []) {
+        const rows = new Map(); annotationRows.set(panel.uid, rows);
+        for (const row of panel.rows) {
+          const offsets = [];
+          const slot = geometry.clusterSlots.get(row.uid);
+          // Retained gene geometry may still use an earlier row order. Remove
+          // that baseline from new cell instances before the GPU adds it back.
+          const y = scene.clusters.get(row.uid).y + panel.rowOffset - clusterBaseOffsets[slot * 2 + 1];
+          for (const cell of row.cells) {
+            offsets.push(values.length / 9);
+            for (const rect of cell.rects) appendRectangle(values, rect, panel.x, y, slot);
+          }
+          offsets.push(values.length / 9); rows.set(row.uid, offsets);
+        }
+      }
+      annotationCount = values.length / 9;
+      if (annotationCount) annotationBuffer = bufferFor(device, annotationBuffer, new Float32Array(values));
+    }
+    // Keys follow the current bottom row. Only this small buffer changes
+    // during a row drag; cells remain retained and use cluster transforms.
+    const keyPreview = nextPreview?.type === "cluster-drag" ? nextPreview : null;
+    if (changed || annotationKeyPreview !== keyPreview) {
+      annotationKeyPreview = keyPreview;
+      annotationKeys.clear();
+      const values = [];
+      for (const panel of annotationPanelsForFrame(scene, keyPreview)) {
+        annotationKeys.set(panel.uid, values.length / 9);
+        for (const rect of panel.rects) appendRectangle(values, rect, panel.x, 0);
+      }
+      annotationKeyCount = values.length / 9;
+      if (annotationKeyCount) annotationKeyBuffer = bufferFor(device, annotationKeyBuffer, new Float32Array(values));
+    }
+  };
+
+  const annotationDrawRanges = (nextPreview, viewport) => {
+    const bounds = scene.figureBounds;
+    if (!nextPreview && bounds && viewport.minX <= bounds.minX && viewport.maxX >= bounds.maxX &&
+        viewport.minY <= bounds.minY && viewport.maxY >= bounds.maxY) {
+      return { cells: annotationCount ? [[0, annotationCount]] : [], keys: annotationKeyCount ? [[0, annotationKeyCount]] : [] };
+    }
+    const cells = [], keys = [];
+    for (const panel of annotationPanelsInViewport(scene, nextPreview, viewport, { labels: false })) {
+      const rows = annotationRows.get(panel.uid);
+      for (const row of panel.rows) {
+        const offsets = rows.get(row.uid);
+        cells.push([offsets[row.firstCell], offsets[row.lastCell]]);
+      }
+      const base = annotationKeys.get(panel.uid);
+      for (const rect of panel.rects) keys.push([base + rect.keyIndex, base + rect.keyIndex + 1]);
+    }
+    const merge = (ranges) => {
+      ranges.sort((a, b) => a[0] - b[0]);
+      const result = [];
+      for (const range of ranges) {
+        const last = result[result.length - 1];
+        if (last && last[1] >= range[0]) last[1] = Math.max(last[1], range[1]);
+        else if (range[1] > range[0]) result.push(range);
+      }
+      return result;
+    };
+    return { cells: merge(cells), keys: merge(keys) };
+  };
 
   const resizeStorageBuffer = (buffer, capacity, values) => {
     if (values.byteLength <= capacity * 4) return { buffer, capacity, resized: false };
@@ -13199,6 +14016,7 @@ async function createWebGpuRenderer(canvas) {
     retainedClusterGeometry = false;
     clusterBaseOffsets.fill(0);
     previewLinksActive = false;
+    annotationPanels = null;
   };
   const restorePreview = (records) => {
     if (!records || !geometry) return;
@@ -13404,6 +14222,11 @@ async function createWebGpuRenderer(canvas) {
         });
         configured = true;
       }
+      if (scene !== nextScene && nextScene.genes === scene?.genes && nextScene.links === scene?.links &&
+          nextScene.loci === scene?.loci && nextScene.clusters === scene?.clusters) {
+        // Annotation-only edits retain all biological geometry and GPU buffers.
+        scene = nextScene;
+      }
       if (scene !== nextScene) {
         geometry = buildGeometry(nextScene, scales, config);
         uploadGeometry(geometry);
@@ -13420,6 +14243,7 @@ async function createWebGpuRenderer(canvas) {
         applyPreview(nextPreview, scales, config, viewportForCamera(camera, width, height));
         preview = nextPreview;
       }
+      updateAnnotations(nextPreview);
       device.queue.writeBuffer(
         uniform,
         0,
@@ -13427,7 +14251,7 @@ async function createWebGpuRenderer(canvas) {
           camera.x,
           camera.y,
           camera.k,
-          0,
+          annotationOffsetForPreview(scene, nextPreview),
           width,
           height,
           0,
@@ -13486,6 +14310,22 @@ async function createWebGpuRenderer(canvas) {
         pass.setVertexBuffer(0, geneEdgeBuffer);
         pass.draw(6, geneEdgeCount);
       }
+      if (annotationCount || annotationKeyCount) {
+        const ranges = annotationDrawRanges(nextPreview, viewportForCamera(camera, width, height));
+        if (ranges.cells.length || ranges.keys.length) {
+          rectanglePipeline ||= device.createRenderPipeline(rectanglePipelineDescriptor);
+          pass.setPipeline(rectanglePipeline);
+          pass.setBindGroup(0, bindGroup);
+          if (ranges.cells.length) {
+            pass.setVertexBuffer(0, annotationBuffer);
+            for (const [first, end] of ranges.cells) pass.draw(6, end - first, 0, first);
+          }
+          if (ranges.keys.length) {
+            pass.setVertexBuffer(0, annotationKeyBuffer);
+            for (const [first, end] of ranges.keys) pass.draw(6, end - first, 0, first);
+          }
+        }
+      }
       pass.end();
       device.queue.submit([encoder.finish()]);
     },
@@ -13529,6 +14369,8 @@ async function createWebGpuRenderer(canvas) {
       trackBuffer?.destroy();
       geneBuffer?.destroy();
       geneEdgeBuffer?.destroy();
+      annotationBuffer?.destroy();
+      annotationKeyBuffer?.destroy();
       clusterOffsetBuffer.destroy();
       locusTransformBuffer.destroy();
       uniform.destroy();
@@ -14142,6 +14984,8 @@ function clusterMap() {
   /* A ClusterMap plot. */
 
   let container = null;
+  let annotationOverlay = null;
+  let annotationUiContext = null, annotationUiLoad = null;
   let transition$1 = transition();
   let zoom = null;
   let canvasZoom = null;
@@ -14199,7 +15043,19 @@ function clusterMap() {
   const future = [];
   const stateSnapshots = createChartStateSerializer();
   let pendingInteractionState = null;
-  const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+  const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-`,
+    measureText: (text, { fontSize, fontFamily, fontWeight = 400 }) => {
+      if (!container) return null;
+      figureMeasurementContext ||= container.node().ownerDocument.createElement("canvas").getContext("2d");
+      const context = figureMeasurementContext;
+      context.save();
+      context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+      context.textAlign = "left"; context.textBaseline = "alphabetic";
+      const metrics = context.measureText(text);
+      context.restore();
+      return metrics;
+    },
+  });
   const canvasBackend = createRetainedSceneBackend({
     render: renderCanvas,
     surface: "canvas",
@@ -14765,10 +15621,12 @@ function clusterMap() {
   }
 
   function applyPatch(operations, { record = true, automaticGroups } = {}) {
+    const sourceScene = runtime.getScene();
+    const annotationsOnly = Array.isArray(operations) && operations.every(isAnnotationOperation);
     invalidateSceneCommit();
     // Source edits may mutate currentData in place. Identity alone cannot
     // invalidate the cached biological defaults, including on undo/redo.
-    stateSnapshots.reset();
+    if (!annotationsOnly) stateSnapshots.reset();
     const groupsAutomaticBefore = groupsAreAutomatic();
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
     const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
@@ -14776,9 +15634,12 @@ function clusterMap() {
       currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
     }
     const groupsAutomaticAfter = groupsAreAutomatic();
-    refreshAfterPatch(result.effects, {
+    if (!annotationsOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
       refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
     });
+    if (sourceScene && !restoringAutomatic && annotationsOnly) {
+      sceneCommit = { sourceScene, changes: { annotationsOnly: true } };
+    }
     redraw({ animate: false });
     emitChange({ type: "data.apply", operations: result.operations });
     if (record) {
@@ -14875,6 +15736,12 @@ function clusterMap() {
       onZoom: (event, viewport) => {
         setCamera(chartState, event.transform);
         applyCamera(viewport);
+        const svgNode = viewport.node()?.ownerSVGElement;
+        // Raster mode has no SVG plot group. Camera synchronization still
+        // dispatches its zoom callback, including while restoring a project.
+        if (!useRaster && svgNode) updateSvgAnnotationViewport(viewport.select("g.clusterMapG"), runtime.getScene(), scenePreview,
+          worldViewport(getCamera(chartState), svgNode.getBoundingClientRect()));
+        annotationOverlay?.refresh();
       },
       onZoomStart: (surface) => surface.attr("cursor", "grabbing"),
       onZoomEnd: (surface) => surface.attr("cursor", "grab"),
@@ -14893,6 +15760,7 @@ function clusterMap() {
       zoomExtent,
       onZoom: (event) => {
         setCamera(chartState, event.transform);
+        annotationOverlay?.refresh();
         scheduleScenePaint();
       },
       onZoomStart: (surface) => {
@@ -15076,10 +15944,11 @@ function clusterMap() {
           pixelRatio: rasterMotion.pixelRatio(),
           preview: scenePreview,
           showLinks: false,
-          showLinkLabels: true,
+          showLinkLabels: runtime.config.link.label.show,
           showLocusTracks: false,
           showGenes: false,
-          showGeneLabels: true,
+          showGeneLabels: runtime.config.gene.label.show,
+          showAnnotationGeometry: false,
           highlightGeneIds: highlightedGeneIds(),
           highlightLinkIds,
           highlightLocusIds: selectedLocusIds,
@@ -15641,11 +16510,14 @@ function clusterMap() {
     syncCameraZoom({ d3, surface: canvas, zoom: canvasZoom, camera });
     applyCamera(svg.select("g.clusterMapViewport"));
 
-    runtime.updateScales(data, { geometryOnly: Boolean(committedScene) });
-    if (synchronize) runtime.synchronizeLocusLayoutStates(data, committedScene ? committedScene.changes.loci || [] : null);
-    if (!committedScene) runtime.updateGroups(data.groups);
+    const annotationsOnly = Boolean(committedScene?.changes.annotationsOnly);
+    if (!annotationsOnly) {
+      runtime.updateScales(data, { geometryOnly: Boolean(committedScene) });
+      if (synchronize) runtime.synchronizeLocusLayoutStates(data, committedScene ? committedScene.changes.loci || [] : null);
+      if (!committedScene) runtime.updateGroups(data.groups);
+    }
 
-    const scene = committedScene
+    const scene = annotationsOnly ? runtime.patchAnnotations(committedScene.sourceScene, data) : committedScene
       ? runtime.patchScene(committedScene.sourceScene, committedScene.changes, data)
       : runtime.buildScene(data);
 
@@ -15733,6 +16605,8 @@ function clusterMap() {
       const previousScene = svgBackend.pendingScene;
       svgBackend.setScene(scene);
       const request = {
+        annotationsOnly,
+        annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
         plot,
         data,
         previousScene,
@@ -15755,6 +16629,31 @@ function clusterMap() {
       svgBackend.paint(request);
 
       if (!hasInitialView) fitInitialView(svg, plot);
+    }
+    if (runtime.config.annotations.enabled && currentData.clusters?.length) {
+      annotationUiContext = {
+        surfaces: [useRaster ? canvas.node() : svg.node()],
+        getScene: () => runtime.getScene(), getPreview: () => scenePreview,
+        getCamera: () => getCamera(chartState),
+        isBusy: () => isDragging(chartState) || Boolean(canvasAnimation || webgpuAnimation),
+        fontFamily: runtime.config.plot.fontFamily,
+      };
+      if (annotationOverlay) annotationOverlay.update(annotationUiContext);
+      else if (!annotationUiLoad) {
+        annotationUiLoad = import('./annotationOverlay.mjs').then(({ createAnnotationOverlay }) => {
+          if (!annotationUiContext) return;
+          annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
+            ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, validateAnnotationPanels, resolveAnnotationScale,
+            annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell },
+            getClusters: () => currentData?.clusters || [], getPanels: () => currentData?.annotationPanels || [],
+            patch: (operations) => my.patch(operations) });
+          annotationOverlay.update(annotationUiContext);
+        }).catch((error) => console.error("Could not load optional annotation controls", error))
+          .finally(() => { annotationUiLoad = null; });
+      }
+    } else {
+      annotationUiContext = null;
+      annotationOverlay?.dispose(); annotationOverlay = null;
     }
   }
 
@@ -16092,6 +16991,8 @@ function clusterMap() {
     });
   };
   my.destroy = () => {
+    annotationUiContext = null;
+    annotationOverlay?.dispose(); annotationOverlay = null;
     stateSnapshots.reset();
     cancelTreePresentationPreview();
     rotateTreeNode = () => {};

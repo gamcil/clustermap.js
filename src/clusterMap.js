@@ -25,9 +25,13 @@ import {
 } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
+import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, validateAnnotationPanels, resolveAnnotationScale,
+  annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell } from "./annotations.mjs";
+import { isAnnotationOperation } from "./annotationOperations.mjs";
+import { updateSvgAnnotationViewport } from "./annotationRenderers.mjs";
 import { applyChartOperations } from "./data/operations.mjs";
 import { isTreeOperation, inverseTreeOperation, applyTreeOperation } from "./treeOperations.mjs";
-import { fitCameraForBounds } from "./camera.mjs";
+import { fitCameraForBounds, worldViewport } from "./camera.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
 import {
@@ -99,6 +103,8 @@ export default function clusterMap() {
   /* A ClusterMap plot. */
 
   let container = null;
+  let annotationOverlay = null;
+  let annotationUiContext = null, annotationUiLoad = null;
   let transition = createTransition();
   let zoom = null;
   let canvasZoom = null;
@@ -156,7 +162,19 @@ export default function clusterMap() {
   const future = [];
   const stateSnapshots = createChartStateSerializer();
   let pendingInteractionState = null;
-  const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-` });
+  const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-`,
+    measureText: (text, { fontSize, fontFamily, fontWeight = 400 }) => {
+      if (!container) return null;
+      figureMeasurementContext ||= container.node().ownerDocument.createElement("canvas").getContext("2d");
+      const context = figureMeasurementContext;
+      context.save();
+      context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+      context.textAlign = "left"; context.textBaseline = "alphabetic";
+      const metrics = context.measureText(text);
+      context.restore();
+      return metrics;
+    },
+  });
   const canvasBackend = createRetainedSceneBackend({
     render: renderCanvas,
     surface: "canvas",
@@ -722,10 +740,12 @@ export default function clusterMap() {
   }
 
   function applyPatch(operations, { record = true, automaticGroups } = {}) {
+    const sourceScene = runtime.getScene();
+    const annotationsOnly = Array.isArray(operations) && operations.every(isAnnotationOperation);
     invalidateSceneCommit();
     // Source edits may mutate currentData in place. Identity alone cannot
     // invalidate the cached biological defaults, including on undo/redo.
-    stateSnapshots.reset();
+    if (!annotationsOnly) stateSnapshots.reset();
     const groupsAutomaticBefore = groupsAreAutomatic();
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
     const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
@@ -733,9 +753,12 @@ export default function clusterMap() {
       currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
     }
     const groupsAutomaticAfter = groupsAreAutomatic();
-    refreshAfterPatch(result.effects, {
+    if (!annotationsOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
       refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
     });
+    if (sourceScene && !restoringAutomatic && annotationsOnly) {
+      sceneCommit = { sourceScene, changes: { annotationsOnly: true } };
+    }
     redraw({ animate: false });
     emitChange({ type: "data.apply", operations: result.operations });
     if (record) {
@@ -832,6 +855,12 @@ export default function clusterMap() {
       onZoom: (event, viewport) => {
         setCamera(chartState, event.transform);
         applyCamera(viewport);
+        const svgNode = viewport.node()?.ownerSVGElement;
+        // Raster mode has no SVG plot group. Camera synchronization still
+        // dispatches its zoom callback, including while restoring a project.
+        if (!useRaster && svgNode) updateSvgAnnotationViewport(viewport.select("g.clusterMapG"), runtime.getScene(), scenePreview,
+          worldViewport(getCamera(chartState), svgNode.getBoundingClientRect()));
+        annotationOverlay?.refresh();
       },
       onZoomStart: (surface) => surface.attr("cursor", "grabbing"),
       onZoomEnd: (surface) => surface.attr("cursor", "grab"),
@@ -850,6 +879,7 @@ export default function clusterMap() {
       zoomExtent,
       onZoom: (event) => {
         setCamera(chartState, event.transform);
+        annotationOverlay?.refresh();
         scheduleScenePaint();
       },
       onZoomStart: (surface) => {
@@ -1033,10 +1063,11 @@ export default function clusterMap() {
           pixelRatio: rasterMotion.pixelRatio(),
           preview: scenePreview,
           showLinks: false,
-          showLinkLabels: true,
+          showLinkLabels: runtime.config.link.label.show,
           showLocusTracks: false,
           showGenes: false,
-          showGeneLabels: true,
+          showGeneLabels: runtime.config.gene.label.show,
+          showAnnotationGeometry: false,
           highlightGeneIds: highlightedGeneIds(),
           highlightLinkIds,
           highlightLocusIds: selectedLocusIds,
@@ -1598,11 +1629,14 @@ export default function clusterMap() {
     syncCameraZoom({ d3, surface: canvas, zoom: canvasZoom, camera });
     applyCamera(svg.select("g.clusterMapViewport"));
 
-    runtime.updateScales(data, { geometryOnly: Boolean(committedScene) });
-    if (synchronize) runtime.synchronizeLocusLayoutStates(data, committedScene ? committedScene.changes.loci || [] : null);
-    if (!committedScene) runtime.updateGroups(data.groups);
+    const annotationsOnly = Boolean(committedScene?.changes.annotationsOnly);
+    if (!annotationsOnly) {
+      runtime.updateScales(data, { geometryOnly: Boolean(committedScene) });
+      if (synchronize) runtime.synchronizeLocusLayoutStates(data, committedScene ? committedScene.changes.loci || [] : null);
+      if (!committedScene) runtime.updateGroups(data.groups);
+    }
 
-    const scene = committedScene
+    const scene = annotationsOnly ? runtime.patchAnnotations(committedScene.sourceScene, data) : committedScene
       ? runtime.patchScene(committedScene.sourceScene, committedScene.changes, data)
       : runtime.buildScene(data);
 
@@ -1690,6 +1724,8 @@ export default function clusterMap() {
       const previousScene = svgBackend.pendingScene;
       svgBackend.setScene(scene);
       const request = {
+        annotationsOnly,
+        annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
         plot,
         data,
         previousScene,
@@ -1712,6 +1748,31 @@ export default function clusterMap() {
       svgBackend.paint(request);
 
       if (!hasInitialView) fitInitialView(svg, plot);
+    }
+    if (runtime.config.annotations.enabled && currentData.clusters?.length) {
+      annotationUiContext = {
+        surfaces: [useRaster ? canvas.node() : svg.node()],
+        getScene: () => runtime.getScene(), getPreview: () => scenePreview,
+        getCamera: () => getCamera(chartState),
+        isBusy: () => isDragging(chartState) || Boolean(canvasAnimation || webgpuAnimation),
+        fontFamily: runtime.config.plot.fontFamily,
+      };
+      if (annotationOverlay) annotationOverlay.update(annotationUiContext);
+      else if (!annotationUiLoad) {
+        annotationUiLoad = import("./annotationOverlay.mjs").then(({ createAnnotationOverlay }) => {
+          if (!annotationUiContext) return;
+          annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
+            ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, validateAnnotationPanels, resolveAnnotationScale,
+            annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell },
+            getClusters: () => currentData?.clusters || [], getPanels: () => currentData?.annotationPanels || [],
+            patch: (operations) => my.patch(operations) });
+          annotationOverlay.update(annotationUiContext);
+        }).catch((error) => console.error("Could not load optional annotation controls", error))
+          .finally(() => { annotationUiLoad = null; });
+      }
+    } else {
+      annotationUiContext = null;
+      annotationOverlay?.dispose(); annotationOverlay = null;
     }
   }
 
@@ -2049,6 +2110,8 @@ export default function clusterMap() {
     });
   };
   my.destroy = () => {
+    annotationUiContext = null;
+    annotationOverlay?.dispose(); annotationOverlay = null;
     stateSnapshots.reset();
     cancelTreePresentationPreview();
     rotateTreeNode = () => {};

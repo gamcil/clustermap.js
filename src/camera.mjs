@@ -10,6 +10,17 @@ function validBounds(bounds) {
   );
 }
 
+/** Camera-visible world rectangle, with overscan measured in screen pixels. */
+export function worldViewport(camera, { width, height }, overscan = 20) {
+  const margin = overscan / camera.k;
+  return {
+    minX: -camera.x / camera.k - margin,
+    maxX: (width - camera.x) / camera.k + margin,
+    minY: -camera.y / camera.k - margin,
+    maxY: (height - camera.y) / camera.k + margin,
+  };
+}
+
 /**
  * Fit a world-space figure envelope into a viewport.
  *

@@ -32,6 +32,7 @@ function clusterLabelOffsetsForStarts(
 
 function chromeForPreview(scene, maxX) {
   if (!scene.chrome) return null;
+  const dx = scene.annotationPanels?.length ? annotationOffsetForPreview(scene, { contentMaxX: maxX }) : maxX - scene.bounds.maxX;
   return {
     ...scene.chrome,
     legend: {
@@ -41,10 +42,20 @@ function chromeForPreview(scene, maxX) {
         x:
           scene.chrome.legend.placement === "bottom"
             ? scene.chrome.legend.position.x
-            : scene.chrome.legend.position.x + maxX - scene.bounds.maxX,
+            : scene.chrome.legend.position.x + dx,
       },
     },
   };
+}
+
+/** Keep the annotation group beyond stationary scales while loci move. */
+export function annotationOffsetForPreview(scene, preview) {
+  if (!scene.annotationPanels?.length || preview?.contentMaxX === undefined) return 0;
+  let right = -Infinity;
+  for (const locus of scene.loci.values()) right = Math.max(right, locus.worldEnd);
+  const movingRight = scene.bounds.maxX + preview.contentMaxX - right;
+  return Math.max(movingRight, scene.annotationChromeRight ?? -Infinity) -
+    (scene.annotationAnchorX ?? scene.bounds.maxX);
 }
 
 /**
@@ -64,6 +75,7 @@ export function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels 
 
   return {
     type: "locus-offset",
+    contentMaxX: maxX,
     locusUid,
     offsetX,
     clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, [
@@ -91,6 +103,7 @@ export function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
   const maxX = Math.max(...[...scene.loci.values()].map(endFor));
   return {
     type: "locus-offsets",
+    contentMaxX: maxX,
     locusOffsets,
     clusterLabelOffsets: clusterLabelOffsetsForStarts(
       scene,
@@ -171,6 +184,7 @@ export function createLocusTrimPreview(
   const maxX = Math.max(...[...scene.loci.values()].map(endFor));
   return {
     type: "locus-trim",
+    contentMaxX: maxX,
     locusUid,
     locusOffsets,
     loci: locusGeometry,

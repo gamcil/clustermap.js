@@ -92,6 +92,34 @@ The appearance editor and internal-node context menu provide the same controls.
 See [the styling contract](TREE_SCHEMA.md#colouring-and-annotations) and try
 `?fixture=tree-styling&renderer=canvas` for an illustrative example.
 
+## Annotation panels
+
+Annotation panels are optional and **disabled by default**. Enable them with
+`chart.config({ annotations: { enabled: true } })` or **Appearance → Annotations
+→ Enable annotation panels**. Disabling them preserves their data and settings,
+but removes the panels and their editing controls from the figure and SVG export.
+The annotation demo fixtures enable the feature explicitly.
+The optional panel-editing UI loads on demand from `dist/annotationOverlay.mjs`;
+include that file beside the main bundle when serving the built files directly.
+
+JSON data may include an `annotationPanels` array for row-aligned heatmaps and
+horizontal bars to the right of the clusters. Values are keyed by cluster ID
+and follow the clusters' row ordering and animations. Supported views are
+continuous/categorical heatmaps and numeric bars, with missing values and keys/axes.
+See [ANNOTATION_SCHEMA.md](ANNOTATION_SCHEMA.md) for the JSON API and defaults.
+Try `?fixture=heatmap&renderer=canvas` (also `svg` or `webgpu`).
+Use `?fixture=heatmap-project` for a 50-cluster project with continuous values,
+gene counts and categorical group presence, retaining its tree and saved layout.
+WebGPU draws marks using instanced rectangles and text using its Canvas overlay.
+SVG export remains vector-based and includes the complete figure.
+Hover an annotation panel and click **Edit** for its live styling menu; hover
+cells to see their original values. Menus control sizing, gaps, borders, scales
+and labels. Edits use the existing `chart.patch()` API and support undo/redo
+and data/project export.
+Hover the empty slot at the right of the figure and click **+** to add a heatmap
+or bar panel from CSV/TSV or JSON data. Edit menus include move-left, move-right
+and remove actions. Bars take one numeric column and support signed values.
+
 ## Biological fixture
 
 `fixtures/mcaa-neighbourhoods-173.json` and

@@ -19,6 +19,9 @@ const stripTrailingWhitespace = {
 
 const core = {
   input: "src/index.js",
+  // The optional HTML editor loads on demand; share core geometry through its
+  // factory argument instead of bundling a second layout/cache implementation.
+  external: (id) => id === "./annotationOverlay.mjs",
   output: [
     {
       file: "dist/clustermap.mjs",
@@ -36,9 +39,8 @@ const core = {
       plugins: [terser()],
     },
   ],
-  // The published chart is self-contained. Consumers may still use D3 to
-  // mount its callable chart, but do not need to resolve or globally expose
-  // D3 for the chart or optional editor to load.
+  // Published modules bundle their D3 dependencies. Annotation controls are
+  // the sole on-demand companion module; consumers need no global D3 runtime.
   plugins: [nodeResolve({ browser: true }), stripTrailingWhitespace, copyEditorCss],
 };
 
@@ -48,4 +50,10 @@ const editor = {
   plugins: [nodeResolve({ browser: true }), stripTrailingWhitespace],
 };
 
-export default [core, editor];
+const annotationUi = {
+  input: "src/annotationOverlay.mjs",
+  output: { file: "dist/annotationOverlay.mjs", format: "es" },
+  plugins: [nodeResolve({ browser: true }), stripTrailingWhitespace],
+};
+
+export default [core, editor, annotationUi];

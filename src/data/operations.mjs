@@ -1,4 +1,6 @@
 import { isTreeOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../treeOperations.mjs";
+import { isAnnotationOperation, normalizeAnnotationOperation, applyAnnotationOperation,
+  inverseAnnotationOperation, validateAnnotationChanges } from "../annotationOperations.mjs";
 
 // Public editing operations deliberately distinguish presentation updates from
 // structural group edits. Group membership is exclusive: assigning a gene to
@@ -368,13 +370,26 @@ export function applyChartOperations(data, index, operations, treeConfig = {}) {
     throw operationError("operations must be a non-empty array");
   }
   const groupIds = new Set(index.groupById.keys());
-  const applied = operations.map((operation) => isTreeOperation(operation)
-    ? normalizeTreeOperation(data.tree, operation)
-    : validateOperation(operation, index, groupIds));
+  const annotationDraft = { annotationPanels: data.annotationPanels };
+  const applied = operations.map((operation) => {
+    if (isTreeOperation(operation)) return normalizeTreeOperation(data.tree, operation);
+    if (isAnnotationOperation(operation)) {
+      const normalized = normalizeAnnotationOperation(annotationDraft, operation);
+      applyAnnotationOperation(annotationDraft, normalized);
+      return normalized;
+    }
+    return validateOperation(operation, index, groupIds);
+  });
   validateTreeOperationBatch(data.tree, applied, treeConfig);
+  validateAnnotationChanges(data, annotationDraft.annotationPanels);
   const hasStructuralGroupEdit = applied.some((operation) => operation.type !== "groups.update" && operation.type.startsWith("groups."));
   const inverse = [];
   for (const operation of applied) {
+    if (isAnnotationOperation(operation)) {
+      inverse.unshift(...inverseAnnotationOperation(data, operation));
+      applyAnnotationOperation(data, operation);
+      continue;
+    }
     if (isTreeOperation(operation)) {
       inverse.unshift(inverseTreeOperation(data.tree));
       applyTreeOperation(data.tree, operation);

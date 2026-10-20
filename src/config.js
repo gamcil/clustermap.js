@@ -1,6 +1,8 @@
 import { TREE_COLOURING_DEFAULTS } from "./treePresentation.mjs";
 
 const defaultConfig = {
+  // Optional row-aligned metadata panels. Synteny remains the default view.
+  annotations: { enabled: false },
   tree: {
     show: true,
     colouring: TREE_COLOURING_DEFAULTS,
