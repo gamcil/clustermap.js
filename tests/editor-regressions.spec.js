@@ -281,3 +281,136 @@ test("annotation rows virtualize, preserve offscreen selection and filter all re
   await expect(rows.first()).toContainText("Cluster 0");
   await expect(rows.first().getByRole("checkbox")).toBeChecked();
 });
+
+for (const renderer of ["svg", "canvas"]) {
+  test(`${renderer}: edited figures survive project reload and publication SVG export`, async ({ page }) => {
+    await page.evaluate(async () => {
+      const data = await (await fetch("/fixtures/heatmap.json")).json();
+      const { ClusterMap } = await import("/dist/clustermap.mjs");
+      chart.destroy();
+      window.chart = ClusterMap().config({ plot: { renderer: "svg", transitionDuration: 0 }, annotations: { enabled: true } });
+      d3.select("#plot").datum(data).call(chart);
+      document.querySelector("clinker-editor").chart = chart;
+      window.publicationInput = structuredClone(data);
+    });
+    // Use real pointer trimming before saving, so the project must retain the
+    // interaction state as well as edits to source data and appearance.
+    const locus = page.locator("#plot g.locus").first();
+    await locus.hover();
+    const handle = await locus.locator("rect.rightHandle").boundingBox();
+    const gene = await locus.locator("polygon.genePolygon").boundingBox();
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(gene.x + gene.width - 1, gene.y + gene.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await expect(page.locator("#plot text.locusText").first()).toHaveText("sequence_a:1-6500");
+    expect(await page.evaluate(() => chart.state().loci.find(([uid]) => uid === "locus-a")[1].end)).toBe(6500);
+
+    await annotation(page);
+    const value = matrixRows(page).first().locator('input[type="number"]').first();
+    await value.fill("0.75"); await value.press("Enter");
+    await page.evaluate(() => chart.patch([
+      { type: "groups.update", ids: [chart.data().groups[0].uid], changes: { label: "Edited gene family", colour: "#315b9a" } },
+      { type: "tree.presentation.update", scope: "subtree", ids: ["x"], changes: { branch: { colour: "#a34b19", width: 3 } } },
+      { type: "tree.presentation.update", scope: "node", ids: ["x"], changes: {
+        label: { text: "Publication clade", colour: "#7a3f9a", fontSize: 12, fontWeight: 700 },
+      } },
+    ]));
+    await page.getByRole("button", { name: "Tree node x: rotate children or open context menu", exact: true }).click();
+    expect(await page.evaluate(() => chart.state().clusterOrder)).toEqual(["b", "a", "c", "d", "e"]);
+    await page.evaluate((renderer) => chart.config({ plot: { renderer, theme: "dark" } }), renderer);
+
+    const saved = await page.evaluate(() => JSON.parse(JSON.stringify(chart.project())));
+    expect(saved.data.annotationPanels.find((panel) => panel.uid === "expression").values.a[0]).toBe(0.75);
+    const bounds = await page.evaluate(() => chart.figureBounds());
+    const svgBefore = await page.evaluate(() => chart.exportSvg());
+    const restored = await page.evaluate(async (saved) => {
+      const { ClusterMap } = await import("/dist/clustermap.mjs");
+      chart.destroy();
+      // Mount a fresh chart with defaults and original, unedited data. Only
+      // the JSON project can supply the saved trimming, ordering and styles.
+      window.chart = ClusterMap();
+      d3.select("#plot").datum(structuredClone(publicationInput)).call(chart);
+      chart.project(JSON.parse(JSON.stringify(saved)));
+      document.querySelector("clinker-editor").chart = chart;
+      return { project: chart.project(), bounds: chart.figureBounds(), undo: chart.canUndo(), svg: chart.exportSvg() };
+    }, saved);
+    expect(restored.project).toEqual(saved);
+    expect(restored.undo).toBe(false);
+    for (const key of ["minX", "minY", "maxX", "maxY"]) {
+      expect(Number.isFinite(restored.bounds[key])).toBe(true);
+      expect(restored.bounds[key]).toBeCloseTo(bounds[key], 4);
+    }
+    await annotation(page);
+    const rowA = matrixRows(page).filter({ hasText: "Example A" });
+    await expect(rowA.locator('input[type="number"]').first()).toHaveValue("0.75");
+
+    // Measure the exported document independently, with no editor or theme
+    // stylesheets. Check actual SVG geometry rather than just saved settings.
+    const exported = await page.context().newPage();
+    try {
+      await exported.setContent("<!doctype html><body></body>");
+      const inspect = async (source) => exported.evaluate((source) => {
+        const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
+        if (parsed.querySelector("parsererror")) throw new Error("Export is not valid SVG");
+        document.body.replaceChildren(document.importNode(parsed.documentElement, true));
+        const svg = document.querySelector("svg"), plot = svg.querySelector("g.clusterMapG");
+        const box = plot.getBBox();
+        const marks = (selector, attributes) => [...svg.querySelectorAll(selector)].map((node) => ({
+          text: node.textContent,
+          ...Object.fromEntries(attributes.map((name) => [name, node.getAttribute(name)])),
+        }));
+        const clusters = [...svg.querySelectorAll("g.cluster")].map((node) => ({
+          label: node.querySelector("text.clusterText").textContent,
+          locus: node.querySelector("text.locusText").textContent,
+          y: node.transform.baseVal.consolidate().matrix.f,
+        })).sort((a, b) => a.y - b.y);
+        return {
+          viewBox: [svg.viewBox.baseVal.x, svg.viewBox.baseVal.y, svg.viewBox.baseVal.width, svg.viewBox.baseVal.height],
+          width: +svg.getAttribute("width"), height: +svg.getAttribute("height"),
+          content: { x: box.x, y: box.y, width: box.width, height: box.height },
+          background: svg.firstElementChild.getAttribute("fill"), clusters,
+          genes: [...svg.querySelectorAll("polygon.genePolygon")].map((node) => ({ points: node.getAttribute("points"), fill: getComputedStyle(node).fill })),
+          legend: marks(".legend-label", []),
+          clades: marks("text.tree-annotation", ["fill", "font-size", "font-weight"]),
+          branches: marks(".tree-branch, .tree-stem", ["d", "x1", "y1", "x2", "y2", "stroke", "stroke-width"]),
+          panels: [...svg.querySelectorAll("g.annotationPanel")].map((panel) => ({
+            text: panel.textContent, transform: panel.getAttribute("transform"),
+            rows: [...panel.querySelectorAll("g.annotationRow")].map((row) => ({
+              transform: row.getAttribute("transform"), y: row.transform.baseVal.consolidate().matrix.f,
+              rects: [...row.querySelectorAll("rect")].map((rect) => ["x", "y", "width", "height", "fill"].map((name) => rect.getAttribute(name))),
+            })),
+          })),
+          interactive: svg.querySelectorAll("script, foreignObject, g.hover, .leftHandle, .rightHandle, [tabindex], [cursor], [pointer-events]").length,
+        };
+      }, source);
+      const before = await inspect(svgBefore), after = await inspect(restored.svg);
+      expect(after).toEqual(before);
+      expect(after.interactive).toBe(0);
+      expect(after.background).toBe("#ffffff");
+      expect(after.clusters.map((row) => row.label)).toEqual(["Example B", "Example A", "Example C", "Example D", "Example E"]);
+      expect(after.clusters.find((row) => row.label === "Example A").locus).toBe("sequence_a:1-6500");
+      expect(after.genes).toHaveLength(5);
+      expect(after.genes.every((gene) => gene.fill === "rgb(49, 91, 154)")).toBe(true);
+      expect(after.legend.map((label) => label.text)).toContain("Edited gene family");
+      expect(after.clades).toEqual([{ text: "Publication clade", fill: "#7a3f9a", "font-size": "12", "font-weight": "700" }]);
+      expect(after.branches.some((branch) => branch.stroke === "#a34b19" && branch["stroke-width"] === "3")).toBe(true);
+      expect(after.panels).toHaveLength(4);
+      const expression = after.panels.find((panel) => panel.text.includes("Expression"));
+      const rowIndex = after.clusters.findIndex((row) => row.label === "Example A");
+      const expressionRows = [...expression.rows].sort((a, b) => a.y - b.y);
+      // 0.75 is halfway between the fixture's middle and final colour stops.
+      expect(expressionRows[rowIndex].rects[0].at(-1)).toBe("rgb(58, 111, 161)");
+      const expected = [after.content.x - 20, after.content.y - 20, after.content.width + 40, after.content.height + 40];
+      after.viewBox.forEach((value, index) => {
+        expect(Number.isFinite(value)).toBe(true);
+        // Text hinting can differ slightly once the SVG has its final size.
+        expect(Math.abs(value - expected[index])).toBeLessThanOrEqual(0.5);
+      });
+      expect(after.width).toBeCloseTo(after.viewBox[2], 4);
+      expect(after.height).toBeCloseTo(after.viewBox[3], 4);
+    } finally { await exported.close(); }
+    // Export must not mutate the live figure or its portable project.
+    expect(await page.evaluate(() => chart.project())).toEqual(saved);
+  });
+}

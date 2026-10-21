@@ -410,7 +410,12 @@ server or internet connection is needed during the run.
 
 Coverage includes shared table geometry and theme states, inline edits and
 merging, undo/redo, annotation batch edits and categories, panel management,
-and virtual scrolling with offscreen selection. Run `npm test` for the Node suite.
+and virtual scrolling with offscreen selection. Publication checks trim a locus,
+edit row order, tree styles and annotation values, then reload the JSON project
+into a fresh chart. SVG exports from both SVG and Canvas renderers are checked
+in an independent document for matching geometry, colours, labels and unclipped
+bounds, including dark mode.
+Run `npm test` for the Node suite.
 
 ## Rendering benchmark
 
