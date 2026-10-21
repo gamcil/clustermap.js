@@ -13711,10 +13711,12 @@ async function createWebGpuRenderer(canvas) {
   // buffer lets committed cluster moves avoid rebuilding every gene vertex.
   let clusterBaseOffsets = new Float32Array(clusterOffsetCapacity * 2);
   let linkRecordBuffer = device.createBuffer({
-    size: 4,
+    // A runtime-sized WGSL array must fit at least one LinkRecord, even when
+    // the chart has no links. Validation also applies to zero-instance draws.
+    size: 64,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
-  let linkRecordCapacity = 0;
+  let linkRecordCapacity = 16;
   let linkIndexBuffer = device.createBuffer({
     size: 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -14275,17 +14277,21 @@ async function createWebGpuRenderer(canvas) {
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, bindGroup);
       if (previewLinksActive) {
-        pass.setPipeline(linkPipeline);
-        pass.setBindGroup(0, bindGroup);
-        pass.draw(60, previewLinkCount);
+        if (previewLinkCount) {
+          pass.setPipeline(linkPipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.draw(60, previewLinkCount);
+        }
       } else if (linkBuffer) {
         pass.setVertexBuffer(0, linkBuffer);
         pass.draw(linkCount);
       }
       if (previewLinksActive) {
-        pass.setPipeline(linkLinePipeline);
-        pass.setBindGroup(0, bindGroup);
-        pass.draw(132, previewLinkCount);
+        if (previewLinkCount) {
+          pass.setPipeline(linkLinePipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.draw(132, previewLinkCount);
+        }
       } else if (linkEdgeBuffer) {
         pass.setPipeline(strokePipeline);
         pass.setBindGroup(0, bindGroup);
