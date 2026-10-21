@@ -7,6 +7,8 @@ export function createFigureSurface() {
 
   function bounds(container, scene, config, tree, preview = null) {
     if (!container || !scene?.bounds) return null;
+    // Reordering moves rows within the figure without changing its extent.
+    if (preview?.type === "cluster-drag") preview = null;
     if (scene !== measuredScene || config !== measuredConfig) textMetrics.clear();
     if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
       context ||= container.ownerDocument.createElement("canvas").getContext("2d");
