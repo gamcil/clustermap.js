@@ -5,6 +5,7 @@ import {
   getGenePolygonCoordinates,
 } from "./genes/layout.mjs";
 import {
+  clusterPairKey,
   getLinkAnchors,
   getLinkLabelPosition,
   getLinkPath,
@@ -50,10 +51,6 @@ function boundsFromRegions(regions) {
     minY: Math.min(...regions.map((region) => region.y)),
     maxY: Math.max(...regions.map((region) => region.y + region.height)),
   };
-}
-
-export function clusterPairKey(left, right) {
-  return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
 }
 
 function formatKilobases(basePairs) {
@@ -434,6 +431,12 @@ function buildHitRegions(loci, genes) {
   return { all, loci: locusRegions, genes: geneRegions };
 }
 
+function adjacencyForOrder(order, fallback) {
+  if (!order) return fallback;
+  const positions = new Map(order.map((uid, index) => [uid, index]));
+  return (one, two) => Math.abs(positions.get(one) - positions.get(two)) === 1;
+}
+
 /**
  * Derive renderer-neutral, world-space geometry from chart data and state.
  * The returned records contain no DOM selections and can be consumed by SVG,
@@ -472,16 +475,7 @@ export function buildScene(
   const links = new Map();
   const linksByClusterPair = new Map();
   const linksByGene = new Map();
-  // Projection receives the current order from the stateful runtime. Index it
-  // once so each link can test adjacency without searching that order array.
-  // The callback remains the generic fallback for direct scene consumers.
-  const clusterOrderIndex = clusterOrder
-    ? new Map(clusterOrder.map((uid, index) => [uid, index]))
-    : null;
-  const indexedAreClustersAdjacent = (one, two) => {
-    if (!clusterOrderIndex) return areClustersAdjacent(one, two);
-    return Math.abs(clusterOrderIndex.get(one) - clusterOrderIndex.get(two)) === 1;
-  };
+  areClustersAdjacent = adjacencyForOrder(clusterOrder, areClustersAdjacent);
   const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
 
   for (const cluster of data.clusters) {
@@ -532,7 +526,7 @@ export function buildScene(
       genes,
       loci,
       clusters,
-      areClustersAdjacent: indexedAreClustersAdjacent,
+      areClustersAdjacent,
       scaleX,
       link,
       linkVisible,
@@ -699,11 +693,12 @@ function placeLegendAfterAnnotations(chrome, panels) {
  */
 export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = {}, options) {
   if (!scene) return scene;
+  options = { ...options, areClustersAdjacent: adjacencyForOrder(options.clusterOrder, options.areClustersAdjacent) };
   const {
     scaleX, shape, label, getGeneState, getLocusState, locusOffset,
     clusterOffset = (uid) => scene.clusters.get(uid).x,
     clusterPosition = (uid) => scene.clusters.get(uid).y,
-    linksForGene, trimIndicatorStyle = {},
+    trimIndicatorStyle = {},
   } = options;
   const requestedLoci = new Set(locusIds);
   const requestedClusters = new Set(clusterIds);
@@ -804,18 +799,8 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
   }
 
   const sources = new Map();
-  if (linksForGene || scene.linksByGene) {
-    for (const uid of changedGenes) {
-      for (const source of linksForGene ? linksForGene(uid) : scene.linksByGene.get(uid) || []) {
-        sources.set(source.uid, source);
-      }
-    }
-  } else {
-    // Generic scene consumers may not have a data lookup. Runtime callers use
-    // their retained incident-link index and never take this scan path.
-    for (const { source } of scene.links.values()) {
-      if (changedGenes.has(source.query.uid) || changedGenes.has(source.target.uid)) sources.set(source.uid, source);
-    }
+  for (const uid of changedGenes) {
+    for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
   }
   const links = new Map(scene.links);
   for (const source of sources.values()) {
@@ -858,17 +843,4 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
         () => entries(locusRegions, locusRegions.keys(), hitBounds)),
     },
   };
-}
-
-// Compatibility entry points delegate to the same patch/finalization path.
-export function patchFlippedLocusScene(scene, locus, options) {
-  return patchScene(scene, { loci: [locus.uid] }, options);
-}
-
-export function patchAnchoredGeneScene(scene, { changes = [], flippedLoci = [] }, options) {
-  const offsets = new Map(changes.map(({ clusterUid, offset }) => [clusterUid, offset]));
-  return patchScene(scene, { loci: flippedLoci, clusters: offsets.keys() }, {
-    ...options,
-    clusterOffset: (uid) => scene.clusters.get(uid).x + (offsets.get(uid) || 0),
-  });
 }

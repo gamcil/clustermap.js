@@ -1,16 +1,16 @@
+import { zoom as createZoom, zoomIdentity, zoomTransform } from "d3-zoom";
+
 // Surface modules supply renderer-specific effects, but every chart camera
 // uses the same D3 gesture contract and intentionally reserves double-click
 // for locus flipping.
 export function bindCameraZoom({
-  d3,
   surface,
   zoomExtent,
   onZoom,
   onStart,
   onEnd,
 }) {
-  const zoom = d3
-    .zoom()
+  const zoom = createZoom()
     .scaleExtent(zoomExtent())
     .on("zoom", onZoom)
     .on("start", onStart)
@@ -27,13 +27,13 @@ export function updateCameraZoom(zoom, zoomExtent) {
 // all renderers, so a surface created while switching renderer must adopt that
 // camera before its first wheel or drag event. Otherwise its default identity
 // transform would overwrite the already-visible camera on that first gesture.
-export function syncCameraZoom({ d3, surface, zoom, camera }) {
+export function syncCameraZoom({ surface, zoom, camera }) {
   const node = surface?.node?.();
   if (!node || !zoom || !camera) return;
-  const current = d3.zoomTransform(node);
+  const current = zoomTransform(node);
   if (current.x === camera.x && current.y === camera.y && current.k === camera.k) return;
   surface.call(
     zoom.transform,
-    d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+    zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
   );
 }

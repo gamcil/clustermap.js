@@ -39,31 +39,20 @@ export function createRasterInteraction({
     const point = worldPoint(surface, event);
     surface.setPointerCapture(event.pointerId);
     updateAffordance(surface, target, { warm: true });
-    if (target.action === "move-cluster") {
+    if (target.action === "move-cluster" || target.action === "move-locus" || target.action.startsWith("trim-locus")) {
       gesture = {
         action: target.action,
         clusterUid: target.clusterUid,
-        start: { x: event.clientX, y: event.clientY },
-        moved: false,
-      };
-      interactions.beginClusterDrag(target.clusterUid, point.y);
-    } else if (target.action === "move-locus") {
-      gesture = {
-        action: target.action,
         locusUid: target.locusUid,
         start: { x: event.clientX, y: event.clientY },
         moved: false,
       };
-      interactions.beginLocusDrag(target.locusUid, point.x);
-    } else if (target.action.startsWith("trim-locus")) {
-      gesture = {
-        action: target.action,
-        locusUid: target.locusUid,
-        edge: target.action.endsWith("left") ? "left" : "right",
-        start: { x: event.clientX, y: event.clientY },
-        moved: false,
-      };
-      interactions.beginLocusTrim();
+      if (target.action === "move-cluster") interactions.beginClusterDrag(target.clusterUid, point.y);
+      else if (target.action === "move-locus") interactions.beginLocusDrag(target.locusUid, point.x);
+      else {
+        gesture.edge = target.action.endsWith("left") ? "left" : "right";
+        interactions.beginLocusTrim();
+      }
     } else if (target.action === "gene") {
       gesture = { action: target.action, geneUid: target.geneUid };
     } else if (target.action === "tree-node") {
@@ -82,9 +71,7 @@ export function createRasterInteraction({
       updateAffordance(surface, targetForEvent(surface, event));
       return;
     }
-    const draggable =
-      gesture.action === "move-cluster" || gesture.action === "move-locus" || gesture.edge;
-    if (draggable && !gesture.moved) {
+    if (gesture.start && !gesture.moved) {
       if (Math.hypot(event.clientX - gesture.start.x, event.clientY - gesture.start.y) < 2) return;
       gesture.moved = true;
       beginMotion();

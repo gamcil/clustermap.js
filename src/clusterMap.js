@@ -1,6 +1,7 @@
+import { animate as runAnimation, afterPaint } from "./animation.mjs";
 import { select } from "d3-selection";
 import { transition as createTransition } from "d3-transition";
-import { zoomIdentity, zoomTransform } from "d3-zoom";
+import { zoomIdentity } from "d3-zoom";
 import { createLinkGroups } from "./links/groups.mjs";
 import {
   createChartState,
@@ -42,6 +43,7 @@ import {
   hitTestCanvas,
   interpolateCanvasScene,
   renderCanvas,
+  CANVAS_LAYERS,
 } from "./canvasRenderer.js";
 import { renderSvg } from "./svgRenderer.js";
 import { createRasterMinimap } from "./rasterMinimap.mjs";
@@ -71,7 +73,6 @@ import { chartStateFromSnapshot, createChartStateSerializer } from "./chartState
 import { lociForClusterRange } from "./locusSelection.mjs";
 
 let nextChartInstance = 0;
-const d3 = { zoomIdentity, zoomTransform };
 const projectFormat = "clinker-project";
 const projectVersion = 1;
 const historyLimit = 100;
@@ -137,14 +138,11 @@ export default function clusterMap() {
   let canvasPreparedFlipBase = null;
   let canvasFlipWarmFrame = null;
   let previewPaintFrame = null;
-  let canvasFlipFrame = null;
+  let cancelCanvasFlip = null;
   let canvasPendingFlip = null;
   let paintPreviewFrame = null;
-  let sceneFlipFrame = null;
+  let cancelSceneFlip = null;
   let clusterCommitFrame = null;
-  let webgpuClusterCommit = null;
-  let webgpuAnchorCommit = null;
-  let webgpuLocusCommit = null;
   let sceneCommit = null;
   let scheduleMinimapBase = () => {};
   let prepareCanvasFlipBase = () => {};
@@ -213,15 +211,6 @@ export default function clusterMap() {
       sourceScene,
       changes: { loci: [...flippedLoci], clusters: changes.map(({ clusterUid }) => clusterUid) },
     };
-    if (!isWebGpuRenderer(runtime.config.plot.renderer)) return;
-    const offsets = new Map(
-      changes
-        .filter(({ offset }) => offset)
-        .map(({ clusterUid, offset }) => [clusterUid, offset])
-    );
-    if (offsets.size || flippedLoci.size) {
-      webgpuAnchorCommit = { sourceScene, offsets, flippedLoci };
-    }
   });
   const anchorGene = (gene, { flipMismatchedLoci = false } = {}) => {
     beginInteractionState();
@@ -291,9 +280,6 @@ export default function clusterMap() {
           order,
           rows,
         });
-        if (isWebGpuRenderer(runtime.config.plot.renderer)) {
-          webgpuClusterCommit = { sourceScene, preview: scenePreview };
-        }
         scheduleScenePreview();
         if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
         clusterCommitFrame = requestAnimationFrame(() => {
@@ -380,13 +366,13 @@ export default function clusterMap() {
     cancelInteraction: () => { pendingInteractionState = null; },
     flipLocus: (locus) => {
       // Do not mutate the retained source underneath an in-flight flip.
-      if (sceneFlipFrame !== null) return;
+      if (cancelSceneFlip !== null) return;
       beginInteractionState();
       flipLocus(chartState, locus);
       if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
-        if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+        canvasAnimation?.cancel();
         canvasAnimation = null;
-        if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
+        cancelCanvasFlip?.();
         const previewProgress = 0.12;
         const sourceScene = canvasScene || runtime.getScene();
         const pending = createCanvasFlipPending(locus, sourceScene);
@@ -397,17 +383,8 @@ export default function clusterMap() {
           clusterLabelText: pending.clusterLabelText,
         });
         scheduleScenePreview();
-        // The first preview frame is retained-scene geometry plus a reflection
-        // patch. Only after it has painted do we project the changed locus and
-        // its incident links; the animation never interpolates every record.
-        // rAF callbacks all run before the browser presents a frame. Queue the
-        // expensive layer preparation from a *second* rAF so the initial
-        // retained-scene preview above is actually visible immediately rather
-        // than being held behind cache construction.
-        canvasFlipFrame = requestAnimationFrame(() => {
-          if (canvasPendingFlip !== pending) return;
-          canvasFlipFrame = requestAnimationFrame(() => startCanvasFlip(pending, previewProgress));
-        });
+        // Show the retained preview before preparing cached flip layers.
+        cancelCanvasFlip = afterPaint(() => startCanvasFlip(pending, previewProgress));
         return;
       }
       if (runtime.getScene()) {
@@ -418,13 +395,13 @@ export default function clusterMap() {
           runtime.synchronizeLocusLayoutState(locus);
           const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, currentData);
           if (useGpu) {
-            webgpuBackend.adoptLocusChanges(targetScene, sourceScene, {
-              loci: [locus.uid], scales: runtime.scales, config: runtime.renderConfig,
+            webgpuBackend.adoptScene(targetScene, sourceScene, {
+              scales: runtime.scales, config: runtime.renderConfig,
             });
             webgpuBackend.setScene(targetScene);
           } else svgBackend.setScene(targetScene);
           scenePreview = null;
-          sceneFlipFrame = null;
+          cancelSceneFlip = null;
           scheduleScenePaint();
           commitInteractionState();
         };
@@ -432,26 +409,15 @@ export default function clusterMap() {
           finish();
           return;
         }
-        const startedAt = performance.now();
-        const frame = (now) => {
-          const elapsed = Math.min(1, (now - startedAt) / duration);
-          const eased = elapsed < 0.5
-            ? 4 * elapsed * elapsed * elapsed
-            : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+        cancelSceneFlip = runAnimation(duration, (progress) => {
           scenePreview = createLocusFlipPreview(sourceScene, locus.uid, {
-            progress: eased,
+            progress,
             clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
           });
           if (useGpu) webgpuBackend.setScene(sourceScene);
           else svgBackend.setScene(sourceScene);
           scheduleScenePaint();
-          if (elapsed < 1) {
-            sceneFlipFrame = requestAnimationFrame(frame);
-            return;
-          }
-          finish();
-        };
-        sceneFlipFrame = requestAnimationFrame(frame);
+        }, finish);
         return;
       }
       redraw();
@@ -461,12 +427,7 @@ export default function clusterMap() {
 
   function commitLocusEdit(loci, updateState) {
     const sourceScene = runtime.getScene();
-    if (sourceScene) {
-      sceneCommit = { sourceScene, changes: { loci } };
-      if (isWebGpuRenderer(runtime.config.plot.renderer)) {
-        webgpuLocusCommit = { sourceScene, loci };
-      }
-    }
+    if (sourceScene) sceneCommit = { sourceScene, changes: { loci } };
     updateState();
     clearScenePreview();
     redraw({ animate: false });
@@ -475,8 +436,8 @@ export default function clusterMap() {
 
   function clearScenePreview() {
     if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
-    if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
-    if (sceneFlipFrame !== null) cancelAnimationFrame(sceneFlipFrame);
+    cancelCanvasFlip?.();
+    cancelSceneFlip?.();
     if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
     scenePreview = null;
     canvasPreviewScene = null;
@@ -485,17 +446,17 @@ export default function clusterMap() {
     if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
     canvasFlipWarmFrame = null;
     previewPaintFrame = null;
-    canvasFlipFrame = null;
+    cancelCanvasFlip = null;
     canvasPendingFlip = null;
-    sceneFlipFrame = null;
+    cancelSceneFlip = null;
     clusterCommitFrame = null;
   }
 
   function flushCanvasFlip() {
     const pending = canvasPendingFlip;
     if (!pending) return;
-    if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
-    canvasFlipFrame = null;
+    cancelCanvasFlip?.();
+    cancelCanvasFlip = null;
     if (!pending.targetScene) {
       runtime.synchronizeLocusLayoutState(pending.locus);
       pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, currentData);
@@ -512,7 +473,7 @@ export default function clusterMap() {
 
   function startCanvasFlip(pending, initialProgress) {
     if (canvasPendingFlip !== pending) return;
-    canvasFlipFrame = null;
+    cancelCanvasFlip = null;
     runtime.synchronizeLocusLayoutState(pending.locus);
     pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, currentData);
     commitInteractionState();
@@ -535,41 +496,29 @@ export default function clusterMap() {
       scheduleMinimapBase(canvasScene);
       return;
     }
-    const startedAt = performance.now();
-    const frame = (now) => {
+    cancelCanvasFlip = runAnimation(duration, (progress) => {
       if (canvasPendingFlip !== pending) return;
-      const elapsed = Math.min(1, (now - startedAt) / duration);
-      const eased = elapsed < 0.5
-        ? 4 * elapsed * elapsed * elapsed
-        : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
       scenePreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
-        progress: initialProgress + (1 - initialProgress) * eased,
+        progress: initialProgress + (1 - initialProgress) * progress,
         clusterLabelText: pending.clusterLabelText,
       });
-      // The dirty region is bounded to the affected locus and its incident
-      // links, so paint it in this rAF rather than one frame later. Links and
-      // genes are drawn together in normal renderer order.
+      // Paint the dirty region in this frame rather than one frame later.
       if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
       previewPaintFrame = null;
       paintPreviewFrame?.();
-      if (elapsed < 1) {
-        canvasFlipFrame = requestAnimationFrame(frame);
-        return;
-      }
-      canvasFlipFrame = null;
+    }, () => {
+      cancelCanvasFlip = null;
       scenePreview = null;
       canvasPreviewScene = null;
       canvasPendingFlip = null;
       canvasScene = pending.targetScene;
       canvasBackend.setScene(canvasScene);
-      // Replace the final preview with the complete target scene.
       paintPreviewFrame?.();
       clearCanvasFlipBase();
       canvasPreparedFlipBase = null;
       scheduleScenePaint();
       scheduleMinimapBase(canvasScene);
-    };
-    canvasFlipFrame = requestAnimationFrame(frame);
+    });
   }
 
   function scheduleScenePaint() {
@@ -634,7 +583,7 @@ export default function clusterMap() {
   }
 
   function stopWebGpuAnimation() {
-    if (webgpuAnimation?.frame) cancelAnimationFrame(webgpuAnimation.frame);
+    webgpuAnimation?.cancel();
     webgpuAnimation = null;
   }
 
@@ -646,24 +595,14 @@ export default function clusterMap() {
     });
   }
 
-  function invalidateSceneCommit() {
-    sceneCommit = null;
-    webgpuClusterCommit = null;
-    webgpuAnchorCommit = null;
-    webgpuLocusCommit = null;
-  }
-
   function loadData(data) {
-    invalidateSceneCommit();
+    sceneCommit = null;
     stateSnapshots.reset();
     const prepared = normalizeChartData(data, runtime.config.tree);
     cancelTreePresentationPreview();
     currentData = prepared;
     chartIndex = createChartIndex(currentData);
-    refreshDerivedGroups();
-    // Generated groups are part of the editable model, so index them after
-    // automatic grouping rather than leaving the group lookup one redraw old.
-    chartIndex = createChartIndex(currentData);
+    refreshGroups();
     selectedLocusIds = new Set(
       [...selectedLocusIds].map(locusForId).filter(Boolean).map((locus) => locus.uid)
     );
@@ -677,18 +616,15 @@ export default function clusterMap() {
     return data?.config?.updateGroups !== false;
   }
 
-  function refreshDerivedGroups() {
-    if (!currentData) return;
-    if (!groupsAreAutomatic()) {
-      if (!currentData.groups) currentData.groups = [];
-      return;
-    }
-    // Deleted genes intentionally leave link records in editable data. Only
-    // links whose endpoints remain in the index participate in auto-grouping.
-    const projectedLinks = currentData.links.filter((link) =>
-      chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
-    );
-    currentData.groups = createLinkGroups(projectedLinks, currentData.groups);
+  function refreshGroups(derive = groupsAreAutomatic()) {
+    if (derive) {
+      // Deleted genes retain their link records; exclude dangling endpoints.
+      const links = currentData.links.filter((link) =>
+        chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
+      );
+      currentData.groups = createLinkGroups(links, currentData.groups);
+    } else currentData.groups ??= [];
+    chartIndex.groupById = new Map(currentData.groups.map((group) => [group.uid, group]));
   }
 
   function emitChange(change) {
@@ -737,12 +673,9 @@ export default function clusterMap() {
   }
 
   function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
+    if (effects.reindex === "data") chartIndex = createChartIndex(currentData);
     if (effects.reindex || refreshAutomatic) {
-      chartIndex = createChartIndex(currentData);
-      if (groupsAreAutomatic() && (effects.refreshDerivedGroups || refreshAutomatic)) {
-        refreshDerivedGroups();
-        chartIndex = createChartIndex(currentData);
-      }
+      refreshGroups(groupsAreAutomatic() && (effects.reindex === "data" || refreshAutomatic));
       runtime.setChartIndex(chartIndex);
     }
     if (effects.rebuildState) {
@@ -755,7 +688,7 @@ export default function clusterMap() {
   function applyPatch(operations, { record = true, automaticGroups } = {}) {
     const sourceScene = runtime.getScene();
     const annotationsOnly = Array.isArray(operations) && operations.every(isAnnotationOperation);
-    invalidateSceneCommit();
+    sceneCommit = null;
     // Source edits may mutate currentData in place. Identity alone cannot
     // invalidate the cached biological defaults, including on undo/redo.
     if (!annotationsOnly) stateSnapshots.reset();
@@ -795,7 +728,7 @@ export default function clusterMap() {
   }
 
   function setState(snapshot, { record = true } = {}) {
-    invalidateSceneCommit();
+    sceneCommit = null;
     pendingInteractionState = null;
     const before = chartState ? stateSnapshots.serialize(chartState, currentData) : null;
     chartState = chartStateFromSnapshot(currentData, snapshot);
@@ -854,7 +787,7 @@ export default function clusterMap() {
       // the chart changes backend, and invalidate any async setup that might
       // otherwise resolve after that canvas has been removed.
       webgpuBackend.destroy();
-      invalidateSceneCommit();
+      sceneCommit = null;
     }
     if (!useCanvas) canvasBackend.destroy();
     if (useRaster) svgBackend.destroy();
@@ -946,6 +879,10 @@ export default function clusterMap() {
       .select("div.tooltip")
       .on("mouseenter", overlay.enter)
       .on("mouseleave", overlay.leave);
+    const canvasFrame = () => ({
+      camera: getCamera(chartState), config: runtime.renderConfig,
+      scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(),
+    });
     const paintCanvas = (canvasNode) => {
       updateFigureSurface();
       const flipLayer =
@@ -966,24 +903,18 @@ export default function clusterMap() {
         renderCanvas({
           canvas: canvasNode,
           scene: canvasPreviewScene,
-          camera: getCamera(chartState),
+          ...canvasFrame(),
           // Keep the normal filled-ribbon appearance throughout the flip.
           config: {
             ...runtime.renderConfig,
             link: {
               ...runtime.config.link,
               asLine: false,
-              label: { ...runtime.config.link.label, show: false },
             },
           },
-          scales: runtime.scales,
-          pixelRatio: rasterMotion.pixelRatio(),
           preview: scenePreview,
           include: { links: canvasPendingFlip.dynamic.links },
-          showLoci: false,
-          showGenes: false,
-          showClusterLabels: false,
-          showChrome: false,
+          layers: ["links"],
           suppressLocusHover: true,
           clear: false,
         });
@@ -1001,15 +932,9 @@ export default function clusterMap() {
           renderCanvas({
             canvas: canvasNode,
             scene: canvasPreviewScene,
-            camera: getCamera(chartState),
-            config: runtime.renderConfig,
-            scales: runtime.scales,
-            pixelRatio: rasterMotion.pixelRatio(),
+            ...canvasFrame(),
             include: { genes: stationaryGenes },
-            showLinks: false,
-            showLoci: false,
-            showClusterLabels: false,
-            showChrome: false,
+            layers: ["genes", "geneLabels"],
             suppressLocusHover: true,
             clear: false,
           });
@@ -1020,16 +945,10 @@ export default function clusterMap() {
         renderCanvas({
           canvas: canvasNode,
           scene: canvasPreviewScene,
-          camera: getCamera(chartState),
-          config: runtime.renderConfig,
-          scales: runtime.scales,
-          pixelRatio: rasterMotion.pixelRatio(),
+          ...canvasFrame(),
           preview: scenePreview,
           include: { loci: canvasPendingFlip.locusRecords.loci },
-          showLinks: false,
-          showLocusTracks: false,
-          showGenes: false,
-          showChrome: false,
+          layers: ["trimIndicators", "clusterLabels"],
           suppressLocusHover: true,
           clear: false,
         });
@@ -1049,13 +968,10 @@ export default function clusterMap() {
         previousTree: treeAnimation?.previousTree,
         previousTreeScene: treeAnimation?.previousScene,
         treeProgress: treeAnimation?.progress ?? 1,
-        camera: getCamera(chartState),
-        config: runtime.renderConfig,
-        scales: runtime.scales,
+        ...canvasFrame(),
         hoverLocusUid: canvasHoverLocusUid,
         suppressLocusHover:
           scenePreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
-        pixelRatio: rasterMotion.pixelRatio(),
         preview: scenePreview,
         highlightGeneIds: highlightedGeneIds(),
         highlightLinkIds,
@@ -1077,19 +993,11 @@ export default function clusterMap() {
           previousTreeScene: treeAnimation?.previousScene,
           treeTargetScene: treeAnimation?.targetScene,
           treeProgress: treeAnimation?.progress ?? 1,
-          camera: getCamera(chartState),
-          config: runtime.renderConfig,
-          scales: runtime.scales,
+          ...canvasFrame(),
           hoverLocusUid: canvasHoverLocusUid,
           suppressLocusHover: scenePreview?.type === "locus-flip",
-          pixelRatio: rasterMotion.pixelRatio(),
           preview: scenePreview,
-          showLinks: false,
-          showLinkLabels: runtime.config.link.label.show,
-          showLocusTracks: false,
-          showGenes: false,
-          showGeneLabels: runtime.config.gene.label.show,
-          showAnnotationGeometry: false,
+          layers: ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"],
           highlightGeneIds: highlightedGeneIds(),
           highlightLinkIds,
           highlightLocusIds: selectedLocusIds,
@@ -1100,12 +1008,9 @@ export default function clusterMap() {
         canvas: canvasNode,
         scene,
         preview: scenePreview,
-        camera: getCamera(chartState),
-        scales: runtime.scales,
-        config: runtime.renderConfig,
+        ...canvasFrame(),
         width: bounds.width,
         height: bounds.height,
-        pixelRatio: rasterMotion.pixelRatio(),
         onUnavailable: () => paintCanvas(webgpuOverlay.node()),
       });
       paintMinimap();
@@ -1133,9 +1038,7 @@ export default function clusterMap() {
       const renderOptions = {
         scene: pending.sourceScene,
         tree: currentData.tree,
-        camera: getCamera(chartState),
-        config: runtime.renderConfig,
-        scales: runtime.scales,
+        ...canvasFrame(),
         dimensions: { width: bounds.width, height: bounds.height },
         pixelRatio,
         suppressLocusHover: true,
@@ -1148,16 +1051,13 @@ export default function clusterMap() {
           loci: pending.dynamic.loci,
           genes: pending.dynamic.genes,
         },
-        showLoci: false,
-        showGenes: false,
-        showClusterLabels: false,
-        showChrome: false,
+        layers: ["links", "linkLabels"],
       });
       renderCanvas({
         canvas: baseCanvas,
         ...renderOptions,
         omit: { loci: pending.dynamic.loci, genes: pending.dynamic.genes },
-        showLinks: false,
+        layers: CANVAS_LAYERS.filter((layer) => layer !== "links" && layer !== "linkLabels"),
         clear: false,
       });
     };
@@ -1170,23 +1070,12 @@ export default function clusterMap() {
       renderCanvas({
         canvas: locusCanvas,
         scene: pending.sourceScene,
+        ...canvasFrame(),
         camera: { ...camera, x: camera.x - frame.x, y: camera.y - frame.y },
-        config: {
-          ...runtime.renderConfig,
-          gene: {
-            ...runtime.renderConfig.gene,
-            // A reflected bitmap would mirror glyphs. The normal target scene
-            // redraw restores labels at the end of the brief animation.
-            label: { ...runtime.config.gene.label, show: false },
-          },
-        },
-        scales: runtime.scales,
         dimensions: frame,
         pixelRatio,
         include: pending.locusRecords,
-        showLinks: false,
-        showClusterLabels: false,
-        showChrome: false,
+        layers: ["tracks", "trimIndicators", "genes"],
         suppressLocusHover: true,
       });
       return frame;
@@ -1364,22 +1253,11 @@ export default function clusterMap() {
             canvas: baseCanvas,
             tree: currentData.tree,
             treeTrackAnchor: false,
-            // A full ribbon overview becomes an opaque field for dense maps.
-            // Keep the structured, coloured gene raster by default; callers
-            // can opt links back in for sparse figures.
-            scene: {
-              ...overviewScene,
-              chrome: null,
-              links: minimapOptions.showLinks ? overviewScene.links : new Map(),
-            },
+            scene: overviewScene,
             camera: { x: projection.x, y: projection.y, k: projection.scale },
-            config: {
-              ...runtime.renderConfig,
-              gene: {
-                ...runtime.renderConfig.gene,
-                label: { ...runtime.config.gene.label, show: false },
-              },
-            },
+            config: runtime.renderConfig,
+            layers: CANVAS_LAYERS.filter((layer) => layer !== "geneLabels" && layer !== "chrome" &&
+              (minimapOptions.showLinks || layer !== "links" && layer !== "linkLabels")),
             scales: runtime.scales,
             dimensions: projection,
             fullScene: true,
@@ -1390,7 +1268,7 @@ export default function clusterMap() {
       });
     };
     const stopCanvasAnimation = () => {
-      if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+      canvasAnimation?.cancel();
       canvasAnimation = null;
     };
     const animateCanvas = (canvasNode, scene, animate) => {
@@ -1402,36 +1280,18 @@ export default function clusterMap() {
         return;
       }
       const previousScene = canvasScene;
-      const duration = runtime.config.plot.transitionDuration;
-      const initialProgress = 0;
-      const suppressLocusHover = false;
-      const startedAt = performance.now();
       if (treeAnimation) treeAnimation.targetScene = scene;
-      const frame = (now) => {
-        const elapsed = Math.min(1, (now - startedAt) / duration);
-        // Matches D3's default cubic-in-out transition closely enough that
-        // the two renderers retain the same interaction feel.
-        const eased =
-          elapsed < 0.5
-            ? 4 * elapsed * elapsed * elapsed
-            : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
-        const progress = initialProgress + (1 - initialProgress) * eased;
+      canvasAnimation = { previousScene, scene, progress: 0, cancel: null };
+      canvasAnimation.cancel = runAnimation(runtime.config.plot.transitionDuration, (progress) => {
         if (treeAnimation) treeAnimation.progress = progress;
-        canvasAnimation = { previousScene, scene, progress, frame: null, suppressLocusHover };
+        canvasAnimation.progress = progress;
         paintCanvas(canvasNode);
-        if (elapsed < 1) {
-          canvasAnimation.frame = requestAnimationFrame(frame);
-        } else {
-          canvasAnimation = null;
-          treeAnimation = null;
-          canvasScene = scene;
-          // The final animation frame intentionally hid the stale hover
-          // affordance. Repaint once with the settled scene so it returns
-          // when the pointer is still over the locus.
-          paintCanvas(canvasNode);
-        }
-      };
-      canvasAnimation = { previousScene, scene, progress: 0, frame: requestAnimationFrame(frame) };
+      }, () => {
+        canvasAnimation = null;
+        treeAnimation = null;
+        canvasScene = scene;
+        paintCanvas(canvasNode);
+      });
     };
     const animateWebGpu = (canvasNode, previousScene, scene, animate) => {
       stopWebGpuAnimation();
@@ -1442,27 +1302,18 @@ export default function clusterMap() {
         paintWebGpu(canvasNode, scene);
         return;
       }
-      const startedAt = performance.now();
       if (treeAnimation) treeAnimation.targetScene = scene;
-      const frame = (now) => {
-        const elapsed = Math.min(1, (now - startedAt) / duration);
-        const eased = elapsed < 0.5
-          ? 4 * elapsed * elapsed * elapsed
-          : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
-        const displayScene = interpolateCanvasScene(previousScene, scene, eased);
-        if (treeAnimation) treeAnimation.progress = eased;
+      webgpuAnimation = { cancel: runAnimation(duration, (progress) => {
+        const displayScene = interpolateCanvasScene(previousScene, scene, progress);
+        if (treeAnimation) treeAnimation.progress = progress;
         webgpuBackend.setScene(displayScene);
         paintWebGpu(canvasNode, displayScene);
-        if (elapsed < 1) {
-          webgpuAnimation.frame = requestAnimationFrame(frame);
-        } else {
-          webgpuAnimation = null;
-          treeAnimation = null;
-          webgpuBackend.setScene(scene);
-          paintWebGpu(canvasNode, scene);
-        }
-      };
-      webgpuAnimation = { frame: requestAnimationFrame(frame) };
+      }, () => {
+        webgpuAnimation = null;
+        treeAnimation = null;
+        webgpuBackend.setScene(scene);
+        paintWebGpu(canvasNode, scene);
+      }) };
     };
     const chooseLegendColour = (group) => {
       const picker = container.select("input.colourPicker");
@@ -1476,22 +1327,22 @@ export default function clusterMap() {
       picker.node().click();
     };
     const setScaleBarLength = (providedValue) => {
-      const value =
-        providedValue ?? prompt("Enter new length (bp):", runtime.config.scaleBar.basePair);
-      if (!value) return;
-      runtime.config.scaleBar.basePair = value;
-      redraw();
+      const value = Number(
+        providedValue ?? prompt("Enter new length (bp):", runtime.config.scaleBar.basePair)
+      );
+      if (Number.isFinite(value) && value > 0) my.config({ scaleBar: { basePair: value } });
     };
-    const renameLegend = (event, group) => {
+    const renameRecord = (event, type, record) => {
       if (event.defaultPrevented) return;
-      const label = prompt("Enter new value:", group.label);
-      if (!label) return;
-      my.patch([{ type: "groups.update", ids: [group.uid], changes: { label } }]);
+      const field = type === "clusters" ? "name" : "label";
+      const value = prompt("Enter new value:", record[field] || record.uid);
+      if (value) my.patch([{ type: `${type}.update`, ids: [record.uid], changes: { [field]: value } }]);
     };
     // Both renderers delegate mutations to the same controller. Raster input
     // adapts stable IDs back to source records at its boundary; SVG already
     // receives those records through its D3 joins.
     const rendererInteractions = {
+      renameCluster: (event, cluster) => renameRecord(event, "clusters", cluster),
       isDragging: () => isDragging(chartState),
       beginClusterDrag: interactionController.beginClusterDrag,
       moveClusterDrag: interactionController.moveClusterDrag,
@@ -1572,7 +1423,7 @@ export default function clusterMap() {
         }
       },
       legendText: (event, group) =>
-        (runtime.config.legend.onClickText || renameLegend)(event, group),
+        runtime.config.legend.onClickText ? runtime.config.legend.onClickText(event, group) : renameRecord(event, "groups", group),
       legendMenu: (event, group) => {
         const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
         handler(event, group);
@@ -1647,8 +1498,8 @@ export default function clusterMap() {
     // camera. Keep D3's per-surface gesture state aligned before a newly
     // created SVG or canvas receives its first interaction.
     const camera = getCamera(chartState);
-    syncCameraZoom({ d3, surface: svg, zoom, camera });
-    syncCameraZoom({ d3, surface: canvas, zoom: canvasZoom, camera });
+    syncCameraZoom({ surface: svg, zoom, camera });
+    syncCameraZoom({ surface: canvas, zoom: canvasZoom, camera });
     applyCamera(svg.select("g.clusterMapViewport"));
 
     const annotationsOnly = Boolean(committedScene?.changes.annotationsOnly);
@@ -1714,30 +1565,10 @@ export default function clusterMap() {
       animateCanvas(canvas.node(), scene, hasInitialView && animate);
     } else if (useWebGpu) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
-      if (webgpuClusterCommit) {
-        webgpuBackend.adoptClusterOrder(
-          scene,
-          webgpuClusterCommit.sourceScene,
-          webgpuClusterCommit.preview
-        );
-        webgpuClusterCommit = null;
-      }
-      if (webgpuAnchorCommit) {
-        webgpuBackend.adoptGeneAnchor(
-          scene,
-          webgpuAnchorCommit.sourceScene,
-          { ...webgpuAnchorCommit, scales: runtime.scales, config: runtime.renderConfig }
-        );
-        webgpuAnchorCommit = null;
-      }
-      if (webgpuLocusCommit) {
-        webgpuBackend.adoptLocusChanges(scene, webgpuLocusCommit.sourceScene, {
-          // Trimming can repack sibling loci; adopt the complete scene patch,
-          // not just the locus whose handle was dragged.
-          loci: scene.changes?.loci || webgpuLocusCommit.loci,
+      if (committedScene && !annotationsOnly) {
+        webgpuBackend.adoptScene(scene, committedScene.sourceScene, {
           scales: runtime.scales, config: runtime.renderConfig,
         });
-        webgpuLocusCommit = null;
       }
       scheduleMinimapBase(scene);
       const previousScene = webgpuBackend.pendingScene;
@@ -1872,7 +1703,7 @@ export default function clusterMap() {
     if (!arguments.length) return runtime.config;
     cancelTreePresentationPreview();
     const before = currentData ? previousConfigPatch(runtime.config, _) : null;
-    invalidateSceneCommit();
+    sceneCommit = null;
     runtime.configure(_, currentData?.tree);
     // Configuration is a live part of the public chart API. Updating it after
     // mounting should have the same immediate effect as updating data, without
@@ -1972,40 +1803,26 @@ export default function clusterMap() {
     clearHistory();
     return my;
   };
-  my.undo = () => {
+  function replayHistory(source, target, direction) {
     const cancelled = cancelTreePresentationPreview();
-    const change = history.pop();
+    const change = source.pop();
     if (!change) { if (cancelled) redraw({ animate: false }); return my; }
+    const value = change[direction];
     if (change.kind === "patch") {
-      applyPatch(change.undo, { record: false, automaticGroups: change.groupsAutomaticBefore });
+      applyPatch(value, { record: false, automaticGroups: direction === "undo" ? change.groupsAutomaticBefore : change.groupsAutomaticAfter });
     } else if (change.kind === "config") {
-      runtime.configure(change.undo, currentData?.tree);
+      runtime.configure(value, currentData?.tree);
       redraw({ animate: false });
       emitChange({ type: "config.change", config: runtime.config });
-    } else if (change.kind === "state" && change.undo) {
-      setState(change.undo, { record: false });
+    } else if (change.kind === "state" && value) {
+      setState(value, { record: false });
     }
-    future.push(change);
+    target.push(change);
     emitHistoryChange();
     return my;
-  };
-  my.redo = () => {
-    const cancelled = cancelTreePresentationPreview();
-    const change = future.pop();
-    if (!change) { if (cancelled) redraw({ animate: false }); return my; }
-    if (change.kind === "patch") {
-      applyPatch(change.redo, { record: false, automaticGroups: change.groupsAutomaticAfter });
-    } else if (change.kind === "config") {
-      runtime.configure(change.redo, currentData?.tree);
-      redraw({ animate: false });
-      emitChange({ type: "config.change", config: runtime.config });
-    } else if (change.kind === "state" && change.redo) {
-      setState(change.redo, { record: false });
-    }
-    history.push(change);
-    emitHistoryChange();
-    return my;
-  };
+  }
+  my.undo = () => replayHistory(history, future, "undo");
+  my.redo = () => replayHistory(future, history, "redo");
   my.highlight = function (ids) {
     if (!arguments.length) return [...highlightGeneIds];
     const isScopedHighlight = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
@@ -2146,7 +1963,7 @@ export default function clusterMap() {
     disposeOverlay = () => {};
     retainedOverlay = null;
     clearScenePreview();
-    if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+    canvasAnimation?.cancel();
     canvasAnimation = null;
     stopWebGpuAnimation();
     rasterMotion.dispose();
@@ -2178,9 +1995,6 @@ export default function clusterMap() {
     scheduleMinimapBase = () => {};
     prepareCanvasFlipBase = () => {};
     warmCanvasFlipBase = () => {};
-    webgpuClusterCommit = null;
-    webgpuAnchorCommit = null;
-    webgpuLocusCommit = null;
     sceneCommit = null;
     chartIndex = null;
     highlightGeneIds.clear();

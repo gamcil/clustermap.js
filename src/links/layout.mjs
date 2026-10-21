@@ -1,3 +1,7 @@
+export function clusterPairKey(left, right) {
+  return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
+}
+
 export function getLinkAnchors(
   link,
   {

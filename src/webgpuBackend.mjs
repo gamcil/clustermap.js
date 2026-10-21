@@ -102,9 +102,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
           fallback();
         });
     },
-    adoptClusterOrder: (...args) => renderer?.adoptClusterOrder(...args) || false,
-    adoptGeneAnchor: (...args) => renderer?.adoptGeneAnchor(...args) || false,
-    adoptLocusChanges: (...args) => renderer?.adoptLocusChanges(...args) || false,
+    adoptScene: (...args) => renderer?.adoptScene(...args) || false,
     destroy: () => {
       generation += 1;
       renderer?.destroy();

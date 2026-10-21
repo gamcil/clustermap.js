@@ -53,7 +53,7 @@ export function renderSvgAnnotations(plot, scene, { preview = null, transition =
   });
 }
 
-export function drawCanvasAnnotations(context, scene, preview = null, { showGeometry = true, viewport = null } = {}) {
+export function drawCanvasAnnotations(context, scene, preview = null, { showGeometry = true, showLabels = true, viewport = null } = {}) {
   for (const panel of annotationPanelsInViewport(scene, preview, viewport, { geometry: showGeometry })) {
     context.save();
     context.translate(panel.x, 0);
@@ -71,7 +71,7 @@ export function drawCanvasAnnotations(context, scene, preview = null, { showGeom
       }
       for (const item of panel.rects) rect(item);
     }
-    for (const item of panel.texts) {
+    for (const item of showLabels ? panel.texts : []) {
       context.save();
       context.translate(item.x, item.y);
       context.rotate((item.rotation || 0) * Math.PI / 180);

@@ -1,13 +1,4 @@
 import { color, rgb } from "d3-color";
-import { select } from "d3-selection";
-
-// Changes value of a text node to a prompted value
-export function renameText(event) {
-  if (event.defaultPrevented) return;
-  let text = select(event.target);
-  let result = prompt("Enter new value:", text.text());
-  if (result) text.text(result);
-}
 
 function isObject(a) {
   return !!a && a.constructor === Object;

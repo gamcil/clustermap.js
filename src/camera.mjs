@@ -1,3 +1,9 @@
+/** Test world bounds after applying a preview translation. */
+export function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
+  return !viewport || !bounds || bounds.minX + x <= viewport.maxX && bounds.maxX + x >= viewport.minX &&
+    bounds.minY + y <= viewport.maxY && bounds.maxY + y >= viewport.minY;
+}
+
 function validBounds(bounds) {
   return (
     bounds &&

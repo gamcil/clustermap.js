@@ -260,9 +260,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     camera: { x: 2000, y: 30, k: 2 },
     config,
     scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
-    showLinks: false,
-    showGenes: false,
-    showChrome: false,
+    layers: ["tracks", "trimIndicators", "clusterLabels"],
   });
   assert.ok(
     calls.some((call) => call[0] === "fillText" && call[1] === "cluster"),
@@ -288,13 +286,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     camera: { x: 20, y: 30, k: 2 },
     config,
     scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
-    showLinks: false,
-    showLoci: false,
-    showLocusTracks: false,
-    showGenes: false,
-    showGeneLabels: true,
-    showClusterLabels: false,
-    showChrome: false,
+    layers: ["geneLabels"],
   });
   assert.ok(
     calls.some((call) => call[0] === "fillText" && call[1] === "gene"),
@@ -312,13 +304,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     camera: { x: 20, y: 30, k: 2 },
     config,
     scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
-    showLinks: false,
-    showLoci: false,
-    showLocusTracks: false,
-    showGenes: false,
-    showGeneLabels: false,
-    showClusterLabels: false,
-    showChrome: false,
+    layers: [],
     highlightGeneIds: new Set(["gene"]),
   });
   assert.ok(

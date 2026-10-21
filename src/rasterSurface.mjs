@@ -1,10 +1,7 @@
 // Owns the persistent DOM surrounding retained raster renderers. Painting,
 // hit testing, minimap behaviour, and renderer-specific resources stay with
 // the chart controller/backends.
-import { zoom, zoomIdentity, zoomTransform } from "d3-zoom";
 import { bindCameraZoom, updateCameraZoom } from "./cameraZoom.mjs";
-
-const d3 = { zoom, zoomIdentity, zoomTransform };
 
 export function ensureRasterSurface({
   container,
@@ -44,7 +41,6 @@ export function ensureRasterSurface({
         .style("height", "100%")
         .style("outline", "none");
       currentZoom = bindCameraZoom({
-        d3,
         surface,
         zoomExtent,
         onZoom,

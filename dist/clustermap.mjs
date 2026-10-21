@@ -1,3 +1,24 @@
+/** Cubic-in-out animation; returns a cancellation function. */
+function animate(duration, update, complete) {
+  const startedAt = performance.now();
+  let cancelled = false;
+  const tick = (now) => {
+    const elapsed = duration ? Math.min(1, (now - startedAt) / duration) : 1;
+    update(elapsed < 0.5 ? 4 * elapsed * elapsed * elapsed : 1 - Math.pow(-2 * elapsed + 2, 3) / 2);
+    if (cancelled) return;
+    if (elapsed < 1) frame = requestAnimationFrame(tick);
+    else { frame = null; complete?.(); }
+  };
+  let frame = requestAnimationFrame(tick);
+  return () => { cancelled = true; if (frame !== null) cancelAnimationFrame(frame); frame = null; };
+}
+
+/** Allow a queued preview to paint before preparing its committed scene. */
+function afterPaint(action) {
+  let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(action); });
+  return () => cancelAnimationFrame(frame);
+}
+
 var xhtml = "http://www.w3.org/1999/xhtml";
 
 var namespaces = {
@@ -951,7 +972,7 @@ function pointer(event, node) {
   return [event.pageX, event.pageY];
 }
 
-var noop$1 = {value: () => {}};
+var noop = {value: () => {}};
 
 function dispatch() {
   for (var i = 0, n = arguments.length, _ = {}, t; i < n; ++i) {
@@ -1026,7 +1047,7 @@ function get$1(type, name) {
 function set$1(type, name, callback) {
   for (var i = 0, n = type.length; i < n; ++i) {
     if (type[i].name === name) {
-      type[i] = noop$1, type = type.slice(0, i).concat(type.slice(i + 1));
+      type[i] = noop, type = type.slice(0, i).concat(type.slice(i + 1));
       break;
     }
   }
@@ -3330,7 +3351,7 @@ function defaultConstrain(transform, extent, translateExtent) {
   );
 }
 
-function zoom() {
+function createZoom() {
   var filter = defaultFilter,
       extent = defaultExtent,
       constrain = defaultConstrain,
@@ -3917,6 +3938,227 @@ function filterLinks(
     .flatMap(({ links: selected }) => selected);
 }
 
+/** Test world bounds after applying a preview translation. */
+function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
+  return !viewport || !bounds || bounds.minX + x <= viewport.maxX && bounds.maxX + x >= viewport.minX &&
+    bounds.minY + y <= viewport.maxY && bounds.maxY + y >= viewport.minY;
+}
+
+function validBounds$1(bounds) {
+  return (
+    bounds &&
+    Number.isFinite(bounds.minX) &&
+    Number.isFinite(bounds.maxX) &&
+    Number.isFinite(bounds.minY) &&
+    Number.isFinite(bounds.maxY) &&
+    bounds.maxX > bounds.minX &&
+    bounds.maxY > bounds.minY
+  );
+}
+
+/** Camera-visible world rectangle, with overscan measured in screen pixels. */
+function worldViewport(camera, { width, height }, overscan = 20) {
+  const margin = overscan / camera.k;
+  return {
+    minX: -camera.x / camera.k - margin,
+    maxX: (width - camera.x) / camera.k + margin,
+    minY: -camera.y / camera.k - margin,
+    maxY: (height - camera.y) / camera.k + margin,
+  };
+}
+
+/**
+ * Fit a world-space figure envelope into a viewport.
+ *
+ * Renderers may obtain the envelope differently (SVG can use getBBox while
+ * raster renderers measure text), but camera policy stays shared: cap an
+ * ordinary fit, optionally retain a readable scale for oversized figures,
+ * and top-align whenever that scale crops the figure.
+ */
+function fitCameraForBounds({
+  bounds,
+  viewport,
+  padding = 20,
+  maximumFitScale = 1.2,
+  minimumReadableScale = 0,
+  constrainScale = (scale) => scale,
+} = {}) {
+  if (!validBounds$1(bounds) || !viewport?.width || !viewport?.height) return null;
+
+  const width = bounds.maxX - bounds.minX;
+  const height = bounds.maxY - bounds.minY;
+  const fitScale = Math.min(
+    maximumFitScale,
+    (viewport.width - padding * 2) / width,
+    (viewport.height - padding * 2) / height
+  );
+  const k = constrainScale(Math.max(fitScale, minimumReadableScale));
+  const cropped = k > fitScale;
+  return {
+    x: cropped
+      ? padding - bounds.minX * k
+      : (viewport.width - width * k) / 2 - bounds.minX * k,
+    y: cropped
+      ? padding - bounds.minY * k
+      : (viewport.height - height * k) / 2 - bounds.minY * k,
+    k,
+    fitScale,
+    cropped,
+  };
+}
+
+function clusterPairKey(left, right) {
+  return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
+}
+
+function getLinkAnchors(
+  link,
+  {
+    geneForUid,
+    areClustersAdjacent,
+    scaleX,
+    horizontalOffset,
+    verticalPosition,
+    geneMidpoint,
+  }
+) {
+  const query = geneForUid(link.query.uid);
+  const target = geneForUid(link.target.uid);
+
+  if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
+
+  const getGeneAnchors = (gene) => {
+    const offset = horizontalOffset(gene);
+    const left = scaleX(gene.start) + offset;
+    const right = scaleX(gene.end) + offset;
+    const forward = gene.strand === 1;
+    return [
+      forward ? left : right,
+      forward ? right : left,
+      verticalPosition(gene) + geneMidpoint,
+    ];
+  };
+
+  const [ax1, ax2, ay] = getGeneAnchors(query);
+  const [bx1, bx2, by] = getGeneAnchors(target);
+
+  return ay > by
+    ? [bx1, bx2, by, ax1, ax2, ay]
+    : [ax1, ax2, ay, bx1, bx2, by];
+}
+
+function interpolateLinkOpacity(previous, next, amount, enabled = true) {
+  const isRenderable = (link) => Boolean(enabled && link?.visible && link?.anchors);
+  const from = isRenderable(previous) ? 1 : 0;
+  const to = isRenderable(next) ? 1 : 0;
+  return from + (to - from) * amount;
+}
+
+function interpolateLinkAnchors(previousScene, previous, nextScene, next, amount) {
+  const inQueryOrder = (scene, link) => {
+    if (!link?.anchors) return null;
+    const query = scene?.genes.get(link.source.query.uid);
+    const queryY = query?.locus?.y;
+    if (!Number.isFinite(queryY)) return link.anchors;
+    const anchors = link.anchors;
+    const queryFirst = Math.abs(anchors[2] - queryY) <= Math.abs(anchors[5] - queryY);
+    return queryFirst ? anchors : [anchors[3], anchors[4], anchors[5], anchors[0], anchors[1], anchors[2]];
+  };
+  const from = inQueryOrder(previousScene, previous);
+  const to = inQueryOrder(nextScene, next);
+  if (!from) return to;
+  if (!to) return from;
+  return to.map((value, index) => from[index] + (value - from[index]) * amount);
+}
+
+function getLinkLabelPosition(
+  [ax1, ax2, ay, bx1, bx2, by],
+  position
+) {
+  const aMid = ax1 + (ax2 - ax1) / 2;
+  const bMid = bx1 + (bx2 - bx1) / 2;
+  return {
+    x: aMid + (bMid - aMid) * position,
+    y: ay + (by - ay) * position,
+  };
+}
+
+function linkPathCommands(anchors, { asLine = false, straight = false } = {}) {
+  if (!anchors) return [];
+  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+  const aMid = ax1 + (ax2 - ax1) / 2;
+  const bMid = bx1 + (bx2 - bx1) / 2;
+  const middle = ay + (by - ay) / 2;
+  if (asLine) {
+    return straight
+      ? [["M", aMid, ay], ["L", bMid, by]]
+      : [["M", aMid, ay], ["C", aMid, middle, bMid, middle, bMid, by]];
+  }
+  return straight
+    ? [["M", ax1, ay], ["L", ax2, ay], ["L", bx2, by], ["L", bx1, by], ["L", ax1, ay], ["Z"]]
+    : [
+        ["M", ax2, ay],
+        ["C", ax2, middle, bx2, middle, bx2, by],
+        ["L", bx1, by],
+        ["C", bx1, middle, ax1, middle, ax1, ay],
+        ["Z"],
+      ];
+}
+
+/** Trace the same link shape used by SVG onto a Canvas context. */
+function traceLinkPath(context, anchors, style) {
+  for (const [command, ...values] of linkPathCommands(anchors, style)) {
+    if (command === "M") context.moveTo(...values);
+    else if (command === "L") context.lineTo(...values);
+    else if (command === "C") context.bezierCurveTo(...values);
+    else context.closePath();
+  }
+}
+
+/**
+ * Sample a link in world coordinates for renderers that submit triangles and
+ * line segments directly rather than accepting SVG/Canvas path commands.
+ */
+function sampleLinkGeometry(anchors, { asLine = false, straight = false, segments = 10 } = {}) {
+  if (!anchors) return { asLine, upper: [], lower: [], line: [] };
+  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+  const middle = ay + (by - ay) / 2;
+  const pointFor = (startX, endX, amount) => straight
+    ? [startX + (endX - startX) * amount, ay + (by - ay) * amount]
+    : [
+        cubic(startX, startX, endX, endX, amount),
+        cubic(ay, middle, middle, by, amount),
+      ];
+  const count = straight ? 1 : Math.max(1, segments);
+  const samples = (startX, endX) => Array.from(
+    { length: count + 1 },
+    (_, index) => pointFor(startX, endX, index / count)
+  );
+  if (asLine) return {
+    asLine,
+    upper: [],
+    lower: [],
+    line: samples((ax1 + ax2) / 2, (bx1 + bx2) / 2),
+  };
+  return { asLine, upper: samples(ax2, bx2), lower: samples(ax1, bx1), line: [] };
+}
+
+function cubic(start, controlA, controlB, end, amount) {
+  const inverse = 1 - amount;
+  return (
+    inverse * inverse * inverse * start +
+    3 * inverse * inverse * amount * controlA +
+    3 * inverse * amount * amount * controlB +
+    amount * amount * amount * end
+  );
+}
+
+function getLinkPath(anchors, style) {
+  return linkPathCommands(anchors, style)
+    .map(([command, ...values]) => `${command}${values.join(",")}`)
+    .join("");
+}
+
 function formatLength(length) {
   const rounded = Math.round(length);
   if (rounded >= 1000) {
@@ -4042,7 +4284,9 @@ function createTrimIndicators({ locus, state, getGeneState, scaleX, shape = {} }
 }
 
 function minStart(loci, startFor) {
-  return Math.min(...loci.map(startFor));
+  let start = Infinity;
+  for (const locus of loci) start = Math.min(start, startFor(locus));
+  return start;
 }
 
 function clusterUidForLocus(locus) {
@@ -4057,8 +4301,8 @@ function clusterLabelOffsetsForStarts(
 ) {
   const offsets = new Map();
   if (alignLabels) {
-    const loci = [...scene.loci.values()];
-    const offset = minStart(loci, startFor) - minStart(loci, (locus) => locus.worldStart);
+    const offset = minStart(scene.loci.values(), startFor) -
+      minStart(scene.loci.values(), (locus) => locus.worldStart);
     for (const cluster of scene.clusters.values()) offsets.set(cluster.source.uid, offset);
     return offsets;
   }
@@ -4099,6 +4343,17 @@ function annotationOffsetForPreview(scene, preview) {
     (scene.annotationAnchorX ?? scene.bounds.maxX);
 }
 
+function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClusters) {
+  let contentMaxX = -Infinity;
+  for (const locus of scene.loci.values()) contentMaxX = Math.max(contentMaxX, endFor(locus));
+  return {
+    ...fields,
+    contentMaxX,
+    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, affectedClusters),
+    chrome: chromeForPreview(scene, contentMaxX),
+  };
+}
+
 /**
  * Describe a transient locus translation relative to an already projected
  * scene. This is deliberately a sparse, renderer-neutral patch: it avoids
@@ -4112,18 +4367,11 @@ function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels }) {
     candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart;
   const endFor = (candidate) =>
     candidate.source.uid === locusUid ? candidate.worldEnd + offsetX : candidate.worldEnd;
-  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
-
-  return {
+  return locusPreview(scene, {
     type: "locus-offset",
-    contentMaxX: maxX,
     locusUid,
     offsetX,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, [
-      scene.clusters.get(locus.cluster.uid),
-    ]),
-    chrome: chromeForPreview(scene, maxX),
-  };
+  }, startFor, endFor, alignLabels, [scene.clusters.get(locus.cluster.uid)]);
 }
 
 /** Describe several transient locus translations without rebuilding the scene. */
@@ -4141,19 +4389,10 @@ function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
   const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
   const startFor = (candidate) => candidate.worldStart + offsetFor(candidate);
   const endFor = (candidate) => candidate.worldEnd + offsetFor(candidate);
-  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
-  return {
+  return locusPreview(scene, {
     type: "locus-offsets",
-    contentMaxX: maxX,
     locusOffsets,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(
-      scene,
-      startFor,
-      alignLabels,
-      affectedClusters
-    ),
-    chrome: chromeForPreview(scene, maxX),
-  };
+  }, startFor, endFor, alignLabels, affectedClusters);
 }
 
 /**
@@ -4222,15 +4461,12 @@ function createLocusTrimPreview(
     );
   }
 
-  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
-  return {
+  return locusPreview(scene, {
     type: "locus-trim",
-    contentMaxX: maxX,
     locusUid,
     locusOffsets,
     loci: locusGeometry,
     geneVisibility,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels),
     ...(clusterLabelText === null
       ? {}
       : {
@@ -4239,8 +4475,7 @@ function createLocusTrimPreview(
             clusterLabelText,
           ]]),
         }),
-    chrome: chromeForPreview(scene, maxX),
-  };
+  }, startFor, endFor, alignLabels);
 }
 
 // Preview patches carry layout deltas rather than cloned scenes. These
@@ -4544,6 +4779,25 @@ function genePolygonForPreview(preview, gene, { includeClusterOffset = true } = 
       ? coordinate + bakedY
       : (axis === undefined ? coordinate : axis + (coordinate - axis) * scale) + x
   );
+}
+
+/** Visible preview rows and their adjacent cluster pairs, shared by raster backends. */
+function clusterPreviewInViewport(scene, preview, viewport, { includeLinks = true } = {}) {
+  const clusters = [...scene.clusters.values()].filter((cluster) => boundsInViewport(
+    cluster.bounds, viewport, { y: clusterOffsetForPreview(preview, cluster.source.uid) }
+  ));
+  const pairs = new Set();
+  if (includeLinks) {
+    const clusterUidByOrder = new Map([...preview.clusterOrder].map(([uid, order]) => [order, uid]));
+    for (const cluster of clusters) {
+      const order = preview.clusterOrder.get(cluster.source.uid);
+      for (const neighbourOrder of [order - 1, order + 1]) {
+        const neighbour = clusterUidByOrder.get(neighbourOrder);
+        if (neighbour !== undefined) pairs.add(clusterPairKey(cluster.source.uid, neighbour));
+      }
+    }
+  }
+  return { clusters, pairs };
 }
 
 const TREE_COLOURING_DEFAULTS = {
@@ -7215,7 +7469,7 @@ function renderSvgAnnotations(plot, scene, { preview = null, transition = null, 
   });
 }
 
-function drawCanvasAnnotations(context, scene, preview = null, { showGeometry = true, viewport = null } = {}) {
+function drawCanvasAnnotations(context, scene, preview = null, { showGeometry = true, showLabels = true, viewport = null } = {}) {
   for (const panel of annotationPanelsInViewport(scene, preview, viewport, { geometry: showGeometry })) {
     context.save();
     context.translate(panel.x, 0);
@@ -7233,7 +7487,7 @@ function drawCanvasAnnotations(context, scene, preview = null, { showGeometry = 
       }
       for (const item of panel.rects) rect(item);
     }
-    for (const item of panel.texts) {
+    for (const item of showLabels ? panel.texts : []) {
       context.save();
       context.translate(item.x, item.y);
       context.rotate((item.rotation || 0) * Math.PI / 180);
@@ -7358,29 +7612,20 @@ const fieldsForType = {
   "links.update": new Set(["label", "colour", "hidden", "identity"]),
 };
 
-// Most edits change records already held by the renderer, so a redraw is
-// enough. Only operations which invalidate an ID lookup or the layout state
-// ask the chart controller to rebuild those derived structures.
-const effectsForType = {
-  "genes.delete": { reindex: true, rebuildState: true, refreshDerivedGroups: true },
-  "genes.restore": { reindex: true, rebuildState: true, refreshDerivedGroups: true },
-  "links.delete": { reindex: true, refreshDerivedGroups: true },
-  "links.restore": { reindex: true, refreshDerivedGroups: true },
-  "groups.create": { reindex: true },
-  "groups.delete": { reindex: true },
-  "groups.merge": { reindex: true },
-};
-
+// Group edits only replace the group lookup; gene/link structure edits also
+// invalidate the biological indexes and automatic grouping.
 function operationEffects(operations) {
-  const effects = { reindex: false, rebuildState: false, refreshDerivedGroups: false };
+  let reindex = false, rebuildState = false;
   for (const { type } of operations) {
-    const next = effectsForType[type];
-    if (!next) continue;
-    if (next.reindex) effects.reindex = true;
-    if (next.rebuildState) effects.rebuildState = true;
-    if (next.refreshDerivedGroups) effects.refreshDerivedGroups = true;
+    if (type === "genes.delete" || type === "genes.restore") {
+      reindex = "data"; rebuildState = true;
+    } else if (type === "links.delete" || type === "links.restore") {
+      reindex = "data";
+    } else if (!reindex && ["groups.create", "groups.delete", "groups.merge"].includes(type)) {
+      reindex = "groups";
+    }
   }
-  return effects;
+  return { reindex, rebuildState };
 }
 
 function operationError(message) {
@@ -7749,69 +7994,6 @@ function applyChartOperations(data, index, operations, treeConfig = {}) {
   return { data, operations: applied, inverse, effects: operationEffects(applied) };
 }
 
-function validBounds$1(bounds) {
-  return (
-    bounds &&
-    Number.isFinite(bounds.minX) &&
-    Number.isFinite(bounds.maxX) &&
-    Number.isFinite(bounds.minY) &&
-    Number.isFinite(bounds.maxY) &&
-    bounds.maxX > bounds.minX &&
-    bounds.maxY > bounds.minY
-  );
-}
-
-/** Camera-visible world rectangle, with overscan measured in screen pixels. */
-function worldViewport(camera, { width, height }, overscan = 20) {
-  const margin = overscan / camera.k;
-  return {
-    minX: -camera.x / camera.k - margin,
-    maxX: (width - camera.x) / camera.k + margin,
-    minY: -camera.y / camera.k - margin,
-    maxY: (height - camera.y) / camera.k + margin,
-  };
-}
-
-/**
- * Fit a world-space figure envelope into a viewport.
- *
- * Renderers may obtain the envelope differently (SVG can use getBBox while
- * raster renderers measure text), but camera policy stays shared: cap an
- * ordinary fit, optionally retain a readable scale for oversized figures,
- * and top-align whenever that scale crops the figure.
- */
-function fitCameraForBounds({
-  bounds,
-  viewport,
-  padding = 20,
-  maximumFitScale = 1.2,
-  minimumReadableScale = 0,
-  constrainScale = (scale) => scale,
-} = {}) {
-  if (!validBounds$1(bounds) || !viewport?.width || !viewport?.height) return null;
-
-  const width = bounds.maxX - bounds.minX;
-  const height = bounds.maxY - bounds.minY;
-  const fitScale = Math.min(
-    maximumFitScale,
-    (viewport.width - padding * 2) / width,
-    (viewport.height - padding * 2) / height
-  );
-  const k = constrainScale(Math.max(fitScale, minimumReadableScale));
-  const cropped = k > fitScale;
-  return {
-    x: cropped
-      ? padding - bounds.minX * k
-      : (viewport.width - width * k) / 2 - bounds.minX * k,
-    y: cropped
-      ? padding - bounds.minY * k
-      : (viewport.height - height * k) / 2 - bounds.minY * k,
-    k,
-    fitScale,
-    cropped,
-  };
-}
-
 const palettes = {
   light: { mode: "light", background: "#ffffff", foreground: "#20252c", muted: "#687586",
     branch: "#555555", guide: "#999999", outline: "#111111", surface: "#ffffff", border: "#cbd3de", missing: "#eeeeee", subtle: "#f3f6fa", hover: "#e3ecf8", selection: "#d6e6fc", accent: "#1677ff", danger: "#b42318" },
@@ -7863,14 +8045,6 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
 [data-clustermap-theme] canvas.clusterMapMinimap { color-scheme:light; }
 `;
   doc.head.append(style);
-}
-
-// Changes value of a text node to a prompted value
-function renameText(event) {
-  if (event.defaultPrevented) return;
-  let text = select(event.target);
-  let result = prompt("Enter new value:", text.text());
-  if (result) text.text(result);
 }
 
 function isObject(a) {
@@ -8219,154 +8393,6 @@ function getGeneLabelDy(position) {
   }
 }
 
-function getLinkAnchors(
-  link,
-  {
-    geneForUid,
-    areClustersAdjacent,
-    scaleX,
-    horizontalOffset,
-    verticalPosition,
-    geneMidpoint,
-  }
-) {
-  const query = geneForUid(link.query.uid);
-  const target = geneForUid(link.target.uid);
-
-  if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
-
-  const getGeneAnchors = (gene) => {
-    const offset = horizontalOffset(gene);
-    const left = scaleX(gene.start) + offset;
-    const right = scaleX(gene.end) + offset;
-    const forward = gene.strand === 1;
-    return [
-      forward ? left : right,
-      forward ? right : left,
-      verticalPosition(gene) + geneMidpoint,
-    ];
-  };
-
-  const [ax1, ax2, ay] = getGeneAnchors(query);
-  const [bx1, bx2, by] = getGeneAnchors(target);
-
-  return ay > by
-    ? [bx1, bx2, by, ax1, ax2, ay]
-    : [ax1, ax2, ay, bx1, bx2, by];
-}
-
-function interpolateLinkOpacity(previous, next, amount, enabled = true) {
-  const isRenderable = (link) => Boolean(enabled && link?.visible && link?.anchors);
-  const from = isRenderable(previous) ? 1 : 0;
-  const to = isRenderable(next) ? 1 : 0;
-  return from + (to - from) * amount;
-}
-
-function interpolateLinkAnchors(previousScene, previous, nextScene, next, amount) {
-  const inQueryOrder = (scene, link) => {
-    if (!link?.anchors) return null;
-    const query = scene?.genes.get(link.source.query.uid);
-    const queryY = query?.locus?.y;
-    if (!Number.isFinite(queryY)) return link.anchors;
-    const anchors = link.anchors;
-    const queryFirst = Math.abs(anchors[2] - queryY) <= Math.abs(anchors[5] - queryY);
-    return queryFirst ? anchors : [anchors[3], anchors[4], anchors[5], anchors[0], anchors[1], anchors[2]];
-  };
-  const from = inQueryOrder(previousScene, previous);
-  const to = inQueryOrder(nextScene, next);
-  if (!from) return to;
-  if (!to) return from;
-  return to.map((value, index) => from[index] + (value - from[index]) * amount);
-}
-
-function getLinkLabelPosition(
-  [ax1, ax2, ay, bx1, bx2, by],
-  position
-) {
-  const aMid = ax1 + (ax2 - ax1) / 2;
-  const bMid = bx1 + (bx2 - bx1) / 2;
-  return {
-    x: aMid + (bMid - aMid) * position,
-    y: ay + (by - ay) * position,
-  };
-}
-
-function linkPathCommands(anchors, { asLine = false, straight = false } = {}) {
-  if (!anchors) return [];
-  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  const aMid = ax1 + (ax2 - ax1) / 2;
-  const bMid = bx1 + (bx2 - bx1) / 2;
-  const middle = ay + (by - ay) / 2;
-  if (asLine) {
-    return straight
-      ? [["M", aMid, ay], ["L", bMid, by]]
-      : [["M", aMid, ay], ["C", aMid, middle, bMid, middle, bMid, by]];
-  }
-  return straight
-    ? [["M", ax1, ay], ["L", ax2, ay], ["L", bx2, by], ["L", bx1, by], ["L", ax1, ay], ["Z"]]
-    : [
-        ["M", ax2, ay],
-        ["C", ax2, middle, bx2, middle, bx2, by],
-        ["L", bx1, by],
-        ["C", bx1, middle, ax1, middle, ax1, ay],
-        ["Z"],
-      ];
-}
-
-/** Trace the same link shape used by SVG onto a Canvas context. */
-function traceLinkPath(context, anchors, style) {
-  for (const [command, ...values] of linkPathCommands(anchors, style)) {
-    if (command === "M") context.moveTo(...values);
-    else if (command === "L") context.lineTo(...values);
-    else if (command === "C") context.bezierCurveTo(...values);
-    else context.closePath();
-  }
-}
-
-/**
- * Sample a link in world coordinates for renderers that submit triangles and
- * line segments directly rather than accepting SVG/Canvas path commands.
- */
-function sampleLinkGeometry(anchors, { asLine = false, straight = false, segments = 10 } = {}) {
-  if (!anchors) return { asLine, upper: [], lower: [], line: [] };
-  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  const middle = ay + (by - ay) / 2;
-  const pointFor = (startX, endX, amount) => straight
-    ? [startX + (endX - startX) * amount, ay + (by - ay) * amount]
-    : [
-        cubic(startX, startX, endX, endX, amount),
-        cubic(ay, middle, middle, by, amount),
-      ];
-  const count = straight ? 1 : Math.max(1, segments);
-  const samples = (startX, endX) => Array.from(
-    { length: count + 1 },
-    (_, index) => pointFor(startX, endX, index / count)
-  );
-  if (asLine) return {
-    asLine,
-    upper: [],
-    lower: [],
-    line: samples((ax1 + ax2) / 2, (bx1 + bx2) / 2),
-  };
-  return { asLine, upper: samples(ax2, bx2), lower: samples(ax1, bx1), line: [] };
-}
-
-function cubic(start, controlA, controlB, end, amount) {
-  const inverse = 1 - amount;
-  return (
-    inverse * inverse * inverse * start +
-    3 * inverse * inverse * amount * controlA +
-    3 * inverse * amount * amount * controlB +
-    amount * amount * amount * end
-  );
-}
-
-function getLinkPath(anchors, style) {
-  return linkPathCommands(anchors, style)
-    .map(([command, ...values]) => `${command}${values.join(",")}`)
-    .join("");
-}
-
 function worldPolygon(points, x, y) {
   return points.map((point, index) => point + (index % 2 === 0 ? x : y));
 }
@@ -8404,10 +8430,6 @@ function boundsFromRegions(regions) {
     minY: Math.min(...regions.map((region) => region.y)),
     maxY: Math.max(...regions.map((region) => region.y + region.height)),
   };
-}
-
-function clusterPairKey(left, right) {
-  return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
 }
 
 function formatKilobases(basePairs) {
@@ -8788,6 +8810,12 @@ function buildHitRegions(loci, genes) {
   return { all, loci: locusRegions, genes: geneRegions };
 }
 
+function adjacencyForOrder(order, fallback) {
+  if (!order) return fallback;
+  const positions = new Map(order.map((uid, index) => [uid, index]));
+  return (one, two) => Math.abs(positions.get(one) - positions.get(two)) === 1;
+}
+
 /**
  * Derive renderer-neutral, world-space geometry from chart data and state.
  * The returned records contain no DOM selections and can be consumed by SVG,
@@ -8826,16 +8854,7 @@ function buildScene(
   const links = new Map();
   const linksByClusterPair = new Map();
   const linksByGene = new Map();
-  // Projection receives the current order from the stateful runtime. Index it
-  // once so each link can test adjacency without searching that order array.
-  // The callback remains the generic fallback for direct scene consumers.
-  const clusterOrderIndex = clusterOrder
-    ? new Map(clusterOrder.map((uid, index) => [uid, index]))
-    : null;
-  const indexedAreClustersAdjacent = (one, two) => {
-    if (!clusterOrderIndex) return areClustersAdjacent(one, two);
-    return Math.abs(clusterOrderIndex.get(one) - clusterOrderIndex.get(two)) === 1;
-  };
+  areClustersAdjacent = adjacencyForOrder(clusterOrder, areClustersAdjacent);
   const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
 
   for (const cluster of data.clusters) {
@@ -8886,7 +8905,7 @@ function buildScene(
       genes,
       loci,
       clusters,
-      areClustersAdjacent: indexedAreClustersAdjacent,
+      areClustersAdjacent,
       scaleX,
       link,
       linkVisible,
@@ -9053,11 +9072,12 @@ function placeLegendAfterAnnotations(chrome, panels) {
  */
 function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = {}, options) {
   if (!scene) return scene;
+  options = { ...options, areClustersAdjacent: adjacencyForOrder(options.clusterOrder, options.areClustersAdjacent) };
   const {
     scaleX, shape, label, getGeneState, getLocusState, locusOffset,
     clusterOffset = (uid) => scene.clusters.get(uid).x,
     clusterPosition = (uid) => scene.clusters.get(uid).y,
-    linksForGene, trimIndicatorStyle = {},
+    trimIndicatorStyle = {},
   } = options;
   const requestedLoci = new Set(locusIds);
   const requestedClusters = new Set(clusterIds);
@@ -9158,18 +9178,8 @@ function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = 
   }
 
   const sources = new Map();
-  if (linksForGene || scene.linksByGene) {
-    for (const uid of changedGenes) {
-      for (const source of linksForGene ? linksForGene(uid) : scene.linksByGene.get(uid) || []) {
-        sources.set(source.uid, source);
-      }
-    }
-  } else {
-    // Generic scene consumers may not have a data lookup. Runtime callers use
-    // their retained incident-link index and never take this scan path.
-    for (const { source } of scene.links.values()) {
-      if (changedGenes.has(source.query.uid) || changedGenes.has(source.target.uid)) sources.set(source.uid, source);
-    }
+  for (const uid of changedGenes) {
+    for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
   }
   const links = new Map(scene.links);
   for (const source of sources.values()) {
@@ -9736,7 +9746,7 @@ function drawLinkLabel(context, layout, source, config, anchors, geometry = {}) 
   context.fillText(source.label ?? source.identity.toFixed(2), labelPosition.x, labelPosition.y);
 }
 
-function drawLink(context, layout, source, config, scales, geometry = {}) {
+function drawLink(context, layout, source, config, scales, geometry, showLabel) {
   const visible = geometry.visible ?? layout.visible;
   const anchors = geometry.anchors ?? layout.anchors;
   if (!visible || !anchors) return;
@@ -9764,7 +9774,7 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   context.lineWidth = config.link.strokeWidth;
   context.stroke();
 
-  drawLinkLabel(context, layout, source, config, anchors, geometry);
+  if (showLabel) drawLinkLabel(context, layout, source, config, anchors, geometry);
   context.restore();
 }
 
@@ -9813,7 +9823,8 @@ function drawGene(
   scales,
   { x: offsetX = 0, y: offsetY = 0 } = {},
   visible = gene.visible,
-  geometry = {}
+  geometry = {},
+  showLabel = true
 ) {
   if (!visible) return;
   context.save();
@@ -9838,7 +9849,7 @@ function drawGene(
   context.stroke();
   if (geometry.flipAxis !== undefined) context.restore();
 
-  drawGeneLabel(context, gene, config, geometry);
+  if (showLabel) drawGeneLabel(context, gene, config, geometry);
   context.restore();
 }
 
@@ -9949,40 +9960,20 @@ function drawLocusTrimIndicators(context, locus, config, geometry = {}) {
   context.restore();
 }
 
-function boundsInViewport$1(bounds, viewport, { x = 0, y = 0 } = {}) {
-  return (
-    !viewport ||
-    !bounds ||
-    (bounds.minX + x <= viewport.maxX &&
-      bounds.maxX + x >= viewport.minX &&
-      bounds.minY + y <= viewport.maxY &&
-      bounds.maxY + y >= viewport.minY)
-  );
-}
-
 function recordsForClusterPreview(
   scene,
   preview,
   viewport,
   { includeLinks = true, includeGenes = true } = {}
 ) {
-  const clusters = [];
-  const clusterUidByOrder = new Map(
-    [...preview.clusterOrder].map(([uid, order]) => [order, uid])
-  );
-  for (const cluster of scene.clusters.values()) {
-    if (!boundsInViewport$1(cluster.bounds, viewport, { y: clusterOffsetForPreview(preview, cluster.source.uid) })) {
-      continue;
-    }
-    clusters.push(cluster);
-  }
+  const { clusters, pairs } = clusterPreviewInViewport(scene, preview, viewport, { includeLinks });
 
   const loci = [];
   const genes = [];
   for (const cluster of clusters) {
     for (const locus of cluster.loci) {
       const offsets = previewOffsetsForLocus(preview, locus);
-      if (!boundsInViewport$1(locus.bounds, viewport, offsets)) continue;
+      if (!boundsInViewport(locus.bounds, viewport, offsets)) continue;
       loci.push(locus);
       if (!includeGenes) continue;
       const locusGenes =
@@ -9991,7 +9982,7 @@ function recordsForClusterPreview(
       for (const gene of locusGenes) {
         if (
           geneVisibleForPreview(preview, gene) &&
-          boundsInViewport$1(gene.bounds, viewport, offsetsForGene(preview, gene))
+          boundsInViewport(gene.bounds, viewport, offsetsForGene(preview, gene))
         ) {
           genes.push(gene);
         }
@@ -10000,17 +9991,8 @@ function recordsForClusterPreview(
   }
 
   const linkUids = new Set();
-  if (includeLinks) {
-    for (const cluster of clusters) {
-      const order = preview.clusterOrder.get(cluster.source.uid);
-      for (const neighbourOrder of [order - 1, order + 1]) {
-        const neighbourUid = clusterUidByOrder.get(neighbourOrder);
-        if (neighbourUid === undefined) continue;
-        for (const uid of scene.linksByClusterPair?.get(clusterPairKey(cluster.source.uid, neighbourUid)) || []) {
-          linkUids.add(uid);
-        }
-      }
-    }
+  for (const pair of pairs) {
+    for (const uid of scene.linksByClusterPair?.get(pair) || []) linkUids.add(uid);
   }
   const links = [...linkUids]
     .map((uid) => scene.links.get(uid))
@@ -10208,7 +10190,9 @@ function interpolateCanvasScene(previous, scene, amount) {
   return { ...scene, clusters, loci, genes, links, annotationPanels };
 }
 
-/** Draw a renderer-neutral chart scene into a Canvas 2D context. */
+const CANVAS_LAYERS = ["links", "linkLabels", "tracks", "trimIndicators", "genes", "geneLabels", "clusterLabels", "tree", "annotations", "annotationLabels", "chrome"];
+
+/** Draw selected layers of a renderer-neutral scene into Canvas 2D. */
 function renderCanvas({
   canvas,
   scene,
@@ -10229,30 +10213,20 @@ function renderCanvas({
   dimensions = null,
   fullScene = false,
   preview = null,
-  backgroundCanvas = null,
-  backgroundCanvases = [],
   clear = true,
   include = null,
   omit = null,
-  showLinks = true,
-  showLoci = true,
-  showLocusTracks = true,
-  showGenes = true,
-  showGeneLabels = showGenes,
-  showLinkLabels = showLinks,
+  layers = CANVAS_LAYERS,
   highlightGeneIds = null,
   highlightLinkIds = null,
   highlightLocusIds = null,
-  showClusterLabels = true,
-  showChrome = true,
-  showAnnotationGeometry = true,
 }) {
   config = figureConfig(config);
-  // Resolve label visibility before querying or projecting records. The
-  // WebGPU overlay requests labels without bodies; disabled labels should
-  // not cause otherwise unused gene/link passes on every interaction frame.
-  showGeneLabels = showGeneLabels && config.gene.label.show;
-  showLinkLabels = showLinkLabels && config.link.label.show;
+  const show = (layer) => layers.includes(layer);
+  const showLinks = show("links"), showGenes = show("genes");
+  const showLoci = show("trimIndicators") || show("tracks");
+  const showGeneLabels = show("geneLabels") && config.gene.label.show;
+  const showLinkLabels = show("linkLabels") && config.link.label.show;
   const displayScene = interpolateCanvasScene(previousScene, scene, progress);
   const context = canvas.getContext("2d");
   const bounds = dimensions || canvas.getBoundingClientRect();
@@ -10269,9 +10243,6 @@ function renderCanvas({
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   if (clear) {
     context.clearRect(0, 0, width, height);
-    for (const background of [backgroundCanvas, ...backgroundCanvases]) {
-      if (background) context.drawImage(background, 0, 0, width, height);
-    }
   }
   context.save();
   context.translate(camera.x, camera.y);
@@ -10318,7 +10289,7 @@ function renderCanvas({
     if (!geometry.visible || !anchors) continue;
     if (
       clusterPreview &&
-      (!boundsInViewport$1({
+      (!boundsInViewport({
         minX: Math.min(anchors[0], anchors[1], anchors[3], anchors[4]),
         maxX: Math.max(anchors[0], anchors[1], anchors[3], anchors[4]),
         minY: Math.min(anchors[2], anchors[5]),
@@ -10327,10 +10298,10 @@ function renderCanvas({
     ) {
       continue;
     }
-    if (showLinks) drawLink(context, link, link.source, config, scales, geometry);
+    if (showLinks) drawLink(context, link, link.source, config, scales, geometry, showLinkLabels);
     else drawLinkLabel(context, link, link.source, config, anchors, geometry);
   }
-  drawTree(context, tree, displayScene, config, preview, {
+  if (show("tree")) drawTree(context, tree, displayScene, config, preview, {
     trackAnchor: treeTrackAnchor,
     previousTree,
     previousScene: previousTreeScene,
@@ -10352,7 +10323,7 @@ function renderCanvas({
   // cropped figure rendered at all. Do not derive them from culled loci: a
   // cluster label can be on screen while every locus body is just outside the
   // viewport. Text is inexpensive and Canvas clips truly offscreen labels.
-  const labelClusters = showLoci && showClusterLabels
+  const labelClusters = show("clusterLabels")
     ? recordsFor(displayScene.clusters, null, "clusters", { ignoreOmit: true })
     : [];
   for (const cluster of labelClusters) {
@@ -10366,7 +10337,7 @@ function renderCanvas({
       ),
     });
   }
-  if (showLocusTracks) {
+  if (show("tracks")) {
     for (const locus of loci) {
       drawLocusTrack(
         context,
@@ -10377,7 +10348,7 @@ function renderCanvas({
       );
     }
   }
-  if (showLoci) {
+  if (show("trimIndicators")) {
     for (const locus of loci) {
       drawLocusTrimIndicators(
         context,
@@ -10410,7 +10381,7 @@ function renderCanvas({
     const offsets = offsetsForGene(preview, gene);
     const visible = geneVisibleForPreview(preview, gene);
     const geometry = geneGeometryForPreview(preview, gene);
-    if (showGenes) drawGene(context, gene, config, scales, offsets, visible, geometry);
+    if (showGenes) drawGene(context, gene, config, scales, offsets, visible, geometry, showGeneLabels);
     else if (visible) drawGeneLabel(context, gene, config, geometry, offsets);
   }
   if (highlightGeneIds?.size) {
@@ -10427,8 +10398,10 @@ function renderCanvas({
       );
     }
   }
-  if (showChrome) drawCanvasAnnotations(context, displayScene, preview, { showGeometry: showAnnotationGeometry, viewport });
-  if (showChrome && displayScene.chrome) {
+  if (show("annotations") || show("annotationLabels")) drawCanvasAnnotations(context, displayScene, preview, {
+    showGeometry: show("annotations"), showLabels: show("annotationLabels"), viewport,
+  });
+  if (show("chrome") && displayScene.chrome) {
     const chrome = preview?.chrome || displayScene.chrome;
     drawLegend(context, chrome.legend);
     drawScaleBar(context, chrome.scaleBar);
@@ -11367,7 +11340,7 @@ function renderSvg({
   scales,
   ids,
   lookup,
-  interactions,
+  interactions = {},
   highlightGeneIds = new Set(),
   highlightLinkIds = new Set(),
   highlightLocusIds = new Set(),
@@ -11410,14 +11383,13 @@ function renderSvg({
 
         info
           .append("text")
-          .text((cluster) => cluster.name)
           .attr("class", "clusterText")
           .attr("y", 8)
           .attr("cursor", "pointer")
           .style("font-weight", "bold")
           .style("font-size", `${config.cluster.nameFontSize}px`)
           .style("font-family", config.plot.fontFamily)
-          .on("click", renameText);
+          .on("click", interactions.renameCluster);
         info
           .append("text")
           .attr("class", "locusText")
@@ -11434,6 +11406,7 @@ function renderSvg({
     );
 
   clusters.select("text.clusterText")
+    .text((cluster) => cluster.name)
     .attr("y", 8)
     .attr("dominant-baseline", null)
     .style("font-size", `${config.cluster.nameFontSize}px`);
@@ -11717,68 +11690,36 @@ function updateClusters(selection, scene, { labelsOnly = false, preview = null }
 
 function createClusterDrag({ plot, ids, interactions }) {
   const clusterSelection = (uid) => plot.selectAll(`#${ids.cluster({ uid })}`);
-
-  const started = (event, cluster) => {
-    const subject = clusterSelection(cluster.uid);
-    subject.classed("active", true).attr("cursor", "grabbing");
-    interactions.beginClusterDrag(cluster.uid, event.y);
-  };
-
-  const dragged = (event) => interactions.moveClusterDrag(event.y);
-
-  const ended = (_, cluster) => {
-    clusterSelection(cluster.uid).classed("active", false).attr("cursor", null);
-    interactions.endClusterDrag();
-  };
-
   return drag()
-    .container(function () {
-      return this.parentNode.parentNode;
+    .container(function () { return this.parentNode.parentNode; })
+    .on("start", (event, cluster) => {
+      clusterSelection(cluster.uid).classed("active", true).attr("cursor", "grabbing");
+      interactions.beginClusterDrag(cluster.uid, event.y);
     })
-    .on("start", started)
-    .on("drag", dragged)
-    .on("end", ended);
+    .on("drag", (event) => interactions.moveClusterDrag(event.y))
+    .on("end", (_, cluster) => {
+      clusterSelection(cluster.uid).classed("active", false).attr("cursor", null);
+      interactions.endClusterDrag();
+    });
 }
 
 function createLocusPositionDrag({ plot, interactions }) {
-  const started = (event, locus) => {
-    interactions.beginLocusDrag(locus.uid, event.x);
-  };
-
-  const dragged = (event) => interactions.moveLocusDrag(event.x);
-
-  const ended = () => interactions.endLocusDrag();
-
   return drag()
     .container(() => plot.node())
-    .on("start", started)
-    .on("drag", dragged)
-    .on("end", ended);
+    .on("start", (event, locus) => interactions.beginLocusDrag(locus.uid, event.x))
+    .on("drag", (event) => interactions.moveLocusDrag(event.x))
+    .on("end", () => interactions.endLocusDrag());
 }
 
-// Resize changes chart state through the controller, while this renderer-owned
-// adapter supplies immediate SVG feedback until the final redraw.
 function createLocusResizeDrag({ plot, interactions }) {
-  const started = () => interactions.beginLocusTrim();
-
-  const dragged = function (event, locus) {
-    interactions.moveLocusTrim(
-      locus,
-      select(this).classed("leftHandle") ? "left" : "right",
-      event.x
-    );
-  };
-
-  const ended = (_, locus) => interactions.endLocusTrim(locus);
-
   return drag()
-    // Keep resize and Canvas pointer coordinates in the same chart-world
-    // space. The default handle-parent container reports locus-local x,
-    // which becomes incorrect as soon as that locus or its cluster moves.
+    // Trimming uses chart-world coordinates, matching Canvas and WebGPU.
     .container(() => plot.node())
-    .on("start", started)
-    .on("drag", dragged)
-    .on("end", ended);
+    .on("start", () => interactions.beginLocusTrim())
+    .on("drag", function (event, locus) {
+      interactions.moveLocusTrim(locus, select(this).classed("leftHandle") ? "left" : "right", event.x);
+    })
+    .on("end", (_, locus) => interactions.endLocusTrim(locus));
 }
 
 function updateLoci(selection, scene, config, highlightLocusIds) {
@@ -12297,31 +12238,20 @@ function createRasterInteraction({
     const point = worldPoint(surface, event);
     surface.setPointerCapture(event.pointerId);
     updateAffordance(surface, target, { warm: true });
-    if (target.action === "move-cluster") {
+    if (target.action === "move-cluster" || target.action === "move-locus" || target.action.startsWith("trim-locus")) {
       gesture = {
         action: target.action,
         clusterUid: target.clusterUid,
-        start: { x: event.clientX, y: event.clientY },
-        moved: false,
-      };
-      interactions.beginClusterDrag(target.clusterUid, point.y);
-    } else if (target.action === "move-locus") {
-      gesture = {
-        action: target.action,
         locusUid: target.locusUid,
         start: { x: event.clientX, y: event.clientY },
         moved: false,
       };
-      interactions.beginLocusDrag(target.locusUid, point.x);
-    } else if (target.action.startsWith("trim-locus")) {
-      gesture = {
-        action: target.action,
-        locusUid: target.locusUid,
-        edge: target.action.endsWith("left") ? "left" : "right",
-        start: { x: event.clientX, y: event.clientY },
-        moved: false,
-      };
-      interactions.beginLocusTrim();
+      if (target.action === "move-cluster") interactions.beginClusterDrag(target.clusterUid, point.y);
+      else if (target.action === "move-locus") interactions.beginLocusDrag(target.locusUid, point.x);
+      else {
+        gesture.edge = target.action.endsWith("left") ? "left" : "right";
+        interactions.beginLocusTrim();
+      }
     } else if (target.action === "gene") {
       gesture = { action: target.action, geneUid: target.geneUid };
     } else if (target.action === "tree-node") {
@@ -12340,9 +12270,7 @@ function createRasterInteraction({
       updateAffordance(surface, targetForEvent(surface, event));
       return;
     }
-    const draggable =
-      gesture.action === "move-cluster" || gesture.action === "move-locus" || gesture.edge;
-    if (draggable && !gesture.moved) {
+    if (gesture.start && !gesture.moved) {
       if (Math.hypot(event.clientX - gesture.start.x, event.clientY - gesture.start.y) < 2) return;
       gesture.moved = true;
       beginMotion();
@@ -12541,35 +12469,131 @@ function createRasterMotion({
   };
 }
 
-const noop = () => {};
+// Surface modules supply renderer-specific effects, but every chart camera
+// uses the same D3 gesture contract and intentionally reserves double-click
+// for locus flipping.
+function bindCameraZoom({
+  surface,
+  zoomExtent,
+  onZoom,
+  onStart,
+  onEnd,
+}) {
+  const zoom = createZoom()
+    .scaleExtent(zoomExtent())
+    .on("zoom", onZoom)
+    .on("start", onStart)
+    .on("end", onEnd);
+  surface.call(zoom).on("dblclick.zoom", null);
+  return zoom;
+}
 
-const exportInteractions = {
-  isDragging: () => false,
-  beginClusterDrag: noop,
-  moveClusterDrag: noop,
-  endClusterDrag: noop,
-  beginLocusDrag: noop,
-  moveLocusDrag: noop,
-  endLocusDrag: noop,
-  beginLocusTrim: noop,
-  moveLocusTrim: noop,
-  endLocusTrim: noop,
-  flipLocus: noop,
-  onGeneClick: null,
-  showGeneMenu: noop,
-  showGroupMenu: noop,
-  setScaleBarLength: noop,
-  chooseLegendColour: noop,
-  legendColour: noop,
-  legendText: noop,
-  legendMenu: noop,
-};
+function updateCameraZoom(zoom, zoomExtent) {
+  if (zoom) zoom.scaleExtent(zoomExtent());
+}
 
-/**
- * Render the retained scene through the normal SVG renderer in a detached
- * document. The publication output therefore shares all drawing semantics
- * with the interactive SVG backend while excluding interaction affordances.
- */
+// D3 keeps a transform on each gesture surface. The chart camera is shared by
+// all renderers, so a surface created while switching renderer must adopt that
+// camera before its first wheel or drag event. Otherwise its default identity
+// transform would overwrite the already-visible camera on that first gesture.
+function syncCameraZoom({ surface, zoom, camera }) {
+  const node = surface?.node?.();
+  if (!node || !zoom || !camera) return;
+  const current = transform(node);
+  if (current.x === camera.x && current.y === camera.y && current.k === camera.k) return;
+  surface.call(
+    zoom.transform,
+    identity$2.translate(camera.x, camera.y).scale(camera.k)
+  );
+}
+
+// Owns the persistent DOM surrounding an SVG chart. Scene joins and all chart
+
+function appendLabelFilter(svg, id) {
+  const filter = svg.append("defs").append("filter")
+    .attr("id", id).attr("x", 0).attr("y", 0).attr("width", 1).attr("height", 1);
+  filter.append("feFlood").attr("flood-color", "rgba(0, 0, 0, 0.8)");
+  filter.append("feComposite").attr("in", "SourceGraphic").attr("in2", "");
+}
+
+function ensureSvgSurface({
+  container,
+  data,
+  ids,
+  fontFamily,
+  zoom,
+  zoomExtent,
+  onZoom,
+  onZoomStart,
+  onZoomEnd,
+}) {
+  let currentZoom = zoom;
+  const svg = container
+    .selectAll("svg.clusterMap")
+    .data([data])
+    .join((enter) => {
+      enter
+        .append("input")
+        .attr("id", ids.picker)
+        .attr("class", "colourPicker")
+        .attr("type", "color")
+        .style("position", "absolute")
+        .style("opacity", 0);
+
+      enter
+        .append("div")
+        .attr("class", "tooltip")
+        .style("opacity", 0)
+        .style("position", "absolute")
+        .style("pointer-events", "none")
+        // Context menus must stay interactive above optional side panels that
+        // share the chart container (such as the demo data editor).
+        .style("z-index", 4)
+        .style("box-sizing", "border-box")
+        .style("padding", "8px")
+        .style("background", "white")
+        .style("border", "1px solid #999")
+        .style("border-radius", "4px")
+        .style("box-shadow", "0 2px 8px rgba(0, 0, 0, 0.2)")
+        .style("font-family", fontFamily);
+
+      const surface = enter
+        .append("svg")
+        .attr("class", "clusterMap")
+        .attr("id", ids.root)
+        .attr("cursor", "grab")
+        .attr("width", "100%")
+        .attr("height", "100%")
+        .attr("xmlns", "http://www.w3.org/2000/svg")
+        .attr("xmlns:xhtml", "http://www.w3.org/1999/xhtml");
+
+      appendLabelFilter(surface, ids.filter);
+
+      // Layout measures chart content in world coordinates. The viewport is
+      // the only group transformed by the persisted camera.
+      const viewport = surface.append("g").attr("class", "clusterMapViewport");
+      viewport.append("g").attr("class", "clusterMapG");
+
+      currentZoom = bindCameraZoom({
+        surface,
+        zoomExtent,
+        onZoom: (event) => onZoom(event, viewport),
+        onStart: () => onZoomStart(surface),
+        onEnd: () => onZoomEnd(surface),
+      });
+      return surface;
+    });
+
+  updateCameraZoom(currentZoom, zoomExtent);
+  return {
+    svg,
+    plot: svg.select("g.clusterMapG"),
+    tooltip: container.select("div.tooltip"),
+    zoom: currentZoom,
+  };
+}
+
+/** Publication output uses the live SVG renderer with interaction affordances removed. */
 function exportChartSvg({
   data,
   scene,
@@ -12591,60 +12615,53 @@ function exportChartSvg({
     .style("position", "fixed")
     .style("visibility", "hidden")
     .style("pointer-events", "none");
-  const defs = select(svgNode).append("defs");
-  const filter = defs
-    .append("filter")
-    .attr("id", "filter_solid")
-    .attr("x", 0)
-    .attr("y", 0)
-    .attr("width", 1)
-    .attr("height", 1);
-  filter.append("feFlood").attr("flood-color", "rgba(0, 0, 0, 0.8)");
-  filter.append("feComposite").attr("in", "SourceGraphic").attr("in2", "");
-  const plot = select(svgNode).append("g").attr("class", "clusterMapG");
-  const exportIds = { ...ids, filter: "filter_solid", colourGradient: "colour-gradient" };
-  renderSvg({
-    plot,
-    data,
-    scene,
-    transition: transition().duration(0),
-    animate: false,
-    config,
-    scales,
-    ids: exportIds,
-    lookup,
-    interactions: exportInteractions,
-  });
-  // Event listeners do not serialize, but hover/trim affordances would still
-  // be visible as nodes in an exported publication figure.
-  plot.selectAll("g.hover").remove();
-  // This is a static figure, so strip interaction affordances even when an
-  // element's cursor or pointer policy was set by the live renderer.
-  plot.selectAll("*").each(function () {
-    this.removeAttribute("cursor");
-    this.removeAttribute("tabindex");
-    this.removeAttribute("role");
-    this.removeAttribute("aria-label");
-    this.removeAttribute("pointer-events");
-    this.style.removeProperty("cursor");
-    this.style.removeProperty("pointer-events");
-    this.classList.remove("active");
-  });
-  const bounds = plot.node().getBBox();
-  svgNode.remove();
-  svgNode.removeAttribute("style");
-  svgNode.setAttribute(
-    "viewBox",
-    `${bounds.x - padding} ${bounds.y - padding} ${bounds.width + padding * 2} ${bounds.height + padding * 2}`
-  );
-  svgNode.setAttribute("width", bounds.width + padding * 2);
-  svgNode.setAttribute("height", bounds.height + padding * 2);
-  svgNode.setAttribute("xmlns", namespace);
-  select(svgNode).insert("rect", ":first-child")
-    .attr("x", bounds.x - padding).attr("y", bounds.y - padding)
-    .attr("width", bounds.width + padding * 2).attr("height", bounds.height + padding * 2)
-    .attr("fill", config.figureStyle.background);
-  return new XMLSerializer().serializeToString(svgNode);
+  try {
+    appendLabelFilter(select(svgNode), "filter_solid");
+    const plot = select(svgNode).append("g").attr("class", "clusterMapG");
+    const exportIds = { ...ids, filter: "filter_solid", colourGradient: "colour-gradient" };
+    renderSvg({
+      plot,
+      data,
+      scene,
+      transition: transition().duration(0),
+      animate: false,
+      config,
+      scales,
+      ids: exportIds,
+      lookup,
+    });
+    // Event listeners do not serialize, but hover/trim affordances would still
+    // be visible as nodes in an exported publication figure.
+    plot.selectAll("g.hover").remove();
+    // This is a static figure, so strip interaction affordances even when an
+    // element's cursor or pointer policy was set by the live renderer.
+    plot.selectAll("*").each(function () {
+      this.removeAttribute("cursor");
+      this.removeAttribute("tabindex");
+      this.removeAttribute("role");
+      this.removeAttribute("aria-label");
+      this.removeAttribute("pointer-events");
+      this.style.removeProperty("cursor");
+      this.style.removeProperty("pointer-events");
+      this.classList.remove("active");
+    });
+    const bounds = plot.node().getBBox();
+    svgNode.removeAttribute("style");
+    svgNode.setAttribute(
+      "viewBox",
+      `${bounds.x - padding} ${bounds.y - padding} ${bounds.width + padding * 2} ${bounds.height + padding * 2}`
+    );
+    svgNode.setAttribute("width", bounds.width + padding * 2);
+    svgNode.setAttribute("height", bounds.height + padding * 2);
+    svgNode.setAttribute("xmlns", namespace);
+    select(svgNode).insert("rect", ":first-child")
+      .attr("x", bounds.x - padding).attr("y", bounds.y - padding)
+      .attr("width", bounds.width + padding * 2).attr("height", bounds.height + padding * 2)
+      .attr("fill", config.figureStyle.background);
+    return new XMLSerializer().serializeToString(svgNode);
+  } finally {
+    svgNode.remove();
+  }
 }
 
 function colors(specifier) {
@@ -13056,14 +13073,14 @@ function locusTextForCluster(uid) {
   return cluster ? locusText(cluster) : "";
 }
 
-function sceneProjectionOptions({ areClustersAdjacent, tree = null } = {}) {
+function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
   const config = renderConfig();
   return {
     scaleX: scales.x,
     locusOffset: scales.locus,
     getLocusState: locusState,
     getGeneState: (gene) => getGeneState(chartState, gene),
-    areClustersAdjacent: areClustersAdjacent || (() => false),
+    clusterOrder,
     shape: config.gene.shape,
     label: config.gene.label,
     link: {
@@ -13135,11 +13152,6 @@ function sceneChromeOptions(data) {
   };
 }
 
-function adjacencyForClusterOrder(order) {
-  const index = new Map(order.map((uid, position) => [uid, position]));
-  return (one, two) => Math.abs(index.get(one) - index.get(two)) === 1;
-}
-
 function buildChartScene(data) {
   // Scene construction is read-only. The controller synchronizes any
   // scale-dependent chart state before asking the runtime to project it.
@@ -13156,12 +13168,11 @@ function buildChartScene(data) {
   currentScene = buildScene(data, {
     ...sceneProjectionOptions({
       tree: data.tree,
-      areClustersAdjacent: adjacencyForClusterOrder(clusterOrder),
+      clusterOrder,
     }),
     scaleY: scales.y,
     clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
     clusterOffset: scales.offset,
-    clusterOrder,
     chrome: sceneChromeOptions(data),
   });
   return currentScene;
@@ -13187,11 +13198,10 @@ function patchChartScene(previousScene, changes = {}, data) {
   currentScene = patchScene(previousScene, { loci, clusters }, {
     ...sceneProjectionOptions({
       tree: data.tree,
-      areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
+      clusterOrder: getClusterOrder(chartState),
     }),
     clusterOffset: scales.offset,
     clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
-    linksForGene: lookup.linksForGene,
     chrome: sceneChromeOptions(data),
   });
   return currentScene;
@@ -13205,7 +13215,7 @@ function setBeforeGeneAnchorUpdate(callback) {
   beforeGeneAnchorUpdate = callback;
 }
 
-function anchorGene(anchor, { flipMismatchedLoci = false, beforeUpdate } = {}) {
+function anchorGene(anchor, { flipMismatchedLoci = false } = {}) {
   const genes = scales.group
     .domain()
     .filter((uid) => scales.group(uid) === scales.group(anchor.uid))
@@ -13232,7 +13242,7 @@ function anchorGene(anchor, { flipMismatchedLoci = false, beforeUpdate } = {}) {
   });
 
   refreshClusterOffsetScale();
-  (beforeUpdate || beforeGeneAnchorUpdate)?.({ changes, flippedLoci });
+  beforeGeneAnchorUpdate?.({ changes, flippedLoci });
   return { changes, flippedLoci };
 }
 
@@ -13953,37 +13963,6 @@ function viewportForCamera(camera, width, height, overscan = 20) {
   return worldViewport(camera, { width, height }, overscan);
 }
 
-function boundsInViewport(bounds, viewport, offsetY = 0) {
-  return (
-    bounds.minX <= viewport.maxX &&
-    bounds.maxX >= viewport.minX &&
-    bounds.minY + offsetY <= viewport.maxY &&
-    bounds.maxY + offsetY >= viewport.minY
-  );
-}
-
-function visibleClusterPreviewPairs(scene, preview, viewport) {
-  const clusters = [];
-  const clusterUidByOrder = new Map(
-    [...preview.clusterOrder].map(([uid, order]) => [order, uid])
-  );
-  for (const cluster of scene.clusters.values()) {
-    if (boundsInViewport(cluster.bounds, viewport, clusterOffsetForPreview(preview, cluster.source.uid))) {
-      clusters.push(cluster);
-    }
-  }
-  const pairs = new Set();
-  for (const cluster of clusters) {
-    const order = preview.clusterOrder.get(cluster.source.uid);
-    for (const neighbourOrder of [order - 1, order + 1]) {
-      const neighbourUid = clusterUidByOrder.get(neighbourOrder);
-      if (neighbourUid === undefined) continue;
-      pairs.add(clusterPairKey(cluster.source.uid, neighbourUid));
-    }
-  }
-  return pairs;
-}
-
 function bufferFor(device, existing, data) {
   if (!data.byteLength) return null;
   if (!existing || existing.size < data.byteLength) {
@@ -14282,7 +14261,7 @@ async function createWebGpuRenderer(canvas) {
   };
 
   const clusterPreviewLinkIndices = (nextPreview, viewport, config) => {
-    const pairs = visibleClusterPreviewPairs(scene, nextPreview, viewport);
+    const { pairs } = clusterPreviewInViewport(scene, nextPreview, viewport);
     const cacheKey = `${config.link.threshold}:${[...pairs].sort().join("|")}`;
     const cached = clusterPreviewIndexCache.get(cacheKey);
     if (cached) return cached;
@@ -14528,14 +14507,23 @@ async function createWebGpuRenderer(canvas) {
     }
   };
 
-  // Commit sparse locus edits into both the GPU buffers and the CPU baseline.
-  // Future previews can then restore these records without rebuilding the chart.
-  const adoptLocusChanges = (nextScene, sourceScene, { offsets = [], loci = [], scales, config }) => {
-    if (!geometry || scene !== sourceScene) return false;
-    const affectedGenes = new Set();
-    for (const uid of loci) {
-      const locus = nextScene.loci.get(uid);
-      if (!locus || !geometry.locusSlots.has(uid)) return false;
+  // Retain translated geometry; only re-upload loci whose local geometry changed.
+  const adoptScene = (nextScene, sourceScene, { scales, config }) => {
+    if (!geometry || scene !== sourceScene || !nextScene.changes) return false;
+    const loci = [], offsets = [], affectedGenes = new Set();
+    for (const uid of nextScene.changes.clusters) {
+      const before = sourceScene.clusters.get(uid), after = nextScene.clusters.get(uid);
+      if (!before || !after || !geometry.clusterSlots.has(uid)) return false;
+      const dx = after.x - before.x, dy = after.y - before.y;
+      if (dx || dy) offsets.push([uid, dx, dy]);
+    }
+    for (const uid of nextScene.changes.loci) {
+      const before = sourceScene.loci.get(uid), locus = nextScene.loci.get(uid);
+      if (!before || !locus) return false;
+      if (before.localX === locus.localX && before.state.start === locus.state.start &&
+          before.state.end === locus.state.end && before.state.flipped === locus.state.flipped) continue;
+      loci.push(uid);
+      if (!geometry.locusSlots.has(uid)) return false;
       for (const gene of locus.genes) {
         affectedGenes.add(gene.source.uid);
         // Trims normally retain hidden ranges for subsequent expansion. If
@@ -14545,7 +14533,7 @@ async function createWebGpuRenderer(canvas) {
       }
     }
     const incidentLinks = [];
-    for (const uid of nextScene.changes?.links || nextScene.links.keys()) {
+    for (const uid of affectedGenes.size ? nextScene.changes.links : []) {
       const link = nextScene.links.get(uid);
       if (link && (affectedGenes.has(link.source.query.uid) || affectedGenes.has(link.source.target.uid))) {
         incidentLinks.push(link);
@@ -14557,9 +14545,10 @@ async function createWebGpuRenderer(canvas) {
       const ranges = geometry.ranges.links.get(link.source.uid);
       if (!retainedClusterGeometry && !ranges?.links.length && !ranges?.linkEdges.length) return false;
     }
-    for (const [uid, offset] of offsets) {
+    for (const [uid, dx, dy] of offsets) {
       const slot = geometry.clusterSlots.get(uid);
-      if (slot !== undefined) clusterBaseOffsets[slot * 2] += offset;
+      clusterBaseOffsets[slot * 2] += dx;
+      clusterBaseOffsets[slot * 2 + 1] += dy;
     }
     const baseFor = (uid, axis) => {
       const slot = geometry.clusterSlots.get(uid);
@@ -14601,7 +14590,7 @@ async function createWebGpuRenderer(canvas) {
         (uid) => baseFor(uid, 0), (uid) => baseFor(uid, 1));
       if (record) device.queue.writeBuffer(linkRecordBuffer, index * 16 * 4, record);
     }
-    if ([...offsets].some(([, offset]) => offset)) retainedClusterGeometry = true;
+    if (offsets.length) retainedClusterGeometry = true;
     scene = nextScene;
     preview = null;
     patchedRecords = null;
@@ -14745,37 +14734,7 @@ async function createWebGpuRenderer(canvas) {
       pass.end();
       device.queue.submit([encoder.finish()]);
     },
-    adoptClusterOrder(nextScene, sourceScene, committedPreview) {
-      if (
-        !geometry ||
-        !committedPreview ||
-        committedPreview.type !== "cluster-drag" ||
-        scene !== sourceScene
-      ) {
-        return false;
-      }
-      // Geometry is still expressed in the old scene's row coordinates. Keep
-      // that buffer and make the committed preview offsets its new baseline;
-      // nextScene remains authoritative for hit testing, labels, and export.
-      for (const [uid, offset] of committedPreview.clusterOffsets) {
-        const slot = geometry.clusterSlots.get(uid);
-        if (slot !== undefined) clusterBaseOffsets[slot * 2 + 1] += offset;
-      }
-      scene = nextScene;
-      preview = null;
-      patchedRecords = null;
-      retainedClusterGeometry = true;
-      clusterPreviewIndexCache = new Map();
-      updateClusterOffsets(null);
-      updateLocusTransforms(null);
-      uploadPreviewLinkIndices(visibleLinkIndices());
-      previewLinksActive = true;
-      return true;
-    },
-    adoptGeneAnchor(nextScene, sourceScene, { flippedLoci, ...options }) {
-      return adoptLocusChanges(nextScene, sourceScene, { ...options, loci: flippedLoci });
-    },
-    adoptLocusChanges: adoptLocusChanges,
+    adoptScene,
     destroy() {
       multisampleTexture?.destroy();
       linkBuffer?.destroy();
@@ -14897,9 +14856,7 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
           fallback();
         });
     },
-    adoptClusterOrder: (...args) => renderer?.adoptClusterOrder(...args) || false,
-    adoptGeneAnchor: (...args) => renderer?.adoptGeneAnchor(...args) || false,
-    adoptLocusChanges: (...args) => renderer?.adoptLocusChanges(...args) || false,
+    adoptScene: (...args) => renderer?.adoptScene(...args) || false,
     destroy: () => {
       generation += 1;
       renderer?.destroy();
@@ -14913,140 +14870,7 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
   };
 }
 
-// Surface modules supply renderer-specific effects, but every chart camera
-// uses the same D3 gesture contract and intentionally reserves double-click
-// for locus flipping.
-function bindCameraZoom({
-  d3,
-  surface,
-  zoomExtent,
-  onZoom,
-  onStart,
-  onEnd,
-}) {
-  const zoom = d3
-    .zoom()
-    .scaleExtent(zoomExtent())
-    .on("zoom", onZoom)
-    .on("start", onStart)
-    .on("end", onEnd);
-  surface.call(zoom).on("dblclick.zoom", null);
-  return zoom;
-}
-
-function updateCameraZoom(zoom, zoomExtent) {
-  if (zoom) zoom.scaleExtent(zoomExtent());
-}
-
-// D3 keeps a transform on each gesture surface. The chart camera is shared by
-// all renderers, so a surface created while switching renderer must adopt that
-// camera before its first wheel or drag event. Otherwise its default identity
-// transform would overwrite the already-visible camera on that first gesture.
-function syncCameraZoom({ d3, surface, zoom, camera }) {
-  const node = surface?.node?.();
-  if (!node || !zoom || !camera) return;
-  const current = d3.zoomTransform(node);
-  if (current.x === camera.x && current.y === camera.y && current.k === camera.k) return;
-  surface.call(
-    zoom.transform,
-    d3.zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
-  );
-}
-
-// Owns the persistent DOM surrounding an SVG chart. Scene joins and all chart
-
-const d3$2 = { zoom, zoomIdentity: identity$2, zoomTransform: transform };
-
-function ensureSvgSurface({
-  container,
-  data,
-  ids,
-  fontFamily,
-  zoom,
-  zoomExtent,
-  onZoom,
-  onZoomStart,
-  onZoomEnd,
-}) {
-  let currentZoom = zoom;
-  const svg = container
-    .selectAll("svg.clusterMap")
-    .data([data])
-    .join((enter) => {
-      enter
-        .append("input")
-        .attr("id", ids.picker)
-        .attr("class", "colourPicker")
-        .attr("type", "color")
-        .style("position", "absolute")
-        .style("opacity", 0);
-
-      enter
-        .append("div")
-        .attr("class", "tooltip")
-        .style("opacity", 0)
-        .style("position", "absolute")
-        .style("pointer-events", "none")
-        // Context menus must stay interactive above optional side panels that
-        // share the chart container (such as the demo data editor).
-        .style("z-index", 4)
-        .style("box-sizing", "border-box")
-        .style("padding", "8px")
-        .style("background", "white")
-        .style("border", "1px solid #999")
-        .style("border-radius", "4px")
-        .style("box-shadow", "0 2px 8px rgba(0, 0, 0, 0.2)")
-        .style("font-family", fontFamily);
-
-      const surface = enter
-        .append("svg")
-        .attr("class", "clusterMap")
-        .attr("id", ids.root)
-        .attr("cursor", "grab")
-        .attr("width", "100%")
-        .attr("height", "100%")
-        .attr("xmlns", "http://www.w3.org/2000/svg")
-        .attr("xmlns:xhtml", "http://www.w3.org/1999/xhtml");
-
-      const defs = surface.append("defs");
-      const filter = defs
-        .append("filter")
-        .attr("id", ids.filter)
-        .attr("x", 0)
-        .attr("y", 0)
-        .attr("width", 1)
-        .attr("height", 1);
-      filter.append("feFlood").attr("flood-color", "rgba(0, 0, 0, 0.8)");
-      filter.append("feComposite").attr("in", "SourceGraphic").attr("in2", "");
-
-      // Layout measures chart content in world coordinates. The viewport is
-      // the only group transformed by the persisted camera.
-      const viewport = surface.append("g").attr("class", "clusterMapViewport");
-      viewport.append("g").attr("class", "clusterMapG");
-
-      currentZoom = bindCameraZoom({
-        d3: d3$2,
-        surface,
-        zoomExtent,
-        onZoom: (event) => onZoom(event, viewport),
-        onStart: () => onZoomStart(surface),
-        onEnd: () => onZoomEnd(surface),
-      });
-      return surface;
-    });
-
-  updateCameraZoom(currentZoom, zoomExtent);
-  return {
-    svg,
-    plot: svg.select("g.clusterMapG"),
-    tooltip: container.select("div.tooltip"),
-    zoom: currentZoom,
-  };
-}
-
 // Owns the persistent DOM surrounding retained raster renderers. Painting,
-
-const d3$1 = { zoom, zoomIdentity: identity$2, zoomTransform: transform };
 
 function ensureRasterSurface({
   container,
@@ -15086,7 +14910,6 @@ function ensureRasterSurface({
         .style("height", "100%")
         .style("outline", "none");
       currentZoom = bindCameraZoom({
-        d3: d3$1,
         surface,
         zoomExtent,
         onZoom,
@@ -15366,7 +15189,6 @@ function lociForClusterRange(clusterOrder, clusterById, startClusterUid, endClus
 }
 
 let nextChartInstance = 0;
-const d3 = { zoomIdentity: identity$2, zoomTransform: transform };
 const projectFormat = "clinker-project";
 const projectVersion = 1;
 const historyLimit = 100;
@@ -15432,14 +15254,11 @@ function clusterMap() {
   let canvasPreparedFlipBase = null;
   let canvasFlipWarmFrame = null;
   let previewPaintFrame = null;
-  let canvasFlipFrame = null;
+  let cancelCanvasFlip = null;
   let canvasPendingFlip = null;
   let paintPreviewFrame = null;
-  let sceneFlipFrame = null;
+  let cancelSceneFlip = null;
   let clusterCommitFrame = null;
-  let webgpuClusterCommit = null;
-  let webgpuAnchorCommit = null;
-  let webgpuLocusCommit = null;
   let sceneCommit = null;
   let scheduleMinimapBase = () => {};
   let prepareCanvasFlipBase = () => {};
@@ -15508,15 +15327,6 @@ function clusterMap() {
       sourceScene,
       changes: { loci: [...flippedLoci], clusters: changes.map(({ clusterUid }) => clusterUid) },
     };
-    if (!isWebGpuRenderer(runtime.config.plot.renderer)) return;
-    const offsets = new Map(
-      changes
-        .filter(({ offset }) => offset)
-        .map(({ clusterUid, offset }) => [clusterUid, offset])
-    );
-    if (offsets.size || flippedLoci.size) {
-      webgpuAnchorCommit = { sourceScene, offsets, flippedLoci };
-    }
   });
   const anchorGene = (gene, { flipMismatchedLoci = false } = {}) => {
     beginInteractionState();
@@ -15586,9 +15396,6 @@ function clusterMap() {
           order,
           rows,
         });
-        if (isWebGpuRenderer(runtime.config.plot.renderer)) {
-          webgpuClusterCommit = { sourceScene, preview: scenePreview };
-        }
         scheduleScenePreview();
         if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
         clusterCommitFrame = requestAnimationFrame(() => {
@@ -15675,13 +15482,13 @@ function clusterMap() {
     cancelInteraction: () => { pendingInteractionState = null; },
     flipLocus: (locus) => {
       // Do not mutate the retained source underneath an in-flight flip.
-      if (sceneFlipFrame !== null) return;
+      if (cancelSceneFlip !== null) return;
       beginInteractionState();
       flipLocus(chartState, locus);
       if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
-        if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+        canvasAnimation?.cancel();
         canvasAnimation = null;
-        if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
+        cancelCanvasFlip?.();
         const previewProgress = 0.12;
         const sourceScene = canvasScene || runtime.getScene();
         const pending = createCanvasFlipPending(locus, sourceScene);
@@ -15692,17 +15499,8 @@ function clusterMap() {
           clusterLabelText: pending.clusterLabelText,
         });
         scheduleScenePreview();
-        // The first preview frame is retained-scene geometry plus a reflection
-        // patch. Only after it has painted do we project the changed locus and
-        // its incident links; the animation never interpolates every record.
-        // rAF callbacks all run before the browser presents a frame. Queue the
-        // expensive layer preparation from a *second* rAF so the initial
-        // retained-scene preview above is actually visible immediately rather
-        // than being held behind cache construction.
-        canvasFlipFrame = requestAnimationFrame(() => {
-          if (canvasPendingFlip !== pending) return;
-          canvasFlipFrame = requestAnimationFrame(() => startCanvasFlip(pending, previewProgress));
-        });
+        // Show the retained preview before preparing cached flip layers.
+        cancelCanvasFlip = afterPaint(() => startCanvasFlip(pending, previewProgress));
         return;
       }
       if (runtime.getScene()) {
@@ -15713,13 +15511,13 @@ function clusterMap() {
           runtime.synchronizeLocusLayoutState(locus);
           const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, currentData);
           if (useGpu) {
-            webgpuBackend.adoptLocusChanges(targetScene, sourceScene, {
-              loci: [locus.uid], scales: runtime.scales, config: runtime.renderConfig,
+            webgpuBackend.adoptScene(targetScene, sourceScene, {
+              scales: runtime.scales, config: runtime.renderConfig,
             });
             webgpuBackend.setScene(targetScene);
           } else svgBackend.setScene(targetScene);
           scenePreview = null;
-          sceneFlipFrame = null;
+          cancelSceneFlip = null;
           scheduleScenePaint();
           commitInteractionState();
         };
@@ -15727,26 +15525,15 @@ function clusterMap() {
           finish();
           return;
         }
-        const startedAt = performance.now();
-        const frame = (now) => {
-          const elapsed = Math.min(1, (now - startedAt) / duration);
-          const eased = elapsed < 0.5
-            ? 4 * elapsed * elapsed * elapsed
-            : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+        cancelSceneFlip = animate(duration, (progress) => {
           scenePreview = createLocusFlipPreview(sourceScene, locus.uid, {
-            progress: eased,
+            progress,
             clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
           });
           if (useGpu) webgpuBackend.setScene(sourceScene);
           else svgBackend.setScene(sourceScene);
           scheduleScenePaint();
-          if (elapsed < 1) {
-            sceneFlipFrame = requestAnimationFrame(frame);
-            return;
-          }
-          finish();
-        };
-        sceneFlipFrame = requestAnimationFrame(frame);
+        }, finish);
         return;
       }
       redraw();
@@ -15756,12 +15543,7 @@ function clusterMap() {
 
   function commitLocusEdit(loci, updateState) {
     const sourceScene = runtime.getScene();
-    if (sourceScene) {
-      sceneCommit = { sourceScene, changes: { loci } };
-      if (isWebGpuRenderer(runtime.config.plot.renderer)) {
-        webgpuLocusCommit = { sourceScene, loci };
-      }
-    }
+    if (sourceScene) sceneCommit = { sourceScene, changes: { loci } };
     updateState();
     clearScenePreview();
     redraw({ animate: false });
@@ -15770,8 +15552,8 @@ function clusterMap() {
 
   function clearScenePreview() {
     if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
-    if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
-    if (sceneFlipFrame !== null) cancelAnimationFrame(sceneFlipFrame);
+    cancelCanvasFlip?.();
+    cancelSceneFlip?.();
     if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
     scenePreview = null;
     canvasPreviewScene = null;
@@ -15780,17 +15562,17 @@ function clusterMap() {
     if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
     canvasFlipWarmFrame = null;
     previewPaintFrame = null;
-    canvasFlipFrame = null;
+    cancelCanvasFlip = null;
     canvasPendingFlip = null;
-    sceneFlipFrame = null;
+    cancelSceneFlip = null;
     clusterCommitFrame = null;
   }
 
   function flushCanvasFlip() {
     const pending = canvasPendingFlip;
     if (!pending) return;
-    if (canvasFlipFrame !== null) cancelAnimationFrame(canvasFlipFrame);
-    canvasFlipFrame = null;
+    cancelCanvasFlip?.();
+    cancelCanvasFlip = null;
     if (!pending.targetScene) {
       runtime.synchronizeLocusLayoutState(pending.locus);
       pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, currentData);
@@ -15807,7 +15589,7 @@ function clusterMap() {
 
   function startCanvasFlip(pending, initialProgress) {
     if (canvasPendingFlip !== pending) return;
-    canvasFlipFrame = null;
+    cancelCanvasFlip = null;
     runtime.synchronizeLocusLayoutState(pending.locus);
     pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, currentData);
     commitInteractionState();
@@ -15830,41 +15612,29 @@ function clusterMap() {
       scheduleMinimapBase(canvasScene);
       return;
     }
-    const startedAt = performance.now();
-    const frame = (now) => {
+    cancelCanvasFlip = animate(duration, (progress) => {
       if (canvasPendingFlip !== pending) return;
-      const elapsed = Math.min(1, (now - startedAt) / duration);
-      const eased = elapsed < 0.5
-        ? 4 * elapsed * elapsed * elapsed
-        : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
       scenePreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
-        progress: initialProgress + (1 - initialProgress) * eased,
+        progress: initialProgress + (1 - initialProgress) * progress,
         clusterLabelText: pending.clusterLabelText,
       });
-      // The dirty region is bounded to the affected locus and its incident
-      // links, so paint it in this rAF rather than one frame later. Links and
-      // genes are drawn together in normal renderer order.
+      // Paint the dirty region in this frame rather than one frame later.
       if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
       previewPaintFrame = null;
       paintPreviewFrame?.();
-      if (elapsed < 1) {
-        canvasFlipFrame = requestAnimationFrame(frame);
-        return;
-      }
-      canvasFlipFrame = null;
+    }, () => {
+      cancelCanvasFlip = null;
       scenePreview = null;
       canvasPreviewScene = null;
       canvasPendingFlip = null;
       canvasScene = pending.targetScene;
       canvasBackend.setScene(canvasScene);
-      // Replace the final preview with the complete target scene.
       paintPreviewFrame?.();
       clearCanvasFlipBase();
       canvasPreparedFlipBase = null;
       scheduleScenePaint();
       scheduleMinimapBase(canvasScene);
-    };
-    canvasFlipFrame = requestAnimationFrame(frame);
+    });
   }
 
   function scheduleScenePaint() {
@@ -15929,7 +15699,7 @@ function clusterMap() {
   }
 
   function stopWebGpuAnimation() {
-    if (webgpuAnimation?.frame) cancelAnimationFrame(webgpuAnimation.frame);
+    webgpuAnimation?.cancel();
     webgpuAnimation = null;
   }
 
@@ -15941,24 +15711,14 @@ function clusterMap() {
     });
   }
 
-  function invalidateSceneCommit() {
-    sceneCommit = null;
-    webgpuClusterCommit = null;
-    webgpuAnchorCommit = null;
-    webgpuLocusCommit = null;
-  }
-
   function loadData(data) {
-    invalidateSceneCommit();
+    sceneCommit = null;
     stateSnapshots.reset();
     const prepared = normalizeChartData(data, runtime.config.tree);
     cancelTreePresentationPreview();
     currentData = prepared;
     chartIndex = createChartIndex(currentData);
-    refreshDerivedGroups();
-    // Generated groups are part of the editable model, so index them after
-    // automatic grouping rather than leaving the group lookup one redraw old.
-    chartIndex = createChartIndex(currentData);
+    refreshGroups();
     selectedLocusIds = new Set(
       [...selectedLocusIds].map(locusForId).filter(Boolean).map((locus) => locus.uid)
     );
@@ -15972,18 +15732,15 @@ function clusterMap() {
     return data?.config?.updateGroups !== false;
   }
 
-  function refreshDerivedGroups() {
-    if (!currentData) return;
-    if (!groupsAreAutomatic()) {
-      if (!currentData.groups) currentData.groups = [];
-      return;
-    }
-    // Deleted genes intentionally leave link records in editable data. Only
-    // links whose endpoints remain in the index participate in auto-grouping.
-    const projectedLinks = currentData.links.filter((link) =>
-      chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
-    );
-    currentData.groups = createLinkGroups(projectedLinks, currentData.groups);
+  function refreshGroups(derive = groupsAreAutomatic()) {
+    if (derive) {
+      // Deleted genes retain their link records; exclude dangling endpoints.
+      const links = currentData.links.filter((link) =>
+        chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
+      );
+      currentData.groups = createLinkGroups(links, currentData.groups);
+    } else currentData.groups ??= [];
+    chartIndex.groupById = new Map(currentData.groups.map((group) => [group.uid, group]));
   }
 
   function emitChange(change) {
@@ -16032,12 +15789,9 @@ function clusterMap() {
   }
 
   function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
+    if (effects.reindex === "data") chartIndex = createChartIndex(currentData);
     if (effects.reindex || refreshAutomatic) {
-      chartIndex = createChartIndex(currentData);
-      if (groupsAreAutomatic() && (effects.refreshDerivedGroups || refreshAutomatic)) {
-        refreshDerivedGroups();
-        chartIndex = createChartIndex(currentData);
-      }
+      refreshGroups(groupsAreAutomatic() && (effects.reindex === "data" || refreshAutomatic));
       runtime.setChartIndex(chartIndex);
     }
     if (effects.rebuildState) {
@@ -16050,7 +15804,7 @@ function clusterMap() {
   function applyPatch(operations, { record = true, automaticGroups } = {}) {
     const sourceScene = runtime.getScene();
     const annotationsOnly = Array.isArray(operations) && operations.every(isAnnotationOperation);
-    invalidateSceneCommit();
+    sceneCommit = null;
     // Source edits may mutate currentData in place. Identity alone cannot
     // invalidate the cached biological defaults, including on undo/redo.
     if (!annotationsOnly) stateSnapshots.reset();
@@ -16090,7 +15844,7 @@ function clusterMap() {
   }
 
   function setState(snapshot, { record = true } = {}) {
-    invalidateSceneCommit();
+    sceneCommit = null;
     pendingInteractionState = null;
     const before = chartState ? stateSnapshots.serialize(chartState, currentData) : null;
     chartState = chartStateFromSnapshot(currentData, snapshot);
@@ -16115,7 +15869,7 @@ function clusterMap() {
       .find(([key]) => String(key) === String(uid))?.[1];
   }
 
-  function redraw({ animate = true, synchronize = true } = {}) {
+  function redraw({ animate: animate$1 = true, synchronize = true } = {}) {
     if (!currentData || !container) return;
     applyTheme(container.node(), resolveTheme(runtime.config.plot.theme));
     if (globalThis.getComputedStyle(container.node()).position === "static") container.style("position", "relative");
@@ -16149,7 +15903,7 @@ function clusterMap() {
       // the chart changes backend, and invalidate any async setup that might
       // otherwise resolve after that canvas has been removed.
       webgpuBackend.destroy();
-      invalidateSceneCommit();
+      sceneCommit = null;
     }
     if (!useCanvas) canvasBackend.destroy();
     if (useRaster) svgBackend.destroy();
@@ -16241,6 +15995,10 @@ function clusterMap() {
       .select("div.tooltip")
       .on("mouseenter", overlay.enter)
       .on("mouseleave", overlay.leave);
+    const canvasFrame = () => ({
+      camera: getCamera(chartState), config: runtime.renderConfig,
+      scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(),
+    });
     const paintCanvas = (canvasNode) => {
       updateFigureSurface();
       const flipLayer =
@@ -16261,24 +16019,18 @@ function clusterMap() {
         renderCanvas({
           canvas: canvasNode,
           scene: canvasPreviewScene,
-          camera: getCamera(chartState),
+          ...canvasFrame(),
           // Keep the normal filled-ribbon appearance throughout the flip.
           config: {
             ...runtime.renderConfig,
             link: {
               ...runtime.config.link,
               asLine: false,
-              label: { ...runtime.config.link.label, show: false },
             },
           },
-          scales: runtime.scales,
-          pixelRatio: rasterMotion.pixelRatio(),
           preview: scenePreview,
           include: { links: canvasPendingFlip.dynamic.links },
-          showLoci: false,
-          showGenes: false,
-          showClusterLabels: false,
-          showChrome: false,
+          layers: ["links"],
           suppressLocusHover: true,
           clear: false,
         });
@@ -16296,15 +16048,9 @@ function clusterMap() {
           renderCanvas({
             canvas: canvasNode,
             scene: canvasPreviewScene,
-            camera: getCamera(chartState),
-            config: runtime.renderConfig,
-            scales: runtime.scales,
-            pixelRatio: rasterMotion.pixelRatio(),
+            ...canvasFrame(),
             include: { genes: stationaryGenes },
-            showLinks: false,
-            showLoci: false,
-            showClusterLabels: false,
-            showChrome: false,
+            layers: ["genes", "geneLabels"],
             suppressLocusHover: true,
             clear: false,
           });
@@ -16315,16 +16061,10 @@ function clusterMap() {
         renderCanvas({
           canvas: canvasNode,
           scene: canvasPreviewScene,
-          camera: getCamera(chartState),
-          config: runtime.renderConfig,
-          scales: runtime.scales,
-          pixelRatio: rasterMotion.pixelRatio(),
+          ...canvasFrame(),
           preview: scenePreview,
           include: { loci: canvasPendingFlip.locusRecords.loci },
-          showLinks: false,
-          showLocusTracks: false,
-          showGenes: false,
-          showChrome: false,
+          layers: ["trimIndicators", "clusterLabels"],
           suppressLocusHover: true,
           clear: false,
         });
@@ -16344,13 +16084,10 @@ function clusterMap() {
         previousTree: treeAnimation?.previousTree,
         previousTreeScene: treeAnimation?.previousScene,
         treeProgress: treeAnimation?.progress ?? 1,
-        camera: getCamera(chartState),
-        config: runtime.renderConfig,
-        scales: runtime.scales,
+        ...canvasFrame(),
         hoverLocusUid: canvasHoverLocusUid,
         suppressLocusHover:
           scenePreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
-        pixelRatio: rasterMotion.pixelRatio(),
         preview: scenePreview,
         highlightGeneIds: highlightedGeneIds(),
         highlightLinkIds,
@@ -16372,19 +16109,11 @@ function clusterMap() {
           previousTreeScene: treeAnimation?.previousScene,
           treeTargetScene: treeAnimation?.targetScene,
           treeProgress: treeAnimation?.progress ?? 1,
-          camera: getCamera(chartState),
-          config: runtime.renderConfig,
-          scales: runtime.scales,
+          ...canvasFrame(),
           hoverLocusUid: canvasHoverLocusUid,
           suppressLocusHover: scenePreview?.type === "locus-flip",
-          pixelRatio: rasterMotion.pixelRatio(),
           preview: scenePreview,
-          showLinks: false,
-          showLinkLabels: runtime.config.link.label.show,
-          showLocusTracks: false,
-          showGenes: false,
-          showGeneLabels: runtime.config.gene.label.show,
-          showAnnotationGeometry: false,
+          layers: ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"],
           highlightGeneIds: highlightedGeneIds(),
           highlightLinkIds,
           highlightLocusIds: selectedLocusIds,
@@ -16395,12 +16124,9 @@ function clusterMap() {
         canvas: canvasNode,
         scene,
         preview: scenePreview,
-        camera: getCamera(chartState),
-        scales: runtime.scales,
-        config: runtime.renderConfig,
+        ...canvasFrame(),
         width: bounds.width,
         height: bounds.height,
-        pixelRatio: rasterMotion.pixelRatio(),
         onUnavailable: () => paintCanvas(webgpuOverlay.node()),
       });
       paintMinimap();
@@ -16428,9 +16154,7 @@ function clusterMap() {
       const renderOptions = {
         scene: pending.sourceScene,
         tree: currentData.tree,
-        camera: getCamera(chartState),
-        config: runtime.renderConfig,
-        scales: runtime.scales,
+        ...canvasFrame(),
         dimensions: { width: bounds.width, height: bounds.height },
         pixelRatio,
         suppressLocusHover: true,
@@ -16443,16 +16167,13 @@ function clusterMap() {
           loci: pending.dynamic.loci,
           genes: pending.dynamic.genes,
         },
-        showLoci: false,
-        showGenes: false,
-        showClusterLabels: false,
-        showChrome: false,
+        layers: ["links", "linkLabels"],
       });
       renderCanvas({
         canvas: baseCanvas,
         ...renderOptions,
         omit: { loci: pending.dynamic.loci, genes: pending.dynamic.genes },
-        showLinks: false,
+        layers: CANVAS_LAYERS.filter((layer) => layer !== "links" && layer !== "linkLabels"),
         clear: false,
       });
     };
@@ -16465,23 +16186,12 @@ function clusterMap() {
       renderCanvas({
         canvas: locusCanvas,
         scene: pending.sourceScene,
+        ...canvasFrame(),
         camera: { ...camera, x: camera.x - frame.x, y: camera.y - frame.y },
-        config: {
-          ...runtime.renderConfig,
-          gene: {
-            ...runtime.renderConfig.gene,
-            // A reflected bitmap would mirror glyphs. The normal target scene
-            // redraw restores labels at the end of the brief animation.
-            label: { ...runtime.config.gene.label, show: false },
-          },
-        },
-        scales: runtime.scales,
         dimensions: frame,
         pixelRatio,
         include: pending.locusRecords,
-        showLinks: false,
-        showClusterLabels: false,
-        showChrome: false,
+        layers: ["tracks", "trimIndicators", "genes"],
         suppressLocusHover: true,
       });
       return frame;
@@ -16659,22 +16369,11 @@ function clusterMap() {
             canvas: baseCanvas,
             tree: currentData.tree,
             treeTrackAnchor: false,
-            // A full ribbon overview becomes an opaque field for dense maps.
-            // Keep the structured, coloured gene raster by default; callers
-            // can opt links back in for sparse figures.
-            scene: {
-              ...overviewScene,
-              chrome: null,
-              links: minimapOptions.showLinks ? overviewScene.links : new Map(),
-            },
+            scene: overviewScene,
             camera: { x: projection.x, y: projection.y, k: projection.scale },
-            config: {
-              ...runtime.renderConfig,
-              gene: {
-                ...runtime.renderConfig.gene,
-                label: { ...runtime.config.gene.label, show: false },
-              },
-            },
+            config: runtime.renderConfig,
+            layers: CANVAS_LAYERS.filter((layer) => layer !== "geneLabels" && layer !== "chrome" &&
+              (minimapOptions.showLinks || layer !== "links" && layer !== "linkLabels")),
             scales: runtime.scales,
             dimensions: projection,
             fullScene: true,
@@ -16685,79 +16384,52 @@ function clusterMap() {
       });
     };
     const stopCanvasAnimation = () => {
-      if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+      canvasAnimation?.cancel();
       canvasAnimation = null;
     };
-    const animateCanvas = (canvasNode, scene, animate) => {
+    const animateCanvas = (canvasNode, scene, animate$1) => {
       stopCanvasAnimation();
-      if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
+      if (!animate$1 || !canvasScene || !runtime.config.plot.transitionDuration) {
         treeAnimation = null;
         canvasScene = scene;
         paintCanvas(canvasNode);
         return;
       }
       const previousScene = canvasScene;
-      const duration = runtime.config.plot.transitionDuration;
-      const initialProgress = 0;
-      const suppressLocusHover = false;
-      const startedAt = performance.now();
       if (treeAnimation) treeAnimation.targetScene = scene;
-      const frame = (now) => {
-        const elapsed = Math.min(1, (now - startedAt) / duration);
-        // Matches D3's default cubic-in-out transition closely enough that
-        // the two renderers retain the same interaction feel.
-        const eased =
-          elapsed < 0.5
-            ? 4 * elapsed * elapsed * elapsed
-            : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
-        const progress = initialProgress + (1 - initialProgress) * eased;
+      canvasAnimation = { previousScene, scene, progress: 0, cancel: null };
+      canvasAnimation.cancel = animate(runtime.config.plot.transitionDuration, (progress) => {
         if (treeAnimation) treeAnimation.progress = progress;
-        canvasAnimation = { previousScene, scene, progress, frame: null, suppressLocusHover };
+        canvasAnimation.progress = progress;
         paintCanvas(canvasNode);
-        if (elapsed < 1) {
-          canvasAnimation.frame = requestAnimationFrame(frame);
-        } else {
-          canvasAnimation = null;
-          treeAnimation = null;
-          canvasScene = scene;
-          // The final animation frame intentionally hid the stale hover
-          // affordance. Repaint once with the settled scene so it returns
-          // when the pointer is still over the locus.
-          paintCanvas(canvasNode);
-        }
-      };
-      canvasAnimation = { previousScene, scene, progress: 0, frame: requestAnimationFrame(frame) };
+      }, () => {
+        canvasAnimation = null;
+        treeAnimation = null;
+        canvasScene = scene;
+        paintCanvas(canvasNode);
+      });
     };
-    const animateWebGpu = (canvasNode, previousScene, scene, animate) => {
+    const animateWebGpu = (canvasNode, previousScene, scene, animate$1) => {
       stopWebGpuAnimation();
       const duration = runtime.config.plot.transitionDuration;
-      if (!animate || !previousScene || !duration) {
+      if (!animate$1 || !previousScene || !duration) {
         treeAnimation = null;
         webgpuBackend.setScene(scene);
         paintWebGpu(canvasNode, scene);
         return;
       }
-      const startedAt = performance.now();
       if (treeAnimation) treeAnimation.targetScene = scene;
-      const frame = (now) => {
-        const elapsed = Math.min(1, (now - startedAt) / duration);
-        const eased = elapsed < 0.5
-          ? 4 * elapsed * elapsed * elapsed
-          : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
-        const displayScene = interpolateCanvasScene(previousScene, scene, eased);
-        if (treeAnimation) treeAnimation.progress = eased;
+      webgpuAnimation = { cancel: animate(duration, (progress) => {
+        const displayScene = interpolateCanvasScene(previousScene, scene, progress);
+        if (treeAnimation) treeAnimation.progress = progress;
         webgpuBackend.setScene(displayScene);
         paintWebGpu(canvasNode, displayScene);
-        if (elapsed < 1) {
-          webgpuAnimation.frame = requestAnimationFrame(frame);
-        } else {
-          webgpuAnimation = null;
-          treeAnimation = null;
-          webgpuBackend.setScene(scene);
-          paintWebGpu(canvasNode, scene);
-        }
-      };
-      webgpuAnimation = { frame: requestAnimationFrame(frame) };
+      }, () => {
+        webgpuAnimation = null;
+        treeAnimation = null;
+        webgpuBackend.setScene(scene);
+        paintWebGpu(canvasNode, scene);
+      }) };
     };
     const chooseLegendColour = (group) => {
       const picker = container.select("input.colourPicker");
@@ -16771,22 +16443,22 @@ function clusterMap() {
       picker.node().click();
     };
     const setScaleBarLength = (providedValue) => {
-      const value =
-        providedValue ?? prompt("Enter new length (bp):", runtime.config.scaleBar.basePair);
-      if (!value) return;
-      runtime.config.scaleBar.basePair = value;
-      redraw();
+      const value = Number(
+        providedValue ?? prompt("Enter new length (bp):", runtime.config.scaleBar.basePair)
+      );
+      if (Number.isFinite(value) && value > 0) my.config({ scaleBar: { basePair: value } });
     };
-    const renameLegend = (event, group) => {
+    const renameRecord = (event, type, record) => {
       if (event.defaultPrevented) return;
-      const label = prompt("Enter new value:", group.label);
-      if (!label) return;
-      my.patch([{ type: "groups.update", ids: [group.uid], changes: { label } }]);
+      const field = type === "clusters" ? "name" : "label";
+      const value = prompt("Enter new value:", record[field] || record.uid);
+      if (value) my.patch([{ type: `${type}.update`, ids: [record.uid], changes: { [field]: value } }]);
     };
     // Both renderers delegate mutations to the same controller. Raster input
     // adapts stable IDs back to source records at its boundary; SVG already
     // receives those records through its D3 joins.
     const rendererInteractions = {
+      renameCluster: (event, cluster) => renameRecord(event, "clusters", cluster),
       isDragging: () => isDragging(chartState),
       beginClusterDrag: interactionController.beginClusterDrag,
       moveClusterDrag: interactionController.moveClusterDrag,
@@ -16867,7 +16539,7 @@ function clusterMap() {
         }
       },
       legendText: (event, group) =>
-        (runtime.config.legend.onClickText || renameLegend)(event, group),
+        runtime.config.legend.onClickText ? runtime.config.legend.onClickText(event, group) : renameRecord(event, "groups", group),
       legendMenu: (event, group) => {
         const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
         handler(event, group);
@@ -16942,8 +16614,8 @@ function clusterMap() {
     // camera. Keep D3's per-surface gesture state aligned before a newly
     // created SVG or canvas receives its first interaction.
     const camera = getCamera(chartState);
-    syncCameraZoom({ d3, surface: svg, zoom, camera });
-    syncCameraZoom({ d3, surface: canvas, zoom: canvasZoom, camera });
+    syncCameraZoom({ surface: svg, zoom, camera });
+    syncCameraZoom({ surface: canvas, zoom: canvasZoom, camera });
     applyCamera(svg.select("g.clusterMapViewport"));
 
     const annotationsOnly = Boolean(committedScene?.changes.annotationsOnly);
@@ -17006,37 +16678,17 @@ function clusterMap() {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
       canvasBackend.setScene(scene);
       scheduleMinimapBase(scene);
-      animateCanvas(canvas.node(), scene, hasInitialView && animate);
+      animateCanvas(canvas.node(), scene, hasInitialView && animate$1);
     } else if (useWebGpu) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
-      if (webgpuClusterCommit) {
-        webgpuBackend.adoptClusterOrder(
-          scene,
-          webgpuClusterCommit.sourceScene,
-          webgpuClusterCommit.preview
-        );
-        webgpuClusterCommit = null;
-      }
-      if (webgpuAnchorCommit) {
-        webgpuBackend.adoptGeneAnchor(
-          scene,
-          webgpuAnchorCommit.sourceScene,
-          { ...webgpuAnchorCommit, scales: runtime.scales, config: runtime.renderConfig }
-        );
-        webgpuAnchorCommit = null;
-      }
-      if (webgpuLocusCommit) {
-        webgpuBackend.adoptLocusChanges(scene, webgpuLocusCommit.sourceScene, {
-          // Trimming can repack sibling loci; adopt the complete scene patch,
-          // not just the locus whose handle was dragged.
-          loci: scene.changes?.loci || webgpuLocusCommit.loci,
+      if (committedScene && !annotationsOnly) {
+        webgpuBackend.adoptScene(scene, committedScene.sourceScene, {
           scales: runtime.scales, config: runtime.renderConfig,
         });
-        webgpuLocusCommit = null;
       }
       scheduleMinimapBase(scene);
       const previousScene = webgpuBackend.pendingScene;
-      animateWebGpu(canvas.node(), previousScene, scene, hasInitialView && animate);
+      animateWebGpu(canvas.node(), previousScene, scene, hasInitialView && animate$1);
     } else {
       const previousScene = svgBackend.pendingScene;
       svgBackend.setScene(scene);
@@ -17049,7 +16701,7 @@ function clusterMap() {
         previousTree: treeAnimation?.previousTree,
         previousTreeScene: treeAnimation?.previousScene,
         transition: transition$1,
-        animate: hasInitialView && animate,
+        animate: hasInitialView && animate$1,
         config: runtime.renderConfig,
         scales: runtime.scales,
         ids: runtime.ids,
@@ -17167,7 +16819,7 @@ function clusterMap() {
     if (!arguments.length) return runtime.config;
     cancelTreePresentationPreview();
     const before = currentData ? previousConfigPatch(runtime.config, _) : null;
-    invalidateSceneCommit();
+    sceneCommit = null;
     runtime.configure(_, currentData?.tree);
     // Configuration is a live part of the public chart API. Updating it after
     // mounting should have the same immediate effect as updating data, without
@@ -17267,40 +16919,26 @@ function clusterMap() {
     clearHistory();
     return my;
   };
-  my.undo = () => {
+  function replayHistory(source, target, direction) {
     const cancelled = cancelTreePresentationPreview();
-    const change = history.pop();
+    const change = source.pop();
     if (!change) { if (cancelled) redraw({ animate: false }); return my; }
+    const value = change[direction];
     if (change.kind === "patch") {
-      applyPatch(change.undo, { record: false, automaticGroups: change.groupsAutomaticBefore });
+      applyPatch(value, { record: false, automaticGroups: direction === "undo" ? change.groupsAutomaticBefore : change.groupsAutomaticAfter });
     } else if (change.kind === "config") {
-      runtime.configure(change.undo, currentData?.tree);
+      runtime.configure(value, currentData?.tree);
       redraw({ animate: false });
       emitChange({ type: "config.change", config: runtime.config });
-    } else if (change.kind === "state" && change.undo) {
-      setState(change.undo, { record: false });
+    } else if (change.kind === "state" && value) {
+      setState(value, { record: false });
     }
-    future.push(change);
+    target.push(change);
     emitHistoryChange();
     return my;
-  };
-  my.redo = () => {
-    const cancelled = cancelTreePresentationPreview();
-    const change = future.pop();
-    if (!change) { if (cancelled) redraw({ animate: false }); return my; }
-    if (change.kind === "patch") {
-      applyPatch(change.redo, { record: false, automaticGroups: change.groupsAutomaticAfter });
-    } else if (change.kind === "config") {
-      runtime.configure(change.redo, currentData?.tree);
-      redraw({ animate: false });
-      emitChange({ type: "config.change", config: runtime.config });
-    } else if (change.kind === "state" && change.redo) {
-      setState(change.redo, { record: false });
-    }
-    history.push(change);
-    emitHistoryChange();
-    return my;
-  };
+  }
+  my.undo = () => replayHistory(history, future, "undo");
+  my.redo = () => replayHistory(future, history, "redo");
   my.highlight = function (ids) {
     if (!arguments.length) return [...highlightGeneIds];
     const isScopedHighlight = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
@@ -17441,7 +17079,7 @@ function clusterMap() {
     disposeOverlay = () => {};
     retainedOverlay = null;
     clearScenePreview();
-    if (canvasAnimation?.frame) cancelAnimationFrame(canvasAnimation.frame);
+    canvasAnimation?.cancel();
     canvasAnimation = null;
     stopWebGpuAnimation();
     rasterMotion.dispose();
@@ -17473,9 +17111,6 @@ function clusterMap() {
     scheduleMinimapBase = () => {};
     prepareCanvasFlipBase = () => {};
     warmCanvasFlipBase = () => {};
-    webgpuClusterCommit = null;
-    webgpuAnchorCommit = null;
-    webgpuLocusCommit = null;
     sceneCommit = null;
     chartIndex = null;
     highlightGeneIds.clear();

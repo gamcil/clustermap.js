@@ -13,29 +13,20 @@ const fieldsForType = {
   "links.update": new Set(["label", "colour", "hidden", "identity"]),
 };
 
-// Most edits change records already held by the renderer, so a redraw is
-// enough. Only operations which invalidate an ID lookup or the layout state
-// ask the chart controller to rebuild those derived structures.
-const effectsForType = {
-  "genes.delete": { reindex: true, rebuildState: true, refreshDerivedGroups: true },
-  "genes.restore": { reindex: true, rebuildState: true, refreshDerivedGroups: true },
-  "links.delete": { reindex: true, refreshDerivedGroups: true },
-  "links.restore": { reindex: true, refreshDerivedGroups: true },
-  "groups.create": { reindex: true },
-  "groups.delete": { reindex: true },
-  "groups.merge": { reindex: true },
-};
-
+// Group edits only replace the group lookup; gene/link structure edits also
+// invalidate the biological indexes and automatic grouping.
 function operationEffects(operations) {
-  const effects = { reindex: false, rebuildState: false, refreshDerivedGroups: false };
+  let reindex = false, rebuildState = false;
   for (const { type } of operations) {
-    const next = effectsForType[type];
-    if (!next) continue;
-    if (next.reindex) effects.reindex = true;
-    if (next.rebuildState) effects.rebuildState = true;
-    if (next.refreshDerivedGroups) effects.refreshDerivedGroups = true;
+    if (type === "genes.delete" || type === "genes.restore") {
+      reindex = "data"; rebuildState = true;
+    } else if (type === "links.delete" || type === "links.restore") {
+      reindex = "data";
+    } else if (!reindex && ["groups.create", "groups.delete", "groups.merge"].includes(type)) {
+      reindex = "groups";
+    }
   }
-  return effects;
+  return { reindex, rebuildState };
 }
 
 function operationError(message) {

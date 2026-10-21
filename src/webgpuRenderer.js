@@ -7,6 +7,7 @@ import { worldViewport } from "./camera.mjs";
 import { figureConfig } from "./theme.mjs";
 import { sampleLinkGeometry } from "./links/layout.mjs";
 import {
+  clusterPreviewInViewport,
   genePolygonForPreview,
   linkVisibleForPreview,
   previewLinkAnchors,
@@ -17,7 +18,6 @@ import {
   locusOffsetForPreview,
   previewOffsetsForLocus,
 } from "./scenePreview.mjs";
-import { clusterPairKey } from "./layout.mjs";
 import { annotationOffsetForPreview, annotationPanelsForFrame, annotationPanelsInViewport } from "./annotations.mjs";
 
 const shader = /* wgsl */ `
@@ -620,37 +620,6 @@ function viewportForCamera(camera, width, height, overscan = 20) {
   return worldViewport(camera, { width, height }, overscan);
 }
 
-function boundsInViewport(bounds, viewport, offsetY = 0) {
-  return (
-    bounds.minX <= viewport.maxX &&
-    bounds.maxX >= viewport.minX &&
-    bounds.minY + offsetY <= viewport.maxY &&
-    bounds.maxY + offsetY >= viewport.minY
-  );
-}
-
-function visibleClusterPreviewPairs(scene, preview, viewport) {
-  const clusters = [];
-  const clusterUidByOrder = new Map(
-    [...preview.clusterOrder].map(([uid, order]) => [order, uid])
-  );
-  for (const cluster of scene.clusters.values()) {
-    if (boundsInViewport(cluster.bounds, viewport, clusterOffsetForPreview(preview, cluster.source.uid))) {
-      clusters.push(cluster);
-    }
-  }
-  const pairs = new Set();
-  for (const cluster of clusters) {
-    const order = preview.clusterOrder.get(cluster.source.uid);
-    for (const neighbourOrder of [order - 1, order + 1]) {
-      const neighbourUid = clusterUidByOrder.get(neighbourOrder);
-      if (neighbourUid === undefined) continue;
-      pairs.add(clusterPairKey(cluster.source.uid, neighbourUid));
-    }
-  }
-  return pairs;
-}
-
 function bufferFor(device, existing, data) {
   if (!data.byteLength) return null;
   if (!existing || existing.size < data.byteLength) {
@@ -949,7 +918,7 @@ export async function createWebGpuRenderer(canvas) {
   };
 
   const clusterPreviewLinkIndices = (nextPreview, viewport, config) => {
-    const pairs = visibleClusterPreviewPairs(scene, nextPreview, viewport);
+    const { pairs } = clusterPreviewInViewport(scene, nextPreview, viewport);
     const cacheKey = `${config.link.threshold}:${[...pairs].sort().join("|")}`;
     const cached = clusterPreviewIndexCache.get(cacheKey);
     if (cached) return cached;
@@ -1195,14 +1164,23 @@ export async function createWebGpuRenderer(canvas) {
     }
   };
 
-  // Commit sparse locus edits into both the GPU buffers and the CPU baseline.
-  // Future previews can then restore these records without rebuilding the chart.
-  const adoptLocusChanges = (nextScene, sourceScene, { offsets = [], loci = [], scales, config }) => {
-    if (!geometry || scene !== sourceScene) return false;
-    const affectedGenes = new Set();
-    for (const uid of loci) {
-      const locus = nextScene.loci.get(uid);
-      if (!locus || !geometry.locusSlots.has(uid)) return false;
+  // Retain translated geometry; only re-upload loci whose local geometry changed.
+  const adoptScene = (nextScene, sourceScene, { scales, config }) => {
+    if (!geometry || scene !== sourceScene || !nextScene.changes) return false;
+    const loci = [], offsets = [], affectedGenes = new Set();
+    for (const uid of nextScene.changes.clusters) {
+      const before = sourceScene.clusters.get(uid), after = nextScene.clusters.get(uid);
+      if (!before || !after || !geometry.clusterSlots.has(uid)) return false;
+      const dx = after.x - before.x, dy = after.y - before.y;
+      if (dx || dy) offsets.push([uid, dx, dy]);
+    }
+    for (const uid of nextScene.changes.loci) {
+      const before = sourceScene.loci.get(uid), locus = nextScene.loci.get(uid);
+      if (!before || !locus) return false;
+      if (before.localX === locus.localX && before.state.start === locus.state.start &&
+          before.state.end === locus.state.end && before.state.flipped === locus.state.flipped) continue;
+      loci.push(uid);
+      if (!geometry.locusSlots.has(uid)) return false;
       for (const gene of locus.genes) {
         affectedGenes.add(gene.source.uid);
         // Trims normally retain hidden ranges for subsequent expansion. If
@@ -1212,7 +1190,7 @@ export async function createWebGpuRenderer(canvas) {
       }
     }
     const incidentLinks = [];
-    for (const uid of nextScene.changes?.links || nextScene.links.keys()) {
+    for (const uid of affectedGenes.size ? nextScene.changes.links : []) {
       const link = nextScene.links.get(uid);
       if (link && (affectedGenes.has(link.source.query.uid) || affectedGenes.has(link.source.target.uid))) {
         incidentLinks.push(link);
@@ -1224,9 +1202,10 @@ export async function createWebGpuRenderer(canvas) {
       const ranges = geometry.ranges.links.get(link.source.uid);
       if (!retainedClusterGeometry && !ranges?.links.length && !ranges?.linkEdges.length) return false;
     }
-    for (const [uid, offset] of offsets) {
+    for (const [uid, dx, dy] of offsets) {
       const slot = geometry.clusterSlots.get(uid);
-      if (slot !== undefined) clusterBaseOffsets[slot * 2] += offset;
+      clusterBaseOffsets[slot * 2] += dx;
+      clusterBaseOffsets[slot * 2 + 1] += dy;
     }
     const baseFor = (uid, axis) => {
       const slot = geometry.clusterSlots.get(uid);
@@ -1268,7 +1247,7 @@ export async function createWebGpuRenderer(canvas) {
         (uid) => baseFor(uid, 0), (uid) => baseFor(uid, 1));
       if (record) device.queue.writeBuffer(linkRecordBuffer, index * 16 * 4, record);
     }
-    if ([...offsets].some(([, offset]) => offset)) retainedClusterGeometry = true;
+    if (offsets.length) retainedClusterGeometry = true;
     scene = nextScene;
     preview = null;
     patchedRecords = null;
@@ -1412,37 +1391,7 @@ export async function createWebGpuRenderer(canvas) {
       pass.end();
       device.queue.submit([encoder.finish()]);
     },
-    adoptClusterOrder(nextScene, sourceScene, committedPreview) {
-      if (
-        !geometry ||
-        !committedPreview ||
-        committedPreview.type !== "cluster-drag" ||
-        scene !== sourceScene
-      ) {
-        return false;
-      }
-      // Geometry is still expressed in the old scene's row coordinates. Keep
-      // that buffer and make the committed preview offsets its new baseline;
-      // nextScene remains authoritative for hit testing, labels, and export.
-      for (const [uid, offset] of committedPreview.clusterOffsets) {
-        const slot = geometry.clusterSlots.get(uid);
-        if (slot !== undefined) clusterBaseOffsets[slot * 2 + 1] += offset;
-      }
-      scene = nextScene;
-      preview = null;
-      patchedRecords = null;
-      retainedClusterGeometry = true;
-      clusterPreviewIndexCache = new Map();
-      updateClusterOffsets(null);
-      updateLocusTransforms(null);
-      uploadPreviewLinkIndices(visibleLinkIndices());
-      previewLinksActive = true;
-      return true;
-    },
-    adoptGeneAnchor(nextScene, sourceScene, { flippedLoci, ...options }) {
-      return adoptLocusChanges(nextScene, sourceScene, { ...options, loci: flippedLoci });
-    },
-    adoptLocusChanges: adoptLocusChanges,
+    adoptScene,
     destroy() {
       multisampleTexture?.destroy();
       linkBuffer?.destroy();

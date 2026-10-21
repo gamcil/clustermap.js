@@ -126,7 +126,7 @@ test("tree patches preserve absent fields through exact undo and redo without re
     operation("node", { label: { text: "<b>plain text</b>", fontWeight: 700 } }, ["x"]),
   ]);
   const after = structuredClone(data);
-  assert.deepEqual(result.effects, { reindex: false, rebuildState: false, refreshDerivedGroups: false });
+  assert.deepEqual(result.effects, { reindex: false, rebuildState: false });
   applyChartOperations(data, index, result.inverse);
   assert.deepEqual(data, before);
   applyChartOperations(data, index, result.operations);

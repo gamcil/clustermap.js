@@ -197,14 +197,14 @@ function locusTextForCluster(uid) {
   return cluster ? locusText(cluster) : "";
 }
 
-function sceneProjectionOptions({ areClustersAdjacent, tree = null } = {}) {
+function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
   const config = renderConfig();
   return {
     scaleX: scales.x,
     locusOffset: scales.locus,
     getLocusState: locusState,
     getGeneState: (gene) => getGeneState(chartState, gene),
-    areClustersAdjacent: areClustersAdjacent || (() => false),
+    clusterOrder,
     shape: config.gene.shape,
     label: config.gene.label,
     link: {
@@ -276,11 +276,6 @@ function sceneChromeOptions(data) {
   };
 }
 
-function adjacencyForClusterOrder(order) {
-  const index = new Map(order.map((uid, position) => [uid, position]));
-  return (one, two) => Math.abs(index.get(one) - index.get(two)) === 1;
-}
-
 function buildChartScene(data) {
   // Scene construction is read-only. The controller synchronizes any
   // scale-dependent chart state before asking the runtime to project it.
@@ -297,12 +292,11 @@ function buildChartScene(data) {
   currentScene = buildScene(data, {
     ...sceneProjectionOptions({
       tree: data.tree,
-      areClustersAdjacent: adjacencyForClusterOrder(clusterOrder),
+      clusterOrder,
     }),
     scaleY: scales.y,
     clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
     clusterOffset: scales.offset,
-    clusterOrder,
     chrome: sceneChromeOptions(data),
   });
   return currentScene;
@@ -328,11 +322,10 @@ function patchChartScene(previousScene, changes = {}, data) {
   currentScene = patchScene(previousScene, { loci, clusters }, {
     ...sceneProjectionOptions({
       tree: data.tree,
-      areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
+      clusterOrder: getClusterOrder(chartState),
     }),
     clusterOffset: scales.offset,
     clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
-    linksForGene: lookup.linksForGene,
     chrome: sceneChromeOptions(data),
   });
   return currentScene;
@@ -346,7 +339,7 @@ function setBeforeGeneAnchorUpdate(callback) {
   beforeGeneAnchorUpdate = callback;
 }
 
-function anchorGene(anchor, { flipMismatchedLoci = false, beforeUpdate } = {}) {
+function anchorGene(anchor, { flipMismatchedLoci = false } = {}) {
   const genes = scales.group
     .domain()
     .filter((uid) => scales.group(uid) === scales.group(anchor.uid))
@@ -373,7 +366,7 @@ function anchorGene(anchor, { flipMismatchedLoci = false, beforeUpdate } = {}) {
   });
 
   refreshClusterOffsetScale();
-  (beforeUpdate || beforeGeneAnchorUpdate)?.({ changes, flippedLoci });
+  beforeGeneAnchorUpdate?.({ changes, flippedLoci });
   return { changes, flippedLoci };
 }
 

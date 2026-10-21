@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("scene derives world-space geometry without DOM state", async () => {
-  const [{ buildScene, patchAnchoredGeneScene, patchFlippedLocusScene }, {
+  const [{ buildScene, patchScene }, {
     createClusterDragPreview,
     createLocusFlipPreview,
     createLocusOffsetPreview,
@@ -315,10 +315,11 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.equal(scene.chrome.colourBar.startColour, "white");
   assert.equal(scene.chrome.colourBar.endColour, "black");
 
-  const anchored = patchAnchoredGeneScene(
+  const anchored = patchScene(
     scene,
-    { changes: [{ clusterUid: "bottom", offset: 7 }], flippedLoci: new Set() },
+    { clusters: ["bottom"] },
     {
+      clusterOffset: (uid) => scene.clusters.get(uid).x + (uid === "bottom" ? 7 : 0),
       scaleX: (value) => value,
       locusOffset: (uid) => (uid === "top-locus" ? 1 : 2),
       getLocusState: (locus) => locusStates.get(locus.uid),
@@ -329,7 +330,6 @@ test("scene derives world-space geometry without DOM state", async () => {
       link: { asLine: false, straight: true, threshold: 0.3, labelPosition: 0.5 },
       clusterLabel: () => "anchored",
       alignLabels: true,
-      linksForGene: () => data.links,
     }
   );
   assert.equal(anchored.clusters.get("bottom").x, 17);
@@ -357,7 +357,7 @@ test("scene derives world-space geometry without DOM state", async () => {
   );
   flippedLocusStates.get("top-locus").flipped = true;
   flippedGeneStates.set("top-gene", { start: 12, end: 18, strand: -1 });
-  const patched = patchFlippedLocusScene(scene, data.clusters[0].loci[0], {
+  const patched = patchScene(scene, { loci: [data.clusters[0].loci[0].uid] }, {
     scaleX: (value) => value,
     locusOffset: (uid) => (uid === "top-locus" ? 1 : 2),
     getLocusState: (locus) => flippedLocusStates.get(locus.uid),
@@ -367,9 +367,6 @@ test("scene derives world-space geometry without DOM state", async () => {
     label: { start: 0.5, position: "middle", anchor: "middle", rotation: 0 },
     link: { asLine: false, straight: true, threshold: 0.3, labelPosition: 0.5 },
     clusterLabel: () => "flipped",
-    linksForGene: (uid) => data.links.filter(
-      (source) => source.query.uid === uid || source.target.uid === uid
-    ),
   });
   assert.notEqual(patched, scene);
   assert.notEqual(patched.loci.get("top-locus"), scene.loci.get("top-locus"));

@@ -414,3 +414,132 @@ for (const renderer of ["svg", "canvas"]) {
     expect(await page.evaluate(() => chart.project())).toEqual(saved);
   });
 }
+
+test("plot label and scale edits update the model, editor, history and export", async ({ page }) => {
+  const label = page.locator("#plot text.clusterText").first();
+  page.once("dialog", (dialog) => dialog.accept("Renamed cluster"));
+  await label.click();
+  await expect(label).toHaveText("Renamed cluster");
+  expect(await page.evaluate(() => chart.data().clusters[0].name)).toBe("Renamed cluster");
+  await annotation(page);
+  await expect(matrixRows(page).first()).toContainText("Renamed cluster");
+  expect(await page.evaluate(() => chart.exportSvg())).toContain("Renamed cluster");
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await page.evaluate(() => chart.data().clusters[0].name)).not.toBe("Renamed cluster");
+  await editor(page).getByRole("button", { name: "Redo", exact: true }).click();
+  await expect(label).toHaveText("Renamed cluster");
+
+  const before = await page.evaluate(() => chart.config().scaleBar.basePair);
+  page.once("dialog", (dialog) => dialog.accept("5000"));
+  await page.locator("#plot text.barText").click();
+  expect(await page.evaluate(() => chart.project().config.scaleBar.basePair)).toBe(5000);
+  await expect(page.locator("#plot text.barText")).toHaveText("5kb");
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await page.evaluate(() => chart.config().scaleBar.basePair)).toBe(before);
+  await editor(page).getByRole("button", { name: "Redo", exact: true }).click();
+  await expect(page.locator("#plot text.barText")).toHaveText("5kb");
+});
+
+test("shared animation timing, completion, cancellation and deferred preparation", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { animate, afterPaint } = await import("/src/animation.mjs");
+    const original = { request: window.requestAnimationFrame, cancel: window.cancelAnimationFrame, now: performance.now };
+    const queued = new Map(), values = [];
+    let serial = 0, completed = 0, prepared = 0;
+    const frame = (now) => { const callbacks = [...queued.values()]; queued.clear(); callbacks.forEach((callback) => callback(now)); };
+    window.requestAnimationFrame = (callback) => { queued.set(++serial, callback); return serial; };
+    window.cancelAnimationFrame = (id) => queued.delete(id);
+    performance.now = () => 0;
+    try {
+      animate(100, (progress) => values.push(progress), () => completed++);
+      frame(25); frame(50); frame(100);
+      const cancel = animate(100, () => { throw new Error("Cancelled animation ran"); });
+      cancel(); frame(100);
+      const cancelPreparation = afterPaint(() => prepared++);
+      frame(100); cancelPreparation(); frame(100);
+      afterPaint(() => prepared++);
+      frame(100); const beforeSecondFrame = prepared; frame(100);
+      return { values, completed, beforeSecondFrame, prepared, pending: queued.size };
+    } finally {
+      window.requestAnimationFrame = original.request; window.cancelAnimationFrame = original.cancel;
+      performance.now = original.now;
+    }
+  });
+  expect(result).toEqual({ values: [0.0625, 0.5, 1], completed: 1, beforeSecondFrame: 0, prepared: 1, pending: 0 });
+});
+
+test("WebGPU retains geometry across locus edits, anchoring and row reorder", async ({ page }) => {
+  test.skip(!await page.evaluate(() => Boolean(navigator.gpu)), "WebGPU is unavailable");
+  await page.evaluate(async () => {
+    const { ClusterMap } = await import("/dist/clustermap.mjs");
+    const data = await (await fetch("/fixtures/heatmap.json")).json();
+    chart.destroy();
+    window.chart = ClusterMap().config({ plot: { renderer: "webgpu", transitionDuration: 0 }, annotations: { enabled: true } });
+    window.gpuStats = { allocations: 0, vertexWrites: 0 };
+    const createBuffer = GPUDevice.prototype.createBuffer, writeBuffer = GPUQueue.prototype.writeBuffer;
+    GPUDevice.prototype.createBuffer = function (...args) { gpuStats.allocations++; return createBuffer.apply(this, args); };
+    GPUQueue.prototype.writeBuffer = function (buffer, ...args) {
+      if (buffer.usage & GPUBufferUsage.VERTEX) gpuStats.vertexWrites++;
+      return writeBuffer.call(this, buffer, ...args);
+    };
+    d3.select("#plot").datum(data).call(chart);
+    document.querySelector("clinker-editor").chart = chart;
+  });
+  const canvas = page.locator("#plot canvas.clusterMapCanvas");
+  await expect.poll(() => canvas.getAttribute("data-webgpu")).not.toBe("initializing");
+  test.skip(await canvas.getAttribute("data-webgpu") === "unavailable", "No WebGPU adapter");
+  await expect(canvas).toHaveAttribute("data-webgpu", "active");
+  const paint = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await paint();
+  const allocations = await page.evaluate(() => gpuStats.allocations);
+  const point = (selector, fraction = 0.5) => page.evaluate(({ selector, fraction }) => {
+    const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml").documentElement;
+    document.body.append(svg); svg.style.visibility = "hidden";
+    try {
+      const node = svg.querySelector(selector), box = node.getBBox();
+      const world = new DOMPoint(box.x + box.width * fraction, box.y + box.height / 2)
+        .matrixTransform(svg.getCTM().inverse().multiply(node.getCTM()));
+      const camera = chart.state().camera, surface = document.querySelector("#plot canvas.clusterMapCanvas").getBoundingClientRect();
+      return { x: surface.x + camera.x + world.x * camera.k, y: surface.y + camera.y + world.y * camera.k };
+    } finally { svg.remove(); }
+  }, { selector, fraction });
+  const track = '[id$="locus_locus-a"] line.trackBar';
+  const start = await point(track, 0.9);
+  await page.mouse.move(start.x, start.y); await page.mouse.down();
+  await page.mouse.move(start.x + 30, start.y, { steps: 6 }); await page.mouse.up(); await paint();
+  expect(await page.evaluate(() => chart.state().locusOffsets.some(([uid, offset]) => uid === "locus-a" && offset !== 0))).toBe(true);
+  expect(await page.evaluate(() => gpuStats.allocations)).toBe(allocations);
+
+  await page.evaluate(() => { gpuStats.vertexWrites = 0; chart.rotateTreeNode("x"); });
+  await paint();
+  expect(await page.evaluate(() => chart.state().clusterOrder)).toEqual(["b", "a", "c", "d", "e"]);
+  expect(await page.evaluate(() => gpuStats.vertexWrites)).toBe(0);
+  const gene = await point('[id$="gene_gene-a"] polygon.genePolygon');
+  await page.mouse.click(gene.x, gene.y); await paint();
+  expect(await page.evaluate(() => chart.state().clusterOffsets.length)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => gpuStats.vertexWrites)).toBe(0);
+  const flip = await point(track, 0.9);
+  await page.mouse.dblclick(flip.x, flip.y); await paint();
+  expect(await page.evaluate(() => chart.state().loci.find(([uid]) => uid === "locus-a")[1].flipped)).toBe(true);
+  expect(await page.evaluate(() => gpuStats.vertexWrites)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => gpuStats.allocations)).toBe(allocations);
+});
+
+test("failed SVG exports remove their temporary measurement surface", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const before = document.querySelectorAll("body > svg").length;
+    const original = SVGGraphicsElement.prototype.getBBox;
+    SVGGraphicsElement.prototype.getBBox = function (...args) {
+      if (this.matches("g.clusterMapG") && this.ownerSVGElement.parentNode === document.body) {
+        throw new Error("Export measurement failed");
+      }
+      return original.apply(this, args);
+    };
+    try {
+      try { chart.exportSvg(); } catch (error) {
+        return { message: error.message, remaining: document.querySelectorAll("body > svg").length - before };
+      }
+    } finally { SVGGraphicsElement.prototype.getBBox = original; }
+  });
+  expect(result).toEqual({ message: "Export measurement failed", remaining: 0 });
+});

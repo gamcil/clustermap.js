@@ -1,7 +1,11 @@
+import { boundsInViewport } from "./camera.mjs";
+import { clusterPairKey } from "./links/layout.mjs";
 import { arrangeTrimIndicators, createTrimIndicators } from "./loci/trimIndicators.mjs";
 
 function minStart(loci, startFor) {
-  return Math.min(...loci.map(startFor));
+  let start = Infinity;
+  for (const locus of loci) start = Math.min(start, startFor(locus));
+  return start;
 }
 
 function clusterUidForLocus(locus) {
@@ -16,8 +20,8 @@ function clusterLabelOffsetsForStarts(
 ) {
   const offsets = new Map();
   if (alignLabels) {
-    const loci = [...scene.loci.values()];
-    const offset = minStart(loci, startFor) - minStart(loci, (locus) => locus.worldStart);
+    const offset = minStart(scene.loci.values(), startFor) -
+      minStart(scene.loci.values(), (locus) => locus.worldStart);
     for (const cluster of scene.clusters.values()) offsets.set(cluster.source.uid, offset);
     return offsets;
   }
@@ -58,6 +62,17 @@ export function annotationOffsetForPreview(scene, preview) {
     (scene.annotationAnchorX ?? scene.bounds.maxX);
 }
 
+function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClusters) {
+  let contentMaxX = -Infinity;
+  for (const locus of scene.loci.values()) contentMaxX = Math.max(contentMaxX, endFor(locus));
+  return {
+    ...fields,
+    contentMaxX,
+    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, affectedClusters),
+    chrome: chromeForPreview(scene, contentMaxX),
+  };
+}
+
 /**
  * Describe a transient locus translation relative to an already projected
  * scene. This is deliberately a sparse, renderer-neutral patch: it avoids
@@ -71,18 +86,11 @@ export function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels 
     candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart;
   const endFor = (candidate) =>
     candidate.source.uid === locusUid ? candidate.worldEnd + offsetX : candidate.worldEnd;
-  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
-
-  return {
+  return locusPreview(scene, {
     type: "locus-offset",
-    contentMaxX: maxX,
     locusUid,
     offsetX,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, [
-      scene.clusters.get(locus.cluster.uid),
-    ]),
-    chrome: chromeForPreview(scene, maxX),
-  };
+  }, startFor, endFor, alignLabels, [scene.clusters.get(locus.cluster.uid)]);
 }
 
 /** Describe several transient locus translations without rebuilding the scene. */
@@ -100,19 +108,10 @@ export function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
   const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
   const startFor = (candidate) => candidate.worldStart + offsetFor(candidate);
   const endFor = (candidate) => candidate.worldEnd + offsetFor(candidate);
-  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
-  return {
+  return locusPreview(scene, {
     type: "locus-offsets",
-    contentMaxX: maxX,
     locusOffsets,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(
-      scene,
-      startFor,
-      alignLabels,
-      affectedClusters
-    ),
-    chrome: chromeForPreview(scene, maxX),
-  };
+  }, startFor, endFor, alignLabels, affectedClusters);
 }
 
 /**
@@ -181,15 +180,12 @@ export function createLocusTrimPreview(
     );
   }
 
-  const maxX = Math.max(...[...scene.loci.values()].map(endFor));
-  return {
+  return locusPreview(scene, {
     type: "locus-trim",
-    contentMaxX: maxX,
     locusUid,
     locusOffsets,
     loci: locusGeometry,
     geneVisibility,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels),
     ...(clusterLabelText === null
       ? {}
       : {
@@ -198,8 +194,7 @@ export function createLocusTrimPreview(
             clusterLabelText,
           ]]),
         }),
-    chrome: chromeForPreview(scene, maxX),
-  };
+  }, startFor, endFor, alignLabels);
 }
 
 // Preview patches carry layout deltas rather than cloned scenes. These
@@ -503,4 +498,23 @@ export function genePolygonForPreview(preview, gene, { includeClusterOffset = tr
       ? coordinate + bakedY
       : (axis === undefined ? coordinate : axis + (coordinate - axis) * scale) + x
   );
+}
+
+/** Visible preview rows and their adjacent cluster pairs, shared by raster backends. */
+export function clusterPreviewInViewport(scene, preview, viewport, { includeLinks = true } = {}) {
+  const clusters = [...scene.clusters.values()].filter((cluster) => boundsInViewport(
+    cluster.bounds, viewport, { y: clusterOffsetForPreview(preview, cluster.source.uid) }
+  ));
+  const pairs = new Set();
+  if (includeLinks) {
+    const clusterUidByOrder = new Map([...preview.clusterOrder].map(([uid, order]) => [order, uid]));
+    for (const cluster of clusters) {
+      const order = preview.clusterOrder.get(cluster.source.uid);
+      for (const neighbourOrder of [order - 1, order + 1]) {
+        const neighbour = clusterUidByOrder.get(neighbourOrder);
+        if (neighbour !== undefined) pairs.add(clusterPairKey(cluster.source.uid, neighbour));
+      }
+    }
+  }
+  return { clusters, pairs };
 }

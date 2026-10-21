@@ -1,10 +1,14 @@
 // Owns the persistent DOM surrounding an SVG chart. Scene joins and all chart
 // interactions remain in the SVG renderer/controller; this module only
 // establishes the SVG viewport, overlay nodes, and camera gesture binding.
-import { zoom, zoomIdentity, zoomTransform } from "d3-zoom";
 import { bindCameraZoom, updateCameraZoom } from "./cameraZoom.mjs";
 
-const d3 = { zoom, zoomIdentity, zoomTransform };
+export function appendLabelFilter(svg, id) {
+  const filter = svg.append("defs").append("filter")
+    .attr("id", id).attr("x", 0).attr("y", 0).attr("width", 1).attr("height", 1);
+  filter.append("feFlood").attr("flood-color", "rgba(0, 0, 0, 0.8)");
+  filter.append("feComposite").attr("in", "SourceGraphic").attr("in2", "");
+}
 
 export function ensureSvgSurface({
   container,
@@ -57,16 +61,7 @@ export function ensureSvgSurface({
         .attr("xmlns", "http://www.w3.org/2000/svg")
         .attr("xmlns:xhtml", "http://www.w3.org/1999/xhtml");
 
-      const defs = surface.append("defs");
-      const filter = defs
-        .append("filter")
-        .attr("id", ids.filter)
-        .attr("x", 0)
-        .attr("y", 0)
-        .attr("width", 1)
-        .attr("height", 1);
-      filter.append("feFlood").attr("flood-color", "rgba(0, 0, 0, 0.8)");
-      filter.append("feComposite").attr("in", "SourceGraphic").attr("in2", "");
+      appendLabelFilter(surface, ids.filter);
 
       // Layout measures chart content in world coordinates. The viewport is
       // the only group transformed by the persisted camera.
@@ -74,7 +69,6 @@ export function ensureSvgSurface({
       viewport.append("g").attr("class", "clusterMapG");
 
       currentZoom = bindCameraZoom({
-        d3,
         surface,
         zoomExtent,
         onZoom: (event) => onZoom(event, viewport),

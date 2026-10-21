@@ -1,9 +1,10 @@
 import { rgbaToRgb } from "./utils.js";
 import { hitTest } from "./hitTest.mjs";
-import { worldViewport } from "./camera.mjs";
+import { boundsInViewport, worldViewport } from "./camera.mjs";
 import { figureConfig } from "./theme.mjs";
 import { queryViewportOrdered } from "./spatialIndex.mjs";
 import {
+  clusterPreviewInViewport,
   offsetsForGene,
   geneGeometryForPreview,
   linkGeometryForPreview,
@@ -15,7 +16,7 @@ import {
   previewOffsetsForLocus,
   previewLinkAnchors,
 } from "./scenePreview.mjs";
-import { clusterPairKey, figureBoundsForChrome } from "./layout.mjs";
+import { figureBoundsForChrome } from "./layout.mjs";
 import { interpolateLinkAnchors, interpolateLinkOpacity, traceLinkPath, getLinkLabelPosition } from "./links/layout.mjs";
 import { hitTestTreeNode, interpolateTreeLayout } from "./treeLayout.mjs";
 import { drawCanvasTree, layoutCanvasTree } from "./treeCanvasRenderer.mjs";
@@ -438,7 +439,7 @@ function drawLinkLabel(context, layout, source, config, anchors, geometry = {}) 
   context.fillText(source.label ?? source.identity.toFixed(2), labelPosition.x, labelPosition.y);
 }
 
-function drawLink(context, layout, source, config, scales, geometry = {}) {
+function drawLink(context, layout, source, config, scales, geometry, showLabel) {
   const visible = geometry.visible ?? layout.visible;
   const anchors = geometry.anchors ?? layout.anchors;
   if (!visible || !anchors) return;
@@ -466,7 +467,7 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   context.lineWidth = config.link.strokeWidth;
   context.stroke();
 
-  drawLinkLabel(context, layout, source, config, anchors, geometry);
+  if (showLabel) drawLinkLabel(context, layout, source, config, anchors, geometry);
   context.restore();
 }
 
@@ -516,7 +517,8 @@ function drawGene(
   scales,
   { x: offsetX = 0, y: offsetY = 0 } = {},
   visible = gene.visible,
-  geometry = {}
+  geometry = {},
+  showLabel = true
 ) {
   if (!visible) return;
   context.save();
@@ -541,7 +543,7 @@ function drawGene(
   context.stroke();
   if (geometry.flipAxis !== undefined) context.restore();
 
-  drawGeneLabel(context, gene, config, geometry);
+  if (showLabel) drawGeneLabel(context, gene, config, geometry);
   context.restore();
 }
 
@@ -652,33 +654,13 @@ function drawLocusTrimIndicators(context, locus, config, geometry = {}) {
   context.restore();
 }
 
-function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
-  return (
-    !viewport ||
-    !bounds ||
-    (bounds.minX + x <= viewport.maxX &&
-      bounds.maxX + x >= viewport.minX &&
-      bounds.minY + y <= viewport.maxY &&
-      bounds.maxY + y >= viewport.minY)
-  );
-}
-
 function recordsForClusterPreview(
   scene,
   preview,
   viewport,
   { includeLinks = true, includeGenes = true } = {}
 ) {
-  const clusters = [];
-  const clusterUidByOrder = new Map(
-    [...preview.clusterOrder].map(([uid, order]) => [order, uid])
-  );
-  for (const cluster of scene.clusters.values()) {
-    if (!boundsInViewport(cluster.bounds, viewport, { y: clusterOffsetForPreview(preview, cluster.source.uid) })) {
-      continue;
-    }
-    clusters.push(cluster);
-  }
+  const { clusters, pairs } = clusterPreviewInViewport(scene, preview, viewport, { includeLinks });
 
   const loci = [];
   const genes = [];
@@ -703,17 +685,8 @@ function recordsForClusterPreview(
   }
 
   const linkUids = new Set();
-  if (includeLinks) {
-    for (const cluster of clusters) {
-      const order = preview.clusterOrder.get(cluster.source.uid);
-      for (const neighbourOrder of [order - 1, order + 1]) {
-        const neighbourUid = clusterUidByOrder.get(neighbourOrder);
-        if (neighbourUid === undefined) continue;
-        for (const uid of scene.linksByClusterPair?.get(clusterPairKey(cluster.source.uid, neighbourUid)) || []) {
-          linkUids.add(uid);
-        }
-      }
-    }
+  for (const pair of pairs) {
+    for (const uid of scene.linksByClusterPair?.get(pair) || []) linkUids.add(uid);
   }
   const links = [...linkUids]
     .map((uid) => scene.links.get(uid))
@@ -911,7 +884,9 @@ export function interpolateCanvasScene(previous, scene, amount) {
   return { ...scene, clusters, loci, genes, links, annotationPanels };
 }
 
-/** Draw a renderer-neutral chart scene into a Canvas 2D context. */
+export const CANVAS_LAYERS = ["links", "linkLabels", "tracks", "trimIndicators", "genes", "geneLabels", "clusterLabels", "tree", "annotations", "annotationLabels", "chrome"];
+
+/** Draw selected layers of a renderer-neutral scene into Canvas 2D. */
 export function renderCanvas({
   canvas,
   scene,
@@ -932,30 +907,20 @@ export function renderCanvas({
   dimensions = null,
   fullScene = false,
   preview = null,
-  backgroundCanvas = null,
-  backgroundCanvases = [],
   clear = true,
   include = null,
   omit = null,
-  showLinks = true,
-  showLoci = true,
-  showLocusTracks = true,
-  showGenes = true,
-  showGeneLabels = showGenes,
-  showLinkLabels = showLinks,
+  layers = CANVAS_LAYERS,
   highlightGeneIds = null,
   highlightLinkIds = null,
   highlightLocusIds = null,
-  showClusterLabels = true,
-  showChrome = true,
-  showAnnotationGeometry = true,
 }) {
   config = figureConfig(config);
-  // Resolve label visibility before querying or projecting records. The
-  // WebGPU overlay requests labels without bodies; disabled labels should
-  // not cause otherwise unused gene/link passes on every interaction frame.
-  showGeneLabels = showGeneLabels && config.gene.label.show;
-  showLinkLabels = showLinkLabels && config.link.label.show;
+  const show = (layer) => layers.includes(layer);
+  const showLinks = show("links"), showGenes = show("genes");
+  const showLoci = show("trimIndicators") || show("tracks");
+  const showGeneLabels = show("geneLabels") && config.gene.label.show;
+  const showLinkLabels = show("linkLabels") && config.link.label.show;
   const displayScene = interpolateCanvasScene(previousScene, scene, progress);
   const context = canvas.getContext("2d");
   const bounds = dimensions || canvas.getBoundingClientRect();
@@ -972,9 +937,6 @@ export function renderCanvas({
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   if (clear) {
     context.clearRect(0, 0, width, height);
-    for (const background of [backgroundCanvas, ...backgroundCanvases]) {
-      if (background) context.drawImage(background, 0, 0, width, height);
-    }
   }
   context.save();
   context.translate(camera.x, camera.y);
@@ -1030,10 +992,10 @@ export function renderCanvas({
     ) {
       continue;
     }
-    if (showLinks) drawLink(context, link, link.source, config, scales, geometry);
+    if (showLinks) drawLink(context, link, link.source, config, scales, geometry, showLinkLabels);
     else drawLinkLabel(context, link, link.source, config, anchors, geometry);
   }
-  drawTree(context, tree, displayScene, config, preview, {
+  if (show("tree")) drawTree(context, tree, displayScene, config, preview, {
     trackAnchor: treeTrackAnchor,
     previousTree,
     previousScene: previousTreeScene,
@@ -1055,7 +1017,7 @@ export function renderCanvas({
   // cropped figure rendered at all. Do not derive them from culled loci: a
   // cluster label can be on screen while every locus body is just outside the
   // viewport. Text is inexpensive and Canvas clips truly offscreen labels.
-  const labelClusters = showLoci && showClusterLabels
+  const labelClusters = show("clusterLabels")
     ? recordsFor(displayScene.clusters, null, "clusters", { ignoreOmit: true })
     : [];
   for (const cluster of labelClusters) {
@@ -1069,7 +1031,7 @@ export function renderCanvas({
       ),
     });
   }
-  if (showLocusTracks) {
+  if (show("tracks")) {
     for (const locus of loci) {
       drawLocusTrack(
         context,
@@ -1080,7 +1042,7 @@ export function renderCanvas({
       );
     }
   }
-  if (showLoci) {
+  if (show("trimIndicators")) {
     for (const locus of loci) {
       drawLocusTrimIndicators(
         context,
@@ -1113,7 +1075,7 @@ export function renderCanvas({
     const offsets = offsetsForGene(preview, gene);
     const visible = geneVisibleForPreview(preview, gene);
     const geometry = geneGeometryForPreview(preview, gene);
-    if (showGenes) drawGene(context, gene, config, scales, offsets, visible, geometry);
+    if (showGenes) drawGene(context, gene, config, scales, offsets, visible, geometry, showGeneLabels);
     else if (visible) drawGeneLabel(context, gene, config, geometry, offsets);
   }
   if (highlightGeneIds?.size) {
@@ -1130,8 +1092,10 @@ export function renderCanvas({
       );
     }
   }
-  if (showChrome) drawCanvasAnnotations(context, displayScene, preview, { showGeometry: showAnnotationGeometry, viewport });
-  if (showChrome && displayScene.chrome) {
+  if (show("annotations") || show("annotationLabels")) drawCanvasAnnotations(context, displayScene, preview, {
+    showGeometry: show("annotations"), showLabels: show("annotationLabels"), viewport,
+  });
+  if (show("chrome") && displayScene.chrome) {
     const chrome = preview?.chrome || displayScene.chrome;
     drawLegend(context, chrome.legend);
     drawScaleBar(context, chrome.scaleBar);

@@ -1,6 +1,6 @@
 import { select } from "d3-selection";
 import { drag } from "d3-drag";
-import { renameText, rgbaToRgb } from "./utils.js";
+import { rgbaToRgb } from "./utils.js";
 import { filterLinks } from "./links/groups.mjs";
 import { getLinkPath, getLinkLabelPosition, interpolateLinkAnchors, interpolateLinkOpacity } from "./links/layout.mjs";
 import { renderSvgTree as renderTree } from "./treeSvgRenderer.mjs";
@@ -34,7 +34,7 @@ export function renderSvg({
   scales,
   ids,
   lookup,
-  interactions,
+  interactions = {},
   highlightGeneIds = new Set(),
   highlightLinkIds = new Set(),
   highlightLocusIds = new Set(),
@@ -77,14 +77,13 @@ export function renderSvg({
 
         info
           .append("text")
-          .text((cluster) => cluster.name)
           .attr("class", "clusterText")
           .attr("y", 8)
           .attr("cursor", "pointer")
           .style("font-weight", "bold")
           .style("font-size", `${config.cluster.nameFontSize}px`)
           .style("font-family", config.plot.fontFamily)
-          .on("click", renameText);
+          .on("click", interactions.renameCluster);
         info
           .append("text")
           .attr("class", "locusText")
@@ -101,6 +100,7 @@ export function renderSvg({
     );
 
   clusters.select("text.clusterText")
+    .text((cluster) => cluster.name)
     .attr("y", 8)
     .attr("dominant-baseline", null)
     .style("font-size", `${config.cluster.nameFontSize}px`);
@@ -384,68 +384,36 @@ function updateClusters(selection, scene, { labelsOnly = false, preview = null }
 
 function createClusterDrag({ plot, ids, interactions }) {
   const clusterSelection = (uid) => plot.selectAll(`#${ids.cluster({ uid })}`);
-
-  const started = (event, cluster) => {
-    const subject = clusterSelection(cluster.uid);
-    subject.classed("active", true).attr("cursor", "grabbing");
-    interactions.beginClusterDrag(cluster.uid, event.y);
-  };
-
-  const dragged = (event) => interactions.moveClusterDrag(event.y);
-
-  const ended = (_, cluster) => {
-    clusterSelection(cluster.uid).classed("active", false).attr("cursor", null);
-    interactions.endClusterDrag();
-  };
-
   return drag()
-    .container(function () {
-      return this.parentNode.parentNode;
+    .container(function () { return this.parentNode.parentNode; })
+    .on("start", (event, cluster) => {
+      clusterSelection(cluster.uid).classed("active", true).attr("cursor", "grabbing");
+      interactions.beginClusterDrag(cluster.uid, event.y);
     })
-    .on("start", started)
-    .on("drag", dragged)
-    .on("end", ended);
+    .on("drag", (event) => interactions.moveClusterDrag(event.y))
+    .on("end", (_, cluster) => {
+      clusterSelection(cluster.uid).classed("active", false).attr("cursor", null);
+      interactions.endClusterDrag();
+    });
 }
 
 function createLocusPositionDrag({ plot, interactions }) {
-  const started = (event, locus) => {
-    interactions.beginLocusDrag(locus.uid, event.x);
-  };
-
-  const dragged = (event) => interactions.moveLocusDrag(event.x);
-
-  const ended = () => interactions.endLocusDrag();
-
   return drag()
     .container(() => plot.node())
-    .on("start", started)
-    .on("drag", dragged)
-    .on("end", ended);
+    .on("start", (event, locus) => interactions.beginLocusDrag(locus.uid, event.x))
+    .on("drag", (event) => interactions.moveLocusDrag(event.x))
+    .on("end", () => interactions.endLocusDrag());
 }
 
-// Resize changes chart state through the controller, while this renderer-owned
-// adapter supplies immediate SVG feedback until the final redraw.
 function createLocusResizeDrag({ plot, interactions }) {
-  const started = () => interactions.beginLocusTrim();
-
-  const dragged = function (event, locus) {
-    interactions.moveLocusTrim(
-      locus,
-      select(this).classed("leftHandle") ? "left" : "right",
-      event.x
-    );
-  };
-
-  const ended = (_, locus) => interactions.endLocusTrim(locus);
-
   return drag()
-    // Keep resize and Canvas pointer coordinates in the same chart-world
-    // space. The default handle-parent container reports locus-local x,
-    // which becomes incorrect as soon as that locus or its cluster moves.
+    // Trimming uses chart-world coordinates, matching Canvas and WebGPU.
     .container(() => plot.node())
-    .on("start", started)
-    .on("drag", dragged)
-    .on("end", ended);
+    .on("start", () => interactions.beginLocusTrim())
+    .on("drag", function (event, locus) {
+      interactions.moveLocusTrim(locus, select(this).classed("leftHandle") ? "left" : "right", event.x);
+    })
+    .on("end", (_, locus) => interactions.endLocusTrim(locus));
 }
 
 function updateLoci(selection, scene, config, highlightLocusIds) {
