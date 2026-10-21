@@ -6855,12 +6855,14 @@ function validateAnnotationPanels(panels, clusters, { previousPanels = null, tre
     // shape, value type or allowed categories. JSON loading always checks it.
     const oldScale = before?.scale ?? {};
     const sameCategories = sameArray(oldScale.domain, scale.domain);
-    if (before?.values === panel.values && before.columns?.length === panel.columns.length &&
-        (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories)) continue;
+    const sameValueRules = before?.columns?.length === panel.columns.length &&
+      (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories);
+    if (before?.values === panel.values && sameValueRules) continue;
     clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
     const categories = type === "categorical" && scale.domain ? new Set(scale.domain) : null;
     for (const [uid, values] of Object.entries(panel.values)) {
       if (!clusterIds.has(uid)) fail(`unknown cluster '${uid}'.`);
+      if (sameValueRules && before.values[uid] === values) continue;
       if (!Array.isArray(values) || values.length !== panel.columns.length) fail(`row '${uid}' must have one value per column.`);
       for (const value of values) {
         if (value === null) continue;
@@ -6985,11 +6987,11 @@ function barRectangles(value, position, width, height, fill, missingColour, bord
 
 const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
   one.length === two.length && one.every((value, index) => value === two[index]);
-function sameCellDefinition(before, after) {
-  return before && before.values === after.values && sameArray(before.columns, after.columns) &&
+function sameCellStyle(before, after) {
+  return before && sameArray(before.columns, after.columns) &&
     ["type", "width", "cellWidth", "cellHeight", "cellGap", "cellBorderWidth", "cellBorderColour", "colour", "missingColour"]
       .every((field) => before[field] === after[field]) &&
-    before.scale?.type === after.scale?.type && sameArray(before.scale?.domain, after.scale?.domain) &&
+    before.scale?.type === after.scale?.type &&
     sameArray(before.scale?.colours, after.scale?.colours);
 }
 
@@ -7026,16 +7028,23 @@ function layoutAnnotationPanels(definitions, clusters, bounds,
     const borderColour = source.cellBorderColour ?? ANNOTATION_DEFAULTS.cellBorderColour;
     const missingColour = source.missingColour ?? theme?.missing ?? ANNOTATION_DEFAULTS.missingColour;
     const position = isBar ? linear().domain(domain).range([0, width]).clamp(true) : null;
-    const rows = sameCellDefinition(before?.definition, source) ? before.rows : [...clusters.keys()].map((uid) => ({ uid, cells: source.columns.map((_, i) => {
-      const value = Object.hasOwn(source.values, uid) ? source.values[uid][i] : null;
-      const rect = { x: i * cellWidth + cellGap / 2, y: -cellHeight / 2 + cellGap / 2,
-        width: cellWidth - cellGap, height: cellHeight - cellGap,
-        fill: value === null ? missingColour : colour(value) };
-      return { ...rect, value, column: source.columns[i], columnIndex: i,
-        rects: isBar ? barRectangles(value, position, width, cellHeight,
-          source.colour ?? ANNOTATION_DEFAULTS.colour, missingColour,
-          borderWidth, borderColour) : cellRectangles(rect, borderWidth, borderColour) };
-    }) }));
+    const reuseRows = sameCellStyle(before?.definition, source) && sameArray(before.domain, domain) &&
+      before.missingColour === missingColour;
+    const previousRows = reuseRows && before.definition.values !== source.values
+      ? new Map(before.rows.map((row) => [row.uid, row])) : null;
+    const rows = reuseRows && before.definition.values === source.values ? before.rows : [...clusters.keys()].map((uid) => {
+      if (previousRows?.has(uid) && before.definition.values[uid] === source.values[uid]) return previousRows.get(uid);
+      return { uid, cells: source.columns.map((_, i) => {
+        const value = Object.hasOwn(source.values, uid) ? source.values[uid][i] : null;
+        const rect = { x: i * cellWidth + cellGap / 2, y: -cellHeight / 2 + cellGap / 2,
+          width: cellWidth - cellGap, height: cellHeight - cellGap,
+          fill: value === null ? missingColour : colour(value) };
+        return { ...rect, value, column: source.columns[i], columnIndex: i,
+          rects: isBar ? barRectangles(value, position, width, cellHeight,
+            source.colour ?? ANNOTATION_DEFAULTS.colour, missingColour,
+            borderWidth, borderColour) : cellRectangles(rect, borderWidth, borderColour) };
+      }) };
+    });
     const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
     const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation }));
     for (const item of header) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
@@ -7069,7 +7078,7 @@ function layoutAnnotationPanels(definitions, clusters, bounds,
       footer.push(text(category, 15, i * (fontSize + 6) + 9));
     });
     for (const item of footer) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
-    const panel = { uid: source.uid, definition: source, title: source.title ?? source.uid, x, width, cellHeight, headingHeight, titleDescent, rowOffset, rows, header, footer, key, fontSize, fontFamily,
+    const panel = { uid: source.uid, definition: source, title: source.title ?? source.uid, x, width, cellHeight, headingHeight, titleDescent, rowOffset, rows, header, footer, key, fontSize, fontFamily, domain, missingColour,
       textColour: theme?.foreground ?? "#333333" };
     // Text overhang contributes to figure bounds, not inter-panel spacing.
     panel.extentWidth = Math.max(width,
@@ -7100,6 +7109,13 @@ function rowBoundary(rows, y, upper = false) {
   return low;
 }
 
+function rowsInRange(panel, minY, maxY) {
+  let sorted = rowIndexes.get(panel);
+  if (!sorted) { sorted = [...panel.rows].sort((a, b) => a.y - b.y); rowIndexes.set(panel, sorted); }
+  return sorted.slice(rowBoundary(sorted, minY - panel.cellHeight / 2),
+    rowBoundary(sorted, maxY + panel.cellHeight / 2, true));
+}
+
 /** Cull shared records, retaining source cells and their contiguous column range. */
 function annotationPanelsInViewport(scene, preview, viewport, { geometry = true, labels = true } = {}) {
   const panels = annotationPanelsForFrame(scene, preview);
@@ -7114,14 +7130,10 @@ function annotationPanelsInViewport(scene, preview, viewport, { geometry = true,
       minY: rect.y, maxY: rect.y + rect.height }, viewport)) : emptyFrames;
     let rows = emptyFrames;
     if (geometry && panel.x <= viewport.maxX && panel.x + panel.width >= viewport.minX) {
-      let sorted = rowIndexes.get(panel);
-      if (!sorted) { sorted = [...panel.rows].sort((a, b) => a.y - b.y); rowIndexes.set(panel, sorted); }
-      const first = rowBoundary(sorted, viewport.minY - panel.cellHeight / 2);
-      const last = rowBoundary(sorted, viewport.maxY + panel.cellHeight / 2, true);
       const count = panel.rows[0]?.cells.length || 1, cellWidth = panel.width / count;
       const firstCell = Math.max(0, Math.floor((viewport.minX - panel.x) / cellWidth));
       const lastCell = Math.min(count, Math.floor((viewport.maxX - panel.x) / cellWidth) + 1);
-      rows = sorted.slice(first, last).map((row) => ({ ...row, firstCell, lastCell }));
+      rows = rowsInRange(panel, viewport.minY, viewport.maxY).map((row) => ({ ...row, firstCell, lastCell }));
     }
     if (rows.length || rects.length || texts.length) visible.push({ ...panel, rows, rects, texts });
   }
@@ -7207,8 +7219,7 @@ function hitTestAnnotationCell(scene, point, preview = null) {
   for (let index = panels.length - 1; index >= 0; index--) {
     const panel = panels[index];
     if (point.x < panel.x || point.x > panel.x + panel.width) continue;
-    for (const row of panel.rows) {
-      if (Math.abs(point.y - row.y) > panel.cellHeight / 2) continue;
+    for (const row of rowsInRange(panel, point.y, point.y)) {
       const cell = row.cells.find((cell) => point.x >= panel.x + cell.x && point.x <= panel.x + cell.x + cell.width &&
         point.y >= row.y + cell.y && point.y <= row.y + cell.y + cell.height);
       if (cell) return { panelUid: panel.uid, title: panel.title, clusterUid: row.uid,
@@ -7358,6 +7369,15 @@ function normalizeAnnotationOperation(data, operation) {
     if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$1("delete requires existing panel IDs.");
     return { type: operation.type, ids: [...new Set(operation.ids)] };
   }
+  if (operation.type === "annotationPanels.updateRows") {
+    const panel = data.annotationPanels?.find((panel) => panel.uid === operation.uid);
+    if (!panel || panel.type === "groups" || !operation.values || typeof operation.values !== "object" ||
+        Array.isArray(operation.values) || !Object.keys(operation.values).length ||
+        Object.values(operation.values).some((row) => row !== null && !Array.isArray(row))) fail$1("updateRows requires a matrix panel and row arrays (or null to remove a row).");
+    const clusterIds = new Set(data.clusters.map((cluster) => cluster.uid));
+    if (Object.keys(operation.values).some((uid) => !clusterIds.has(uid))) fail$1("updateRows requires existing cluster IDs.");
+    return { type: operation.type, uid: operation.uid, values: structuredClone(operation.values) };
+  }
   if (operation.type === "annotationPanels.replaceStyle") {
     if (!known.has(operation.uid) || !operation.style || typeof operation.style !== "object" ||
         Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !styleFields.has(key))) fail$1("replaceStyle requires an existing panel and supported style fields.");
@@ -7387,6 +7407,15 @@ function applyAnnotationOperation(data, operation) {
     data.annotationPanels = operation.ids.map((uid) => byId.get(uid));
     return;
   }
+  if (operation.type === "annotationPanels.updateRows") {
+    data.annotationPanels = panels.map((panel) => {
+      if (panel.uid !== operation.uid) return panel;
+      const values = { ...panel.values, ...structuredClone(operation.values) };
+      for (const [uid, row] of Object.entries(operation.values)) if (row === null) delete values[uid];
+      return { ...panel, values };
+    });
+    return;
+  }
   data.annotationPanels = panels.map((panel) => operation.type === "annotationPanels.replaceStyle"
     ? panel.uid === operation.uid ? {
       ...Object.fromEntries(Object.entries(panel).filter(([key]) => !styleFields.has(key))),
@@ -7400,6 +7429,11 @@ function inverseAnnotationOperation(data, operation) {
   if (operation.type === "annotationPanels.reorder") return [{ type: operation.type, ids: (data.annotationPanels || []).map((panel) => panel.uid) }];
   if (operation.type === "annotationPanels.delete") return data.annotationPanels.flatMap((panel, index) =>
     operation.ids.includes(panel.uid) ? [{ type: "annotationPanels.create", panel: structuredClone(panel), index }] : []);
+  if (operation.type === "annotationPanels.updateRows") {
+    const panel = data.annotationPanels.find((panel) => panel.uid === operation.uid);
+    return [{ type: operation.type, uid: panel.uid, values: structuredClone(Object.fromEntries(
+      Object.keys(operation.values).map((uid) => [uid, Object.hasOwn(panel.values, uid) ? panel.values[uid] : null]))) }];
+  }
   const ids = operation.type === "annotationPanels.replaceStyle" ? [operation.uid] : operation.ids;
   return data.annotationPanels.filter((panel) => ids.includes(panel.uid))
     .flatMap((panel) => [
@@ -7470,7 +7504,7 @@ function renderSvgAnnotations(plot, scene, { preview = null, transition = null, 
 }
 
 function drawCanvasAnnotations(context, scene, preview = null, { showGeometry = true, showLabels = true, viewport = null } = {}) {
-  for (const panel of annotationPanelsInViewport(scene, preview, viewport, { geometry: showGeometry })) {
+  for (const panel of annotationPanelsInViewport(scene, preview, viewport, { geometry: showGeometry, labels: showLabels })) {
     context.save();
     context.translate(panel.x, 0);
     const rect = (item) => {
@@ -7960,7 +7994,7 @@ function applyChartOperations(data, index, operations, treeConfig = {}) {
     throw operationError("operations must be a non-empty array");
   }
   const groupIds = new Set(index.groupById.keys());
-  const annotationDraft = { annotationPanels: data.annotationPanels };
+  const annotationDraft = { annotationPanels: data.annotationPanels, clusters: data.clusters };
   const applied = operations.map((operation) => {
     if (isTreeOperation(operation)) return normalizeTreeOperation(data.tree, operation);
     if (isAnnotationOperation(operation)) {

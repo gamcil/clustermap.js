@@ -54,7 +54,7 @@ export function renderSvgAnnotations(plot, scene, { preview = null, transition =
 }
 
 export function drawCanvasAnnotations(context, scene, preview = null, { showGeometry = true, showLabels = true, viewport = null } = {}) {
-  for (const panel of annotationPanelsInViewport(scene, preview, viewport, { geometry: showGeometry })) {
+  for (const panel of annotationPanelsInViewport(scene, preview, viewport, { geometry: showGeometry, labels: showLabels })) {
     context.save();
     context.translate(panel.x, 0);
     const rect = (item) => {

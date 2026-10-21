@@ -1077,6 +1077,14 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
   };
   const renderMatrix = (layout, panel) => {
     const categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel);
+    const updateRows = (values, refresh = true, control) => {
+      const source = current();
+      return commit([
+        ...(categorical && !source.scale?.domain ? [{ type: "annotationPanels.update", ids: [selected],
+          changes: { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } }] : []),
+        { type: "annotationPanels.updateRows", uid: selected, values },
+      ], refresh, control);
+    };
     if (categorical && batchValue !== "" && !resolved.domain[Number(batchValue)]) batchValue = "";
     const { viewport: tableArea } = layout;
     const all = input(null, "Select all filtered clusters", false, "checkbox");
@@ -1090,14 +1098,14 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
     if (!categorical) value.placeholder = "Value";
     const applyValues = (clear) => {
       if (!clear && !value.checkValidity()) { value.reportValidity(); return; }
-      const source = current(), values = { ...source.values };
+      const source = current(), values = {};
       const next = clear || value.value === "" ? null : categorical ? resolved.domain[Number(value.value)] : Number(value.value);
       for (const uid of selection) {
-        const row = [...(values[uid] || source.columns.map(() => null))];
+        const row = [...(source.values[uid] || source.columns.map(() => null))];
         source.columns.forEach((_, index) => { if (columns.value === "all" || index === Number(columns.value)) row[index] = next; });
         values[uid] = row;
       }
-      update({ values, ...(categorical && !source.scale?.domain ? { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } : {}) });
+      updateRows(values);
     };
     button(batch, "Set values", () => applyValues(false));
     button(batch, "Clear values", () => applyValues(true));
@@ -1174,9 +1182,7 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
         const change = (value, control) => {
           const source = current(), values = [...(source.values[cluster.uid] ?? source.columns.map(() => null))];
           values[index] = value;
-          return update({ values: { ...source.values, [cluster.uid]: values },
-            ...(categorical && !source.scale?.domain ? { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } : {}),
-          }, false, control);
+          return updateRows({ [cluster.uid]: values }, false, control);
         };
         if (categorical) field(valueCell, label, value === null ? "missing" : String(resolved.domain.indexOf(value)), {
           entries: [["missing", "Missing"], ...resolved.domain.map((item, i) => [String(i), item])],
@@ -2450,12 +2456,14 @@ function validateAnnotationPanels(panels, clusters, { previousPanels = null, tre
     // shape, value type or allowed categories. JSON loading always checks it.
     const oldScale = before?.scale ?? {};
     const sameCategories = sameArray(oldScale.domain, scale.domain);
-    if (before?.values === panel.values && before.columns?.length === panel.columns.length &&
-        (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories)) continue;
+    const sameValueRules = before?.columns?.length === panel.columns.length &&
+      (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories);
+    if (before?.values === panel.values && sameValueRules) continue;
     clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
     const categories = type === "categorical" && scale.domain ? new Set(scale.domain) : null;
     for (const [uid, values] of Object.entries(panel.values)) {
       if (!clusterIds.has(uid)) fail(`unknown cluster '${uid}'.`);
+      if (sameValueRules && before.values[uid] === values) continue;
       if (!Array.isArray(values) || values.length !== panel.columns.length) fail(`row '${uid}' must have one value per column.`);
       for (const value of values) {
         if (value === null) continue;

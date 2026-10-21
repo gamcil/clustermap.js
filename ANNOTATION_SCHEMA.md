@@ -216,6 +216,15 @@ chart.patch([{
 }]);
 ```
 
+For inline or batch value edits, replace only the affected rows. Undo retains those
+rows; unchanged rows are shared. A `null` row removes its entry (missing data).
+
+```js
+chart.patch([{ type: "annotationPanels.updateRows", uid: "expression",
+  values: { "cluster-a": [0.2, 0.8], "cluster-b": null },
+}]);
+```
+
 Updates accept the panel fields except `uid` and `type`, including `values`
 and group-marker definitions. `scale` replaces the complete scale: omit `domain`
 to restore inferred bounds. Column labels must remain unique and non-empty,

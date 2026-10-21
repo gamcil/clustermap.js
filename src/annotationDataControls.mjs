@@ -73,6 +73,14 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
   };
   const renderMatrix = (layout, panel) => {
     const categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel);
+    const updateRows = (values, refresh = true, control) => {
+      const source = current();
+      return commit([
+        ...(categorical && !source.scale?.domain ? [{ type: "annotationPanels.update", ids: [selected],
+          changes: { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } }] : []),
+        { type: "annotationPanels.updateRows", uid: selected, values },
+      ], refresh, control);
+    };
     if (categorical && batchValue !== "" && !resolved.domain[Number(batchValue)]) batchValue = "";
     const { viewport: tableArea } = layout;
     const all = input(null, "Select all filtered clusters", false, "checkbox");
@@ -86,14 +94,14 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
     if (!categorical) value.placeholder = "Value";
     const applyValues = (clear) => {
       if (!clear && !value.checkValidity()) { value.reportValidity(); return; }
-      const source = current(), values = { ...source.values };
+      const source = current(), values = {};
       const next = clear || value.value === "" ? null : categorical ? resolved.domain[Number(value.value)] : Number(value.value);
       for (const uid of selection) {
-        const row = [...(values[uid] || source.columns.map(() => null))];
+        const row = [...(source.values[uid] || source.columns.map(() => null))];
         source.columns.forEach((_, index) => { if (columns.value === "all" || index === Number(columns.value)) row[index] = next; });
         values[uid] = row;
       }
-      update({ values, ...(categorical && !source.scale?.domain ? { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } : {}) });
+      updateRows(values);
     };
     button(batch, "Set values", () => applyValues(false));
     button(batch, "Clear values", () => applyValues(true));
@@ -170,9 +178,7 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
         const change = (value, control) => {
           const source = current(), values = [...(source.values[cluster.uid] ?? source.columns.map(() => null))];
           values[index] = value;
-          return update({ values: { ...source.values, [cluster.uid]: values },
-            ...(categorical && !source.scale?.domain ? { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } : {}),
-          }, false, control);
+          return updateRows({ [cluster.uid]: values }, false, control);
         };
         if (categorical) field(valueCell, label, value === null ? "missing" : String(resolved.domain.indexOf(value)), {
           entries: [["missing", "Missing"], ...resolved.domain.map((item, i) => [String(i), item])],

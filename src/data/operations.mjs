@@ -361,7 +361,7 @@ export function applyChartOperations(data, index, operations, treeConfig = {}) {
     throw operationError("operations must be a non-empty array");
   }
   const groupIds = new Set(index.groupById.keys());
-  const annotationDraft = { annotationPanels: data.annotationPanels };
+  const annotationDraft = { annotationPanels: data.annotationPanels, clusters: data.clusters };
   const applied = operations.map((operation) => {
     if (isTreeOperation(operation)) return normalizeTreeOperation(data.tree, operation);
     if (isAnnotationOperation(operation)) {

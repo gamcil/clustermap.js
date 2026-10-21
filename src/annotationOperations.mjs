@@ -25,6 +25,15 @@ export function normalizeAnnotationOperation(data, operation) {
     if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail("delete requires existing panel IDs.");
     return { type: operation.type, ids: [...new Set(operation.ids)] };
   }
+  if (operation.type === "annotationPanels.updateRows") {
+    const panel = data.annotationPanels?.find((panel) => panel.uid === operation.uid);
+    if (!panel || panel.type === "groups" || !operation.values || typeof operation.values !== "object" ||
+        Array.isArray(operation.values) || !Object.keys(operation.values).length ||
+        Object.values(operation.values).some((row) => row !== null && !Array.isArray(row))) fail("updateRows requires a matrix panel and row arrays (or null to remove a row).");
+    const clusterIds = new Set(data.clusters.map((cluster) => cluster.uid));
+    if (Object.keys(operation.values).some((uid) => !clusterIds.has(uid))) fail("updateRows requires existing cluster IDs.");
+    return { type: operation.type, uid: operation.uid, values: structuredClone(operation.values) };
+  }
   if (operation.type === "annotationPanels.replaceStyle") {
     if (!known.has(operation.uid) || !operation.style || typeof operation.style !== "object" ||
         Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !styleFields.has(key))) fail("replaceStyle requires an existing panel and supported style fields.");
@@ -54,6 +63,15 @@ export function applyAnnotationOperation(data, operation) {
     data.annotationPanels = operation.ids.map((uid) => byId.get(uid));
     return;
   }
+  if (operation.type === "annotationPanels.updateRows") {
+    data.annotationPanels = panels.map((panel) => {
+      if (panel.uid !== operation.uid) return panel;
+      const values = { ...panel.values, ...structuredClone(operation.values) };
+      for (const [uid, row] of Object.entries(operation.values)) if (row === null) delete values[uid];
+      return { ...panel, values };
+    });
+    return;
+  }
   data.annotationPanels = panels.map((panel) => operation.type === "annotationPanels.replaceStyle"
     ? panel.uid === operation.uid ? {
       ...Object.fromEntries(Object.entries(panel).filter(([key]) => !styleFields.has(key))),
@@ -67,6 +85,11 @@ export function inverseAnnotationOperation(data, operation) {
   if (operation.type === "annotationPanels.reorder") return [{ type: operation.type, ids: (data.annotationPanels || []).map((panel) => panel.uid) }];
   if (operation.type === "annotationPanels.delete") return data.annotationPanels.flatMap((panel, index) =>
     operation.ids.includes(panel.uid) ? [{ type: "annotationPanels.create", panel: structuredClone(panel), index }] : []);
+  if (operation.type === "annotationPanels.updateRows") {
+    const panel = data.annotationPanels.find((panel) => panel.uid === operation.uid);
+    return [{ type: operation.type, uid: panel.uid, values: structuredClone(Object.fromEntries(
+      Object.keys(operation.values).map((uid) => [uid, Object.hasOwn(panel.values, uid) ? panel.values[uid] : null]))) }];
+  }
   const ids = operation.type === "annotationPanels.replaceStyle" ? [operation.uid] : operation.ids;
   return data.annotationPanels.filter((panel) => ids.includes(panel.uid))
     .flatMap((panel) => [
