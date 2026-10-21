@@ -5,9 +5,7 @@ the gene clusters. The array order is the left-to-right panel order. Supported
 types are `heatmap` (continuous or categorical colours), `bar` (horizontal
 numeric bars), and `groups` (labelled vertical bars spanning cluster rows).
 
-This is an optional supporting view for gene-cluster metadata, disabled by
-default. The supported scope is heatmaps, categorical strips and horizontal
-bars, plus group markers; statistical chart types are outside the current feature scope.
+Panels are disabled by default. Enable them with:
 
 ```js
 chart.config({ annotations: { enabled: true } });
@@ -50,6 +48,9 @@ The example's `clusters` entry is a placeholder: use ordinary cluster objects
 whose `uid` fields match the keys in `values`.
 
 ## Panel fields
+
+`columns`, `values` and scale fields apply to heatmaps and bars. Group-marker
+fields are described [below](#group-markers).
 
 | Field | Meaning | Default |
 | --- | --- | --- |
@@ -170,52 +171,20 @@ column. Each row draws one horizontal bar on a common linear scale:
 - This first bar type has one value per cluster; grouped and stacked series
   are not supported. Add separate bar panels for different measurements.
 
-## Behaviour and scope
+## Behaviour
 
-- Values attach to **cluster IDs**, rather than row indices or locus IDs.
-- Cells are centered on each cluster's gene track and follow row drag/reorder
-  previews and tree rotations. Horizontal locus movement changes panel anchoring,
-  while preserving the common column alignment across rows.
-- Panels start after the greater of the locus/trim-indicator extent and the
-  right edges of the cluster area's visible scales and bottom legend. Locus
-  drag previews respect the same boundary, so dragging a short cluster left
-  cannot pull annotations over the identity bar. A right-positioned gene legend
-  is placed after the panels and is excluded from their placement boundary.
-- Visible panels share title, column-heading and colour-key baselines. Their
-  hover borders use the same top and bottom extents, reserving space for the
-  tallest heading/key across all visible panels. Cell centers stay aligned with
-  the cluster rows; individual cell heights can still be styled separately.
-- Shared header spacing uses measured glyph bounds, including heading rotation,
-  with a 6-unit gap between the column headings and the panel-title band.
-- Column headings, panel titles and colour keys are included in figure bounds
-  and static SVG export. Data and project exports retain the panel definitions.
-- SVG draws panel primitives directly. Canvas draws cells, keys and text with
-  Canvas 2D. WebGPU draws cells and colour keys as instanced GPU rectangles,
-  with only panel text on its Canvas overlay. Cell instances share cluster row
-  transforms and remain retained during pan, zoom and drag previews.
-- Hover an annotation panel (including its headings, colour key or space between
-  rows) to show its padded border and **Edit** button above the panel. The button opens a compact menu
-  for that panel. Controls update the plot without an Apply button, and the menu
-  stays open while editing. Text fields commit on change, matching other label
-  editors; numeric and colour controls update on input. Click outside, use the
-  close button or press Escape to dismiss it.
-- Hover the empty slot to the right of the figure to reveal **+**, including
-  when no panels exist yet. Choose Heatmap or Bar chart, enter a title and paste
-  CSV/TSV with a header: first column is the cluster UID, remaining columns are
-  the data headings. Blank cells are missing; omitted cluster rows are allowed.
-  Heatmaps accept numeric or categorical values; bars need one numeric column.
-  Alternatively paste JSON containing `columns` and `values` in the same format
-  as a panel definition. A starter table lists the current cluster IDs.
-- Each Edit menu includes **Move left**, **Move right** and **Remove**. These
-  actions and panel creation support undo/redo and persist in data/project exports.
-- Panel-specific settings are not in the global Appearance panel. When panels
-  are hidden, a **Hidden panels** button in the plot provides access to their
-  settings so they can be shown again. Borders, buttons and menus are interface
-  elements and do not appear in SVG exports or affect figure bounds.
-- Hovering a cell shows the panel, cluster, column and original value (`Missing`
-  for null/omitted values). Hit testing uses the same projected cells in SVG,
-  Canvas and WebGPU. Tooltips are HTML and are excluded from SVG export.
-- Arbitrary chart callbacks and external plotting adapters are not provided yet.
+- Membership and values use cluster IDs. Panels stay aligned with cluster rows
+  during reordering and tree rotations; locus movement preserves column alignment.
+- Panels start after the cluster area, including trim indicators, scales and a
+  bottom legend. A right-positioned gene legend follows the panels.
+- Visible panels share title, heading and key baselines, reserving enough space
+  for the tallest heading/key. Cell heights may be styled separately.
+- Titles, rotated headings and keys contribute to figure bounds and SVG export.
+  Editing borders, buttons, menus and tooltips are excluded.
+- Hover a panel for its **Edit** menu or a cell for its original value. Controls
+  update immediately. Escape, the close button or clicking outside dismisses menus.
+- Use **+** after the last panel to add a panel. Hidden panels remain accessible
+  through **Hidden panels** and **Data → Annotations**.
 
 ## Editing and history
 
@@ -247,118 +216,26 @@ chart.patch([{
 }]);
 ```
 
-Supported changes are the presentation fields in the table, including `columns`,
-but excluding `uid`, `type`, and `values`. `scale` replaces the complete scale
-definition: omit `domain` to restore automatic bounds. Column label edits must
-preserve the row-array lengths and unique, non-empty labels. Batches are
-validated before changing live data. Undo/redo stores presentation snapshots,
-sharing the original value data rather than copying the matrix into history.
-The internal `annotationPanels.replaceStyle` operation restores exact optional
-field presence during undo/redo. Data/project exports include current styles.
+Updates accept the panel fields except `uid` and `type`, including `values`
+and group-marker definitions. `scale` replaces the complete scale: omit `domain`
+to restore inferred bounds. Column labels must remain unique and non-empty,
+and each row array must match the column count. Send dependent columns, values
+and category-domain changes in one batch. Style-only undo shares the existing
+matrix; project and data exports include current definitions.
 
-Choose a preset palette or edit individual colour stops/category colours.
-The editor offers inferred or custom continuous domains; categorical domains
-continue to follow the JSON definition or inferred category order.
+## Demos
 
-## Demo
+- `?fixture=heatmap`: numeric and categorical heatmaps, signed bars, missing/zero
+  values and a small tree.
+- `?fixture=heatmap-project`: 50 clusters with a saved layout, synthetic response
+  values, source gene counts and gene-group presence. Open the same fixture via
+  **Load project…** using `fixtures/clinker-project-heatmap.json`.
+- `?fixture=group-markers`: nested clades and an explicit non-contiguous group.
 
-Load `?fixture=heatmap&renderer=canvas`, `&renderer=webgpu`, or `&renderer=svg`.
-The fixture includes continuous and categorical heatmaps, positive and signed
-bar panels, missing/zero values, and a bifurcating tree for trying row rotations.
+Add `&renderer=svg`, `canvas` or `webgpu` to choose a renderer. Synthetic values
+and tree distances are illustrative, not biological measurements.
 
-For a larger, real-data example, load `?fixture=heatmap-project`. This uses
-`fixtures/clinker-project-heatmap.json`, based on `clinker-project(3).json`, with
-50 clusters, 6,838 homology links and the original tree, settings and saved
-layout. Its three panels show:
-
-- **Synthetic response:** four deterministic illustrative columns on a shared
-  [-2, 2] scale. These are generated test values, not biological measurements.
-  Selected cells and the last cluster's entire row are deliberately missing.
-- **Gene count:** a bar panel showing the number of genes in each source cluster,
-  with an inferred domain that includes zero.
-  Counts describe the source data, including genes hidden by saved trimming.
-- **Gene group presence:** presence/absence of the first six source gene groups
-  in each cluster, derived from the actual group membership.
-
-Heatmaps in both demo fixtures use the shared default cell dimensions
-(32 × 20 world units). Bars use the default panel width of 120 and height of 20.
-
-It defaults to the project's WebGPU renderer. Use
-`?fixture=heatmap-project&renderer=canvas` or `&renderer=svg` to compare backends.
-The file can also be opened using **Load project…**.
-
-## Implementation
-
-`src/annotations.mjs` owns validation, colour mapping, projected cells and
-shared per-frame positioning. `src/layout.mjs` builds panels with the scene
-and updates them through the common scene patch path. The thin SVG and Canvas
-adapters in `src/annotationRenderers.mjs` consume those records. The two panel
-types share cluster-ID association, placement and editing operations; internal
-scene records are not part of the public API.
-
-Frame projections are shared by rendering and hit testing. Each scene retains
-its static projection and only its latest interaction preview, using weak keys
-so retired scenes can be collected. Consumers treat these records as read-only.
-Inferred domains are cached by the value-matrix identity; presentation edits
-reuse that matrix. Data must be replaced/reloaded rather than mutated in place.
-
-Patch validation checks the private candidate array already built during
-normalization. Unchanged panels are reused, and presentation edits rescan values
-only when column count, value type or allowed categories change. New matrices
-and JSON loads still receive full validation before any live changes are made.
-The HTML overlay uses one menu state for adding, editing or accessing hidden
-panels, independently of hover state; all renderers share that interface.
-It owns the tooltip lifecycle too, retaining listeners across redraws and
-releasing them when the feature is disabled or its drawing surface changes.
-Scene builds and geometry patches share one annotation-placement function;
-geometry patches retain cell/key records and only translate panels when their
-anchor moves. The WebGPU rectangle pipeline is created on first use, so charts
-without visible annotation geometry do not compile that pipeline.
-
-### Audit: scope and remaining costs
-
-- Core ownership remains synteny. Annotation types are limited to the existing
-  heatmap/categorical and bar implementations; there is no chart-plugin framework
-  or statistical computation layer.
-- With the feature disabled, definitions remain in data but are excluded from
-  scene geometry, figure bounds, right-legend placement, editing UI and export.
-  Existing annotation GPU buffers and HTML listeners are released. JSON input
-  still receives boundary validation. Core validation/geometry remain bundled;
-  the optional HTML UI is loaded separately on first activation.
-- The shared placement and frame-projection paths are used by all renderers.
-  Locus translation, trimming and row reorder reuse cell/key geometry. Changing
-  the panel anchor creates translated panel wrappers, not new cell matrices.
-- A shared viewport query culls panel marks, headings and keys. Rows use a cached
-  sorted index and binary range lookup; column selection is a contiguous range.
-  Canvas skips offscreen marks and labels. WebGPU's Canvas overlay requests only
-  labels, so it does not walk cells. WebGPU retains complete cell buffers and
-  submits merged visible instance ranges without uploading cells during zoom.
-  When the entire figure is visible, it takes a constant-time full-range path.
-  Live SVG updates annotation joins only when their visible set changes; static
-  exports and initial figure fitting use the full figure.
-- Annotation-only edits retain biological layout, spatial indexes, scales and
-  snapshot baselines. SVG updates annotation/chrome elements; WebGPU retains
-  gene/link buffers. Unchanged panels and cell records survive presentation
-  edits, and changes limited to text do not re-upload GPU cell buffers. Canvas
-  still repaints the visible canvas, but does not re-project the biological data.
-- WebGPU uses native rectangles for marks and its Canvas overlay for text. The
-  annotation rectangle pipeline is cached after its first use; first activation
-  can incur pipeline compilation. Disabling releases its cell/key buffers.
-- These are code-audit conclusions, not measured speedup claims. The build has
-  been checked; browser interaction/export regression coverage and profiling of
-  large matrices remain outstanding.
-
-### Optional UI packaging
-
-`dist/annotationOverlay.mjs` contains the panel menus, data-entry form and tooltip.
-The main ES and UMD bundles import it only when annotations are enabled. Deploy
-it beside the main bundle (or let a bundler resolve the relative dynamic import).
-The core passes its annotation functions into this UI factory, keeping geometry,
-validation, scale inference and frame caches shared rather than duplicating them
-in the UI bundle. No extra import is needed in application code. Failed UI loading
-is reported in the console; annotation rendering and static export remain usable.
-
-## Group markers (proof of concept)
+## Group markers
 
 A `groups` panel shares the positioning, visibility, editing and ordering of
 other annotation panels. It does not need `columns`, `values` or a colour scale.
@@ -408,30 +285,18 @@ panel, including hidden panels. The in-plot menu keeps quick styling controls
 under **Advanced**. **Edit data…** opens the selected panel in the Data editor.
 When no editor handles that action, the same data editor opens in the plot menu.
 
-The data editor supports:
+The editor supports numeric/categorical matrices, category and column management,
+CSV/TSV or JSON replacement, group-marker membership, and panel ordering/visibility.
+Replacement tables use cluster IDs in the first column and data headings in the
+remaining columns. Blank cells are missing; omitted clusters are allowed. Bars
+keep exactly one column, heatmaps at least one, and marker panels at least one group.
 
-- Numeric matrix values and categorical dropdowns, keyed by cluster ID.
-- Category creation, renaming and colours. Rename updates every assignment.
-  Removing a category lets users replace its assignments with another category
-  or missing values. A categorical domain may be empty when all values are missing.
-- Adding, renaming and removing heatmap columns (at least one must remain).
-  Bar panels keep exactly one column.
-- Replacing a matrix using CSV/TSV or JSON `{columns, values}`. New categories
-  from replacement data are added without discarding existing category colours.
-- Group-marker labels, colours, memberships, addition and removal (at least one
-  group must remain). Tree clades use node IDs; explicit memberships use cluster selections.
-- Panel creation, ordering, visibility and removal.
-
-Values are edited on change/blur; all mutations are immediate and undoable.
-Missing values appear as empty numeric inputs or the **Missing** category choice.
-The editor shares its toolbar search, controls and table styles across all data
-panels. **Replace data…**, visibility, ordering and removal are available directly
-in the annotation toolbar. Matrix rows support checkbox and Shift selection,
-including selecting all filtered rows. Batch actions set or clear values in one
-column or all columns for the selected rows, as one undoable operation.
-Selections persist across filtering and scrolling, and reset when switching panels.
-Rows are searchable by name/ID and use the same fixed-height row virtualization
-as the other data tables. Column headers and cluster names remain visible while scrolling.
+Renaming categories updates their assignments. Removing one offers replacement
+with another category or missing values. Matrix rows support search, checkbox
+and Shift selection, including all filtered rows. Batch actions set or clear one
+column or all columns in one undoable edit. Selection survives scrolling and
+filtering and resets when changing panels. Enter commits; Escape cancels an
+inline edit. All data changes are undoable.
 
 Changes to matrix data use the same atomic patch API as presentation edits:
 
@@ -445,10 +310,6 @@ chart.patch([{
   }
 }]);
 ```
-
-Send columns, values and category-domain changes together when they depend on
-one another; validation checks the complete batch before applying it.
-Style-only undo records retain the existing matrix without copying it.
 
 Hosts can open an editor directly with `editor.editAnnotations(panelUid)`.
 The plot emits the cancelable, bubbling DOM event `clustermap:edit-annotation`

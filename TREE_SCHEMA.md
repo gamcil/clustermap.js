@@ -1,4 +1,4 @@
-# Tree schema and implementation contract for clustermap.js
+# Tree schema
 
 This is the tree input contract implemented by clustermap.js.
 Clinker parses tree files and resolves leaf labels to cluster IDs. Clustermap
@@ -146,14 +146,8 @@ including batch selections, and clamps the preview to the allowed range.
 Committed drag orders update the tree's child arrays as well as the displayed
 cluster order. A selection with no compatible insertion remains in place.
 
-When a tree is present, existing `clusterOrder` state must reflect the derived
-order. It may remain as a compatibility representation, but cannot become an
-independent source of ordering. Ordinary cluster dragging and programmatic
-ordering APIs must obey the same constraints.
-
-Tree edits participate in the existing undo/redo system. Save edited child
-order in project snapshots. Renaming a cluster must not break its association
-with a leaf.
+Layout state follows tree order. Tree edits support undo/redo and persist in
+project snapshots. Renaming a cluster preserves its leaf association.
 
 ## Rendering and configuration
 
@@ -215,41 +209,9 @@ position; `config.tree.scaleBar.show` controls its visibility independently.
 Dashed leaf guides are hidden by default. The tree is positioned as far right
 as possible while leaving a gap between every leaf tip and its cluster label.
 
-## Layout and rendering
-
-`src/treeLayout.mjs` owns the shared `layoutTree()` output: root and child
-branches, vertical stems, internal nodes, leaf guides, formatted support labels,
-and the scale bar. It also owns node hit testing and `interpolateTreeLayout()`,
-which supplies the same geometry at each animation frame to every renderer.
-Node positions interpolate by identity, so a branch flip folds its stem while
-ancestors unaffected by that flip stay still.
-
-`src/treeCanvasRenderer.mjs` measures text and paints these marks into Canvas.
-The WebGPU backend uses this same adapter in its Canvas overlay.
-`src/treeSvgRenderer.mjs` measures SVG text, joins the marks to DOM elements,
-and drives the shared frame interpolation with a D3 transition. SVG export
-uses this adapter too. The adapters own drawing and interaction binding;
-topology, positioning, label formatting, and scale geometry belong to the
-shared layout. These modules are internal; the frontend passes `data.tree`
-and `config.tree` through the existing chart API.
-
-## Scope
-
-The initial viewer supports normalised tree input, rectangular rendering,
-support labels, styling, node rotation, constrained vertical dragging,
-undo/redo, project round-tripping and SVG export.
-
-Newick parsing, filename matching, tree inference and rerooting are outside
-this implementation's scope. Future rerooting must explicitly preserve the
-correct association of lengths and support values with branches.
-
-## Verification
-
-Run `npm test` for validation, ordering, layout, and state round-trip coverage.
-After `npm run build`, run `npm run test:tree-browser` for browser checks of
-node flips, undo/redo, public project save/load, and static SVG export. The
-browser check uses local files and requires Playwright Chromium to be installed
-(`npx playwright install chromium`).
+Tree geometry is shared across SVG, Canvas and WebGPU; static SVG exports
+include branches, support labels and annotations. Newick parsing, leaf matching,
+tree inference and rerooting are outside the library's scope.
 
 ## Colouring and annotations
 
@@ -308,9 +270,8 @@ Node height is H minus root depth. A merge strictly below the threshold colours
 its vertical connector and outgoing edges. Its incoming edge stays neutral
 when its parent is at/above the cut. Singletons have no merge mark. Ties remain
 neutral; zero is neutral; a cut above H colours the whole tree. `"auto"` resolves
-to `0.7 × H`, including zero for a zero-height tree. This string differs from
-the draft plan's `null`: **null is reserved for removing patch overrides**.
-Persisted presentation values cannot be null.
+to `0.7 × H`, including zero for a zero-height tree. Null removes patch
+overrides and is not valid in persisted presentation values.
 
 Palette assignment uses stable node IDs, so rotating branches preserves colours.
 Automatic colours are derived, never written into manual override records.
@@ -333,10 +294,8 @@ stub retains the global style. Width-only overrides preserve inherited colours.
 Markers and support text retain their own appearance.
 
 Annotations are separate from original node names and support values. They use
-plain text below/right of the node, with defaults `#333`, 10px, regular, normal,
-and the plot font family. Their measured bounds affect tree placement, camera
-fitting, the raster minimap and static SVG export. SVG, Canvas and the WebGPU
-Canvas overlay consume the same resolved branch and annotation records.
+plain text below/right of the node, with defaults black, 10px, regular, normal,
+and the plot font family. Their bounds contribute to figure placement and export.
 
 ### Editing API and history
 
@@ -378,20 +337,15 @@ cancels it. Project snapshots omit the preview. The appearance slider uses this
 API to produce one undo step per completed gesture. Configuration changes,
 undo/redo, data replacement and destruction also cancel previews.
 
-`chart.rotateTreeNode(uid)` exposes the same undoable child rotation as clicking
-a node. The optional editor shows clade colouring only for compatible merge-height
-trees, revealing cut/palette controls when colouring is enabled. Resetting all
-manual styles lives in tree settings. Right-click an internal node for a compact
-form with subtree and incoming-branch controls and label formatting visible
-together. Colour swatches can be edited directly; the reset arrow beside each
-branch row clears its overrides, and blank thickness inherits. Controls update
-the plot immediately through undoable patches, keeping the menu and input focus
-in place while editing. The menu's Reset button removes this node's own
-subtree style, incoming-branch override and label in one undoable edit, preserving
-independent descendant overrides and the automatic colouring policy.
-SVG nodes also support the context-menu key or Shift+F10. Escape closes the menu
-and returns focus. These controls and interactive attributes are excluded from
-SVG export.
+`chart.rotateTreeNode(uid)` performs the same undoable rotation as clicking a
+node. The Appearance panel exposes colouring controls for compatible trees and
+resetting all manual styles. Right-click an internal node to edit its subtree,
+incoming branch and label. Blank thickness inherits; reset arrows clear the
+corresponding overrides. The menu's Reset clears this node's styles and label,
+preserving descendant overrides and automatic colouring.
+
+Controls update immediately. SVG nodes also support Shift+F10 or the context-menu
+key. Escape closes the menu and restores focus. Controls are excluded from SVG export.
 
 Try `?fixture=tree-styling&renderer=canvas` (or `svg`/`webgpu`) for a small
 illustrative bifurcating merge-height tree with an outgroup and annotated clade.
