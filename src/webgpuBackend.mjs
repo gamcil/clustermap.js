@@ -13,26 +13,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
   let generation = 0;
 
   const draw = () => {
-    if (!renderer || !latestPaint) return;
-    const {
-      camera,
-      config,
-      height,
-      pixelRatio,
-      preview,
-      scales,
-      width,
-    } = latestPaint;
-    renderer.render({
-      nextScene: pendingScene,
-      preview,
-      camera,
-      scales,
-      config,
-      width,
-      height,
-      pixelRatio,
-    });
+    if (renderer && latestPaint) renderer.render({ ...latestPaint, nextScene: pendingScene });
   };
 
   const fallback = () => latestPaint?.onUnavailable?.();
@@ -40,9 +21,6 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
   return {
     get pendingScene() {
       return pendingScene;
-    },
-    get renderer() {
-      return renderer;
     },
     hasResources: () => Boolean(renderer || canvas || initialization || unavailable),
     setScene: (scene) => {

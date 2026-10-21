@@ -12985,7 +12985,6 @@ const lookup = {
   geneData: (uid) => chartIndex?.geneById.get(uid),
   locusData: (uid) => chartIndex?.locusById.get(uid),
   clusterData: (uid) => chartIndex?.clusterById.get(uid),
-  linksForGene: (uid) => chartIndex?.linksByGeneId.get(uid) || [],
 };
 
 function validateConfiguration(options, tree = null) {
@@ -13083,45 +13082,26 @@ function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
 
 function sceneChromeOptions(data) {
   const config = renderConfig();
+  const textStyle = { textColour: config.figureStyle.foreground, fontFamily: config.plot.fontFamily };
   return {
     legend: {
-      textColour: config.figureStyle.foreground, subtitleColour: config.figureStyle.muted,
-      show: config.legend.show,
+      ...config.legend, ...textStyle,
+      subtitleColour: config.figureStyle.muted,
       placement: config.legend.position,
-      columns: config.legend.columns,
-      columnWidth: config.legend.columnWidth,
-      marginLeft: config.legend.marginLeft,
-      marginTop: config.legend.marginTop,
-      entryHeight: config.legend.entryHeight,
-      fontSize: config.legend.fontSize,
-      subtitleFontSize: config.legend.subtitleFontSize,
-      fontFamily: config.plot.fontFamily,
       groups: data.groups,
       groupForGene: scales.group,
       colourForGroup: scales.colour,
     },
     scaleBar: {
-      textColour: config.figureStyle.foreground,
+      ...config.scaleBar, ...textStyle,
       show: config.plot.scaleGenes && config.scaleBar.show,
       x: 0,
-      marginTop: config.scaleBar.marginTop,
-      basePair: config.scaleBar.basePair,
       coordinateFor: scales.x,
-      height: config.scaleBar.height,
-      colour: config.scaleBar.colour,
       strokeWidth: config.scaleBar.stroke,
-      fontSize: config.scaleBar.fontSize,
-      fontFamily: config.plot.fontFamily,
     },
     colourBar: {
-      textColour: config.figureStyle.foreground,
-      show: config.colourBar.show,
+      ...config.colourBar, ...textStyle,
       x: config.plot.scaleGenes ? scales.x(config.scaleBar.basePair) + 20 : 0,
-      marginTop: config.colourBar.marginTop,
-      width: config.colourBar.width,
-      height: config.colourBar.height,
-      fontSize: config.colourBar.fontSize,
-      fontFamily: config.plot.fontFamily,
       scoreColour: scales.score,
       domain: scales.score.domain(),
     },
@@ -13133,11 +13113,7 @@ function sceneChromeOptions(data) {
 }
 
 function buildChartScene(data) {
-  // Scene construction is read-only. The controller synchronizes any
-  // scale-dependent chart state before asking the runtime to project it.
-  // SVG historically applies this policy while binding its link elements.
-  // Keep the same result in the shared scene so Canvas and WebGPU consume the
-  // exact same best-only, threshold, membership, and hidden-link set.
+  // Resolve link policy once for all renderers and their previews.
   allowedLinkIds = new Set(filterLinks(data.links, {
     groupForGene: scales.group,
     geneForUid: lookup.geneData,
@@ -14829,26 +14805,7 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
   let generation = 0;
 
   const draw = () => {
-    if (!renderer || !latestPaint) return;
-    const {
-      camera,
-      config,
-      height,
-      pixelRatio,
-      preview,
-      scales,
-      width,
-    } = latestPaint;
-    renderer.render({
-      nextScene: pendingScene,
-      preview,
-      camera,
-      scales,
-      config,
-      width,
-      height,
-      pixelRatio,
-    });
+    if (renderer && latestPaint) renderer.render({ ...latestPaint, nextScene: pendingScene });
   };
 
   const fallback = () => latestPaint?.onUnavailable?.();
@@ -14856,9 +14813,6 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
   return {
     get pendingScene() {
       return pendingScene;
-    },
-    get renderer() {
-      return renderer;
     },
     hasResources: () => Boolean(renderer || canvas || initialization || unavailable),
     setScene: (scene) => {
