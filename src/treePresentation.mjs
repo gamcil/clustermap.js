@@ -125,7 +125,7 @@ export function invalidateTreePresentation(tree) {
 /** Resolve properties once per presentation/config revision, never per tween. */
 export function resolveTreePresentation(tree, config = {}) {
   const defaults = { ...TREE_COLOURING_DEFAULTS, ...config.colouring };
-  const signature = JSON.stringify([config.branch?.colour, config.branch?.width, defaults]);
+  const signature = JSON.stringify([config.branch?.colour, config.branch?.width, config.textColour, defaults]);
   const cached = stylesCache.get(tree);
   if (cached && cached.presentation === tree.presentation && cached.signature === signature) return cached.value;
   validateTreePresentation(tree, config);
@@ -153,7 +153,7 @@ export function resolveTreePresentation(tree, config = {}) {
     const mergeStyle = { ...base, ...(automatic ? { colour: automatic } : {}), ...subtree };
     if (node.children) stems.set(uid, mergeStyle);
     const label = tree.presentation?.nodes?.[uid]?.label;
-    if (label?.text) annotations.set(uid, { colour: "#333", fontSize: 10, fontWeight: 400, fontStyle: "normal", ...label });
+    if (label?.text) annotations.set(uid, { colour: config.textColour || "#333", fontSize: 10, fontWeight: 400, fontStyle: "normal", ...label });
     for (const child of node.children || []) {
       branches.set(child, { ...mergeStyle, ...tree.presentation?.nodes?.[child]?.branch });
       visit(child, subtree, automatic);

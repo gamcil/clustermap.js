@@ -4,6 +4,7 @@
 
 import { color } from "d3-color";
 import { worldViewport } from "./camera.mjs";
+import { figureConfig } from "./theme.mjs";
 import { sampleLinkGeometry } from "./links/layout.mjs";
 import {
   genePolygonForPreview,
@@ -406,7 +407,7 @@ function transparent(colour) {
   return [colour[0], colour[1], colour[2], 0];
 }
 
-function geneVertices(gene, scales, preview = null, clusterSlot = 0, strokeWidth = 1) {
+function geneVertices(gene, scales, preview = null, clusterSlot = 0, strokeWidth = 1, strokeColour = "black") {
   const fill = [];
   const edge = [];
   const visible = geneVisibleForPreview(preview, gene);
@@ -417,7 +418,7 @@ function geneVertices(gene, scales, preview = null, clusterSlot = 0, strokeWidth
     gene,
     visible ? colour : transparent(colour),
     genePolygonForPreview(preview, gene, { includeClusterOffset: false }),
-    visible ? [0, 0, 0, 1] : [0, 0, 0, 0],
+    visible ? rgba(strokeColour) : [0, 0, 0, 0],
     clusterSlot,
     strokeWidth
   );
@@ -436,7 +437,7 @@ function linkVertices(scene, link, scales, config, preview = null) {
   const stroke = rgba(
     link.source.colour || (config.link.groupColour
       ? scales.colour(scales.group(link.source.query.uid))
-      : "black")
+      : config.figureStyle?.outline || "black")
   );
   const opacity = link.opacity ?? 1;
   colour[3] *= opacity;
@@ -584,7 +585,7 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
       scales,
       preview,
       locusSlots.get(gene.locus.source.uid),
-      config.gene.shape.strokeWidth
+      config.gene.shape.strokeWidth, config.gene.shape.stroke
     );
     ranges.genes.set(gene.source.uid, {
       genes: append(genes, vertices.genes),
@@ -1174,7 +1175,7 @@ export async function createWebGpuRenderer(canvas) {
         scales,
         nextPreview,
         geometry.locusSlots.get(gene.locus.source.uid),
-        config.gene.shape.strokeWidth
+        config.gene.shape.strokeWidth, config.gene.shape.stroke
       );
       write("genes", ranges.genes, vertices.genes);
       write("geneEdges", ranges.geneEdges, vertices.geneEdges);
@@ -1243,7 +1244,7 @@ export async function createWebGpuRenderer(canvas) {
         const ranges = geometry.ranges.genes.get(gene.source.uid);
         const target = nextScene.genes.get(gene.source.uid);
         if (!ranges || !target) continue;
-        const vertices = geneVertices(target, scales, null, slot, config.gene.shape.strokeWidth);
+        const vertices = geneVertices(target, scales, null, slot, config.gene.shape.strokeWidth, config.gene.shape.stroke);
         commit("genes", ranges.genes, translateVertices(vertices.genes, x, y, 7));
         commit("geneEdges", ranges.geneEdges, translateVertices(vertices.geneEdges, x, y, 10));
       }
@@ -1279,6 +1280,7 @@ export async function createWebGpuRenderer(canvas) {
 
   return {
     render({ nextScene, preview: nextPreview = null, camera, scales, config, width, height, pixelRatio }) {
+      config = figureConfig(config);
       const pixelWidth = Math.max(1, Math.round(width * pixelRatio));
       const pixelHeight = Math.max(1, Math.round(height * pixelRatio));
       const resized = canvas.width !== pixelWidth || canvas.height !== pixelHeight;
@@ -1342,7 +1344,7 @@ export async function createWebGpuRenderer(canvas) {
         colorAttachments: [{
           view: multisampleTexture.createView(),
           resolveTarget: context.getCurrentTexture().createView(),
-          clearValue: { r: 1, g: 1, b: 1, a: 1 },
+          clearValue: [0, 0, 0, 0],
           loadOp: "clear",
           storeOp: "discard",
         }],

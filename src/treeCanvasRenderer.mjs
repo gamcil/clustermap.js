@@ -74,7 +74,7 @@ export function drawCanvasTree(context, layout) {
   context.lineCap = "butt";
   context.strokeStyle = layout.branch.colour;
   context.lineWidth = layout.branch.width;
-  context.fillStyle = "white";
+  context.fillStyle = layout.background;
   for (const node of layout.nodes) {
     context.beginPath();
     context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
@@ -98,7 +98,7 @@ export function drawCanvasTree(context, layout) {
     context.strokeStyle = bar.colour;
     context.lineWidth = bar.strokeWidth;
     traceLines(context, bar.lines);
-    context.fillStyle = "black";
+    context.fillStyle = layout.foreground;
     context.font = `${bar.fontSize}px ${bar.fontFamily}`;
     context.textAlign = "center";
     context.textBaseline = "top";

@@ -269,6 +269,7 @@ export function layoutTree({
     Object.assign(cutLine.label, measureText(cutLine.label.text, cutLine.label));
   }
   return positionTreeLayout({
+    background: config.figureStyle?.background || "white", foreground: config.figureStyle?.foreground || "black",
     cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
     rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX, style: branch },
     ys, previousYs,

@@ -26,9 +26,9 @@
       #toolbar button:hover { border-color: #78a9ed; background: #f4f8ff; }
       #data-import-status { color: #536b88; font-size: 12px; }
       #data-import-status[data-error="true"] { color: #b42318; }
-      #workspace { position: relative; display: flex; flex: 1; min-height: 0; }
+      #workspace { position: relative; display: flex; flex: 1; min-height: 0; padding: 8px 12px 12px; box-sizing: border-box; }
       #plot, #plot > .chart-host { width: 100%; height: 100%; }
-      #plot { flex: 1; min-height: 0; }
+      #plot { flex: 1; min-width: 0; min-height: 0; box-sizing: border-box; overflow: hidden; }
       clinker-editor { position: absolute; z-index: 3; right: 12px; bottom: 12px; left: 12px; height: min(360px, 42vh); max-height: calc(100% - 48px); box-shadow: 0 8px 28px rgba(23,36,54,.16); }
     </style>
   </head>
@@ -44,6 +44,7 @@
         <input id="project-import-file" type="file" accept="application/json,.json" hidden>
         <span id="data-import-status" role="status" aria-live="polite"></span>
         <button id="btn-editor" aria-expanded="false">Edit data</button>
+        <label>Theme <select id="theme-mode"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
       </div>
       <div id="workspace"><div id="plot"></div></div>
       <clinker-editor id="editor" resizable hidden></clinker-editor>
@@ -53,6 +54,7 @@
       import { ClusterMap } from "./dist/clustermap.mjs";
       import { defineClinkerEditor, mountPlotSelectionToolbar } from "./dist/editor.mjs";
       import { createLargeTestingData, SYNTHETIC_FIXTURES } from "./largeTestingData.mjs";
+      import { applyTheme, resolveTheme } from "./src/theme.mjs";
 
       const params = new URLSearchParams(location.search);
       const testMode = params.has("test");
@@ -73,6 +75,14 @@
         link: { threshold: 0.3, bestOnly: true },
       });
       const source = projectFixture ? d3.json(projectFixture) : syntheticFixture ? Promise.resolve(createLargeTestingData(syntheticFixture)) : treeFixture ? d3.json("fixtures/bua-genbank-tree.json") : biologicalFixture ? d3.json(biologicalFixture) : d3.json("testing.json");
+      const themeSelect = document.querySelector("#theme-mode");
+      const syncTheme = () => {
+        themeSelect.value = chart.config().plot.theme;
+        applyTheme(document.querySelector("main"), resolveTheme(themeSelect.value));
+      };
+      chart.on("change", (event) => { if (event.type === "config.change" || event.type === "theme.change") syncTheme(); });
+      themeSelect.addEventListener("change", () => chart.config({ plot: { theme: themeSelect.value } }));
+      syncTheme();
       const download = (blob, filename) => {
         const url = URL.createObjectURL(blob);
         const anchor = Object.assign(document.createElement("a"), { href: url, download: filename });
@@ -119,6 +129,7 @@
           ...(params.has("minimap") ? { minimap: { ...project.config.plot.minimap, show: true } } : {}),
         } });
         // Annotation examples opt in explicitly; ordinary charts remain synteny-only.
+        if (params.has("theme")) chart.config({ plot: { theme: params.get("theme") } });
         if (fixture === "heatmap" || fixture === "heatmap-project") chart.config({ annotations: { enabled: true } });
         if (testMode) { window.__demoChart = chart; window.d3 = d3; }
         d3.select("#plot").selectAll("div").data([data]).join("div").attr("class", "chart-host").call(chart);

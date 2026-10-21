@@ -31,6 +31,7 @@ import {
   patchAnnotationScene,
 } from "./layout.mjs";
 import { isRendererMode } from "./rendererMode.mjs";
+import { figureConfig } from "./theme.mjs";
 
 // This is deliberately one factory per chart, not a collection of tiny API
 // factories: configuration, scales, indexes, and mutable scene state must not
@@ -82,6 +83,11 @@ function synchronizeLocusLayoutStates(data, locusIds = null) {
 }
 
 const config = createDefaultConfig();
+let renderedConfig = null;
+function renderConfig() {
+  if (!renderedConfig) renderedConfig = figureConfig(config);
+  return renderedConfig;
+}
 let chartIndex = null;
 let chartState = null;
 let currentScene = null;
@@ -131,6 +137,7 @@ function validateConfiguration(options, tree = null) {
   const candidate = createDefaultConfig();
   updateConfig(candidate, config);
   updateConfig(candidate, options);
+  if (!["light", "dark", "auto"].includes(candidate.plot.theme)) throw new TypeError("plot.theme must be light, dark or auto.");
   if (typeof candidate.annotations?.enabled !== "boolean") {
     throw new TypeError("annotations.enabled must be a boolean.");
   }
@@ -144,6 +151,7 @@ function validateConfiguration(options, tree = null) {
 function configure(options, tree = null) {
   validateConfiguration(options, tree);
   updateConfig(config, options);
+  renderedConfig = null;
 }
 
 const scales = {
@@ -190,6 +198,7 @@ function locusTextForCluster(uid) {
 }
 
 function sceneProjectionOptions({ areClustersAdjacent } = {}) {
+  const config = renderConfig();
   return {
     scaleX: scales.x,
     locusOffset: scales.locus,
@@ -211,12 +220,15 @@ function sceneProjectionOptions({ areClustersAdjacent } = {}) {
     fontFamily: config.plot.fontFamily,
     measureText,
     annotationsEnabled: config.annotations.enabled,
+    theme: config.figureStyle,
   };
 }
 
 function sceneChromeOptions(data) {
+  const config = renderConfig();
   return {
     legend: {
+      textColour: config.figureStyle.foreground, subtitleColour: config.figureStyle.muted,
       show: config.legend.show,
       placement: config.legend.position,
       columns: config.legend.columns,
@@ -232,6 +244,7 @@ function sceneChromeOptions(data) {
       colourForGroup: scales.colour,
     },
     scaleBar: {
+      textColour: config.figureStyle.foreground,
       show: config.plot.scaleGenes && config.scaleBar.show,
       x: 0,
       marginTop: config.scaleBar.marginTop,
@@ -244,6 +257,7 @@ function sceneChromeOptions(data) {
       fontFamily: config.plot.fontFamily,
     },
     colourBar: {
+      textColour: config.figureStyle.foreground,
       show: config.colourBar.show,
       x: config.plot.scaleGenes ? scales.x(config.scaleBar.basePair) + 20 : 0,
       marginTop: config.colourBar.marginTop,
@@ -426,6 +440,7 @@ function updateScales(data, { geometryOnly = false } = {}) {
 
 return {
   config,
+  get renderConfig() { return renderConfig(); },
   configure,
   validateConfiguration,
   lookup,

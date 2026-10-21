@@ -209,7 +209,7 @@ function sameCellDefinition(before, after) {
 
 /** Project JSON annotations once, using the same row coordinates as loci. */
 export function layoutAnnotationPanels(definitions, clusters, bounds,
-  { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null } = {}) {
+  { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null, theme = null } = {}) {
   if (!definitions?.length || !bounds || !clusters.size) return [];
   const previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
   let x = anchorX;
@@ -229,15 +229,16 @@ export function layoutAnnotationPanels(definitions, clusters, bounds,
     const cellGap = isBar ? 0 : source.cellGap ?? ANNOTATION_DEFAULTS.cellGap;
     const borderWidth = source.cellBorderWidth ?? ANNOTATION_DEFAULTS.cellBorderWidth;
     const borderColour = source.cellBorderColour ?? ANNOTATION_DEFAULTS.cellBorderColour;
+    const missingColour = source.missingColour ?? theme?.missing ?? ANNOTATION_DEFAULTS.missingColour;
     const position = isBar ? scaleLinear().domain(domain).range([0, width]).clamp(true) : null;
     const rows = sameCellDefinition(before?.definition, source) ? before.rows : [...clusters.keys()].map((uid) => ({ uid, cells: source.columns.map((_, i) => {
       const value = Object.hasOwn(source.values, uid) ? source.values[uid][i] : null;
       const rect = { x: i * cellWidth + cellGap / 2, y: -cellHeight / 2 + cellGap / 2,
         width: cellWidth - cellGap, height: cellHeight - cellGap,
-        fill: value === null ? source.missingColour ?? "#eeeeee" : colour(value) };
+        fill: value === null ? missingColour : colour(value) };
       return { ...rect, value, column: source.columns[i], columnIndex: i,
         rects: isBar ? barRectangles(value, position, width, cellHeight,
-          source.colour ?? ANNOTATION_DEFAULTS.colour, source.missingColour ?? ANNOTATION_DEFAULTS.missingColour,
+          source.colour ?? ANNOTATION_DEFAULTS.colour, missingColour,
           borderWidth, borderColour) : cellRectangles(rect, borderWidth, borderColour) };
     }) }));
     const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
@@ -253,13 +254,13 @@ export function layoutAnnotationPanels(definitions, clusters, bounds,
     }
     const footer = [], key = [];
     if (source.showKey !== false && isBar) {
-      key.push({ x: 0, y: 0, width, height: 1, fill: "#555555" });
+      key.push({ x: 0, y: 0, width, height: 1, fill: theme?.muted ?? "#555555" });
       const ticks = position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40))));
       if (!ticks.includes(0)) ticks.push(0);
       for (const value of ticks.sort((a, b) => a - b)) {
         const tickX = position(value);
         key.push({ x: Math.max(0, Math.min(width - Math.min(1, width), tickX - 0.5)), y: 0,
-          width: Math.min(1, width), height: 5, fill: "#555555" });
+          width: Math.min(1, width), height: 5, fill: theme?.muted ?? "#555555" });
         footer.push(text(numberLabel(value), tickX, fontSize + 9,
           { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
       }
@@ -273,7 +274,8 @@ export function layoutAnnotationPanels(definitions, clusters, bounds,
       footer.push(text(category, 15, i * (fontSize + 6) + 9));
     });
     for (const item of footer) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
-    const panel = { uid: source.uid, definition: source, title: source.title ?? source.uid, x, width, cellHeight, headingHeight, titleDescent, rowOffset, rows, header, footer, key, fontSize, fontFamily };
+    const panel = { uid: source.uid, definition: source, title: source.title ?? source.uid, x, width, cellHeight, headingHeight, titleDescent, rowOffset, rows, header, footer, key, fontSize, fontFamily,
+      textColour: theme?.foreground ?? "#333333" };
     // Text overhang contributes to figure bounds, not inter-panel spacing.
     panel.extentWidth = Math.max(width,
       ...header.map((item) => item.x + item.bounds.maxX),
@@ -371,10 +373,10 @@ function projectAnnotationFrame(scene, preview) {
   return frames.map((frame) => ({ ...frame, verticalBounds: { minY, maxY } }));
 }
 
-export function annotationFigureBounds(bounds, panels, clusters) {
+export function annotationFigureBounds(bounds, panels, clusters, frames = null) {
   if (!bounds || !panels.length) return bounds;
   const result = { ...bounds };
-  for (const panel of annotationPanelsForFrame({ annotationPanels: panels, clusters })) {
+  for (const panel of frames || annotationPanelsForFrame({ annotationPanels: panels, clusters })) {
     const area = annotationPanelBounds(panel);
     result.maxX = Math.max(result.maxX, panel.x + panel.extentWidth);
     result.minY = Math.min(result.minY, area.minY);

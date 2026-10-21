@@ -92,6 +92,29 @@ The appearance editor and internal-node context menu provide the same controls.
 See [the styling contract](TREE_SCHEMA.md#colouring-and-annotations) and try
 `?fixture=tree-styling&renderer=canvas` for an illustrative example.
 
+## Interface theme and figure background
+
+Use `chart.config({ plot: { theme: "auto" } })` to follow the system appearance,
+or choose `"light"` / `"dark"`. Auto is the default. This themes the controls,
+menus and editor; figure colours remain fixed when the interface theme changes.
+The demo toolbar and Appearance panel expose the setting.
+
+Figures use a white background by default. To choose a softer editing/figure
+background explicitly, use `chart.config({ plot: { background: "#f5f5f3" } })`
+or the Figure background control. This setting is saved with the project and
+used in SVG export, so the displayed figure matches the output.
+The padded figure surface follows the content bounds and camera; space outside
+the figure uses the interface theme. A label above the surface shows its width ×
+height in CSS pixels at 100% zoom, including padding; zooming does not change
+these dimensions. The surface and dimensions follow live drag/trim previews,
+including labels, trees and annotation panels. SVG output remains resolution independent.
+
+Gene/group colours, heatmap ramps, bar fills and manual styles remain unchanged.
+Neutral configuration colours (`gene.shape.stroke`, `locus.trackBar.colour`,
+`scaleBar.colour`, `tree.branch.colour`, `tree.leafGuide.colour`) default to
+`null`, which resolves to fixed publication defaults, independent of theme.
+Explicit colours in saved projects retain their values.
+
 ## Annotation panels
 
 Annotation panels are optional and **disabled by default**. Enable them with

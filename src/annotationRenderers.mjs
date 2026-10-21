@@ -48,7 +48,7 @@ export function renderSvgAnnotations(plot, scene, { preview = null, transition =
       .attr("width", (item) => item.width).attr("height", (item) => item.height).attr("fill", (item) => item.fill);
     const texts = group.selectAll("text").data(panel.texts).join("text")
       .text((item) => item.text).attr("text-anchor", (item) => item.anchor)
-      .attr("font-weight", (item) => item.weight || 400).attr("fill", "#333333");
+      .attr("font-weight", (item) => item.weight || 400).attr("fill", panel.textColour);
     moving(texts).attr("transform", (item) => `translate(${item.x},${item.y}) rotate(${item.rotation || 0})`);
   });
 }
@@ -76,7 +76,7 @@ export function drawCanvasAnnotations(context, scene, preview = null, { showGeom
       context.translate(item.x, item.y);
       context.rotate((item.rotation || 0) * Math.PI / 180);
       context.font = `${item.weight || 400} ${panel.fontSize}px ${panel.fontFamily}`;
-      context.fillStyle = "#333333";
+      context.fillStyle = panel.textColour;
       context.textAlign = item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left";
       context.textBaseline = "alphabetic";
       context.fillText(item.text, 0, 0);

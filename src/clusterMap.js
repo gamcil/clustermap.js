@@ -32,6 +32,8 @@ import { updateSvgAnnotationViewport } from "./annotationRenderers.mjs";
 import { applyChartOperations } from "./data/operations.mjs";
 import { isTreeOperation, inverseTreeOperation, applyTreeOperation } from "./treeOperations.mjs";
 import { fitCameraForBounds, worldViewport } from "./camera.mjs";
+import { applyTheme, resolveTheme } from "./theme.mjs";
+import { createFigureSurface } from "./figureSurface.mjs";
 import { createHtmlOverlay } from "./htmlOverlay.js";
 import { createInteractionController } from "./interactionController.mjs";
 import {
@@ -103,7 +105,18 @@ export default function clusterMap() {
   /* A ClusterMap plot. */
 
   let container = null;
+  const figureSurface = createFigureSurface();
+  function updateFigureSurface() {
+    if (container) figureSurface.update(container, runtime.getScene(), runtime.renderConfig,
+      currentData?.tree, getCamera(chartState), scenePreview);
+  }
   let annotationOverlay = null;
+  let themeMedia = null;
+  function systemThemeChanged() {
+    if (runtime.config.plot.theme !== "auto" || !container || !currentData) return;
+    applyTheme(container.node(), resolveTheme(runtime.config.plot.theme));
+    emitChange({ type: "theme.change", theme: resolveTheme(runtime.config.plot.theme).mode });
+  }
   let annotationUiContext = null, annotationUiLoad = null;
   let transition = createTransition();
   let zoom = null;
@@ -406,7 +419,7 @@ export default function clusterMap() {
           const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, currentData);
           if (useGpu) {
             webgpuBackend.adoptLocusChanges(targetScene, sourceScene, {
-              loci: [locus.uid], scales: runtime.scales, config: runtime.config,
+              loci: [locus.uid], scales: runtime.scales, config: runtime.renderConfig,
             });
             webgpuBackend.setScene(targetScene);
           } else svgBackend.setScene(targetScene);
@@ -809,6 +822,13 @@ export default function clusterMap() {
 
   function redraw({ animate = true, synchronize = true } = {}) {
     if (!currentData || !container) return;
+    applyTheme(container.node(), resolveTheme(runtime.config.plot.theme));
+    if (globalThis.getComputedStyle(container.node()).position === "static") container.style("position", "relative");
+    container.style("isolation", "isolate");
+    if (!themeMedia && globalThis.matchMedia) {
+      themeMedia = globalThis.matchMedia("(prefers-color-scheme: dark)");
+      themeMedia.addEventListener("change", systemThemeChanged);
+    }
     const committedScene = sceneCommit;
     sceneCommit = null;
     disposeRasterInteraction();
@@ -900,7 +920,7 @@ export default function clusterMap() {
       eventNamespace: `.${runtime.ids.root}-tooltip`,
       actions: {
         redraw,
-        treeControls: () => ({ tree: currentData.tree, clusters: currentData.clusters, config: runtime.config.tree,
+        treeControls: () => ({ tree: currentData.tree, clusters: currentData.clusters, config: runtime.renderConfig.tree,
           patch: (ops) => updateFromTreeMenu(() => my.patch(ops)),
           rotate: (uid) => updateFromTreeMenu(() => rotateTreeNode(uid)) }),
         updateGene: (gene, changes) => my.patch([
@@ -927,6 +947,7 @@ export default function clusterMap() {
       .on("mouseenter", overlay.enter)
       .on("mouseleave", overlay.leave);
     const paintCanvas = (canvasNode) => {
+      updateFigureSurface();
       const flipLayer =
         scenePreview?.type === "locus-flip" &&
         canvasPendingFlip &&
@@ -948,7 +969,7 @@ export default function clusterMap() {
           camera: getCamera(chartState),
           // Keep the normal filled-ribbon appearance throughout the flip.
           config: {
-            ...runtime.config,
+            ...runtime.renderConfig,
             link: {
               ...runtime.config.link,
               asLine: false,
@@ -981,7 +1002,7 @@ export default function clusterMap() {
             canvas: canvasNode,
             scene: canvasPreviewScene,
             camera: getCamera(chartState),
-            config: runtime.config,
+            config: runtime.renderConfig,
             scales: runtime.scales,
             pixelRatio: rasterMotion.pixelRatio(),
             include: { genes: stationaryGenes },
@@ -1000,7 +1021,7 @@ export default function clusterMap() {
           canvas: canvasNode,
           scene: canvasPreviewScene,
           camera: getCamera(chartState),
-          config: runtime.config,
+          config: runtime.renderConfig,
           scales: runtime.scales,
           pixelRatio: rasterMotion.pixelRatio(),
           preview: scenePreview,
@@ -1029,7 +1050,7 @@ export default function clusterMap() {
         previousTreeScene: treeAnimation?.previousScene,
         treeProgress: treeAnimation?.progress ?? 1,
         camera: getCamera(chartState),
-        config: runtime.config,
+        config: runtime.renderConfig,
         scales: runtime.scales,
         hoverLocusUid: canvasHoverLocusUid,
         suppressLocusHover:
@@ -1045,6 +1066,7 @@ export default function clusterMap() {
     };
     const paintWebGpu = (canvasNode, scene) => {
       if (!canvasNode || !scene) return;
+      updateFigureSurface();
       const overlayNode = webgpuOverlay.node();
       if (overlayNode) {
         renderCanvas({
@@ -1056,7 +1078,7 @@ export default function clusterMap() {
           treeTargetScene: treeAnimation?.targetScene,
           treeProgress: treeAnimation?.progress ?? 1,
           camera: getCamera(chartState),
-          config: runtime.config,
+          config: runtime.renderConfig,
           scales: runtime.scales,
           hoverLocusUid: canvasHoverLocusUid,
           suppressLocusHover: scenePreview?.type === "locus-flip",
@@ -1080,7 +1102,7 @@ export default function clusterMap() {
         preview: scenePreview,
         camera: getCamera(chartState),
         scales: runtime.scales,
-        config: runtime.config,
+        config: runtime.renderConfig,
         width: bounds.width,
         height: bounds.height,
         pixelRatio: rasterMotion.pixelRatio(),
@@ -1112,7 +1134,7 @@ export default function clusterMap() {
         scene: pending.sourceScene,
         tree: currentData.tree,
         camera: getCamera(chartState),
-        config: runtime.config,
+        config: runtime.renderConfig,
         scales: runtime.scales,
         dimensions: { width: bounds.width, height: bounds.height },
         pixelRatio,
@@ -1150,9 +1172,9 @@ export default function clusterMap() {
         scene: pending.sourceScene,
         camera: { ...camera, x: camera.x - frame.x, y: camera.y - frame.y },
         config: {
-          ...runtime.config,
+          ...runtime.renderConfig,
           gene: {
-            ...runtime.config.gene,
+            ...runtime.renderConfig.gene,
             // A reflected bitmap would mirror glyphs. The normal target scene
             // redraw restores labels at the end of the brief animation.
             label: { ...runtime.config.gene.label, show: false },
@@ -1352,9 +1374,9 @@ export default function clusterMap() {
             },
             camera: { x: projection.x, y: projection.y, k: projection.scale },
             config: {
-              ...runtime.config,
+              ...runtime.renderConfig,
               gene: {
-                ...runtime.config.gene,
+                ...runtime.renderConfig.gene,
                 label: { ...runtime.config.gene.label, show: false },
               },
             },
@@ -1566,7 +1588,7 @@ export default function clusterMap() {
           canvas: useWebGpu ? webgpuOverlay.node() : canvasNode,
           scene: runtime.getScene(),
           camera: getCamera(chartState),
-          config: runtime.config,
+          config: runtime.renderConfig,
           event,
           tree: currentData.tree,
           treeDragging: isDragging(chartState),
@@ -1704,7 +1726,7 @@ export default function clusterMap() {
         webgpuBackend.adoptGeneAnchor(
           scene,
           webgpuAnchorCommit.sourceScene,
-          { ...webgpuAnchorCommit, scales: runtime.scales, config: runtime.config }
+          { ...webgpuAnchorCommit, scales: runtime.scales, config: runtime.renderConfig }
         );
         webgpuAnchorCommit = null;
       }
@@ -1713,7 +1735,7 @@ export default function clusterMap() {
           // Trimming can repack sibling loci; adopt the complete scene patch,
           // not just the locus whose handle was dragged.
           loci: scene.changes?.loci || webgpuLocusCommit.loci,
-          scales: runtime.scales, config: runtime.config,
+          scales: runtime.scales, config: runtime.renderConfig,
         });
         webgpuLocusCommit = null;
       }
@@ -1733,7 +1755,7 @@ export default function clusterMap() {
         previousTreeScene: treeAnimation?.previousScene,
         transition,
         animate: hasInitialView && animate,
-        config: runtime.config,
+        config: runtime.renderConfig,
         scales: runtime.scales,
         ids: runtime.ids,
         lookup: { gene: runtime.lookup.geneData },
@@ -1742,13 +1764,15 @@ export default function clusterMap() {
         highlightLinkIds,
         highlightLocusIds: selectedLocusIds,
       };
-      paintPreviewFrame = () => svgBackend.paint({
-        ...request, preview: scenePreview, animate: false,
-      });
+      paintPreviewFrame = () => {
+        updateFigureSurface();
+        svgBackend.paint({ ...request, preview: scenePreview, animate: false });
+      };
       svgBackend.paint(request);
 
       if (!hasInitialView) fitInitialView(svg, plot);
     }
+    updateFigureSurface();
     if (runtime.config.annotations.enabled && currentData.clusters?.length) {
       annotationUiContext = {
         surfaces: [useRaster ? canvas.node() : svg.node()],
@@ -1838,6 +1862,7 @@ export default function clusterMap() {
   function applyCamera(selection) {
     const { x, y, k } = getCamera(chartState);
     selection.attr("transform", `translate(${x}, ${y}) scale(${k})`);
+    updateFigureSurface();
   }
 
   my.config = function (_) {
@@ -2091,18 +2116,13 @@ export default function clusterMap() {
     return () => changeListeners.delete(listener);
   };
   /** Latest computed layout, excluding transient animation and drag geometry. */
-  my.figureBounds = () => {
-    const scene = runtime.getScene();
-    if (!container || !scene?.bounds) return null;
-    figureMeasurementContext ||= container.node().ownerDocument.createElement("canvas").getContext("2d");
-    return canvasFigureBounds(figureMeasurementContext, scene, runtime.config, currentData.tree);
-  };
+  my.figureBounds = () => figureSurface.bounds(container?.node(), runtime.getScene(), runtime.renderConfig, currentData?.tree);
   my.exportSvg = ({ padding = 20 } = {}) => {
     flushCanvasFlip();
     return exportChartSvg({
       data: currentData,
       scene: runtime.getScene(),
-      config: runtime.config,
+      config: runtime.renderConfig,
       scales: runtime.scales,
       ids: runtime.ids,
       lookup: { gene: runtime.lookup.geneData },
@@ -2110,6 +2130,8 @@ export default function clusterMap() {
     });
   };
   my.destroy = () => {
+    figureSurface.clear();
+    themeMedia?.removeEventListener("change", systemThemeChanged); themeMedia = null;
     annotationUiContext = null;
     annotationOverlay?.dispose(); annotationOverlay = null;
     stateSnapshots.reset();
@@ -2132,6 +2154,8 @@ export default function clusterMap() {
     container
       ?.selectAll([
         "svg.clusterMap",
+        "div.clusterMapFigureSurface",
+        "div.clusterMapFigureDimensions",
         "input.colourPicker",
         "div.tooltip",
         "canvas.clusterMapCanvas",

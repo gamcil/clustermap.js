@@ -1,6 +1,7 @@
 import { select } from "d3-selection";
 import { transition } from "d3-transition";
 import { renderSvg } from "./svgRenderer.js";
+import { figureConfig } from "./theme.mjs";
 
 const noop = () => {};
 
@@ -42,6 +43,7 @@ export function exportChartSvg({
   documentRef = document,
 }) {
   if (!scene) throw new Error("Cannot export an SVG before the chart has rendered.");
+  config = figureConfig(config);
   const namespace = "http://www.w3.org/2000/svg";
   const svgNode = documentRef.createElementNS(namespace, "svg");
   // SVG text getBBox() is unreliable while the tree is detached. Attach it
@@ -100,5 +102,9 @@ export function exportChartSvg({
   svgNode.setAttribute("width", bounds.width + padding * 2);
   svgNode.setAttribute("height", bounds.height + padding * 2);
   svgNode.setAttribute("xmlns", namespace);
+  select(svgNode).insert("rect", ":first-child")
+    .attr("x", bounds.x - padding).attr("y", bounds.y - padding)
+    .attr("width", bounds.width + padding * 2).attr("height", bounds.height + padding * 2)
+    .attr("fill", config.figureStyle.background);
   return new XMLSerializer().serializeToString(svgNode);
 }

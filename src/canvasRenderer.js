@@ -1,6 +1,7 @@
 import { rgbaToRgb } from "./utils.js";
 import { hitTest } from "./hitTest.mjs";
 import { worldViewport } from "./camera.mjs";
+import { figureConfig } from "./theme.mjs";
 import { queryViewportOrdered } from "./spatialIndex.mjs";
 import {
   offsetsForGene,
@@ -12,13 +13,14 @@ import {
   geneVisibleForPreview,
   locusGeometryForPreview,
   previewOffsetsForLocus,
+  previewLinkAnchors,
 } from "./scenePreview.mjs";
-import { clusterPairKey } from "./layout.mjs";
-import { interpolateLinkAnchors, interpolateLinkOpacity, traceLinkPath } from "./links/layout.mjs";
+import { clusterPairKey, figureBoundsForChrome } from "./layout.mjs";
+import { interpolateLinkAnchors, interpolateLinkOpacity, traceLinkPath, getLinkLabelPosition } from "./links/layout.mjs";
 import { hitTestTreeNode, interpolateTreeLayout } from "./treeLayout.mjs";
 import { drawCanvasTree, layoutCanvasTree } from "./treeCanvasRenderer.mjs";
 import { resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
-import { annotationPanelsForFrame } from "./annotations.mjs";
+import { annotationPanelsForFrame, annotationFigureBounds } from "./annotations.mjs";
 import { drawCanvasAnnotations } from "./annotationRenderers.mjs";
 
 /**
@@ -162,9 +164,24 @@ export function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = 
  * Scene layout deliberately records only renderer-neutral chrome extents; the
  * raster adapter owns glyph measurement for initial camera fitting.
  */
-export function canvasFigureBounds(context, scene, config, tree = null) {
+export function canvasFigureBounds(context, scene, config, tree = null, { preview = null, textMetrics = null } = {}) {
   if (!scene?.bounds) return null;
-  const bounds = { ...(scene.figureBounds || scene.bounds) };
+  let structural = scene.bounds;
+  const chrome = preview?.chrome || scene.chrome;
+  const panels = annotationPanelsForFrame(scene, preview);
+  if (preview) {
+    structural = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+    for (const locus of scene.loci.values()) {
+      const geometry = locusGeometryForPreview(preview, locus);
+      const { x = 0, y = 0 } = geometry.offsets;
+      structural.minX = Math.min(structural.minX, geometry.worldStart ?? locus.worldStart + x);
+      structural.maxX = Math.max(structural.maxX, geometry.worldEnd ?? locus.worldEnd + x);
+      structural.minY = Math.min(structural.minY, locus.bounds.minY + y);
+      structural.maxY = Math.max(structural.maxY, locus.bounds.maxY + y);
+    }
+  }
+  const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome),
+    scene.annotationPanels || [], scene.clusters, panels) : scene.figureBounds || structural) };
   const include = (x, y) => {
     bounds.minX = Math.min(bounds.minX, x);
     bounds.maxX = Math.max(bounds.maxX, x);
@@ -174,12 +191,18 @@ export function canvasFigureBounds(context, scene, config, tree = null) {
   const includeText = (text, x, y, { fontSize, fontFamily = config.plot.fontFamily,
     fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
     if (!text) return;
-    context.save();
-    context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-    context.textAlign = align;
-    context.textBaseline = baseline;
-    const metrics = context.measureText(String(text));
-    context.restore();
+    const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    const key = JSON.stringify([font, align, baseline, String(text)]);
+    let metrics = textMetrics?.get(key);
+    if (!metrics) {
+      context.save();
+      context.font = font;
+      context.textAlign = align;
+      context.textBaseline = baseline;
+      metrics = context.measureText(String(text));
+      context.restore();
+      textMetrics?.set(key, metrics);
+    }
     const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
     const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
     const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
@@ -199,51 +222,59 @@ export function canvasFigureBounds(context, scene, config, tree = null) {
   // Add stroke extent without walking every homology link when labels are off.
   const halfStroke = Math.max(config.gene.shape.strokeWidth || 0, config.locus.trackBar.stroke || 0,
     config.link.show ? config.link.strokeWidth || 0 : 0) / 2;
-  include(scene.bounds.minX - halfStroke, scene.bounds.minY - halfStroke);
-  include(scene.bounds.maxX + halfStroke, scene.bounds.maxY + halfStroke);
+  include(structural.minX - halfStroke, structural.minY - halfStroke);
+  include(structural.maxX + halfStroke, structural.maxY + halfStroke);
   for (const cluster of scene.clusters.values()) {
-    const x = cluster.x + cluster.info.x;
-    includeText(cluster.source.name, x, cluster.y + 8,
+    const x = cluster.x + cluster.info.x + clusterLabelOffsetForPreview(preview, cluster.source.uid);
+    const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
+    includeText(cluster.source.name, x, y + 8,
       { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right" });
-    includeText(cluster.info.locusText, x, cluster.y + 12,
+    includeText(clusterLabelTextForPreview(preview, cluster.source.uid, cluster.info.locusText), x, y + 12,
       { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
   }
   if (config.gene.label.show) {
     for (const gene of scene.genes.values()) {
-      if (!gene.visible) continue;
+      if (!geneVisibleForPreview(preview, gene)) continue;
+      const offsets = offsetsForGene(preview, gene);
+      const geometry = geneGeometryForPreview(preview, gene);
       includeText(gene.source.label || gene.source.name || gene.source.uid,
-        gene.locus.x + gene.label.x, gene.locus.y + gene.label.y,
+        (geometry.labelX ?? gene.locus.x + gene.label.x) + offsets.x, gene.locus.y + gene.label.y + offsets.y,
         { fontSize: config.gene.label.fontSize, align: config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor, rotation: gene.label.rotation });
     }
   }
   if (config.link.show && config.link.label.show) {
     for (const link of scene.links.values()) {
-      if (!link.visible || !link.labelPosition) continue;
-      includeText(link.source.label ?? link.source.identity.toFixed(2), link.labelPosition.x, link.labelPosition.y,
+      const geometry = linkGeometryForPreview(scene, link, preview, config);
+      if (!geometry.visible || !link.labelPosition) continue;
+      const anchors = preview ? previewLinkAnchors(scene, link, preview) : link.anchors;
+      const position = preview && anchors ? getLinkLabelPosition(anchors, config.link.label.position) : link.labelPosition;
+      includeText(link.source.label ?? link.source.identity.toFixed(2), position.x, position.y,
         { fontSize: config.link.label.fontSize, align: "center" });
     }
   }
   if (config.locus.trimIndicators?.show !== false) {
     const style = resolveTrimIndicatorStyle(config.locus.trimIndicators);
     for (const locus of scene.loci.values()) {
-      for (const indicator of locus.trimIndicators || []) {
-        includeText(indicator.text, locus.x + indicator.x, locus.y + indicator.y,
+      const geometry = locusGeometryForPreview(preview, locus);
+      const { x = 0, y = 0 } = geometry.offsets;
+      for (const indicator of geometry.trimIndicators || locus.trimIndicators || []) {
+        includeText(indicator.text, locus.x + indicator.x + x, locus.y + indicator.y + y,
           { fontSize: style.fontSize, fontWeight: style.fontWeight, align: indicator.anchor, baseline: "top", border: style.borderWidth });
       }
     }
   }
-  const treeLayout = layoutCanvasTree(context, tree, scene, config, { trackAnchor: false });
+  const treeLayout = layoutCanvasTree(context, tree, scene, config, { preview, trackAnchor: Boolean(preview) });
   if (treeLayout) {
     include(treeLayout.bounds.minX, treeLayout.bounds.minY);
     include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
   }
-  for (const panel of annotationPanelsForFrame(scene)) {
+  for (const panel of panels) {
     for (const item of panel.texts) includeText(item.text, panel.x + item.x, item.y,
       { fontSize: panel.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
         align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
   }
-  if (scene.chrome?.legend.visible) {
-    const legend = scene.chrome.legend;
+  if (chrome?.legend.visible) {
+    const legend = chrome.legend;
     const subtitleSize = legend.subtitleFontSize || Math.max(10, legend.fontSize * 0.72);
     for (const item of legend.items) {
       const x = legend.position.x + item.x, y = legend.position.y + item.y + item.circleY;
@@ -255,16 +286,16 @@ export function canvasFigureBounds(context, scene, config, tree = null) {
         { fontSize: subtitleSize, fontFamily: legend.fontFamily, baseline: "middle" });
     }
   }
-  if (scene.chrome?.scaleBar.visible) {
-    const bar = scene.chrome.scaleBar;
+  if (chrome?.scaleBar.visible) {
+    const bar = chrome.scaleBar;
     const half = bar.strokeWidth / 2;
     include(bar.position.x - half, bar.position.y - half);
     include(bar.position.x + bar.length + half, bar.position.y + bar.height + half);
     includeText(bar.label, bar.position.x + bar.length / 2, bar.position.y + bar.height + 5,
       { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
   }
-  if (scene.chrome?.colourBar.visible) {
-    const bar = scene.chrome.colourBar;
+  if (chrome?.colourBar.visible) {
+    const bar = chrome.colourBar;
     include(bar.position.x - 0.5, bar.position.y - 0.5);
     include(bar.position.x + bar.width + 0.5, bar.position.y + bar.height + 0.5);
     const font = { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, baseline: "top" };
@@ -430,7 +461,7 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   } else {
     context.fillStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
     context.fill();
-    context.strokeStyle = source.colour || (config.link.groupColour ? colour : "black");
+    context.strokeStyle = source.colour || (config.link.groupColour ? colour : config.figureStyle.outline);
   }
   context.lineWidth = config.link.strokeWidth;
   context.stroke();
@@ -468,7 +499,7 @@ function drawClusterInfo(
 ) {
   const { x, y } = cluster;
   const anchorX = x + cluster.info.x + offsetX;
-  context.fillStyle = "black";
+  context.fillStyle = config.figureStyle?.foreground || "black";
   context.textAlign = "end";
   context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
   context.textBaseline = "alphabetic";
@@ -521,7 +552,7 @@ function drawGeneLabel(context, gene, config, geometry = {}, { x: offsetX = 0, y
   context.save();
   context.translate(labelX, gene.locus.y + y + offsetY);
   context.rotate((rotation * Math.PI) / 180);
-  context.fillStyle = "black";
+  context.fillStyle = config.figureStyle?.foreground || "black";
   context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
   context.textAlign = config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor;
   context.textBaseline = "alphabetic";
@@ -561,7 +592,7 @@ function drawLocusHighlight(context, locus, camera, geometry = {}) {
   context.restore();
 }
 
-function drawLocusHover(context, scene, locusUid, geometry = {}) {
+function drawLocusHover(context, scene, locusUid, geometry = {}, foreground = "black") {
   if (!locusUid) return;
   const locus = scene.loci.get(locusUid);
   if (!locus) return;
@@ -573,7 +604,7 @@ function drawLocusHover(context, scene, locusUid, geometry = {}) {
   const y = locus.y + hover.y + (offsets.y || 0);
   context.fillStyle = "rgba(0, 0, 0, 0.4)";
   context.fillRect(x, y, hover.width, hover.height);
-  context.fillStyle = "black";
+  context.fillStyle = foreground;
   context.fillRect(locus.x + hover.leftHandleX + (offsets?.x || 0), y, 8, hover.height);
   context.fillRect(locus.x + hover.rightHandleX + (offsets?.x || 0), y, 8, hover.height);
 }
@@ -705,10 +736,10 @@ function drawLegend(context, legend) {
     context.arc(item.x, item.y + item.circleY, item.radius, 0, 2 * Math.PI);
     context.fillStyle = item.colour;
     context.fill();
-    context.fillStyle = "black";
+    context.fillStyle = legend.textColour || "black";
     context.fillText(item.label, item.x + item.textX, item.y + item.textY);
     if (item.subtitle) {
-      context.fillStyle = "#566273";
+      context.fillStyle = legend.subtitleColour || "#566273";
       context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
       context.fillText(item.subtitle, item.x + item.textX, item.y + item.subtitleY);
       context.font = `${legend.fontSize}px ${legend.fontFamily}`;
@@ -732,7 +763,7 @@ function drawScaleBar(context, scaleBar) {
   context.moveTo(scaleBar.length, 0);
   context.lineTo(scaleBar.length, scaleBar.height);
   context.stroke();
-  context.fillStyle = "black";
+  context.fillStyle = scaleBar.textColour || "black";
   context.font = `${scaleBar.fontSize}px ${scaleBar.fontFamily}`;
   context.textAlign = "center";
   context.textBaseline = "top";
@@ -750,10 +781,10 @@ function drawColourBar(context, colourBar) {
   gradient.addColorStop(1, colourBar.endColour);
   context.fillStyle = gradient;
   context.fillRect(0, 0, colourBar.width, colourBar.height);
-  context.strokeStyle = "black";
+  context.strokeStyle = colourBar.textColour || "black";
   context.lineWidth = 1;
   context.strokeRect(0, 0, colourBar.width, colourBar.height);
-  context.fillStyle = "black";
+  context.fillStyle = colourBar.textColour || "black";
   context.font = `${colourBar.fontSize}px ${colourBar.fontFamily}`;
   context.textBaseline = "top";
   context.textAlign = "center";
@@ -919,6 +950,7 @@ export function renderCanvas({
   showChrome = true,
   showAnnotationGeometry = true,
 }) {
+  config = figureConfig(config);
   // Resolve label visibility before querying or projecting records. The
   // WebGPU overlay requests labels without bodies; disabled labels should
   // not cause otherwise unused gene/link passes on every interaction frame.
@@ -1071,7 +1103,8 @@ export function renderCanvas({
       context,
       displayScene,
       hoverLocusUid,
-      hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
+      hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null,
+      config.figureStyle.foreground
     );
   }
   for (const gene of (showGenes || showGeneLabels)

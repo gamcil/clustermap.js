@@ -4671,7 +4671,7 @@ function invalidateTreePresentation(tree) {
 /** Resolve properties once per presentation/config revision, never per tween. */
 function resolveTreePresentation(tree, config = {}) {
   const defaults = { ...TREE_COLOURING_DEFAULTS, ...config.colouring };
-  const signature = JSON.stringify([config.branch?.colour, config.branch?.width, defaults]);
+  const signature = JSON.stringify([config.branch?.colour, config.branch?.width, config.textColour, defaults]);
   const cached = stylesCache.get(tree);
   if (cached && cached.presentation === tree.presentation && cached.signature === signature) return cached.value;
   validateTreePresentation(tree, config);
@@ -4699,7 +4699,7 @@ function resolveTreePresentation(tree, config = {}) {
     const mergeStyle = { ...base, ...(automatic ? { colour: automatic } : {}), ...subtree };
     if (node.children) stems.set(uid, mergeStyle);
     const label = tree.presentation?.nodes?.[uid]?.label;
-    if (label?.text) annotations.set(uid, { colour: "#333", fontSize: 10, fontWeight: 400, fontStyle: "normal", ...label });
+    if (label?.text) annotations.set(uid, { colour: config.textColour || "#333", fontSize: 10, fontWeight: 400, fontStyle: "normal", ...label });
     for (const child of node.children || []) {
       branches.set(child, { ...mergeStyle, ...tree.presentation?.nodes?.[child]?.branch });
       visit(child, subtree, automatic);
@@ -4978,6 +4978,7 @@ function layoutTree({
     Object.assign(cutLine.label, measureText(cutLine.label.text, cutLine.label));
   }
   return positionTreeLayout({
+    background: config.figureStyle?.background || "white", foreground: config.figureStyle?.foreground || "black",
     cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
     rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX, style: branch },
     ys, previousYs,
@@ -6653,7 +6654,7 @@ function sameCellDefinition(before, after) {
 
 /** Project JSON annotations once, using the same row coordinates as loci. */
 function layoutAnnotationPanels(definitions, clusters, bounds,
-  { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null } = {}) {
+  { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null, theme = null } = {}) {
   if (!definitions?.length || !bounds || !clusters.size) return [];
   const previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
   let x = anchorX;
@@ -6673,15 +6674,16 @@ function layoutAnnotationPanels(definitions, clusters, bounds,
     const cellGap = isBar ? 0 : source.cellGap ?? ANNOTATION_DEFAULTS.cellGap;
     const borderWidth = source.cellBorderWidth ?? ANNOTATION_DEFAULTS.cellBorderWidth;
     const borderColour = source.cellBorderColour ?? ANNOTATION_DEFAULTS.cellBorderColour;
+    const missingColour = source.missingColour ?? theme?.missing ?? ANNOTATION_DEFAULTS.missingColour;
     const position = isBar ? linear().domain(domain).range([0, width]).clamp(true) : null;
     const rows = sameCellDefinition(before?.definition, source) ? before.rows : [...clusters.keys()].map((uid) => ({ uid, cells: source.columns.map((_, i) => {
       const value = Object.hasOwn(source.values, uid) ? source.values[uid][i] : null;
       const rect = { x: i * cellWidth + cellGap / 2, y: -cellHeight / 2 + cellGap / 2,
         width: cellWidth - cellGap, height: cellHeight - cellGap,
-        fill: value === null ? source.missingColour ?? "#eeeeee" : colour(value) };
+        fill: value === null ? missingColour : colour(value) };
       return { ...rect, value, column: source.columns[i], columnIndex: i,
         rects: isBar ? barRectangles(value, position, width, cellHeight,
-          source.colour ?? ANNOTATION_DEFAULTS.colour, source.missingColour ?? ANNOTATION_DEFAULTS.missingColour,
+          source.colour ?? ANNOTATION_DEFAULTS.colour, missingColour,
           borderWidth, borderColour) : cellRectangles(rect, borderWidth, borderColour) };
     }) }));
     const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
@@ -6697,13 +6699,13 @@ function layoutAnnotationPanels(definitions, clusters, bounds,
     }
     const footer = [], key = [];
     if (source.showKey !== false && isBar) {
-      key.push({ x: 0, y: 0, width, height: 1, fill: "#555555" });
+      key.push({ x: 0, y: 0, width, height: 1, fill: theme?.muted ?? "#555555" });
       const ticks = position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40))));
       if (!ticks.includes(0)) ticks.push(0);
       for (const value of ticks.sort((a, b) => a - b)) {
         const tickX = position(value);
         key.push({ x: Math.max(0, Math.min(width - Math.min(1, width), tickX - 0.5)), y: 0,
-          width: Math.min(1, width), height: 5, fill: "#555555" });
+          width: Math.min(1, width), height: 5, fill: theme?.muted ?? "#555555" });
         footer.push(text(numberLabel(value), tickX, fontSize + 9,
           { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
       }
@@ -6717,7 +6719,8 @@ function layoutAnnotationPanels(definitions, clusters, bounds,
       footer.push(text(category, 15, i * (fontSize + 6) + 9));
     });
     for (const item of footer) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
-    const panel = { uid: source.uid, definition: source, title: source.title ?? source.uid, x, width, cellHeight, headingHeight, titleDescent, rowOffset, rows, header, footer, key, fontSize, fontFamily };
+    const panel = { uid: source.uid, definition: source, title: source.title ?? source.uid, x, width, cellHeight, headingHeight, titleDescent, rowOffset, rows, header, footer, key, fontSize, fontFamily,
+      textColour: theme?.foreground ?? "#333333" };
     // Text overhang contributes to figure bounds, not inter-panel spacing.
     panel.extentWidth = Math.max(width,
       ...header.map((item) => item.x + item.bounds.maxX),
@@ -6815,10 +6818,10 @@ function projectAnnotationFrame(scene, preview) {
   return frames.map((frame) => ({ ...frame, verticalBounds: { minY, maxY } }));
 }
 
-function annotationFigureBounds(bounds, panels, clusters) {
+function annotationFigureBounds(bounds, panels, clusters, frames = null) {
   if (!bounds || !panels.length) return bounds;
   const result = { ...bounds };
-  for (const panel of annotationPanelsForFrame({ annotationPanels: panels, clusters })) {
+  for (const panel of frames || annotationPanelsForFrame({ annotationPanels: panels, clusters })) {
     const area = annotationPanelBounds(panel);
     result.maxX = Math.max(result.maxX, panel.x + panel.extentWidth);
     result.minY = Math.min(result.minY, area.minY);
@@ -7105,7 +7108,7 @@ function renderSvgAnnotations(plot, scene, { preview = null, transition = null, 
       .attr("width", (item) => item.width).attr("height", (item) => item.height).attr("fill", (item) => item.fill);
     const texts = group.selectAll("text").data(panel.texts).join("text")
       .text((item) => item.text).attr("text-anchor", (item) => item.anchor)
-      .attr("font-weight", (item) => item.weight || 400).attr("fill", "#333333");
+      .attr("font-weight", (item) => item.weight || 400).attr("fill", panel.textColour);
     moving(texts).attr("transform", (item) => `translate(${item.x},${item.y}) rotate(${item.rotation || 0})`);
   });
 }
@@ -7133,7 +7136,7 @@ function drawCanvasAnnotations(context, scene, preview = null, { showGeometry = 
       context.translate(item.x, item.y);
       context.rotate((item.rotation || 0) * Math.PI / 180);
       context.font = `${item.weight || 400} ${panel.fontSize}px ${panel.fontFamily}`;
-      context.fillStyle = "#333333";
+      context.fillStyle = panel.textColour;
       context.textAlign = item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left";
       context.textBaseline = "alphabetic";
       context.fillText(item.text, 0, 0);
@@ -7707,616 +7710,57 @@ function fitCameraForBounds({
   };
 }
 
-// Structural styles and the same neutral controls used by the plot editor.
-function installTreeControlsStyle(doc) {
-  if (doc.getElementById("clustermap-tree-controls-style")) return;
-  const style = doc.createElement("style");
-  style.id = "clustermap-tree-controls-style";
+const palettes = {
+  light: { mode: "light", background: "#ffffff", foreground: "#20252c", muted: "#687586",
+    branch: "#555555", guide: "#999999", outline: "#111111", surface: "#ffffff", border: "#cbd3de", missing: "#eeeeee", subtle: "#f3f6fa", hover: "#e3ecf8", selection: "#d6e6fc", accent: "#1677ff", danger: "#b42318" },
+  dark: { mode: "dark", background: "#171b22", foreground: "#e5eaf1", muted: "#a0adbd",
+    branch: "#bac4d1", guide: "#748193", outline: "#c9d2df", surface: "#232a35", border: "#465365", missing: "#39414e", subtle: "#293241", hover: "#354660", selection: "#3a5276", accent: "#85b7ff", danger: "#ffaaa3" },
+};
+
+function resolveTheme(mode = "auto") {
+  const dark = mode === "dark" || mode === "auto" && globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  return palettes[dark ? "dark" : "light"];
+}
+
+/** Figure colours are independent of the interface/system theme. */
+function figureConfig(config) {
+  if (config.figureStyle) return config;
+  const theme = { background: config.plot.background, foreground: "#000000",
+    outline: "#000000", branch: "#555555", guide: "#999999",
+    muted: "#687586", missing: "#eeeeee" };
+  return { ...config, figureStyle: theme,
+    tree: { ...config.tree, textColour: theme.foreground,
+      branch: { ...config.tree.branch, colour: config.tree.branch.colour ?? theme.branch },
+      leafGuide: { ...config.tree.leafGuide, colour: config.tree.leafGuide.colour ?? theme.guide } },
+    gene: { ...config.gene, shape: { ...config.gene.shape, stroke: config.gene.shape.stroke ?? theme.outline } },
+    locus: { ...config.locus, trackBar: { ...config.locus.trackBar, colour: config.locus.trackBar.colour ?? theme.outline } },
+    scaleBar: { ...config.scaleBar, colour: config.scaleBar.colour ?? theme.foreground },
+  };
+}
+
+/** Scoped CSS keeps multiple independently themed charts on one page possible. */
+function applyTheme(element, theme) {
+  if (!element) return;
+  element.dataset.clustermapTheme = theme.mode;
+  element.style.colorScheme = theme.mode;
+  for (const [key, value] of Object.entries(theme)) if (key !== "mode") element.style.setProperty(`--cm-${key}`, value);
+  const doc = element.ownerDocument;
+  if (doc.getElementById("clustermap-theme-style")) return;
+  const style = doc.createElement("style"); style.id = "clustermap-theme-style";
   style.textContent = `
-.cm-tree-controls { font:inherit; color:inherit; text-align:left; }
-.cm-tree-controls * { box-sizing:border-box; }
-.cm-tree-controls [hidden] { display:none!important; }
-.cm-tree-controls fieldset { min-width:0; margin:0 0 10px; padding:8px; border:1px solid #ddd; border-radius:4px; }
-.cm-tree-controls legend { padding:0 4px; font-weight:600; }
-.cm-tree-controls button, .cm-tree-controls input, .cm-tree-controls select { font:inherit; color:inherit; }
-.cm-tree-controls button, .cm-tree-controls select, .cm-tree-controls input:not([type=checkbox]):not([type=color]):not([type=range]) { min-height:30px; border:1px solid #cbd3de; border-radius:6px; padding:4px 8px; background:#fff; }
-.cm-tree-controls button { cursor:pointer; }
-.cm-tree-controls button:hover:not(:disabled) { border-color:#78a9ed; background:#f4f8ff; }
-.cm-tree-controls button:disabled { color:#8993a1; background:#f5f6f8; cursor:default; }
-.cm-tree-controls button[aria-pressed=true] { font-weight:600; }
-.cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:6px; margin:6px 0; }
-.cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }
-.cm-tree-controls input[type=number] { width:64px; min-width:0; }
-.cm-tree-controls input[type=range] { width:100%; }
-.cm-tree-controls select { width:132px; min-width:0; }
-.cm-tree-controls input[type=color] { width:30px; height:24px; padding:0; border:0; background:transparent; cursor:pointer; }
-.cm-tree-controls .cm-tree-heading { font-weight:600; margin-bottom:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cm-tree-controls .cm-tree-branch-row { display:grid; grid-template-columns:minmax(0,1fr) 30px 64px 28px; gap:6px; align-items:center; margin:8px 0; }
-.cm-tree-controls .cm-tree-reset { width:28px; padding:2px; min-height:26px; }
-.cm-tree-controls .cm-tree-wide { display:block; }
-.cm-tree-controls .cm-tree-wide > span { display:block; margin-bottom:4px; }
-.cm-tree-controls .cm-tree-wide input, .cm-tree-controls .cm-tree-wide select { width:100%; }
-.cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
-.cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }
-.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid #e5e9ef; margin:10px 0; }
-.cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:10px; }
-.cm-tree-controls [role=status]:empty { display:none; }
-.cm-tree-controls [role=status] { color:#a13c46; margin:6px 0 0; }
-.cm-tree-controls--popover { width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font-size:12px; line-height:1.3; }
-.cm-tree-controls--popover .cm-tree-heading { font-size:12px; margin-bottom:6px; }
-.cm-tree-controls--popover button, .cm-tree-controls--popover input:not([type=checkbox]):not([type=color]) { min-height:24px; padding:2px 5px; border-radius:4px; }
-.cm-tree-controls--popover input[type=number] { width:52px; }
-.cm-tree-controls--popover input[type=color] { width:24px; height:20px; }
-.cm-tree-controls--popover input[type=checkbox] { width:12px; height:12px; margin:0; }
-.cm-tree-controls--popover .cm-tree-branch-row { grid-template-columns:minmax(0,1fr) 24px 52px 22px; gap:5px; margin:5px 0; }
-.cm-tree-controls--popover .cm-tree-reset { width:22px; min-height:22px; padding:0; }
-.cm-tree-controls--popover .cm-tree-row { margin:4px 0; gap:4px; }
-.cm-tree-controls--popover .cm-tree-format { gap:5px; }
-.cm-tree-controls--popover .cm-tree-separator { margin:6px 0; }
-.cm-tree-controls--popover .cm-tree-actions { margin-top:6px; }
-`.replaceAll(".cm-tree-controls", ".cm-tree-controls.cm-tree-controls");
+[data-clustermap-theme] { color:var(--cm-foreground); background:var(--cm-background); }
+[data-clustermap-theme] :is(.tooltip,.cm-annotation-menu,.cm-annotation-hidden,.annotation-tooltip) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }
+[data-clustermap-theme] :is(button,select,input:not([type=color]):not([type=checkbox]),textarea):not(.cm-data-ui *) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }
+[data-clustermap-theme] button:hover:not(.cm-data-ui *) { background:var(--cm-hover)!important; }
+[data-clustermap-theme] button:disabled { opacity:.45; }
+clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(--cm-foreground); border-color:var(--cm-border); }
+[data-clustermap-theme] .cm-annotation-menu :is(p,summary) { color:var(--cm-muted); }
+[data-clustermap-theme] :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { position:relative; z-index:1; background:transparent; color-scheme:light; }
+[data-clustermap-theme] .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border); }
+[data-clustermap-theme] .clusterMapFigureDimensions { z-index:2; color:var(--cm-muted); font:12px/20px system-ui,sans-serif; white-space:nowrap; }
+[data-clustermap-theme] canvas.clusterMapMinimap { color-scheme:light; }
+`;
   doc.head.append(style);
-}
-
-/** Policy settings and node popovers share the same compact editing form. */
-function createTreeControls({ tree, config, patch, preview, rotate, clusters = [], nodeUid = null,
-  policy = true, onResize, document: doc = globalThis.document }) {
-  installTreeControlsStyle(doc);
-  const element = (tag, parent, text, className) => {
-    const node = doc.createElement(tag);
-    if (text !== undefined) node.textContent = text;
-    if (className) node.className = className;
-    parent?.append(node);
-    return node;
-  };
-  const container = element("div", null, undefined, `cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
-  const message = element("p"); message.setAttribute("role", "status");
-  const run = (action) => { try { action(); message.textContent = ""; } catch (error) { message.textContent = error.message; } };
-  const button = (parent, title, action, className) => {
-    const node = element("button", parent, title, className); node.type = "button";
-    node.onclick = () => run(action); return node;
-  };
-  const section = (title) => { const field = element("fieldset", container); element("legend", field, title); return field; };
-  const input = (parent, title, type, value, options = {}) => {
-    const row = element("label", parent, undefined, "cm-tree-row");
-    element("span", row, title);
-    const control = element("input", row); control.type = type;
-    if (type === "checkbox") control.checked = Boolean(value); else control.value = value ?? "";
-    Object.assign(control, options); return control;
-  };
-  const reset = (scope, uid) => patch([{ type: "tree.presentation.reset", scope, ...(uid ? { ids: [uid] } : {}) }]);
-  const resolved = resolveTreePresentation(tree, config);
-
-  let compatible = tree.distance?.kind === "mergeHeight";
-  try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...resolved.policy, mode: "cutHeight" } } }, config); }
-  catch { compatible = false; }
-  if (policy && compatible) {
-    const field = section("Clade colouring");
-    const effective = resolved.policy;
-    const change = (changes) => [{ type: "tree.presentation.update", scope: "tree", changes: { colouring: changes } }];
-    const enabled = input(field, "Colour clades", "checkbox", effective.mode === "cutHeight");
-    enabled.onchange = () => run(() => patch(change({ mode: enabled.checked ? "cutHeight" : "none" })));
-    const options = element("div", field); options.hidden = !enabled.checked;
-    const actual = effective.cutHeight === "auto" ? resolved.height * 0.7 : effective.cutHeight;
-    const number = input(options, "Cut height", "number", actual, { min: "0", step: "any" });
-    number.onchange = () => run(() => patch(change({ cutHeight: Number(number.value) })));
-    const slider = element("input", options); slider.type = "range";
-    Object.assign(slider, { min: "0", max: String(Math.max(resolved.height, actual) || 1), step: String(resolved.height / 1000 || 0.001), value: actual });
-    slider.setAttribute("aria-label", "Preview cut height");
-    let cancelled = false;
-    const cancel = () => { cancelled = true; preview?.(null); slider.value = actual; number.value = actual; };
-    slider.oninput = () => run(() => { cancelled = false; number.value = slider.value; preview?.(change({ cutHeight: Number(slider.value) })); });
-    slider.onchange = () => { if (!cancelled) run(() => patch(change({ cutHeight: Number(slider.value) }))); };
-    slider.onkeydown = (event) => { if (event.key === "Escape") { cancel(); event.preventDefault(); } };
-    slider.onpointercancel = cancel;
-    const auto = button(number.parentElement, "Auto", () => patch(change({ cutHeight: "auto" })));
-    auto.title = "Use automatic cut height (70%)";
-    auto.setAttribute("aria-pressed", String(effective.cutHeight === "auto"));
-    const palettes = [
-      ["Muted", ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"]],
-      ["Colorblind friendly", ["#0072b2", "#e69f00", "#009e73", "#cc79a7", "#d55e00", "#56b4e9"]],
-    ];
-    if (!palettes.some(([, colours]) => JSON.stringify(colours) === JSON.stringify(effective.palette))) palettes.unshift(["Custom", effective.palette]);
-    const paletteRow = element("label", options, undefined, "cm-tree-row"); element("span", paletteRow, "Palette");
-    const select = element("select", paletteRow); select.setAttribute("aria-label", "Clade palette");
-    palettes.forEach(([name, colours], index) => { const option = element("option", select, name); option.value = index; option.selected = JSON.stringify(colours) === JSON.stringify(effective.palette); });
-    select.onchange = () => run(() => patch(change({ palette: palettes[Number(select.value)][1] })));
-    const line = input(options, "Show cut line", "checkbox", effective.showCutLine);
-    line.onchange = () => run(() => patch(change({ showCutLine: line.checked })));
-  }
-
-  if (policy) {
-    const resetAll = button(container, "Reset all manual styles", () => reset("manual"));
-    resetAll.title = "Clear manual tree styles and labels; keep automatic clade colouring.";
-    resetAll.disabled = !Object.keys(tree.presentation?.nodes || {}).length && !Object.keys(tree.presentation?.subtrees || {}).length;
-    container.append(message);
-    return container;
-  }
-
-  const nodesById = new Map(tree.nodes.map((node) => [node.uid, node]));
-  const clusterNames = new Map(clusters.map((cluster) => [cluster.uid, cluster.name || cluster.label || cluster.uid]));
-  const descriptions = new Map();
-  const describe = (uid) => {
-    if (descriptions.has(uid)) return descriptions.get(uid);
-    const node = nodesById.get(uid);
-    const children = node.children?.map(describe);
-    const info = children ? { count: children.reduce((sum, child) => sum + child.count, 0), labels: children.flatMap((child) => child.labels).slice(0, 2) }
-      : { count: 1, labels: [node.label || clusterNames.get(node.cluster) || node.cluster] };
-    descriptions.set(uid, info);
-    return info;
-  };
-  const titleFor = (uid) => {
-    const node = nodesById.get(uid);
-    if (node.label) return node.label;
-    const { count, labels } = describe(uid);
-    return uid === tree.root ? `All ${count} clusters` : `${labels.join(" + ")}${count > 2 ? ` + ${count - 2} more` : ""}`;
-  };
-  const uid = nodesById.get(nodeUid)?.children ? nodeUid : nodesById.get(tree.root)?.children ? tree.root : null;
-  const host = element("div", container);
-
-  const colourInput = (parent, title, value, fallback, onChange) => {
-    const picker = element("input", parent); picker.type = "color";
-    const initial = color(value || fallback)?.formatHex() || "#555555";
-    let override = value ?? null;
-    const refresh = () => {
-      picker.value = color(override || fallback)?.formatHex() || initial;
-      picker.title = `${title}${override === null ? " (inherited)" : ""}`;
-    };
-    picker.setAttribute("aria-label", title); refresh();
-    picker.oninput = () => {
-      if (picker.value === override) return;
-      run(() => { onChange(picker.value); override = picker.value; picker.title = title; });
-    };
-    picker.onchange = picker.oninput;
-    return { reset: () => { override = null; refresh(); } };
-  };
-  const liveNumber = (control, onChange) => {
-    let previous = control.value === "" ? null : Number(control.value);
-    control.oninput = () => {
-      if (!control.validity.valid) return;
-      const next = control.value === "" ? null : Number(control.value);
-      if (next === previous) return;
-      run(() => { onChange(next); previous = next; });
-    };
-    control.onchange = control.oninput;
-    return (value = "") => { control.value = value; previous = value === "" ? null : Number(value); };
-  };
-  const resetButton = (parent, title, action) => {
-    const control = button(parent, "↺", action, "cm-tree-reset");
-    control.title = title; control.setAttribute("aria-label", title); return control;
-  };
-  function renderNode() {
-    if (!host || !uid) return;
-    host.replaceChildren();
-    host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
-    const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
-    button(host, "Rotate branches", () => rotate(uid));
-    const inheritedBranch = (scope) => {
-      const collection = scope === "subtree" ? "subtrees" : "nodes";
-      const records = tree.presentation?.[collection] || {};
-      const record = { ...records[uid] }; delete record.branch;
-      const inherited = resolveTreePresentation({ ...tree, presentation: {
-        ...tree.presentation, [collection]: { ...records, [uid]: record },
-      } }, config);
-      return (scope === "subtree" ? inherited.stems : inherited.branches).get(uid) || inherited.base;
-    };
-    const branchControls = (scope, title, style, fallback) => {
-      const row = element("div", host, undefined, "cm-tree-branch-row");
-      const name = element("span", row, title);
-      name.title = scope === "subtree" ? "Branches within this clade, excluding its incoming branch." : "Only the horizontal branch entering this node.";
-      const update = (branch) => patch([{ type: "tree.presentation.update", scope, ids: [uid], changes: { branch } }]);
-      const colour = colourInput(row, `${title} colour`, style?.colour, fallback.colour, (colour) => update({ colour }));
-      const width = element("input", row); width.type = "number";
-      Object.assign(width, { min: "0.1", step: "any", value: style?.width ?? fallback.width });
-      width.setAttribute("aria-label", `${title} thickness`); width.title = "Thickness (px); leave blank to inherit";
-      const clearWidth = liveNumber(width, (width) => update({ width }));
-      width.onblur = () => {
-        if (width.value !== "") return;
-        const current = resolveTreePresentation(tree, config);
-        clearWidth((scope === "subtree" ? current.stems : current.branches).get(uid)?.width ?? current.base.width);
-      };
-      resetButton(row, `Reset ${title.toLowerCase()} style`, () => { update(null); colour.reset(); clearWidth(fallback.width); });
-    };
-    branchControls("subtree", "Subtree", tree.presentation?.subtrees?.[uid]?.branch, inheritedBranch("subtree"));
-    const record = tree.presentation?.nodes?.[uid] || {};
-    if (uid !== tree.root) branchControls("node", "Incoming branch", record.branch, inheritedBranch("node"));
-    element("hr", host, undefined, "cm-tree-separator");
-    const label = record.label || {};
-    const text = input(host, "Label", "text", label.text, { placeholder: "Clade label" });
-    text.setAttribute("aria-label", "Annotation text"); text.parentElement.classList.add("cm-tree-wide");
-    const updateLabel = (label) => patch([{ type: "tree.presentation.update", scope: "node", ids: [uid], changes: { label } }]);
-    let previousText = text.value;
-    text.oninput = () => {
-      if (text.value === previousText) return;
-      run(() => { updateLabel({ text: text.value || null }); previousText = text.value; });
-    };
-    const formatting = element("div", host, undefined, "cm-tree-format");
-    const colour = colourInput(formatting, "Text colour", label.colour, "#333", (colour) => updateLabel({ colour }));
-    const size = element("input", formatting); size.type = "number";
-    Object.assign(size, { min: "1", step: "any", value: label.fontSize ?? "", placeholder: "10" });
-    size.setAttribute("aria-label", "Text size"); size.title = "Text size (px); leave blank to inherit";
-    const bold = input(formatting, "Bold", "checkbox", label.fontWeight === 700);
-    const italic = input(formatting, "Italic", "checkbox", label.fontStyle === "italic");
-    const clearSize = liveNumber(size, (fontSize) => updateLabel({ fontSize }));
-    bold.onchange = () => run(() => updateLabel({ fontWeight: bold.checked ? 700 : null }));
-    italic.onchange = () => run(() => updateLabel({ fontStyle: italic.checked ? "italic" : null }));
-    resetButton(formatting, "Clear label and formatting", () => {
-      updateLabel(null);
-      text.value = ""; previousText = ""; colour.reset(); clearSize(); bold.checked = false; italic.checked = false;
-    });
-    const actions = element("div", host, undefined, "cm-tree-actions");
-    const resetNode = button(actions, "Reset", () => {
-      if (tree.presentation?.subtrees?.[uid] || tree.presentation?.nodes?.[uid]) {
-        patch([
-          { type: "tree.presentation.reset", scope: "subtree", ids: [uid] },
-          { type: "tree.presentation.reset", scope: "node", ids: [uid] },
-        ]);
-      }
-      renderNode();
-      host.querySelector(".cm-tree-actions button")?.focus({ preventScroll: true });
-    });
-    resetNode.title = "Reset this node's subtree style, incoming branch and label; keep descendant overrides and automatic colouring.";
-    onResize?.();
-  }
-  renderNode();
-  container.append(message);
-  return container;
-}
-
-// Browser-only tooltip lifecycle shared by any chart renderer. Menu content is
-
-function createHtmlOverlay({
-  tooltip,
-  scales,
-  actions,
-  eventNamespace = ".clusterMapTooltip",
-}) {
-  const windowRef = tooltip.node()?.ownerDocument?.defaultView;
-  const clickEvent = `click${eventNamespace}`;
-  const keyEvent = `keydown${eventNamespace}`;
-  let focusTarget = null;
-  let treeMenu = false;
-  let menuTree = null;
-
-  const hide = (returnFocus = false) => {
-    tooltip.style("opacity", 0).style("pointer-events", "none").attr("aria-hidden", "true").property("inert", true);
-    const wasTreeMenu = treeMenu;
-    treeMenu = false;
-    menuTree = null;
-    if (returnFocus && focusTarget?.isConnected) focusTarget.focus?.({ preventScroll: true });
-    focusTarget = null;
-    if (wasTreeMenu) tooltip.html("");
-  };
-
-  const dismissOnOutsideClick = (event) => {
-    const node = tooltip.node();
-    if (!node || event.target === node || node.contains(event.target) || event.composedPath?.().includes(node)) return;
-    hide();
-  };
-
-  const position = (event) => {
-    const bounds = tooltip.node().getBoundingClientRect();
-    const rect = event.target?.getBoundingClientRect?.();
-    const x = event.clientX ?? (rect ? rect.x + rect.width / 2 : 0);
-    const y = event.clientY ?? (rect ? rect.y + rect.height : 0);
-    tooltip
-      .interrupt()
-      .style("left", `${Math.max(8, Math.min(x - bounds.width / 2, (windowRef?.innerWidth || Infinity) - bounds.width - 8))}px`)
-      .style("top", `${Math.max(8, Math.min(y + 12, (windowRef?.innerHeight || Infinity) - bounds.height - 8))}px`)
-      .style("opacity", 1)
-      .style("pointer-events", "all");
-  };
-  const show = (event, contents) => {
-    tooltip.html("").append(() => contents.node());
-    tooltip.attr("aria-hidden", null).property("inert", false).style("position", "fixed");
-    position(event);
-  };
-
-  const geneContents = (gene) => {
-    const div = create$1("div").attr("class", "tooltip-contents")
-      .style("display", "flex").style("flex-direction", "column")
-      .style("gap", "4px").style("width", "260px");
-    div.append("label").attr("for", "gene-label-input").text("Edit label");
-    const text = div.append("input").attr("id", "gene-label-input").attr("type", "text")
-      .attr("value", gene.label || gene.name || gene.uid).style("box-sizing", "border-box").style("width", "100%");
-    div.append("label").attr("for", "gene-qualifiers-input").text("Gene qualifiers");
-    const select = div.append("select").attr("id", "gene-qualifiers-input").attr("multiple", true)
-      .attr("size", 4).style("box-sizing", "border-box").style("width", "100%");
-    const names = gene.names || {};
-    select.selectAll("option").data(Object.keys(names)).join("option")
-      .text((key) => `${names[key]} [${key}]`).attr("value", (key) => names[key]);
-    const groupId = scales.group(gene.uid);
-    const group = div.append("div").style("margin-top", "2px");
-    group.append("span").text("Similarity group: ");
-    group.append("span").text(scales.name(groupId)).style("color", scales.colour(groupId)).style("font-weight", "bold");
-    const colour = color(gene.colour || scales.colour(groupId));
-    const pickerColour = colour ? colour.formatHex() : "#000000";
-    div.append("label").text("Choose gene colour: ").append("input")
-      .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
-      .on("change", (event) => actions.updateGene(gene, { colour: event.target.value }));
-    div.append("button").text("Anchor map on gene").on("click", () => actions.anchorGene(gene));
-    if (typeof actions.revealGene === "function") {
-      div.append("button").text("Reveal in data editor").on("click", () => {
-        actions.revealGene(gene);
-        hide();
-      });
-    }
-    text.on("input", (event) => { actions.updateGene(gene, { label: event.target.value }); select.attr("value", null); });
-    select.on("change", (event) => { actions.updateGene(gene, { label: event.target.value }); text.attr("value", event.target.value); });
-    return div;
-  };
-
-  const groupContents = (group) => {
-    const div = create$1("div").attr("class", "tooltip-contents")
-      .style("display", "flex").style("flex-direction", "column");
-    div.append("label").text("Edit label");
-    const text = div.append("input").attr("type", "text").attr("value", group.label || group.uid);
-    div.append("label").text("Merge with...");
-    const groups = actions.getGroups();
-    const select = div.append("select").attr("multiple", true);
-    select.selectAll("option").data(groups.filter((candidate) => candidate.uid !== group.uid)).join("option")
-      .text((candidate) => candidate.label).attr("value", (candidate) => candidate.uid);
-    div.append("button").text("Merge!").on("click", () => {
-      const sourceIds = [...select.node().options]
-        .filter((option) => option.selected)
-        .map((option) => groups.find((candidate) => String(candidate.uid) === option.value)?.uid)
-        .filter((uid) => uid !== undefined);
-      if (sourceIds.length) actions.mergeGroups(group, sourceIds);
-    });
-    const colour = color(group.colour);
-    const pickerColour = colour ? colour.formatHex() : "#000000";
-    div.append("label").text("Choose group colour: ").append("input")
-      .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
-      .on("change", (event) => actions.updateGroup(group, { colour: event.target.value }));
-    div.append("button").text("Hide group").on("click", () => actions.updateGroup(group, { hidden: true }));
-    if (typeof actions.revealGroup === "function") {
-      div.append("button").text("Reveal in data editor").on("click", () => {
-        actions.revealGroup(group);
-        hide();
-      });
-    }
-    text.on("input", (event) => actions.updateGroup(group, { label: event.target.value }));
-    return div;
-  };
-
-  return {
-    isTreeMenuOpen: (tree) => treeMenu && menuTree === tree,
-    enter: () => {
-      tooltip
-        .interrupt()
-        .attr("aria-hidden", null).property("inert", false)
-        .style("opacity", 1)
-        .style("pointer-events", "all");
-      // A chart must never replace another chart's window listener. The
-      // namespace is supplied by the chart runtime and is removed on redraw
-      // or destroy, which also releases this overlay's closure.
-      if (windowRef) select(windowRef).on(clickEvent, dismissOnOutsideClick);
-    },
-    leave: () => {
-      if (treeMenu) return;
-      const active = document.activeElement;
-      if (active?.tagName === "INPUT" && tooltip.node().contains(active)) return;
-      tooltip
-        .transition()
-        .delay(400)
-        .style("opacity", 0)
-        .style("pointer-events", "none");
-    },
-    show,
-    showGeneMenu: (event, gene) => { event.preventDefault(); show(event, geneContents(gene)); },
-    showGroupMenu: (event, group) => { event.preventDefault(); show(event, groupContents(group)); },
-    showTreeMenu: (event, uid) => {
-      event.preventDefault(); event.stopPropagation();
-      focusTarget = event.target;
-      const options = actions.treeControls();
-      menuTree = options.tree;
-      const controls = createTreeControls({ ...options, nodeUid: uid, policy: false,
-        onResize: () => { if (treeMenu) position(event); } });
-      show(event, select(controls));
-      treeMenu = true;
-      if (windowRef) {
-        select(windowRef).on(clickEvent, dismissOnOutsideClick).on(keyEvent, (key) => {
-          if (key.key === "Escape" && treeMenu) { key.preventDefault(); hide(true); }
-        });
-      }
-      controls.querySelector("button, input, select")?.focus({ preventScroll: true });
-    },
-    dispose: () => {
-      if (windowRef) select(windowRef).on(clickEvent, null).on(keyEvent, null);
-      tooltip.interrupt();
-      hide(treeMenu);
-    },
-  };
-}
-
-// Translates renderer-independent pointer coordinates into chart-state actions.
-// Renderers only need to forward pointer events in chart-world coordinates.
-function createInteractionController({
-  clusterRows,
-  getClusterOrder,
-  getClusterPosition,
-  getTree = () => null,
-  getLocusOffset,
-  selectedLocusIds = () => [],
-  selectedClusterIds = () => [],
-  setDragging,
-  previewClusterDrag,
-  commitClusterOrder,
-  previewLocusOffset,
-  previewLocusOffsets = null,
-  commitLocusOffset,
-  previewLocusTrim,
-  commitLocusTrim,
-  cancelInteraction = () => {},
-  flipLocus,
-}) {
-  let clusterDrag = null;
-  let locusDrag = null;
-
-  const clamp = (value, [min, max]) => Math.min(max, Math.max(min, value));
-
-  return {
-    beginClusterDrag(uid, pointerY) {
-      const order = [...getClusterOrder()];
-      const selected = new Set(selectedClusterIds());
-      // Dragging a selected cluster moves every selected cluster as one
-      // ordered block. A cluster outside the selection keeps the familiar
-      // single-row drag behaviour.
-      const uids = selected.has(uid)
-        ? order.filter((clusterUid) => selected.has(clusterUid))
-        : [uid];
-      const remaining = order.filter((clusterUid) => !uids.includes(clusterUid));
-      const draggedIndex = uids.indexOf(uid);
-      const legalInsertions = [];
-      for (let insertion = 0; insertion <= remaining.length; insertion += 1) {
-        const candidate = [
-          ...remaining.slice(0, insertion),
-          ...uids,
-          ...remaining.slice(insertion),
-        ];
-        if (isTreeOrderCompatible(getTree(), candidate)) legalInsertions.push(insertion);
-      }
-      clusterDrag = {
-        uid,
-        uids,
-        draggedIndex,
-        legalInsertions,
-        baseOrder: order,
-        blocked: legalInsertions.length === 0,
-        selected: new Set(uids),
-        order,
-        positions: new Map(uids.map((clusterUid) => [
-          clusterUid,
-          getClusterPosition(clusterUid),
-        ])),
-        pointerOffset: getClusterPosition(uid) - pointerY,
-      };
-      setDragging(true);
-    },
-
-    moveClusterDrag(pointerY) {
-      if (!clusterDrag) return;
-      if (clusterDrag.blocked) return;
-      const range = clusterRows();
-      const selectedYs = [...clusterDrag.positions.values()];
-      const anchorY = clusterDrag.positions.get(clusterDrag.uid);
-      const rowMin = Math.min(...range);
-      const rowMax = Math.max(...range);
-      const extentMin = rowMin + anchorY - Math.min(...selectedYs);
-      const extentMax = rowMax - (Math.max(...selectedYs) - anchorY);
-      const legalTargets = clusterDrag.legalInsertions.map((insertion) => ({
-        insertion,
-        index: insertion + clusterDrag.draggedIndex,
-        y: range[insertion + clusterDrag.draggedIndex],
-      })).filter((candidate) => candidate.y >= extentMin && candidate.y <= extentMax);
-      if (!legalTargets.length) return;
-      const legalMin = Math.min(...legalTargets.map((candidate) => candidate.y));
-      const legalMax = Math.max(...legalTargets.map((candidate) => candidate.y));
-      // Keep the whole selected set inside the plot and stop at the first or
-      // last tree-compatible insertion. Using only the dragged row's range
-      // lets a multi-row selection overrun either boundary.
-      const allowedY = [Math.max(legalMin, extentMin), Math.min(legalMax, extentMax)];
-      const rawY = clamp(pointerY + clusterDrag.pointerOffset, allowedY);
-      const target = legalTargets.reduce((closest, candidate) =>
-        Math.abs(candidate.y - rawY) < Math.abs(closest.y - rawY) ? candidate : closest
-      , legalTargets[0]);
-      const previous = legalTargets
-        .filter((candidate) => candidate.y < target.y)
-        .at(-1);
-      const next = legalTargets.find((candidate) => candidate.y > target.y);
-      const minY = previous ? (previous.y + target.y) / 2 : legalMin;
-      const maxY = next ? (next.y + target.y) / 2 : legalMax;
-      const y = clamp(rawY, [
-        Math.max(Math.min(minY, maxY), allowedY[0]),
-        Math.min(Math.max(minY, maxY), allowedY[1]),
-      ]);
-      const remaining = clusterDrag.baseOrder.filter((uid) => !clusterDrag.selected.has(uid));
-      const order = [
-        ...remaining.slice(0, target.insertion),
-        ...clusterDrag.uids,
-        ...remaining.slice(target.insertion),
-      ];
-      clusterDrag.order = order;
-      const delta = y - clusterDrag.positions.get(clusterDrag.uid);
-      const positions = new Map(
-        [...clusterDrag.positions].map(([uid, position]) => [uid, position + delta])
-      );
-      previewClusterDrag(clusterDrag.uid, y, order, positions);
-    },
-
-    endClusterDrag() {
-      if (!clusterDrag) return;
-      clusterDrag = null;
-      setDragging(false);
-      commitClusterOrder();
-    },
-
-    cancelClusterDrag() {
-      if (!clusterDrag) return;
-      clusterDrag = null;
-      setDragging(false);
-      cancelInteraction();
-    },
-
-    beginLocusDrag(uid, pointerX) {
-      const selected = new Set(selectedLocusIds());
-      const locusUids = selected.has(uid) ? [...selected] : [uid];
-      locusDrag = {
-        uids: locusUids,
-        pointerStart: pointerX,
-        initialOffsets: new Map(locusUids.map((locusUid) => [locusUid, getLocusOffset(locusUid)])),
-      };
-      setDragging(true);
-    },
-
-    moveLocusDrag(pointerX) {
-      if (!locusDrag) return;
-      const delta = pointerX - locusDrag.pointerStart;
-      const offsets = new Map(
-        locusDrag.uids.map((uid) => [uid, locusDrag.initialOffsets.get(uid) + delta])
-      );
-      if (locusDrag.uids.length > 1 && previewLocusOffsets) {
-        previewLocusOffsets(offsets);
-        return;
-      }
-      previewLocusOffset(locusDrag.uids[0], offsets.get(locusDrag.uids[0]));
-    },
-
-    endLocusDrag() {
-      if (!locusDrag) return;
-      const { uids } = locusDrag;
-      locusDrag = null;
-      setDragging(false);
-      commitLocusOffset(uids.length === 1 ? uids[0] : uids);
-    },
-
-    cancelLocusDrag() {
-      if (!locusDrag) return;
-      locusDrag = null;
-      setDragging(false);
-      cancelInteraction();
-    },
-
-    beginLocusTrim() {
-      setDragging(true);
-    },
-
-    moveLocusTrim(locus, edge, pointerX) {
-      previewLocusTrim(locus, edge, pointerX);
-    },
-
-    endLocusTrim(locus) {
-      setDragging(false);
-      commitLocusTrim(locus);
-    },
-
-    cancelLocusTrim() {
-      setDragging(false);
-      cancelInteraction();
-    },
-
-    flipLocus,
-  };
 }
 
 // Changes value of a text node to a prompted value
@@ -8946,6 +8390,7 @@ function buildChrome(bounds, genes, chrome) {
   );
   const scaleBarLength = chrome.scaleBar.coordinateFor(chrome.scaleBar.basePair);
   const scaleBar = {
+    textColour: chrome.scaleBar.textColour,
     visible: chrome.scaleBar.show,
     position: {
       x: chrome.scaleBar.x,
@@ -8964,6 +8409,7 @@ function buildChrome(bounds, genes, chrome) {
 
   const identityDomain = chrome.colourBar.domain || [0, 1];
   const colourBar = {
+    textColour: chrome.colourBar.textColour,
     visible: chrome.colourBar.show && !chrome.link.groupColour && chrome.link.show,
     position: {
       x: chrome.colourBar.x,
@@ -9007,6 +8453,7 @@ function buildChrome(bounds, genes, chrome) {
   const radius = step / 4;
   const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
   const legend = {
+    textColour: chrome.legend.textColour, subtitleColour: chrome.legend.subtitleColour,
     visible: chrome.legend.show,
     placement,
     columns,
@@ -9267,6 +8714,7 @@ function buildScene(
     fontFamily = "sans-serif",
     measureText = null,
     annotationsEnabled = false,
+    theme = null,
   }
 ) {
   const clusters = new Map();
@@ -9359,7 +8807,7 @@ function buildScene(
   const hitRegions = buildHitRegions(loci, genes);
   const chromeLayout = buildChrome(bounds, genes, chrome);
   const annotations = projectSceneAnnotations(data.annotationPanels, clusters, bounds, chromeLayout,
-    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText });
+    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, theme });
   return {
     clusters,
     loci,
@@ -9737,7 +9185,7 @@ function drawCanvasTree(context, layout) {
   context.lineCap = "butt";
   context.strokeStyle = layout.branch.colour;
   context.lineWidth = layout.branch.width;
-  context.fillStyle = "white";
+  context.fillStyle = layout.background;
   for (const node of layout.nodes) {
     context.beginPath();
     context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
@@ -9761,7 +9209,7 @@ function drawCanvasTree(context, layout) {
     context.strokeStyle = bar.colour;
     context.lineWidth = bar.strokeWidth;
     traceLines(context, bar.lines);
-    context.fillStyle = "black";
+    context.fillStyle = layout.foreground;
     context.font = `${bar.fontSize}px ${bar.fontFamily}`;
     context.textAlign = "center";
     context.textBaseline = "top";
@@ -9911,9 +9359,24 @@ function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
  * Scene layout deliberately records only renderer-neutral chrome extents; the
  * raster adapter owns glyph measurement for initial camera fitting.
  */
-function canvasFigureBounds(context, scene, config, tree = null) {
+function canvasFigureBounds(context, scene, config, tree = null, { preview = null, textMetrics = null } = {}) {
   if (!scene?.bounds) return null;
-  const bounds = { ...(scene.figureBounds || scene.bounds) };
+  let structural = scene.bounds;
+  const chrome = preview?.chrome || scene.chrome;
+  const panels = annotationPanelsForFrame(scene, preview);
+  if (preview) {
+    structural = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+    for (const locus of scene.loci.values()) {
+      const geometry = locusGeometryForPreview(preview, locus);
+      const { x = 0, y = 0 } = geometry.offsets;
+      structural.minX = Math.min(structural.minX, geometry.worldStart ?? locus.worldStart + x);
+      structural.maxX = Math.max(structural.maxX, geometry.worldEnd ?? locus.worldEnd + x);
+      structural.minY = Math.min(structural.minY, locus.bounds.minY + y);
+      structural.maxY = Math.max(structural.maxY, locus.bounds.maxY + y);
+    }
+  }
+  const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome),
+    scene.annotationPanels || [], scene.clusters, panels) : scene.figureBounds || structural) };
   const include = (x, y) => {
     bounds.minX = Math.min(bounds.minX, x);
     bounds.maxX = Math.max(bounds.maxX, x);
@@ -9923,12 +9386,18 @@ function canvasFigureBounds(context, scene, config, tree = null) {
   const includeText = (text, x, y, { fontSize, fontFamily = config.plot.fontFamily,
     fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
     if (!text) return;
-    context.save();
-    context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-    context.textAlign = align;
-    context.textBaseline = baseline;
-    const metrics = context.measureText(String(text));
-    context.restore();
+    const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    const key = JSON.stringify([font, align, baseline, String(text)]);
+    let metrics = textMetrics?.get(key);
+    if (!metrics) {
+      context.save();
+      context.font = font;
+      context.textAlign = align;
+      context.textBaseline = baseline;
+      metrics = context.measureText(String(text));
+      context.restore();
+      textMetrics?.set(key, metrics);
+    }
     const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
     const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
     const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
@@ -9948,51 +9417,59 @@ function canvasFigureBounds(context, scene, config, tree = null) {
   // Add stroke extent without walking every homology link when labels are off.
   const halfStroke = Math.max(config.gene.shape.strokeWidth || 0, config.locus.trackBar.stroke || 0,
     config.link.show ? config.link.strokeWidth || 0 : 0) / 2;
-  include(scene.bounds.minX - halfStroke, scene.bounds.minY - halfStroke);
-  include(scene.bounds.maxX + halfStroke, scene.bounds.maxY + halfStroke);
+  include(structural.minX - halfStroke, structural.minY - halfStroke);
+  include(structural.maxX + halfStroke, structural.maxY + halfStroke);
   for (const cluster of scene.clusters.values()) {
-    const x = cluster.x + cluster.info.x;
-    includeText(cluster.source.name, x, cluster.y + 8,
+    const x = cluster.x + cluster.info.x + clusterLabelOffsetForPreview(preview, cluster.source.uid);
+    const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
+    includeText(cluster.source.name, x, y + 8,
       { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right" });
-    includeText(cluster.info.locusText, x, cluster.y + 12,
+    includeText(clusterLabelTextForPreview(preview, cluster.source.uid, cluster.info.locusText), x, y + 12,
       { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
   }
   if (config.gene.label.show) {
     for (const gene of scene.genes.values()) {
-      if (!gene.visible) continue;
+      if (!geneVisibleForPreview(preview, gene)) continue;
+      const offsets = offsetsForGene(preview, gene);
+      const geometry = geneGeometryForPreview(preview, gene);
       includeText(gene.source.label || gene.source.name || gene.source.uid,
-        gene.locus.x + gene.label.x, gene.locus.y + gene.label.y,
+        (geometry.labelX ?? gene.locus.x + gene.label.x) + offsets.x, gene.locus.y + gene.label.y + offsets.y,
         { fontSize: config.gene.label.fontSize, align: config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor, rotation: gene.label.rotation });
     }
   }
   if (config.link.show && config.link.label.show) {
     for (const link of scene.links.values()) {
-      if (!link.visible || !link.labelPosition) continue;
-      includeText(link.source.label ?? link.source.identity.toFixed(2), link.labelPosition.x, link.labelPosition.y,
+      const geometry = linkGeometryForPreview(scene, link, preview, config);
+      if (!geometry.visible || !link.labelPosition) continue;
+      const anchors = preview ? previewLinkAnchors(scene, link, preview) : link.anchors;
+      const position = preview && anchors ? getLinkLabelPosition(anchors, config.link.label.position) : link.labelPosition;
+      includeText(link.source.label ?? link.source.identity.toFixed(2), position.x, position.y,
         { fontSize: config.link.label.fontSize, align: "center" });
     }
   }
   if (config.locus.trimIndicators?.show !== false) {
     const style = resolveTrimIndicatorStyle(config.locus.trimIndicators);
     for (const locus of scene.loci.values()) {
-      for (const indicator of locus.trimIndicators || []) {
-        includeText(indicator.text, locus.x + indicator.x, locus.y + indicator.y,
+      const geometry = locusGeometryForPreview(preview, locus);
+      const { x = 0, y = 0 } = geometry.offsets;
+      for (const indicator of geometry.trimIndicators || locus.trimIndicators || []) {
+        includeText(indicator.text, locus.x + indicator.x + x, locus.y + indicator.y + y,
           { fontSize: style.fontSize, fontWeight: style.fontWeight, align: indicator.anchor, baseline: "top", border: style.borderWidth });
       }
     }
   }
-  const treeLayout = layoutCanvasTree(context, tree, scene, config, { trackAnchor: false });
+  const treeLayout = layoutCanvasTree(context, tree, scene, config, { preview, trackAnchor: Boolean(preview) });
   if (treeLayout) {
     include(treeLayout.bounds.minX, treeLayout.bounds.minY);
     include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
   }
-  for (const panel of annotationPanelsForFrame(scene)) {
+  for (const panel of panels) {
     for (const item of panel.texts) includeText(item.text, panel.x + item.x, item.y,
       { fontSize: panel.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
         align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
   }
-  if (scene.chrome?.legend.visible) {
-    const legend = scene.chrome.legend;
+  if (chrome?.legend.visible) {
+    const legend = chrome.legend;
     const subtitleSize = legend.subtitleFontSize || Math.max(10, legend.fontSize * 0.72);
     for (const item of legend.items) {
       const x = legend.position.x + item.x, y = legend.position.y + item.y + item.circleY;
@@ -10004,16 +9481,16 @@ function canvasFigureBounds(context, scene, config, tree = null) {
         { fontSize: subtitleSize, fontFamily: legend.fontFamily, baseline: "middle" });
     }
   }
-  if (scene.chrome?.scaleBar.visible) {
-    const bar = scene.chrome.scaleBar;
+  if (chrome?.scaleBar.visible) {
+    const bar = chrome.scaleBar;
     const half = bar.strokeWidth / 2;
     include(bar.position.x - half, bar.position.y - half);
     include(bar.position.x + bar.length + half, bar.position.y + bar.height + half);
     includeText(bar.label, bar.position.x + bar.length / 2, bar.position.y + bar.height + 5,
       { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
   }
-  if (scene.chrome?.colourBar.visible) {
-    const bar = scene.chrome.colourBar;
+  if (chrome?.colourBar.visible) {
+    const bar = chrome.colourBar;
     include(bar.position.x - 0.5, bar.position.y - 0.5);
     include(bar.position.x + bar.width + 0.5, bar.position.y + bar.height + 0.5);
     const font = { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, baseline: "top" };
@@ -10179,7 +9656,7 @@ function drawLink(context, layout, source, config, scales, geometry = {}) {
   } else {
     context.fillStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
     context.fill();
-    context.strokeStyle = source.colour || (config.link.groupColour ? colour : "black");
+    context.strokeStyle = source.colour || (config.link.groupColour ? colour : config.figureStyle.outline);
   }
   context.lineWidth = config.link.strokeWidth;
   context.stroke();
@@ -10216,7 +9693,7 @@ function drawClusterInfo(
 ) {
   const { x, y } = cluster;
   const anchorX = x + cluster.info.x + offsetX;
-  context.fillStyle = "black";
+  context.fillStyle = config.figureStyle?.foreground || "black";
   context.textAlign = "end";
   context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
   context.textBaseline = "alphabetic";
@@ -10269,7 +9746,7 @@ function drawGeneLabel(context, gene, config, geometry = {}, { x: offsetX = 0, y
   context.save();
   context.translate(labelX, gene.locus.y + y + offsetY);
   context.rotate((rotation * Math.PI) / 180);
-  context.fillStyle = "black";
+  context.fillStyle = config.figureStyle?.foreground || "black";
   context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
   context.textAlign = config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor;
   context.textBaseline = "alphabetic";
@@ -10309,7 +9786,7 @@ function drawLocusHighlight(context, locus, camera, geometry = {}) {
   context.restore();
 }
 
-function drawLocusHover(context, scene, locusUid, geometry = {}) {
+function drawLocusHover(context, scene, locusUid, geometry = {}, foreground = "black") {
   if (!locusUid) return;
   const locus = scene.loci.get(locusUid);
   if (!locus) return;
@@ -10321,7 +9798,7 @@ function drawLocusHover(context, scene, locusUid, geometry = {}) {
   const y = locus.y + hover.y + (offsets.y || 0);
   context.fillStyle = "rgba(0, 0, 0, 0.4)";
   context.fillRect(x, y, hover.width, hover.height);
-  context.fillStyle = "black";
+  context.fillStyle = foreground;
   context.fillRect(locus.x + hover.leftHandleX + (offsets?.x || 0), y, 8, hover.height);
   context.fillRect(locus.x + hover.rightHandleX + (offsets?.x || 0), y, 8, hover.height);
 }
@@ -10453,10 +9930,10 @@ function drawLegend(context, legend) {
     context.arc(item.x, item.y + item.circleY, item.radius, 0, 2 * Math.PI);
     context.fillStyle = item.colour;
     context.fill();
-    context.fillStyle = "black";
+    context.fillStyle = legend.textColour || "black";
     context.fillText(item.label, item.x + item.textX, item.y + item.textY);
     if (item.subtitle) {
-      context.fillStyle = "#566273";
+      context.fillStyle = legend.subtitleColour || "#566273";
       context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
       context.fillText(item.subtitle, item.x + item.textX, item.y + item.subtitleY);
       context.font = `${legend.fontSize}px ${legend.fontFamily}`;
@@ -10480,7 +9957,7 @@ function drawScaleBar(context, scaleBar) {
   context.moveTo(scaleBar.length, 0);
   context.lineTo(scaleBar.length, scaleBar.height);
   context.stroke();
-  context.fillStyle = "black";
+  context.fillStyle = scaleBar.textColour || "black";
   context.font = `${scaleBar.fontSize}px ${scaleBar.fontFamily}`;
   context.textAlign = "center";
   context.textBaseline = "top";
@@ -10498,10 +9975,10 @@ function drawColourBar(context, colourBar) {
   gradient.addColorStop(1, colourBar.endColour);
   context.fillStyle = gradient;
   context.fillRect(0, 0, colourBar.width, colourBar.height);
-  context.strokeStyle = "black";
+  context.strokeStyle = colourBar.textColour || "black";
   context.lineWidth = 1;
   context.strokeRect(0, 0, colourBar.width, colourBar.height);
-  context.fillStyle = "black";
+  context.fillStyle = colourBar.textColour || "black";
   context.font = `${colourBar.fontSize}px ${colourBar.fontFamily}`;
   context.textBaseline = "top";
   context.textAlign = "center";
@@ -10667,6 +10144,7 @@ function renderCanvas({
   showChrome = true,
   showAnnotationGeometry = true,
 }) {
+  config = figureConfig(config);
   // Resolve label visibility before querying or projecting records. The
   // WebGPU overlay requests labels without bodies; disabled labels should
   // not cause otherwise unused gene/link passes on every interaction frame.
@@ -10819,7 +10297,8 @@ function renderCanvas({
       context,
       displayScene,
       hoverLocusUid,
-      hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null
+      hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null,
+      config.figureStyle.foreground
     );
   }
   for (const gene of (showGenes || showGeneLabels)
@@ -10854,6 +10333,673 @@ function renderCanvas({
   }
   context.restore();
   return { width, height, pixelRatio };
+}
+
+/** One backdrop shared by all renderers; camera changes only update its transform. */
+function createFigureSurface() {
+  let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
+  const textMetrics = new Map();
+
+  function bounds(container, scene, config, tree, preview = null) {
+    if (!container || !scene?.bounds) return null;
+    if (scene !== measuredScene || config !== measuredConfig) textMetrics.clear();
+    if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
+      context ||= container.ownerDocument.createElement("canvas").getContext("2d");
+      measuredBounds = canvasFigureBounds(context, scene, config, tree, { preview, textMetrics });
+      measuredScene = scene;
+      measuredConfig = config;
+      measuredPreview = preview;
+    }
+    return { ...measuredBounds };
+  }
+
+  function update(container, scene, config, tree, camera, preview = null) {
+    const extent = bounds(container.node(), scene, config, tree, preview);
+    if (!extent) return;
+    const padding = 20;
+    const { x, y, k } = camera;
+    const width = extent.maxX - extent.minX + padding * 2;
+    const height = extent.maxY - extent.minY + padding * 2;
+    const left = x + (extent.minX - padding) * k;
+    const top = y + (extent.minY - padding) * k;
+    container.selectAll("div.clusterMapFigureSurface").data([extent]).join(
+      (enter) => enter.insert("div", ":first-child")
+        .attr("class", "clusterMapFigureSurface").attr("aria-hidden", "true")
+        .style("position", "absolute").style("left", "0").style("top", "0")
+        .style("pointer-events", "none").style("transform-origin", "0 0")
+    )
+      .style("width", `${width}px`)
+      .style("height", `${height}px`)
+      .style("background", config.plot.background)
+      .style("transform", `translate(${left}px, ${top}px) scale(${k})`);
+    const label = container.selectAll("div.clusterMapFigureDimensions").data([extent]).join(
+      (enter) => enter.append("div").attr("class", "clusterMapFigureDimensions")
+        .attr("title", "Figure width × height at 100% zoom, including padding. SVG output is resolution independent.")
+        .style("position", "absolute").style("left", "0").style("top", "0")
+        .style("pointer-events", "none")
+    ).style("transform", `translate(${left}px, ${top - 24}px)`);
+    const text = `${Math.round(width).toLocaleString("en-US")} × ${Math.round(height).toLocaleString("en-US")} px`;
+    if (label.text() !== text) label.text(text);
+  }
+
+  function clear() {
+    context = measuredScene = measuredConfig = measuredBounds = measuredPreview = null;
+    textMetrics.clear();
+  }
+
+  return { bounds, update, clear };
+}
+
+// Structural styles and the same neutral controls used by the plot editor.
+function installTreeControlsStyle(doc) {
+  if (doc.getElementById("clustermap-tree-controls-style")) return;
+  const style = doc.createElement("style");
+  style.id = "clustermap-tree-controls-style";
+  style.textContent = `
+.cm-tree-controls { font:inherit; color:inherit; text-align:left; }
+.cm-tree-controls * { box-sizing:border-box; }
+.cm-tree-controls [hidden] { display:none!important; }
+.cm-tree-controls fieldset { min-width:0; margin:0 0 10px; padding:8px; border:1px solid #ddd; border-radius:4px; }
+.cm-tree-controls legend { padding:0 4px; font-weight:600; }
+.cm-tree-controls button, .cm-tree-controls input, .cm-tree-controls select { font:inherit; color:inherit; }
+.cm-tree-controls button, .cm-tree-controls select, .cm-tree-controls input:not([type=checkbox]):not([type=color]):not([type=range]) { min-height:30px; border:1px solid #cbd3de; border-radius:6px; padding:4px 8px; background:#fff; }
+.cm-tree-controls button { cursor:pointer; }
+.cm-tree-controls button:hover:not(:disabled) { border-color:#78a9ed; background:#f4f8ff; }
+.cm-tree-controls button:disabled { color:#8993a1; background:#f5f6f8; cursor:default; }
+.cm-tree-controls button[aria-pressed=true] { font-weight:600; }
+.cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:6px; margin:6px 0; }
+.cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }
+.cm-tree-controls input[type=number] { width:64px; min-width:0; }
+.cm-tree-controls input[type=range] { width:100%; }
+.cm-tree-controls select { width:132px; min-width:0; }
+.cm-tree-controls input[type=color] { width:30px; height:24px; padding:0; border:0; background:transparent; cursor:pointer; }
+.cm-tree-controls .cm-tree-heading { font-weight:600; margin-bottom:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-tree-controls .cm-tree-branch-row { display:grid; grid-template-columns:minmax(0,1fr) 30px 64px 28px; gap:6px; align-items:center; margin:8px 0; }
+.cm-tree-controls .cm-tree-reset { width:28px; padding:2px; min-height:26px; }
+.cm-tree-controls .cm-tree-wide { display:block; }
+.cm-tree-controls .cm-tree-wide > span { display:block; margin-bottom:4px; }
+.cm-tree-controls .cm-tree-wide input, .cm-tree-controls .cm-tree-wide select { width:100%; }
+.cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }
+.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid #e5e9ef; margin:10px 0; }
+.cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:10px; }
+.cm-tree-controls [role=status]:empty { display:none; }
+.cm-tree-controls [role=status] { color:#a13c46; margin:6px 0 0; }
+.cm-tree-controls--popover { width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font-size:12px; line-height:1.3; }
+.cm-tree-controls--popover .cm-tree-heading { font-size:12px; margin-bottom:6px; }
+.cm-tree-controls--popover button, .cm-tree-controls--popover input:not([type=checkbox]):not([type=color]) { min-height:24px; padding:2px 5px; border-radius:4px; }
+.cm-tree-controls--popover input[type=number] { width:52px; }
+.cm-tree-controls--popover input[type=color] { width:24px; height:20px; }
+.cm-tree-controls--popover input[type=checkbox] { width:12px; height:12px; margin:0; }
+.cm-tree-controls--popover .cm-tree-branch-row { grid-template-columns:minmax(0,1fr) 24px 52px 22px; gap:5px; margin:5px 0; }
+.cm-tree-controls--popover .cm-tree-reset { width:22px; min-height:22px; padding:0; }
+.cm-tree-controls--popover .cm-tree-row { margin:4px 0; gap:4px; }
+.cm-tree-controls--popover .cm-tree-format { gap:5px; }
+.cm-tree-controls--popover .cm-tree-separator { margin:6px 0; }
+.cm-tree-controls--popover .cm-tree-actions { margin-top:6px; }
+`.replaceAll(".cm-tree-controls", ".cm-tree-controls.cm-tree-controls");
+  doc.head.append(style);
+}
+
+/** Policy settings and node popovers share the same compact editing form. */
+function createTreeControls({ tree, config, patch, preview, rotate, clusters = [], nodeUid = null,
+  policy = true, onResize, document: doc = globalThis.document }) {
+  installTreeControlsStyle(doc);
+  const element = (tag, parent, text, className) => {
+    const node = doc.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    parent?.append(node);
+    return node;
+  };
+  const container = element("div", null, undefined, `cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
+  const message = element("p"); message.setAttribute("role", "status");
+  const run = (action) => { try { action(); message.textContent = ""; } catch (error) { message.textContent = error.message; } };
+  const button = (parent, title, action, className) => {
+    const node = element("button", parent, title, className); node.type = "button";
+    node.onclick = () => run(action); return node;
+  };
+  const section = (title) => { const field = element("fieldset", container); element("legend", field, title); return field; };
+  const input = (parent, title, type, value, options = {}) => {
+    const row = element("label", parent, undefined, "cm-tree-row");
+    element("span", row, title);
+    const control = element("input", row); control.type = type;
+    if (type === "checkbox") control.checked = Boolean(value); else control.value = value ?? "";
+    Object.assign(control, options); return control;
+  };
+  const reset = (scope, uid) => patch([{ type: "tree.presentation.reset", scope, ...(uid ? { ids: [uid] } : {}) }]);
+  const resolved = resolveTreePresentation(tree, config);
+
+  let compatible = tree.distance?.kind === "mergeHeight";
+  try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...resolved.policy, mode: "cutHeight" } } }, config); }
+  catch { compatible = false; }
+  if (policy && compatible) {
+    const field = section("Clade colouring");
+    const effective = resolved.policy;
+    const change = (changes) => [{ type: "tree.presentation.update", scope: "tree", changes: { colouring: changes } }];
+    const enabled = input(field, "Colour clades", "checkbox", effective.mode === "cutHeight");
+    enabled.onchange = () => run(() => patch(change({ mode: enabled.checked ? "cutHeight" : "none" })));
+    const options = element("div", field); options.hidden = !enabled.checked;
+    const actual = effective.cutHeight === "auto" ? resolved.height * 0.7 : effective.cutHeight;
+    const number = input(options, "Cut height", "number", actual, { min: "0", step: "any" });
+    number.onchange = () => run(() => patch(change({ cutHeight: Number(number.value) })));
+    const slider = element("input", options); slider.type = "range";
+    Object.assign(slider, { min: "0", max: String(Math.max(resolved.height, actual) || 1), step: String(resolved.height / 1000 || 0.001), value: actual });
+    slider.setAttribute("aria-label", "Preview cut height");
+    let cancelled = false;
+    const cancel = () => { cancelled = true; preview?.(null); slider.value = actual; number.value = actual; };
+    slider.oninput = () => run(() => { cancelled = false; number.value = slider.value; preview?.(change({ cutHeight: Number(slider.value) })); });
+    slider.onchange = () => { if (!cancelled) run(() => patch(change({ cutHeight: Number(slider.value) }))); };
+    slider.onkeydown = (event) => { if (event.key === "Escape") { cancel(); event.preventDefault(); } };
+    slider.onpointercancel = cancel;
+    const auto = button(number.parentElement, "Auto", () => patch(change({ cutHeight: "auto" })));
+    auto.title = "Use automatic cut height (70%)";
+    auto.setAttribute("aria-pressed", String(effective.cutHeight === "auto"));
+    const palettes = [
+      ["Muted", ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"]],
+      ["Colorblind friendly", ["#0072b2", "#e69f00", "#009e73", "#cc79a7", "#d55e00", "#56b4e9"]],
+    ];
+    if (!palettes.some(([, colours]) => JSON.stringify(colours) === JSON.stringify(effective.palette))) palettes.unshift(["Custom", effective.palette]);
+    const paletteRow = element("label", options, undefined, "cm-tree-row"); element("span", paletteRow, "Palette");
+    const select = element("select", paletteRow); select.setAttribute("aria-label", "Clade palette");
+    palettes.forEach(([name, colours], index) => { const option = element("option", select, name); option.value = index; option.selected = JSON.stringify(colours) === JSON.stringify(effective.palette); });
+    select.onchange = () => run(() => patch(change({ palette: palettes[Number(select.value)][1] })));
+    const line = input(options, "Show cut line", "checkbox", effective.showCutLine);
+    line.onchange = () => run(() => patch(change({ showCutLine: line.checked })));
+  }
+
+  if (policy) {
+    const resetAll = button(container, "Reset all manual styles", () => reset("manual"));
+    resetAll.title = "Clear manual tree styles and labels; keep automatic clade colouring.";
+    resetAll.disabled = !Object.keys(tree.presentation?.nodes || {}).length && !Object.keys(tree.presentation?.subtrees || {}).length;
+    container.append(message);
+    return container;
+  }
+
+  const nodesById = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const clusterNames = new Map(clusters.map((cluster) => [cluster.uid, cluster.name || cluster.label || cluster.uid]));
+  const descriptions = new Map();
+  const describe = (uid) => {
+    if (descriptions.has(uid)) return descriptions.get(uid);
+    const node = nodesById.get(uid);
+    const children = node.children?.map(describe);
+    const info = children ? { count: children.reduce((sum, child) => sum + child.count, 0), labels: children.flatMap((child) => child.labels).slice(0, 2) }
+      : { count: 1, labels: [node.label || clusterNames.get(node.cluster) || node.cluster] };
+    descriptions.set(uid, info);
+    return info;
+  };
+  const titleFor = (uid) => {
+    const node = nodesById.get(uid);
+    if (node.label) return node.label;
+    const { count, labels } = describe(uid);
+    return uid === tree.root ? `All ${count} clusters` : `${labels.join(" + ")}${count > 2 ? ` + ${count - 2} more` : ""}`;
+  };
+  const uid = nodesById.get(nodeUid)?.children ? nodeUid : nodesById.get(tree.root)?.children ? tree.root : null;
+  const host = element("div", container);
+
+  const colourInput = (parent, title, value, fallback, onChange) => {
+    const picker = element("input", parent); picker.type = "color";
+    const initial = color(value || fallback)?.formatHex() || "#555555";
+    let override = value ?? null;
+    const refresh = () => {
+      picker.value = color(override || fallback)?.formatHex() || initial;
+      picker.title = `${title}${override === null ? " (inherited)" : ""}`;
+    };
+    picker.setAttribute("aria-label", title); refresh();
+    picker.oninput = () => {
+      if (picker.value === override) return;
+      run(() => { onChange(picker.value); override = picker.value; picker.title = title; });
+    };
+    picker.onchange = picker.oninput;
+    return { reset: () => { override = null; refresh(); } };
+  };
+  const liveNumber = (control, onChange) => {
+    let previous = control.value === "" ? null : Number(control.value);
+    control.oninput = () => {
+      if (!control.validity.valid) return;
+      const next = control.value === "" ? null : Number(control.value);
+      if (next === previous) return;
+      run(() => { onChange(next); previous = next; });
+    };
+    control.onchange = control.oninput;
+    return (value = "") => { control.value = value; previous = value === "" ? null : Number(value); };
+  };
+  const resetButton = (parent, title, action) => {
+    const control = button(parent, "↺", action, "cm-tree-reset");
+    control.title = title; control.setAttribute("aria-label", title); return control;
+  };
+  function renderNode() {
+    if (!host || !uid) return;
+    host.replaceChildren();
+    host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
+    const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
+    button(host, "Rotate branches", () => rotate(uid));
+    const inheritedBranch = (scope) => {
+      const collection = scope === "subtree" ? "subtrees" : "nodes";
+      const records = tree.presentation?.[collection] || {};
+      const record = { ...records[uid] }; delete record.branch;
+      const inherited = resolveTreePresentation({ ...tree, presentation: {
+        ...tree.presentation, [collection]: { ...records, [uid]: record },
+      } }, config);
+      return (scope === "subtree" ? inherited.stems : inherited.branches).get(uid) || inherited.base;
+    };
+    const branchControls = (scope, title, style, fallback) => {
+      const row = element("div", host, undefined, "cm-tree-branch-row");
+      const name = element("span", row, title);
+      name.title = scope === "subtree" ? "Branches within this clade, excluding its incoming branch." : "Only the horizontal branch entering this node.";
+      const update = (branch) => patch([{ type: "tree.presentation.update", scope, ids: [uid], changes: { branch } }]);
+      const colour = colourInput(row, `${title} colour`, style?.colour, fallback.colour, (colour) => update({ colour }));
+      const width = element("input", row); width.type = "number";
+      Object.assign(width, { min: "0.1", step: "any", value: style?.width ?? fallback.width });
+      width.setAttribute("aria-label", `${title} thickness`); width.title = "Thickness (px); leave blank to inherit";
+      const clearWidth = liveNumber(width, (width) => update({ width }));
+      width.onblur = () => {
+        if (width.value !== "") return;
+        const current = resolveTreePresentation(tree, config);
+        clearWidth((scope === "subtree" ? current.stems : current.branches).get(uid)?.width ?? current.base.width);
+      };
+      resetButton(row, `Reset ${title.toLowerCase()} style`, () => { update(null); colour.reset(); clearWidth(fallback.width); });
+    };
+    branchControls("subtree", "Subtree", tree.presentation?.subtrees?.[uid]?.branch, inheritedBranch("subtree"));
+    const record = tree.presentation?.nodes?.[uid] || {};
+    if (uid !== tree.root) branchControls("node", "Incoming branch", record.branch, inheritedBranch("node"));
+    element("hr", host, undefined, "cm-tree-separator");
+    const label = record.label || {};
+    const text = input(host, "Label", "text", label.text, { placeholder: "Clade label" });
+    text.setAttribute("aria-label", "Annotation text"); text.parentElement.classList.add("cm-tree-wide");
+    const updateLabel = (label) => patch([{ type: "tree.presentation.update", scope: "node", ids: [uid], changes: { label } }]);
+    let previousText = text.value;
+    text.oninput = () => {
+      if (text.value === previousText) return;
+      run(() => { updateLabel({ text: text.value || null }); previousText = text.value; });
+    };
+    const formatting = element("div", host, undefined, "cm-tree-format");
+    const colour = colourInput(formatting, "Text colour", label.colour, "#333", (colour) => updateLabel({ colour }));
+    const size = element("input", formatting); size.type = "number";
+    Object.assign(size, { min: "1", step: "any", value: label.fontSize ?? "", placeholder: "10" });
+    size.setAttribute("aria-label", "Text size"); size.title = "Text size (px); leave blank to inherit";
+    const bold = input(formatting, "Bold", "checkbox", label.fontWeight === 700);
+    const italic = input(formatting, "Italic", "checkbox", label.fontStyle === "italic");
+    const clearSize = liveNumber(size, (fontSize) => updateLabel({ fontSize }));
+    bold.onchange = () => run(() => updateLabel({ fontWeight: bold.checked ? 700 : null }));
+    italic.onchange = () => run(() => updateLabel({ fontStyle: italic.checked ? "italic" : null }));
+    resetButton(formatting, "Clear label and formatting", () => {
+      updateLabel(null);
+      text.value = ""; previousText = ""; colour.reset(); clearSize(); bold.checked = false; italic.checked = false;
+    });
+    const actions = element("div", host, undefined, "cm-tree-actions");
+    const resetNode = button(actions, "Reset", () => {
+      if (tree.presentation?.subtrees?.[uid] || tree.presentation?.nodes?.[uid]) {
+        patch([
+          { type: "tree.presentation.reset", scope: "subtree", ids: [uid] },
+          { type: "tree.presentation.reset", scope: "node", ids: [uid] },
+        ]);
+      }
+      renderNode();
+      host.querySelector(".cm-tree-actions button")?.focus({ preventScroll: true });
+    });
+    resetNode.title = "Reset this node's subtree style, incoming branch and label; keep descendant overrides and automatic colouring.";
+    onResize?.();
+  }
+  renderNode();
+  container.append(message);
+  return container;
+}
+
+// Browser-only tooltip lifecycle shared by any chart renderer. Menu content is
+
+function createHtmlOverlay({
+  tooltip,
+  scales,
+  actions,
+  eventNamespace = ".clusterMapTooltip",
+}) {
+  const windowRef = tooltip.node()?.ownerDocument?.defaultView;
+  const clickEvent = `click${eventNamespace}`;
+  const keyEvent = `keydown${eventNamespace}`;
+  let focusTarget = null;
+  let treeMenu = false;
+  let menuTree = null;
+
+  const hide = (returnFocus = false) => {
+    tooltip.style("opacity", 0).style("pointer-events", "none").attr("aria-hidden", "true").property("inert", true);
+    const wasTreeMenu = treeMenu;
+    treeMenu = false;
+    menuTree = null;
+    if (returnFocus && focusTarget?.isConnected) focusTarget.focus?.({ preventScroll: true });
+    focusTarget = null;
+    if (wasTreeMenu) tooltip.html("");
+  };
+
+  const dismissOnOutsideClick = (event) => {
+    const node = tooltip.node();
+    if (!node || event.target === node || node.contains(event.target) || event.composedPath?.().includes(node)) return;
+    hide();
+  };
+
+  const position = (event) => {
+    const bounds = tooltip.node().getBoundingClientRect();
+    const rect = event.target?.getBoundingClientRect?.();
+    const x = event.clientX ?? (rect ? rect.x + rect.width / 2 : 0);
+    const y = event.clientY ?? (rect ? rect.y + rect.height : 0);
+    tooltip
+      .interrupt()
+      .style("left", `${Math.max(8, Math.min(x - bounds.width / 2, (windowRef?.innerWidth || Infinity) - bounds.width - 8))}px`)
+      .style("top", `${Math.max(8, Math.min(y + 12, (windowRef?.innerHeight || Infinity) - bounds.height - 8))}px`)
+      .style("opacity", 1)
+      .style("pointer-events", "all");
+  };
+  const show = (event, contents) => {
+    tooltip.html("").append(() => contents.node());
+    tooltip.attr("aria-hidden", null).property("inert", false).style("position", "fixed");
+    position(event);
+  };
+
+  const geneContents = (gene) => {
+    const div = create$1("div").attr("class", "tooltip-contents")
+      .style("display", "flex").style("flex-direction", "column")
+      .style("gap", "4px").style("width", "260px");
+    div.append("label").attr("for", "gene-label-input").text("Edit label");
+    const text = div.append("input").attr("id", "gene-label-input").attr("type", "text")
+      .attr("value", gene.label || gene.name || gene.uid).style("box-sizing", "border-box").style("width", "100%");
+    div.append("label").attr("for", "gene-qualifiers-input").text("Gene qualifiers");
+    const select = div.append("select").attr("id", "gene-qualifiers-input").attr("multiple", true)
+      .attr("size", 4).style("box-sizing", "border-box").style("width", "100%");
+    const names = gene.names || {};
+    select.selectAll("option").data(Object.keys(names)).join("option")
+      .text((key) => `${names[key]} [${key}]`).attr("value", (key) => names[key]);
+    const groupId = scales.group(gene.uid);
+    const group = div.append("div").style("margin-top", "2px");
+    group.append("span").text("Similarity group: ");
+    group.append("span").text(scales.name(groupId)).style("color", scales.colour(groupId)).style("font-weight", "bold");
+    const colour = color(gene.colour || scales.colour(groupId));
+    const pickerColour = colour ? colour.formatHex() : "#000000";
+    div.append("label").text("Choose gene colour: ").append("input")
+      .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
+      .on("change", (event) => actions.updateGene(gene, { colour: event.target.value }));
+    div.append("button").text("Anchor map on gene").on("click", () => actions.anchorGene(gene));
+    if (typeof actions.revealGene === "function") {
+      div.append("button").text("Reveal in data editor").on("click", () => {
+        actions.revealGene(gene);
+        hide();
+      });
+    }
+    text.on("input", (event) => { actions.updateGene(gene, { label: event.target.value }); select.attr("value", null); });
+    select.on("change", (event) => { actions.updateGene(gene, { label: event.target.value }); text.attr("value", event.target.value); });
+    return div;
+  };
+
+  const groupContents = (group) => {
+    const div = create$1("div").attr("class", "tooltip-contents")
+      .style("display", "flex").style("flex-direction", "column");
+    div.append("label").text("Edit label");
+    const text = div.append("input").attr("type", "text").attr("value", group.label || group.uid);
+    div.append("label").text("Merge with...");
+    const groups = actions.getGroups();
+    const select = div.append("select").attr("multiple", true);
+    select.selectAll("option").data(groups.filter((candidate) => candidate.uid !== group.uid)).join("option")
+      .text((candidate) => candidate.label).attr("value", (candidate) => candidate.uid);
+    div.append("button").text("Merge!").on("click", () => {
+      const sourceIds = [...select.node().options]
+        .filter((option) => option.selected)
+        .map((option) => groups.find((candidate) => String(candidate.uid) === option.value)?.uid)
+        .filter((uid) => uid !== undefined);
+      if (sourceIds.length) actions.mergeGroups(group, sourceIds);
+    });
+    const colour = color(group.colour);
+    const pickerColour = colour ? colour.formatHex() : "#000000";
+    div.append("label").text("Choose group colour: ").append("input")
+      .attr("type", "color").attr("value", pickerColour).property("value", pickerColour)
+      .on("change", (event) => actions.updateGroup(group, { colour: event.target.value }));
+    div.append("button").text("Hide group").on("click", () => actions.updateGroup(group, { hidden: true }));
+    if (typeof actions.revealGroup === "function") {
+      div.append("button").text("Reveal in data editor").on("click", () => {
+        actions.revealGroup(group);
+        hide();
+      });
+    }
+    text.on("input", (event) => actions.updateGroup(group, { label: event.target.value }));
+    return div;
+  };
+
+  return {
+    isTreeMenuOpen: (tree) => treeMenu && menuTree === tree,
+    enter: () => {
+      tooltip
+        .interrupt()
+        .attr("aria-hidden", null).property("inert", false)
+        .style("opacity", 1)
+        .style("pointer-events", "all");
+      // A chart must never replace another chart's window listener. The
+      // namespace is supplied by the chart runtime and is removed on redraw
+      // or destroy, which also releases this overlay's closure.
+      if (windowRef) select(windowRef).on(clickEvent, dismissOnOutsideClick);
+    },
+    leave: () => {
+      if (treeMenu) return;
+      const active = document.activeElement;
+      if (active?.tagName === "INPUT" && tooltip.node().contains(active)) return;
+      tooltip
+        .transition()
+        .delay(400)
+        .style("opacity", 0)
+        .style("pointer-events", "none");
+    },
+    show,
+    showGeneMenu: (event, gene) => { event.preventDefault(); show(event, geneContents(gene)); },
+    showGroupMenu: (event, group) => { event.preventDefault(); show(event, groupContents(group)); },
+    showTreeMenu: (event, uid) => {
+      event.preventDefault(); event.stopPropagation();
+      focusTarget = event.target;
+      const options = actions.treeControls();
+      menuTree = options.tree;
+      const controls = createTreeControls({ ...options, nodeUid: uid, policy: false,
+        onResize: () => { if (treeMenu) position(event); } });
+      show(event, select(controls));
+      treeMenu = true;
+      if (windowRef) {
+        select(windowRef).on(clickEvent, dismissOnOutsideClick).on(keyEvent, (key) => {
+          if (key.key === "Escape" && treeMenu) { key.preventDefault(); hide(true); }
+        });
+      }
+      controls.querySelector("button, input, select")?.focus({ preventScroll: true });
+    },
+    dispose: () => {
+      if (windowRef) select(windowRef).on(clickEvent, null).on(keyEvent, null);
+      tooltip.interrupt();
+      hide(treeMenu);
+    },
+  };
+}
+
+// Translates renderer-independent pointer coordinates into chart-state actions.
+// Renderers only need to forward pointer events in chart-world coordinates.
+function createInteractionController({
+  clusterRows,
+  getClusterOrder,
+  getClusterPosition,
+  getTree = () => null,
+  getLocusOffset,
+  selectedLocusIds = () => [],
+  selectedClusterIds = () => [],
+  setDragging,
+  previewClusterDrag,
+  commitClusterOrder,
+  previewLocusOffset,
+  previewLocusOffsets = null,
+  commitLocusOffset,
+  previewLocusTrim,
+  commitLocusTrim,
+  cancelInteraction = () => {},
+  flipLocus,
+}) {
+  let clusterDrag = null;
+  let locusDrag = null;
+
+  const clamp = (value, [min, max]) => Math.min(max, Math.max(min, value));
+
+  return {
+    beginClusterDrag(uid, pointerY) {
+      const order = [...getClusterOrder()];
+      const selected = new Set(selectedClusterIds());
+      // Dragging a selected cluster moves every selected cluster as one
+      // ordered block. A cluster outside the selection keeps the familiar
+      // single-row drag behaviour.
+      const uids = selected.has(uid)
+        ? order.filter((clusterUid) => selected.has(clusterUid))
+        : [uid];
+      const remaining = order.filter((clusterUid) => !uids.includes(clusterUid));
+      const draggedIndex = uids.indexOf(uid);
+      const legalInsertions = [];
+      for (let insertion = 0; insertion <= remaining.length; insertion += 1) {
+        const candidate = [
+          ...remaining.slice(0, insertion),
+          ...uids,
+          ...remaining.slice(insertion),
+        ];
+        if (isTreeOrderCompatible(getTree(), candidate)) legalInsertions.push(insertion);
+      }
+      clusterDrag = {
+        uid,
+        uids,
+        draggedIndex,
+        legalInsertions,
+        baseOrder: order,
+        blocked: legalInsertions.length === 0,
+        selected: new Set(uids),
+        order,
+        positions: new Map(uids.map((clusterUid) => [
+          clusterUid,
+          getClusterPosition(clusterUid),
+        ])),
+        pointerOffset: getClusterPosition(uid) - pointerY,
+      };
+      setDragging(true);
+    },
+
+    moveClusterDrag(pointerY) {
+      if (!clusterDrag) return;
+      if (clusterDrag.blocked) return;
+      const range = clusterRows();
+      const selectedYs = [...clusterDrag.positions.values()];
+      const anchorY = clusterDrag.positions.get(clusterDrag.uid);
+      const rowMin = Math.min(...range);
+      const rowMax = Math.max(...range);
+      const extentMin = rowMin + anchorY - Math.min(...selectedYs);
+      const extentMax = rowMax - (Math.max(...selectedYs) - anchorY);
+      const legalTargets = clusterDrag.legalInsertions.map((insertion) => ({
+        insertion,
+        index: insertion + clusterDrag.draggedIndex,
+        y: range[insertion + clusterDrag.draggedIndex],
+      })).filter((candidate) => candidate.y >= extentMin && candidate.y <= extentMax);
+      if (!legalTargets.length) return;
+      const legalMin = Math.min(...legalTargets.map((candidate) => candidate.y));
+      const legalMax = Math.max(...legalTargets.map((candidate) => candidate.y));
+      // Keep the whole selected set inside the plot and stop at the first or
+      // last tree-compatible insertion. Using only the dragged row's range
+      // lets a multi-row selection overrun either boundary.
+      const allowedY = [Math.max(legalMin, extentMin), Math.min(legalMax, extentMax)];
+      const rawY = clamp(pointerY + clusterDrag.pointerOffset, allowedY);
+      const target = legalTargets.reduce((closest, candidate) =>
+        Math.abs(candidate.y - rawY) < Math.abs(closest.y - rawY) ? candidate : closest
+      , legalTargets[0]);
+      const previous = legalTargets
+        .filter((candidate) => candidate.y < target.y)
+        .at(-1);
+      const next = legalTargets.find((candidate) => candidate.y > target.y);
+      const minY = previous ? (previous.y + target.y) / 2 : legalMin;
+      const maxY = next ? (next.y + target.y) / 2 : legalMax;
+      const y = clamp(rawY, [
+        Math.max(Math.min(minY, maxY), allowedY[0]),
+        Math.min(Math.max(minY, maxY), allowedY[1]),
+      ]);
+      const remaining = clusterDrag.baseOrder.filter((uid) => !clusterDrag.selected.has(uid));
+      const order = [
+        ...remaining.slice(0, target.insertion),
+        ...clusterDrag.uids,
+        ...remaining.slice(target.insertion),
+      ];
+      clusterDrag.order = order;
+      const delta = y - clusterDrag.positions.get(clusterDrag.uid);
+      const positions = new Map(
+        [...clusterDrag.positions].map(([uid, position]) => [uid, position + delta])
+      );
+      previewClusterDrag(clusterDrag.uid, y, order, positions);
+    },
+
+    endClusterDrag() {
+      if (!clusterDrag) return;
+      clusterDrag = null;
+      setDragging(false);
+      commitClusterOrder();
+    },
+
+    cancelClusterDrag() {
+      if (!clusterDrag) return;
+      clusterDrag = null;
+      setDragging(false);
+      cancelInteraction();
+    },
+
+    beginLocusDrag(uid, pointerX) {
+      const selected = new Set(selectedLocusIds());
+      const locusUids = selected.has(uid) ? [...selected] : [uid];
+      locusDrag = {
+        uids: locusUids,
+        pointerStart: pointerX,
+        initialOffsets: new Map(locusUids.map((locusUid) => [locusUid, getLocusOffset(locusUid)])),
+      };
+      setDragging(true);
+    },
+
+    moveLocusDrag(pointerX) {
+      if (!locusDrag) return;
+      const delta = pointerX - locusDrag.pointerStart;
+      const offsets = new Map(
+        locusDrag.uids.map((uid) => [uid, locusDrag.initialOffsets.get(uid) + delta])
+      );
+      if (locusDrag.uids.length > 1 && previewLocusOffsets) {
+        previewLocusOffsets(offsets);
+        return;
+      }
+      previewLocusOffset(locusDrag.uids[0], offsets.get(locusDrag.uids[0]));
+    },
+
+    endLocusDrag() {
+      if (!locusDrag) return;
+      const { uids } = locusDrag;
+      locusDrag = null;
+      setDragging(false);
+      commitLocusOffset(uids.length === 1 ? uids[0] : uids);
+    },
+
+    cancelLocusDrag() {
+      if (!locusDrag) return;
+      locusDrag = null;
+      setDragging(false);
+      cancelInteraction();
+    },
+
+    beginLocusTrim() {
+      setDragging(true);
+    },
+
+    moveLocusTrim(locus, edge, pointerX) {
+      previewLocusTrim(locus, edge, pointerX);
+    },
+
+    endLocusTrim(locus) {
+      setDragging(false);
+      commitLocusTrim(locus);
+    },
+
+    cancelLocusTrim() {
+      setDragging(false);
+      cancelInteraction();
+    },
+
+    flipLocus,
+  };
 }
 
 function positionLines(selection, lines) {
@@ -10919,7 +11065,7 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
     .attr("stroke-dasharray", layout.guide.dash.join(" ")).attr("pointer-events", "none");
   const nodes = group.selectAll("circle.tree-node").data(layout.nodes, (node) => node.uid).join("circle")
     .attr("class", "tree-node").attr("r", (node) => node.radius)
-    .attr("fill", "white").attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width)
+    .attr("fill", layout.background).attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width)
     .attr("cursor", "pointer")
     .attr("tabindex", 0).attr("role", "button").attr("aria-label", (node) => `Tree node ${node.uid}: rotate children or open context menu`)
     .on("contextmenu", (event, node) => interactions.showTreeMenu?.(event, node.uid))
@@ -10949,7 +11095,7 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
     .attr("text-anchor", "middle").attr("dominant-baseline", "hanging")
     // Match the existing SVG clustermap scale bar, whose font size uses pt.
     .attr("font-size", `${layout.scaleBar?.fontSize}pt`).attr("font-family", layout.scaleBar?.fontFamily)
-    .attr("fill", "black").text((label) => label.text);
+    .attr("fill", layout.foreground).text((label) => label.text);
   const paintFrame = (frame) => {
     positionBranches(root, [frame.rootBranch]);
     positionBranches(branches, frame.branches);
@@ -10992,6 +11138,8 @@ function renderSvg({
   highlightLinkIds = new Set(),
   highlightLocusIds = new Set(),
 }) {
+  config = figureConfig(config);
+  plot.attr("fill", config.figureStyle.foreground);
   if (preview) return renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
     highlightGeneIds, highlightLocusIds });
   previewStates.delete(plot.node());
@@ -11522,7 +11670,7 @@ function updateLinks(selection, scene, previousScene, config, scales, ids, highl
       const colour = scales.colour(scales.group(link.query.uid));
       return config.link.asLine ? rgbaToRgb(colour) : colour;
     }
-    return config.link.asLine ? scales.score(link.identity) : "black";
+    return config.link.asLine ? scales.score(link.identity) : config.figureStyle.outline;
   };
 
   const opacity = (link) => interpolateLinkOpacity(
@@ -11729,7 +11877,7 @@ function renderColourBar({ plot, colourBar, ids, transform }) {
     .attr("width", colourBar.width)
     .attr("height", colourBar.height)
     .style("fill", "white")
-    .style("stroke", "black")
+    .style("stroke", colourBar.textColour || "black")
     .style("stroke-width", "1px");
   bar
     .select(".colourBarFill")
@@ -12199,6 +12347,7 @@ function exportChartSvg({
   documentRef = document,
 }) {
   if (!scene) throw new Error("Cannot export an SVG before the chart has rendered.");
+  config = figureConfig(config);
   const namespace = "http://www.w3.org/2000/svg";
   const svgNode = documentRef.createElementNS(namespace, "svg");
   // SVG text getBBox() is unreliable while the tree is detached. Attach it
@@ -12257,6 +12406,10 @@ function exportChartSvg({
   svgNode.setAttribute("width", bounds.width + padding * 2);
   svgNode.setAttribute("height", bounds.height + padding * 2);
   svgNode.setAttribute("xmlns", namespace);
+  select(svgNode).insert("rect", ":first-child")
+    .attr("x", bounds.x - padding).attr("y", bounds.y - padding)
+    .attr("width", bounds.width + padding * 2).attr("height", bounds.height + padding * 2)
+    .attr("fill", config.figureStyle.background);
   return new XMLSerializer().serializeToString(svgNode);
 }
 
@@ -12303,12 +12456,15 @@ const defaultConfig = {
     colouring: TREE_COLOURING_DEFAULTS,
     width: 100,
     useBranchLengths: true,
-    branch: { width: 1.5, colour: "#555" },
+    branch: { width: 1.5, colour: null },
     support: { show: true, fontSize: 9, precision: 1 },
     scaleBar: { show: true },
-    leafGuide: { show: false, colour: "#999", width: 1, dash: "4 3" },
+    leafGuide: { show: false, colour: null, width: 1, dash: "4 3" },
   },
   plot: {
+    theme: "auto",
+    // Figure appearance is stable across interface and system themes.
+    background: "#ffffff",
     transitionDuration: 250,
     renderer: "svg",
     // Canvas may reduce resolution during motion and at small zoom scales.
@@ -12362,7 +12518,7 @@ const defaultConfig = {
     },
   },
   scaleBar: {
-    colour: "black",
+    colour: null,
     fontSize: 10,
     height: 12,
     basePair: 2500,
@@ -12401,7 +12557,7 @@ const defaultConfig = {
       borderOpacity: 1,
     },
     trackBar: {
-      colour: "#111",
+      colour: null,
       stroke: 1,
     },
     spacing: 50,
@@ -12415,7 +12571,7 @@ const defaultConfig = {
       // Optional hook exposed as a deliberate action in the gene context menu.
       // It intentionally does not replace the normal click-to-anchor behaviour.
       onReveal: null,
-      stroke: "black",
+      stroke: null,
       strokeWidth: 1,
     },
     label: {
@@ -12552,6 +12708,11 @@ function synchronizeLocusLayoutStates(data, locusIds = null) {
 }
 
 const config = createDefaultConfig();
+let renderedConfig = null;
+function renderConfig() {
+  if (!renderedConfig) renderedConfig = figureConfig(config);
+  return renderedConfig;
+}
 let chartIndex = null;
 let chartState = null;
 let currentScene = null;
@@ -12601,6 +12762,7 @@ function validateConfiguration(options, tree = null) {
   const candidate = createDefaultConfig();
   updateConfig(candidate, config);
   updateConfig(candidate, options);
+  if (!["light", "dark", "auto"].includes(candidate.plot.theme)) throw new TypeError("plot.theme must be light, dark or auto.");
   if (typeof candidate.annotations?.enabled !== "boolean") {
     throw new TypeError("annotations.enabled must be a boolean.");
   }
@@ -12614,6 +12776,7 @@ function validateConfiguration(options, tree = null) {
 function configure(options, tree = null) {
   validateConfiguration(options, tree);
   updateConfig(config, options);
+  renderedConfig = null;
 }
 
 const scales = {
@@ -12660,6 +12823,7 @@ function locusTextForCluster(uid) {
 }
 
 function sceneProjectionOptions({ areClustersAdjacent } = {}) {
+  const config = renderConfig();
   return {
     scaleX: scales.x,
     locusOffset: scales.locus,
@@ -12681,12 +12845,15 @@ function sceneProjectionOptions({ areClustersAdjacent } = {}) {
     fontFamily: config.plot.fontFamily,
     measureText,
     annotationsEnabled: config.annotations.enabled,
+    theme: config.figureStyle,
   };
 }
 
 function sceneChromeOptions(data) {
+  const config = renderConfig();
   return {
     legend: {
+      textColour: config.figureStyle.foreground, subtitleColour: config.figureStyle.muted,
       show: config.legend.show,
       placement: config.legend.position,
       columns: config.legend.columns,
@@ -12702,6 +12869,7 @@ function sceneChromeOptions(data) {
       colourForGroup: scales.colour,
     },
     scaleBar: {
+      textColour: config.figureStyle.foreground,
       show: config.plot.scaleGenes && config.scaleBar.show,
       x: 0,
       marginTop: config.scaleBar.marginTop,
@@ -12714,6 +12882,7 @@ function sceneChromeOptions(data) {
       fontFamily: config.plot.fontFamily,
     },
     colourBar: {
+      textColour: config.figureStyle.foreground,
       show: config.colourBar.show,
       x: config.plot.scaleGenes ? scales.x(config.scaleBar.basePair) + 20 : 0,
       marginTop: config.colourBar.marginTop,
@@ -12896,6 +13065,7 @@ function updateScales(data, { geometryOnly = false } = {}) {
 
 return {
   config,
+  get renderConfig() { return renderConfig(); },
   configure,
   validateConfiguration,
   lookup,
@@ -13333,7 +13503,7 @@ function transparent(colour) {
   return [colour[0], colour[1], colour[2], 0];
 }
 
-function geneVertices(gene, scales, preview = null, clusterSlot = 0, strokeWidth = 1) {
+function geneVertices(gene, scales, preview = null, clusterSlot = 0, strokeWidth = 1, strokeColour = "black") {
   const fill = [];
   const edge = [];
   const visible = geneVisibleForPreview(preview, gene);
@@ -13344,7 +13514,7 @@ function geneVertices(gene, scales, preview = null, clusterSlot = 0, strokeWidth
     gene,
     visible ? colour : transparent(colour),
     genePolygonForPreview(preview, gene, { includeClusterOffset: false }),
-    visible ? [0, 0, 0, 1] : [0, 0, 0, 0],
+    visible ? rgba(strokeColour) : [0, 0, 0, 0],
     clusterSlot,
     strokeWidth
   );
@@ -13363,7 +13533,7 @@ function linkVertices(scene, link, scales, config, preview = null) {
   const stroke = rgba(
     link.source.colour || (config.link.groupColour
       ? scales.colour(scales.group(link.source.query.uid))
-      : "black")
+      : config.figureStyle?.outline || "black")
   );
   const opacity = link.opacity ?? 1;
   colour[3] *= opacity;
@@ -13511,7 +13681,7 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
       scales,
       preview,
       locusSlots.get(gene.locus.source.uid),
-      config.gene.shape.strokeWidth
+      config.gene.shape.strokeWidth, config.gene.shape.stroke
     );
     ranges.genes.set(gene.source.uid, {
       genes: append(genes, vertices.genes),
@@ -14101,7 +14271,7 @@ async function createWebGpuRenderer(canvas) {
         scales,
         nextPreview,
         geometry.locusSlots.get(gene.locus.source.uid),
-        config.gene.shape.strokeWidth
+        config.gene.shape.strokeWidth, config.gene.shape.stroke
       );
       write("genes", ranges.genes, vertices.genes);
       write("geneEdges", ranges.geneEdges, vertices.geneEdges);
@@ -14170,7 +14340,7 @@ async function createWebGpuRenderer(canvas) {
         const ranges = geometry.ranges.genes.get(gene.source.uid);
         const target = nextScene.genes.get(gene.source.uid);
         if (!ranges || !target) continue;
-        const vertices = geneVertices(target, scales, null, slot, config.gene.shape.strokeWidth);
+        const vertices = geneVertices(target, scales, null, slot, config.gene.shape.strokeWidth, config.gene.shape.stroke);
         commit("genes", ranges.genes, translateVertices(vertices.genes, x, y, 7));
         commit("geneEdges", ranges.geneEdges, translateVertices(vertices.geneEdges, x, y, 10));
       }
@@ -14206,6 +14376,7 @@ async function createWebGpuRenderer(canvas) {
 
   return {
     render({ nextScene, preview: nextPreview = null, camera, scales, config, width, height, pixelRatio }) {
+      config = figureConfig(config);
       const pixelWidth = Math.max(1, Math.round(width * pixelRatio));
       const pixelHeight = Math.max(1, Math.round(height * pixelRatio));
       const resized = canvas.width !== pixelWidth || canvas.height !== pixelHeight;
@@ -14269,7 +14440,7 @@ async function createWebGpuRenderer(canvas) {
         colorAttachments: [{
           view: multisampleTexture.createView(),
           resolveTarget: context.getCurrentTexture().createView(),
-          clearValue: { r: 1, g: 1, b: 1, a: 1 },
+          clearValue: [0, 0, 0, 0],
           loadOp: "clear",
           storeOp: "discard",
         }],
@@ -14990,7 +15161,18 @@ function clusterMap() {
   /* A ClusterMap plot. */
 
   let container = null;
+  const figureSurface = createFigureSurface();
+  function updateFigureSurface() {
+    if (container) figureSurface.update(container, runtime.getScene(), runtime.renderConfig,
+      currentData?.tree, getCamera(chartState), scenePreview);
+  }
   let annotationOverlay = null;
+  let themeMedia = null;
+  function systemThemeChanged() {
+    if (runtime.config.plot.theme !== "auto" || !container || !currentData) return;
+    applyTheme(container.node(), resolveTheme(runtime.config.plot.theme));
+    emitChange({ type: "theme.change", theme: resolveTheme(runtime.config.plot.theme).mode });
+  }
   let annotationUiContext = null, annotationUiLoad = null;
   let transition$1 = transition();
   let zoom = null;
@@ -15293,7 +15475,7 @@ function clusterMap() {
           const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, currentData);
           if (useGpu) {
             webgpuBackend.adoptLocusChanges(targetScene, sourceScene, {
-              loci: [locus.uid], scales: runtime.scales, config: runtime.config,
+              loci: [locus.uid], scales: runtime.scales, config: runtime.renderConfig,
             });
             webgpuBackend.setScene(targetScene);
           } else svgBackend.setScene(targetScene);
@@ -15696,6 +15878,13 @@ function clusterMap() {
 
   function redraw({ animate = true, synchronize = true } = {}) {
     if (!currentData || !container) return;
+    applyTheme(container.node(), resolveTheme(runtime.config.plot.theme));
+    if (globalThis.getComputedStyle(container.node()).position === "static") container.style("position", "relative");
+    container.style("isolation", "isolate");
+    if (!themeMedia && globalThis.matchMedia) {
+      themeMedia = globalThis.matchMedia("(prefers-color-scheme: dark)");
+      themeMedia.addEventListener("change", systemThemeChanged);
+    }
     const committedScene = sceneCommit;
     sceneCommit = null;
     disposeRasterInteraction();
@@ -15787,7 +15976,7 @@ function clusterMap() {
       eventNamespace: `.${runtime.ids.root}-tooltip`,
       actions: {
         redraw,
-        treeControls: () => ({ tree: currentData.tree, clusters: currentData.clusters, config: runtime.config.tree,
+        treeControls: () => ({ tree: currentData.tree, clusters: currentData.clusters, config: runtime.renderConfig.tree,
           patch: (ops) => updateFromTreeMenu(() => my.patch(ops)),
           rotate: (uid) => updateFromTreeMenu(() => rotateTreeNode(uid)) }),
         updateGene: (gene, changes) => my.patch([
@@ -15814,6 +16003,7 @@ function clusterMap() {
       .on("mouseenter", overlay.enter)
       .on("mouseleave", overlay.leave);
     const paintCanvas = (canvasNode) => {
+      updateFigureSurface();
       const flipLayer =
         scenePreview?.type === "locus-flip" &&
         canvasPendingFlip &&
@@ -15835,7 +16025,7 @@ function clusterMap() {
           camera: getCamera(chartState),
           // Keep the normal filled-ribbon appearance throughout the flip.
           config: {
-            ...runtime.config,
+            ...runtime.renderConfig,
             link: {
               ...runtime.config.link,
               asLine: false,
@@ -15868,7 +16058,7 @@ function clusterMap() {
             canvas: canvasNode,
             scene: canvasPreviewScene,
             camera: getCamera(chartState),
-            config: runtime.config,
+            config: runtime.renderConfig,
             scales: runtime.scales,
             pixelRatio: rasterMotion.pixelRatio(),
             include: { genes: stationaryGenes },
@@ -15887,7 +16077,7 @@ function clusterMap() {
           canvas: canvasNode,
           scene: canvasPreviewScene,
           camera: getCamera(chartState),
-          config: runtime.config,
+          config: runtime.renderConfig,
           scales: runtime.scales,
           pixelRatio: rasterMotion.pixelRatio(),
           preview: scenePreview,
@@ -15916,7 +16106,7 @@ function clusterMap() {
         previousTreeScene: treeAnimation?.previousScene,
         treeProgress: treeAnimation?.progress ?? 1,
         camera: getCamera(chartState),
-        config: runtime.config,
+        config: runtime.renderConfig,
         scales: runtime.scales,
         hoverLocusUid: canvasHoverLocusUid,
         suppressLocusHover:
@@ -15932,6 +16122,7 @@ function clusterMap() {
     };
     const paintWebGpu = (canvasNode, scene) => {
       if (!canvasNode || !scene) return;
+      updateFigureSurface();
       const overlayNode = webgpuOverlay.node();
       if (overlayNode) {
         renderCanvas({
@@ -15943,7 +16134,7 @@ function clusterMap() {
           treeTargetScene: treeAnimation?.targetScene,
           treeProgress: treeAnimation?.progress ?? 1,
           camera: getCamera(chartState),
-          config: runtime.config,
+          config: runtime.renderConfig,
           scales: runtime.scales,
           hoverLocusUid: canvasHoverLocusUid,
           suppressLocusHover: scenePreview?.type === "locus-flip",
@@ -15967,7 +16158,7 @@ function clusterMap() {
         preview: scenePreview,
         camera: getCamera(chartState),
         scales: runtime.scales,
-        config: runtime.config,
+        config: runtime.renderConfig,
         width: bounds.width,
         height: bounds.height,
         pixelRatio: rasterMotion.pixelRatio(),
@@ -15999,7 +16190,7 @@ function clusterMap() {
         scene: pending.sourceScene,
         tree: currentData.tree,
         camera: getCamera(chartState),
-        config: runtime.config,
+        config: runtime.renderConfig,
         scales: runtime.scales,
         dimensions: { width: bounds.width, height: bounds.height },
         pixelRatio,
@@ -16037,9 +16228,9 @@ function clusterMap() {
         scene: pending.sourceScene,
         camera: { ...camera, x: camera.x - frame.x, y: camera.y - frame.y },
         config: {
-          ...runtime.config,
+          ...runtime.renderConfig,
           gene: {
-            ...runtime.config.gene,
+            ...runtime.renderConfig.gene,
             // A reflected bitmap would mirror glyphs. The normal target scene
             // redraw restores labels at the end of the brief animation.
             label: { ...runtime.config.gene.label, show: false },
@@ -16239,9 +16430,9 @@ function clusterMap() {
             },
             camera: { x: projection.x, y: projection.y, k: projection.scale },
             config: {
-              ...runtime.config,
+              ...runtime.renderConfig,
               gene: {
-                ...runtime.config.gene,
+                ...runtime.renderConfig.gene,
                 label: { ...runtime.config.gene.label, show: false },
               },
             },
@@ -16453,7 +16644,7 @@ function clusterMap() {
           canvas: useWebGpu ? webgpuOverlay.node() : canvasNode,
           scene: runtime.getScene(),
           camera: getCamera(chartState),
-          config: runtime.config,
+          config: runtime.renderConfig,
           event,
           tree: currentData.tree,
           treeDragging: isDragging(chartState),
@@ -16591,7 +16782,7 @@ function clusterMap() {
         webgpuBackend.adoptGeneAnchor(
           scene,
           webgpuAnchorCommit.sourceScene,
-          { ...webgpuAnchorCommit, scales: runtime.scales, config: runtime.config }
+          { ...webgpuAnchorCommit, scales: runtime.scales, config: runtime.renderConfig }
         );
         webgpuAnchorCommit = null;
       }
@@ -16600,7 +16791,7 @@ function clusterMap() {
           // Trimming can repack sibling loci; adopt the complete scene patch,
           // not just the locus whose handle was dragged.
           loci: scene.changes?.loci || webgpuLocusCommit.loci,
-          scales: runtime.scales, config: runtime.config,
+          scales: runtime.scales, config: runtime.renderConfig,
         });
         webgpuLocusCommit = null;
       }
@@ -16620,7 +16811,7 @@ function clusterMap() {
         previousTreeScene: treeAnimation?.previousScene,
         transition: transition$1,
         animate: hasInitialView && animate,
-        config: runtime.config,
+        config: runtime.renderConfig,
         scales: runtime.scales,
         ids: runtime.ids,
         lookup: { gene: runtime.lookup.geneData },
@@ -16629,13 +16820,15 @@ function clusterMap() {
         highlightLinkIds,
         highlightLocusIds: selectedLocusIds,
       };
-      paintPreviewFrame = () => svgBackend.paint({
-        ...request, preview: scenePreview, animate: false,
-      });
+      paintPreviewFrame = () => {
+        updateFigureSurface();
+        svgBackend.paint({ ...request, preview: scenePreview, animate: false });
+      };
       svgBackend.paint(request);
 
       if (!hasInitialView) fitInitialView(svg, plot);
     }
+    updateFigureSurface();
     if (runtime.config.annotations.enabled && currentData.clusters?.length) {
       annotationUiContext = {
         surfaces: [useRaster ? canvas.node() : svg.node()],
@@ -16725,6 +16918,7 @@ function clusterMap() {
   function applyCamera(selection) {
     const { x, y, k } = getCamera(chartState);
     selection.attr("transform", `translate(${x}, ${y}) scale(${k})`);
+    updateFigureSurface();
   }
 
   my.config = function (_) {
@@ -16978,18 +17172,13 @@ function clusterMap() {
     return () => changeListeners.delete(listener);
   };
   /** Latest computed layout, excluding transient animation and drag geometry. */
-  my.figureBounds = () => {
-    const scene = runtime.getScene();
-    if (!container || !scene?.bounds) return null;
-    figureMeasurementContext ||= container.node().ownerDocument.createElement("canvas").getContext("2d");
-    return canvasFigureBounds(figureMeasurementContext, scene, runtime.config, currentData.tree);
-  };
+  my.figureBounds = () => figureSurface.bounds(container?.node(), runtime.getScene(), runtime.renderConfig, currentData?.tree);
   my.exportSvg = ({ padding = 20 } = {}) => {
     flushCanvasFlip();
     return exportChartSvg({
       data: currentData,
       scene: runtime.getScene(),
-      config: runtime.config,
+      config: runtime.renderConfig,
       scales: runtime.scales,
       ids: runtime.ids,
       lookup: { gene: runtime.lookup.geneData },
@@ -16997,6 +17186,8 @@ function clusterMap() {
     });
   };
   my.destroy = () => {
+    figureSurface.clear();
+    themeMedia?.removeEventListener("change", systemThemeChanged); themeMedia = null;
     annotationUiContext = null;
     annotationOverlay?.dispose(); annotationOverlay = null;
     stateSnapshots.reset();
@@ -17019,6 +17210,8 @@ function clusterMap() {
     container
       ?.selectAll([
         "svg.clusterMap",
+        "div.clusterMapFigureSurface",
+        "div.clusterMapFigureDimensions",
         "input.colourPicker",
         "div.tooltip",
         "canvas.clusterMapCanvas",

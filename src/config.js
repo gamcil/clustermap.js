@@ -8,12 +8,15 @@ const defaultConfig = {
     colouring: TREE_COLOURING_DEFAULTS,
     width: 100,
     useBranchLengths: true,
-    branch: { width: 1.5, colour: "#555" },
+    branch: { width: 1.5, colour: null },
     support: { show: true, fontSize: 9, precision: 1 },
     scaleBar: { show: true },
-    leafGuide: { show: false, colour: "#999", width: 1, dash: "4 3" },
+    leafGuide: { show: false, colour: null, width: 1, dash: "4 3" },
   },
   plot: {
+    theme: "auto",
+    // Figure appearance is stable across interface and system themes.
+    background: "#ffffff",
     transitionDuration: 250,
     renderer: "svg",
     // Canvas may reduce resolution during motion and at small zoom scales.
@@ -67,7 +70,7 @@ const defaultConfig = {
     },
   },
   scaleBar: {
-    colour: "black",
+    colour: null,
     fontSize: 10,
     height: 12,
     basePair: 2500,
@@ -106,7 +109,7 @@ const defaultConfig = {
       borderOpacity: 1,
     },
     trackBar: {
-      colour: "#111",
+      colour: null,
       stroke: 1,
     },
     spacing: 50,
@@ -120,7 +123,7 @@ const defaultConfig = {
       // Optional hook exposed as a deliberate action in the gene context menu.
       // It intentionally does not replace the normal click-to-anchor behaviour.
       onReveal: null,
-      stroke: "black",
+      stroke: null,
       strokeWidth: 1,
     },
     label: {

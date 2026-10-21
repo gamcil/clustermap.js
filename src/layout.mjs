@@ -85,7 +85,7 @@ function extendBounds(bounds, minX, maxX, minY, maxY) {
 // glyph metrics while fitting, and SVG uses its native bounding box. The scene
 // still records the chrome's structural footprint for renderer-neutral camera
 // and minimap work.
-function figureBoundsForChrome(bounds, chrome) {
+export function figureBoundsForChrome(bounds, chrome) {
   if (!bounds || !chrome) return bounds;
   let figureBounds = { ...bounds };
   const { legend, scaleBar, colourBar } = chrome;
@@ -138,6 +138,7 @@ function buildChrome(bounds, genes, chrome) {
   );
   const scaleBarLength = chrome.scaleBar.coordinateFor(chrome.scaleBar.basePair);
   const scaleBar = {
+    textColour: chrome.scaleBar.textColour,
     visible: chrome.scaleBar.show,
     position: {
       x: chrome.scaleBar.x,
@@ -156,6 +157,7 @@ function buildChrome(bounds, genes, chrome) {
 
   const identityDomain = chrome.colourBar.domain || [0, 1];
   const colourBar = {
+    textColour: chrome.colourBar.textColour,
     visible: chrome.colourBar.show && !chrome.link.groupColour && chrome.link.show,
     position: {
       x: chrome.colourBar.x,
@@ -199,6 +201,7 @@ function buildChrome(bounds, genes, chrome) {
   const radius = step / 4;
   const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
   const legend = {
+    textColour: chrome.legend.textColour, subtitleColour: chrome.legend.subtitleColour,
     visible: chrome.legend.show,
     placement,
     columns,
@@ -459,6 +462,7 @@ export function buildScene(
     fontFamily = "sans-serif",
     measureText = null,
     annotationsEnabled = false,
+    theme = null,
   }
 ) {
   const clusters = new Map();
@@ -551,7 +555,7 @@ export function buildScene(
   const hitRegions = buildHitRegions(loci, genes);
   const chromeLayout = buildChrome(bounds, genes, chrome);
   const annotations = projectSceneAnnotations(data.annotationPanels, clusters, bounds, chromeLayout,
-    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText });
+    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, theme });
   return {
     clusters,
     loci,

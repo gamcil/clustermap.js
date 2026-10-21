@@ -63,7 +63,7 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     .attr("stroke-dasharray", layout.guide.dash.join(" ")).attr("pointer-events", "none");
   const nodes = group.selectAll("circle.tree-node").data(layout.nodes, (node) => node.uid).join("circle")
     .attr("class", "tree-node").attr("r", (node) => node.radius)
-    .attr("fill", "white").attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width)
+    .attr("fill", layout.background).attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width)
     .attr("cursor", "pointer")
     .attr("tabindex", 0).attr("role", "button").attr("aria-label", (node) => `Tree node ${node.uid}: rotate children or open context menu`)
     .on("contextmenu", (event, node) => interactions.showTreeMenu?.(event, node.uid))
@@ -93,7 +93,7 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     .attr("text-anchor", "middle").attr("dominant-baseline", "hanging")
     // Match the existing SVG clustermap scale bar, whose font size uses pt.
     .attr("font-size", `${layout.scaleBar?.fontSize}pt`).attr("font-family", layout.scaleBar?.fontFamily)
-    .attr("fill", "black").text((label) => label.text);
+    .attr("fill", layout.foreground).text((label) => label.text);
   const paintFrame = (frame) => {
     positionBranches(root, [frame.rootBranch]);
     positionBranches(branches, frame.branches);

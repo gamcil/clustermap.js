@@ -6,6 +6,7 @@ import { getLinkPath, getLinkLabelPosition, interpolateLinkAnchors, interpolateL
 import { renderSvgTree as renderTree } from "./treeSvgRenderer.mjs";
 import { resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
 import { renderSvgAnnotations } from "./annotationRenderers.mjs";
+import { figureConfig } from "./theme.mjs";
 
 import {
   clusterLabelOffsetForPreview, clusterLabelTextForPreview, clusterOffsetForPreview,
@@ -38,6 +39,8 @@ export function renderSvg({
   highlightLinkIds = new Set(),
   highlightLocusIds = new Set(),
 }) {
+  config = figureConfig(config);
+  plot.attr("fill", config.figureStyle.foreground);
   if (preview) return renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
     highlightGeneIds, highlightLocusIds });
   previewStates.delete(plot.node());
@@ -568,7 +571,7 @@ function updateLinks(selection, scene, previousScene, config, scales, ids, highl
       const colour = scales.colour(scales.group(link.query.uid));
       return config.link.asLine ? rgbaToRgb(colour) : colour;
     }
-    return config.link.asLine ? scales.score(link.identity) : "black";
+    return config.link.asLine ? scales.score(link.identity) : config.figureStyle.outline;
   };
 
   const opacity = (link) => interpolateLinkOpacity(
@@ -775,7 +778,7 @@ function renderColourBar({ plot, colourBar, ids, transform }) {
     .attr("width", colourBar.width)
     .attr("height", colourBar.height)
     .style("fill", "white")
-    .style("stroke", "black")
+    .style("stroke", colourBar.textColour || "black")
     .style("stroke-width", "1px");
   bar
     .select(".colourBarFill")
