@@ -4974,26 +4974,27 @@ const leafXAnchors = new WeakMap();
 /** Return whether an order keeps every tree clade contiguous. */
 function isTreeOrderCompatible(tree, order) {
   if (!tree) return true;
+  const positions = new Map(order.map((uid, index) => [uid, index]));
+  if (positions.size !== order.length) return false;
   const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
-  const positions = new Map(order.map((clusterUid, index) => [clusterUid, index]));
-  const descendants = new Map();
-  const collect = (uid) => {
-    if (descendants.has(uid)) return descendants.get(uid);
+  const span = (uid) => {
     const node = nodes.get(uid);
-    if (!node) return [];
-    const clusters = node.children?.length
-      ? node.children.flatMap(collect)
-      : [node.cluster];
-    descendants.set(uid, clusters);
-    return clusters;
+    if (!node) return null;
+    if (!node.children?.length) {
+      const position = positions.get(node.cluster);
+      return position === undefined ? null : { min: position, max: position, count: 1 };
+    }
+    let min = Infinity, max = -Infinity, count = 0;
+    for (const child of node.children) {
+      const range = span(child);
+      if (!range) return null;
+      min = Math.min(min, range.min);
+      max = Math.max(max, range.max);
+      count += range.count;
+    }
+    return max - min + 1 === count ? { min, max, count } : null;
   };
-  for (const node of tree.nodes) {
-    const clusters = collect(node.uid);
-    if (!clusters.length || clusters.some((uid) => !positions.has(uid))) return false;
-    const indices = clusters.map((uid) => positions.get(uid));
-    if (Math.max(...indices) - Math.min(...indices) + 1 !== indices.length) return false;
-  }
-  return order.length === positions.size && positions.size === descendants.get(tree.root)?.length;
+  return span(tree.root)?.count === order.length;
 }
 
 /** Keep the tree in its base position until a dragged label reaches a leaf. */
