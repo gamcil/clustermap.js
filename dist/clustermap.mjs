@@ -11087,10 +11087,7 @@ function createInteractionController({
         uids,
         draggedIndex,
         legalInsertions,
-        baseOrder: order,
-        blocked: legalInsertions.length === 0,
-        selected: new Set(uids),
-        order,
+        remaining,
         positions: new Map(uids.map((clusterUid) => [
           clusterUid,
           getClusterPosition(clusterUid),
@@ -11101,8 +11098,7 @@ function createInteractionController({
     },
 
     moveClusterDrag(pointerY) {
-      if (!clusterDrag) return;
-      if (clusterDrag.blocked) return;
+      if (!clusterDrag?.legalInsertions.length) return;
       const range = clusterRows();
       const selectedYs = [...clusterDrag.positions.values()];
       const anchorY = clusterDrag.positions.get(clusterDrag.uid);
@@ -11112,7 +11108,6 @@ function createInteractionController({
       const extentMax = rowMax - (Math.max(...selectedYs) - anchorY);
       const legalTargets = clusterDrag.legalInsertions.map((insertion) => ({
         insertion,
-        index: insertion + clusterDrag.draggedIndex,
         y: range[insertion + clusterDrag.draggedIndex],
       })).filter((candidate) => candidate.y >= extentMin && candidate.y <= extentMax);
       if (!legalTargets.length) return;
@@ -11136,13 +11131,12 @@ function createInteractionController({
         Math.max(Math.min(minY, maxY), allowedY[0]),
         Math.min(Math.max(minY, maxY), allowedY[1]),
       ]);
-      const remaining = clusterDrag.baseOrder.filter((uid) => !clusterDrag.selected.has(uid));
+      const { remaining } = clusterDrag;
       const order = [
         ...remaining.slice(0, target.insertion),
         ...clusterDrag.uids,
         ...remaining.slice(target.insertion),
       ];
-      clusterDrag.order = order;
       const delta = y - clusterDrag.positions.get(clusterDrag.uid);
       const positions = new Map(
         [...clusterDrag.positions].map(([uid, position]) => [uid, position + delta])
@@ -15094,8 +15088,8 @@ const stateEntries = (value) => Array.isArray(value)
 const recordStateEntries = (value) => stateEntries(value)
   .filter(([, entry]) => entry && typeof entry === "object" && !Array.isArray(entry));
 
-function numericEntries(entries) {
-  return [...entries].filter(([, value]) => finiteNumber(value) !== null);
+function offsetEntries(entries) {
+  return [...entries].filter(([, value]) => Number.isFinite(value) && value !== 0);
 }
 
 function locusSnapshot(state) {
@@ -15166,8 +15160,8 @@ function snapshotFromBaseline(state, data, baseline) {
     clusterOrder: !data.tree && state.clusterOrder.length === defaultOrder.length && state.clusterOrder.every((uid, index) => uid === defaultOrder[index])
       ? []
       : [...state.clusterOrder],
-    clusterOffsets: numericEntries(state.clusterOffsets).filter(([, value]) => value !== 0),
-    locusOffsets: numericEntries(state.locusOffsets).filter(([, value]) => value !== 0),
+    clusterOffsets: offsetEntries(state.clusterOffsets),
+    locusOffsets: offsetEntries(state.locusOffsets),
     loci: changedLocusEntries(state, baseline.loci),
     genes,
     camera: { ...state.camera },
@@ -15208,23 +15202,20 @@ function chartStateFromSnapshot(data, snapshot) {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
     throw new TypeError("Chart state must be an object.");
   }
-  const clusterIds = new Set(data.clusters.map((cluster) => cluster.uid));
   const loci = data.clusters.flatMap((cluster) => cluster.loci);
-  const locusIds = new Set(loci.map((locus) => locus.uid));
   const genesByLocus = new Map(loci.map((locus) => [
     locus.uid,
     new Map(locus.genes.map((gene) => [gene.uid, gene])),
   ]));
-  const geneKeys = new Set(loci.flatMap((locus) => locus.genes.map((gene) => `${locus.uid}:${gene.uid}`)));
   const restored = createChartState(data);
   const applyOffsets = (entries, allowed, target) => stateEntries(entries).forEach(([uid, value]) => {
     if (allowed.has(uid) && finiteNumber(value) !== null) target.set(uid, value);
   });
-  applyOffsets(snapshot.clusterOffsets, clusterIds, restored.clusterOffsets);
-  applyOffsets(snapshot.locusOffsets, locusIds, restored.locusOffsets);
+  applyOffsets(snapshot.clusterOffsets, restored.clusterOffsets, restored.clusterOffsets);
+  applyOffsets(snapshot.locusOffsets, restored.loci, restored.locusOffsets);
   recordStateEntries(snapshot.loci).forEach(([uid, value]) => {
-    if (!locusIds.has(uid)) return;
     const target = restored.loci.get(uid);
+    if (!target) return;
     ["start", "end"].forEach((key) => {
       if (finiteNumber(value[key]) !== null) target[key] = value[key];
     });
@@ -15233,15 +15224,15 @@ function chartStateFromSnapshot(data, snapshot) {
     if (value.flipped !== undefined) target.flipped = Boolean(value.flipped);
   });
   recordStateEntries(snapshot.genes).forEach(([key, value]) => {
-    if (!geneKeys.has(key)) return;
     const target = restored.genes.get(key);
+    if (!target) return;
     ["start", "end", "strand"].forEach((property) => {
       if (finiteNumber(value[property]) !== null) target[property] = value[property];
     });
   });
   const camera = snapshot.camera || {};
   if (Array.isArray(snapshot.clusterOrder)) {
-    const order = snapshot.clusterOrder.filter((uid) => clusterIds.has(uid));
+    const order = snapshot.clusterOrder.filter((uid) => restored.clusterOffsets.has(uid));
     restored.clusterOrder = [...new Set([...order, ...restored.clusterOrder])];
     setTreeClusterOrder(data.tree, restored.clusterOrder);
   }

@@ -52,10 +52,7 @@ export function createInteractionController({
         uids,
         draggedIndex,
         legalInsertions,
-        baseOrder: order,
-        blocked: legalInsertions.length === 0,
-        selected: new Set(uids),
-        order,
+        remaining,
         positions: new Map(uids.map((clusterUid) => [
           clusterUid,
           getClusterPosition(clusterUid),
@@ -66,8 +63,7 @@ export function createInteractionController({
     },
 
     moveClusterDrag(pointerY) {
-      if (!clusterDrag) return;
-      if (clusterDrag.blocked) return;
+      if (!clusterDrag?.legalInsertions.length) return;
       const range = clusterRows();
       const selectedYs = [...clusterDrag.positions.values()];
       const anchorY = clusterDrag.positions.get(clusterDrag.uid);
@@ -77,7 +73,6 @@ export function createInteractionController({
       const extentMax = rowMax - (Math.max(...selectedYs) - anchorY);
       const legalTargets = clusterDrag.legalInsertions.map((insertion) => ({
         insertion,
-        index: insertion + clusterDrag.draggedIndex,
         y: range[insertion + clusterDrag.draggedIndex],
       })).filter((candidate) => candidate.y >= extentMin && candidate.y <= extentMax);
       if (!legalTargets.length) return;
@@ -101,13 +96,12 @@ export function createInteractionController({
         Math.max(Math.min(minY, maxY), allowedY[0]),
         Math.min(Math.max(minY, maxY), allowedY[1]),
       ]);
-      const remaining = clusterDrag.baseOrder.filter((uid) => !clusterDrag.selected.has(uid));
+      const { remaining } = clusterDrag;
       const order = [
         ...remaining.slice(0, target.insertion),
         ...clusterDrag.uids,
         ...remaining.slice(target.insertion),
       ];
-      clusterDrag.order = order;
       const delta = y - clusterDrag.positions.get(clusterDrag.uid);
       const positions = new Map(
         [...clusterDrag.positions].map(([uid, position]) => [uid, position + delta])
