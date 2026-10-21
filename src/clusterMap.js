@@ -1788,7 +1788,10 @@ export default function clusterMap() {
           annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
             ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, validateAnnotationPanels, resolveAnnotationScale,
             annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell },
-            getClusters: () => currentData?.clusters || [], getPanels: () => currentData?.annotationPanels || [],
+            editData: (panelUid) => !container.node().dispatchEvent(new CustomEvent("clustermap:edit-annotation", {
+              bubbles: true, cancelable: true, detail: { chart: my, panelUid },
+            })),
+            getTree: () => currentData?.tree, getClusters: () => currentData?.clusters || [], getPanels: () => currentData?.annotationPanels || [],
             patch: (operations) => my.patch(operations) });
           annotationOverlay.update(annotationUiContext);
         }).catch((error) => console.error("Could not load optional annotation controls", error))

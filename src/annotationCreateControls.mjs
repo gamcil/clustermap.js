@@ -1,79 +1,53 @@
-import { csvParseRows, tsvParseRows, csvFormatRows } from "d3-dsv";
-
-// Detect the header separator outside quoted fields. Tabs inside a CSV value
-// must not turn the entire table into TSV.
-function parseTable(text) {
-  for (const token of text.matchAll(/"(?:[^"]|"")*"|([,\t\r\n])/g)) {
-    if (token[1]) return (token[1] === "\t" ? tsvParseRows : csvParseRows)(text);
-  }
-  return csvParseRows(text);
-}
+import { createControls, createActionRunner } from "./uiControls.mjs";
+import { csvFormatRows } from "d3-dsv";
+import { parseAnnotationTable } from "./annotationData.mjs";
 
 /** Small data-entry form; panel validation and history remain in the patch API. */
-export function createAnnotationCreateControls({ document, getClusters, getPanels, patch, onCreate, annotationApi }) {
+export function createAnnotationCreateControls({ document, getClusters, getPanels, getTree, patch, onCreate, annotationApi }) {
   const { validateAnnotationPanels } = annotationApi;
   const node = document.createElement("form");
-  const field = (title, tag) => {
-    const label = document.createElement("label"), caption = document.createElement("span");
-    caption.textContent = title;
-    const input = document.createElement(tag); label.append(caption, input); node.append(label);
-    return input;
+  const ui = createControls(document);
+  const type = ui.select(ui.row(node, "Type"), "Type", "heatmap", [["heatmap", "Heatmap"], ["bar", "Bar chart"], ["groups", "Group markers"]]);
+  const title = ui.input(ui.row(node, "Title"), "Title", "");
+  const scale = ui.select(ui.row(node, "Values"), "Values", "continuous", [["continuous", "Numeric"], ["categorical", "Categories"]]);
+  type.onchange = () => {
+    const groups = type.value === "groups";
+    scale.parentElement.hidden = groups;
+    scale.disabled = type.value === "bar";
+    if (scale.disabled) scale.value = "continuous";
+    help.textContent = groups ? "Define groups as JSON. Each needs a uid, a label, and either clusterIds or a tree nodeUid. Colours are optional."
+      : tableHelp;
+    data.value = groups ? JSON.stringify({ groups: [{ uid: "group-1", label: "Example group",
+      clusterIds: getClusters().slice(0, 2).map((cluster) => cluster.uid) }] }, null, 2) : tableTemplate;
   };
-  const options = (select, entries) => {
-    for (const [value, label] of entries) {
-      const option = document.createElement("option"); option.value = value; option.textContent = label; select.append(option);
-    }
-  };
-  const type = field("Type", "select");
-  options(type, [["heatmap", "Heatmap"], ["bar", "Bar chart"]]);
-  const title = field("Title", "input"); title.type = "text";
-  const scale = field("Values", "select");
-  options(scale, [["continuous", "Numeric"], ["categorical", "Categories"]]);
-  type.onchange = () => { scale.disabled = type.value === "bar"; if (scale.disabled) scale.value = "continuous"; };
   const help = document.createElement("p");
-  help.textContent = "Paste CSV or a tab-separated table. First column: cluster ID; remaining headings: data columns. Blank cells are missing. Bars use one data column. JSON {columns, values} is also accepted.";
+  const tableHelp = "Paste CSV or a tab-separated table. First column: cluster ID; remaining headings: data columns. Blank cells are missing. Bars use one data column. JSON {columns, values} is also accepted.";
+  help.textContent = tableHelp;
   node.append(help);
-  const data = field("Data", "textarea"); data.rows = 8; data.spellcheck = false;
+  const data = ui.el("textarea", undefined, ui.row(node, "Data")); data.setAttribute("aria-label", "Data"); data.rows = 8; data.spellcheck = false;
   data.parentElement.className = "cm-annotation-data";
-  data.value = csvFormatRows([["cluster", "Value"], ...getClusters().map((cluster) => [cluster.uid, ""])]);
+  const tableTemplate = csvFormatRows([["cluster", "Value"], ...getClusters().map((cluster) => [cluster.uid, ""])]);
+  data.value = tableTemplate;
   const error = document.createElement("p"); error.dataset.annotationError = ""; error.setAttribute("role", "alert"); node.append(error);
   const submit = document.createElement("button"); submit.type = "submit"; submit.textContent = "Add panel"; node.append(submit);
+  const run = createActionRunner((message) => { error.textContent = message; });
   node.onsubmit = (event) => {
     event.preventDefault(); error.textContent = "";
-    try {
+    run(() => {
       const raw = data.value.trim();
-      let columns, values;
-      if (raw.startsWith("{")) ({ columns, values } = JSON.parse(raw));
-      else {
-        const rows = parseTable(raw);
-        if (rows.length < 2 || rows[0].length < 2) throw new Error("Include a header and at least one cluster row.");
-        columns = rows.shift().slice(1).map((label) => label.trim());
-        values = Object.create(null);
-        for (const row of rows) {
-          if (row.every((cell) => !cell.trim())) continue;
-          const uid = row[0].trim();
-          if (Object.hasOwn(values, uid)) throw new Error(`Duplicate cluster ID '${uid}'.`);
-          if (row.length > columns.length + 1) throw new Error(`Too many values for '${uid}'.`);
-          values[uid] = columns.map((_, index) => {
-            const value = (row[index + 1] ?? "").trim();
-            if (!value) return null;
-            if (scale.value === "categorical") return value;
-            const numeric = Number(value);
-            if (!Number.isFinite(numeric)) throw new Error(`Expected a numeric value for '${uid}'.`);
-            return numeric;
-          });
-        }
-      }
+      let columns, values, groups;
+      if (type.value === "groups") ({ groups } = JSON.parse(raw));
+      else ({ columns, values } = parseAnnotationTable(raw, scale.value === "categorical"));
       const ids = new Set(getPanels().map((panel) => panel.uid));
       let serial = 1;
       while (ids.has(`${type.value}-${serial}`)) serial++;
       const panel = { uid: `${type.value}-${serial}`, type: type.value,
-        title: title.value.trim() || (type.value === "bar" ? "Bar chart" : "Heatmap"),
-        columns, values, scale: { type: scale.value } };
-      validateAnnotationPanels([panel], getClusters());
+        title: title.value.trim() || (type.value === "groups" ? "Groups" : type.value === "bar" ? "Bar chart" : "Heatmap"),
+        ...(type.value === "groups" ? { groups } : { columns, values, scale: { type: scale.value } }) };
+      validateAnnotationPanels([panel], getClusters(), { tree: getTree?.() });
       patch([{ type: "annotationPanels.create", panel }]);
       onCreate(panel.uid);
-    } catch (exception) { error.textContent = exception.message; }
+    });
   };
   return { node };
 }

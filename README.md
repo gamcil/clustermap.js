@@ -250,8 +250,19 @@ document.querySelector("clinker-editor").chart = chart;
 <clinker-editor></clinker-editor>
 ```
 
-`<clinker-editor>` uses light DOM. Omit the CSS import for an unstyled editor,
-or override the namespaced `.cm-editor` classes from an application stylesheet.
+The data views share a panel layout, cell spacing, row selection, keyed virtual
+scrolling and native controls. The shared layout owns optional tools, record
+counts, batch actions and the scrolling table viewport. Shared selection controls
+manage selected counts, select-visible and clear-selection actions, and header
+checkbox state where present.
+Scrolling updates the visible row window without rebuilding headers or batch
+controls. Appearance fields are created when their tab is first opened, then
+synchronized in place as settings change. All edits use the chart's patch or
+configuration API, with rejected edits reported in the editor.
+
+`<clinker-editor>` uses light DOM and installs the shared native-control styles.
+Load `clinker/editor.css` for the panel layout, or provide application styles
+using the namespaced `.cm-editor` and `.cm-data-*` classes.
 The component never owns a separate data copy: edits call the attached chart's
 public API and its table refreshes from `chart.on("change")`.
 

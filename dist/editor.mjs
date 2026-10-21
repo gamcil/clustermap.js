@@ -242,7 +242,7 @@ function rgbConvert(o) {
   return new Rgb(o.r, o.g, o.b, o.opacity);
 }
 
-function rgb(r, g, b, opacity) {
+function rgb$1(r, g, b, opacity) {
   return arguments.length === 1 ? rgbConvert(r) : new Rgb(r, g, b, opacity == null ? 1 : opacity);
 }
 
@@ -253,7 +253,7 @@ function Rgb(r, g, b, opacity) {
   this.opacity = +opacity;
 }
 
-define(Rgb, rgb, extend(Color, {
+define(Rgb, rgb$1, extend(Color, {
   brighter(k) {
     k = k == null ? brighter : Math.pow(brighter, k);
     return new Rgb(this.r * k, this.g * k, this.b * k, this.opacity);
@@ -403,6 +403,2108 @@ function hsl2rgb(h, m1, m2) {
       : h < 240 ? m1 + (m2 - m1) * (240 - h) / 60
       : m1) * 255;
 }
+
+const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
+
+/** Native controls with consistent labels, values and validity handling. */
+function createControls(document) {
+  const el = (tag, text, parent, className) => {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    parent?.append(node); return node;
+  };
+  const row = (parent, label) => {
+    const node = el("label", undefined, parent); el("span", label, node); return node;
+  };
+  const button = (parent, label, action, className) => {
+    const node = el("button", label, parent, className); node.type = "button"; node.onclick = action; return node;
+  };
+  const input = (parent, label, value, type = "text", onChange, options = {}) => {
+    const node = el("input", undefined, parent); Object.assign(node, { type, ...options });
+    node.setAttribute("aria-label", label);
+    if (type === "checkbox") node.checked = Boolean(value);
+    else node.value = type === "color" ? colourHex(value) : value ?? "";
+    if (type === "number" && options.step === undefined) node.step = "any";
+    if (onChange) node.onchange = () => { if (node.checkValidity()) onChange(type === "checkbox" ? node.checked : node.value); };
+    return node;
+  };
+  const select = (parent, label, value, entries, onChange) => {
+    const node = el("select", undefined, parent); node.setAttribute("aria-label", label);
+    for (const entry of entries) {
+      const [key, title] = Array.isArray(entry) ? entry : [entry, entry];
+      el("option", title, node).value = key;
+    }
+    node.value = value;
+    if (onChange) node.onchange = () => onChange(node.value);
+    return node;
+  };
+  return { el, row, button, input, select };
+}
+
+/** Report rejected UI edits consistently while leaving validation in the model. */
+function createActionRunner(report) {
+  return (action, control) => {
+    control?.setCustomValidity("");
+    try { action(); report(""); return true; }
+    catch (error) { report(error.message); control?.setCustomValidity(error.message); return false; }
+  };
+}
+
+const lastMarkup = new WeakMap();
+/** Preserve focused controls when a header or action bar has not changed. */
+function setMarkup(node, html) {
+  if (lastMarkup.get(node) === html) return;
+  node.innerHTML = html; lastMarkup.set(node, html);
+}
+
+/** Shared controls and table primitives for the packaged and inline data editors. */
+function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
+  const node = document.createElement("label"); node.className = "cm-data-search";
+  const input = document.createElement("input"); input.type = "search";
+  input.placeholder = placeholder; input.setAttribute("aria-label", "Filter records");
+  if (onInput) input.oninput = () => onInput(input.value);
+  node.append(input);
+  return { node, input };
+}
+
+/** Shared content layout for every data view, including the standalone editor. */
+function createDataPanel(document, { label = "Editable chart data" } = {}) {
+  installDataEditorStyle(document);
+  const ui = createControls(document), node = ui.el("div", undefined, null, "cm-data-panel");
+  const tools = ui.el("div", undefined, node, "cm-data-tools"); tools.hidden = true;
+  const meta = ui.el("div", undefined, node, "cm-data-meta");
+  const summary = ui.el("span", undefined, meta);
+  const selectVisible = ui.button(meta, "Select all visible", null);
+  const actions = ui.el("div", undefined, node, "cm-data-actions"); actions.hidden = true;
+  const viewport = ui.el("div", undefined, node, "cm-data-table");
+  viewport.setAttribute("role", "region"); viewport.setAttribute("aria-label", label);
+  return { node, tools, meta, summary, selectVisible, actions, viewport,
+    sync() { tools.hidden = ![...tools.children].some((child) => !child.hidden); } };
+}
+
+/** Keep selection controls independent of the table's row and action rendering. */
+function createSelectionControls(panel, { selection, onChange, checkbox } = {}) {
+  const ui = createControls(panel.node.ownerDocument);
+  const count = ui.el("strong", undefined, panel.actions);
+  const actions = ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
+  const clear = ui.button(panel.actions, "Clear selection", () => { selection.clear(); onChange(); });
+  let visibleIds = [];
+  panel.selectVisible.onclick = () => { selection.setMany(visibleIds); onChange(); };
+  if (checkbox) checkbox.onchange = () => { selection.setMany(visibleIds, checkbox.checked); onChange(); };
+  return { actions,
+    update({ ids, summary, noun, selectSuffix = "" }) {
+      visibleIds = ids;
+      const selectedVisible = ids.reduce((total, id) => total + Number(selection.has(id)), 0);
+      const all = ids.length > 0 && selectedVisible === ids.length;
+      panel.summary.textContent = summary;
+      panel.selectVisible.hidden = !ids.length;
+      panel.selectVisible.disabled = all;
+      panel.selectVisible.textContent = `Select all ${ids.length.toLocaleString()} visible${selectSuffix}`;
+      panel.actions.hidden = !selection.size;
+      count.textContent = `${selection.size.toLocaleString()} ${noun}${selection.size === 1 ? "" : "s"} selected`;
+      clear.disabled = !selection.size;
+      if (checkbox) {
+        checkbox.checked = all;
+        checkbox.indeterminate = selectedVisible > 0 && !all;
+        checkbox.disabled = !ids.length;
+      }
+    },
+  };
+}
+
+const cellClass = (selection) => `cm-data-cell${selection ? " cm-data-cell--select" : ""}`;
+function createDataCell(document, tag = "td", selection = false) {
+  const node = document.createElement(tag); node.className = cellClass(selection); return node;
+}
+function dataCell(content, selection = false) {
+  return `<span class="${cellClass(selection)}">${content}</span>`;
+}
+
+function installDataEditorStyle(document) {
+  if (document.getElementById("cm-data-editor-style")) return;
+  const style = document.createElement("style"); style.id = "cm-data-editor-style";
+  style.textContent = `
+@layer clinker-editor {
+.cm-data-ui { color:var(--cm-foreground,#273444); font:13px/1.4 system-ui,sans-serif; }
+.cm-data-ui [hidden] { display:none!important; }
+.cm-data-ui :is(button,input,select,textarea) { font:inherit; color:inherit; box-sizing:border-box; }
+.cm-data-ui :where(button,select,input:not([type=color]):not([type=checkbox]):not([type=range]),textarea) { min-height:var(--cm-control-height,30px); padding:var(--cm-control-padding,4px 8px); border:1px solid var(--cm-border,#cbd3de); border-radius:var(--cm-control-radius,6px); background:var(--cm-surface,#fff); }
+.cm-data-ui input[type=checkbox] { cursor:pointer; }
+.cm-data-ui input[type=color] { width:30px; height:22px; padding:0; border:0; background:transparent; }
+.cm-data-ui button { cursor:pointer; }
+.cm-data-ui button:hover:not(:disabled) { border-color:var(--cm-accent,#78a9ed); background:var(--cm-hover,#f4f8ff); }
+.cm-data-ui :where(button,summary):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:2px; }
+.cm-data-ui summary { cursor:pointer; }
+.cm-data-ui summary:hover { color:var(--cm-accent,#1677ff); }
+.cm-data-ui button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
+.cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
+.cm-data-search { display:flex; flex:1; min-width:140px; }
+.cm-data-search input { width:100%; }
+.cm-data-error { color:var(--cm-danger,#b42318); font-size:12px; margin:6px 0; }
+.cm-data-error:empty { display:none; }
+.cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
+.cm-data-tools { flex-shrink:0; }
+.cm-data-meta { display:flex; align-items:center; justify-content:space-between; min-height:30px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
+.cm-data-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; padding:8px 10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-subtle,#f3f6fa); }
+.cm-data-actions strong { padding:4px 7px; border-radius:5px; background:var(--cm-selection,#d6e6fc); color:var(--cm-foreground,#273444); }
+.cm-data-selection-actions { display:contents; }
+.cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
+.cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; font-weight:650; text-align:left; }
+.cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:34px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; }
+.cm-data-row > :is(th,td) { height:34px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
+.cm-data-row:is(:hover,:focus-within) { --cm-row-background:var(--cm-hover,#e3ecf8); }
+.cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
+.cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
+span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
+.cm-data-cell--select input { margin:0; }
+.cm-data-ui .cm-data-cell .cm-data-field { padding-inline:0; margin-inline:-1px; }
+.cm-data-ui input.cm-data-field.cm-data-cell { padding-inline:7px; }
+.cm-data-placeholder { color:var(--cm-muted,#687586); font-style:normal; }
+.cm-data-ui .cm-data-field { min-width:0; border-color:transparent!important; background:transparent!important; }
+.cm-data-ui .cm-data-row .cm-data-field { height:28px; min-height:28px; padding-block:2px; line-height:20px; }
+.cm-data-ui .cm-data-field:is(:hover,:focus) { border-color:var(--cm-accent,#c6d8f0)!important; background:var(--cm-surface,#fff)!important; }
+.cm-data-ui .cm-data-field:focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:-2px; }
+.cm-data-field::placeholder { color:var(--cm-muted,#7b8796); }
+.cm-data-field[type=number]:not(:hover):not(:focus) { appearance:textfield; -moz-appearance:textfield; }
+.cm-data-field[type=number]:not(:hover):not(:focus)::-webkit-inner-spin-button { appearance:none; }
+select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
+}
+`;
+  document.head.append(style);
+}
+
+/** Selection shared by flat rows, tree leaves and annotation matrices. */
+class RowSelection extends Set {
+  #anchor = null;
+
+  select(id, checked, { orderedIds = [], range = false } = {}) {
+    const start = orderedIds.indexOf(this.#anchor), end = orderedIds.indexOf(id);
+    const ids = range && start >= 0 && end >= 0
+      ? orderedIds.slice(Math.min(start, end), Math.max(start, end) + 1) : [id];
+    this.setMany(ids, checked);
+    this.#anchor = id;
+  }
+
+  setMany(ids, checked = true) {
+    for (const id of ids) { if (checked) this.add(id); else this.delete(id); }
+    this.#anchor = null;
+  }
+
+  prune(ids) {
+    const valid = ids instanceof Set ? ids : new Set(ids);
+    for (const id of this) if (!valid.has(id)) this.delete(id);
+    if (!valid.has(this.#anchor)) this.#anchor = null;
+  }
+
+  clear() { super.clear(); this.#anchor = null; }
+}
+
+/** Shared fixed-height row window for scrollable data editors. */
+function virtualRowWindow(count, scrollTop, height, { rowHeight = 34, overscan = 8, threshold = 200 } = {}) {
+  const virtual = count > threshold;
+  const first = virtual ? Math.min(Math.max(0, count - 1), Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)) : 0;
+  const last = virtual ? Math.min(count, first + Math.ceil((height || 320) / rowHeight) + overscan * 2) : count;
+  return { first, last, before: first * rowHeight, after: (count - last) * rowHeight };
+}
+
+/** Own scrolling, resizing and keyed DOM rows; callers supply row/spacer elements. */
+function createVirtualRows({ viewport, container, key, createRow, updateRow,
+  createSpacer, createEmpty, headerHeight = () => 0, onRender = () => {} }) {
+  const document = container.ownerDocument, view = document.defaultView;
+  if (!viewport.hasAttribute("tabindex")) viewport.tabIndex = -1;
+  const spacer = () => {
+    const node = createSpacer ? createSpacer() : document.createElement("div");
+    node.setAttribute("aria-hidden", "true"); container.append(node); return node;
+  };
+  const top = spacer(), bottom = spacer(), mounted = new Map();
+  const empty = createEmpty?.();
+  if (empty) container.insertBefore(empty, bottom);
+  let rows = [], first = -1, last = -1, frame = null, destroyed = false, rendering = false, pending = false;
+  const render = (force = false) => {
+    if (destroyed) return;
+    if (rendering) { pending = true; return; }
+    const window = virtualRowWindow(rows.length, Math.max(0, viewport.scrollTop - headerHeight()), viewport.clientHeight);
+    if (!force && first === window.first && last === window.last) return;
+    rendering = true;
+    try {
+      first = window.first; last = window.last;
+      const visible = rows.slice(first, last), ids = new Set(visible.map(key));
+      const remove = (node) => {
+        if (node.contains(document.activeElement)) { document.activeElement.blur(); viewport.focus({ preventScroll: true }); }
+        node.remove();
+      };
+      for (const [id, entry] of mounted) if (!ids.has(id)) { remove(entry.node); mounted.delete(id); }
+      if (empty) empty.hidden = rows.length > 0;
+      let next = empty || bottom, restoreFocus = null;
+      for (let index = visible.length - 1; index >= 0; index--) {
+        const row = visible[index], id = key(row);
+        let entry = mounted.get(id);
+        if (!entry) { entry = { node: createRow(row) }; mounted.set(id, entry); }
+        else if (updateRow) {
+          const updated = updateRow(entry.node, row);
+          if (updated && updated !== entry.node) {
+            const active = document.activeElement, label = active?.getAttribute("aria-label");
+            if (label && entry.node.contains(active)) restoreFocus = [...updated.querySelectorAll("[aria-label]")]
+              .find((control) => control.tagName === active.tagName && control.type === active.type && control.getAttribute("aria-label") === label);
+            remove(entry.node); entry.node = updated;
+          }
+        }
+        entry.node.setAttribute("aria-rowindex", first + index + 2);
+        if (entry.node.nextSibling !== next) container.insertBefore(entry.node, next);
+        next = entry.node;
+      }
+      // A table spacer uses its cell for height; a list spacer uses the element.
+      (top.firstElementChild || top).style.height = `${window.before}px`;
+      (bottom.firstElementChild || bottom).style.height = `${window.after}px`;
+      onRender([...mounted.values()].map((entry) => entry.node));
+      restoreFocus?.focus({ preventScroll: true });
+    } finally {
+      rendering = false;
+      if (pending && !destroyed) { pending = false; view.queueMicrotask(() => render(true)); }
+    }
+  };
+  const schedule = () => { if (frame === null) frame = view.requestAnimationFrame(() => { frame = null; render(); }); };
+  viewport.addEventListener("scroll", schedule);
+  const observer = new view.ResizeObserver(schedule); observer.observe(viewport);
+  return {
+    setRows(next) { rows = next; render(true); },
+    refresh() { render(true); },
+    destroy() {
+      destroyed = true; observer.disconnect(); viewport.removeEventListener("scroll", schedule);
+      if (frame !== null) view.cancelAnimationFrame(frame);
+      for (const { node } of mounted.values()) node.remove();
+      top.remove(); bottom.remove(); empty?.remove(); mounted.clear();
+    },
+  };
+}
+
+var EOL = {},
+    EOF = {},
+    QUOTE = 34,
+    NEWLINE = 10,
+    RETURN = 13;
+
+function objectConverter(columns) {
+  return new Function("d", "return {" + columns.map(function(name, i) {
+    return JSON.stringify(name) + ": d[" + i + "] || \"\"";
+  }).join(",") + "}");
+}
+
+function customConverter(columns, f) {
+  var object = objectConverter(columns);
+  return function(row, i) {
+    return f(object(row), i, columns);
+  };
+}
+
+// Compute unique columns in order of discovery.
+function inferColumns(rows) {
+  var columnSet = Object.create(null),
+      columns = [];
+
+  rows.forEach(function(row) {
+    for (var column in row) {
+      if (!(column in columnSet)) {
+        columns.push(columnSet[column] = column);
+      }
+    }
+  });
+
+  return columns;
+}
+
+function pad(value, width) {
+  var s = value + "", length = s.length;
+  return length < width ? new Array(width - length + 1).join(0) + s : s;
+}
+
+function formatYear(year) {
+  return year < 0 ? "-" + pad(-year, 6)
+    : year > 9999 ? "+" + pad(year, 6)
+    : pad(year, 4);
+}
+
+function formatDate(date) {
+  var hours = date.getUTCHours(),
+      minutes = date.getUTCMinutes(),
+      seconds = date.getUTCSeconds(),
+      milliseconds = date.getUTCMilliseconds();
+  return isNaN(date) ? "Invalid Date"
+      : formatYear(date.getUTCFullYear()) + "-" + pad(date.getUTCMonth() + 1, 2) + "-" + pad(date.getUTCDate(), 2)
+      + (milliseconds ? "T" + pad(hours, 2) + ":" + pad(minutes, 2) + ":" + pad(seconds, 2) + "." + pad(milliseconds, 3) + "Z"
+      : seconds ? "T" + pad(hours, 2) + ":" + pad(minutes, 2) + ":" + pad(seconds, 2) + "Z"
+      : minutes || hours ? "T" + pad(hours, 2) + ":" + pad(minutes, 2) + "Z"
+      : "");
+}
+
+function dsv(delimiter) {
+  var reFormat = new RegExp("[\"" + delimiter + "\n\r]"),
+      DELIMITER = delimiter.charCodeAt(0);
+
+  function parse(text, f) {
+    var convert, columns, rows = parseRows(text, function(row, i) {
+      if (convert) return convert(row, i - 1);
+      columns = row, convert = f ? customConverter(row, f) : objectConverter(row);
+    });
+    rows.columns = columns || [];
+    return rows;
+  }
+
+  function parseRows(text, f) {
+    var rows = [], // output rows
+        N = text.length,
+        I = 0, // current character index
+        n = 0, // current line number
+        t, // current token
+        eof = N <= 0, // current token followed by EOF?
+        eol = false; // current token followed by EOL?
+
+    // Strip the trailing newline.
+    if (text.charCodeAt(N - 1) === NEWLINE) --N;
+    if (text.charCodeAt(N - 1) === RETURN) --N;
+
+    function token() {
+      if (eof) return EOF;
+      if (eol) return eol = false, EOL;
+
+      // Unescape quotes.
+      var i, j = I, c;
+      if (text.charCodeAt(j) === QUOTE) {
+        while (I++ < N && text.charCodeAt(I) !== QUOTE || text.charCodeAt(++I) === QUOTE);
+        if ((i = I) >= N) eof = true;
+        else if ((c = text.charCodeAt(I++)) === NEWLINE) eol = true;
+        else if (c === RETURN) { eol = true; if (text.charCodeAt(I) === NEWLINE) ++I; }
+        return text.slice(j + 1, i - 1).replace(/""/g, "\"");
+      }
+
+      // Find next delimiter or newline.
+      while (I < N) {
+        if ((c = text.charCodeAt(i = I++)) === NEWLINE) eol = true;
+        else if (c === RETURN) { eol = true; if (text.charCodeAt(I) === NEWLINE) ++I; }
+        else if (c !== DELIMITER) continue;
+        return text.slice(j, i);
+      }
+
+      // Return last token before EOF.
+      return eof = true, text.slice(j, N);
+    }
+
+    while ((t = token()) !== EOF) {
+      var row = [];
+      while (t !== EOL && t !== EOF) row.push(t), t = token();
+      if (f && (row = f(row, n++)) == null) continue;
+      rows.push(row);
+    }
+
+    return rows;
+  }
+
+  function preformatBody(rows, columns) {
+    return rows.map(function(row) {
+      return columns.map(function(column) {
+        return formatValue(row[column]);
+      }).join(delimiter);
+    });
+  }
+
+  function format(rows, columns) {
+    if (columns == null) columns = inferColumns(rows);
+    return [columns.map(formatValue).join(delimiter)].concat(preformatBody(rows, columns)).join("\n");
+  }
+
+  function formatBody(rows, columns) {
+    if (columns == null) columns = inferColumns(rows);
+    return preformatBody(rows, columns).join("\n");
+  }
+
+  function formatRows(rows) {
+    return rows.map(formatRow).join("\n");
+  }
+
+  function formatRow(row) {
+    return row.map(formatValue).join(delimiter);
+  }
+
+  function formatValue(value) {
+    return value == null ? ""
+        : value instanceof Date ? formatDate(value)
+        : reFormat.test(value += "") ? "\"" + value.replace(/"/g, "\"\"") + "\""
+        : value;
+  }
+
+  return {
+    parse: parse,
+    parseRows: parseRows,
+    format: format,
+    formatBody: formatBody,
+    formatRows: formatRows,
+    formatRow: formatRow,
+    formatValue: formatValue
+  };
+}
+
+var csv = dsv(",");
+var csvParseRows = csv.parseRows;
+var csvFormatRows = csv.formatRows;
+
+var tsv = dsv("\t");
+var tsvParseRows = tsv.parseRows;
+
+/** Shared CSV/TSV/JSON boundary for creation and replacement. */
+function parseAnnotationTable(text, categorical = false) {
+  const raw = text.trim();
+  if (raw.startsWith("{")) {
+    const { columns, values } = JSON.parse(raw);
+    return { columns, values };
+  }
+  let parse = csvParseRows;
+  for (const token of raw.matchAll(/"(?:[^"]|"")*"|([,\t\r\n])/g)) {
+    if (token[1]) { parse = token[1] === "\t" ? tsvParseRows : csvParseRows; break; }
+  }
+  const rows = parse(raw);
+  if (rows.length < 2 || rows[0].length < 2) throw new Error("Include a header and at least one cluster row.");
+  const columns = rows.shift().slice(1).map((label) => label.trim()), values = Object.create(null);
+  for (const row of rows) {
+    if (row.every((cell) => !cell.trim())) continue;
+    const uid = row[0].trim();
+    if (Object.hasOwn(values, uid)) throw new Error(`Duplicate cluster ID '${uid}'.`);
+    if (row.length > columns.length + 1) throw new Error(`Too many values for '${uid}'.`);
+    values[uid] = columns.map((_, index) => {
+      const value = (row[index + 1] ?? "").trim();
+      if (!value) return null;
+      if (categorical) return value;
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) throw new Error(`Expected a numeric value for '${uid}'.`);
+      return numeric;
+    });
+  }
+  return { columns, values };
+}
+
+function annotationTableText(panel, clusters) {
+  return csvFormatRows([["cluster", ...panel.columns], ...clusters.map((cluster) =>
+    [cluster.uid, ...(panel.values[cluster.uid] ?? panel.columns.map(() => null))])]);
+}
+
+function mapAnnotationValues(values, map) {
+  return Object.fromEntries(Object.entries(values).map(([uid, row]) => [uid, row.map(map)]));
+}
+
+/** Small data-entry form; panel validation and history remain in the patch API. */
+function createAnnotationCreateControls({ document, getClusters, getPanels, getTree, patch, onCreate, annotationApi }) {
+  const { validateAnnotationPanels } = annotationApi;
+  const node = document.createElement("form");
+  const ui = createControls(document);
+  const type = ui.select(ui.row(node, "Type"), "Type", "heatmap", [["heatmap", "Heatmap"], ["bar", "Bar chart"], ["groups", "Group markers"]]);
+  const title = ui.input(ui.row(node, "Title"), "Title", "");
+  const scale = ui.select(ui.row(node, "Values"), "Values", "continuous", [["continuous", "Numeric"], ["categorical", "Categories"]]);
+  type.onchange = () => {
+    const groups = type.value === "groups";
+    scale.parentElement.hidden = groups;
+    scale.disabled = type.value === "bar";
+    if (scale.disabled) scale.value = "continuous";
+    help.textContent = groups ? "Define groups as JSON. Each needs a uid, a label, and either clusterIds or a tree nodeUid. Colours are optional."
+      : tableHelp;
+    data.value = groups ? JSON.stringify({ groups: [{ uid: "group-1", label: "Example group",
+      clusterIds: getClusters().slice(0, 2).map((cluster) => cluster.uid) }] }, null, 2) : tableTemplate;
+  };
+  const help = document.createElement("p");
+  const tableHelp = "Paste CSV or a tab-separated table. First column: cluster ID; remaining headings: data columns. Blank cells are missing. Bars use one data column. JSON {columns, values} is also accepted.";
+  help.textContent = tableHelp;
+  node.append(help);
+  const data = ui.el("textarea", undefined, ui.row(node, "Data")); data.setAttribute("aria-label", "Data"); data.rows = 8; data.spellcheck = false;
+  data.parentElement.className = "cm-annotation-data";
+  const tableTemplate = csvFormatRows([["cluster", "Value"], ...getClusters().map((cluster) => [cluster.uid, ""])]);
+  data.value = tableTemplate;
+  const error = document.createElement("p"); error.dataset.annotationError = ""; error.setAttribute("role", "alert"); node.append(error);
+  const submit = document.createElement("button"); submit.type = "submit"; submit.textContent = "Add panel"; node.append(submit);
+  const run = createActionRunner((message) => { error.textContent = message; });
+  node.onsubmit = (event) => {
+    event.preventDefault(); error.textContent = "";
+    run(() => {
+      const raw = data.value.trim();
+      let columns, values, groups;
+      if (type.value === "groups") ({ groups } = JSON.parse(raw));
+      else ({ columns, values } = parseAnnotationTable(raw, scale.value === "categorical"));
+      const ids = new Set(getPanels().map((panel) => panel.uid));
+      let serial = 1;
+      while (ids.has(`${type.value}-${serial}`)) serial++;
+      const panel = { uid: `${type.value}-${serial}`, type: type.value,
+        title: title.value.trim() || (type.value === "groups" ? "Groups" : type.value === "bar" ? "Bar chart" : "Heatmap"),
+        ...(type.value === "groups" ? { groups } : { columns, values, scale: { type: scale.value } }) };
+      validateAnnotationPanels([panel], getClusters(), { tree: getTree?.() });
+      patch([{ type: "annotationPanels.create", panel }]);
+      onCreate(panel.uid);
+    });
+  };
+  return { node };
+}
+
+/** Data editing is optional UI; every change goes through the chart's patch API. */
+function createAnnotationDataControls({ document, getPanels, getClusters, getTree, patch, annotationApi, embedded = false }) {
+  installDataEditorStyle(document);
+  installStyle(document);
+  const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
+  const toolbar = document.createElement("div"); toolbar.className = "cm-data-toolbar";
+  const node = document.createElement("div"); node.className = "cm-data-ui cm-annotation-data-editor"; node.tabIndex = -1;
+  let selected = null, applying = false, renderedPanel = null, renderedPanels = null, renderedClusters = null, filter = "", deleting = null, creating = false;
+  let disposeView = () => {}, filterRows = () => {}, filterSelection = () => {};
+  const selection = new RowSelection();
+  let selectionPanel = null, batchColumn = "0", batchValue = "";
+  const current = () => getPanels().find((panel) => panel.uid === selected);
+  const { el, button, input, select } = createControls(document);
+  const error = (message) => { node.querySelector('[data-data-error]').textContent = message; };
+  const run = createActionRunner(error);
+  const commit = (operations, refresh = true) => {
+    applying = true;
+    try { run(() => {
+      patch(operations);
+      if (refresh) render(); else { renderedPanel = current(); renderedPanels = getPanels(); }
+    }); } finally { applying = false; }
+  };
+  const update = (changes, refresh = true) => commit([{ type: "annotationPanels.update", ids: [selected], changes }], refresh);
+  const categoryScale = (panel, domain, colours) => ({ ...panel.scale, type: "categorical", domain,
+    colours: colours.length ? colours : [...ANNOTATION_PALETTES.Qualitative] });
+  const renderCategories = (parent, panel) => {
+    const { domain, colour } = resolveAnnotationScale(panel), colours = domain.map(colour);
+
+    domain.forEach((name, index) => {
+      const row = el("div", undefined, parent); row.className = "cm-annotation-category";
+      input(row, `Colour for ${name}`, colour(name), "color", (value) => {
+        const next = [...colours]; next[index] = value; update({ scale: categoryScale(current(), domain, next) });
+      });
+      input(row, `Rename category ${name}`, name, "text", (value) => {
+        if (!value.trim()) { error("Category names cannot be empty."); return; }
+        update({ values: mapAnnotationValues(current().values, (item) => item === name ? value : item),
+          scale: categoryScale(panel, domain.map((item) => item === name ? value : item), colours) });
+      });
+      button(row, "×", () => { deleting = name; render(); }).setAttribute("aria-label", `Remove category ${name}`);
+      if (deleting === name) {
+        const remove = el("div", undefined, parent); remove.className = "cm-annotation-category-remove";
+        el("span", `Replace “${name}” with`, remove);
+        // Index values keep the missing option distinct from arbitrary category names.
+        const replacement = select(remove, "Replacement category", "missing", [["missing", "Missing"],
+          ...domain.flatMap((item, i) => item === name ? [] : [[String(i), item]])], () => {});
+        button(remove, "Remove", () => {
+          const value = replacement.value === "missing" ? null : domain[Number(replacement.value)];
+          deleting = null;
+          update({ values: mapAnnotationValues(current().values, (item) => item === name ? value : item),
+            scale: categoryScale(panel, domain.filter((item) => item !== name), colours.filter((_, i) => i !== index)) });
+        });
+        button(remove, "Cancel", () => { deleting = null; render(); });
+      }
+    });
+    const row = el("div", undefined, parent); row.className = "cm-annotation-category";
+    const used = new Set(colours.map((value) => colourHex(value)));
+    const nextColour = ANNOTATION_PALETTES.Qualitative.find((value) => !used.has(colourHex(value))) ??
+      ANNOTATION_PALETTES.Qualitative[domain.length % ANNOTATION_PALETTES.Qualitative.length];
+    const swatch = input(row, "New category colour", nextColour, "color", () => {});
+    const name = input(row, "New category name", "", "text", () => {}); name.placeholder = "New category";
+    button(row, "+", () => {
+      if (!name.value.trim()) { name.focus(); return; }
+      update({ scale: categoryScale(panel, [...domain, name.value.trim()], [...colours, swatch.value]) });
+    }).setAttribute("aria-label", "Add category");
+  };
+  const renderMatrix = (layout, panel) => {
+    const categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel);
+    if (categorical && batchValue !== "" && !resolved.domain[Number(batchValue)]) batchValue = "";
+    const { viewport: tableArea } = layout;
+    const all = input(null, "Select all filtered clusters", "", "checkbox", () => {});
+    const selectionControls = createSelectionControls(layout, { selection, checkbox: all, onChange: () => syncSelection() });
+    const batch = selectionControls.actions;
+    const columns = select(batch, "Columns to edit", batchColumn,
+      [["all", "All columns"], ...panel.columns.map((name, index) => [String(index), name])], (value) => { batchColumn = value; });
+    const value = categorical
+      ? select(batch, "Batch value", batchValue, [["", "Missing"], ...resolved.domain.map((name, index) => [String(index), name])], (value) => { batchValue = value; })
+      : input(batch, "Batch value", batchValue, "number", (value) => { batchValue = value; });
+    if (!categorical) value.placeholder = "Value";
+    const applyValues = (clear) => {
+      if (!clear && !value.checkValidity()) { value.reportValidity(); return; }
+      const source = current(), values = { ...source.values };
+      const next = clear || value.value === "" ? null : categorical ? resolved.domain[Number(value.value)] : Number(value.value);
+      for (const uid of selection) {
+        const row = [...(values[uid] || source.columns.map(() => null))];
+        source.columns.forEach((_, index) => { if (columns.value === "all" || index === Number(columns.value)) row[index] = next; });
+        values[uid] = row;
+      }
+      update({ values, ...(categorical && !source.scale?.domain ? { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } : {}) });
+    };
+    button(batch, "Set values", () => applyValues(false));
+    button(batch, "Clear values", () => applyValues(true));
+    tableArea.classList.add("cm-annotation-matrix");
+    const table = el("table", undefined, tableArea), head = el("tr", undefined, el("thead", undefined, table));
+    const cell = (tag, parent, selection = false) => { const node = createDataCell(document, tag, selection); parent.append(node); return node; };
+    const selectionHead = cell("th", head, true);
+    selectionHead.append(all);
+    cell("th", head).textContent = "Cluster";
+    panel.columns.forEach((column, index) => {
+      const heading = cell("th", head), row = el("div", undefined, heading); row.className = "cm-annotation-column";
+      input(row, `Column ${index + 1} name`, column, "text", (value) => {
+        const columns = [...current().columns]; columns[index] = value; update({ columns });
+      }).classList.add("cm-data-field");
+      if (panel.type === "heatmap") {
+        const remove = button(row, "×", () => update({ columns: panel.columns.filter((_, i) => i !== index),
+          values: Object.fromEntries(Object.entries(current().values).map(([uid, values]) => [uid, values.filter((_, i) => i !== index)])) }));
+        remove.disabled = panel.columns.length === 1; remove.setAttribute("aria-label", `Remove column ${column}`);
+      }
+    });
+    for (const cell of head.children) cell.classList.add("cm-data-head");
+    const extra = panel.type === "heatmap";
+    if (extra) {
+      const heading = cell("th", head); heading.classList.add("cm-data-head", "cm-annotation-add-column");
+      const form = el("form", undefined, heading);
+      const add = button(form, "+", () => { add.hidden = true; name.hidden = save.hidden = false; name.focus(); });
+      add.setAttribute("aria-label", "Add column");
+      const name = input(form, "New column name", "", "text", () => {}); name.placeholder = "Column name"; name.hidden = true;
+      const save = button(form, "Add", () => {}); save.type = "submit"; save.hidden = true;
+      form.onsubmit = (event) => {
+        event.preventDefault();
+        if (!name.value.trim()) return;
+        update({ columns: [...panel.columns, name.value.trim()], values: Object.fromEntries(
+          Object.entries(current().values).map(([uid, values]) => [uid, [...values, null]])) });
+      };
+      name.onkeydown = (event) => { if (event.key === "Escape") { event.preventDefault(); name.hidden = save.hidden = true; add.hidden = false; add.focus(); } };
+    }
+    const body = el("tbody", undefined, table);
+    let mounted = [];
+    const rowIds = new WeakMap();
+    const spacer = () => {
+      const row = el("tr"), cell = el("td", undefined, row);
+      row.className = "cm-annotation-spacer"; row.setAttribute("aria-hidden", "true");
+      cell.colSpan = panel.columns.length + 2 + Number(extra); return row;
+    };
+    let clusters = [];
+    const syncSelection = () => {
+      selectionControls.update({ ids: clusters.map((cluster) => cluster.uid),
+        summary: `${clusters.length.toLocaleString()} visible clusters`, noun: "cluster" });
+      for (const row of mounted) {
+        const checked = selection.has(rowIds.get(row));
+        row.classList.toggle("is-selected", checked); row.setAttribute("aria-selected", String(checked));
+        row.querySelector('input[type="checkbox"]').checked = checked;
+      }
+    };
+    filterSelection = syncSelection;
+    const toggleRow = (uid, checked, shift) => {
+      selection.select(uid, checked, { range: shift, orderedIds: clusters.map((cluster) => cluster.uid) });
+      syncSelection();
+    };
+    const createRow = (cluster) => {
+      const row = el("tr"), selectionCell = cell("td", row, true);
+      const check = input(selectionCell, `Select ${cluster.name || cluster.uid}`, "", "checkbox", () => {});
+      check.onclick = (event) => toggleRow(cluster.uid, check.checked, event.shiftKey);
+      const name = cell("th", row); name.textContent = cluster.name || cluster.uid;
+      name.onclick = (event) => toggleRow(cluster.uid, !selection.has(cluster.uid), event.shiftKey);
+      row.className = "cm-data-row"; rowIds.set(row, cluster.uid);
+      name.scope = "row"; name.title = cluster.uid;
+      panel.columns.forEach((column, index) => {
+        const valueCell = cell("td", row), label = `${cluster.name || cluster.uid}: ${column}`;
+        const value = current().values[cluster.uid]?.[index] ?? null;
+        const change = (value) => {
+          const source = current(), values = [...(source.values[cluster.uid] ?? source.columns.map(() => null))];
+          values[index] = value;
+          update({ values: { ...source.values, [cluster.uid]: values },
+            ...(categorical && !source.scale?.domain ? { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } : {}),
+          }, false);
+        };
+        if (categorical) select(valueCell, label, value === null ? "missing" : String(resolved.domain.indexOf(value)),
+          [["missing", "Missing"], ...resolved.domain.map((item, i) => [String(i), item])],
+          (key) => change(key === "missing" ? null : resolved.domain[Number(key)]));
+        else {
+          const field = input(valueCell, label, value, "number", (value) => change(value === "" ? null : Number(value)));
+          field.placeholder = "—";
+        }
+      });
+      for (const field of row.querySelectorAll("input:not([type=checkbox]),select")) field.classList.add("cm-data-field");
+      if (extra) cell("td", row);
+      return row;
+    };
+    const list = createVirtualRows({ viewport: tableArea, container: body, key: (cluster) => cluster.uid,
+      createRow, createSpacer: spacer, headerHeight: () => head.offsetHeight,
+      onRender: (nodes) => { mounted = nodes; table.setAttribute("aria-rowcount", clusters.length + 1); syncSelection(); } });
+    disposeView = () => list.destroy();
+    filterRows = () => {
+      const needle = filter.trim().toLowerCase();
+      clusters = getClusters().filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle));
+      tableArea.scrollTop = 0; list.setRows(clusters);
+    };
+    filterRows();
+  };
+  const renderReplacement = (layout, panel) => {
+    const parent = layout.tools;
+    const categorical = panel.scale?.type === "categorical";
+    const box = el("div", undefined, parent); box.className = "cm-annotation-replacement"; box.hidden = true;
+    const data = el("textarea", undefined, box); data.rows = 5;
+    data.setAttribute("aria-label", "Replacement annotation data (CSV, TSV or JSON)"); data.spellcheck = false;
+    const actions = el("div", undefined, box); actions.className = "cm-data-toolbar";
+    button(actions, "Replace data", () => {
+      try {
+        const changes = parseAnnotationTable(data.value, categorical);
+        if (categorical) {
+          const source = current(), scale = resolveAnnotationScale(source), domain = new Set(scale.domain);
+          for (const row of Object.values(changes.values)) for (const value of row) if (value !== null) domain.add(value);
+          const categories = [...domain];
+          changes.scale = categoryScale(source, categories, categories.map((value, i) =>
+            scale.domain.includes(value) ? scale.colour(value) : ANNOTATION_PALETTES.Qualitative[i % ANNOTATION_PALETTES.Qualitative.length]));
+        }
+        update(changes);
+      } catch (exception) { error(exception.message); }
+    });
+    button(actions, "Cancel", () => { box.hidden = true; layout.sync(); });
+    return () => {
+      box.hidden = !box.hidden; layout.sync();
+      if (!box.hidden) { data.value = annotationTableText(current(), getClusters()); data.focus(); }
+    };
+  };
+  const renderGroups = (parent, panel) => {
+    const editGroup = (index, changes) => update({ groups: current().groups.map((group, i) => i === index ? { ...group, ...changes } : group) });
+    panel.groups.forEach((group, index) => {
+      const box = el("fieldset", undefined, parent); el("legend", group.label || group.uid, box);
+      const row = el("div", undefined, box); row.className = "cm-data-toolbar cm-annotation-data-toolbar";
+      input(row, "Group label", group.label ?? group.uid, "text", (label) => editGroup(index, { label }));
+      input(row, "Group colour", group.colour ?? panel.colour ?? "#267c9e", "color", (colour) => editGroup(index, { colour }));
+      const remove = button(row, "Remove group", () => update({ groups: panel.groups.filter((_, i) => i !== index) }));
+      remove.disabled = panel.groups.length === 1;
+      const tree = getTree?.();
+      select(row, "Membership", group.nodeUid === undefined ? "clusters" : "tree",
+        [["clusters", "Selected clusters"], ...(tree ? [["tree", "Tree clade"]] : [])], (mode) => {
+          const groups = [...current().groups];
+          const { nodeUid, clusterIds, ...style } = groups[index];
+          groups[index] = mode === "tree" ? { ...style, nodeUid: tree.root } : { ...style, clusterIds: [getClusters()[0].uid] };
+          update({ groups });
+        });
+      if (group.nodeUid !== undefined) select(box, "Tree node", group.nodeUid,
+        tree.nodes.map((node) => [node.uid, node.label || node.uid]), (nodeUid) => editGroup(index, { nodeUid }));
+      else {
+        const members = el("select", undefined, box); members.multiple = true; members.size = Math.min(5, getClusters().length);
+        members.setAttribute("aria-label", `Clusters in ${group.label || group.uid}`);
+        for (const cluster of getClusters()) {
+          const option = el("option", `${cluster.name || cluster.uid} (${cluster.uid})`, members);
+          option.value = cluster.uid; option.selected = group.clusterIds.includes(cluster.uid);
+        }
+        members.onchange = () => editGroup(index, { clusterIds: [...members.selectedOptions].map((option) => option.value) });
+      }
+    });
+    button(parent, "Add group", () => {
+      let serial = 1; while (panel.groups.some((group) => group.uid === `group-${serial}`)) serial++;
+      update({ groups: [...panel.groups, { uid: `group-${serial}`, label: `Group ${serial}`, clusterIds: [getClusters()[0].uid] }] });
+    });
+  };
+  function render() {
+    const active = document.activeElement, restoreFocus = node.contains(active) || toolbar.contains(active);
+    const samePanel = renderedPanel?.uid === selected;
+    const scroll = samePanel ? node.querySelector(".cm-annotation-matrix")?.scrollTop || 0 : 0;
+    const categoriesOpen = samePanel && node.querySelector(".cm-annotation-categories")?.open;
+    disposeView(); disposeView = () => {}; filterRows = () => {}; filterSelection = () => {};
+    node.replaceChildren();
+    toolbar.replaceChildren();
+    if (!embedded) node.append(toolbar);
+    const panels = getPanels(); renderedPanels = panels; renderedClusters = getClusters();
+    if (!panels.some((panel) => panel.uid === selected)) selected = panels[0]?.uid ?? null;
+    if (panels.length) select(toolbar, "Annotation panel", selected, panels.map((panel) => [panel.uid, panel.title || panel.uid]),
+      (uid) => { selected = uid; deleting = null; creating = false; render(); });
+    button(toolbar, creating ? "Cancel" : "Add panel", () => { creating = !creating; render(); });
+    const status = el("div", undefined, node); status.className = "cm-data-error"; status.dataset.dataError = ""; status.setAttribute("role", "alert");
+    const body = el("div", undefined, node); body.className = "cm-annotation-data-body";
+    if (creating) {
+      const form = createAnnotationCreateControls({ document, getPanels, getClusters, getTree, patch, annotationApi,
+        onCreate: (uid) => { selected = uid; creating = false; render(); } });
+      body.append(form.node); return;
+    }
+    const panel = current(); renderedPanel = panel;
+    if (selectionPanel !== panel?.uid) {
+      selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = "";
+    }
+    const validRows = new Set(getClusters().map((cluster) => cluster.uid));
+    selection.prune(validRows);
+    if (batchColumn !== "all" && Number(batchColumn) >= (panel?.columns?.length || 0)) batchColumn = "0";
+    if (!panel) { el("p", "No annotation panels. Add a panel to attach data to cluster rows.", body); return; }
+    const layout = createDataPanel(document, { label: "Editable annotation data" }); body.append(layout.node);
+    if (panel.type !== "groups") button(toolbar, "Replace data…", renderReplacement(layout, panel));
+    button(toolbar, panel.show === false ? "Show" : "Hide", () => update({ show: panel.show === false }));
+    const index = panels.indexOf(panel);
+    for (const [label, symbol, direction] of [["Move left", "←", -1], ["Move right", "→", 1]]) {
+      const move = button(toolbar, symbol, () => {
+        const ids = panels.map((item) => item.uid); [ids[index], ids[index + direction]] = [ids[index + direction], ids[index]];
+        commit([{ type: "annotationPanels.reorder", ids }]);
+      });
+      move.title = label; move.setAttribute("aria-label", label);
+      move.disabled = index + direction < 0 || index + direction >= panels.length;
+    }
+    button(toolbar, "Remove", () => commit([{ type: "annotationPanels.delete", ids: [selected] }])).setAttribute("aria-label", "Remove panel");
+    if (panel.type === "groups") { layout.meta.hidden = true; renderGroups(layout.viewport, panel); }
+    else {
+      if (panel.scale?.type === "categorical") {
+        const categories = el("details", undefined, layout.tools); categories.className = "cm-annotation-categories";
+        categories.open = categoriesOpen || deleting !== null;
+        const summary = el("summary", "Categories", categories);
+        const scale = resolveAnnotationScale(panel);
+        for (const category of scale.domain) {
+          const chip = el("span", category, summary); chip.className = "cm-annotation-category-chip";
+          chip.style.setProperty("--category-colour", scale.colour(category));
+        }
+        renderCategories(el("div", undefined, categories), panel);
+      }
+      renderMatrix(layout, panel);
+    }
+    layout.sync();
+    if (!embedded && panel.type !== "groups") {
+      const search = createDataSearch(document, { placeholder: "Find a cluster", onInput: (value) => { filter = value; filterRows(); } });
+      search.input.value = filter; toolbar.append(search.node);
+    }
+    const matrix = node.querySelector(".cm-annotation-matrix"); if (matrix) matrix.scrollTop = scroll;
+    if (restoreFocus && !active.isConnected) node.focus({ preventScroll: true });
+  }
+  const clearSelection = () => { selection.clear(); filterSelection(); };
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !event.defaultPrevented && selection.size) { event.preventDefault(); clearSelection(); }
+  });
+  render();
+  return { node, toolbar, select(uid) { selected = uid; creating = false; deleting = null; render(); },
+    clearSelection,
+    get filter() { return filter; },
+    setFilter(value) { filter = value; filterRows(); },
+    destroy() { disposeView(); toolbar.remove(); },
+    update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters || !node.childElementCount)) render(); } };
+}
+
+function installStyle(document) {
+  if (document.getElementById("cm-annotation-data-style")) return;
+  const style = document.createElement("style"); style.id = "cm-annotation-data-style";
+  style.textContent = `
+@layer clinker-editor {
+.cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }
+.cm-annotation-data-toolbar { flex-wrap:wrap; }
+.cm-annotation-data-toolbar > input { width:140px; }
+.cm-annotation-data-editor .cm-data-toolbar > select { max-width:260px; }
+.cm-annotation-data-toolbar label { display:flex; gap:4px; align-items:center; }
+.cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
+.cm-annotation-data-editor details { flex-shrink:0; }
+.cm-annotation-data-editor summary { cursor:pointer; color:var(--cm-muted,#687586); }
+.cm-annotation-categories { padding:0; }
+.cm-annotation-categories > div { display:flex; flex-wrap:wrap; gap:6px 16px; padding:8px 0 2px; }
+.cm-annotation-category-chip { display:inline-flex; align-items:center; gap:4px; margin-left:12px; font-size:12px; }
+.cm-annotation-category-chip::before { content:""; width:9px; height:9px; border-radius:2px; background:var(--category-colour); }
+.cm-annotation-category { display:flex; align-items:center; gap:5px; }
+.cm-annotation-category input[type=text] { min-width:0; width:140px; }
+.cm-annotation-category-remove { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:6px; border:1px solid var(--cm-border,#cbd3de); border-radius:4px; }
+.cm-annotation-matrix { position:relative; }
+.cm-annotation-data-editor .cm-data-actions input[type=number] { width:112px; }
+.cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font-size:13px; width:max-content; min-width:100%; }
+
+.cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,#f3f6fa); }
+.cm-annotation-matrix tr > :first-child { position:sticky; left:0; z-index:1; width:32px; min-width:32px; background:var(--cm-row-background,var(--cm-subtle,#f3f6fa)); }
+.cm-annotation-matrix tr > :nth-child(2) { position:sticky; left:32px; z-index:1; }
+.cm-annotation-matrix tbody th { background:var(--cm-row-background); }
+.cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,#f3f6fa); }
+.cm-annotation-matrix tbody th { cursor:pointer; min-width:200px; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }
+.cm-annotation-matrix :is(input:not([type=checkbox]),select) { width:140px; }
+.cm-annotation-column { display:flex; align-items:center; }
+.cm-annotation-column input { font-weight:inherit; }
+.cm-annotation-column button { visibility:hidden; border:0; padding:0 4px; min-height:24px; }
+.cm-annotation-column:is(:hover,:focus-within) button { visibility:visible; }
+.cm-annotation-add-column { width:36px; }
+.cm-annotation-add-column form { display:flex; gap:4px; }
+.cm-annotation-spacer > td { height:0; border:0; padding:0; }
+.cm-annotation-data-editor fieldset { flex-shrink:0; border:1px solid var(--cm-border,#cbd3de); border-radius:4px; padding:8px; margin:0 0 8px; }
+.cm-annotation-data-editor fieldset > select { margin-top:6px; max-width:100%; }
+.cm-annotation-replacement { flex-shrink:0; }
+.cm-annotation-data-editor textarea { display:block; width:100%; margin:6px 0; resize:vertical; }
+.cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }
+.cm-annotation-data-editor [data-data-error]:empty { display:none; }
+
+}
+`;
+  document.head.append(style);
+}
+
+function validateGroupPanel(panel, clusterIds, tree, fail) {
+  if (!Array.isArray(panel.groups) || !panel.groups.length) fail("group panels require a non-empty groups array.");
+  for (const key of ["markerWidth", "laneGap"]) {
+    if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
+  }
+  const ids = new Set(), nodes = new Set(tree?.nodes.map((node) => node.uid));
+  for (const group of panel.groups) {
+    if (!group || typeof group.uid !== "string" || !group.uid.trim() || ids.has(group.uid)) fail("groups require unique, non-empty uid strings.");
+    ids.add(group.uid);
+    if (group.label !== undefined && typeof group.label !== "string") fail("group label must be text.");
+    if (group.colour !== undefined && (typeof group.colour !== "string" || !color(group.colour))) fail("group colour must be a CSS colour.");
+    if ((group.nodeUid !== undefined) === (group.clusterIds !== undefined)) fail("each group requires either nodeUid or clusterIds.");
+    if (group.nodeUid !== undefined) {
+      if (!nodes.has(group.nodeUid)) fail(`unknown tree node '${group.nodeUid}'.`);
+    } else if (!Array.isArray(group.clusterIds) || !group.clusterIds.length ||
+        new Set(group.clusterIds).size !== group.clusterIds.length || group.clusterIds.some((uid) => !clusterIds.has(uid))) {
+      fail("group clusterIds must contain unique, existing cluster IDs.");
+    }
+  }
+}
+
+function ascending(a, b) {
+  return a == null || b == null ? NaN : a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
+}
+
+function descending(a, b) {
+  return a == null || b == null ? NaN
+    : b < a ? -1
+    : b > a ? 1
+    : b >= a ? 0
+    : NaN;
+}
+
+function bisector(f) {
+  let compare1, compare2, delta;
+
+  // If an accessor is specified, promote it to a comparator. In this case we
+  // can test whether the search value is (self-) comparable. We can’t do this
+  // for a comparator (except for specific, known comparators) because we can’t
+  // tell if the comparator is symmetric, and an asymmetric comparator can’t be
+  // used to test whether a single value is comparable.
+  if (f.length !== 2) {
+    compare1 = ascending;
+    compare2 = (d, x) => ascending(f(d), x);
+    delta = (d, x) => f(d) - x;
+  } else {
+    compare1 = f === ascending || f === descending ? f : zero$1;
+    compare2 = f;
+    delta = f;
+  }
+
+  function left(a, x, lo = 0, hi = a.length) {
+    if (lo < hi) {
+      if (compare1(x, x) !== 0) return hi;
+      do {
+        const mid = (lo + hi) >>> 1;
+        if (compare2(a[mid], x) < 0) lo = mid + 1;
+        else hi = mid;
+      } while (lo < hi);
+    }
+    return lo;
+  }
+
+  function right(a, x, lo = 0, hi = a.length) {
+    if (lo < hi) {
+      if (compare1(x, x) !== 0) return hi;
+      do {
+        const mid = (lo + hi) >>> 1;
+        if (compare2(a[mid], x) <= 0) lo = mid + 1;
+        else hi = mid;
+      } while (lo < hi);
+    }
+    return lo;
+  }
+
+  function center(a, x, lo = 0, hi = a.length) {
+    const i = left(a, x, lo, hi - 1);
+    return i > lo && delta(a[i - 1], x) > -delta(a[i], x) ? i - 1 : i;
+  }
+
+  return {left, center, right};
+}
+
+function zero$1() {
+  return 0;
+}
+
+function number$1(x) {
+  return x === null ? NaN : +x;
+}
+
+const ascendingBisect = bisector(ascending);
+const bisectRight = ascendingBisect.right;
+bisector(number$1).center;
+var bisect = bisectRight;
+
+class InternMap extends Map {
+  constructor(entries, key = keyof) {
+    super();
+    Object.defineProperties(this, {_intern: {value: new Map()}, _key: {value: key}});
+    if (entries != null) for (const [key, value] of entries) this.set(key, value);
+  }
+  get(key) {
+    return super.get(intern_get(this, key));
+  }
+  has(key) {
+    return super.has(intern_get(this, key));
+  }
+  set(key, value) {
+    return super.set(intern_set(this, key), value);
+  }
+  delete(key) {
+    return super.delete(intern_delete(this, key));
+  }
+}
+
+function intern_get({_intern, _key}, value) {
+  const key = _key(value);
+  return _intern.has(key) ? _intern.get(key) : value;
+}
+
+function intern_set({_intern, _key}, value) {
+  const key = _key(value);
+  if (_intern.has(key)) return _intern.get(key);
+  _intern.set(key, value);
+  return value;
+}
+
+function intern_delete({_intern, _key}, value) {
+  const key = _key(value);
+  if (_intern.has(key)) {
+    value = _intern.get(key);
+    _intern.delete(key);
+  }
+  return value;
+}
+
+function keyof(value) {
+  return value !== null && typeof value === "object" ? value.valueOf() : value;
+}
+
+const e10 = Math.sqrt(50),
+    e5 = Math.sqrt(10),
+    e2 = Math.sqrt(2);
+
+function tickSpec(start, stop, count) {
+  const step = (stop - start) / Math.max(0, count),
+      power = Math.floor(Math.log10(step)),
+      error = step / Math.pow(10, power),
+      factor = error >= e10 ? 10 : error >= e5 ? 5 : error >= e2 ? 2 : 1;
+  let i1, i2, inc;
+  if (power < 0) {
+    inc = Math.pow(10, -power) / factor;
+    i1 = Math.round(start * inc);
+    i2 = Math.round(stop * inc);
+    if (i1 / inc < start) ++i1;
+    if (i2 / inc > stop) --i2;
+    inc = -inc;
+  } else {
+    inc = Math.pow(10, power) * factor;
+    i1 = Math.round(start / inc);
+    i2 = Math.round(stop / inc);
+    if (i1 * inc < start) ++i1;
+    if (i2 * inc > stop) --i2;
+  }
+  if (i2 < i1 && 0.5 <= count && count < 2) return tickSpec(start, stop, count * 2);
+  return [i1, i2, inc];
+}
+
+function ticks(start, stop, count) {
+  stop = +stop, start = +start, count = +count;
+  if (!(count > 0)) return [];
+  if (start === stop) return [start];
+  const reverse = stop < start, [i1, i2, inc] = reverse ? tickSpec(stop, start, count) : tickSpec(start, stop, count);
+  if (!(i2 >= i1)) return [];
+  const n = i2 - i1 + 1, ticks = new Array(n);
+  if (reverse) {
+    if (inc < 0) for (let i = 0; i < n; ++i) ticks[i] = (i2 - i) / -inc;
+    else for (let i = 0; i < n; ++i) ticks[i] = (i2 - i) * inc;
+  } else {
+    if (inc < 0) for (let i = 0; i < n; ++i) ticks[i] = (i1 + i) / -inc;
+    else for (let i = 0; i < n; ++i) ticks[i] = (i1 + i) * inc;
+  }
+  return ticks;
+}
+
+function tickIncrement(start, stop, count) {
+  stop = +stop, start = +start, count = +count;
+  return tickSpec(start, stop, count)[2];
+}
+
+function tickStep(start, stop, count) {
+  stop = +stop, start = +start, count = +count;
+  const reverse = stop < start, inc = reverse ? tickIncrement(stop, start, count) : tickIncrement(start, stop, count);
+  return (reverse ? -1 : 1) * (inc < 0 ? 1 / -inc : inc);
+}
+
+function initRange(domain, range) {
+  switch (arguments.length) {
+    case 0: break;
+    case 1: this.range(domain); break;
+    default: this.range(range).domain(domain); break;
+  }
+  return this;
+}
+
+const implicit = Symbol("implicit");
+
+function ordinal() {
+  var index = new InternMap(),
+      domain = [],
+      range = [],
+      unknown = implicit;
+
+  function scale(d) {
+    let i = index.get(d);
+    if (i === undefined) {
+      if (unknown !== implicit) return unknown;
+      index.set(d, i = domain.push(d) - 1);
+    }
+    return range[i % range.length];
+  }
+
+  scale.domain = function(_) {
+    if (!arguments.length) return domain.slice();
+    domain = [], index = new InternMap();
+    for (const value of _) {
+      if (index.has(value)) continue;
+      index.set(value, domain.push(value) - 1);
+    }
+    return scale;
+  };
+
+  scale.range = function(_) {
+    return arguments.length ? (range = Array.from(_), scale) : range.slice();
+  };
+
+  scale.unknown = function(_) {
+    return arguments.length ? (unknown = _, scale) : unknown;
+  };
+
+  scale.copy = function() {
+    return ordinal(domain, range).unknown(unknown);
+  };
+
+  initRange.apply(scale, arguments);
+
+  return scale;
+}
+
+var constant = x => () => x;
+
+function linear$1(a, d) {
+  return function(t) {
+    return a + t * d;
+  };
+}
+
+function exponential(a, b, y) {
+  return a = Math.pow(a, y), b = Math.pow(b, y) - a, y = 1 / y, function(t) {
+    return Math.pow(a + t * b, y);
+  };
+}
+
+function gamma(y) {
+  return (y = +y) === 1 ? nogamma : function(a, b) {
+    return b - a ? exponential(a, b, y) : constant(isNaN(a) ? b : a);
+  };
+}
+
+function nogamma(a, b) {
+  var d = b - a;
+  return d ? linear$1(a, d) : constant(isNaN(a) ? b : a);
+}
+
+var rgb = (function rgbGamma(y) {
+  var color = gamma(y);
+
+  function rgb(start, end) {
+    var r = color((start = rgb$1(start)).r, (end = rgb$1(end)).r),
+        g = color(start.g, end.g),
+        b = color(start.b, end.b),
+        opacity = nogamma(start.opacity, end.opacity);
+    return function(t) {
+      start.r = r(t);
+      start.g = g(t);
+      start.b = b(t);
+      start.opacity = opacity(t);
+      return start + "";
+    };
+  }
+
+  rgb.gamma = rgbGamma;
+
+  return rgb;
+})(1);
+
+function numberArray(a, b) {
+  if (!b) b = [];
+  var n = a ? Math.min(b.length, a.length) : 0,
+      c = b.slice(),
+      i;
+  return function(t) {
+    for (i = 0; i < n; ++i) c[i] = a[i] * (1 - t) + b[i] * t;
+    return c;
+  };
+}
+
+function isNumberArray(x) {
+  return ArrayBuffer.isView(x) && !(x instanceof DataView);
+}
+
+function genericArray(a, b) {
+  var nb = b ? b.length : 0,
+      na = a ? Math.min(nb, a.length) : 0,
+      x = new Array(na),
+      c = new Array(nb),
+      i;
+
+  for (i = 0; i < na; ++i) x[i] = interpolate(a[i], b[i]);
+  for (; i < nb; ++i) c[i] = b[i];
+
+  return function(t) {
+    for (i = 0; i < na; ++i) c[i] = x[i](t);
+    return c;
+  };
+}
+
+function date(a, b) {
+  var d = new Date;
+  return a = +a, b = +b, function(t) {
+    return d.setTime(a * (1 - t) + b * t), d;
+  };
+}
+
+function interpolateNumber(a, b) {
+  return a = +a, b = +b, function(t) {
+    return a * (1 - t) + b * t;
+  };
+}
+
+function object$1(a, b) {
+  var i = {},
+      c = {},
+      k;
+
+  if (a === null || typeof a !== "object") a = {};
+  if (b === null || typeof b !== "object") b = {};
+
+  for (k in b) {
+    if (k in a) {
+      i[k] = interpolate(a[k], b[k]);
+    } else {
+      c[k] = b[k];
+    }
+  }
+
+  return function(t) {
+    for (k in i) c[k] = i[k](t);
+    return c;
+  };
+}
+
+var reA = /[-+]?(?:\d+\.?\d*|\.?\d+)(?:[eE][-+]?\d+)?/g,
+    reB = new RegExp(reA.source, "g");
+
+function zero(b) {
+  return function() {
+    return b;
+  };
+}
+
+function one(b) {
+  return function(t) {
+    return b(t) + "";
+  };
+}
+
+function string(a, b) {
+  var bi = reA.lastIndex = reB.lastIndex = 0, // scan index for next number in b
+      am, // current match in a
+      bm, // current match in b
+      bs, // string preceding current number in b, if any
+      i = -1, // index in s
+      s = [], // string constants and placeholders
+      q = []; // number interpolators
+
+  // Coerce inputs to strings.
+  a = a + "", b = b + "";
+
+  // Interpolate pairs of numbers in a & b.
+  while ((am = reA.exec(a))
+      && (bm = reB.exec(b))) {
+    if ((bs = bm.index) > bi) { // a string precedes the next number in b
+      bs = b.slice(bi, bs);
+      if (s[i]) s[i] += bs; // coalesce with previous string
+      else s[++i] = bs;
+    }
+    if ((am = am[0]) === (bm = bm[0])) { // numbers in a & b match
+      if (s[i]) s[i] += bm; // coalesce with previous string
+      else s[++i] = bm;
+    } else { // interpolate non-matching numbers
+      s[++i] = null;
+      q.push({i: i, x: interpolateNumber(am, bm)});
+    }
+    bi = reB.lastIndex;
+  }
+
+  // Add remains of b.
+  if (bi < b.length) {
+    bs = b.slice(bi);
+    if (s[i]) s[i] += bs; // coalesce with previous string
+    else s[++i] = bs;
+  }
+
+  // Special optimization for only a single match.
+  // Otherwise, interpolate each of the numbers and rejoin the string.
+  return s.length < 2 ? (q[0]
+      ? one(q[0].x)
+      : zero(b))
+      : (b = q.length, function(t) {
+          for (var i = 0, o; i < b; ++i) s[(o = q[i]).i] = o.x(t);
+          return s.join("");
+        });
+}
+
+function interpolate(a, b) {
+  var t = typeof b, c;
+  return b == null || t === "boolean" ? constant(b)
+      : (t === "number" ? interpolateNumber
+      : t === "string" ? ((c = color(b)) ? (b = c, rgb) : string)
+      : b instanceof color ? rgb
+      : b instanceof Date ? date
+      : isNumberArray(b) ? numberArray
+      : Array.isArray(b) ? genericArray
+      : typeof b.valueOf !== "function" && typeof b.toString !== "function" || isNaN(b) ? object$1
+      : interpolateNumber)(a, b);
+}
+
+function interpolateRound(a, b) {
+  return a = +a, b = +b, function(t) {
+    return Math.round(a * (1 - t) + b * t);
+  };
+}
+
+function constants(x) {
+  return function() {
+    return x;
+  };
+}
+
+function number(x) {
+  return +x;
+}
+
+var unit = [0, 1];
+
+function identity$1(x) {
+  return x;
+}
+
+function normalize(a, b) {
+  return (b -= (a = +a))
+      ? function(x) { return (x - a) / b; }
+      : constants(isNaN(b) ? NaN : 0.5);
+}
+
+function clamper(a, b) {
+  var t;
+  if (a > b) t = a, a = b, b = t;
+  return function(x) { return Math.max(a, Math.min(b, x)); };
+}
+
+// normalize(a, b)(x) takes a domain value x in [a,b] and returns the corresponding parameter t in [0,1].
+// interpolate(a, b)(t) takes a parameter t in [0,1] and returns the corresponding range value x in [a,b].
+function bimap(domain, range, interpolate) {
+  var d0 = domain[0], d1 = domain[1], r0 = range[0], r1 = range[1];
+  if (d1 < d0) d0 = normalize(d1, d0), r0 = interpolate(r1, r0);
+  else d0 = normalize(d0, d1), r0 = interpolate(r0, r1);
+  return function(x) { return r0(d0(x)); };
+}
+
+function polymap(domain, range, interpolate) {
+  var j = Math.min(domain.length, range.length) - 1,
+      d = new Array(j),
+      r = new Array(j),
+      i = -1;
+
+  // Reverse descending domains.
+  if (domain[j] < domain[0]) {
+    domain = domain.slice().reverse();
+    range = range.slice().reverse();
+  }
+
+  while (++i < j) {
+    d[i] = normalize(domain[i], domain[i + 1]);
+    r[i] = interpolate(range[i], range[i + 1]);
+  }
+
+  return function(x) {
+    var i = bisect(domain, x, 1, j) - 1;
+    return r[i](d[i](x));
+  };
+}
+
+function copy(source, target) {
+  return target
+      .domain(source.domain())
+      .range(source.range())
+      .interpolate(source.interpolate())
+      .clamp(source.clamp())
+      .unknown(source.unknown());
+}
+
+function transformer() {
+  var domain = unit,
+      range = unit,
+      interpolate$1 = interpolate,
+      transform,
+      untransform,
+      unknown,
+      clamp = identity$1,
+      piecewise,
+      output,
+      input;
+
+  function rescale() {
+    var n = Math.min(domain.length, range.length);
+    if (clamp !== identity$1) clamp = clamper(domain[0], domain[n - 1]);
+    piecewise = n > 2 ? polymap : bimap;
+    output = input = null;
+    return scale;
+  }
+
+  function scale(x) {
+    return x == null || isNaN(x = +x) ? unknown : (output || (output = piecewise(domain.map(transform), range, interpolate$1)))(transform(clamp(x)));
+  }
+
+  scale.invert = function(y) {
+    return clamp(untransform((input || (input = piecewise(range, domain.map(transform), interpolateNumber)))(y)));
+  };
+
+  scale.domain = function(_) {
+    return arguments.length ? (domain = Array.from(_, number), rescale()) : domain.slice();
+  };
+
+  scale.range = function(_) {
+    return arguments.length ? (range = Array.from(_), rescale()) : range.slice();
+  };
+
+  scale.rangeRound = function(_) {
+    return range = Array.from(_), interpolate$1 = interpolateRound, rescale();
+  };
+
+  scale.clamp = function(_) {
+    return arguments.length ? (clamp = _ ? true : identity$1, rescale()) : clamp !== identity$1;
+  };
+
+  scale.interpolate = function(_) {
+    return arguments.length ? (interpolate$1 = _, rescale()) : interpolate$1;
+  };
+
+  scale.unknown = function(_) {
+    return arguments.length ? (unknown = _, scale) : unknown;
+  };
+
+  return function(t, u) {
+    transform = t, untransform = u;
+    return rescale();
+  };
+}
+
+function continuous() {
+  return transformer()(identity$1, identity$1);
+}
+
+function formatDecimal(x) {
+  return Math.abs(x = Math.round(x)) >= 1e21
+      ? x.toLocaleString("en").replace(/,/g, "")
+      : x.toString(10);
+}
+
+// Computes the decimal coefficient and exponent of the specified number x with
+// significant digits p, where x is positive and p is in [1, 21] or undefined.
+// For example, formatDecimalParts(1.23) returns ["123", 0].
+function formatDecimalParts(x, p) {
+  if (!isFinite(x) || x === 0) return null; // NaN, ±Infinity, ±0
+  var i = (x = p ? x.toExponential(p - 1) : x.toExponential()).indexOf("e"), coefficient = x.slice(0, i);
+
+  // The string returned by toExponential either has the form \d\.\d+e[-+]\d+
+  // (e.g., 1.2e+3) or the form \de[-+]\d+ (e.g., 1e+3).
+  return [
+    coefficient.length > 1 ? coefficient[0] + coefficient.slice(2) : coefficient,
+    +x.slice(i + 1)
+  ];
+}
+
+function exponent(x) {
+  return x = formatDecimalParts(Math.abs(x)), x ? x[1] : NaN;
+}
+
+function formatGroup(grouping, thousands) {
+  return function(value, width) {
+    var i = value.length,
+        t = [],
+        j = 0,
+        g = grouping[0],
+        length = 0;
+
+    while (i > 0 && g > 0) {
+      if (length + g + 1 > width) g = Math.max(1, width - length);
+      t.push(value.substring(i -= g, i + g));
+      if ((length += g + 1) > width) break;
+      g = grouping[j = (j + 1) % grouping.length];
+    }
+
+    return t.reverse().join(thousands);
+  };
+}
+
+function formatNumerals(numerals) {
+  return function(value) {
+    return value.replace(/[0-9]/g, function(i) {
+      return numerals[+i];
+    });
+  };
+}
+
+// [[fill]align][sign][symbol][0][width][,][.precision][~][type]
+var re = /^(?:(.)?([<>=^]))?([+\-( ])?([$#])?(0)?(\d+)?(,)?(\.\d+)?(~)?([a-z%])?$/i;
+
+function formatSpecifier(specifier) {
+  if (!(match = re.exec(specifier))) throw new Error("invalid format: " + specifier);
+  var match;
+  return new FormatSpecifier({
+    fill: match[1],
+    align: match[2],
+    sign: match[3],
+    symbol: match[4],
+    zero: match[5],
+    width: match[6],
+    comma: match[7],
+    precision: match[8] && match[8].slice(1),
+    trim: match[9],
+    type: match[10]
+  });
+}
+
+formatSpecifier.prototype = FormatSpecifier.prototype; // instanceof
+
+function FormatSpecifier(specifier) {
+  this.fill = specifier.fill === undefined ? " " : specifier.fill + "";
+  this.align = specifier.align === undefined ? ">" : specifier.align + "";
+  this.sign = specifier.sign === undefined ? "-" : specifier.sign + "";
+  this.symbol = specifier.symbol === undefined ? "" : specifier.symbol + "";
+  this.zero = !!specifier.zero;
+  this.width = specifier.width === undefined ? undefined : +specifier.width;
+  this.comma = !!specifier.comma;
+  this.precision = specifier.precision === undefined ? undefined : +specifier.precision;
+  this.trim = !!specifier.trim;
+  this.type = specifier.type === undefined ? "" : specifier.type + "";
+}
+
+FormatSpecifier.prototype.toString = function() {
+  return this.fill
+      + this.align
+      + this.sign
+      + this.symbol
+      + (this.zero ? "0" : "")
+      + (this.width === undefined ? "" : Math.max(1, this.width | 0))
+      + (this.comma ? "," : "")
+      + (this.precision === undefined ? "" : "." + Math.max(0, this.precision | 0))
+      + (this.trim ? "~" : "")
+      + this.type;
+};
+
+// Trims insignificant zeros, e.g., replaces 1.2000k with 1.2k.
+function formatTrim(s) {
+  out: for (var n = s.length, i = 1, i0 = -1, i1; i < n; ++i) {
+    switch (s[i]) {
+      case ".": i0 = i1 = i; break;
+      case "0": if (i0 === 0) i0 = i; i1 = i; break;
+      default: if (!+s[i]) break out; if (i0 > 0) i0 = 0; break;
+    }
+  }
+  return i0 > 0 ? s.slice(0, i0) + s.slice(i1 + 1) : s;
+}
+
+var prefixExponent;
+
+function formatPrefixAuto(x, p) {
+  var d = formatDecimalParts(x, p);
+  if (!d) return prefixExponent = undefined, x.toPrecision(p);
+  var coefficient = d[0],
+      exponent = d[1],
+      i = exponent - (prefixExponent = Math.max(-8, Math.min(8, Math.floor(exponent / 3))) * 3) + 1,
+      n = coefficient.length;
+  return i === n ? coefficient
+      : i > n ? coefficient + new Array(i - n + 1).join("0")
+      : i > 0 ? coefficient.slice(0, i) + "." + coefficient.slice(i)
+      : "0." + new Array(1 - i).join("0") + formatDecimalParts(x, Math.max(0, p + i - 1))[0]; // less than 1y!
+}
+
+function formatRounded(x, p) {
+  var d = formatDecimalParts(x, p);
+  if (!d) return x + "";
+  var coefficient = d[0],
+      exponent = d[1];
+  return exponent < 0 ? "0." + new Array(-exponent).join("0") + coefficient
+      : coefficient.length > exponent + 1 ? coefficient.slice(0, exponent + 1) + "." + coefficient.slice(exponent + 1)
+      : coefficient + new Array(exponent - coefficient.length + 2).join("0");
+}
+
+var formatTypes = {
+  "%": (x, p) => (x * 100).toFixed(p),
+  "b": (x) => Math.round(x).toString(2),
+  "c": (x) => x + "",
+  "d": formatDecimal,
+  "e": (x, p) => x.toExponential(p),
+  "f": (x, p) => x.toFixed(p),
+  "g": (x, p) => x.toPrecision(p),
+  "o": (x) => Math.round(x).toString(8),
+  "p": (x, p) => formatRounded(x * 100, p),
+  "r": formatRounded,
+  "s": formatPrefixAuto,
+  "X": (x) => Math.round(x).toString(16).toUpperCase(),
+  "x": (x) => Math.round(x).toString(16)
+};
+
+function identity(x) {
+  return x;
+}
+
+var map = Array.prototype.map,
+    prefixes = ["y","z","a","f","p","n","µ","m","","k","M","G","T","P","E","Z","Y"];
+
+function formatLocale(locale) {
+  var group = locale.grouping === undefined || locale.thousands === undefined ? identity : formatGroup(map.call(locale.grouping, Number), locale.thousands + ""),
+      currencyPrefix = locale.currency === undefined ? "" : locale.currency[0] + "",
+      currencySuffix = locale.currency === undefined ? "" : locale.currency[1] + "",
+      decimal = locale.decimal === undefined ? "." : locale.decimal + "",
+      numerals = locale.numerals === undefined ? identity : formatNumerals(map.call(locale.numerals, String)),
+      percent = locale.percent === undefined ? "%" : locale.percent + "",
+      minus = locale.minus === undefined ? "−" : locale.minus + "",
+      nan = locale.nan === undefined ? "NaN" : locale.nan + "";
+
+  function newFormat(specifier, options) {
+    specifier = formatSpecifier(specifier);
+
+    var fill = specifier.fill,
+        align = specifier.align,
+        sign = specifier.sign,
+        symbol = specifier.symbol,
+        zero = specifier.zero,
+        width = specifier.width,
+        comma = specifier.comma,
+        precision = specifier.precision,
+        trim = specifier.trim,
+        type = specifier.type;
+
+    // The "n" type is an alias for ",g".
+    if (type === "n") comma = true, type = "g";
+
+    // The "" type, and any invalid type, is an alias for ".12~g".
+    else if (!formatTypes[type]) precision === undefined && (precision = 12), trim = true, type = "g";
+
+    // If zero fill is specified, padding goes after sign and before digits.
+    if (zero || (fill === "0" && align === "=")) zero = true, fill = "0", align = "=";
+
+    // Compute the prefix and suffix.
+    // For SI-prefix, the suffix is lazily computed.
+    var prefix = (options && options.prefix !== undefined ? options.prefix : "") + (symbol === "$" ? currencyPrefix : symbol === "#" && /[boxX]/.test(type) ? "0" + type.toLowerCase() : ""),
+        suffix = (symbol === "$" ? currencySuffix : /[%p]/.test(type) ? percent : "") + (options && options.suffix !== undefined ? options.suffix : "");
+
+    // What format function should we use?
+    // Is this an integer type?
+    // Can this type generate exponential notation?
+    var formatType = formatTypes[type],
+        maybeSuffix = /[defgprs%]/.test(type);
+
+    // Set the default precision if not specified,
+    // or clamp the specified precision to the supported range.
+    // For significant precision, it must be in [1, 21].
+    // For fixed precision, it must be in [0, 20].
+    precision = precision === undefined ? 6
+        : /[gprs]/.test(type) ? Math.max(1, Math.min(21, precision))
+        : Math.max(0, Math.min(20, precision));
+
+    function format(value) {
+      var valuePrefix = prefix,
+          valueSuffix = suffix,
+          i, n, c;
+
+      if (type === "c") {
+        valueSuffix = formatType(value) + valueSuffix;
+        value = "";
+      } else {
+        value = +value;
+
+        // Determine the sign. -0 is not less than 0, but 1 / -0 is!
+        var valueNegative = value < 0 || 1 / value < 0;
+
+        // Perform the initial formatting.
+        value = isNaN(value) ? nan : formatType(Math.abs(value), precision);
+
+        // Trim insignificant zeros.
+        if (trim) value = formatTrim(value);
+
+        // If a negative value rounds to zero after formatting, and no explicit positive sign is requested, hide the sign.
+        if (valueNegative && +value === 0 && sign !== "+") valueNegative = false;
+
+        // Compute the prefix and suffix.
+        valuePrefix = (valueNegative ? (sign === "(" ? sign : minus) : sign === "-" || sign === "(" ? "" : sign) + valuePrefix;
+        valueSuffix = (type === "s" && !isNaN(value) && prefixExponent !== undefined ? prefixes[8 + prefixExponent / 3] : "") + valueSuffix + (valueNegative && sign === "(" ? ")" : "");
+
+        // Break the formatted value into the integer “value” part that can be
+        // grouped, and fractional or exponential “suffix” part that is not.
+        if (maybeSuffix) {
+          i = -1, n = value.length;
+          while (++i < n) {
+            if (c = value.charCodeAt(i), 48 > c || c > 57) {
+              valueSuffix = (c === 46 ? decimal + value.slice(i + 1) : value.slice(i)) + valueSuffix;
+              value = value.slice(0, i);
+              break;
+            }
+          }
+        }
+      }
+
+      // If the fill character is not "0", grouping is applied before padding.
+      if (comma && !zero) value = group(value, Infinity);
+
+      // Compute the padding.
+      var length = valuePrefix.length + value.length + valueSuffix.length,
+          padding = length < width ? new Array(width - length + 1).join(fill) : "";
+
+      // If the fill character is "0", grouping is applied after padding.
+      if (comma && zero) value = group(padding + value, padding.length ? width - valueSuffix.length : Infinity), padding = "";
+
+      // Reconstruct the final output based on the desired alignment.
+      switch (align) {
+        case "<": value = valuePrefix + value + valueSuffix + padding; break;
+        case "=": value = valuePrefix + padding + value + valueSuffix; break;
+        case "^": value = padding.slice(0, length = padding.length >> 1) + valuePrefix + value + valueSuffix + padding.slice(length); break;
+        default: value = padding + valuePrefix + value + valueSuffix; break;
+      }
+
+      return numerals(value);
+    }
+
+    format.toString = function() {
+      return specifier + "";
+    };
+
+    return format;
+  }
+
+  function formatPrefix(specifier, value) {
+    var e = Math.max(-8, Math.min(8, Math.floor(exponent(value) / 3))) * 3,
+        k = Math.pow(10, -e),
+        f = newFormat((specifier = formatSpecifier(specifier), specifier.type = "f", specifier), {suffix: prefixes[8 + e / 3]});
+    return function(value) {
+      return f(k * value);
+    };
+  }
+
+  return {
+    format: newFormat,
+    formatPrefix: formatPrefix
+  };
+}
+
+var locale;
+var format;
+var formatPrefix;
+
+defaultLocale({
+  thousands: ",",
+  grouping: [3],
+  currency: ["$", ""]
+});
+
+function defaultLocale(definition) {
+  locale = formatLocale(definition);
+  format = locale.format;
+  formatPrefix = locale.formatPrefix;
+  return locale;
+}
+
+function precisionFixed(step) {
+  return Math.max(0, -exponent(Math.abs(step)));
+}
+
+function precisionPrefix(step, value) {
+  return Math.max(0, Math.max(-8, Math.min(8, Math.floor(exponent(value) / 3))) * 3 - exponent(Math.abs(step)));
+}
+
+function precisionRound(step, max) {
+  step = Math.abs(step), max = Math.abs(max) - step;
+  return Math.max(0, exponent(max) - exponent(step)) + 1;
+}
+
+function tickFormat(start, stop, count, specifier) {
+  var step = tickStep(start, stop, count),
+      precision;
+  specifier = formatSpecifier(specifier == null ? ",f" : specifier);
+  switch (specifier.type) {
+    case "s": {
+      var value = Math.max(Math.abs(start), Math.abs(stop));
+      if (specifier.precision == null && !isNaN(precision = precisionPrefix(step, value))) specifier.precision = precision;
+      return formatPrefix(specifier, value);
+    }
+    case "":
+    case "e":
+    case "g":
+    case "p":
+    case "r": {
+      if (specifier.precision == null && !isNaN(precision = precisionRound(step, Math.max(Math.abs(start), Math.abs(stop))))) specifier.precision = precision - (specifier.type === "e");
+      break;
+    }
+    case "f":
+    case "%": {
+      if (specifier.precision == null && !isNaN(precision = precisionFixed(step))) specifier.precision = precision - (specifier.type === "%") * 2;
+      break;
+    }
+  }
+  return format(specifier);
+}
+
+function linearish(scale) {
+  var domain = scale.domain;
+
+  scale.ticks = function(count) {
+    var d = domain();
+    return ticks(d[0], d[d.length - 1], count == null ? 10 : count);
+  };
+
+  scale.tickFormat = function(count, specifier) {
+    var d = domain();
+    return tickFormat(d[0], d[d.length - 1], count == null ? 10 : count, specifier);
+  };
+
+  scale.nice = function(count) {
+    if (count == null) count = 10;
+
+    var d = domain();
+    var i0 = 0;
+    var i1 = d.length - 1;
+    var start = d[i0];
+    var stop = d[i1];
+    var prestep;
+    var step;
+    var maxIter = 10;
+
+    if (stop < start) {
+      step = start, start = stop, stop = step;
+      step = i0, i0 = i1, i1 = step;
+    }
+
+    while (maxIter-- > 0) {
+      step = tickIncrement(start, stop, count);
+      if (step === prestep) {
+        d[i0] = start;
+        d[i1] = stop;
+        return domain(d);
+      } else if (step > 0) {
+        start = Math.floor(start / step) * step;
+        stop = Math.ceil(stop / step) * step;
+      } else if (step < 0) {
+        start = Math.ceil(start * step) / step;
+        stop = Math.floor(stop * step) / step;
+      } else {
+        break;
+      }
+      prestep = step;
+    }
+
+    return scale;
+  };
+
+  return scale;
+}
+
+function linear() {
+  var scale = continuous();
+
+  scale.copy = function() {
+    return copy(scale, linear());
+  };
+
+  initRange.apply(scale, arguments);
+
+  return linearish(scale);
+}
+
+const sequential = ["#f7fbff", "#08306b"];
+const categorical = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377", "#bbbbbb"];
+const ANNOTATION_DEFAULTS = Object.freeze({ cellWidth: 32, cellHeight: 20, gap: 24,
+  fontSize: 10, headingRotation: -60, missingColour: "#eeeeee",
+  cellGap: 0, cellBorderWidth: 0, cellBorderColour: "#ffffff", width: 120, colour: "#267c9e" });
+const ANNOTATION_PALETTES = {
+  Blue: sequential,
+  "Blue–red": ["#2166ac", "#f7f7f7", "#b2182b"],
+  Viridis: ["#440154", "#21918c", "#fde725"],
+  Qualitative: categorical,
+};
+
+// Validate at the JSON boundary; renderers only consume projected records.
+function validateAnnotationPanels(panels, clusters, { previousPanels = null, tree = null } = {}) {
+  if (panels == null) return;
+  const fail = (message) => { throw new TypeError(`Invalid annotationPanels: ${message}`); };
+  if (!Array.isArray(panels)) fail("expected an array.");
+  const ids = new Set(), previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
+  let clusterIds;
+  for (const panel of panels) {
+    if (!panel || typeof panel !== "object") fail("each panel must be an object.");
+    if (typeof panel.uid !== "string" || !panel.uid.trim() || ids.has(panel.uid)) fail("panels require unique, non-empty uid strings.");
+    ids.add(panel.uid);
+    const before = previous.get(panel.uid);
+    if (before === panel) continue;
+    if (!["heatmap", "bar", "groups"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap, bar or groups.`);
+    if (panel.title != null && typeof panel.title !== "string") fail("title must be text.");
+    for (const key of ["show", "showKey", "showColumnLabels"]) {
+      if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
+    }
+    if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
+    for (const key of ["cellWidth", "cellHeight", "fontSize", "width"]) {
+      if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
+    }
+    if (panel.gap !== undefined && (!Number.isFinite(panel.gap) || panel.gap < 0)) fail("gap must be non-negative.");
+    for (const key of ["cellGap", "cellBorderWidth"]) {
+      if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] < 0)) fail(`${key} must be non-negative.`);
+    }
+    if ((panel.cellGap ?? 0) >= Math.min(panel.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth,
+      panel.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight)) fail("cellGap must be smaller than cellWidth and cellHeight.");
+    if (panel.cellBorderColour !== undefined && (typeof panel.cellBorderColour !== "string" || !color(panel.cellBorderColour))) fail("cellBorderColour must be a CSS colour.");
+    if (panel.colour !== undefined && (typeof panel.colour !== "string" || !color(panel.colour))) fail("colour must be a CSS colour.");
+    if (panel.type === "groups") {
+      clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
+      validateGroupPanel(panel, clusterIds, tree, fail);
+      continue;
+    }
+    if (!Array.isArray(panel.columns) || !panel.columns.length ||
+        panel.columns.some((column) => typeof column !== "string" || !column.trim()) ||
+        new Set(panel.columns).size !== panel.columns.length) fail("columns must be unique, non-empty strings.");
+    if (panel.type === "bar" && panel.columns.length !== 1) fail("bar panels require exactly one column.");
+    if (!panel.values || typeof panel.values !== "object" || Array.isArray(panel.values)) fail("values must map cluster IDs to row arrays.");
+    const scale = panel.scale ?? {};
+    if (!scale || typeof scale !== "object" || Array.isArray(scale)) fail("scale must be an object.");
+    const type = scale.type ?? "continuous";
+    if (panel.type === "bar" && type !== "continuous") fail("bar panels require a continuous scale.");
+    if (!["continuous", "categorical"].includes(type)) fail("scale.type must be continuous or categorical.");
+    if (scale.colours !== undefined && (!Array.isArray(scale.colours) || !scale.colours.length ||
+        scale.colours.some((value) => typeof value !== "string" || !color(value)))) fail("scale.colours must contain valid CSS colours.");
+    if (type === "continuous" && scale.colours?.length < 2) fail("continuous scales need at least two colours.");
+    if (panel.missingColour !== undefined && (typeof panel.missingColour !== "string" || !color(panel.missingColour))) fail("missingColour must be a CSS colour.");
+    if (scale.domain !== undefined) {
+      if (!Array.isArray(scale.domain)) fail("scale.domain must be an array.");
+      if (type === "continuous" && (scale.domain.length !== 2 || !scale.domain.every(Number.isFinite) || scale.domain[0] >= scale.domain[1])) fail("continuous domain must be [min, max] with min < max.");
+      if (panel.type === "bar" && (scale.domain[0] > 0 || scale.domain[1] < 0)) fail("bar domains must include zero.");
+      if (type === "categorical" && (scale.domain.some((value) => typeof value !== "string") || new Set(scale.domain).size !== scale.domain.length)) fail("categorical domain must contain unique strings.");
+    }
+    // Presentation changes leave the matrix valid unless they change its
+    // shape, value type or allowed categories. JSON loading always checks it.
+    const oldScale = before?.scale ?? {};
+    const sameCategories = sameArray(oldScale.domain, scale.domain);
+    if (before?.values === panel.values && before.columns?.length === panel.columns.length &&
+        (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories)) continue;
+    clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
+    const categories = type === "categorical" && scale.domain ? new Set(scale.domain) : null;
+    for (const [uid, values] of Object.entries(panel.values)) {
+      if (!clusterIds.has(uid)) fail(`unknown cluster '${uid}'.`);
+      if (!Array.isArray(values) || values.length !== panel.columns.length) fail(`row '${uid}' must have one value per column.`);
+      for (const value of values) {
+        if (value === null) continue;
+        if (type === "continuous" ? !Number.isFinite(value) : typeof value !== "string") fail(`invalid ${type} value in row '${uid}'.`);
+        if (categories && !categories.has(value)) fail(`category '${value}' is absent from scale.domain.`);
+      }
+    }
+  }
+}
+
+// Values are replaced at data boundaries and shared by presentation edits.
+// Retain only their inferred domain, not a second flattened copy of the matrix.
+const domainCache = new WeakMap();
+function inferredDomain(values, type, isBar) {
+  let cached = domainCache.get(values);
+  if (!cached) { cached = {}; domainCache.set(values, cached); }
+  const key = type === "categorical" ? "categories" : isBar ? "bars" : "numeric";
+  if (cached[key]) return cached[key];
+  const categories = new Set();
+  let min = Infinity, max = -Infinity, count = 0;
+  for (const row of Object.values(values)) for (const value of row) {
+    if (value === null) continue;
+    count++;
+    if (type === "categorical") categories.add(value);
+    else { min = Math.min(min, value); max = Math.max(max, value); }
+  }
+  if (isBar) { min = Math.min(0, min); max = Math.max(0, max); }
+  return cached[key] = type === "categorical" ? [...categories]
+    : !count || isBar && min === max ? [0, 1]
+    : min === max ? [min - 0.5, max + 0.5] : [min, max];
+}
+
+/** Resolve scales identically for layout and the appearance editor. */
+function resolveAnnotationScale(source) {
+  const scale = source.scale ?? {}, type = scale.type ?? "continuous";
+  const domain = scale.domain ?? inferredDomain(source.values, type, source.type === "bar");
+  const colours = scale.colours ?? (type === "continuous" ? sequential : categorical);
+  const colour = type === "categorical"
+    ? ordinal(domain, colours).unknown(source.missingColour ?? "#eeeeee")
+    : linear().domain(colours.map((_, i) => domain[0] + (domain[1] - domain[0]) * i / (colours.length - 1))).range(colours).clamp(true);
+  return { type, domain, colours, colour };
+}
+
+const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
+  one.length === two.length && one.every((value, index) => value === two[index]);
+Object.freeze([]);
+
+const palettes = {
+  light: { mode: "light", background: "#ffffff", foreground: "#20252c", muted: "#687586",
+    branch: "#555555", guide: "#999999", outline: "#111111", surface: "#ffffff", border: "#cbd3de", missing: "#eeeeee", subtle: "#f3f6fa", hover: "#e3ecf8", selection: "#d6e6fc", accent: "#1677ff", danger: "#b42318" },
+  dark: { mode: "dark", background: "#171b22", foreground: "#e5eaf1", muted: "#a0adbd",
+    branch: "#bac4d1", guide: "#748193", outline: "#c9d2df", surface: "#232a35", border: "#465365", missing: "#39414e", subtle: "#293241", hover: "#354660", selection: "#3a5276", accent: "#85b7ff", danger: "#ffaaa3" },
+};
+
+function resolveTheme(mode = "auto") {
+  const dark = mode === "dark" || mode === "auto" && globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches;
+  return palettes[dark ? "dark" : "light"];
+}
+
+/** Figure colours are independent of the interface/system theme. */
+function figureConfig(config) {
+  if (config.figureStyle) return config;
+  const theme = { background: config.plot.background, foreground: "#000000",
+    outline: "#000000", branch: "#555555", guide: "#999999",
+    muted: "#687586", missing: "#eeeeee" };
+  return { ...config, figureStyle: theme,
+    tree: { ...config.tree, textColour: theme.foreground,
+      branch: { ...config.tree.branch, colour: config.tree.branch.colour ?? theme.branch },
+      leafGuide: { ...config.tree.leafGuide, colour: config.tree.leafGuide.colour ?? theme.guide } },
+    gene: { ...config.gene, shape: { ...config.gene.shape, stroke: config.gene.shape.stroke ?? theme.outline } },
+    locus: { ...config.locus, trackBar: { ...config.locus.trackBar, colour: config.locus.trackBar.colour ?? theme.outline } },
+    scaleBar: { ...config.scaleBar, colour: config.scaleBar.colour ?? theme.foreground },
+  };
+}
+
+/** Scoped CSS keeps multiple independently themed charts on one page possible. */
+function applyTheme(element, theme) {
+  if (!element) return;
+  element.dataset.clustermapTheme = theme.mode;
+  element.style.colorScheme = theme.mode;
+  for (const [key, value] of Object.entries(theme)) if (key !== "mode") element.style.setProperty(`--cm-${key}`, value);
+  const doc = element.ownerDocument;
+  if (doc.getElementById("clustermap-theme-style")) return;
+  const style = doc.createElement("style"); style.id = "clustermap-theme-style";
+  style.textContent = `
+[data-clustermap-theme] { color:var(--cm-foreground); background:var(--cm-background); }
+[data-clustermap-theme] :is(.tooltip,.cm-annotation-menu,.cm-annotation-hidden,.annotation-tooltip) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }
+[data-clustermap-theme] :is(button,select,input:not([type=color]):not([type=checkbox]),textarea):not(.cm-data-ui *) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }
+[data-clustermap-theme] button:hover:not(.cm-data-ui *) { background:var(--cm-hover)!important; }
+[data-clustermap-theme] button:disabled { opacity:.45; }
+clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(--cm-foreground); border-color:var(--cm-border); }
+[data-clustermap-theme] .cm-annotation-menu :is(p,summary) { color:var(--cm-muted); }
+[data-clustermap-theme] :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { position:relative; z-index:1; background:transparent; color-scheme:light; }
+[data-clustermap-theme] .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border); }
+[data-clustermap-theme] .clusterMapFigureDimensions { z-index:2; color:var(--cm-muted); font:12px/20px system-ui,sans-serif; white-space:nowrap; }
+[data-clustermap-theme] canvas.clusterMapMinimap { color-scheme:light; }
+`;
+  doc.head.append(style);
+}
+
+/** Editor field definitions; presentation metadata is independent of chart config. */
+const APPEARANCE_FIELDS = [
+  ["Plot", "plot.theme", "Interface theme", "select", ["auto", "light", "dark"]],
+  ["Plot", "plot.background", "Figure background", "colour"],
+  ["Annotations", "annotations.enabled", "Enable annotation panels", "checkbox"],
+  ["Legend", "legend.show", "Show legend", "checkbox"], ["Legend", "legend.position", "Position", "select", ["right", "bottom"]], ["Legend", "legend.columns", "Columns", "number"], ["Legend", "legend.columnWidth", "Column width", "number", undefined, true], ["Legend", "legend.entryHeight", "Entry height", "number", undefined, true], ["Legend", "legend.fontSize", "Font size", "number", undefined, true], ["Legend", "legend.subtitleFontSize", "Subtitle size", "number", undefined, true], ["Legend", "legend.marginLeft", "Left margin", "number", undefined, true], ["Legend", "legend.marginTop", "Top margin", "number", undefined, true],
+  ["Links", "link.show", "Show links", "checkbox"], ["Links", "link.asLine", "Draw as lines", "checkbox"], ["Links", "link.bestOnly", "Best match only", "checkbox"], ["Links", "link.threshold", "Minimum identity", "number"], ["Links", "link.straight", "Straight links", "checkbox", undefined, true], ["Links", "link.groupColour", "Use group colour", "checkbox", undefined, true], ["Links", "link.strokeWidth", "Stroke width", "number", undefined, true],
+  ["Link labels", "link.label.show", "Show link labels", "checkbox"], ["Link labels", "link.label.background", "Label background", "checkbox", undefined, true], ["Link labels", "link.label.fontSize", "Font size", "number", undefined, true], ["Link labels", "link.label.position", "Position", "number", undefined, true],
+  ["Tree", "tree.show", "Show tree", "checkbox"], ["Tree", "tree.width", "Tree width", "number"], ["Tree", "tree.useBranchLengths", "Use branch lengths", "checkbox"], ["Tree", "tree.branch.width", "Branch stroke width", "number"], ["Tree", "tree.branch.colour", "Branch colour", "colour"], ["Tree", "tree.support.show", "Show support values", "checkbox"], ["Tree", "tree.support.fontSize", "Support font size", "number", undefined, true], ["Tree", "tree.support.precision", "Support precision", "number", undefined, true], ["Tree", "tree.scaleBar.show", "Show tree scale bar", "checkbox"], ["Tree", "tree.leafGuide.show", "Show dashed leaf guides", "checkbox"], ["Tree", "tree.leafGuide.colour", "Leaf guide colour", "colour", undefined, true], ["Tree", "tree.leafGuide.width", "Leaf guide width", "number", undefined, true], ["Tree", "tree.leafGuide.dash", "Leaf guide dash pattern", "text", undefined, true],
+  ["Clusters & loci", "cluster.alignLabels", "Align cluster labels", "checkbox"], ["Clusters & loci", "cluster.hideLocusCoordinates", "Hide locus coordinates", "checkbox"], ["Clusters & loci", "locus.trimIndicators.show", "Show trim indicators", "checkbox"], ["Clusters & loci", "cluster.spacing", "Cluster spacing", "number"], ["Clusters & loci", "locus.spacing", "Locus spacing", "number"], ["Clusters & loci", "cluster.nameFontSize", "Cluster name size", "number", undefined, true], ["Clusters & loci", "cluster.lociFontSize", "Locus label size", "number", undefined, true], ["Clusters & loci", "locus.trimIndicators.fontSize", "Trim indicator size", "number", undefined, true], ["Clusters & loci", "locus.trimIndicators.fontWeight", "Trim indicator weight", "number", undefined, true], ["Clusters & loci", "locus.trimIndicators.borderWidth", "Trim indicator border", "number", undefined, true], ["Clusters & loci", "locus.trimIndicators.borderOpacity", "Trim indicator border opacity", "number", undefined, true], ["Clusters & loci", "locus.trackBar.colour", "Track colour", "colour", undefined, true], ["Clusters & loci", "locus.trackBar.stroke", "Track stroke", "number", undefined, true],
+  ["Genes", "gene.label.show", "Show gene labels", "checkbox"], ["Genes", "gene.label.name", "Label field", "select", ["uid", "name", "label"]], ["Genes", "gene.label.position", "Label position", "select", ["top", "bottom"]], ["Genes", "gene.label.anchor", "Label anchor", "select", ["start", "middle", "end"], true], ["Genes", "gene.label.fontSize", "Label size", "number", undefined, true], ["Genes", "gene.label.rotation", "Label rotation", "number", undefined, true], ["Genes", "gene.label.spacing", "Label spacing", "number", undefined, true], ["Genes", "gene.label.start", "Label start", "number", undefined, true], ["Genes", "gene.shape.bodyHeight", "Body height", "number", undefined, true], ["Genes", "gene.shape.tipHeight", "Tip height", "number", undefined, true], ["Genes", "gene.shape.tipLength", "Tip length", "number", undefined, true], ["Genes", "gene.shape.stroke", "Stroke colour", "colour", undefined, true], ["Genes", "gene.shape.strokeWidth", "Stroke width", "number", undefined, true],
+  ["Scale bars", "scaleBar.show", "Show scale bar", "checkbox"], ["Scale bars", "scaleBar.basePair", "Base pairs", "number"], ["Scale bars", "colourBar.show", "Show identity bar", "checkbox"], ["Scale bars", "colourBar.domain.minMode", "Minimum source", "select", [["fixed", "Custom value"], ["data", "Lowest identity in data"]]], ["Scale bars", "colourBar.domain.min", "Minimum identity", "number"], ["Scale bars", "colourBar.domain.maxMode", "Maximum source", "select", [["fixed", "Custom value"], ["data", "Highest identity in data"]]], ["Scale bars", "colourBar.domain.max", "Maximum identity", "number"], ["Scale bars", "scaleBar.height", "Height", "number", undefined, true], ["Scale bars", "scaleBar.fontSize", "Font size", "number", undefined, true], ["Scale bars", "scaleBar.stroke", "Stroke", "number", undefined, true], ["Scale bars", "scaleBar.colour", "Colour", "colour", undefined, true], ["Scale bars", "scaleBar.marginTop", "Scale margin", "number", undefined, true], ["Scale bars", "colourBar.width", "Identity width", "number", undefined, true], ["Scale bars", "colourBar.height", "Identity height", "number", undefined, true], ["Scale bars", "colourBar.fontSize", "Identity font size", "number", undefined, true], ["Scale bars", "colourBar.marginTop", "Identity margin", "number", undefined, true],
+  ["Plot & navigation", "plot.renderer", "Renderer", "select", ["svg", "canvas", "webgpu"]], ["Plot & navigation", "plot.minimap.show", "Show minimap", "checkbox"], ["Plot & navigation", "plot.minZoom", "Minimum zoom", "number"], ["Plot & navigation", "plot.maxZoom", "Maximum zoom", "number"], ["Plot & navigation", "plot.transitionDuration", "Transition (ms)", "number", undefined, true], ["Plot & navigation", "plot.scaleFactor", "Scale factor", "number", undefined, true], ["Plot & navigation", "plot.scaleGenes", "Scale genes", "checkbox", undefined, true], ["Plot & navigation", "plot.fontFamily", "Font family", "text", undefined, true], ["Plot & navigation", "plot.minimap.showLinks", "Minimap links", "checkbox", undefined, true], ["Plot & navigation", "plot.minimap.width", "Minimap width", "number", undefined, true], ["Plot & navigation", "plot.minimap.height", "Minimap height", "number", undefined, true], ["Plot & navigation", "plot.minimap.margin", "Minimap margin", "number", undefined, true],
+  ];
 
 const TREE_COLOURING_DEFAULTS = {
   mode: "none",
@@ -574,13 +2676,8 @@ function installTreeControlsStyle(doc) {
 .cm-tree-controls { font:inherit; color:inherit; text-align:left; }
 .cm-tree-controls * { box-sizing:border-box; }
 .cm-tree-controls [hidden] { display:none!important; }
-.cm-tree-controls fieldset { min-width:0; margin:0 0 10px; padding:8px; border:1px solid #ddd; border-radius:4px; }
+.cm-tree-controls fieldset { min-width:0; margin:0 0 10px; padding:8px; border:1px solid var(--cm-border,#ddd); border-radius:4px; }
 .cm-tree-controls legend { padding:0 4px; font-weight:600; }
-.cm-tree-controls button, .cm-tree-controls input, .cm-tree-controls select { font:inherit; color:inherit; }
-.cm-tree-controls button, .cm-tree-controls select, .cm-tree-controls input:not([type=checkbox]):not([type=color]):not([type=range]) { min-height:30px; border:1px solid #cbd3de; border-radius:6px; padding:4px 8px; background:#fff; }
-.cm-tree-controls button { cursor:pointer; }
-.cm-tree-controls button:hover:not(:disabled) { border-color:#78a9ed; background:#f4f8ff; }
-.cm-tree-controls button:disabled { color:#8993a1; background:#f5f6f8; cursor:default; }
 .cm-tree-controls button[aria-pressed=true] { font-weight:600; }
 .cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:6px; margin:6px 0; }
 .cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }
@@ -596,10 +2693,10 @@ function installTreeControlsStyle(doc) {
 .cm-tree-controls .cm-tree-wide input, .cm-tree-controls .cm-tree-wide select { width:100%; }
 .cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 .cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }
-.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid #e5e9ef; margin:10px 0; }
+.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid var(--cm-border,#e5e9ef); margin:10px 0; }
 .cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:10px; }
 .cm-tree-controls [role=status]:empty { display:none; }
-.cm-tree-controls [role=status] { color:#a13c46; margin:6px 0 0; }
+.cm-tree-controls [role=status] { color:var(--cm-danger,#a13c46); margin:6px 0 0; }
 .cm-tree-controls--popover { width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font-size:12px; line-height:1.3; }
 .cm-tree-controls--popover .cm-tree-heading { font-size:12px; margin-bottom:6px; }
 .cm-tree-controls--popover button, .cm-tree-controls--popover input:not([type=checkbox]):not([type=color]) { min-height:24px; padding:2px 5px; border-radius:4px; }
@@ -612,35 +2709,25 @@ function installTreeControlsStyle(doc) {
 .cm-tree-controls--popover .cm-tree-format { gap:5px; }
 .cm-tree-controls--popover .cm-tree-separator { margin:6px 0; }
 .cm-tree-controls--popover .cm-tree-actions { margin-top:6px; }
-`.replaceAll(".cm-tree-controls", ".cm-tree-controls.cm-tree-controls");
+`;
   doc.head.append(style);
 }
 
 /** Policy settings and node popovers share the same compact editing form. */
 function createTreeControls({ tree, config, patch, preview, rotate, clusters = [], nodeUid = null,
   policy = true, onResize, document: doc = globalThis.document }) {
+  installDataEditorStyle(doc);
   installTreeControlsStyle(doc);
-  const element = (tag, parent, text, className) => {
-    const node = doc.createElement(tag);
-    if (text !== undefined) node.textContent = text;
-    if (className) node.className = className;
-    parent?.append(node);
-    return node;
-  };
-  const container = element("div", null, undefined, `cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
+  const ui = createControls(doc);
+  const element = (tag, parent, text, className) => ui.el(tag, text, parent, className);
+  const container = element("div", null, undefined, `cm-data-ui cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
   const message = element("p"); message.setAttribute("role", "status");
-  const run = (action) => { try { action(); message.textContent = ""; } catch (error) { message.textContent = error.message; } };
-  const button = (parent, title, action, className) => {
-    const node = element("button", parent, title, className); node.type = "button";
-    node.onclick = () => run(action); return node;
-  };
+  const run = createActionRunner((text) => { message.textContent = text; });
+  const button = (parent, title, action, className) => ui.button(parent, title, () => run(action), className);
   const section = (title) => { const field = element("fieldset", container); element("legend", field, title); return field; };
   const input = (parent, title, type, value, options = {}) => {
-    const row = element("label", parent, undefined, "cm-tree-row");
-    element("span", row, title);
-    const control = element("input", row); control.type = type;
-    if (type === "checkbox") control.checked = Boolean(value); else control.value = value ?? "";
-    Object.assign(control, options); return control;
+    const row = ui.row(parent, title); row.className = "cm-tree-row";
+    return ui.input(row, title, value, type, undefined, options);
   };
   const reset = (scope, uid) => patch([{ type: "tree.presentation.reset", scope, ...(uid ? { ids: [uid] } : {}) }]);
   const resolved = resolveTreePresentation(tree, config);
@@ -821,6 +2908,60 @@ function createTreeControls({ tree, config, patch, preview, rotate, clusters = [
   return container;
 }
 
+/** Build native fields once; synchronize values and filtering without losing focus. */
+function createAppearanceControls({ document, patch, preview, rotate }) {
+  const ui = createControls(document), node = ui.el("div", undefined, null, "cm-editor__appearance-grid");
+  const sections = new Map(), fields = [];
+  for (const [name, path, label, type, options, advanced] of APPEARANCE_FIELDS) {
+    let section = sections.get(name);
+    if (!section) {
+      const box = ui.el("fieldset", undefined, node); ui.el("legend", name, box);
+      section = { box, key: name.toLowerCase().replaceAll(/\W+/g, "-"), details: null, fields: [] }; sections.set(name, section);
+    }
+    if (advanced && !section.details) {
+      section.details = ui.el("details", undefined, section.box); section.details.dataset.appearanceSection = section.key;
+      ui.el("summary", "Advanced", section.details);
+    }
+    const row = ui.row(advanced ? section.details : section.box, label);
+    // Some sections interleave general and advanced entries; keep disclosure last.
+    if (!advanced && section.details) section.box.insertBefore(row, section.details);
+    const control = type === "select" ? ui.select(row, label, "", options)
+      : ui.input(row, label, "", type === "colour" ? "color" : type);
+    control.dataset.config = path;
+    const field = { row, control, path, type, advanced, search: `${name} ${label} ${path}`.toLowerCase() };
+    fields.push(field); section.fields.push(field);
+  }
+  const empty = ui.el("p", "", node, "cm-editor__empty"), treeHost = ui.el("div", undefined, node, "cm-editor__appearance-tree");
+  let treeState = null;
+  return { node, update({ config, tree, filter, expanded }) {
+    for (const field of fields) {
+      const { control, path, type } = field;
+      const value = path.split(".").reduce((current, key) => current?.[key], config);
+      if (type === "checkbox") control.checked = Boolean(value);
+      else if (control !== document.activeElement) control.value = type === "colour" ? colourHex(value) : value ?? "";
+      const bound = path === "colourBar.domain.min" ? "min" : path === "colourBar.domain.max" ? "max" : null;
+      control.disabled = Boolean(bound && config.colourBar.domain[`${bound}Mode`] === "data");
+      field.row.hidden = Boolean(filter && !field.search.includes(filter));
+    }
+    let visible = 0;
+    for (const section of sections.values()) {
+      section.box.hidden = section.fields.every((field) => field.row.hidden);
+      if (!section.box.hidden) visible++;
+      if (section.details) {
+        section.details.hidden = !section.fields.some((field) => field.advanced && !field.row.hidden);
+        section.details.open = Boolean(filter) || expanded.has(section.key);
+      }
+    }
+    empty.hidden = visible > 0; empty.textContent = `No appearance settings match “${filter}”.`;
+    treeHost.hidden = !tree || Boolean(filter && !/tree|clade|colour|color|annotation|branch|cut|palette/.test(filter));
+    const treeKey = JSON.stringify(config.tree);
+    if (!treeHost.hidden && (treeState?.tree !== tree || treeState?.config !== treeKey)) {
+      treeHost.replaceChildren(createTreeControls({ tree, config: config.tree, patch, preview, rotate, document }));
+      treeState = { tree, config: treeKey };
+    }
+  } };
+}
+
 const tagName = "clinker-editor";
 const HTMLElementBase = globalThis.HTMLElement || class {};
 
@@ -834,7 +2975,6 @@ const labelFor = (record, fallback = "") => record?.label || record?.name || fal
 // Chart palettes are stored as CSS colours (often rgb(...)); colour inputs only
 // accept hexadecimal values. D3's parser is bundled with the chart and keeps
 // editor swatches in sync with the rendered legend.
-const colourFor = (value) => color(value || "#888888")?.formatHex() || "#888888";
 const groupMap = (data) => new Map((data?.groups || []).flatMap((group) =>
   (group.genes || []).flatMap((id) => [[id, group], [String(id), group]])
 ));
@@ -842,40 +2982,53 @@ function editableCell(kind, id, value, placeholder, compact = false, width = nul
   const length = String(value || placeholder || "").length;
   const fixed = Number.isFinite(width);
   const size = compact && !fixed ? ` size="${Math.max(8, Math.min(30, length + 1))}"` : "";
-  const style = Number.isFinite(width) ? ` style="width:${Math.ceil(width)}px;min-width:${Math.ceil(width)}px"` : "";
-  return `<input class="cm-editor-inline-input${fixed ? " cm-editor-inline-input--fixed" : ""}" data-edit="${kind}" data-id="${escapeHtml(id)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"${size}${style}>`;
+  const style = Number.isFinite(width) ? ` style="width:${Math.ceil(width) + 2}px;min-width:${Math.ceil(width) + 2}px"` : "";
+  return `<input class="cm-data-cell cm-data-field cm-editor-inline-input${fixed ? " cm-editor-inline-input--fixed" : ""}" data-edit="${kind}" data-id="${escapeHtml(id)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"${size}${style}>`;
 }
 
 function editableField(kind, id, value, placeholder, label, editing, compact = false, width = null) {
   if (editing) {
-    const fixed = Number.isFinite(width) ? ` style="width:${Math.ceil(width)}px;flex:0 0 ${Math.ceil(width)}px"` : "";
-    return `<span class="cm-editor__editable-field is-editing"${fixed}>${editableCell(kind, id, value, placeholder, compact, width)}</span>`;
+    const fixed = Number.isFinite(width) ? ` style="width:${Math.ceil(width) + 16}px;flex:0 0 ${Math.ceil(width) + 16}px"` : "";
+    return `<span class="cm-data-cell cm-editor__editable-field is-editing"${fixed}>${editableCell(kind, id, value, placeholder, compact, width)}</span>`;
   }
-  const text = value ? escapeHtml(value) : `<span class="cm-editor__editable-placeholder">${escapeHtml(placeholder)}</span>`;
-  return `<span class="cm-editor__editable-field"><span class="cm-editor__editable-label" title="${escapeHtml(value || placeholder)}">${text}</span><button type="button" class="cm-editor__edit-icon" data-focus-edit="${kind}" data-id="${escapeHtml(id)}" aria-label="Edit ${escapeHtml(label)}" title="Edit ${escapeHtml(label)}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 20 4.1-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.1 16 4 20Z"></path><path d="m13.8 7.2 3 3"></path></svg></button></span>`;
+  const text = value ? escapeHtml(value) : `<span class="cm-data-placeholder">${escapeHtml(placeholder)}</span>`;
+  return `<span class="cm-data-cell cm-editor__editable-field"><span class="cm-editor__editable-label" title="${escapeHtml(value || placeholder)}">${text}</span><button type="button" class="cm-editor__edit-icon" data-focus-edit="${kind}" data-id="${escapeHtml(id)}" aria-label="Edit ${escapeHtml(label)}" title="Edit ${escapeHtml(label)}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 20 4.1-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.1 16 4 20Z"></path><path d="m13.8 7.2 3 3"></path></svg></button></span>`;
 }
 
 /**
  * An optional, light-DOM editor for a ClusterMap chart.
  *
- * The component deliberately does not import a stylesheet or own a copy of the
- * chart data.  Set .chart to an already rendered chart, then optionally load
- * `clinker/editor.css` for the package's default presentation.
+ * Shared native-control styles are installed on mount; `clinker/editor.css`
+ * supplies the optional panel layout. Set .chart to an already rendered chart.
+ * Edits use its public API; the component owns no copy of the chart data.
  */
 class ClinkerEditorElement extends HTMLElementBase {
   #chart = null;
+  #runEdit = createActionRunner((message) => {
+    const status = this.querySelector("[data-editor-error]");
+    if (status) { status.textContent = message; status.hidden = !message; }
+  });
+  #annotationEditor = null;
+  #appearanceView = null;
+  #recordView = null;
+  #editAnnotation = (event) => {
+    if (event.defaultPrevented || event.detail?.chart !== this.#chart) return;
+    event.preventDefault(); this.editAnnotations(event.detail.panelUid);
+  };
   #unsubscribe = null;
   #kind = "groups";
   #geneView = "tree";
-  #selected = new Set();
-  #selectionAnchor = null;
+  #selected = new RowSelection();
+  #rowView = null;
+  #selectionControls = null;
+  #rowsCache = null;
+  #selectionData = null;
   #filter = "";
   #appearanceFilter = "";
   #appearanceAdvanced = new Set();
   #memberGroupId = null;
   #expanded = new Set();
   #draggedGroupId = null;
-  #scrollTop = 0;
   #resizeStart = null;
   #editingKey = null;
   #editWidths = new Map();
@@ -892,18 +3045,25 @@ class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    this.classList.add("cm-editor");
+    this.classList.add("cm-editor", "cm-data-ui");
+    installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();
     this.#bind();
+    this.ownerDocument.addEventListener("clustermap:edit-annotation", this.#editAnnotation);
     this.#subscribe();
     this.#render();
   }
 
   disconnectedCallback() {
+    this.ownerDocument.removeEventListener("clustermap:edit-annotation", this.#editAnnotation);
     this.#chart?.previewTreePresentation?.(null);
     this.#unsubscribe?.();
     this.#unsubscribe = null;
     this.#cancelHover();
+    this.#rowView?.destroy(); this.#rowView = null;
+    this.#annotationEditor?.destroy();
+    this.#annotationEditor = null;
+    this.querySelector("[data-annotation-editor]")?.replaceChildren();
   }
 
   get chart() { return this.#chart; }
@@ -914,6 +3074,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.#unsubscribe?.();
     this.#unsubscribe = null;
     this.#chart = value || null;
+    this.#selected.clear(); this.#selectionData = null; this.#rowsCache = null;
     this.#dataCache = null;
     this.#subscribe();
     this.#initializeExpanded();
@@ -922,8 +3083,26 @@ class ClinkerEditorElement extends HTMLElementBase {
 
   get value() { return this.#chart?.data?.(); }
 
+  /** Open a panel's annotation data from the plot or a host application. */
+  editAnnotations(panelUid) {
+    this.hidden = false;
+    this.#kind = "annotations";
+    this.#selected.clear();
+    this.querySelectorAll("[data-tab]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.tab === "data")));
+    this.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== "data"; });
+    this.querySelectorAll("[data-kind]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.kind === "annotations")));
+    this.#renderData();
+    if (panelUid) this.#annotationEditor?.select(panelUid);
+    this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true }));
+    return this;
+  }
+
   /** Replace any declarative fallback content with the packaged editor UI. */
   reset() {
+    this.#appearanceView = null;
+    this.#rowView?.destroy(); this.#rowView = null;
+    this.#annotationEditor?.destroy();
+    this.#annotationEditor = null;
     this.replaceChildren();
     this.#renderShell();
     this.#render();
@@ -944,12 +3123,14 @@ class ClinkerEditorElement extends HTMLElementBase {
         <button type="button" data-tab="data" role="tab" aria-selected="true">Data</button>
         <button type="button" data-tab="appearance" role="tab" aria-selected="false">Appearance</button>
       </div>
+      <div data-editor-error class="cm-data-error" role="alert" hidden></div>
       <section data-panel="data" class="cm-editor__panel">
-        <div class="cm-editor__toolbar">
+        <div class="cm-editor__toolbar cm-data-toolbar">
           <div class="cm-editor__segmented" aria-label="Data type">
             <button type="button" data-kind="groups" aria-pressed="true">Groups</button>
             <button type="button" data-kind="genes" aria-pressed="false">Genes</button>
             <button type="button" data-kind="links" aria-pressed="false">Links</button>
+            <button type="button" data-kind="annotations" aria-pressed="false">Annotations</button>
           </div>
           <div class="cm-editor__segmented" data-gene-view aria-label="Gene view" hidden>
             <button type="button" data-gene-view-kind="tree" aria-pressed="true">By locus</button>
@@ -958,35 +3139,49 @@ class ClinkerEditorElement extends HTMLElementBase {
           </div>
           <button type="button" data-command="toggle-tree" hidden>Expand visible</button>
           <button type="button" data-command="new-group">Create group…</button>
-          <label class="cm-editor__search"><span class="cm-editor__sr-only">Filter records</span><input type="search" data-filter placeholder="Search names, labels, loci, or clusters"></label>
+          <div data-annotation-toolbar class="cm-editor__annotation-toolbar" hidden></div>
+          <span data-search-slot></span>
           <button type="button" data-command="clear-filter" aria-label="Clear filter" title="Clear filter" hidden>×</button>
         </div>
-        <div class="cm-editor__member-filter" data-member-filter hidden><span>Group: <strong data-member-label></strong></span><button type="button" data-command="clear-member-filter" aria-label="Clear group member filter" title="Clear group member filter">×</button></div>
-        <div class="cm-editor__actions" data-actions hidden></div>
-        <div class="cm-editor__meta"><span data-summary></span><button type="button" data-command="select-visible">Select all visible</button></div>
-        <div class="cm-editor__table" role="region" aria-label="Editable chart data">
-          <div data-head class="cm-editor__head"></div>
-          <div data-rows></div>
-        </div>
+        <div data-annotation-editor class="cm-editor__annotation-editor" hidden></div>
+        <div data-record-editor></div>
       </section>
       <section data-panel="appearance" class="cm-editor__panel" hidden>
         <div class="cm-editor__appearance-toolbar"><label class="cm-editor__search"><span class="cm-editor__sr-only">Find an appearance setting</span><input type="search" data-appearance-filter placeholder="Find a setting"></label><button type="button" data-command="clear-appearance-filter" aria-label="Clear appearance filter" title="Clear appearance filter" hidden>×</button></div>
         <div class="cm-editor__appearance" data-appearance></div>
       </section>`;
+    const panel = createDataPanel(this.ownerDocument);
+    panel.node.dataset.recordEditor = "";
+    panel.tools.dataset.recordTools = "";
+    panel.tools.innerHTML = `<div class="cm-editor__member-filter" data-member-filter hidden><span>Group: <strong data-member-label></strong></span><button type="button" data-command="clear-member-filter" aria-label="Clear group member filter" title="Clear group member filter">×</button></div>`;
+    this.#selectionControls = createSelectionControls(panel, { selection: this.#selected,
+      onChange: () => { this.#renderData(); this.#syncHighlight(); } });
+    this.#selectionControls.actions.dataset.actions = "";
+    panel.viewport.classList.add("cm-editor__table");
+    panel.viewport.innerHTML = `<div data-head class="cm-editor__head"></div><div data-rows></div>`;
+    this.querySelector("[data-record-editor]").replaceWith(panel.node);
+    const search = createDataSearch(this.ownerDocument);
+    search.input.dataset.filter = "";
+    this.querySelector("[data-search-slot]").replaceWith(search.node);
   }
 
   #subscribe() {
     if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
     this.#unsubscribe = this.#chart.on("change", (change) => {
-      if (change.type === "data.apply" || change.type === "data.replace") this.#dataCache = null;
+      if (change.type === "data.apply" || change.type === "data.replace") {
+        // Patches can mutate the existing data object, so identity alone does
+        // not invalidate derived rows, indexes or deleted-record selections.
+        this.#dataCache = null;
+        this.#rowsCache = null;
+        this.#selectionData = null;
+      }
       if (change.type === "data.replace") {
         this.#selected.clear();
-        this.#selectionAnchor = null;
         this.#expanded.clear();
         this.#initializeExpanded();
       }
       if (change.type === "data.apply" || change.type === "data.replace") this.#renderData();
-      else if (change.type === "config.change") this.#renderAppearance();
+      else if (change.type === "config.change" || change.type === "theme.change") this.#renderAppearance();
       if (change.type === "data.replace" || (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.presentation.")))) this.#renderAppearance();
       if (change.type === "history.change") this.#renderHistory();
     });
@@ -1019,18 +3214,14 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.addEventListener("pointerup", () => { this.#resizeStart = null; });
     this.addEventListener("pointercancel", () => { this.#resizeStart = null; });
     this.addEventListener("input", (event) => {
-      if (event.target.matches("[data-filter]")) {
-        this.#filter = event.target.value.trim().toLowerCase();
-        this.#scrollTop = 0;
-        this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-        this.#renderData();
-      }
+      if (event.target.matches("[data-filter]")) this.#activeDataView?.setFilter(event.target.value);
       if (event.target.matches("[data-appearance-filter]")) {
         this.#appearanceFilter = event.target.value.trim().toLowerCase();
         this.#renderAppearance();
       }
     });
     this.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented) return;
       if (event.key === "Escape" && event.target.matches("[data-edit]")) {
         event.preventDefault();
         this.#editWidths.delete(this.#editingKey);
@@ -1038,10 +3229,7 @@ class ClinkerEditorElement extends HTMLElementBase {
         this.#renderData();
         return;
       }
-      if (event.key === "Escape" && this.#selected.size) {
-        this.#selected.clear();
-        this.#renderData();
-      }
+      if (event.key === "Escape") this.#activeDataView?.clearSelection();
       if (event.key === "Enter" && event.target.matches("[data-edit]")) event.target.blur();
       const grip = event.target.closest("[data-reorder]");
       if (grip && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
@@ -1096,15 +3284,15 @@ class ClinkerEditorElement extends HTMLElementBase {
       if (!row || row.contains(event.relatedTarget)) return;
       this.#queueHover(null);
     });
-    this.addEventListener("scroll", (event) => {
-      const table = event.target.closest(".cm-editor__table");
-      if (!table) return;
-      this.#scrollTop = table.scrollTop;
-      this.#renderData();
-    }, true);
+
   }
 
   #click(event) {
+    const checkbox = event.target.closest("[data-select]");
+    if (checkbox) {
+      this.#selectRow(this.#id(checkbox.dataset.select), checkbox.checked, event.shiftKey);
+      this.#renderData(); this.#syncHighlight(); return;
+    }
     const edit = event.target.closest("[data-focus-edit]");
     if (edit) {
       event.preventDefault();
@@ -1136,7 +3324,7 @@ class ClinkerEditorElement extends HTMLElementBase {
       const current = this.#sort[this.#kind];
       const key = sort.dataset.sort;
       this.#sort[this.#kind] = { key, direction: current?.key === key ? -current.direction : 1 };
-      this.#scrollTop = 0;
+      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
       this.#renderData();
       return;
     }
@@ -1168,6 +3356,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     if (tab) {
       this.querySelectorAll("[data-tab]").forEach((node) => node.setAttribute("aria-selected", String(node === button)));
       this.querySelectorAll("[data-panel]").forEach((node) => { node.hidden = node.dataset.panel !== tab; });
+      if (tab === "appearance") this.#renderAppearance(); else this.#renderData();
       return;
     }
     const kind = button.dataset.kind;
@@ -1175,7 +3364,7 @@ class ClinkerEditorElement extends HTMLElementBase {
       this.#kind = kind;
       if (kind !== "genes") this.#memberGroupId = null;
       this.#selected.clear();
-      this.#scrollTop = 0;
+      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
       this.querySelectorAll("[data-kind]").forEach((node) => node.setAttribute("aria-pressed", String(node === button)));
       this.#renderData();
       return;
@@ -1183,19 +3372,13 @@ class ClinkerEditorElement extends HTMLElementBase {
     const geneView = button.dataset.geneViewKind;
     if (geneView) {
       this.#geneView = geneView;
-      this.#scrollTop = 0;
+      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
       this.querySelectorAll("[data-gene-view-kind]").forEach((node) => node.setAttribute("aria-pressed", String(node === button)));
       this.#renderData();
       return;
     }
     const command = button.dataset.command;
-    if (command === "select-visible") {
-      this.#selectableIds().forEach((id) => this.#selected.add(id));
-      this.#renderData();
-    } else if (command === "clear-selection") {
-      this.#selected.clear();
-      this.#renderData();
-    } else if (command === "delete") {
+    if (command === "delete") {
       this.#deleteSelected();
     } else if (command === "new-group") {
       const label = window.prompt("Name for the new homology group");
@@ -1248,11 +3431,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     } else if (command === "toggle-tree") {
       this.#toggleTree();
     } else if (command === "clear-filter") {
-      this.#filter = "";
-      const input = this.querySelector("[data-filter]");
-      if (input) input.value = "";
-      this.#scrollTop = 0;
-      this.#renderData();
+      this.#activeDataView?.setFilter("");
     } else if (command === "clear-member-filter") {
       this.#memberGroupId = null;
       this.#renderData();
@@ -1268,18 +3447,15 @@ class ClinkerEditorElement extends HTMLElementBase {
     const target = event.target;
     if (target.matches("[data-select-many]")) {
       const ids = JSON.parse(target.dataset.selectMany || "[]").map((id) => this.#id(id));
-      ids.forEach((id) => {
-        if (target.checked) this.#selected.add(id);
-        else this.#selected.delete(id);
-      });
-      this.#selectionAnchor = null;
+      this.#selected.setMany(ids, target.checked);
       this.#renderData();
       this.#syncHighlight();
       return;
     }
     if (target.matches("[data-select]")) {
       const id = this.#id(target.dataset.select);
-      this.#selectRow(id, target.checked, event.shiftKey);
+      if (this.#selected.has(id) === target.checked) return;
+      this.#selectRow(id, target.checked, false);
       this.#renderData();
       this.#syncHighlight();
       return;
@@ -1312,7 +3488,7 @@ class ClinkerEditorElement extends HTMLElementBase {
 
   #apply(operation) {
     if (!this.#chart?.patch) return;
-    this.#chart.patch([operation]);
+    this.#runEdit(() => this.#chart.patch([operation]));
   }
 
   #edit(input) {
@@ -1339,7 +3515,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     const value = input.type === "checkbox" ? input.checked : input.type === "number" ? Number(input.value) : input.value;
     let config = value;
     for (const key of keys.slice().reverse()) config = { [key]: config };
-    this.#chart.config(config);
+    this.#runEdit(() => this.#chart.config(config), input);
   }
 
   #data() { return this.#chart?.data?.() || null; }
@@ -1413,17 +3589,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   #isEditing(kind, id) { return this.#editingKey === this.#editKey(kind, id); }
 
   #selectRow(id, checked, range) {
-    const selectable = this.#rows().filter((row) => row.type === "gene" || !row.type).map((row) => row.id);
-    const start = selectable.indexOf(this.#selectionAnchor);
-    const end = selectable.indexOf(id);
-    if (range && start >= 0 && end >= 0) {
-      selectable.slice(Math.min(start, end), Math.max(start, end) + 1).forEach((candidate) => {
-        if (checked) this.#selected.add(candidate);
-        else this.#selected.delete(candidate);
-      });
-    } else if (checked) this.#selected.add(id);
-    else this.#selected.delete(id);
-    this.#selectionAnchor = id;
+    this.#selected.select(id, checked, { range, orderedIds: this.#rows().filter((row) => row.type === "gene" || !row.type).map((row) => row.id) });
   }
 
   #selectableIds(rows = this.#rows()) {
@@ -1444,6 +3610,14 @@ class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #rows() {
+    const data = this.#data();
+    const key = JSON.stringify([this.#kind, this.#geneView, this.#filter, this.#memberGroupId, this.#sort, [...this.#expanded]]);
+    if (this.#rowsCache?.data === data && this.#rowsCache.key === key) return this.#rowsCache.rows;
+    const rows = this.#computeRows();
+    this.#rowsCache = { data, key, rows }; return rows;
+  }
+
+  #computeRows() {
     const data = this.#data();
     if (!data) return [];
     const needle = this.#filter;
@@ -1543,22 +3717,66 @@ class ClinkerEditorElement extends HTMLElementBase {
     if (redo) redo.disabled = !this.#chart?.canRedo?.();
   }
 
+  get #activeDataView() {
+    if (this.#kind === "annotations") return this.#annotationEditor;
+    return this.#recordView ||= {
+      setFilter: (text) => {
+        this.#filter = text.trim().toLowerCase();
+        this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
+        this.#renderData();
+      },
+      clearSelection: () => { this.#selected.clear(); this.#renderData(); this.#syncHighlight(); },
+      update: () => this.#renderData(),
+      destroy: () => { this.#rowView?.destroy(); this.#rowView = null; },
+    };
+  }
+
   #renderData() {
-    const rows = this.#rows();
+    if (this.querySelector('[data-panel="data"]')?.hidden) return;
+    const annotations = this.#kind === "annotations";
+    const annotationHost = this.querySelector("[data-annotation-editor]");
+    if (!annotationHost) return;
+    annotationHost.hidden = !annotations;
+    this.querySelector("[data-annotation-toolbar]").hidden = !annotations;
+    const search = this.querySelector("[data-filter]");
+    search.value = annotations ? this.#annotationEditor?.filter || "" : this.#filter;
+    search.placeholder = annotations ? "Find a cluster" : "Search names, labels, loci, or clusters";
+    this.querySelector("[data-record-editor]").hidden = annotations;
+    if (annotations) {
+      for (const selector of ["[data-gene-view]", "[data-member-filter]", '[data-command="new-group"]',
+        '[data-command="toggle-tree"]']) this.querySelector(selector).hidden = true;
+      if (!this.#annotationEditor) {
+        this.#annotationEditor = createAnnotationDataControls({ document: this.ownerDocument,
+          embedded: true,
+          getPanels: () => this.#data()?.annotationPanels || [], getClusters: () => this.#data()?.clusters || [],
+          getTree: () => this.#data()?.tree, patch: (operations) => this.#chart.patch(operations),
+          annotationApi: { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale, validateAnnotationPanels },
+        });
+        annotationHost.append(this.#annotationEditor.node);
+        this.querySelector("[data-annotation-toolbar]").append(this.#annotationEditor.toolbar);
+      } else this.#activeDataView.update();
+      search.value = this.#annotationEditor.filter;
+      this.querySelector('[data-command="clear-filter"]').hidden = !this.#annotationEditor.filter;
+      return;
+    }
     const data = this.#data();
     const head = this.querySelector("[data-head]");
     const list = this.querySelector("[data-rows]");
-    const summary = this.querySelector("[data-summary]");
     const actions = this.querySelector("[data-actions]");
     if (!data) {
-      head.replaceChildren(); list.textContent = "Set the chart property to edit a ClusterMap chart."; summary.textContent = "No chart attached."; actions.hidden = true;
+      this.#rowView?.destroy(); this.#rowView = null;
+      setMarkup(head, ""); list.textContent = "Set the chart property to edit a ClusterMap chart.";
+      this.#selectionControls.update({ ids: [], summary: "No chart attached.", noun: this.#kind.slice(0, -1) });
+      setMarkup(actions, "");
       return;
     }
     const geneView = this.querySelector("[data-gene-view]");
     const memberFilter = this.querySelector("[data-member-filter]");
     const memberGroup = data.groups.find((group) => group.uid === this.#memberGroupId);
     if (!memberGroup) this.#memberGroupId = null;
+    const rows = this.#rows();
     memberFilter.hidden = !memberGroup || this.#kind !== "genes";
+    this.querySelector("[data-record-tools]").hidden = memberFilter.hidden;
     if (memberGroup) this.querySelector("[data-member-label]").textContent = labelFor(memberGroup, memberGroup.uid);
     geneView.hidden = this.#kind !== "genes";
     this.querySelector('[data-command="new-group"]').hidden = this.#kind !== "groups";
@@ -1579,78 +3797,83 @@ class ClinkerEditorElement extends HTMLElementBase {
         : [{ label: "" }, { label: "Gene", sort: "label" }, { label: "Locus", sort: "locus" }, { label: "Cluster", sort: "cluster" }, { label: "Group", sort: "group" }, { label: "Colour" }];
     const sort = this.#sort[this.#kind];
     head.hidden = isTree;
-    head.className = `cm-editor__head cm-editor__head--${this.#kind}`;
-    head.innerHTML = columns.map(({ label, sort: key }) => {
-      if (!key) return `<span>${label}</span>`;
+    head.className = `cm-data-head cm-editor__head cm-editor__head--${this.#kind}`;
+    setMarkup(head, columns.map(({ label, sort: key }, index) => {
+      if (index === 0) return dataCell("", true);
+      if (!key) return `<span class="cm-data-cell">${label}</span>`;
       const active = sort?.key === key;
       const direction = active && sort.direction < 0 ? "descending" : "ascending";
-      return `<button type="button" class="cm-editor__sort" data-sort="${key}" aria-label="Sort by ${label}, ${direction}" title="Sort by ${label}">${label}<span aria-hidden="true">${active ? (sort.direction < 0 ? "↓" : "↑") : "↕"}</span></button>`;
-    }).join("");
+      return `<button type="button" class="cm-data-cell cm-editor__sort" data-sort="${key}" aria-label="Sort by ${label}, ${direction}" title="Sort by ${label}">${label}<span aria-hidden="true">${active ? (sort.direction < 0 ? "↓" : "↑") : "↕"}</span></button>`;
+    }).join(""));
     list.className = `cm-editor__rows cm-editor__rows--${isTree ? "tree" : this.#kind}`;
     const table = this.querySelector(".cm-editor__table");
-    const rowHeight = 34;
-    const virtual = rows.length > 200;
-    const viewportRows = Math.ceil((table?.clientHeight || 320) / rowHeight) + 16;
-    const first = virtual ? Math.max(0, Math.floor(this.#scrollTop / rowHeight) - 8) : 0;
-    const last = virtual ? Math.min(rows.length, first + viewportRows) : rows.length;
-    const visibleRows = rows.slice(first, last);
-    const renderRow = (row) => isTree ? this.#treeRowMarkup(row) : this.#rowMarkup(row);
-    list.innerHTML = rows.length
-      ? `${virtual ? `<div style="height:${first * rowHeight}px"></div>` : ""}${visibleRows.map(renderRow).join("")}${virtual ? `<div style="height:${Math.max(0, rows.length - last) * rowHeight}px"></div>` : ""}`
-      : `<p class="cm-editor__empty">No ${this.#kind} match the filter.</p>`;
+    if (!this.#rowView) {
+      list.replaceChildren();
+      const markup = new WeakMap();
+      const build = (row, html = row.type ? this.#treeRowMarkup(row) : this.#rowMarkup(row)) => {
+        const template = this.ownerDocument.createElement("template"); template.innerHTML = html;
+        const node = template.content.firstElementChild; markup.set(node, html); return node;
+      };
+      this.#rowView = createVirtualRows({ viewport: table, container: list,
+        key: (row) => `${this.#kind}:${row.type || "row"}:${row.key ?? row.id}`,
+        headerHeight: () => head.hidden ? 0 : head.offsetHeight, createRow: build,
+        createEmpty: () => { const message = this.ownerDocument.createElement("p"); message.className = "cm-editor__empty"; message.textContent = "No records match the filter."; return message; },
+        updateRow: (node, row) => {
+          const html = row.type ? this.#treeRowMarkup(row) : this.#rowMarkup(row);
+          return markup.get(node) === html ? node : build(row, html);
+        } });
+    }
+    if (this.#selectionData !== data) {
+      const cache = this.#cache();
+      const records = this.#kind === "genes" ? cache.geneById.values() : this.#kind === "links" ? data.links : data.groups;
+      this.#selected.prune([...records].map((record) => record.uid)); this.#selectionData = data;
+    }
+    this.#rowView.setRows(rows);
     const visibleGenes = isTree ? new Set(rows.flatMap((row) => row.selectIds || (row.type === "gene" ? [row.id] : []))).size : rows.length;
-    summary.textContent = isTree
+    const summaryText = isTree
       ? `${rows.filter((row) => row.type !== "gene").length.toLocaleString()} cluster/locus rows · ${visibleGenes.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
       : `${rows.length.toLocaleString()} visible ${this.#kind}${memberGroup && this.#kind === "genes" ? " in selected group" : ""}${this.#filter ? " matching search" : ""}.`;
-    const selectable = this.#selectableIds(rows);
-    const selectVisible = this.querySelector('[data-command="select-visible"]');
-    selectVisible.hidden = !selectable.length;
-    selectVisible.disabled = selectable.length > 0 && selectable.every((id) => this.#selected.has(id));
-    selectVisible.textContent = isTree ? `Select all ${selectable.length.toLocaleString()} visible genes` : `Select all ${selectable.length.toLocaleString()} visible`;
-    const selected = [...this.#selected];
-    actions.hidden = !selected.length;
-    actions.innerHTML = selected.length ? this.#actionsMarkup(selected.length) : "";
+    this.#selectionControls.update({ ids: this.#selectableIds(rows), summary: summaryText,
+      noun: this.#kind.slice(0, -1), selectSuffix: isTree ? " genes" : "" });
+    setMarkup(actions, this.#selected.size ? this.#actionsMarkup(this.#selected.size) : "");
   }
 
   #rowMarkup(row) {
     const selected = this.#selected.has(row.id);
-    const box = `<input type="checkbox" data-select="${escapeHtml(row.id)}" ${selected ? "checked" : ""} aria-label="Select ${escapeHtml(row.label || row.source)}">`;
+    const box = dataCell(`<input type="checkbox" data-select="${escapeHtml(row.id)}" ${selected ? "checked" : ""} aria-label="Select ${escapeHtml(row.label || row.source)}">`, true);
     const visible = (type) => `<button type="button" class="cm-editor__visibility" data-visible data-type="${type}" data-id="${escapeHtml(row.id)}" data-hidden="${row.hidden}" aria-label="${row.hidden ? "Show" : "Hide"}" title="${row.hidden ? "Show" : "Hide"}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.75"></circle>${row.hidden ? '<path d="m4 4 16 16"></path>' : ""}</svg></button>`;
-    const colour = (type) => `<input type="color" data-colour data-type="${type}" data-id="${escapeHtml(row.id)}" value="${colourFor(row.colour)}" aria-label="Colour">`;
-    if (this.#kind === "groups") return `<div data-id="${escapeHtml(row.id)}" class="cm-editor__row cm-editor__row--groups ${selected ? "is-selected" : ""}">${box}<button type="button" class="cm-editor__reorder" draggable="true" data-reorder="${escapeHtml(row.id)}" aria-label="Reorder ${escapeHtml(row.label)}; use Arrow Up or Arrow Down to move it" title="Drag to reorder; Arrow Up or Arrow Down moves one place">⠿</button>${editableField("group:label", row.id, row.label, "Group name", row.label || "group", this.#isEditing("group:label", row.id))}${editableField("group:subtitle", row.id, row.subtitle, "Add subtitle…", `${row.label || "group"} subtitle`, this.#isEditing("group:subtitle", row.id))}<span class="cm-editor__context">${row.count.toLocaleString()} genes</span>${visible("groups")}${colour("groups")}</div>`;
-    if (this.#kind === "links") return `<div data-id="${escapeHtml(row.id)}" class="cm-editor__row cm-editor__row--links ${selected ? "is-selected" : ""}">${box}<span class="cm-editor__context" title="${escapeHtml(row.source)}">${escapeHtml(row.source)}</span><span class="cm-editor__context" title="${escapeHtml(row.target)}">${escapeHtml(row.target)}</span>${editableCell("link:identity", row.id, row.identity, "Identity")}<span class="cm-editor__context" title="${escapeHtml(row.groups)}">${escapeHtml(row.groups)}</span>${editableField("link:label", row.id, row.label, "Add label…", "link label", this.#isEditing("link:label", row.id))}<span>${visible("links")}</span>${colour("links")}</div>`;
-    return `<div data-id="${escapeHtml(row.id)}" class="cm-editor__row cm-editor__row--genes ${selected ? "is-selected" : ""}">${box}${editableField("gene:label", row.id, row.label, "Gene label", row.label || "gene", this.#isEditing("gene:label", row.id))}<span class="cm-editor__context" title="${escapeHtml(row.locus)}">${escapeHtml(row.locus)}</span><span class="cm-editor__context" title="${escapeHtml(row.cluster)}">${escapeHtml(row.cluster)}</span><span class="cm-editor__context" title="${escapeHtml(row.group)}">${escapeHtml(row.group)}</span>${colour("genes")}</div>`;
+    const colour = (type) => dataCell(`<input type="color" data-colour data-type="${type}" data-id="${escapeHtml(row.id)}" value="${colourHex(row.colour)}" aria-label="Colour">`);
+    if (this.#kind === "groups") return `<div data-id="${escapeHtml(row.id)}" class="cm-data-row cm-editor__row cm-editor__row--groups ${selected ? "is-selected" : ""}">${box}<button type="button" class="cm-editor__reorder" draggable="true" data-reorder="${escapeHtml(row.id)}" aria-label="Reorder ${escapeHtml(row.label)}; use Arrow Up or Arrow Down to move it" title="Drag to reorder; Arrow Up or Arrow Down moves one place">⠿</button>${editableField("group:label", row.id, row.label, "Group name", row.label || "group", this.#isEditing("group:label", row.id))}${editableField("group:subtitle", row.id, row.subtitle, "Add subtitle…", `${row.label || "group"} subtitle`, this.#isEditing("group:subtitle", row.id))}<span class="cm-data-cell">${row.count.toLocaleString()} genes</span>${visible("groups")}${colour("groups")}</div>`;
+    if (this.#kind === "links") return `<div data-id="${escapeHtml(row.id)}" class="cm-data-row cm-editor__row cm-editor__row--links ${selected ? "is-selected" : ""}">${box}<span class="cm-data-cell" title="${escapeHtml(row.source)}">${escapeHtml(row.source)}</span><span class="cm-data-cell" title="${escapeHtml(row.target)}">${escapeHtml(row.target)}</span>${editableCell("link:identity", row.id, row.identity, "Identity")}<span class="cm-data-cell" title="${escapeHtml(row.groups)}">${escapeHtml(row.groups)}</span>${editableField("link:label", row.id, row.label, "Add label…", "link label", this.#isEditing("link:label", row.id))}<span>${visible("links")}</span>${colour("links")}</div>`;
+    return `<div data-id="${escapeHtml(row.id)}" class="cm-data-row cm-editor__row cm-editor__row--genes ${selected ? "is-selected" : ""}">${box}${editableField("gene:label", row.id, row.label, "Gene label", row.label || "gene", this.#isEditing("gene:label", row.id))}<span class="cm-data-cell" title="${escapeHtml(row.locus)}">${escapeHtml(row.locus)}</span><span class="cm-data-cell" title="${escapeHtml(row.cluster)}">${escapeHtml(row.cluster)}</span><span class="cm-data-cell" title="${escapeHtml(row.group)}">${escapeHtml(row.group)}</span>${colour("genes")}</div>`;
   }
 
   #treeRowMarkup(row) {
     if (row.type === "gene") {
       const selected = this.#selected.has(row.id);
-      return `<div data-id="${escapeHtml(row.id)}" class="cm-editor__tree-row cm-editor__tree-gene ${selected ? "is-selected" : ""}" style="--depth:${row.depth}"><input type="checkbox" data-select="${escapeHtml(row.id)}" ${selected ? "checked" : ""} aria-label="Select ${escapeHtml(row.label)}">${editableField("gene:label", row.id, row.label, "Gene label", row.label || "gene", this.#isEditing("gene:label", row.id))}<span class="cm-editor__context" title="${escapeHtml(row.group)}">${escapeHtml(row.group)}</span><input type="color" data-colour data-type="genes" data-id="${escapeHtml(row.id)}" value="${colourFor(row.colour)}" aria-label="Colour"></div>`;
+      return `<div data-id="${escapeHtml(row.id)}" class="cm-data-row cm-editor__tree-row cm-editor__tree-gene ${selected ? "is-selected" : ""}" style="--depth:${row.depth}">${dataCell(`<input type="checkbox" data-select="${escapeHtml(row.id)}" ${selected ? "checked" : ""} aria-label="Select ${escapeHtml(row.label)}">`, true)}${editableField("gene:label", row.id, row.label, "Gene label", row.label || "gene", this.#isEditing("gene:label", row.id))}<span class="cm-data-cell" title="${escapeHtml(row.group)}">${escapeHtml(row.group)}</span>${dataCell(`<input type="color" data-colour data-type="genes" data-id="${escapeHtml(row.id)}" value="${colourHex(row.colour)}" aria-label="Colour">`)}</div>`;
     }
     const arrow = `<button type="button" class="cm-editor__tree-toggle" data-tree-toggle="${escapeHtml(row.key)}" aria-label="${row.open ? "Collapse" : "Expand"}">${row.open ? "▾" : "▸"}</button>`;
     const selected = row.selectIds?.length && row.selectIds.every((id) => this.#selected.has(id));
-    const select = `<input type="checkbox" data-select-many="${escapeHtml(JSON.stringify(row.selectIds || []))}" ${selected ? "checked" : ""} aria-label="Select ${row.count.toLocaleString()} genes in ${escapeHtml(row.label)}">`;
+    const select = dataCell(`<input type="checkbox" data-select-many="${escapeHtml(JSON.stringify(row.selectIds || []))}" ${selected ? "checked" : ""} aria-label="Select ${row.count.toLocaleString()} genes in ${escapeHtml(row.label)}">`, true);
     const count = `<span class="cm-editor__tree-count">(${row.count.toLocaleString()})</span>`;
     const selectedIds = escapeHtml(JSON.stringify(row.selectIds || []));
     if (row.type === "cluster-locus") {
       const clusterEditing = this.#isEditing("cluster:label", row.cluster.uid);
       const locusEditing = this.#isEditing("locus:label", row.locus.uid);
-      return `<div data-select-ids="${selectedIds}" class="cm-editor__tree-row cm-editor__tree-parent">${arrow}${select}<div class="cm-editor__tree-combined ${clusterEditing || locusEditing ? "is-editing" : ""}">${editableField("cluster:label", row.cluster.uid, row.label, "Cluster name", row.label || "cluster", clusterEditing, true, this.#editWidths.get(this.#editKey("cluster:label", row.cluster.uid)))}<span class="cm-editor__tree-separator">·</span>${editableField("locus:label", row.locus.uid, row.locusLabel, "Locus name", row.locusLabel || "locus", locusEditing, true, this.#editWidths.get(this.#editKey("locus:label", row.locus.uid)))}${count}</div></div>`;
+      return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent">${arrow}${select}<div class="cm-editor__tree-combined ${clusterEditing || locusEditing ? "is-editing" : ""}">${editableField("cluster:label", row.cluster.uid, row.label, "Cluster name", row.label || "cluster", clusterEditing, true, this.#editWidths.get(this.#editKey("cluster:label", row.cluster.uid)))}<span class="cm-editor__tree-separator">·</span>${editableField("locus:label", row.locus.uid, row.locusLabel, "Locus name", row.locusLabel || "locus", locusEditing, true, this.#editWidths.get(this.#editKey("locus:label", row.locus.uid)))}${count}</div></div>`;
     }
-    if (row.type === "gene-group") return `<div data-select-ids="${selectedIds}" class="cm-editor__tree-row cm-editor__tree-parent">${arrow}${select}<span class="cm-editor__tree-group-label">${escapeHtml(row.label)} ${count}</span></div>`;
+    if (row.type === "gene-group") return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent">${arrow}${select}<span class="cm-data-cell cm-editor__tree-group-label">${escapeHtml(row.label)} ${count}</span></div>`;
     const type = row.type === "cluster" ? "cluster" : "locus";
     const record = row[type];
-    return `<div data-select-ids="${selectedIds}" class="cm-editor__tree-row cm-editor__tree-parent" style="--depth:${row.depth || 0}">${arrow}${select}<span class="cm-editor__tree-name-with-count">${editableField(`${type}:label`, record.uid, row.label, `${type} name`, row.label || type, this.#isEditing(`${type}:label`, record.uid), true)}${count}</span></div>`;
+    return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent" style="--depth:${row.depth || 0}">${arrow}${select}<span class="cm-editor__tree-name-with-count">${editableField(`${type}:label`, record.uid, row.label, `${type} name`, row.label || type, this.#isEditing(`${type}:label`, record.uid), true)}${count}</span></div>`;
   }
 
   #actionsMarkup(count) {
-    const noun = this.#kind.slice(0, -1);
-    const summary = `<strong>${count} ${noun}${count === 1 ? "" : "s"} selected</strong>`;
     const focus = `<span class="cm-editor__action-group"><button type="button" data-command="focus">Focus in plot</button></span>`;
-    const clear = `<button type="button" data-command="clear-selection">Clear selection</button>`;
     if (this.#kind === "genes") {
       const options = (this.#data()?.groups || []).map((group) => `<option value="${escapeHtml(group.uid)}">${escapeHtml(labelFor(group, group.uid))}</option>`).join("");
-      return `${summary}${focus}<span class="cm-editor__action-group"><label>Move to <select data-assign-group><option value="">Choose a group…</option>${options}</select></label><button type="button" data-command="assign">Move</button><button type="button" data-command="unassign">Remove from groups</button><button type="button" data-command="new-group-for-selection">New group…</button></span><span class="cm-editor__action-group"><button type="button" data-command="delete" class="cm-editor__danger">Delete selected genes</button>${clear}</span>`;
+      return `${focus}<span class="cm-editor__action-group"><label>Move to <select data-assign-group><option value="">Choose a group…</option>${options}</select></label><button type="button" data-command="assign">Move</button><button type="button" data-command="unassign">Remove from groups</button><button type="button" data-command="new-group-for-selection">New group…</button></span><span class="cm-editor__action-group"><button type="button" data-command="delete" class="cm-editor__danger">Delete selected genes</button></span>`;
     }
     // Individual records are edited inline. Keep this bar for explicitly
     // shared presentation changes, as in the original editor.
@@ -1658,7 +3881,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     const groupActions = this.#kind !== "groups" ? "" : count > 1
       ? `<span class="cm-editor__action-group"><select data-merge-target><option value="">Choose group to keep…</option>${(this.#data()?.groups || []).filter((group) => this.#selected.has(group.uid)).map((group) => `<option value="${escapeHtml(group.uid)}">${escapeHtml(labelFor(group, group.uid))}</option>`).join("")}</select><button type="button" data-command="merge">Merge groups</button></span>`
       : `<span class="cm-editor__action-group"><button type="button" data-command="view-members">View member genes</button><button type="button" data-command="move-first">First</button><label>Position <input type="number" data-group-position min="1" max="${this.#data()?.groups.length || 1}" value="${Math.max(1, (this.#data()?.groups || []).findIndex((group) => this.#selected.has(group.uid)) + 1)}"></label><button type="button" data-command="move-position">Move</button><button type="button" data-command="move-last">Last</button></span>`;
-    return `${summary}${focus}${presentation}${groupActions}<span class="cm-editor__action-group"><button type="button" data-command="delete" class="cm-editor__danger">Delete selected ${this.#kind}</button>${clear}</span>`;
+    return `${focus}${presentation}${groupActions}<span class="cm-editor__action-group"><button type="button" data-command="delete" class="cm-editor__danger">Delete selected ${this.#kind}</button></span>`;
   }
 
   #deleteSelected() {
@@ -1694,8 +3917,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.#kind = "genes";
     this.#geneView = "list";
     this.#selected.clear();
-    this.#selectionAnchor = null;
-    this.#scrollTop = 0;
+    this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
     this.querySelectorAll("[data-kind]").forEach((node) => node.setAttribute("aria-pressed", String(node.dataset.kind === "genes")));
     this.querySelectorAll("[data-gene-view-kind]").forEach((node) => node.setAttribute("aria-pressed", String(node.dataset.geneViewKind === "list")));
     this.#syncHighlight();
@@ -1819,56 +4041,22 @@ class ClinkerEditorElement extends HTMLElementBase {
 
   #renderAppearance() {
     const container = this.querySelector("[data-appearance]");
-    const config = this.#chart?.config?.();
-    if (!container || !config) return;
+    const requestedConfig = this.#chart?.config?.();
+    const config = requestedConfig && figureConfig(requestedConfig);
+    if (config) applyTheme(this, resolveTheme(config.plot.theme));
+    if (!container) return;
+    container.hidden = !config;
+    if (!config || this.querySelector('[data-panel="appearance"]')?.hidden) return;
     const clear = this.querySelector('[data-command="clear-appearance-filter"]');
     if (clear) clear.hidden = !this.#appearanceFilter;
-    const fields = [
-      ["Annotations", "annotations.enabled", "Enable annotation panels", "checkbox"],
-      ["Legend", "legend.show", "Show legend", "checkbox"], ["Legend", "legend.position", "Position", "select", ["right", "bottom"]], ["Legend", "legend.columns", "Columns", "number"], ["Legend", "legend.columnWidth", "Column width", "number", undefined, true], ["Legend", "legend.entryHeight", "Entry height", "number", undefined, true], ["Legend", "legend.fontSize", "Font size", "number", undefined, true], ["Legend", "legend.subtitleFontSize", "Subtitle size", "number", undefined, true], ["Legend", "legend.marginLeft", "Left margin", "number", undefined, true], ["Legend", "legend.marginTop", "Top margin", "number", undefined, true],
-      ["Links", "link.show", "Show links", "checkbox"], ["Links", "link.asLine", "Draw as lines", "checkbox"], ["Links", "link.bestOnly", "Best match only", "checkbox"], ["Links", "link.threshold", "Minimum identity", "number"], ["Links", "link.straight", "Straight links", "checkbox", undefined, true], ["Links", "link.groupColour", "Use group colour", "checkbox", undefined, true], ["Links", "link.strokeWidth", "Stroke width", "number", undefined, true],
-      ["Link labels", "link.label.show", "Show link labels", "checkbox"], ["Link labels", "link.label.background", "Label background", "checkbox", undefined, true], ["Link labels", "link.label.fontSize", "Font size", "number", undefined, true], ["Link labels", "link.label.position", "Position", "number", undefined, true],
-      ["Tree", "tree.show", "Show tree", "checkbox"], ["Tree", "tree.width", "Tree width", "number"], ["Tree", "tree.useBranchLengths", "Use branch lengths", "checkbox"], ["Tree", "tree.branch.width", "Branch stroke width", "number"], ["Tree", "tree.branch.colour", "Branch colour", "colour"], ["Tree", "tree.support.show", "Show support values", "checkbox"], ["Tree", "tree.support.fontSize", "Support font size", "number", undefined, true], ["Tree", "tree.support.precision", "Support precision", "number", undefined, true], ["Tree", "tree.scaleBar.show", "Show tree scale bar", "checkbox"], ["Tree", "tree.leafGuide.show", "Show dashed leaf guides", "checkbox"], ["Tree", "tree.leafGuide.colour", "Leaf guide colour", "colour", undefined, true], ["Tree", "tree.leafGuide.width", "Leaf guide width", "number", undefined, true], ["Tree", "tree.leafGuide.dash", "Leaf guide dash pattern", "text", undefined, true],
-      ["Clusters & loci", "cluster.alignLabels", "Align cluster labels", "checkbox"], ["Clusters & loci", "cluster.hideLocusCoordinates", "Hide locus coordinates", "checkbox"], ["Clusters & loci", "locus.trimIndicators.show", "Show trim indicators", "checkbox"], ["Clusters & loci", "cluster.spacing", "Cluster spacing", "number"], ["Clusters & loci", "locus.spacing", "Locus spacing", "number"], ["Clusters & loci", "cluster.nameFontSize", "Cluster name size", "number", undefined, true], ["Clusters & loci", "cluster.lociFontSize", "Locus label size", "number", undefined, true], ["Clusters & loci", "locus.trimIndicators.fontSize", "Trim indicator size", "number", undefined, true], ["Clusters & loci", "locus.trimIndicators.fontWeight", "Trim indicator weight", "number", undefined, true], ["Clusters & loci", "locus.trimIndicators.borderWidth", "Trim indicator border", "number", undefined, true], ["Clusters & loci", "locus.trimIndicators.borderOpacity", "Trim indicator border opacity", "number", undefined, true], ["Clusters & loci", "locus.trackBar.colour", "Track colour", "colour", undefined, true], ["Clusters & loci", "locus.trackBar.stroke", "Track stroke", "number", undefined, true],
-      ["Genes", "gene.label.show", "Show gene labels", "checkbox"], ["Genes", "gene.label.name", "Label field", "select", ["uid", "name", "label"]], ["Genes", "gene.label.position", "Label position", "select", ["top", "bottom"]], ["Genes", "gene.label.anchor", "Label anchor", "select", ["start", "middle", "end"], true], ["Genes", "gene.label.fontSize", "Label size", "number", undefined, true], ["Genes", "gene.label.rotation", "Label rotation", "number", undefined, true], ["Genes", "gene.label.spacing", "Label spacing", "number", undefined, true], ["Genes", "gene.label.start", "Label start", "number", undefined, true], ["Genes", "gene.shape.bodyHeight", "Body height", "number", undefined, true], ["Genes", "gene.shape.tipHeight", "Tip height", "number", undefined, true], ["Genes", "gene.shape.tipLength", "Tip length", "number", undefined, true], ["Genes", "gene.shape.stroke", "Stroke colour", "colour", undefined, true], ["Genes", "gene.shape.strokeWidth", "Stroke width", "number", undefined, true],
-      ["Scale bars", "scaleBar.show", "Show scale bar", "checkbox"], ["Scale bars", "scaleBar.basePair", "Base pairs", "number"], ["Scale bars", "colourBar.show", "Show identity bar", "checkbox"], ["Scale bars", "colourBar.domain.minMode", "Minimum source", "select", [["fixed", "Custom value"], ["data", "Lowest identity in data"]]], ["Scale bars", "colourBar.domain.min", "Minimum identity", "number"], ["Scale bars", "colourBar.domain.maxMode", "Maximum source", "select", [["fixed", "Custom value"], ["data", "Highest identity in data"]]], ["Scale bars", "colourBar.domain.max", "Maximum identity", "number"], ["Scale bars", "scaleBar.height", "Height", "number", undefined, true], ["Scale bars", "scaleBar.fontSize", "Font size", "number", undefined, true], ["Scale bars", "scaleBar.stroke", "Stroke", "number", undefined, true], ["Scale bars", "scaleBar.colour", "Colour", "colour", undefined, true], ["Scale bars", "scaleBar.marginTop", "Scale margin", "number", undefined, true], ["Scale bars", "colourBar.width", "Identity width", "number", undefined, true], ["Scale bars", "colourBar.height", "Identity height", "number", undefined, true], ["Scale bars", "colourBar.fontSize", "Identity font size", "number", undefined, true], ["Scale bars", "colourBar.marginTop", "Identity margin", "number", undefined, true],
-      ["Plot & navigation", "plot.renderer", "Renderer", "select", ["svg", "canvas", "webgpu"]], ["Plot & navigation", "plot.minimap.show", "Show minimap", "checkbox"], ["Plot & navigation", "plot.minZoom", "Minimum zoom", "number"], ["Plot & navigation", "plot.maxZoom", "Maximum zoom", "number"], ["Plot & navigation", "plot.transitionDuration", "Transition (ms)", "number", undefined, true], ["Plot & navigation", "plot.scaleFactor", "Scale factor", "number", undefined, true], ["Plot & navigation", "plot.scaleGenes", "Scale genes", "checkbox", undefined, true], ["Plot & navigation", "plot.fontFamily", "Font family", "text", undefined, true], ["Plot & navigation", "plot.minimap.showLinks", "Minimap links", "checkbox", undefined, true], ["Plot & navigation", "plot.minimap.width", "Minimap width", "number", undefined, true], ["Plot & navigation", "plot.minimap.height", "Minimap height", "number", undefined, true], ["Plot & navigation", "plot.minimap.margin", "Minimap margin", "number", undefined, true],
-    ];
-    const valueAt = (path) => path.split(".").reduce((value, key) => value?.[key], config);
-    const bySection = fields.reduce((sections, field) => {
-      const [section] = field;
-      (sections.get(section) || sections.set(section, []).get(section)).push(field);
-      return sections;
-    }, new Map());
-    const matchingSections = [...bySection].map(([section, entries]) => {
-      const visible = entries.filter(([, path, label]) => !this.#appearanceFilter || `${section} ${label} ${path}`.toLowerCase().includes(this.#appearanceFilter));
-      if (!visible.length) return "";
-      const renderField = ([, path, label, type, options]) => {
-        const value = valueAt(path);
-        const identityBound = path.endsWith(".min") ? "min" : path.endsWith(".max") ? "max" : null;
-        const disabled = identityBound && config.colourBar?.domain?.[`${identityBound}Mode`] === "data" ? " disabled" : "";
-        const control = type === "checkbox" ? `<input data-config="${path}" type="checkbox" ${value ? "checked" : ""}>`
-          : type === "select" ? `<select data-config="${path}">${options.map((option) => {
-            const [optionValue, optionLabel] = Array.isArray(option) ? option : [option, option];
-            return `<option value="${optionValue}" ${optionValue === value ? "selected" : ""}>${optionLabel}</option>`;
-          }).join("")}</select>`
-            : `<input data-config="${path}" type="${type === "colour" ? "color" : type}" value="${escapeHtml(type === "colour" ? colourFor(value) : value ?? "")}" step="any"${disabled}>`;
-        return `<label><span>${label}</span>${control}</label>`;
-      };
-      const general = visible.filter((field) => !field[5]);
-      const advanced = visible.filter((field) => field[5]);
-      const sectionKey = section.toLowerCase().replaceAll(/\W+/g, "-");
-      const expandAdvanced = Boolean(this.#appearanceFilter) || this.#appearanceAdvanced.has(sectionKey);
-      return `<fieldset><legend>${section}</legend>${general.map(renderField).join("")}${advanced.length ? `<details data-appearance-section="${sectionKey}"${expandAdvanced ? " open" : ""}><summary>Advanced</summary>${advanced.map(renderField).join("")}</details>` : ""}</fieldset>`;
-    });
-    container.innerHTML = matchingSections.join("") || `<p class="cm-editor__empty">No appearance settings match “${escapeHtml(this.#appearanceFilter)}”.</p>`;
-    const tree = this.#chart.data()?.tree;
-    if (tree && (!this.#appearanceFilter || /tree|clade|colour|color|annotation|branch|cut|palette/.test(this.#appearanceFilter))) {
-      const controls = createTreeControls({ tree, config: config.tree,
+    if (!this.#appearanceView) {
+      this.#appearanceView = createAppearanceControls({ document: this.ownerDocument,
         patch: (ops) => this.#chart.patch(ops), preview: (ops) => this.#chart.previewTreePresentation(ops),
-        rotate: (uid) => this.#chart.rotateTreeNode(uid), document: this.ownerDocument });
-      container.append(controls);
+        rotate: (uid) => this.#chart.rotateTreeNode(uid) });
+      container.append(this.#appearanceView.node);
     }
+    this.#appearanceView.update({ config, tree: this.#chart.data()?.tree, filter: this.#appearanceFilter,
+      expanded: this.#appearanceAdvanced });
   }
 }
 

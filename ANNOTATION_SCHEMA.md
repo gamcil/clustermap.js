@@ -394,5 +394,66 @@ between lanes (default 12). Width is computed from lanes and label lengths.
 `cellHeight` controls the padding about each segment's first and last row
 centres. Scale/key and column-heading fields are unused.
 
-Group bars use WebGPU rectangles in the GPU renderer; text follows the existing
-text overlay. SVG exports include both.
+Use the existing **+** slot and choose **Group markers** to add a definition as
+JSON. The panel's **Edit** menu changes labels, colours, memberships, thickness
+and spacing directly, with undo/redo. Move-left/right, hide and remove actions
+work as for other panels. Group bars use WebGPU rectangles in the GPU renderer;
+text follows the existing text overlay. SVG exports include both.
+
+## Editing annotation data
+
+**Data → Annotations** in the optional plot editor manages every annotation
+panel, including hidden panels. The in-plot menu keeps quick styling controls
+(title, colours, range and legend); sizes, borders and label formatting are
+under **Advanced**. **Edit data…** opens the selected panel in the Data editor.
+When no editor handles that action, the same data editor opens in the plot menu.
+
+The data editor supports:
+
+- Numeric matrix values and categorical dropdowns, keyed by cluster ID.
+- Category creation, renaming and colours. Rename updates every assignment.
+  Removing a category lets users replace its assignments with another category
+  or missing values. A categorical domain may be empty when all values are missing.
+- Adding, renaming and removing heatmap columns (at least one must remain).
+  Bar panels keep exactly one column.
+- Replacing a matrix using CSV/TSV or JSON `{columns, values}`. New categories
+  from replacement data are added without discarding existing category colours.
+- Group-marker labels, colours, memberships, addition and removal (at least one
+  group must remain). Tree clades use node IDs; explicit memberships use cluster selections.
+- Panel creation, ordering, visibility and removal.
+
+Values are edited on change/blur; all mutations are immediate and undoable.
+Missing values appear as empty numeric inputs or the **Missing** category choice.
+The editor shares its toolbar search, controls and table styles across all data
+panels. **Replace data…**, visibility, ordering and removal are available directly
+in the annotation toolbar. Matrix rows support checkbox and Shift selection,
+including selecting all filtered rows. Batch actions set or clear values in one
+column or all columns for the selected rows, as one undoable operation.
+Selections persist across filtering and scrolling, and reset when switching panels.
+Rows are searchable by name/ID and use the same fixed-height row virtualization
+as the other data tables. Column headers and cluster names remain visible while scrolling.
+
+Changes to matrix data use the same atomic patch API as presentation edits:
+
+```js
+chart.patch([{
+  type: "annotationPanels.update",
+  ids: ["expression"],
+  changes: {
+    columns: ["Control", "Treatment"],
+    values: { "cluster-a": [0.2, 0.8], "cluster-b": [0.6, null] }
+  }
+}]);
+```
+
+Send columns, values and category-domain changes together when they depend on
+one another; validation checks the complete batch before applying it.
+Style-only undo records retain the existing matrix without copying it.
+
+Hosts can open an editor directly with `editor.editAnnotations(panelUid)`.
+The plot emits the cancelable, bubbling DOM event `clustermap:edit-annotation`
+with `detail: {chart, panelUid}`. An attached `<clinker-editor>` handles events
+for its own chart, opens Data → Annotations, and prevents the inline fallback.
+Custom hosts may handle this event and call `preventDefault()` instead.
+The editor emits `clinker-editor-open` when opened this way, so host buttons
+can update their expanded state.

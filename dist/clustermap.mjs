@@ -6592,7 +6592,7 @@ function validateAnnotationPanels(panels, clusters, { previousPanels = null, tre
     if (type === "continuous" && scale.colours?.length < 2) fail("continuous scales need at least two colours.");
     if (panel.missingColour !== undefined && (typeof panel.missingColour !== "string" || !color(panel.missingColour))) fail("missingColour must be a CSS colour.");
     if (scale.domain !== undefined) {
-      if (!Array.isArray(scale.domain) || !scale.domain.length) fail("scale.domain must be a non-empty array.");
+      if (!Array.isArray(scale.domain)) fail("scale.domain must be an array.");
       if (type === "continuous" && (scale.domain.length !== 2 || !scale.domain.every(Number.isFinite) || scale.domain[0] >= scale.domain[1])) fail("continuous domain must be [min, max] with min < max.");
       if (panel.type === "bar" && (scale.domain[0] > 0 || scale.domain[1] < 0)) fail("bar domains must include zero.");
       if (type === "categorical" && (scale.domain.some((value) => typeof value !== "string") || new Set(scale.domain).size !== scale.domain.length)) fail("categorical domain must contain unique strings.");
@@ -7079,9 +7079,10 @@ function validateTree(tree, clusters) {
   return tree;
 }
 
-const fields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
+const styleFields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
   "groups", "markerWidth", "laneGap", "fontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
   "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour"]);
+const fields = new Set([...styleFields, "values"]);
 const fail$1 = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
 
 const isAnnotationOperation = (operation) => typeof operation?.type === "string" && operation.type.startsWith("annotationPanels.");
@@ -7105,7 +7106,7 @@ function normalizeAnnotationOperation(data, operation) {
   }
   if (operation.type === "annotationPanels.replaceStyle") {
     if (!known.has(operation.uid) || !operation.style || typeof operation.style !== "object" ||
-        Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !fields.has(key))) fail$1("replaceStyle requires an existing panel and supported style fields.");
+        Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !styleFields.has(key))) fail$1("replaceStyle requires an existing panel and supported style fields.");
     return { type: operation.type, uid: operation.uid, style: structuredClone(operation.style) };
   }
   if (operation.type !== "annotationPanels.update") fail$1(`unsupported type '${operation.type}'.`);
@@ -7134,7 +7135,7 @@ function applyAnnotationOperation(data, operation) {
   }
   data.annotationPanels = panels.map((panel) => operation.type === "annotationPanels.replaceStyle"
     ? panel.uid === operation.uid ? {
-      ...Object.fromEntries(Object.entries(panel).filter(([key]) => !fields.has(key))),
+      ...Object.fromEntries(Object.entries(panel).filter(([key]) => !styleFields.has(key))),
       ...structuredClone(operation.style),
     } : panel
     : operation.ids.includes(panel.uid) ? { ...panel, ...structuredClone(operation.changes) } : panel);
@@ -7147,8 +7148,12 @@ function inverseAnnotationOperation(data, operation) {
     operation.ids.includes(panel.uid) ? [{ type: "annotationPanels.create", panel: structuredClone(panel), index }] : []);
   const ids = operation.type === "annotationPanels.replaceStyle" ? [operation.uid] : operation.ids;
   return data.annotationPanels.filter((panel) => ids.includes(panel.uid))
-    .map((panel) => ({ type: "annotationPanels.replaceStyle", uid: panel.uid,
-      style: structuredClone(Object.fromEntries(Object.entries(panel).filter(([key]) => fields.has(key)))) }));
+    .flatMap((panel) => [
+      { type: "annotationPanels.replaceStyle", uid: panel.uid,
+        style: structuredClone(Object.fromEntries(Object.entries(panel).filter(([key]) => styleFields.has(key)))) },
+      ...(operation.type === "annotationPanels.update" && Object.hasOwn(operation.changes, "values")
+        ? [{ type: "annotationPanels.update", ids: [panel.uid], changes: { values: structuredClone(panel.values) } }] : []),
+    ]);
 }
 
 // The operation normalizer has already built this private candidate array.
@@ -10488,6 +10493,107 @@ function createFigureSurface() {
   return { bounds, update, clear };
 }
 
+const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
+
+/** Native controls with consistent labels, values and validity handling. */
+function createControls(document) {
+  const el = (tag, text, parent, className) => {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    parent?.append(node); return node;
+  };
+  const row = (parent, label) => {
+    const node = el("label", undefined, parent); el("span", label, node); return node;
+  };
+  const button = (parent, label, action, className) => {
+    const node = el("button", label, parent, className); node.type = "button"; node.onclick = action; return node;
+  };
+  const input = (parent, label, value, type = "text", onChange, options = {}) => {
+    const node = el("input", undefined, parent); Object.assign(node, { type, ...options });
+    node.setAttribute("aria-label", label);
+    if (type === "checkbox") node.checked = Boolean(value);
+    else node.value = type === "color" ? colourHex(value) : value ?? "";
+    if (type === "number" && options.step === undefined) node.step = "any";
+    if (onChange) node.onchange = () => { if (node.checkValidity()) onChange(type === "checkbox" ? node.checked : node.value); };
+    return node;
+  };
+  const select = (parent, label, value, entries, onChange) => {
+    const node = el("select", undefined, parent); node.setAttribute("aria-label", label);
+    for (const entry of entries) {
+      const [key, title] = Array.isArray(entry) ? entry : [entry, entry];
+      el("option", title, node).value = key;
+    }
+    node.value = value;
+    if (onChange) node.onchange = () => onChange(node.value);
+    return node;
+  };
+  return { el, row, button, input, select };
+}
+
+/** Report rejected UI edits consistently while leaving validation in the model. */
+function createActionRunner(report) {
+  return (action, control) => {
+    control?.setCustomValidity("");
+    try { action(); report(""); return true; }
+    catch (error) { report(error.message); control?.setCustomValidity(error.message); return false; }
+  };
+}
+
+function installDataEditorStyle(document) {
+  if (document.getElementById("cm-data-editor-style")) return;
+  const style = document.createElement("style"); style.id = "cm-data-editor-style";
+  style.textContent = `
+@layer clinker-editor {
+.cm-data-ui { color:var(--cm-foreground,#273444); font:13px/1.4 system-ui,sans-serif; }
+.cm-data-ui [hidden] { display:none!important; }
+.cm-data-ui :is(button,input,select,textarea) { font:inherit; color:inherit; box-sizing:border-box; }
+.cm-data-ui :where(button,select,input:not([type=color]):not([type=checkbox]):not([type=range]),textarea) { min-height:var(--cm-control-height,30px); padding:var(--cm-control-padding,4px 8px); border:1px solid var(--cm-border,#cbd3de); border-radius:var(--cm-control-radius,6px); background:var(--cm-surface,#fff); }
+.cm-data-ui input[type=checkbox] { cursor:pointer; }
+.cm-data-ui input[type=color] { width:30px; height:22px; padding:0; border:0; background:transparent; }
+.cm-data-ui button { cursor:pointer; }
+.cm-data-ui button:hover:not(:disabled) { border-color:var(--cm-accent,#78a9ed); background:var(--cm-hover,#f4f8ff); }
+.cm-data-ui :where(button,summary):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:2px; }
+.cm-data-ui summary { cursor:pointer; }
+.cm-data-ui summary:hover { color:var(--cm-accent,#1677ff); }
+.cm-data-ui button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
+.cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
+.cm-data-search { display:flex; flex:1; min-width:140px; }
+.cm-data-search input { width:100%; }
+.cm-data-error { color:var(--cm-danger,#b42318); font-size:12px; margin:6px 0; }
+.cm-data-error:empty { display:none; }
+.cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
+.cm-data-tools { flex-shrink:0; }
+.cm-data-meta { display:flex; align-items:center; justify-content:space-between; min-height:30px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
+.cm-data-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; padding:8px 10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-subtle,#f3f6fa); }
+.cm-data-actions strong { padding:4px 7px; border-radius:5px; background:var(--cm-selection,#d6e6fc); color:var(--cm-foreground,#273444); }
+.cm-data-selection-actions { display:contents; }
+.cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
+.cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; font-weight:650; text-align:left; }
+.cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:34px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; }
+.cm-data-row > :is(th,td) { height:34px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
+.cm-data-row:is(:hover,:focus-within) { --cm-row-background:var(--cm-hover,#e3ecf8); }
+.cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
+.cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
+span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
+.cm-data-cell--select input { margin:0; }
+.cm-data-ui .cm-data-cell .cm-data-field { padding-inline:0; margin-inline:-1px; }
+.cm-data-ui input.cm-data-field.cm-data-cell { padding-inline:7px; }
+.cm-data-placeholder { color:var(--cm-muted,#687586); font-style:normal; }
+.cm-data-ui .cm-data-field { min-width:0; border-color:transparent!important; background:transparent!important; }
+.cm-data-ui .cm-data-row .cm-data-field { height:28px; min-height:28px; padding-block:2px; line-height:20px; }
+.cm-data-ui .cm-data-field:is(:hover,:focus) { border-color:var(--cm-accent,#c6d8f0)!important; background:var(--cm-surface,#fff)!important; }
+.cm-data-ui .cm-data-field:focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:-2px; }
+.cm-data-field::placeholder { color:var(--cm-muted,#7b8796); }
+.cm-data-field[type=number]:not(:hover):not(:focus) { appearance:textfield; -moz-appearance:textfield; }
+.cm-data-field[type=number]:not(:hover):not(:focus)::-webkit-inner-spin-button { appearance:none; }
+select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
+}
+`;
+  document.head.append(style);
+}
+
 // Structural styles and the same neutral controls used by the plot editor.
 function installTreeControlsStyle(doc) {
   if (doc.getElementById("clustermap-tree-controls-style")) return;
@@ -10497,13 +10603,8 @@ function installTreeControlsStyle(doc) {
 .cm-tree-controls { font:inherit; color:inherit; text-align:left; }
 .cm-tree-controls * { box-sizing:border-box; }
 .cm-tree-controls [hidden] { display:none!important; }
-.cm-tree-controls fieldset { min-width:0; margin:0 0 10px; padding:8px; border:1px solid #ddd; border-radius:4px; }
+.cm-tree-controls fieldset { min-width:0; margin:0 0 10px; padding:8px; border:1px solid var(--cm-border,#ddd); border-radius:4px; }
 .cm-tree-controls legend { padding:0 4px; font-weight:600; }
-.cm-tree-controls button, .cm-tree-controls input, .cm-tree-controls select { font:inherit; color:inherit; }
-.cm-tree-controls button, .cm-tree-controls select, .cm-tree-controls input:not([type=checkbox]):not([type=color]):not([type=range]) { min-height:30px; border:1px solid #cbd3de; border-radius:6px; padding:4px 8px; background:#fff; }
-.cm-tree-controls button { cursor:pointer; }
-.cm-tree-controls button:hover:not(:disabled) { border-color:#78a9ed; background:#f4f8ff; }
-.cm-tree-controls button:disabled { color:#8993a1; background:#f5f6f8; cursor:default; }
 .cm-tree-controls button[aria-pressed=true] { font-weight:600; }
 .cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:6px; margin:6px 0; }
 .cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }
@@ -10519,10 +10620,10 @@ function installTreeControlsStyle(doc) {
 .cm-tree-controls .cm-tree-wide input, .cm-tree-controls .cm-tree-wide select { width:100%; }
 .cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 .cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }
-.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid #e5e9ef; margin:10px 0; }
+.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid var(--cm-border,#e5e9ef); margin:10px 0; }
 .cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:10px; }
 .cm-tree-controls [role=status]:empty { display:none; }
-.cm-tree-controls [role=status] { color:#a13c46; margin:6px 0 0; }
+.cm-tree-controls [role=status] { color:var(--cm-danger,#a13c46); margin:6px 0 0; }
 .cm-tree-controls--popover { width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font-size:12px; line-height:1.3; }
 .cm-tree-controls--popover .cm-tree-heading { font-size:12px; margin-bottom:6px; }
 .cm-tree-controls--popover button, .cm-tree-controls--popover input:not([type=checkbox]):not([type=color]) { min-height:24px; padding:2px 5px; border-radius:4px; }
@@ -10535,35 +10636,25 @@ function installTreeControlsStyle(doc) {
 .cm-tree-controls--popover .cm-tree-format { gap:5px; }
 .cm-tree-controls--popover .cm-tree-separator { margin:6px 0; }
 .cm-tree-controls--popover .cm-tree-actions { margin-top:6px; }
-`.replaceAll(".cm-tree-controls", ".cm-tree-controls.cm-tree-controls");
+`;
   doc.head.append(style);
 }
 
 /** Policy settings and node popovers share the same compact editing form. */
 function createTreeControls({ tree, config, patch, preview, rotate, clusters = [], nodeUid = null,
   policy = true, onResize, document: doc = globalThis.document }) {
+  installDataEditorStyle(doc);
   installTreeControlsStyle(doc);
-  const element = (tag, parent, text, className) => {
-    const node = doc.createElement(tag);
-    if (text !== undefined) node.textContent = text;
-    if (className) node.className = className;
-    parent?.append(node);
-    return node;
-  };
-  const container = element("div", null, undefined, `cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
+  const ui = createControls(doc);
+  const element = (tag, parent, text, className) => ui.el(tag, text, parent, className);
+  const container = element("div", null, undefined, `cm-data-ui cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
   const message = element("p"); message.setAttribute("role", "status");
-  const run = (action) => { try { action(); message.textContent = ""; } catch (error) { message.textContent = error.message; } };
-  const button = (parent, title, action, className) => {
-    const node = element("button", parent, title, className); node.type = "button";
-    node.onclick = () => run(action); return node;
-  };
+  const run = createActionRunner((text) => { message.textContent = text; });
+  const button = (parent, title, action, className) => ui.button(parent, title, () => run(action), className);
   const section = (title) => { const field = element("fieldset", container); element("legend", field, title); return field; };
   const input = (parent, title, type, value, options = {}) => {
-    const row = element("label", parent, undefined, "cm-tree-row");
-    element("span", row, title);
-    const control = element("input", row); control.type = type;
-    if (type === "checkbox") control.checked = Boolean(value); else control.value = value ?? "";
-    Object.assign(control, options); return control;
+    const row = ui.row(parent, title); row.className = "cm-tree-row";
+    return ui.input(row, title, value, type, undefined, options);
   };
   const reset = (scope, uid) => patch([{ type: "tree.presentation.reset", scope, ...(uid ? { ids: [uid] } : {}) }]);
   const resolved = resolveTreePresentation(tree, config);
@@ -16947,7 +17038,10 @@ function clusterMap() {
           annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
             ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, validateAnnotationPanels, resolveAnnotationScale,
             annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell },
-            getClusters: () => currentData?.clusters || [], getPanels: () => currentData?.annotationPanels || [],
+            editData: (panelUid) => !container.node().dispatchEvent(new CustomEvent("clustermap:edit-annotation", {
+              bubbles: true, cancelable: true, detail: { chart: my, panelUid },
+            })),
+            getTree: () => currentData?.tree, getClusters: () => currentData?.clusters || [], getPanels: () => currentData?.annotationPanels || [],
             patch: (operations) => my.patch(operations) });
           annotationOverlay.update(annotationUiContext);
         }).catch((error) => console.error("Could not load optional annotation controls", error))

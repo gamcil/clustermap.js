@@ -135,6 +135,7 @@
         d3.select("#plot").selectAll("div").data([data]).join("div").attr("class", "chart-host").call(chart);
         if (project?.state) chart.state(project.state);
         editor.chart = chart;
+        editor.addEventListener("clinker-editor-open", () => document.querySelector("#btn-editor").setAttribute("aria-expanded", "true"));
         mountPlotSelectionToolbar(chart, document.querySelector("#workspace"));
         document.querySelector("#btn-editor").addEventListener("click", () => {
           editor.hidden = !editor.hidden;

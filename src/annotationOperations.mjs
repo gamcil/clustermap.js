@@ -1,8 +1,9 @@
 import { validateAnnotationPanels } from "./annotations.mjs";
 
-const fields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
+const styleFields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
   "groups", "markerWidth", "laneGap", "fontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
   "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour"]);
+const fields = new Set([...styleFields, "values"]);
 const fail = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
 
 export const isAnnotationOperation = (operation) => typeof operation?.type === "string" && operation.type.startsWith("annotationPanels.");
@@ -26,7 +27,7 @@ export function normalizeAnnotationOperation(data, operation) {
   }
   if (operation.type === "annotationPanels.replaceStyle") {
     if (!known.has(operation.uid) || !operation.style || typeof operation.style !== "object" ||
-        Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !fields.has(key))) fail("replaceStyle requires an existing panel and supported style fields.");
+        Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !styleFields.has(key))) fail("replaceStyle requires an existing panel and supported style fields.");
     return { type: operation.type, uid: operation.uid, style: structuredClone(operation.style) };
   }
   if (operation.type !== "annotationPanels.update") fail(`unsupported type '${operation.type}'.`);
@@ -55,7 +56,7 @@ export function applyAnnotationOperation(data, operation) {
   }
   data.annotationPanels = panels.map((panel) => operation.type === "annotationPanels.replaceStyle"
     ? panel.uid === operation.uid ? {
-      ...Object.fromEntries(Object.entries(panel).filter(([key]) => !fields.has(key))),
+      ...Object.fromEntries(Object.entries(panel).filter(([key]) => !styleFields.has(key))),
       ...structuredClone(operation.style),
     } : panel
     : operation.ids.includes(panel.uid) ? { ...panel, ...structuredClone(operation.changes) } : panel);
@@ -68,8 +69,12 @@ export function inverseAnnotationOperation(data, operation) {
     operation.ids.includes(panel.uid) ? [{ type: "annotationPanels.create", panel: structuredClone(panel), index }] : []);
   const ids = operation.type === "annotationPanels.replaceStyle" ? [operation.uid] : operation.ids;
   return data.annotationPanels.filter((panel) => ids.includes(panel.uid))
-    .map((panel) => ({ type: "annotationPanels.replaceStyle", uid: panel.uid,
-      style: structuredClone(Object.fromEntries(Object.entries(panel).filter(([key]) => fields.has(key)))) }));
+    .flatMap((panel) => [
+      { type: "annotationPanels.replaceStyle", uid: panel.uid,
+        style: structuredClone(Object.fromEntries(Object.entries(panel).filter(([key]) => styleFields.has(key)))) },
+      ...(operation.type === "annotationPanels.update" && Object.hasOwn(operation.changes, "values")
+        ? [{ type: "annotationPanels.update", ids: [panel.uid], changes: { values: structuredClone(panel.values) } }] : []),
+    ]);
 }
 
 // The operation normalizer has already built this private candidate array.

@@ -1,32 +1,24 @@
 import { color } from "d3-color";
+import { installDataEditorStyle } from "./dataEditorUi.mjs";
+import { createControls, createActionRunner } from "./uiControls.mjs";
 import { resolveTreePresentation, validateTreePresentation } from "./treePresentation.mjs";
 import { installTreeControlsStyle } from "./treeControlsStyle.mjs";
 
 /** Policy settings and node popovers share the same compact editing form. */
 export function createTreeControls({ tree, config, patch, preview, rotate, clusters = [], nodeUid = null,
   policy = true, onResize, document: doc = globalThis.document }) {
+  installDataEditorStyle(doc);
   installTreeControlsStyle(doc);
-  const element = (tag, parent, text, className) => {
-    const node = doc.createElement(tag);
-    if (text !== undefined) node.textContent = text;
-    if (className) node.className = className;
-    parent?.append(node);
-    return node;
-  };
-  const container = element("div", null, undefined, `cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
+  const ui = createControls(doc);
+  const element = (tag, parent, text, className) => ui.el(tag, text, parent, className);
+  const container = element("div", null, undefined, `cm-data-ui cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
   const message = element("p"); message.setAttribute("role", "status");
-  const run = (action) => { try { action(); message.textContent = ""; } catch (error) { message.textContent = error.message; } };
-  const button = (parent, title, action, className) => {
-    const node = element("button", parent, title, className); node.type = "button";
-    node.onclick = () => run(action); return node;
-  };
+  const run = createActionRunner((text) => { message.textContent = text; });
+  const button = (parent, title, action, className) => ui.button(parent, title, () => run(action), className);
   const section = (title) => { const field = element("fieldset", container); element("legend", field, title); return field; };
   const input = (parent, title, type, value, options = {}) => {
-    const row = element("label", parent, undefined, "cm-tree-row");
-    element("span", row, title);
-    const control = element("input", row); control.type = type;
-    if (type === "checkbox") control.checked = Boolean(value); else control.value = value ?? "";
-    Object.assign(control, options); return control;
+    const row = ui.row(parent, title); row.className = "cm-tree-row";
+    return ui.input(row, title, value, type, undefined, options);
   };
   const reset = (scope, uid) => patch([{ type: "tree.presentation.reset", scope, ...(uid ? { ids: [uid] } : {}) }]);
   const resolved = resolveTreePresentation(tree, config);

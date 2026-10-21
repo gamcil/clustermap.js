@@ -1,127 +1,108 @@
-import { color } from "d3-color";
+import { createControls, createActionRunner, colourHex as hex } from "./uiControls.mjs";
 
-const hex = (value) => color(value)?.formatHex() || "#888888";
-
-/** A compact editor for JSON-backed panel presentation, with no private data copy. */
-export function createAnnotationControls({ getPanels, patch, document, panelUid, annotationApi }) {
-  const { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale } = annotationApi;
-  const node = document.createElement("fieldset");
-  node.className = "cm-annotation-controls";
+/** Quick styling stays in the plot; data and membership editing live in the data editor. */
+export function createAnnotationControls({ getPanels, patch, document, panelUid, annotationApi, onEditData }) {
+  const { ANNOTATION_DEFAULTS: defaults, ANNOTATION_PALETTES: palettes, resolveAnnotationScale } = annotationApi;
+  const node = document.createElement("fieldset"); node.className = "cm-annotation-controls";
   let applying = false;
+  const run = createActionRunner((message) => { node.querySelector("[data-annotation-error]").textContent = message; });
   const current = () => getPanels().find((panel) => panel.uid === panelUid);
-  const element = (tag, text) => {
-    const item = document.createElement(tag);
-    if (text !== undefined) item.textContent = text;
-    return item;
-  };
-  const row = (parent, label, control) => {
-    const item = element("label"); item.append(element("span", label), control); parent.append(item);
-    return control;
-  };
+  const ui = createControls(document), { el, row } = ui;
   const input = (parent, label, field, value, type = "text", options = {}) => {
-    const control = element("input");
-    Object.assign(control, { type, ...options });
-    control.dataset.annotationField = field;
-    if (type === "checkbox") control.checked = value;
-    else control.value = type === "color" ? hex(value) : value;
-    if (type === "number") control.step = "any";
-    return row(parent, label, control);
+    const control = ui.input(row(parent, label), label, value, type, undefined, options);
+    control.dataset.annotationField = field; return control;
   };
-  const select = (parent, label, field, value, options) => {
-    const control = element("select"); control.dataset.annotationField = field;
-    for (const [key, title] of options) {
-      const option = element("option", title); option.value = key; control.append(option);
-    }
-    control.value = value;
-    return row(parent, label, control);
+  const select = (parent, label, field, value, entries) => {
+    const control = ui.select(row(parent, label), label, value, entries);
+    control.dataset.annotationField = field; return control;
   };
-  const render = () => {
-    const panel = current();
-    const labelsOpen = node.querySelector("details")?.open || false;
-    node.replaceChildren(element("legend", "Appearance"));
-    if (!panel) return;
-    const isBar = panel.type === "bar";
-    input(node, "Show panel", "show", panel.show !== false, "checkbox");
+  const paletteSelect = (parent, resolved) => {
+    const name = Object.entries(palettes).find(([, colours]) => colours.length === resolved.colours.length &&
+      colours.every((value, i) => hex(value) === hex(resolved.colours[i])))?.[0] || "custom";
+    select(parent, "Palette", "palette", name, [["custom", "Custom"], ...Object.keys(palettes).map((key) => [key, key])]);
+  };
+  const gradient = () => {
+    const preview = node.querySelector("[data-colour-preview]");
+    if (preview) preview.style.background = `linear-gradient(to right, ${resolveAnnotationScale(current()).colours.join(",")})`;
+  };
+  function render() {
+    const open = node.querySelector("details")?.open || false, panel = current();
+    node.replaceChildren(); if (!panel) return;
+    const groups = panel.type === "groups", bar = panel.type === "bar";
     input(node, "Title", "title", panel.title ?? panel.uid);
-    const sizes = isBar ? [["width", "Panel width"], ["cellHeight", "Bar height"]]
-      : [["cellWidth", "Cell width"], ["cellHeight", "Cell height"], ["cellGap", "Cell gap"]];
-    for (const [field, label] of [...sizes, ["cellBorderWidth", "Border width"], ["gap", "Panel gap"]]) {
-      input(node, label, field, panel[field] ?? ANNOTATION_DEFAULTS[field], "number",
-        { min: ["cellWidth", "cellHeight", "width"].includes(field) ? "0.1" : "0" });
-    }
-    node.querySelector('[data-annotation-field="gap"]').title = "Distance from the preceding panel's grid edge (or the cluster area, including scales, for the first panel).";
-    input(node, "Border colour", "cellBorderColour", panel.cellBorderColour ?? ANNOTATION_DEFAULTS.cellBorderColour, "color");
-    const resolved = resolveAnnotationScale(panel);
-    if (resolved.type === "continuous") {
-      const auto = !panel.scale?.domain;
-      input(node, "Automatic domain", "autoDomain", auto, "checkbox");
-      input(node, "Minimum", "domainMin", resolved.domain[0], "number", { disabled: auto });
-      input(node, "Maximum", "domainMax", resolved.domain[1], "number", { disabled: auto });
-    }
-    if (isBar) input(node, "Bar colour", "colour", panel.colour ?? ANNOTATION_DEFAULTS.colour, "color");
+    const resolved = groups ? null : resolveAnnotationScale(panel);
+    if (groups) panel.groups.forEach((group, i) => input(node, group.label || group.uid, `group:${i}:colour`,
+      group.colour ?? panel.colour ?? defaults.colour, "color"));
+    else if (bar) input(node, "Colour", "colour", panel.colour ?? defaults.colour, "color");
+    else if (resolved.type === "categorical") resolved.domain.forEach((name, i) => input(node, name, `colour:${i}`, resolved.colour(name), "color"));
     else {
-      const paletteName = Object.entries(ANNOTATION_PALETTES).find(([, colours]) =>
-        colours.length === resolved.colours.length && colours.every((value, i) => hex(value) === hex(resolved.colours[i])))?.[0] || "custom";
-      select(node, "Palette", "palette", paletteName,
-        [["custom", "Custom"], ...Object.keys(ANNOTATION_PALETTES).map((name) => [name, name])]);
-      const swatches = resolved.type === "categorical" ? resolved.domain.map(resolved.colour) : resolved.colours;
-      swatches.forEach((value, i) => input(node,
-        resolved.type === "categorical" ? resolved.domain[i] : `Colour ${i + 1}`, `colour:${i}`, value, "color"));
+      paletteSelect(node, resolved);
+      const preview = el("div", undefined, node); preview.dataset.colourPreview = ""; preview.className = "cm-annotation-gradient";
+      preview.setAttribute("role", "img"); preview.setAttribute("aria-label", "Colour gradient"); gradient();
     }
-    input(node, "Missing colour", "missingColour", panel.missingColour ?? ANNOTATION_DEFAULTS.missingColour, "color");
-    input(node, isBar ? "Show axis" : "Show colour key", "showKey", panel.showKey !== false, "checkbox");
-    const advanced = element("details"); advanced.append(element("summary", "Labels")); node.append(advanced);
-    advanced.open = labelsOpen;
-    input(advanced, "Font size", "fontSize", panel.fontSize ?? ANNOTATION_DEFAULTS.fontSize, "number", { min: "0.1" });
-    input(advanced, "Show column labels", "showColumnLabels", panel.showColumnLabels !== false, "checkbox");
-    input(advanced, "Heading angle", "headingRotation", panel.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation), "number", { min: "-90", max: "0" });
-    panel.columns.forEach((value, i) => input(advanced, `Column ${i + 1}`, `column:${i}`, value));
-    const error = element("div"); error.dataset.annotationError = ""; error.setAttribute("role", "alert"); node.append(error);
-  };
+    if (resolved?.type === "continuous") {
+      const range = el("div", undefined, node); range.className = "cm-annotation-range";
+      select(range, "Range", "autoDomain", panel.scale?.domain ? "custom" : "auto", [["auto", "Auto"], ["custom", "Custom"]]);
+      if (panel.scale?.domain) {
+        input(range, "Minimum", "domainMin", resolved.domain[0], "number");
+        input(range, "Maximum", "domainMax", resolved.domain[1], "number");
+      }
+    }
+    if (!groups) input(node, bar ? "Show axis" : "Show legend", "showKey", panel.showKey !== false, "checkbox");
+    const data = el("button", "Edit data…", node); data.type = "button"; data.onclick = () => onEditData?.();
+    const advanced = el("details", undefined, node); el("summary", "Advanced", advanced); advanced.open = open;
+    const sizes = groups ? [["markerWidth", "Bar thickness", 3], ["laneGap", "Lane gap", 12]]
+      : bar ? [["width", "Panel width", defaults.width], ["cellHeight", "Bar height", defaults.cellHeight]]
+        : [["cellWidth", "Cell width", defaults.cellWidth], ["cellHeight", "Cell height", defaults.cellHeight], ["cellGap", "Cell gap", defaults.cellGap]];
+    for (const [field, label, fallback] of [...sizes, ["gap", "Panel gap", defaults.gap], ["fontSize", "Font size", defaults.fontSize]]) {
+      input(advanced, label, field, panel[field] ?? fallback, "number", { min: ["gap", "cellGap"].includes(field) ? "0" : "0.1" });
+    }
+    if (!groups) {
+      input(advanced, "Border width", "cellBorderWidth", panel.cellBorderWidth ?? defaults.cellBorderWidth, "number", { min: "0" });
+      input(advanced, "Border colour", "cellBorderColour", panel.cellBorderColour ?? defaults.cellBorderColour, "color");
+      input(advanced, "Missing colour", "missingColour", panel.missingColour ?? defaults.missingColour, "color");
+      if (!bar && resolved.type === "continuous") resolved.colours.forEach((value, i) => input(advanced, `Colour stop ${i + 1}`, `colour:${i}`, value, "color"));
+      else if (!bar) paletteSelect(advanced, resolved);
+      input(advanced, "Show column labels", "showColumnLabels", panel.showColumnLabels !== false, "checkbox");
+      input(advanced, "Heading angle", "headingRotation", panel.headingRotation ?? (bar ? 0 : defaults.headingRotation), "number", { min: "-90", max: "0" });
+    }
+    const error = el("div", undefined, node); error.dataset.annotationError = ""; error.setAttribute("role", "alert");
+  }
   const edit = (event) => {
     const control = event.target, field = control.dataset.annotationField;
-    if (!field) return;
-    // Text commits on change, consistent with the editor's other label fields.
-    if ((control.type === "text") !== (event.type === "change")) return;
+    if (!field || (control.type === "text") !== (event.type === "change")) return;
     control.setCustomValidity("");
     if (!control.checkValidity() || control.type === "number" && control.value === "") return;
-    const panel = current(), resolved = resolveAnnotationScale(panel);
+    const panel = current(), resolved = panel.type === "groups" ? null : resolveAnnotationScale(panel);
     const value = control.type === "checkbox" ? control.checked : control.type === "number" ? control.valueAsNumber : control.value;
     let changes, refresh = false;
     const scale = { ...panel.scale };
-    if (field === "autoDomain") {
-      if (value) delete scale.domain;
-      else scale.domain = resolved.domain;
+    if (field.startsWith("group:")) {
+      const index = Number(field.split(":")[1]);
+      changes = { groups: panel.groups.map((group, i) => i === index ? { ...group, colour: value } : group) };
+    } else if (field === "autoDomain") {
+      if (value === "auto") delete scale.domain; else scale.domain = resolved.domain;
       changes = { scale }; refresh = true;
     } else if (field === "domainMin" || field === "domainMax") {
-      const min = node.querySelector('[data-annotation-field="domainMin"]').valueAsNumber;
-      const max = node.querySelector('[data-annotation-field="domainMax"]').valueAsNumber;
-      changes = { scale: { ...scale, domain: [min, max] } };
+      const domain = [...resolved.domain]; domain[field === "domainMin" ? 0 : 1] = value;
+      changes = { scale: { ...scale, domain } };
     } else if (field === "palette") {
       if (value === "custom") return;
-      changes = { scale: { ...scale, colours: [...ANNOTATION_PALETTES[value]] } }; refresh = true;
+      changes = { scale: { ...scale, colours: [...palettes[value]] } }; refresh = true;
     } else if (field.startsWith("colour:")) {
       const colours = resolved.type === "categorical" ? resolved.domain.map(resolved.colour) : [...resolved.colours];
-      colours[Number(field.split(":")[1])] = value;
-      changes = { scale: { ...scale, colours } };
-    } else if (field.startsWith("column:")) {
-      const columns = [...panel.columns]; columns[Number(field.split(":")[1])] = value;
-      changes = { columns };
+      colours[Number(field.split(":")[1])] = value; changes = { scale: { ...scale, colours } };
     } else changes = { [field]: value };
-    try {
-      applying = true;
+    applying = true;
+    try { run(() => {
       patch([{ type: "annotationPanels.update", ids: [panel.uid], changes }]);
       node.querySelector("[data-annotation-error]").textContent = "";
       node.querySelectorAll("input").forEach((input) => input.setCustomValidity(""));
       if (refresh) render();
-      else if (field.startsWith("colour:")) node.querySelector('[data-annotation-field="palette"]').value = "custom";
-    } catch (error) {
-      node.querySelector("[data-annotation-error]").textContent = error.message;
-      control.setCustomValidity(error.message);
-    } finally { applying = false; }
+      else { gradient(); if (field.startsWith("colour:")) { const palette = node.querySelector('[data-annotation-field="palette"]'); if (palette) palette.value = "custom"; } }
+    }, control); } finally { applying = false; }
   };
-  node.addEventListener("input", edit);
-  node.addEventListener("change", edit);
+  node.addEventListener("input", edit); node.addEventListener("change", edit);
   render();
   return { node, update() { if (!applying) render(); } };
 }

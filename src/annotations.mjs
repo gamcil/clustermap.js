@@ -66,7 +66,7 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
     if (type === "continuous" && scale.colours?.length < 2) fail("continuous scales need at least two colours.");
     if (panel.missingColour !== undefined && (typeof panel.missingColour !== "string" || !color(panel.missingColour))) fail("missingColour must be a CSS colour.");
     if (scale.domain !== undefined) {
-      if (!Array.isArray(scale.domain) || !scale.domain.length) fail("scale.domain must be a non-empty array.");
+      if (!Array.isArray(scale.domain)) fail("scale.domain must be an array.");
       if (type === "continuous" && (scale.domain.length !== 2 || !scale.domain.every(Number.isFinite) || scale.domain[0] >= scale.domain[1])) fail("continuous domain must be [min, max] with min < max.");
       if (panel.type === "bar" && (scale.domain[0] > 0 || scale.domain[1] < 0)) fail("bar domains must include zero.");
       if (type === "categorical" && (scale.domain.some((value) => typeof value !== "string") || new Set(scale.domain).size !== scale.domain.length)) fail("categorical domain must contain unique strings.");
