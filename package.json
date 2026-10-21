@@ -33,7 +33,8 @@
     "import:clinker": "node scripts/import-clinker-render.mjs",
     "test": "node --test test/*.test.js",
     "test:baseline": "node --test test/baseline.test.js",
-    "test:tree-browser": "node test/tree-browser.mjs"
+    "test:tree-browser": "node test/tree-browser.mjs",
+    "test:editor-browser": "playwright test tests/editor-regressions.spec.js --project=chromium --workers=1"
   },
   "author": "",
   "license": "ISC",

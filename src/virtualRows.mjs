@@ -26,6 +26,7 @@ export function createVirtualRows({ viewport, container, key, createRow, updateR
     if (rendering) { pending = true; return; }
     const window = virtualRowWindow(rows.length, Math.max(0, viewport.scrollTop - headerHeight()), viewport.clientHeight);
     if (!force && first === window.first && last === window.last) return;
+    const scrollTop = viewport.scrollTop;
     rendering = true;
     try {
       first = window.first; last = window.last;
@@ -57,6 +58,9 @@ export function createVirtualRows({ viewport, container, key, createRow, updateR
       // A table spacer uses its cell for height; a list spacer uses the element.
       (top.firstElementChild || top).style.height = `${window.before}px`;
       (bottom.firstElementChild || bottom).style.height = `${window.after}px`;
+      // Removing mounted rows can temporarily shrink the scroll area and clamp
+      // its position, especially when jumping to the end of a native table.
+      viewport.scrollTop = scrollTop;
       onRender([...mounted.values()].map((entry) => entry.node));
       restoreFocus?.focus({ preventScroll: true });
     } finally {

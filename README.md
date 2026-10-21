@@ -401,6 +401,17 @@ is the appropriate artifact for applications, such as the Python-packaged
 Clinker frontend, that bundle the library as a static browser asset; the ESM
 entry is intended for modern JavaScript bundlers.
 
+## Editor regression tests
+
+Run `npm run build`, then `npm run test:editor-browser` to check the packaged
+editor in Chromium. Install the browser once with `npx playwright install chromium`.
+The suite starts its own local server and uses local D3 and fixtures; no demo
+server or internet connection is needed during the run.
+
+Coverage includes shared table geometry and theme states, inline edits and
+merging, undo/redo, annotation batch edits and categories, panel management,
+and virtual scrolling with offscreen selection. Run `npm test` for the Node suite.
+
 ## Rendering benchmark
 
 Run `npm run bench:rendering` (three repetitions by default) to compare the
