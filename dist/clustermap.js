@@ -10100,13 +10100,11 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
 
   const interpolateNumber = (from, to, amount) => from + (to - from) * amount;
 
-  function interpolatePosition(from, to, amount) {
-    if (!from || !to) return to;
-    return {
-      ...to,
-      x: interpolateNumber(from.x, to.x, amount),
-      y: interpolateNumber(from.y, to.y, amount),
-    };
+  function interpolateFields(from, to, amount, fields = ["x", "y"]) {
+    if (!from || !to || from === to) return to;
+    const result = { ...to };
+    for (const field of fields) result[field] = interpolateNumber(from[field] ?? to[field], to[field], amount);
+    return result;
   }
 
   function interpolateArray(from, to, amount) {
@@ -10120,29 +10118,16 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       locus.track[side] ??
       locus[side === "x1" ? "worldStart" : "worldEnd"] - locus.x;
     return {
-      ...to,
-      x: interpolateNumber(from.x, to.x, amount),
-      y: interpolateNumber(from.y, to.y, amount),
-      worldStart: interpolateNumber(from.worldStart, to.worldStart, amount),
-      worldEnd: interpolateNumber(from.worldEnd, to.worldEnd, amount),
-      transform: interpolatePosition(from.transform, to.transform, amount),
+      ...interpolateFields(from, to, amount, ["x", "y", "worldStart", "worldEnd"]),
+      transform: interpolateFields(from.transform, to.transform, amount),
       track: {
         ...to.track,
         x1: interpolateNumber(trackX(from, "x1"), trackX(to, "x1"), amount),
         x2: interpolateNumber(trackX(from, "x2"), trackX(to, "x2"), amount),
         y: interpolateNumber(from.track.y, to.track.y, amount),
       },
-      hover: from.hover && to.hover
-        ? {
-            ...to.hover,
-            x: interpolateNumber(from.hover.x, to.hover.x, amount),
-            y: interpolateNumber(from.hover.y, to.hover.y, amount),
-            width: interpolateNumber(from.hover.width, to.hover.width, amount),
-            height: interpolateNumber(from.hover.height, to.hover.height, amount),
-            leftHandleX: interpolateNumber(from.hover.leftHandleX, to.hover.leftHandleX, amount),
-            rightHandleX: interpolateNumber(from.hover.rightHandleX, to.hover.rightHandleX, amount),
-          }
-        : to.hover,
+      hover: interpolateFields(from.hover, to.hover, amount,
+        ["x", "y", "width", "height", "leftHandleX", "rightHandleX"]),
     };
   }
 
@@ -10162,10 +10147,8 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     for (const [uid, cluster] of scene.clusters) {
       const prior = previous.clusters.get(uid);
       clusters.set(uid, {
-        ...cluster,
-        x: prior ? interpolateNumber(prior.x, cluster.x, amount) : cluster.x,
-        y: prior ? interpolateNumber(prior.y, cluster.y, amount) : cluster.y,
-        info: interpolatePosition(prior?.info, cluster.info, amount),
+        ...interpolateFields(prior, cluster, amount),
+        info: interpolateFields(prior?.info, cluster.info, amount),
         loci: cluster.loci.map((locus) => loci.get(locus.source.uid)),
       });
     }
@@ -10176,17 +10159,8 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       genes.set(uid, {
         ...gene,
         polygon: interpolateArray(prior?.polygon, gene.polygon, amount),
-        locus: interpolatePosition(prior?.locus, gene.locus, amount),
-        label: {
-          ...gene.label,
-          x: interpolateNumber(prior?.label?.x ?? gene.label.x, gene.label.x, amount),
-          y: interpolateNumber(prior?.label?.y ?? gene.label.y, gene.label.y, amount),
-          rotation: interpolateNumber(
-            prior?.label?.rotation ?? gene.label.rotation,
-            gene.label.rotation,
-            amount
-          ),
-        },
+        locus: interpolateFields(prior?.locus, gene.locus, amount),
+        label: interpolateFields(prior?.label, gene.label, amount, ["x", "y", "rotation"]),
       });
     }
 
@@ -10201,7 +10175,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
         // row swap that reverses which endpoint is upper, so interpolate in
         // stable query/target order to keep each end attached to its gene.
         anchors,
-        labelPosition: interpolatePosition(prior?.labelPosition, link.labelPosition, amount),
+        labelPosition: interpolateFields(prior?.labelPosition, link.labelPosition, amount),
         opacity,
         visible: opacity > 0 && Boolean(prior?.visible || link.visible),
       });
