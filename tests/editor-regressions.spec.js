@@ -64,6 +64,19 @@ async function annotation(page, categorical = false) {
 }
 const panelData = (page, uid) => page.evaluate((uid) => chart.data().annotationPanels.find((panel) => panel.uid === uid), uid);
 
+const canvasPoint = (page, selector, fraction = 0.5) => page.evaluate(({ selector, fraction }) => {
+  const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml").documentElement;
+  document.body.append(svg); svg.style.visibility = "hidden";
+  try {
+    const node = svg.querySelector(selector), box = node.getBBox();
+    const world = new DOMPoint(box.x + box.width * fraction, box.y + box.height / 2)
+      .matrixTransform(svg.getCTM().inverse().multiply(node.getCTM()));
+    const camera = chart.state().camera, surface = document.querySelector("#plot canvas.clusterMapCanvas").getBoundingClientRect();
+    return { x: surface.x + camera.x + world.x * camera.k, y: surface.y + camera.y + world.y * camera.k };
+  } finally { svg.remove(); }
+}, { selector, fraction });
+
+
 for (const theme of ["light", "dark"]) {
   test(`${theme}: shared geometry and interactive colours across data views`, async ({ page }) => {
     await page.evaluate((theme) => chart.config({ plot: { theme } }), theme);
@@ -492,17 +505,7 @@ test("WebGPU retains geometry across locus edits, anchoring and row reorder", as
   const paint = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await paint();
   const allocations = await page.evaluate(() => gpuStats.allocations);
-  const point = (selector, fraction = 0.5) => page.evaluate(({ selector, fraction }) => {
-    const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml").documentElement;
-    document.body.append(svg); svg.style.visibility = "hidden";
-    try {
-      const node = svg.querySelector(selector), box = node.getBBox();
-      const world = new DOMPoint(box.x + box.width * fraction, box.y + box.height / 2)
-        .matrixTransform(svg.getCTM().inverse().multiply(node.getCTM()));
-      const camera = chart.state().camera, surface = document.querySelector("#plot canvas.clusterMapCanvas").getBoundingClientRect();
-      return { x: surface.x + camera.x + world.x * camera.k, y: surface.y + camera.y + world.y * camera.k };
-    } finally { svg.remove(); }
-  }, { selector, fraction });
+  const point = (selector, fraction = 0.5) => canvasPoint(page, selector, fraction);
   const track = '[id$="locus_locus-a"] line.trackBar';
   const start = await point(track, 0.9);
   await page.mouse.move(start.x, start.y); await page.mouse.down();
@@ -542,4 +545,185 @@ test("failed SVG exports remove their temporary measurement surface", async ({ p
     } finally { SVGGraphicsElement.prototype.getBBox = original; }
   });
   expect(result).toEqual({ message: "Export measurement failed", remaining: 0 });
+});
+
+test("raster listeners persist across edits and detach on renderer changes and destroy", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    chart.config({ plot: { renderer: "canvas" } });
+    const surface = document.querySelector("#plot canvas.clusterMapCanvas");
+    const listener = () => d3.select(surface).on("pointerdown.canvasInteraction");
+    const initial = listener();
+    chart.config({ gene: { label: { show: false } } });
+    const afterConfig = listener() === initial;
+    chart.patch([{ type: "genes.update", ids: [chart.data().clusters[0].loci[0].genes[0].uid], changes: { label: "Updated" } }]);
+    const afterPatch = listener() === initial;
+    chart.undo();
+    const afterUndo = listener() === initial;
+    chart.data(structuredClone(chart.data()));
+    const afterReplacement = listener() === initial;
+    chart.config({ plot: { renderer: "svg" } });
+    const detached = listener() === undefined;
+    chart.config({ plot: { renderer: "canvas" } });
+    const next = document.querySelector("#plot canvas.clusterMapCanvas");
+    const rebound = next !== surface && typeof d3.select(next).on("pointerdown.canvasInteraction") === "function";
+    chart.destroy();
+    const destroyed = d3.select(next).on("pointerdown.canvasInteraction") === undefined;
+    return { afterConfig, afterPatch, afterUndo, afterReplacement, detached, rebound, destroyed };
+  });
+  expect(result).toEqual({ afterConfig: true, afterPatch: true, afterUndo: true,
+    afterReplacement: true, detached: true, rebound: true, destroyed: true });
+});
+
+test("context menus retain bindings and use current data and configured actions", async ({ page }) => {
+  const gene = page.locator("#plot polygon.genePolygon").first();
+  const uid = await gene.evaluate((node) => node.__data__.uid);
+  await page.evaluate((uid) => {
+    window.reveals = [];
+    window.enterMenu = d3.select("#plot .tooltip").on("mouseenter");
+    chart.config({ gene: { shape: { onReveal: (gene) => reveals.push(["old", gene.label]) } } });
+    chart.patch([{ type: "genes.update", ids: [uid], changes: { label: "Updated label" } }]);
+    chart.config({ gene: { shape: { onReveal: (gene) => reveals.push(["new", gene.label]) } } });
+  }, uid);
+  await gene.dispatchEvent("contextmenu", { clientX: 100, clientY: 100 });
+  await page.locator("#plot .tooltip").getByRole("button", { name: "Reveal in data editor" }).click();
+  expect(await page.evaluate(() => reveals)).toEqual([["new", "Updated label"]]);
+  await page.evaluate((uid) => {
+    const data = structuredClone(chart.data());
+    data.clusters.flatMap((cluster) => cluster.loci).flatMap((locus) => locus.genes)
+      .find((gene) => gene.uid === uid).label = "Replacement label";
+    chart.data(data);
+  }, uid);
+  await gene.dispatchEvent("contextmenu", { clientX: 100, clientY: 100 });
+  await page.locator("#plot .tooltip").getByRole("button", { name: "Reveal in data editor" }).click();
+  expect(await page.evaluate(() => reveals)).toEqual([["new", "Updated label"], ["new", "Replacement label"]]);
+  expect(await page.evaluate(() => d3.select("#plot .tooltip").on("mouseenter") === enterMenu)).toBe(true);
+});
+
+
+test("Canvas bitmap flips commit once and support undo and export during animation", async ({ page }) => {
+  await page.evaluate(async () => {
+    const data = await (await fetch("/fixtures/heatmap.json")).json();
+    chart.data(data);
+    chart.config({ plot: { renderer: "canvas", transitionDuration: 100 } });
+    chart.state({ ...chart.state(), camera: { x: 350, y: 40, k: 1 } });
+    chart.clearHistory();
+    window.bitmapCopies = 0;
+    const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+      if (this.canvas.classList.contains("clusterMapCanvas")) bitmapCopies++;
+      return drawImage.apply(this, args);
+    };
+  });
+  const point = await canvasPoint(page, '[id$="locus_locus-a"] line.trackBar', 0.9);
+  await page.mouse.move(point.x, point.y);
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.mouse.dblclick(point.x, point.y);
+  await expect.poll(() => page.evaluate(() => bitmapCopies)).toBeGreaterThan(0);
+  await page.waitForTimeout(200);
+  const flipped = () => page.evaluate(() => chart.state().loci.some(([uid, state]) => uid === "locus-a" && state.flipped));
+  expect(await flipped()).toBe(true);
+  await page.evaluate(() => chart.undo());
+  expect(await flipped()).toBe(false);
+  expect(await page.evaluate(() => chart.canUndo())).toBe(false);
+  await page.evaluate(() => chart.redo());
+  expect(await flipped()).toBe(true);
+  // Trigger a fresh flip and flush it through export before its animation ends.
+  const next = await canvasPoint(page, '[id$="locus_locus-a"] line.trackBar', 0.9);
+  await page.mouse.dblclick(next.x, next.y);
+  expect(await page.evaluate(() => chart.exportSvg())).toContain("clusterMapG");
+  expect(await flipped()).toBe(false);
+  await page.evaluate(() => chart.undo());
+  expect(await flipped()).toBe(true);
+});
+
+test("renderer switches cancel Canvas animation paints on detached surfaces", async ({ page }) => {
+  await page.evaluate(async () => {
+    chart.data(await (await fetch("/fixtures/heatmap.json")).json());
+    chart.config({ plot: { renderer: "canvas", transitionDuration: 120 } });
+    window.detachedPaints = 0;
+    const clearRect = CanvasRenderingContext2D.prototype.clearRect;
+    CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+      if (this.canvas.classList.contains("clusterMapCanvas") && !this.canvas.isConnected) detachedPaints++;
+      return clearRect.apply(this, args);
+    };
+    chart.rotateTreeNode("x");
+  });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+  await page.evaluate(() => chart.config({ plot: { renderer: "svg" } }));
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => detachedPaints)).toBe(0);
+});
+
+test("WebGPU fallback paints the current frame and reflects subsequent edits", async ({ page }) => {
+  await page.evaluate(async () => {
+    Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+    chart.data(await (await fetch("/fixtures/heatmap.json")).json());
+    chart.config({ plot: { renderer: "canvas", adaptiveResolution: false, transitionDuration: 0 } });
+    chart.state({ ...chart.state(), camera: { x: 350, y: 40, k: 1 } });
+    chart.patch([{ type: "genes.update", ids: ["gene-a"], changes: { colour: "#cc5500" } }]);
+  });
+  const point = await canvasPoint(page, '[id$="gene_gene-a"] polygon.genePolygon');
+  const pixel = (selector) => page.evaluate(({ point, selector }) => {
+    const canvas = document.querySelector(selector), bounds = canvas.getBoundingClientRect();
+    const x = Math.floor((point.x - bounds.x) * canvas.width / bounds.width);
+    const y = Math.floor((point.y - bounds.y) * canvas.height / bounds.height);
+    return [...canvas.getContext("2d").getImageData(x, y, 1, 1).data];
+  }, { point, selector });
+  const before = await pixel("#plot canvas.clusterMapCanvas");
+  expect(before).toEqual([204, 85, 0, 255]);
+  await page.evaluate(() => chart.config({ plot: { renderer: "webgpu" } }));
+  await expect(page.locator("#plot canvas.clusterMapCanvas")).toHaveAttribute("data-webgpu", "unavailable");
+  expect(await pixel("#plot canvas.clusterMapWebGpuOverlay")).toEqual(before);
+  await page.evaluate(() => chart.patch([{ type: "genes.update", ids: ["gene-a"], changes: { colour: "#1155aa" } }]));
+  expect(await pixel("#plot canvas.clusterMapWebGpuOverlay")).toEqual([17, 85, 170, 255]);
+});
+
+for (const renderer of ["svg", "canvas"]) for (const duration of [0, 80]) {
+  test(`${renderer}: ${duration}ms flips paint current geometry and create one history entry`, async ({ page }) => {
+    await page.evaluate(async ({ renderer, duration }) => {
+      chart.data(await (await fetch("/fixtures/heatmap.json")).json());
+      chart.config({ plot: { renderer, transitionDuration: duration } });
+      chart.state({ ...chart.state(), camera: { x: 350, y: 40, k: 1 } });
+      chart.clearHistory();
+    }, { renderer, duration });
+    const points = () => page.evaluate(() => new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml")
+      .querySelector('[id$="gene_gene-a"] polygon.genePolygon').getAttribute("points"));
+    const before = await points();
+    if (renderer === "svg") await page.locator('#plot [id$="locus_locus-a"]').dispatchEvent("dblclick");
+    else {
+      const point = await canvasPoint(page, '[id$="locus_locus-a"] line.trackBar', 0.9);
+      await page.mouse.dblclick(point.x, point.y);
+    }
+    await expect.poll(() => page.evaluate(() => chart.canUndo())).toBe(true);
+    const after = await points();
+    expect(after).not.toBe(before);
+    if (renderer === "svg") await expect(page.locator('#plot [id$="gene_gene-a"] polygon.genePolygon')).toHaveAttribute("points", after);
+    await page.evaluate(() => chart.undo());
+    expect(await points()).toBe(before);
+    expect(await page.evaluate(() => chart.canUndo())).toBe(false);
+    await page.evaluate(() => chart.redo());
+    expect(await points()).toBe(after);
+  });
+}
+
+test("camera focus uses the current renderer and becomes inert after destruction", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const uid = chart.data().clusters[0].loci[0].genes[0].uid;
+    chart.config({ plot: { renderer: "canvas" } });
+    chart.focus([uid]);
+    const canvas = d3.select("#plot canvas.clusterMapCanvas").node().__zoom;
+    const focusedCanvas = chart.state().camera;
+    chart.config({ plot: { renderer: "svg" } });
+    chart.focus([uid]);
+    const svg = d3.select("#plot svg.clusterMap").node().__zoom;
+    const focusedSvg = chart.state().camera;
+    chart.destroy();
+    const chainable = chart.focus([uid]) === chart;
+    return { canvas: { x: canvas.x, y: canvas.y, k: canvas.k }, focusedCanvas,
+      svg: { x: svg.x, y: svg.y, k: svg.k }, focusedSvg, chainable, after: chart.state().camera };
+  });
+  expect(result.canvas).toEqual(result.focusedCanvas);
+  expect(result.svg).toEqual(result.focusedSvg);
+  expect(result.chainable).toBe(true);
+  expect(result.after).toEqual(result.focusedSvg);
 });

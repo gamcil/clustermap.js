@@ -18,6 +18,7 @@ export function createHtmlOverlay({
   let menuTree = null;
 
   const hide = (returnFocus = false) => {
+    if (windowRef) select(windowRef).on(clickEvent, null).on(keyEvent, null);
     tooltip.style("opacity", 0).style("pointer-events", "none").attr("aria-hidden", "true").property("inert", true);
     const wasTreeMenu = treeMenu;
     treeMenu = false;
@@ -119,6 +120,8 @@ export function createHtmlOverlay({
   };
 
   return {
+    node: tooltip.node(),
+    hide,
     isTreeMenuOpen: (tree) => treeMenu && menuTree === tree,
     enter: () => {
       tooltip
@@ -127,8 +130,7 @@ export function createHtmlOverlay({
         .style("opacity", 1)
         .style("pointer-events", "all");
       // A chart must never replace another chart's window listener. The
-      // namespace is supplied by the chart runtime and is removed on redraw
-      // or destroy, which also releases this overlay's closure.
+      // namespace is supplied by the chart runtime and removed on dismissal.
       if (windowRef) select(windowRef).on(clickEvent, dismissOnOutsideClick);
     },
     leave: () => {
@@ -161,7 +163,6 @@ export function createHtmlOverlay({
       controls.querySelector("button, input, select")?.focus({ preventScroll: true });
     },
     dispose: () => {
-      if (windowRef) select(windowRef).on(clickEvent, null).on(keyEvent, null);
       tooltip.interrupt();
       hide(treeMenu);
     },

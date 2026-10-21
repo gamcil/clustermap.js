@@ -59,6 +59,7 @@ import {
 import { exportChartSvg } from "./svgExport.mjs";
 import { createChartRuntime } from "./chartRuntime.js";
 import { createRetainedSceneBackend } from "./retainedSceneBackend.mjs";
+import { createCanvasBackend } from "./canvasBackend.mjs";
 import { createWebGpuBackend } from "./webgpuBackend.mjs";
 import { ensureSvgSurface } from "./svgSurface.mjs";
 import { ensureRasterSurface } from "./rasterSurface.mjs";
@@ -119,7 +120,6 @@ export default function clusterMap() {
     emitChange({ type: "theme.change", theme: resolveTheme(runtime.config.plot.theme).mode });
   }
   let annotationUiContext = null, annotationUiLoad = null;
-  let transition = createTransition();
   let zoom = null;
   let canvasZoom = null;
   let hasInitialView = false;
@@ -130,33 +130,23 @@ export default function clusterMap() {
   let treeAnimation = null;
   let webgpuAnimation = null;
   let scenePreview = null;
-  let canvasPreviewScene = null;
-  let canvasFlipStaticCanvas = null;
-  let canvasFlipLocusCanvas = null;
-  let canvasFlipLocusFrame = null;
-  let canvasFlipDirtyFrame = null;
-  let canvasPreparedFlipBase = null;
-  let canvasFlipWarmFrame = null;
   let previewPaintFrame = null;
   let cancelCanvasFlip = null;
   let canvasPendingFlip = null;
-  let paintPreviewFrame = null;
   let cancelSceneFlip = null;
   let clusterCommitFrame = null;
   let sceneCommit = null;
-  let scheduleMinimapBase = () => {};
-  let prepareCanvasFlipBase = () => {};
-  let warmCanvasFlipBase = () => {};
+  let rasterCanvas = null, overlayCanvas = null, minimapCanvas = null;
+  let minimapScene = null, minimapMeasurement = null;
   let currentData = null;
   let figureMeasurementContext = null;
-  let rotateTreeNode = () => {};
   let chartIndex = null;
   let highlightGeneIds = new Set();
   let highlightLinkIds = new Set();
   let selectedLocusIds = new Set();
   let locusSelectionAnchorUid = null;
   let disposeRasterInteraction = () => {};
-  let disposeOverlay = () => {};
+  let rasterHitSurface = null;
   let retainedOverlay = null;
   let updatingTreeMenu = false;
   function updateFromTreeMenu(action) {
@@ -165,9 +155,6 @@ export default function clusterMap() {
     try { return action(); }
     finally { updatingTreeMenu = previous; }
   }
-  // Rebound on each redraw so programmatic focusing always targets the
-  // currently active renderer surface.
-  let focusCamera = () => false;
   const changeListeners = new Set();
   const history = [];
   const future = [];
@@ -186,10 +173,7 @@ export default function clusterMap() {
       return metrics;
     },
   });
-  const canvasBackend = createRetainedSceneBackend({
-    render: renderCanvas,
-    surface: "canvas",
-  });
+  const canvasBackend = createCanvasBackend();
   const svgBackend = createRetainedSceneBackend({
     render: renderSvg,
     surface: "plot",
@@ -253,7 +237,7 @@ export default function clusterMap() {
           order: getClusterOrder(chartState),
           rows: runtime.scales.y.range(),
         });
-        scheduleScenePreview();
+        scheduleScenePaint();
         return;
       }
       redraw({ animate: false });
@@ -280,7 +264,7 @@ export default function clusterMap() {
           order,
           rows,
         });
-        scheduleScenePreview();
+        scheduleScenePaint();
         if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
         clusterCommitFrame = requestAnimationFrame(() => {
           clusterCommitFrame = requestAnimationFrame(() => {
@@ -302,7 +286,7 @@ export default function clusterMap() {
         scenePreview = createLocusOffsetPreview(runtime.getScene(), uid, offset, {
           alignLabels: runtime.config.cluster.alignLabels,
         });
-        scheduleScenePreview();
+        scheduleScenePaint();
         return;
       }
       redraw({ animate: false });
@@ -313,7 +297,7 @@ export default function clusterMap() {
         scenePreview = createLocusOffsetsPreview(runtime.getScene(), offsets, {
           alignLabels: runtime.config.cluster.alignLabels,
         });
-        scheduleScenePreview();
+        scheduleScenePaint();
         return;
       }
       redraw({ animate: false });
@@ -351,7 +335,7 @@ export default function clusterMap() {
           trimIndicatorStyle: runtime.config.locus.trimIndicators,
           clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
         });
-        scheduleScenePreview();
+        scheduleScenePaint();
         return result;
       }
       redraw({ animate: false, synchronize: false });
@@ -370,19 +354,18 @@ export default function clusterMap() {
       beginInteractionState();
       flipLocus(chartState, locus);
       if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
-        canvasAnimation?.cancel();
-        canvasAnimation = null;
+        stopCanvasAnimation();
         cancelCanvasFlip?.();
         const previewProgress = 0.12;
         const sourceScene = canvasScene || runtime.getScene();
-        const pending = createCanvasFlipPending(locus, sourceScene);
+        const pending = { locus, sourceScene, targetScene: null,
+          clusterLabelText: runtime.locusTextForCluster(locus.clusterUid) };
         canvasPendingFlip = pending;
-        canvasPreviewScene = sourceScene;
         scenePreview = createLocusFlipPreview(sourceScene, locus.uid, {
           progress: previewProgress,
           clusterLabelText: pending.clusterLabelText,
         });
-        scheduleScenePreview();
+        scheduleScenePaint();
         // Show the retained preview before preparing cached flip layers.
         cancelCanvasFlip = afterPaint(() => startCanvasFlip(pending, previewProgress));
         return;
@@ -440,11 +423,7 @@ export default function clusterMap() {
     cancelSceneFlip?.();
     if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
     scenePreview = null;
-    canvasPreviewScene = null;
-    clearCanvasFlipBase();
-    canvasPreparedFlipBase = null;
-    if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
-    canvasFlipWarmFrame = null;
+    canvasBackend.clearFlip();
     previewPaintFrame = null;
     cancelCanvasFlip = null;
     canvasPendingFlip = null;
@@ -465,10 +444,8 @@ export default function clusterMap() {
     canvasScene = pending.targetScene;
     canvasBackend.setScene(canvasScene);
     scenePreview = null;
-    canvasPreviewScene = null;
     canvasPendingFlip = null;
-    clearCanvasFlipBase();
-    canvasPreparedFlipBase = null;
+    canvasBackend.clearFlip();
   }
 
   function startCanvasFlip(pending, initialProgress) {
@@ -477,25 +454,24 @@ export default function clusterMap() {
     runtime.synchronizeLocusLayoutState(pending.locus);
     pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, currentData);
     commitInteractionState();
-    prepareCanvasFlipBase(pending);
+    canvasBackend.prepareFlip(pending.locus.uid, pending.sourceScene);
     // Restore and repaint the affected canvas region before the browser can
     // present a frame. The base image stays offscreen; the visible plot stays
     // a single canvas throughout the animation.
-    paintPreviewFrame?.();
-    const duration = runtime.config.plot.transitionDuration;
-    if (!duration) {
+    paintScene();
+    const finish = () => {
+      cancelCanvasFlip = null;
+      scenePreview = null;
+      canvasPendingFlip = null;
       canvasScene = pending.targetScene;
       canvasBackend.setScene(canvasScene);
-      scenePreview = null;
-      canvasPreviewScene = null;
-      canvasPendingFlip = null;
-      paintPreviewFrame?.();
-      clearCanvasFlipBase();
-      canvasPreparedFlipBase = null;
+      paintScene();
+      canvasBackend.clearFlip();
       scheduleScenePaint();
       scheduleMinimapBase(canvasScene);
-      return;
-    }
+    };
+    const duration = runtime.config.plot.transitionDuration;
+    if (!duration) { finish(); return; }
     cancelCanvasFlip = runAnimation(duration, (progress) => {
       if (canvasPendingFlip !== pending) return;
       scenePreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
@@ -505,31 +481,17 @@ export default function clusterMap() {
       // Paint the dirty region in this frame rather than one frame later.
       if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
       previewPaintFrame = null;
-      paintPreviewFrame?.();
-    }, () => {
-      cancelCanvasFlip = null;
-      scenePreview = null;
-      canvasPreviewScene = null;
-      canvasPendingFlip = null;
-      canvasScene = pending.targetScene;
-      canvasBackend.setScene(canvasScene);
-      paintPreviewFrame?.();
-      clearCanvasFlipBase();
-      canvasPreparedFlipBase = null;
-      scheduleScenePaint();
-      scheduleMinimapBase(canvasScene);
-    });
+      paintScene();
+    }, finish);
   }
 
   function scheduleScenePaint() {
-    if (previewPaintFrame !== null || !paintPreviewFrame) return;
+    if (previewPaintFrame !== null || !container || !runtime.getScene()) return;
     previewPaintFrame = requestAnimationFrame(() => {
       previewPaintFrame = null;
-      paintPreviewFrame();
+      paintScene();
     });
   }
-
-  const scheduleScenePreview = scheduleScenePaint;
 
   function zoomExtent() {
     const minimum = Math.max(0, Number(runtime.config.plot.minZoom) || 0);
@@ -541,45 +503,6 @@ export default function clusterMap() {
   function constrainZoom(scale) {
     const [minimum, maximum] = zoomExtent();
     return Math.max(minimum, Math.min(maximum, scale));
-  }
-
-  function createCanvasFlipPending(locus, sourceScene) {
-    const dynamicLinks = new Set();
-    const locusGenes = new Set(locus.genes.map((gene) => gene.uid));
-    const dynamicGenes = new Set(locusGenes);
-    for (const gene of locus.genes) {
-      for (const link of runtime.lookup.linksForGene(gene.uid)) {
-        dynamicLinks.add(link.uid);
-        // The link must remain below both endpoint gene shapes. Repaint its
-        // stationary neighbour in the same dirty canvas region as the
-        // reflected locus rather than compositing separate layers.
-        dynamicGenes.add(link.query.uid);
-        dynamicGenes.add(link.target.uid);
-      }
-    }
-    return {
-      locus,
-      sourceScene,
-      clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
-      targetScene: null,
-      locusRecords: {
-        loci: new Set([locus.uid]),
-        genes: locusGenes,
-        links: new Set(),
-      },
-      dynamic: {
-        loci: new Set([locus.uid]),
-        genes: dynamicGenes,
-        links: dynamicLinks,
-      },
-    };
-  }
-
-  function clearCanvasFlipBase() {
-    canvasFlipStaticCanvas = null;
-    canvasFlipLocusCanvas = null;
-    canvasFlipLocusFrame = null;
-    canvasFlipDirtyFrame = null;
   }
 
   function stopWebGpuAnimation() {
@@ -741,6 +664,7 @@ export default function clusterMap() {
   }
 
   function highlightedGeneIds() {
+    if (!selectedLocusIds.size) return highlightGeneIds;
     const ids = new Set(highlightGeneIds);
     for (const locusUid of selectedLocusIds) {
       for (const gene of chartIndex?.locusById.get(locusUid)?.genes || []) ids.add(gene.uid);
@@ -753,6 +677,349 @@ export default function clusterMap() {
       .find(([key]) => String(key) === String(uid))?.[1];
   }
 
+  const chooseLegendColour = (group) => {
+    const picker = container.select("input.colourPicker");
+    picker.on("change", () => {
+      my.patch([{
+        type: "groups.update",
+        ids: [group.uid],
+        changes: { colour: picker.node().value },
+      }]);
+    });
+    picker.node().click();
+  };
+  const setScaleBarLength = (providedValue) => {
+    const value = Number(
+      providedValue ?? prompt("Enter new length (bp):", runtime.config.scaleBar.basePair)
+    );
+    if (Number.isFinite(value) && value > 0) my.config({ scaleBar: { basePair: value } });
+  };
+  const renameRecord = (event, type, record) => {
+    if (event.defaultPrevented) return;
+    const field = type === "clusters" ? "name" : "label";
+    const value = prompt("Enter new value:", record[field] || record.uid);
+    if (value) my.patch([{ type: `${type}.update`, ids: [record.uid], changes: { [field]: value } }]);
+  };
+  // Both renderers delegate mutations to the same controller. Raster input
+  // adapts stable IDs back to source records at its boundary; SVG already
+  // receives those records through its D3 joins.
+  const rendererInteractions = {
+    ...interactionController,
+    renameCluster: (event, cluster) => renameRecord(event, "clusters", cluster),
+    isDragging: () => isDragging(chartState),
+    rotateTreeNode: (uid) => {
+      if (!container) return;
+      const node = currentData.tree?.nodes.find((entry) => entry.uid === uid);
+      if (!node?.children) return;
+      beginInteractionState();
+      treeAnimation = {
+        previousTree: {
+          ...currentData.tree,
+          nodes: currentData.tree.nodes.map((entry) => ({
+            ...entry,
+            children: entry.children ? [...entry.children] : undefined,
+          })),
+        },
+        previousScene: runtime.getScene(),
+        progress: 0,
+      };
+      sceneCommit = { sourceScene: runtime.getScene(), changes: {} };
+      node.children.reverse();
+      chartState = createChartState(currentData, chartState);
+      runtime.setChartState(chartState);
+      redraw();
+      commitInteractionState();
+    },
+    toggleLocusSelection: (locus, { clusterRange = null } = {}) => {
+      const ids = new Set(selectedLocusIds);
+      const anchor = locusForId(locusSelectionAnchorUid);
+      if (clusterRange && anchor) {
+        const range = lociForClusterRange(
+          getClusterOrder(chartState),
+          chartIndex?.clusterById || new Map(),
+          anchor.clusterUid,
+          locus.clusterUid
+        );
+        if (range.length) {
+          range.forEach((uid) => {
+            if (clusterRange === "remove") ids.delete(uid);
+            else ids.add(uid);
+          });
+          my.locusSelection(ids);
+          if (ids.size) locusSelectionAnchorUid = locus.uid;
+          return;
+        }
+      }
+      if (ids.has(locus.uid)) ids.delete(locus.uid);
+      else ids.add(locus.uid);
+      my.locusSelection(ids);
+      if (ids.size) locusSelectionAnchorUid = locus.uid;
+    },
+    onGeneClick: (event, gene) => {
+      // Shift-click belongs to the containing locus and must not also invoke
+      // the established single-gene anchor interaction.
+      if (event.shiftKey) return;
+      (runtime.config.gene.shape.onClick || ((_, record) => anchorGene(record)))(event, gene);
+    },
+    showTreeMenu: (...args) => retainedOverlay?.showTreeMenu(...args),
+    showGeneMenu: (...args) => retainedOverlay?.showGeneMenu(...args),
+    showGroupMenu: (...args) => retainedOverlay?.showGroupMenu(...args),
+    setScaleBarLength,
+    chooseLegendColour,
+    legendColour: (event, group) => {
+      if (runtime.config.legend.onClickCircle) {
+        runtime.config.legend.onClickCircle(event, group);
+      } else {
+        chooseLegendColour(group);
+      }
+    },
+    legendText: (event, group) =>
+      runtime.config.legend.onClickText ? runtime.config.legend.onClickText(event, group) : renameRecord(event, "groups", group),
+    legendMenu: (event, group) => {
+      const handler = runtime.config.legend.onAltClickText || retainedOverlay.showGroupMenu;
+      handler(event, group);
+    },
+  };
+
+  const targetForEvent = (canvasNode, event) =>
+    hitTestCanvas({
+      // A canvas can only have one rendering context. WebGPU owns the
+      // visible surface, so use its transparent 2D text/chrome overlay
+      // for the metric-dependent portions of hit testing instead.
+      canvas: rasterHitSurface,
+      scene: runtime.getScene(),
+      camera: getCamera(chartState),
+      config: runtime.renderConfig,
+      event,
+      tree: currentData.tree,
+      treeDragging: isDragging(chartState),
+    });
+  const locusForTarget = (target) =>
+    target?.locusUid || runtime.lookup.geneData(target?.geneUid)?.locusUid || null;
+  const rasterBindings = createRasterInteractionBindings({
+    interactions: rendererInteractions,
+    getGene: runtime.lookup.geneData,
+    getLocus: runtime.lookup.locusData,
+  });
+  const rasterInteraction = createRasterInteraction({
+    targetForEvent,
+    worldPoint: (surface, event) =>
+      canvasWorldPoint(surface, event, getCamera(chartState)),
+    locusForTarget,
+    setHoverLocus: (locusUid) => {
+      if (canvasHoverLocusUid === locusUid) return false;
+      canvasHoverLocusUid = locusUid;
+      scheduleScenePaint();
+      return true;
+    },
+    warmLocus: (uid) => { if (isCanvasRenderer(runtime.config.plot.renderer)) canvasBackend.warmLocus(uid); },
+    beginMotion: rasterMotion.begin,
+    endMotion: rasterMotion.end,
+    setCursor: (surface, cursor) => select(surface).style("cursor", cursor),
+    ...rasterBindings,
+  });
+
+  function sceneFrame(scene) {
+    return {
+      scene, camera: getCamera(chartState), config: runtime.renderConfig,
+      scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(), tree: currentData.tree,
+      preview: scenePreview, hoverLocusUid: canvasHoverLocusUid,
+      suppressLocusHover: scenePreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
+      previousTree: treeAnimation?.previousTree, previousTreeScene: treeAnimation?.previousScene,
+      treeTargetScene: treeAnimation?.targetScene, treeProgress: treeAnimation?.progress ?? 1,
+      highlightGeneIds: highlightedGeneIds(), highlightLinkIds, highlightLocusIds: selectedLocusIds,
+    };
+  }
+
+  function paintScene() {
+    if (!container || !runtime.getScene()) return;
+    if (isCanvasRenderer(runtime.config.plot.renderer)) return paintCanvas();
+    if (isWebGpuRenderer(runtime.config.plot.renderer)) return paintWebGpu();
+    return paintSvg();
+  }
+
+  function paintSvg({ annotationsOnly = false, previousScene = null, animate = false } = {}) {
+    const svg = container?.select("svg.clusterMap");
+    if (!svg || svg.empty()) return;
+    updateFigureSurface();
+    return svgBackend.paint({ ...sceneFrame(svgBackend.pendingScene || runtime.getScene()),
+      plot: svg.select("g.clusterMapG"), data: currentData, annotationsOnly, previousScene, animate,
+      annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
+      transition: animate ? createTransition().duration(runtime.config.plot.transitionDuration) : null,
+      ids: runtime.ids, lookup: { gene: runtime.lookup.geneData }, interactions: rendererInteractions });
+  }
+
+  function focusCamera({ genes = [], links = [] } = {}) {
+    const scene = runtime.getScene();
+    if (!container || !scene) return false;
+    let bounds = null;
+    const include = (candidate) => {
+      if (!candidate) return;
+      if (!bounds) {
+        bounds = { ...candidate };
+        return;
+      }
+      bounds.minX = Math.min(bounds.minX, candidate.minX);
+      bounds.maxX = Math.max(bounds.maxX, candidate.maxX);
+      bounds.minY = Math.min(bounds.minY, candidate.minY);
+      bounds.maxY = Math.max(bounds.maxY, candidate.maxY);
+    };
+    for (const uid of genes) include(scene.genes.get(uid)?.bounds);
+    for (const uid of links) {
+      const rendered = scene.links.get(uid);
+      if (rendered?.bounds) {
+        include(rendered.bounds);
+        continue;
+      }
+      // The data editor intentionally includes links that are hidden by a
+      // threshold or best-match setting. They have no scene ribbon, but
+      // their endpoints remain useful, focusable context.
+      const link = chartIndex?.linkById.get(uid);
+      include(scene.genes.get(link?.query.uid)?.bounds);
+      include(scene.genes.get(link?.target.uid)?.bounds);
+    }
+    const useRaster = isRasterRenderer(runtime.config.plot.renderer);
+    const node = useRaster ? rasterCanvas : container.select("svg.clusterMap").node();
+    if (!bounds || !node) return false;
+    const viewport = node.getBoundingClientRect();
+    const camera = fitCameraForBounds({
+      bounds,
+      viewport,
+      padding: 56,
+      constrainScale: constrainZoom,
+    });
+    if (!camera) return false;
+    const transform = zoomIdentity.translate(camera.x, camera.y).scale(camera.k);
+    if (useRaster && canvasZoom) select(node).call(canvasZoom.transform, transform);
+    else if (zoom) select(node).call(zoom.transform, transform);
+    else setCamera(chartState, camera);
+    return true;
+  }
+
+  function paintCanvas(canvas = rasterCanvas, scene = canvasAnimation?.scene || canvasPendingFlip?.sourceScene || canvasBackend.pendingScene || runtime.getScene()) {
+    if (!canvas || !scene) return null;
+    updateFigureSurface();
+    const result = canvasBackend.paint({ ...sceneFrame(scene), canvas,
+      previousScene: canvasAnimation?.previousScene, progress: canvasAnimation?.progress });
+    paintMinimap();
+    return result;
+  }
+
+  function paintWebGpu(scene = webgpuBackend.pendingScene || runtime.getScene()) {
+    if (!rasterCanvas || !scene) return;
+    updateFigureSurface();
+    const frame = sceneFrame(scene);
+    if (overlayCanvas) renderCanvas({ ...frame, canvas: overlayCanvas,
+      layers: ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"] });
+    const { width, height } = rasterCanvas.getBoundingClientRect();
+    webgpuBackend.paint({ ...frame, canvas: rasterCanvas, width, height, onUnavailable: paintWebGpuFallback });
+    paintMinimap();
+  }
+
+  function paintWebGpuFallback() {
+    paintCanvas(overlayCanvas, webgpuBackend.pendingScene);
+  }
+
+  function paintMinimap() {
+    if (!minimapCanvas) return;
+    rasterMinimap.paint({ minimap: minimapCanvas, surface: rasterCanvas,
+      scene: minimapScene || runtime.getScene(), options: runtime.config.plot.minimap,
+      camera: getCamera(chartState), pixelRatio: globalThis.devicePixelRatio || 1 });
+  }
+
+  function renderMinimapBase({ canvas, scene, projection }) {
+    const options = runtime.config.plot.minimap;
+    renderCanvas({ canvas, scene, tree: currentData.tree, treeTrackAnchor: false,
+      camera: { x: projection.x, y: projection.y, k: projection.scale },
+      config: runtime.renderConfig, scales: runtime.scales, dimensions: projection, fullScene: true,
+      layers: CANVAS_LAYERS.filter((layer) => layer !== "geneLabels" && layer !== "chrome" &&
+        (options.showLinks || layer !== "links" && layer !== "linkLabels")),
+      pixelRatio: globalThis.devicePixelRatio || 1 });
+  }
+
+  function scheduleMinimapBase(scene) {
+    if (!minimapCanvas || !runtime.config.plot.minimap?.show) return;
+    if (currentData.tree && runtime.config.tree.show) {
+      minimapMeasurement ||= minimapCanvas.ownerDocument.createElement("canvas").getContext("2d");
+      scene = { ...scene, figureBounds: canvasFigureBounds(minimapMeasurement, scene, runtime.config, currentData.tree) };
+    }
+    minimapScene = scene;
+    rasterMinimap.scheduleBase({ scene, minimap: minimapCanvas, options: runtime.config.plot.minimap,
+      renderBase: renderMinimapBase, onPaint: paintMinimap });
+  }
+
+  function stopCanvasAnimation() {
+    canvasAnimation?.cancel();
+    canvasAnimation = null;
+  }
+
+  function animateCanvas(scene, animate) {
+    stopCanvasAnimation();
+    if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
+      treeAnimation = null;
+      canvasScene = scene;
+      paintCanvas();
+      return;
+    }
+    const previousScene = canvasScene;
+    if (treeAnimation) treeAnimation.targetScene = scene;
+    canvasAnimation = { previousScene, scene, progress: 0, cancel: null };
+    canvasAnimation.cancel = runAnimation(runtime.config.plot.transitionDuration, (progress) => {
+      if (treeAnimation) treeAnimation.progress = progress;
+      canvasAnimation.progress = progress;
+      paintCanvas();
+    }, () => {
+      canvasAnimation = null;
+      treeAnimation = null;
+      canvasScene = scene;
+      paintCanvas();
+    });
+  }
+
+  function animateWebGpu(previousScene, scene, animate) {
+    stopWebGpuAnimation();
+    const duration = runtime.config.plot.transitionDuration;
+    if (!animate || !previousScene || !duration) {
+      treeAnimation = null;
+      webgpuBackend.setScene(scene);
+      paintWebGpu(scene);
+      return;
+    }
+    if (treeAnimation) treeAnimation.targetScene = scene;
+    webgpuAnimation = { cancel: runAnimation(duration, (progress) => {
+      const displayScene = interpolateCanvasScene(previousScene, scene, progress);
+      if (treeAnimation) treeAnimation.progress = progress;
+      webgpuBackend.setScene(displayScene);
+      paintWebGpu(displayScene);
+    }, () => {
+      webgpuAnimation = null;
+      treeAnimation = null;
+      webgpuBackend.setScene(scene);
+      paintWebGpu(scene);
+    }) };
+  }
+
+  const minimapInteractions = {
+    getSurface: () => rasterCanvas,
+    getScene: () => minimapScene || runtime.getScene(),
+    getCamera: () => getCamera(chartState),
+    getOptions: () => runtime.config.plot.minimap,
+    moveCamera: (camera) => {
+      const mainCanvas = rasterCanvas;
+      if (!camera || !mainCanvas) return;
+      // Go through D3 rather than mutating its private __zoom state. This
+      // keeps the next wheel/pan gesture continuous with minimap navigation.
+      select(mainCanvas).call(
+        canvasZoom.transform,
+        zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
+      );
+      paintMinimap();
+    },
+    beginMotion: rasterMotion.begin,
+    endMotion: rasterMotion.end,
+    setCursor: (surface, cursor) => select(surface).style("cursor", cursor),
+  };
+
   function redraw({ animate = true, synchronize = true } = {}) {
     if (!currentData || !container) return;
     applyTheme(container.node(), resolveTheme(runtime.config.plot.theme));
@@ -764,20 +1031,11 @@ export default function clusterMap() {
     }
     const committedScene = sceneCommit;
     sceneCommit = null;
-    disposeRasterInteraction();
-    disposeRasterInteraction = () => {};
     if (!updatingTreeMenu || !retainedOverlay?.isTreeMenuOpen(currentData.tree)) {
-      disposeOverlay();
-      disposeOverlay = () => {};
-      retainedOverlay = null;
+      retainedOverlay?.hide(true);
     }
     const data = currentData;
-    if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
-    canvasFlipWarmFrame = null;
-    canvasPreparedFlipBase = null;
 
-    // Set up the shared transition
-    transition = createTransition().duration(runtime.config.plot.transitionDuration);
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
@@ -789,14 +1047,15 @@ export default function clusterMap() {
       webgpuBackend.destroy();
       sceneCommit = null;
     }
-    if (!useCanvas) canvasBackend.destroy();
+    if (!useRaster) { disposeRasterInteraction(); disposeRasterInteraction = () => {}; }
+    if (!useCanvas) { stopCanvasAnimation(); canvasBackend.destroy(); }
     if (useRaster) svgBackend.destroy();
     const minimapOptions = runtime.config.plot.minimap || {};
     // The overview is a separate 2D canvas, so it works for both raster
     // backends. WebGPU owns only the main plot surface.
     const showMinimap = useRaster && minimapOptions.show;
     if (!useCanvas) clearScenePreview();
-    if (!showMinimap) rasterMinimap.clear();
+    if (!showMinimap) { rasterMinimap.clear(); minimapScene = null; }
 
     const svgSurface = ensureSvgSurface({
       container,
@@ -811,7 +1070,7 @@ export default function clusterMap() {
         const svgNode = viewport.node()?.ownerSVGElement;
         // Raster mode has no SVG plot group. Camera synchronization still
         // dispatches its zoom callback, including while restoring a project.
-        if (!useRaster && svgNode) updateSvgAnnotationViewport(viewport.select("g.clusterMapG"), runtime.getScene(), scenePreview,
+        if (!isRasterRenderer(runtime.config.plot.renderer) && svgNode) updateSvgAnnotationViewport(viewport.select("g.clusterMapG"), runtime.getScene(), scenePreview,
           worldViewport(getCamera(chartState), svgNode.getBoundingClientRect()));
         annotationOverlay?.refresh();
       },
@@ -845,654 +1104,48 @@ export default function clusterMap() {
       },
     });
     const { canvas, webgpuOverlay, minimap } = rasterSurface;
+    rasterCanvas = canvas.node(); overlayCanvas = webgpuOverlay.node(); minimapCanvas = minimap.node();
     canvasZoom = rasterSurface.zoom;
     svg.style("display", useRaster ? "none" : null);
-    const overlay = retainedOverlay || createHtmlOverlay({
-      tooltip: svgSurface.tooltip,
-      scales: runtime.scales,
-      eventNamespace: `.${runtime.ids.root}-tooltip`,
-      actions: {
-        redraw,
-        treeControls: () => ({ tree: currentData.tree, clusters: currentData.clusters, config: runtime.renderConfig.tree,
-          patch: (ops) => updateFromTreeMenu(() => my.patch(ops)),
-          rotate: (uid) => updateFromTreeMenu(() => rotateTreeNode(uid)) }),
-        updateGene: (gene, changes) => my.patch([
-          { type: "genes.update", ids: [gene.uid], changes },
-        ]),
-        updateGroup: (group, changes) => my.patch([
-          { type: "groups.update", ids: [group.uid], changes },
-        ]),
-        mergeGroups: (target, sourceIds) => my.patch([{
-          type: "groups.merge",
-          targetId: target.uid,
-          sourceIds,
-        }]),
-        anchorGene: (gene) => anchorGene(gene, { flipMismatchedLoci: true }),
-        revealGene: runtime.config.gene.shape.onReveal,
-        revealGroup: runtime.config.legend.onReveal,
-        getGroups: () => data.groups,
-      },
-    });
-    retainedOverlay = overlay;
-    disposeOverlay = overlay.dispose;
-    container
-      .select("div.tooltip")
-      .on("mouseenter", overlay.enter)
-      .on("mouseleave", overlay.leave);
-    const canvasFrame = () => ({
-      camera: getCamera(chartState), config: runtime.renderConfig,
-      scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(),
-    });
-    const paintCanvas = (canvasNode) => {
-      updateFigureSurface();
-      const flipLayer =
-        scenePreview?.type === "locus-flip" &&
-        canvasPendingFlip &&
-        canvasPreviewScene === canvasPendingFlip.sourceScene &&
-        canvasFlipStaticCanvas &&
-        canvasFlipLocusCanvas &&
-        canvasFlipLocusFrame &&
-        canvasFlipDirtyFrame;
-      if (flipLayer) {
-        restoreCanvasFlipRegion(
-          canvasNode,
-          canvasFlipStaticCanvas,
-          canvasFlipDirtyFrame,
-          rasterMotion.pixelRatio()
-        );
-        renderCanvas({
-          canvas: canvasNode,
-          scene: canvasPreviewScene,
-          ...canvasFrame(),
-          // Keep the normal filled-ribbon appearance throughout the flip.
-          config: {
-            ...runtime.renderConfig,
-            link: {
-              ...runtime.config.link,
-              asLine: false,
-            },
-          },
-          preview: scenePreview,
-          include: { links: canvasPendingFlip.dynamic.links },
-          layers: ["links"],
-          suppressLocusHover: true,
-          clear: false,
-        });
-        drawCanvasFlipLocus(
-          canvasNode,
-          canvasFlipLocusCanvas,
-          canvasFlipLocusFrame,
-          canvasFlipDirtyFrame,
-          scenePreview,
-          rasterMotion.pixelRatio()
-        );
-        const stationaryGenes = new Set(canvasPendingFlip.dynamic.genes);
-        for (const uid of canvasPendingFlip.locusRecords.genes) stationaryGenes.delete(uid);
-        if (stationaryGenes.size) {
-          renderCanvas({
-            canvas: canvasNode,
-            scene: canvasPreviewScene,
-            ...canvasFrame(),
-            include: { genes: stationaryGenes },
-            layers: ["genes", "geneLabels"],
-            suppressLocusHover: true,
-            clear: false,
-          });
-        }
-        // The cached base contains the source label. Repaint the affected
-        // cluster info from the sparse preview so flipped coordinates become
-        // visible immediately rather than at the end of the bitmap animation.
-        renderCanvas({
-          canvas: canvasNode,
-          scene: canvasPreviewScene,
-          ...canvasFrame(),
-          preview: scenePreview,
-          include: { loci: canvasPendingFlip.locusRecords.loci },
-          layers: ["trimIndicators", "clusterLabels"],
-          suppressLocusHover: true,
-          clear: false,
-        });
-        paintMinimap();
-        return canvasFlipDirtyFrame;
-      }
-      const result = canvasBackend.paint({
-        canvas: canvasNode,
-        tree: currentData.tree,
-        scene:
-          canvasAnimation?.scene ||
-          canvasPreviewScene ||
-          canvasBackend.pendingScene ||
-          runtime.getScene(),
-        previousScene: canvasAnimation?.previousScene,
-        progress: canvasAnimation?.progress,
-        previousTree: treeAnimation?.previousTree,
-        previousTreeScene: treeAnimation?.previousScene,
-        treeProgress: treeAnimation?.progress ?? 1,
-        ...canvasFrame(),
-        hoverLocusUid: canvasHoverLocusUid,
-        suppressLocusHover:
-          scenePreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
-        preview: scenePreview,
-        highlightGeneIds: highlightedGeneIds(),
-        highlightLinkIds,
-        highlightLocusIds: selectedLocusIds,
-      });
-      paintMinimap();
-      return result;
-    };
-    const paintWebGpu = (canvasNode, scene) => {
-      if (!canvasNode || !scene) return;
-      updateFigureSurface();
-      const overlayNode = webgpuOverlay.node();
-      if (overlayNode) {
-        renderCanvas({
-          canvas: overlayNode,
-          scene,
-          tree: currentData.tree,
-          previousTree: treeAnimation?.previousTree,
-          previousTreeScene: treeAnimation?.previousScene,
-          treeTargetScene: treeAnimation?.targetScene,
-          treeProgress: treeAnimation?.progress ?? 1,
-          ...canvasFrame(),
-          hoverLocusUid: canvasHoverLocusUid,
-          suppressLocusHover: scenePreview?.type === "locus-flip",
-          preview: scenePreview,
-          layers: ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"],
-          highlightGeneIds: highlightedGeneIds(),
-          highlightLinkIds,
-          highlightLocusIds: selectedLocusIds,
-        });
-      }
-      const bounds = canvasNode.getBoundingClientRect();
-      webgpuBackend.paint({
-        canvas: canvasNode,
-        scene,
-        preview: scenePreview,
-        ...canvasFrame(),
-        width: bounds.width,
-        height: bounds.height,
-        onUnavailable: () => paintCanvas(webgpuOverlay.node()),
-      });
-      paintMinimap();
-    };
-    paintPreviewFrame = useCanvas
-      ? () => paintCanvas(canvas.node())
-      : useWebGpu
-        ? () => paintWebGpu(canvas.node(), webgpuBackend.pendingScene || runtime.getScene())
-        : null;
-    const flipLayerMatches = (layer, pending, bounds, pixelRatio) => {
-      if (!layer || layer.sourceScene !== pending.sourceScene || layer.locusUid !== pending.locus.uid) {
-        return false;
-      }
-      const camera = getCamera(chartState);
-      return (
-        layer.width === bounds.width &&
-        layer.height === bounds.height &&
-        layer.pixelRatio === pixelRatio &&
-        layer.camera.x === camera.x &&
-        layer.camera.y === camera.y &&
-        layer.camera.k === camera.k
-      );
-    };
-    const renderFlipStaticBase = (pending, baseCanvas, bounds, pixelRatio) => {
-      const renderOptions = {
-        scene: pending.sourceScene,
-        tree: currentData.tree,
-        ...canvasFrame(),
-        dimensions: { width: bounds.width, height: bounds.height },
-        pixelRatio,
-        suppressLocusHover: true,
-      };
-      renderCanvas({
-        canvas: baseCanvas,
-        ...renderOptions,
-        omit: {
-          links: pending.dynamic.links,
-          loci: pending.dynamic.loci,
-          genes: pending.dynamic.genes,
+    if (retainedOverlay?.node !== svgSurface.tooltip.node()) {
+      retainedOverlay?.dispose();
+      retainedOverlay = createHtmlOverlay({
+        tooltip: svgSurface.tooltip,
+        scales: runtime.scales,
+        eventNamespace: `.${runtime.ids.root}-tooltip`,
+        actions: {
+          redraw,
+          treeControls: () => ({ tree: currentData.tree, clusters: currentData.clusters, config: runtime.renderConfig.tree,
+            patch: (ops) => updateFromTreeMenu(() => my.patch(ops)),
+            rotate: (uid) => updateFromTreeMenu(() => rendererInteractions.rotateTreeNode(uid)) }),
+          updateGene: (gene, changes) => my.patch([
+            { type: "genes.update", ids: [gene.uid], changes },
+          ]),
+          updateGroup: (group, changes) => my.patch([
+            { type: "groups.update", ids: [group.uid], changes },
+          ]),
+          mergeGroups: (target, sourceIds) => my.patch([{
+            type: "groups.merge",
+            targetId: target.uid,
+            sourceIds,
+          }]),
+          anchorGene: (gene) => anchorGene(gene, { flipMismatchedLoci: true }),
+          get revealGene() { return runtime.config.gene.shape.onReveal; },
+          get revealGroup() { return runtime.config.legend.onReveal; },
+          getGroups: () => currentData.groups,
         },
-        layers: ["links", "linkLabels"],
       });
-      renderCanvas({
-        canvas: baseCanvas,
-        ...renderOptions,
-        omit: { loci: pending.dynamic.loci, genes: pending.dynamic.genes },
-        layers: CANVAS_LAYERS.filter((layer) => layer !== "links" && layer !== "linkLabels"),
-        clear: false,
-      });
-    };
-    const renderFlipLocusBitmap = (pending, locusCanvas, bounds, pixelRatio) => {
-      const frame = screenFrameForBounds(
-        boundsForRecords(pending.sourceScene.loci, pending.locusRecords.loci),
-        bounds
-      );
-      const camera = getCamera(chartState);
-      renderCanvas({
-        canvas: locusCanvas,
-        scene: pending.sourceScene,
-        ...canvasFrame(),
-        camera: { ...camera, x: camera.x - frame.x, y: camera.y - frame.y },
-        dimensions: frame,
-        pixelRatio,
-        include: pending.locusRecords,
-        layers: ["tracks", "trimIndicators", "genes"],
-        suppressLocusHover: true,
-      });
-      return frame;
-    };
-    const boundsForRecords = (records, ids) => {
-      let result = null;
-      for (const uid of ids) {
-        const bounds = records.get(uid)?.bounds;
-        if (!bounds) continue;
-        result = result
-          ? {
-              minX: Math.min(result.minX, bounds.minX),
-              maxX: Math.max(result.maxX, bounds.maxX),
-              minY: Math.min(result.minY, bounds.minY),
-              maxY: Math.max(result.maxY, bounds.maxY),
-            }
-          : { ...bounds };
-      }
-      return result;
-    };
-    const screenFrameForBounds = (worldBounds, canvasBounds, padding = 12) => {
-      const camera = getCamera(chartState);
-      if (!worldBounds) return { x: 0, y: 0, width: 1, height: 1 };
-      const x = Math.max(0, camera.x + worldBounds.minX * camera.k - padding);
-      const y = Math.max(0, camera.y + worldBounds.minY * camera.k - padding);
-      const right = Math.min(
-        canvasBounds.width,
-        camera.x + worldBounds.maxX * camera.k + padding
-      );
-      const bottom = Math.min(
-        canvasBounds.height,
-        camera.y + worldBounds.maxY * camera.k + padding
-      );
-      return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
-    };
-    const flipDirtyBounds = (pending) => {
-      const locusBounds = boundsForRecords(pending.sourceScene.loci, pending.dynamic.loci);
-      const linkBounds = boundsForRecords(pending.sourceScene.links, pending.dynamic.links);
-      const geneBounds = boundsForRecords(pending.sourceScene.genes, pending.dynamic.genes);
-      return [locusBounds, linkBounds, geneBounds]
-        .filter(Boolean)
-        .reduce(
-          (result, bounds) =>
-            result
-              ? {
-                  minX: Math.min(result.minX, bounds.minX),
-                  maxX: Math.max(result.maxX, bounds.maxX),
-                  minY: Math.min(result.minY, bounds.minY),
-                  maxY: Math.max(result.maxY, bounds.maxY),
-                }
-              : { ...bounds },
-          null
-        );
-    };
-    const restoreCanvasFlipRegion = (canvasNode, baseCanvas, frame, pixelRatio) => {
-      const context = canvasNode.getContext("2d");
-      const left = Math.max(0, Math.floor(frame.x * pixelRatio));
-      const top = Math.max(0, Math.floor(frame.y * pixelRatio));
-      const right = Math.min(baseCanvas.width, Math.ceil((frame.x + frame.width) * pixelRatio));
-      const bottom = Math.min(baseCanvas.height, Math.ceil((frame.y + frame.height) * pixelRatio));
-      const width = Math.max(1, right - left);
-      const height = Math.max(1, bottom - top);
-      const x = left / pixelRatio;
-      const y = top / pixelRatio;
-      const cssWidth = width / pixelRatio;
-      const cssHeight = height / pixelRatio;
-      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-      context.clearRect(x, y, cssWidth, cssHeight);
-      context.drawImage(baseCanvas, left, top, width, height, x, y, cssWidth, cssHeight);
-    };
-    const drawCanvasFlipLocus = (canvasNode, locusCanvas, locusFrame, dirtyFrame, preview, pixelRatio) => {
-      const axis = preview.axes?.get(preview.locusUid);
-      if (axis === undefined) return;
-      const camera = getCamera(chartState);
-      const context = canvasNode.getContext("2d");
-      const screenAxis = camera.x + axis * camera.k;
-      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-      context.save();
-      context.beginPath();
-      context.rect(dirtyFrame.x, dirtyFrame.y, dirtyFrame.width, dirtyFrame.height);
-      context.clip();
-      context.translate(screenAxis, 0);
-      context.scale(1 - 2 * preview.progress, 1);
-      context.translate(-screenAxis, 0);
-      context.drawImage(
-        locusCanvas,
-        0,
-        0,
-        locusCanvas.width,
-        locusCanvas.height,
-        locusFrame.x,
-        locusFrame.y,
-        locusFrame.width,
-        locusFrame.height
-      );
-      context.restore();
-    };
-    prepareCanvasFlipBase = (pending) => {
-      const canvasNode = canvas.node();
-      if (!canvasNode || !pending.sourceScene) return;
-      const bounds = canvasNode.getBoundingClientRect();
-      const pixelRatio = rasterMotion.pixelRatio();
-      if (flipLayerMatches(canvasPreparedFlipBase, pending, bounds, pixelRatio)) {
-        canvasFlipStaticCanvas = canvasPreparedFlipBase.baseCanvas;
-        canvasFlipLocusCanvas = canvasPreparedFlipBase.locusCanvas;
-        canvasFlipLocusFrame = canvasPreparedFlipBase.locusFrame;
-      } else {
-        if (!canvasFlipStaticCanvas) canvasFlipStaticCanvas = document.createElement("canvas");
-        if (!canvasFlipLocusCanvas) canvasFlipLocusCanvas = document.createElement("canvas");
-        renderFlipStaticBase(pending, canvasFlipStaticCanvas, bounds, pixelRatio);
-        canvasFlipLocusFrame = renderFlipLocusBitmap(
-          pending,
-          canvasFlipLocusCanvas,
-          bounds,
-          pixelRatio
-        );
-      }
-      canvasFlipDirtyFrame = screenFrameForBounds(flipDirtyBounds(pending), bounds);
-    };
-    warmCanvasFlipBase = (locusUid) => {
-      if (!locusUid || canvasPendingFlip) return;
-      if (canvasFlipWarmFrame !== null) cancelAnimationFrame(canvasFlipWarmFrame);
-      canvasFlipWarmFrame = requestAnimationFrame(() => {
-        canvasFlipWarmFrame = null;
-        const canvasNode = canvas.node();
-        const locus = runtime.lookup.locusData(locusUid);
-        const sourceScene = canvasScene || runtime.getScene();
-        if (!canvasNode || !locus || !sourceScene || canvasPendingFlip) return;
-        const bounds = canvasNode.getBoundingClientRect();
-        const pixelRatio = rasterMotion.pixelRatio();
-        const pending = createCanvasFlipPending(locus, sourceScene);
-        if (flipLayerMatches(canvasPreparedFlipBase, pending, bounds, pixelRatio)) return;
-        const baseCanvas = document.createElement("canvas");
-        const locusCanvas = document.createElement("canvas");
-        renderFlipStaticBase(pending, baseCanvas, bounds, pixelRatio);
-        const locusFrame = renderFlipLocusBitmap(pending, locusCanvas, bounds, pixelRatio);
-        canvasPreparedFlipBase = {
-          sourceScene,
-          locusUid,
-          width: bounds.width,
-          height: bounds.height,
-          pixelRatio,
-          camera: { ...getCamera(chartState) },
-          baseCanvas,
-          locusCanvas,
-          locusFrame,
-        };
-      });
-    };
-    let minimapScene = null;
-    let minimapMeasurement = null;
-    const paintMinimap = () => {
-      rasterMinimap.paint({
-        minimap: minimap.node(),
-        surface: canvas.node(),
-        scene: minimapScene || runtime.getScene(),
-        options: minimapOptions,
-        camera: getCamera(chartState),
-        pixelRatio: globalThis.devicePixelRatio || 1,
-      });
-    };
-    scheduleMinimapBase = (scene) => {
-      if (!showMinimap) return;
-      if (currentData.tree && runtime.config.tree.show) {
-        minimapMeasurement ||= document.createElement("canvas").getContext("2d");
-        scene = { ...scene, figureBounds: canvasFigureBounds(minimapMeasurement, scene, runtime.config, currentData.tree) };
-      }
-      minimapScene = scene;
-      rasterMinimap.scheduleBase({
-        scene,
-        minimap: minimap.node(),
-        options: minimapOptions,
-        renderBase: ({ canvas: baseCanvas, scene: overviewScene, projection }) => {
-          renderCanvas({
-            canvas: baseCanvas,
-            tree: currentData.tree,
-            treeTrackAnchor: false,
-            scene: overviewScene,
-            camera: { x: projection.x, y: projection.y, k: projection.scale },
-            config: runtime.renderConfig,
-            layers: CANVAS_LAYERS.filter((layer) => layer !== "geneLabels" && layer !== "chrome" &&
-              (minimapOptions.showLinks || layer !== "links" && layer !== "linkLabels")),
-            scales: runtime.scales,
-            dimensions: projection,
-            fullScene: true,
-            pixelRatio: globalThis.devicePixelRatio || 1,
-          });
-        },
-        onPaint: paintMinimap,
-      });
-    };
-    const stopCanvasAnimation = () => {
-      canvasAnimation?.cancel();
-      canvasAnimation = null;
-    };
-    const animateCanvas = (canvasNode, scene, animate) => {
-      stopCanvasAnimation();
-      if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
-        treeAnimation = null;
-        canvasScene = scene;
-        paintCanvas(canvasNode);
-        return;
-      }
-      const previousScene = canvasScene;
-      if (treeAnimation) treeAnimation.targetScene = scene;
-      canvasAnimation = { previousScene, scene, progress: 0, cancel: null };
-      canvasAnimation.cancel = runAnimation(runtime.config.plot.transitionDuration, (progress) => {
-        if (treeAnimation) treeAnimation.progress = progress;
-        canvasAnimation.progress = progress;
-        paintCanvas(canvasNode);
-      }, () => {
-        canvasAnimation = null;
-        treeAnimation = null;
-        canvasScene = scene;
-        paintCanvas(canvasNode);
-      });
-    };
-    const animateWebGpu = (canvasNode, previousScene, scene, animate) => {
-      stopWebGpuAnimation();
-      const duration = runtime.config.plot.transitionDuration;
-      if (!animate || !previousScene || !duration) {
-        treeAnimation = null;
-        webgpuBackend.setScene(scene);
-        paintWebGpu(canvasNode, scene);
-        return;
-      }
-      if (treeAnimation) treeAnimation.targetScene = scene;
-      webgpuAnimation = { cancel: runAnimation(duration, (progress) => {
-        const displayScene = interpolateCanvasScene(previousScene, scene, progress);
-        if (treeAnimation) treeAnimation.progress = progress;
-        webgpuBackend.setScene(displayScene);
-        paintWebGpu(canvasNode, displayScene);
-      }, () => {
-        webgpuAnimation = null;
-        treeAnimation = null;
-        webgpuBackend.setScene(scene);
-        paintWebGpu(canvasNode, scene);
-      }) };
-    };
-    const chooseLegendColour = (group) => {
-      const picker = container.select("input.colourPicker");
-      picker.on("change", () => {
-        my.patch([{
-          type: "groups.update",
-          ids: [group.uid],
-          changes: { colour: picker.node().value },
-        }]);
-      });
-      picker.node().click();
-    };
-    const setScaleBarLength = (providedValue) => {
-      const value = Number(
-        providedValue ?? prompt("Enter new length (bp):", runtime.config.scaleBar.basePair)
-      );
-      if (Number.isFinite(value) && value > 0) my.config({ scaleBar: { basePair: value } });
-    };
-    const renameRecord = (event, type, record) => {
-      if (event.defaultPrevented) return;
-      const field = type === "clusters" ? "name" : "label";
-      const value = prompt("Enter new value:", record[field] || record.uid);
-      if (value) my.patch([{ type: `${type}.update`, ids: [record.uid], changes: { [field]: value } }]);
-    };
-    // Both renderers delegate mutations to the same controller. Raster input
-    // adapts stable IDs back to source records at its boundary; SVG already
-    // receives those records through its D3 joins.
-    const rendererInteractions = {
-      renameCluster: (event, cluster) => renameRecord(event, "clusters", cluster),
-      isDragging: () => isDragging(chartState),
-      beginClusterDrag: interactionController.beginClusterDrag,
-      moveClusterDrag: interactionController.moveClusterDrag,
-      endClusterDrag: interactionController.endClusterDrag,
-      cancelClusterDrag: interactionController.cancelClusterDrag,
-      rotateTreeNode: (uid) => {
-        const node = currentData.tree?.nodes.find((entry) => entry.uid === uid);
-        if (!node?.children) return;
-        beginInteractionState();
-        treeAnimation = {
-          previousTree: {
-            ...currentData.tree,
-            nodes: currentData.tree.nodes.map((entry) => ({
-              ...entry,
-              children: entry.children ? [...entry.children] : undefined,
-            })),
-          },
-          previousScene: runtime.getScene(),
-          progress: 0,
-        };
-        sceneCommit = { sourceScene: runtime.getScene(), changes: {} };
-        node.children.reverse();
-        chartState = createChartState(currentData, chartState);
-        runtime.setChartState(chartState);
-        redraw();
-        commitInteractionState();
-      },
-      beginLocusDrag: interactionController.beginLocusDrag,
-      moveLocusDrag: interactionController.moveLocusDrag,
-      endLocusDrag: interactionController.endLocusDrag,
-      cancelLocusDrag: interactionController.cancelLocusDrag,
-      beginLocusTrim: interactionController.beginLocusTrim,
-      moveLocusTrim: interactionController.moveLocusTrim,
-      endLocusTrim: interactionController.endLocusTrim,
-      cancelLocusTrim: interactionController.cancelLocusTrim,
-      flipLocus: interactionController.flipLocus,
-      toggleLocusSelection: (locus, { clusterRange = null } = {}) => {
-        const ids = new Set(selectedLocusIds);
-        const anchor = locusForId(locusSelectionAnchorUid);
-        if (clusterRange && anchor) {
-          const range = lociForClusterRange(
-            getClusterOrder(chartState),
-            chartIndex?.clusterById || new Map(),
-            anchor.clusterUid,
-            locus.clusterUid
-          );
-          if (range.length) {
-            range.forEach((uid) => {
-              if (clusterRange === "remove") ids.delete(uid);
-              else ids.add(uid);
-            });
-            my.locusSelection(ids);
-            if (ids.size) locusSelectionAnchorUid = locus.uid;
-            return;
-          }
-        }
-        if (ids.has(locus.uid)) ids.delete(locus.uid);
-        else ids.add(locus.uid);
-        my.locusSelection(ids);
-        if (ids.size) locusSelectionAnchorUid = locus.uid;
-      },
-      onGeneClick: (event, gene) => {
-        // Shift-click belongs to the containing locus and must not also invoke
-        // the established single-gene anchor interaction.
-        if (event.shiftKey) return;
-        (runtime.config.gene.shape.onClick || ((_, record) => anchorGene(record)))(event, gene);
-      },
-      showTreeMenu: overlay.showTreeMenu,
-      showGeneMenu: overlay.showGeneMenu,
-      showGroupMenu: overlay.showGroupMenu,
-      setScaleBarLength,
-      chooseLegendColour,
-      legendColour: (event, group) => {
-        if (runtime.config.legend.onClickCircle) {
-          runtime.config.legend.onClickCircle(event, group);
-        } else {
-          chooseLegendColour(group);
-        }
-      },
-      legendText: (event, group) =>
-        runtime.config.legend.onClickText ? runtime.config.legend.onClickText(event, group) : renameRecord(event, "groups", group),
-      legendMenu: (event, group) => {
-        const handler = runtime.config.legend.onAltClickText || overlay.showGroupMenu;
-        handler(event, group);
-      },
-    };
-    rotateTreeNode = rendererInteractions.rotateTreeNode;
+      container
+        .select("div.tooltip")
+        .on("mouseenter", retainedOverlay.enter)
+        .on("mouseleave", retainedOverlay.leave);
+    }
+    rasterHitSurface = useWebGpu ? webgpuOverlay.node() : canvas.node();
     if (useRaster) {
-      const targetForEvent = (canvasNode, event) =>
-        hitTestCanvas({
-          // A canvas can only have one rendering context. WebGPU owns the
-          // visible surface, so use its transparent 2D text/chrome overlay
-          // for the metric-dependent portions of hit testing instead.
-          canvas: useWebGpu ? webgpuOverlay.node() : canvasNode,
-          scene: runtime.getScene(),
-          camera: getCamera(chartState),
-          config: runtime.renderConfig,
-          event,
-          tree: currentData.tree,
-          treeDragging: isDragging(chartState),
-        });
-      const locusForTarget = (target) =>
-        target?.locusUid || runtime.lookup.geneData(target?.geneUid)?.locusUid || null;
-      const rasterBindings = createRasterInteractionBindings({
-        interactions: rendererInteractions,
-        getGene: runtime.lookup.geneData,
-        getLocus: runtime.lookup.locusData,
-      });
-      const rasterInteraction = createRasterInteraction({
-        targetForEvent,
-        worldPoint: (surface, event) =>
-          canvasWorldPoint(surface, event, getCamera(chartState)),
-        locusForTarget,
-        setHoverLocus: (locusUid) => {
-          if (canvasHoverLocusUid === locusUid) return false;
-          canvasHoverLocusUid = locusUid;
-          scheduleScenePaint();
-          return true;
-        },
-        warmLocus: useCanvas ? warmCanvasFlipBase : () => {},
-        beginMotion: rasterMotion.begin,
-        endMotion: rasterMotion.end,
-        setCursor: (surface, cursor) => select(surface).style("cursor", cursor),
-        ...rasterBindings,
-      });
-      canvasZoom.filter(function (event) {
-        return rasterInteraction.zoomFilter(this, event);
-      });
+      canvasZoom.filter(function (event) { return rasterInteraction.zoomFilter(this, event); });
       disposeRasterInteraction = rasterInteraction.bind(canvas);
 
-      rasterMinimap.bind(minimap, {
-        getSurface: () => canvas.node(),
-        getScene: () => minimapScene || runtime.getScene(),
-        getCamera: () => getCamera(chartState),
-        options: minimapOptions,
-        moveCamera: (camera) => {
-          const mainCanvas = canvas.node();
-          if (!camera || !mainCanvas) return;
-          // Go through D3 rather than mutating its private __zoom state. This
-          // keeps the next wheel/pan gesture continuous with minimap navigation.
-          select(mainCanvas).call(
-            canvasZoom.transform,
-            zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
-          );
-          paintMinimap();
-        },
-        beginMotion: rasterMotion.begin,
-        endMotion: rasterMotion.end,
-        setCursor: (surface, cursor) => select(surface).style("cursor", cursor),
-      });
+      if (showMinimap) rasterMinimap.bind(minimap, minimapInteractions);
     }
     // The currently displayed renderer can change without changing the chart
     // camera. Keep D3's per-surface gesture state aligned before a newly
@@ -1513,56 +1166,11 @@ export default function clusterMap() {
       ? runtime.patchScene(committedScene.sourceScene, committedScene.changes, data)
       : runtime.buildScene(data);
 
-    focusCamera = ({ genes = [], links = [] } = {}) => {
-      let bounds = null;
-      const include = (candidate) => {
-        if (!candidate) return;
-        if (!bounds) {
-          bounds = { ...candidate };
-          return;
-        }
-        bounds.minX = Math.min(bounds.minX, candidate.minX);
-        bounds.maxX = Math.max(bounds.maxX, candidate.maxX);
-        bounds.minY = Math.min(bounds.minY, candidate.minY);
-        bounds.maxY = Math.max(bounds.maxY, candidate.maxY);
-      };
-      for (const uid of genes) include(scene.genes.get(uid)?.bounds);
-      for (const uid of links) {
-        const rendered = scene.links.get(uid);
-        if (rendered?.bounds) {
-          include(rendered.bounds);
-          continue;
-        }
-        // The data editor intentionally includes links that are hidden by a
-        // threshold or best-match setting. They have no scene ribbon, but
-        // their endpoints remain useful, focusable context.
-        const link = chartIndex?.linkById.get(uid);
-        include(scene.genes.get(link?.query.uid)?.bounds);
-        include(scene.genes.get(link?.target.uid)?.bounds);
-      }
-      const surface = useRaster ? canvas : svg;
-      const node = surface.node();
-      if (!bounds || !node) return false;
-      const viewport = node.getBoundingClientRect();
-      const camera = fitCameraForBounds({
-        bounds,
-        viewport,
-        padding: 56,
-        constrainScale: constrainZoom,
-      });
-      if (!camera) return false;
-      const transform = zoomIdentity.translate(camera.x, camera.y).scale(camera.k);
-      if (useRaster && canvasZoom) select(node).call(canvasZoom.transform, transform);
-      else if (zoom) svg.call(zoom.transform, transform);
-      else setCamera(chartState, camera);
-      return true;
-    };
-
     if (useCanvas) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
       canvasBackend.setScene(scene);
       scheduleMinimapBase(scene);
-      animateCanvas(canvas.node(), scene, hasInitialView && animate);
+      animateCanvas(scene, hasInitialView && animate);
     } else if (useWebGpu) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
       if (committedScene && !annotationsOnly) {
@@ -1572,34 +1180,11 @@ export default function clusterMap() {
       }
       scheduleMinimapBase(scene);
       const previousScene = webgpuBackend.pendingScene;
-      animateWebGpu(canvas.node(), previousScene, scene, hasInitialView && animate);
+      animateWebGpu(previousScene, scene, hasInitialView && animate);
     } else {
       const previousScene = svgBackend.pendingScene;
       svgBackend.setScene(scene);
-      const request = {
-        annotationsOnly,
-        annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
-        plot,
-        data,
-        previousScene,
-        previousTree: treeAnimation?.previousTree,
-        previousTreeScene: treeAnimation?.previousScene,
-        transition,
-        animate: hasInitialView && animate,
-        config: runtime.renderConfig,
-        scales: runtime.scales,
-        ids: runtime.ids,
-        lookup: { gene: runtime.lookup.geneData },
-        interactions: rendererInteractions,
-        highlightGeneIds: highlightedGeneIds(),
-        highlightLinkIds,
-        highlightLocusIds: selectedLocusIds,
-      };
-      paintPreviewFrame = () => {
-        updateFigureSurface();
-        svgBackend.paint({ ...request, preview: scenePreview, animate: false });
-      };
-      svgBackend.paint(request);
+      paintSvg({ annotationsOnly, previousScene, animate: hasInitialView && animate });
 
       if (!hasInitialView) fitInitialView(svg, plot);
     }
@@ -1778,7 +1363,7 @@ export default function clusterMap() {
     applyPatch(operations);
     return my;
   };
-  my.rotateTreeNode = (uid) => { cancelTreePresentationPreview(); rotateTreeNode(uid); return my; };
+  my.rotateTreeNode = (uid) => { cancelTreePresentationPreview(); rendererInteractions.rotateTreeNode(uid); return my; };
   /** Transient tree styles; patch commits once, null cancels the preview. */
   my.previewTreePresentation = (operations) => {
     const tree = currentData?.tree;
@@ -1956,15 +1541,13 @@ export default function clusterMap() {
     annotationOverlay?.dispose(); annotationOverlay = null;
     stateSnapshots.reset();
     cancelTreePresentationPreview();
-    rotateTreeNode = () => {};
     disposeRasterInteraction();
+    rasterHitSurface = null;
     disposeRasterInteraction = () => {};
-    disposeOverlay();
-    disposeOverlay = () => {};
+    retainedOverlay?.dispose();
     retainedOverlay = null;
     clearScenePreview();
-    canvasAnimation?.cancel();
-    canvasAnimation = null;
+    stopCanvasAnimation();
     stopWebGpuAnimation();
     rasterMotion.dispose();
     rasterMinimap.clear();
@@ -1991,10 +1574,7 @@ export default function clusterMap() {
     hasInitialView = false;
     canvasHoverLocusUid = null;
     canvasScene = null;
-    paintPreviewFrame = null;
-    scheduleMinimapBase = () => {};
-    prepareCanvasFlipBase = () => {};
-    warmCanvasFlipBase = () => {};
+    rasterCanvas = overlayCanvas = minimapCanvas = minimapScene = minimapMeasurement = null;
     sceneCommit = null;
     chartIndex = null;
     highlightGeneIds.clear();

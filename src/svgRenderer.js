@@ -120,7 +120,7 @@ export function renderSvg({
   updateClusters(clusterRender, scene);
 
   const loci = clusters
-    .selectAll("g.loci")
+    .select("g.loci")
     .selectAll("g.locus")
     .data((cluster) => cluster.loci, (locus) => locus.uid)
     .join(
@@ -206,7 +206,7 @@ export function renderSvg({
     );
 
   loci
-    .selectAll("g.genes")
+    .select("g.genes")
     .selectAll("g.gene")
     .data((locus) => locus.genes, (gene) => gene.uid)
     .join(

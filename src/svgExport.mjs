@@ -1,5 +1,4 @@
 import { select } from "d3-selection";
-import { transition } from "d3-transition";
 import { renderSvg } from "./svgRenderer.js";
 import { figureConfig } from "./theme.mjs";
 import { appendLabelFilter } from "./svgSurface.mjs";
@@ -34,7 +33,6 @@ export function exportChartSvg({
       plot,
       data,
       scene,
-      transition: transition().duration(0),
       animate: false,
       config,
       scales,

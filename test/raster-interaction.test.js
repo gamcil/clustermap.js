@@ -50,3 +50,36 @@ for (const [action, kind, coordinate, edge] of [
     dispose();
   });
 }
+
+test("raster bindings persist on one surface and release listeners when replaced", () => {
+  const listeners = new Map(), calls = [];
+  const windowRef = {
+    addEventListener(type, listener) { listeners.set(type, listener); calls.push(`add:${type}`); },
+    removeEventListener(type, listener) { if (listeners.get(type) === listener) listeners.delete(type); calls.push(`remove:${type}`); },
+  };
+  const makeSurface = () => {
+    const node = { ownerDocument: { defaultView: windowRef } }, handlers = new Map();
+    return { node: () => node, handlers,
+      on(name, handler) { handlers.set(name, handler); return this; } };
+  };
+  const first = makeSurface(), second = makeSurface();
+  const controller = createRasterInteraction({ interactions: {}, actions: {} });
+  const disposeFirst = controller.bind(first);
+  const keydown = listeners.get("keydown"), pointerdown = first.handlers.get("pointerdown.canvasInteraction");
+  assert.equal(controller.bind(first), disposeFirst);
+  assert.equal(listeners.get("keydown"), keydown);
+  assert.equal(first.handlers.get("pointerdown.canvasInteraction"), pointerdown);
+  assert.equal(calls.length, 2);
+  const disposeSecond = controller.bind(second);
+  assert.deepEqual(calls, ["add:keydown", "add:keyup", "remove:keydown", "remove:keyup", "add:keydown", "add:keyup"]);
+  disposeFirst();
+  assert.equal(listeners.size, 2, "an old disposer does not detach a new surface");
+  disposeSecond(); disposeSecond();
+  assert.equal(listeners.size, 0);
+  assert.equal(calls.length, 8, "disposal is idempotent");
+  const rebound = controller.bind(second);
+  disposeSecond();
+  assert.equal(listeners.size, 2, "an old disposer cannot detach a rebound surface");
+  rebound();
+  assert.equal(listeners.size, 0);
+});

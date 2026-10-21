@@ -28,6 +28,7 @@ export function createRasterInteraction({
   let panMode = false;
   let spaceDown = false;
   let activeSurface = null;
+  let boundSurface = null, disposeBinding = () => {};
 
   const updateAffordance = (surface, target, { warm = false } = {}) => {
     const locusUid = locusForTarget(target);
@@ -119,6 +120,9 @@ export function createRasterInteraction({
 
     bind(selection) {
       const surface = selection.node();
+      if (surface === boundSurface) return disposeBinding;
+      disposeBinding();
+      boundSurface = surface;
       const windowRef = surface?.ownerDocument?.defaultView;
       const isActive = () =>
         activeSurface === surface || surface?.ownerDocument?.activeElement === surface;
@@ -208,11 +212,16 @@ export function createRasterInteraction({
             actions.legendMenu(event, target.group);
           }
         });
-      return () => {
+      const dispose = () => {
+        if (disposeBinding !== dispose) return;
+        boundSurface = activeSurface = gesture = null;
+        disposeBinding = () => {};
+        panMode = spaceDown = false;
         windowRef?.removeEventListener("keydown", keydown);
         windowRef?.removeEventListener("keyup", keyup);
         selection.on(".canvasKeyboard", null).on(".canvasInteraction", null);
       };
+      return disposeBinding = dispose;
     },
   };
 }

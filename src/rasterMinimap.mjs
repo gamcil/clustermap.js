@@ -17,6 +17,7 @@ export function createRasterMinimap({
   let baseCanvas = null;
   let baseFrame = null;
   let gesture = false;
+  let binding = null;
 
   const projectionFor = (scene, options) =>
     createMinimapProjection({
@@ -42,6 +43,7 @@ export function createRasterMinimap({
       if (baseFrame !== null) cancelFrame(baseFrame);
       baseFrame = null;
       gesture = false;
+      binding?.on(".minimap", null); binding = null;
     },
 
     paint({ minimap, surface, scene, options, camera, pixelRatio }) {
@@ -77,12 +79,14 @@ export function createRasterMinimap({
       getSurface,
       getScene,
       getCamera,
-      options,
+      getOptions,
       moveCamera,
       beginMotion,
       endMotion,
       setCursor,
     }) {
+      if (binding?.node() === selection.node()) return;
+      binding?.on(".minimap", null); binding = selection;
       gesture = false;
       const move = (minimap, event) => {
         const camera = cameraForPointer({
@@ -90,7 +94,7 @@ export function createRasterMinimap({
           minimap,
           surface: getSurface(),
           scene: getScene(),
-          options,
+          options: getOptions(),
           camera: getCamera(),
         });
         if (camera) moveCamera(camera);
