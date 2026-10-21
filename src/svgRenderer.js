@@ -1,7 +1,6 @@
 import { select } from "d3-selection";
 import { drag } from "d3-drag";
 import { linkColours } from "./links/style.mjs";
-import { filterLinks } from "./links/groups.mjs";
 import { getLinkPath, getLinkLabelPosition, interpolateLinkAnchors, interpolateLinkOpacity } from "./links/layout.mjs";
 import { renderSvgTree as renderTree } from "./treeSvgRenderer.mjs";
 import { resolveTrimIndicatorStyle } from "./loci/trimIndicators.mjs";
@@ -33,7 +32,6 @@ export function renderSvg({
   config,
   scales,
   ids,
-  lookup,
   interactions = {},
   highlightGeneIds = new Set(),
   highlightLinkIds = new Set(),
@@ -238,15 +236,12 @@ export function renderSvg({
         )
     );
 
-  const visibleLinks = filterLinks(data.links, {
-    groupForGene: scales.group,
-    geneForUid: lookup.gene,
-    bestOnly: config.link.bestOnly,
-    threshold: config.link.threshold,
-  });
+  // Keep allowed links even when their clusters are not currently adjacent:
+  // a drag preview can reveal them without rebuilding the DOM.
+  const allowedLinks = [...scene.links.values()].filter((link) => link.allowed).map((link) => link.source);
   linkGroup
     .selectAll("g.geneLinkG")
-    .data(visibleLinks, ids.link)
+    .data(allowedLinks, ids.link)
     .join(
       (enter) => {
         enter = enter

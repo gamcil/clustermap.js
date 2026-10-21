@@ -10,8 +10,7 @@ import { linkColours } from "./links/style.mjs";
 import {
   clusterPreviewInViewport,
   genePolygonForPreview,
-  linkVisibleForPreview,
-  previewLinkAnchors,
+  linkGeometryForPreview,
   recordsForPreview,
   clusterOffsetForPreview,
   geneVisibleForPreview,
@@ -429,7 +428,7 @@ function geneVertices(gene, scales, preview = null, clusterSlot = 0, strokeWidth
 function linkVertices(scene, link, scales, config, preview = null) {
   const fill = [];
   const edge = [];
-  const visible = linkVisibleForPreview(scene, link, preview, config);
+  const { visible, anchors } = linkGeometryForPreview(scene, link, preview, config);
   const colours = linkColours(link.source, scales, config);
   const colour = rgba(colours.fill), stroke = rgba(colours.stroke);
   const opacity = link.opacity ?? 1;
@@ -439,7 +438,7 @@ function linkVertices(scene, link, scales, config, preview = null) {
     // Keeping retained link records at a constant vertex count lets a trim
     // preview toggle visibility by alpha alone.
     visible: true,
-    anchors: preview ? previewLinkAnchors(scene, link, preview) : link.anchors,
+    anchors,
     asLine: config.link.asLine,
     straight: config.link.straight,
     strokeWidth: config.link.strokeWidth,

@@ -11349,7 +11349,6 @@ function renderSvg({
   config,
   scales,
   ids,
-  lookup,
   interactions = {},
   highlightGeneIds = new Set(),
   highlightLinkIds = new Set(),
@@ -11554,15 +11553,12 @@ function renderSvg({
         )
     );
 
-  const visibleLinks = filterLinks(data.links, {
-    groupForGene: scales.group,
-    geneForUid: lookup.gene,
-    bestOnly: config.link.bestOnly,
-    threshold: config.link.threshold,
-  });
+  // Keep allowed links even when their clusters are not currently adjacent:
+  // a drag preview can reveal them without rebuilding the DOM.
+  const allowedLinks = [...scene.links.values()].filter((link) => link.allowed).map((link) => link.source);
   linkGroup
     .selectAll("g.geneLinkG")
-    .data(visibleLinks, ids.link)
+    .data(allowedLinks, ids.link)
     .join(
       (enter) => {
         enter = enter
@@ -12587,7 +12583,6 @@ function exportChartSvg({
   config,
   scales,
   ids,
-  lookup,
   padding = 20,
   documentRef = document,
 }) {
@@ -12614,7 +12609,6 @@ function exportChartSvg({
       config,
       scales,
       ids: exportIds,
-      lookup,
     });
     // Event listeners do not serialize, but hover/trim affordances would still
     // be visible as nodes in an exported publication figure.
@@ -13880,7 +13874,7 @@ function geneVertices(gene, scales, preview = null, clusterSlot = 0, strokeWidth
 function linkVertices(scene, link, scales, config, preview = null) {
   const fill = [];
   const edge = [];
-  const visible = linkVisibleForPreview(scene, link, preview, config);
+  const { visible, anchors } = linkGeometryForPreview(scene, link, preview, config);
   const colours = linkColours(link.source, scales, config);
   const colour = rgba(colours.fill), stroke = rgba(colours.stroke);
   const opacity = link.opacity ?? 1;
@@ -13890,7 +13884,7 @@ function linkVertices(scene, link, scales, config, preview = null) {
     // Keeping retained link records at a constant vertex count lets a trim
     // preview toggle visibility by alpha alone.
     visible: true,
-    anchors: preview ? previewLinkAnchors(scene, link, preview) : link.anchors,
+    anchors,
     asLine: config.link.asLine,
     straight: config.link.straight,
     strokeWidth: config.link.strokeWidth,
@@ -16026,7 +16020,7 @@ function clusterMap() {
       plot: svg.select("g.clusterMapG"), data: currentData, annotationsOnly, previousScene, animate,
       annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
       transition: animate ? transition().duration(runtime.config.plot.transitionDuration) : null,
-      ids: runtime.ids, lookup: { gene: runtime.lookup.geneData }, interactions: rendererInteractions });
+      ids: runtime.ids, interactions: rendererInteractions });
   }
 
   function focusCamera({ genes = [], links = [] } = {}) {
@@ -16710,7 +16704,6 @@ function clusterMap() {
       config: runtime.renderConfig,
       scales: runtime.scales,
       ids: runtime.ids,
-      lookup: { gene: runtime.lookup.geneData },
       padding,
     });
   };

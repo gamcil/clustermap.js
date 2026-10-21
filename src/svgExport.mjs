@@ -10,7 +10,6 @@ export function exportChartSvg({
   config,
   scales,
   ids,
-  lookup,
   padding = 20,
   documentRef = document,
 }) {
@@ -37,7 +36,6 @@ export function exportChartSvg({
       config,
       scales,
       ids: exportIds,
-      lookup,
     });
     // Event listeners do not serialize, but hover/trim affordances would still
     // be visible as nodes in an exported publication figure.

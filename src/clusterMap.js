@@ -846,7 +846,7 @@ export default function clusterMap() {
       plot: svg.select("g.clusterMapG"), data: currentData, annotationsOnly, previousScene, animate,
       annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
       transition: animate ? createTransition().duration(runtime.config.plot.transitionDuration) : null,
-      ids: runtime.ids, lookup: { gene: runtime.lookup.geneData }, interactions: rendererInteractions });
+      ids: runtime.ids, interactions: rendererInteractions });
   }
 
   function focusCamera({ genes = [], links = [] } = {}) {
@@ -1530,7 +1530,6 @@ export default function clusterMap() {
       config: runtime.renderConfig,
       scales: runtime.scales,
       ids: runtime.ids,
-      lookup: { gene: runtime.lookup.geneData },
       padding,
     });
   };
