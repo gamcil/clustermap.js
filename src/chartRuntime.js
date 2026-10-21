@@ -197,7 +197,7 @@ function locusTextForCluster(uid) {
   return cluster ? locusText(cluster) : "";
 }
 
-function sceneProjectionOptions({ areClustersAdjacent } = {}) {
+function sceneProjectionOptions({ areClustersAdjacent, tree = null } = {}) {
   const config = renderConfig();
   return {
     scaleX: scales.x,
@@ -220,6 +220,7 @@ function sceneProjectionOptions({ areClustersAdjacent } = {}) {
     fontFamily: config.plot.fontFamily,
     measureText,
     annotationsEnabled: config.annotations.enabled,
+    tree,
     theme: config.figureStyle,
   };
 }
@@ -295,6 +296,7 @@ function buildChartScene(data) {
   const clusterOrder = getClusterOrder(chartState);
   currentScene = buildScene(data, {
     ...sceneProjectionOptions({
+      tree: data.tree,
       areClustersAdjacent: adjacencyForClusterOrder(clusterOrder),
     }),
     scaleY: scales.y,
@@ -325,6 +327,7 @@ function patchChartScene(previousScene, changes = {}, data) {
   }
   currentScene = patchScene(previousScene, { loci, clusters }, {
     ...sceneProjectionOptions({
+      tree: data.tree,
       areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
     }),
     clusterOffset: scales.offset,
@@ -457,7 +460,7 @@ return {
   buildScene: buildChartScene,
   patchScene: patchChartScene,
   patchAnnotations(previousScene, data) {
-    currentScene = patchAnnotationScene(previousScene, data.annotationPanels, sceneProjectionOptions());
+    currentScene = patchAnnotationScene(previousScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
     return currentScene;
   },
   setBeforeGeneAnchorUpdate,

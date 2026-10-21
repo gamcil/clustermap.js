@@ -117,6 +117,9 @@ Explicit colours in saved projects retain their values.
 
 ## Annotation panels
 
+Group marker PoC: `?fixture=group-markers&renderer=webgpu` shows tree clades,
+nested groups and a non-contiguous explicit group alongside a heatmap.
+
 Annotation panels are optional and **disabled by default**. Enable them with
 `chart.config({ annotations: { enabled: true } })` or **Appearance → Annotations
 → Enable annotation panels**. Disabling them preserves their data and settings,

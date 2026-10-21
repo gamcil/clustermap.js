@@ -2,12 +2,12 @@
 
 Optional top-level `annotationPanels` defines data displayed to the right of
 the gene clusters. The array order is the left-to-right panel order. Supported
-types are `heatmap` (continuous or categorical colours) and `bar` (horizontal
-numeric bars).
+types are `heatmap` (continuous or categorical colours), `bar` (horizontal
+numeric bars), and `groups` (labelled vertical bars spanning cluster rows).
 
 This is an optional supporting view for gene-cluster metadata, disabled by
 default. The supported scope is heatmaps, categorical strips and horizontal
-bars; statistical chart types are outside the current feature scope.
+bars, plus group markers; statistical chart types are outside the current feature scope.
 
 ```js
 chart.config({ annotations: { enabled: true } });
@@ -54,7 +54,7 @@ whose `uid` fields match the keys in `values`.
 | Field | Meaning | Default |
 | --- | --- | --- |
 | `uid` | Unique, non-empty panel ID | Required |
-| `type` | `"heatmap"` or `"bar"` | Required |
+| `type` | `"heatmap"`, `"bar"` or `"groups"` | Required |
 | `show` | Whether the panel is drawn and reserves space | `true` |
 | `title` | Panel heading; an empty string hides it | `uid` |
 | `columns` | Unique, non-empty column labels; exactly one for bars | Required |
@@ -357,3 +357,42 @@ The core passes its annotation functions into this UI factory, keeping geometry,
 validation, scale inference and frame caches shared rather than duplicating them
 in the UI bundle. No extra import is needed in application code. Failed UI loading
 is reported in the console; annotation rendering and static export remain usable.
+
+## Group markers (proof of concept)
+
+A `groups` panel shares the positioning, visibility, editing and ordering of
+other annotation panels. It does not need `columns`, `values` or a colour scale.
+Try `?fixture=group-markers&renderer=webgpu` (or `canvas` / `svg`).
+
+```json
+{
+  "uid": "taxonomy",
+  "type": "groups",
+  "title": "Clades",
+  "groups": [
+    { "uid": "genus", "label": "Example genus", "nodeUid": "ingroup", "colour": "#7547a8" },
+    { "uid": "isolates", "label": "Clinical", "clusterIds": ["a", "c"], "colour": "#228833" }
+  ]
+}
+```
+
+Each group requires a unique `uid` within its panel and exactly one of:
+
+- `nodeUid`: a node in the loaded tree; its descendant clusters define membership.
+- `clusterIds`: a non-empty list of unique cluster IDs, also usable without a tree.
+
+`label` defaults to the group UID; an empty string hides it. `colour` defaults to
+the panel's `colour`, then `#267c9e`. Membership follows cluster IDs during
+reordering. Groups with separated rows produce separate labelled segments;
+unselected intervening rows are never included. Overlapping/nested groups use
+separate lanes, allocated in group definition order. Disjoint groups share a
+lane. Labels are vertically centred beside each segment.
+
+Common `show`, `title`, `gap`, `fontSize` and `cellHeight` fields apply.
+`markerWidth` controls bar thickness (default 3); `laneGap` controls the gap
+between lanes (default 12). Width is computed from lanes and label lengths.
+`cellHeight` controls the padding about each segment's first and last row
+centres. Scale/key and column-heading fields are unused.
+
+Group bars use WebGPU rectangles in the GPU renderer; text follows the existing
+text overlay. SVG exports include both.

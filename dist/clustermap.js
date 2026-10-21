@@ -5549,6 +5549,88 @@
     return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId };
   }
 
+  function validateGroupPanel(panel, clusterIds, tree, fail) {
+    if (!Array.isArray(panel.groups) || !panel.groups.length) fail("group panels require a non-empty groups array.");
+    for (const key of ["markerWidth", "laneGap"]) {
+      if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
+    }
+    const ids = new Set(), nodes = new Set(tree?.nodes.map((node) => node.uid));
+    for (const group of panel.groups) {
+      if (!group || typeof group.uid !== "string" || !group.uid.trim() || ids.has(group.uid)) fail("groups require unique, non-empty uid strings.");
+      ids.add(group.uid);
+      if (group.label !== undefined && typeof group.label !== "string") fail("group label must be text.");
+      if (group.colour !== undefined && (typeof group.colour !== "string" || !color(group.colour))) fail("group colour must be a CSS colour.");
+      if ((group.nodeUid !== undefined) === (group.clusterIds !== undefined)) fail("each group requires either nodeUid or clusterIds.");
+      if (group.nodeUid !== undefined) {
+        if (!nodes.has(group.nodeUid)) fail(`unknown tree node '${group.nodeUid}'.`);
+      } else if (!Array.isArray(group.clusterIds) || !group.clusterIds.length ||
+          new Set(group.clusterIds).size !== group.clusterIds.length || group.clusterIds.some((uid) => !clusterIds.has(uid))) {
+        fail("group clusterIds must contain unique, existing cluster IDs.");
+      }
+    }
+  }
+
+  /** Resolve membership and allocate lanes once; placement remains independent of tree geometry. */
+  function layoutGroupPanel(source, clusters, { fontFamily, fontSize, cellHeight, rowOffset, theme, tree, measureBounds }) {
+    const nodes = new Map(tree?.nodes.map((node) => [node.uid, node]));
+    const descendants = new Map();
+    const collect = (uid) => {
+      if (!descendants.has(uid)) {
+        const node = nodes.get(uid);
+        descendants.set(uid, node?.children?.length ? node.children.flatMap(collect) : node ? [node.cluster] : []);
+      }
+      return descendants.get(uid);
+    };
+    const markerWidth = source.markerWidth ?? 3, laneGap = source.laneGap ?? 12;
+    const lanes = [];
+    const markerGroups = source.groups.map((group) => {
+      const clusterIds = group.clusterIds ?? collect(group.nodeUid);
+      let laneIndex = lanes.findIndex((lane) => clusterIds.every((uid) => !lane.members.has(uid)));
+      if (laneIndex < 0) { laneIndex = lanes.length; lanes.push({ members: new Set(), width: 0 }); }
+      const lane = lanes[laneIndex], label = group.label ?? group.uid;
+      const labelBounds = measureBounds(label);
+      for (const uid of clusterIds) lane.members.add(uid);
+      lane.width = Math.max(lane.width, markerWidth + (label ? 6 + labelBounds.maxX - labelBounds.minX : 0));
+      return { uid: group.uid, label, clusterIds: new Set(clusterIds), laneIndex, labelBounds,
+        colour: group.colour ?? source.colour ?? "#267c9e" };
+    });
+    let width = 0;
+    for (const lane of lanes) { lane.x = width; width += lane.width + laneGap; }
+    width -= laneGap;
+    for (const group of markerGroups) group.x = lanes[group.laneIndex].x;
+    const title = source.title ?? source.uid;
+    const header = title ? [{ text: title, x: 0, y: 0, anchor: "start", weight: 700, kind: "title",
+      bounds: measureBounds(title, { weight: 700 }) }] : [];
+    return { uid: source.uid, definition: source, title, width, cellHeight, rowOffset, fontSize, fontFamily,
+      markerWidth, markerGroups, headingHeight: 0, titleDescent: Math.max(0, header[0]?.bounds.maxY ?? 0),
+      rows: [...clusters.keys()].map((uid) => ({ uid, cells: [] })), header, footer: [], key: [],
+      textColour: theme?.foreground ?? "#333333", extentWidth: Math.max(width, header[0]?.bounds.maxX ?? 0) };
+  }
+
+  /** Split non-contiguous memberships using the current row order, including drag previews. */
+  function groupPanelMarks(panel, rows) {
+    const sorted = [...rows].sort((a, b) => a.y - b.y);
+    const rects = [], texts = [];
+    for (const group of panel.markerGroups) {
+      let start = -1;
+      const segment = (end) => {
+        const top = sorted[start].y - panel.cellHeight / 2, bottom = sorted[end].y + panel.cellHeight / 2;
+        const uid = `${group.uid}:${sorted[start].uid}`;
+        rects.push({ uid, x: group.x, y: top, width: panel.markerWidth, height: bottom - top,
+          fill: group.colour, keyIndex: rects.length });
+        if (group.label) texts.push({ uid, text: group.label, x: group.x + panel.markerWidth + 6 - group.labelBounds.minX,
+          y: (top + bottom - group.labelBounds.minY - group.labelBounds.maxY) / 2,
+          anchor: "start", bounds: group.labelBounds });
+      };
+      for (let i = 0; i <= sorted.length; i++) {
+        const member = i < sorted.length && group.clusterIds.has(sorted[i].uid);
+        if (member && start < 0) start = i;
+        if (!member && start >= 0) { segment(i - 1); start = -1; }
+      }
+    }
+    return { rects, texts };
+  }
+
   function ascending(a, b) {
     return a == null || b == null ? NaN : a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
   }
@@ -6467,7 +6549,7 @@
   };
 
   // Validate at the JSON boundary; renderers only consume projected records.
-  function validateAnnotationPanels(panels, clusters, { previousPanels = null } = {}) {
+  function validateAnnotationPanels(panels, clusters, { previousPanels = null, tree = null } = {}) {
     if (panels == null) return;
     const fail = (message) => { throw new TypeError(`Invalid annotationPanels: ${message}`); };
     if (!Array.isArray(panels)) fail("expected an array.");
@@ -6479,17 +6561,12 @@
       ids.add(panel.uid);
       const before = previous.get(panel.uid);
       if (before === panel) continue;
-      if (!["heatmap", "bar"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap or bar.`);
+      if (!["heatmap", "bar", "groups"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap, bar or groups.`);
       if (panel.title != null && typeof panel.title !== "string") fail("title must be text.");
       for (const key of ["show", "showKey", "showColumnLabels"]) {
         if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
       }
       if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
-      if (!Array.isArray(panel.columns) || !panel.columns.length ||
-          panel.columns.some((column) => typeof column !== "string" || !column.trim()) ||
-          new Set(panel.columns).size !== panel.columns.length) fail("columns must be unique, non-empty strings.");
-      if (panel.type === "bar" && panel.columns.length !== 1) fail("bar panels require exactly one column.");
-      if (!panel.values || typeof panel.values !== "object" || Array.isArray(panel.values)) fail("values must map cluster IDs to row arrays.");
       for (const key of ["cellWidth", "cellHeight", "fontSize", "width"]) {
         if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
       }
@@ -6501,6 +6578,16 @@
         panel.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight)) fail("cellGap must be smaller than cellWidth and cellHeight.");
       if (panel.cellBorderColour !== undefined && (typeof panel.cellBorderColour !== "string" || !color(panel.cellBorderColour))) fail("cellBorderColour must be a CSS colour.");
       if (panel.colour !== undefined && (typeof panel.colour !== "string" || !color(panel.colour))) fail("colour must be a CSS colour.");
+      if (panel.type === "groups") {
+        clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
+        validateGroupPanel(panel, clusterIds, tree, fail);
+        continue;
+      }
+      if (!Array.isArray(panel.columns) || !panel.columns.length ||
+          panel.columns.some((column) => typeof column !== "string" || !column.trim()) ||
+          new Set(panel.columns).size !== panel.columns.length) fail("columns must be unique, non-empty strings.");
+      if (panel.type === "bar" && panel.columns.length !== 1) fail("bar panels require exactly one column.");
+      if (!panel.values || typeof panel.values !== "object" || Array.isArray(panel.values)) fail("values must map cluster IDs to row arrays.");
       const scale = panel.scale ?? {};
       if (!scale || typeof scale !== "object" || Array.isArray(scale)) fail("scale must be an object.");
       const type = scale.type ?? "continuous";
@@ -6520,7 +6607,7 @@
       // shape, value type or allowed categories. JSON loading always checks it.
       const oldScale = before?.scale ?? {};
       const sameCategories = sameArray(oldScale.domain, scale.domain);
-      if (before?.values === panel.values && before.columns.length === panel.columns.length &&
+      if (before?.values === panel.values && before.columns?.length === panel.columns.length &&
           (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories)) continue;
       clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
       const categories = type === "categorical" && scale.domain ? new Set(scale.domain) : null;
@@ -6660,7 +6747,7 @@
 
   /** Project JSON annotations once, using the same row coordinates as loci. */
   function layoutAnnotationPanels(definitions, clusters, bounds,
-    { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null, theme = null } = {}) {
+    { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null, theme = null, tree = null } = {}) {
     if (!definitions?.length || !bounds || !clusters.size) return [];
     const previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
     let x = anchorX;
@@ -6669,6 +6756,15 @@
       x += source.gap ?? ANNOTATION_DEFAULTS.gap;
       if (before?.definition === source && before.fontFamily === fontFamily && before.rowOffset === rowOffset) {
         const panel = before.x === x ? before : { ...before, x };
+        x += panel.width;
+        return panel;
+      }
+      if (source.type === "groups") {
+        const panel = { ...layoutGroupPanel(source, clusters, { fontFamily, rowOffset, theme, tree,
+          fontSize: source.fontSize ?? ANNOTATION_DEFAULTS.fontSize,
+          cellHeight: source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight,
+          measureBounds: (value, options) => textBounds(value, source.fontSize ?? ANNOTATION_DEFAULTS.fontSize, fontFamily, measureText, options),
+        }), x };
         x += panel.width;
         return panel;
       }
@@ -6811,10 +6907,11 @@
       let minY = Infinity, maxY = -Infinity;
       for (const row of rows) { minY = Math.min(minY, row.y); maxY = Math.max(maxY, row.y); }
       const top = minY - cellHeight / 2 - 10, bottom = maxY + cellHeight / 2 + 20;
-      return { ...panel, x: panel.x + dx, rows,
-        texts: [...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
+      const groupMarks = panel.markerGroups ? groupPanelMarks(panel, rows) : null;
+      return { ...panel, x: panel.x + dx, rows: groupMarks ? [] : rows,
+        texts: [...(groupMarks?.texts ?? []), ...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
           ...panel.footer.map((item) => ({ ...item, y: item.y + bottom }))],
-        rects: panel.key.map((item, keyIndex) => ({ ...item, keyIndex, y: item.y + bottom })) };
+        rects: groupMarks?.rects ?? panel.key.map((item, keyIndex) => ({ ...item, keyIndex, y: item.y + bottom })) };
     });
     let minY = Infinity, maxY = -Infinity;
     for (const frame of frames) {
@@ -6914,11 +7011,11 @@
 
   function normalizeChartData(data, treeConfig = {}) {
     const source = cloneDataValue(data);
-    validateAnnotationPanels(source.annotationPanels, source.clusters);
     if (source.tree != null) {
       validateTree(source.tree, source.clusters);
       validateTreePresentation(source.tree, treeConfig);
     }
+    validateAnnotationPanels(source.annotationPanels, source.clusters, { tree: source.tree });
     return {
       ...source,
       clusters: source.clusters.map((cluster) => ({
@@ -6989,7 +7086,7 @@
   }
 
   const fields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
-    "fontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
+    "groups", "markerWidth", "laneGap", "fontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
     "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour"]);
   const fail$1 = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
 
@@ -7063,7 +7160,7 @@
   // The operation normalizer has already built this private candidate array.
   function validateAnnotationChanges(data, panels) {
     if (panels === data.annotationPanels) return;
-    validateAnnotationPanels(panels, data.clusters, { previousPanels: data.annotationPanels });
+    validateAnnotationPanels(panels, data.clusters, { previousPanels: data.annotationPanels, tree: data.tree });
   }
 
   const svgViews = new WeakMap();
@@ -8720,6 +8817,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       fontFamily = "sans-serif",
       measureText = null,
       annotationsEnabled = false,
+      tree = null,
       theme = null,
     }
   ) {
@@ -8813,7 +8911,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     const hitRegions = buildHitRegions(loci, genes);
     const chromeLayout = buildChrome(bounds, genes, chrome);
     const annotations = projectSceneAnnotations(data.annotationPanels, clusters, bounds, chromeLayout,
-      { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, theme });
+      { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, theme, tree });
     return {
       clusters,
       loci,
@@ -12828,7 +12926,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     return cluster ? locusText(cluster) : "";
   }
 
-  function sceneProjectionOptions({ areClustersAdjacent } = {}) {
+  function sceneProjectionOptions({ areClustersAdjacent, tree = null } = {}) {
     const config = renderConfig();
     return {
       scaleX: scales.x,
@@ -12851,6 +12949,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       fontFamily: config.plot.fontFamily,
       measureText,
       annotationsEnabled: config.annotations.enabled,
+      tree,
       theme: config.figureStyle,
     };
   }
@@ -12926,6 +13025,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     const clusterOrder = getClusterOrder(chartState);
     currentScene = buildScene(data, {
       ...sceneProjectionOptions({
+        tree: data.tree,
         areClustersAdjacent: adjacencyForClusterOrder(clusterOrder),
       }),
       scaleY: scales.y,
@@ -12956,6 +13056,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     }
     currentScene = patchScene(previousScene, { loci, clusters }, {
       ...sceneProjectionOptions({
+        tree: data.tree,
         areClustersAdjacent: adjacencyForClusterOrder(getClusterOrder(chartState)),
       }),
       clusterOffset: scales.offset,
@@ -13088,7 +13189,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     buildScene: buildChartScene,
     patchScene: patchChartScene,
     patchAnnotations(previousScene, data) {
-      currentScene = patchAnnotationScene(previousScene, data.annotationPanels, sceneProjectionOptions());
+      currentScene = patchAnnotationScene(previousScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
       return currentScene;
     },
     setBeforeGeneAnchorUpdate,
@@ -13937,7 +14038,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let multisampleTexture = null;
     let annotationBuffer = null, annotationKeyBuffer = null;
     let annotationCount = 0, annotationKeyCount = 0;
-    let annotationPanels = null, annotationKeyPreview = null;
+    let annotationPanels = null, annotationKeyPreview = null, annotationGroupRows = null;
     const annotationRows = new Map(), annotationKeys = new Map();
 
     const appendRectangle = (values, rect, x, y, slot = 0) => {
@@ -13948,7 +14049,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         annotationBuffer?.destroy(); annotationKeyBuffer?.destroy();
         annotationBuffer = annotationKeyBuffer = null;
         annotationCount = annotationKeyCount = 0;
-        annotationPanels = scene.annotationPanels; annotationKeyPreview = null;
+        annotationPanels = scene.annotationPanels; annotationKeyPreview = annotationGroupRows = null;
         annotationRows.clear(); annotationKeys.clear();
         return;
       }
@@ -13983,7 +14084,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       // Keys follow the current bottom row. Only this small buffer changes
       // during a row drag; cells remain retained and use cluster transforms.
       const keyPreview = nextPreview?.type === "cluster-drag" ? nextPreview : null;
-      if (changed || annotationKeyPreview !== keyPreview) {
+      const groupRows = annotationPanels.some((panel) => panel.markerGroups) ? scene.clusters : null;
+      if (changed || annotationKeyPreview !== keyPreview || annotationGroupRows !== groupRows) {
+        annotationGroupRows = groupRows;
         annotationKeyPreview = keyPreview;
         annotationKeys.clear();
         const values = [];

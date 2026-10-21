@@ -60,7 +60,7 @@
       const testMode = params.has("test");
       const fixture = params.get("fixture");
       const syntheticFixture = Object.hasOwn(SYNTHETIC_FIXTURES, fixture) ? SYNTHETIC_FIXTURES[fixture] : null;
-      const biologicalFixtures = { mcaa: "fixtures/mcaa-neighbourhoods-173.json", pks: "fixtures/pks-regions-142.json", "tree-styling": "fixtures/tree-styling.json", heatmap: "fixtures/heatmap.json" };
+      const biologicalFixtures = { mcaa: "fixtures/mcaa-neighbourhoods-173.json", pks: "fixtures/pks-regions-142.json", "tree-styling": "fixtures/tree-styling.json", heatmap: "fixtures/heatmap.json", "group-markers": "fixtures/group-markers.json" };
       const biologicalFixture = biologicalFixtures[fixture];
       const projectFixtures = { "heatmap-project": "fixtures/clinker-project-heatmap.json" };
       const projectFixture = projectFixtures[fixture];
@@ -130,7 +130,7 @@
         } });
         // Annotation examples opt in explicitly; ordinary charts remain synteny-only.
         if (params.has("theme")) chart.config({ plot: { theme: params.get("theme") } });
-        if (fixture === "heatmap" || fixture === "heatmap-project") chart.config({ annotations: { enabled: true } });
+        if (fixture === "heatmap" || fixture === "heatmap-project" || fixture === "group-markers") chart.config({ annotations: { enabled: true } });
         if (testMode) { window.__demoChart = chart; window.d3 = d3; }
         d3.select("#plot").selectAll("div").data([data]).join("div").attr("class", "chart-host").call(chart);
         if (project?.state) chart.state(project.state);

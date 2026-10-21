@@ -41,11 +41,11 @@ function normalizeLocus(locus, clusterUid) {
 
 export function normalizeChartData(data, treeConfig = {}) {
   const source = cloneDataValue(data);
-  validateAnnotationPanels(source.annotationPanels, source.clusters);
   if (source.tree != null) {
     validateTree(source.tree, source.clusters);
     validateTreePresentation(source.tree, treeConfig);
   }
+  validateAnnotationPanels(source.annotationPanels, source.clusters, { tree: source.tree });
   return {
     ...source,
     clusters: source.clusters.map((cluster) => ({

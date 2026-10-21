@@ -462,6 +462,7 @@ export function buildScene(
     fontFamily = "sans-serif",
     measureText = null,
     annotationsEnabled = false,
+    tree = null,
     theme = null,
   }
 ) {
@@ -555,7 +556,7 @@ export function buildScene(
   const hitRegions = buildHitRegions(loci, genes);
   const chromeLayout = buildChrome(bounds, genes, chrome);
   const annotations = projectSceneAnnotations(data.annotationPanels, clusters, bounds, chromeLayout,
-    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, theme });
+    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, theme, tree });
   return {
     clusters,
     loci,

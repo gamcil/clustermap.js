@@ -1,7 +1,7 @@
 import { validateAnnotationPanels } from "./annotations.mjs";
 
 const fields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
-  "fontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
+  "groups", "markerWidth", "laneGap", "fontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
   "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour"]);
 const fail = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
 
@@ -75,5 +75,5 @@ export function inverseAnnotationOperation(data, operation) {
 // The operation normalizer has already built this private candidate array.
 export function validateAnnotationChanges(data, panels) {
   if (panels === data.annotationPanels) return;
-  validateAnnotationPanels(panels, data.clusters, { previousPanels: data.annotationPanels });
+  validateAnnotationPanels(panels, data.clusters, { previousPanels: data.annotationPanels, tree: data.tree });
 }

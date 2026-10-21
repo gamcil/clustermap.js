@@ -1,3 +1,4 @@
+import { validateGroupPanel, layoutGroupPanel, groupPanelMarks } from "./annotationGroups.mjs";
 import { color } from "d3-color";
 import { scaleLinear, scaleOrdinal } from "d3-scale";
 import { clusterOffsetForPreview, annotationOffsetForPreview } from "./scenePreview.mjs";
@@ -16,7 +17,7 @@ export const ANNOTATION_PALETTES = {
 };
 
 // Validate at the JSON boundary; renderers only consume projected records.
-export function validateAnnotationPanels(panels, clusters, { previousPanels = null } = {}) {
+export function validateAnnotationPanels(panels, clusters, { previousPanels = null, tree = null } = {}) {
   if (panels == null) return;
   const fail = (message) => { throw new TypeError(`Invalid annotationPanels: ${message}`); };
   if (!Array.isArray(panels)) fail("expected an array.");
@@ -28,17 +29,12 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
     ids.add(panel.uid);
     const before = previous.get(panel.uid);
     if (before === panel) continue;
-    if (!["heatmap", "bar"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap or bar.`);
+    if (!["heatmap", "bar", "groups"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap, bar or groups.`);
     if (panel.title != null && typeof panel.title !== "string") fail("title must be text.");
     for (const key of ["show", "showKey", "showColumnLabels"]) {
       if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
     }
     if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
-    if (!Array.isArray(panel.columns) || !panel.columns.length ||
-        panel.columns.some((column) => typeof column !== "string" || !column.trim()) ||
-        new Set(panel.columns).size !== panel.columns.length) fail("columns must be unique, non-empty strings.");
-    if (panel.type === "bar" && panel.columns.length !== 1) fail("bar panels require exactly one column.");
-    if (!panel.values || typeof panel.values !== "object" || Array.isArray(panel.values)) fail("values must map cluster IDs to row arrays.");
     for (const key of ["cellWidth", "cellHeight", "fontSize", "width"]) {
       if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
     }
@@ -50,6 +46,16 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
       panel.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight)) fail("cellGap must be smaller than cellWidth and cellHeight.");
     if (panel.cellBorderColour !== undefined && (typeof panel.cellBorderColour !== "string" || !color(panel.cellBorderColour))) fail("cellBorderColour must be a CSS colour.");
     if (panel.colour !== undefined && (typeof panel.colour !== "string" || !color(panel.colour))) fail("colour must be a CSS colour.");
+    if (panel.type === "groups") {
+      clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
+      validateGroupPanel(panel, clusterIds, tree, fail);
+      continue;
+    }
+    if (!Array.isArray(panel.columns) || !panel.columns.length ||
+        panel.columns.some((column) => typeof column !== "string" || !column.trim()) ||
+        new Set(panel.columns).size !== panel.columns.length) fail("columns must be unique, non-empty strings.");
+    if (panel.type === "bar" && panel.columns.length !== 1) fail("bar panels require exactly one column.");
+    if (!panel.values || typeof panel.values !== "object" || Array.isArray(panel.values)) fail("values must map cluster IDs to row arrays.");
     const scale = panel.scale ?? {};
     if (!scale || typeof scale !== "object" || Array.isArray(scale)) fail("scale must be an object.");
     const type = scale.type ?? "continuous";
@@ -69,7 +75,7 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
     // shape, value type or allowed categories. JSON loading always checks it.
     const oldScale = before?.scale ?? {};
     const sameCategories = sameArray(oldScale.domain, scale.domain);
-    if (before?.values === panel.values && before.columns.length === panel.columns.length &&
+    if (before?.values === panel.values && before.columns?.length === panel.columns.length &&
         (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories)) continue;
     clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
     const categories = type === "categorical" && scale.domain ? new Set(scale.domain) : null;
@@ -209,7 +215,7 @@ function sameCellDefinition(before, after) {
 
 /** Project JSON annotations once, using the same row coordinates as loci. */
 export function layoutAnnotationPanels(definitions, clusters, bounds,
-  { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null, theme = null } = {}) {
+  { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null, theme = null, tree = null } = {}) {
   if (!definitions?.length || !bounds || !clusters.size) return [];
   const previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
   let x = anchorX;
@@ -218,6 +224,15 @@ export function layoutAnnotationPanels(definitions, clusters, bounds,
     x += source.gap ?? ANNOTATION_DEFAULTS.gap;
     if (before?.definition === source && before.fontFamily === fontFamily && before.rowOffset === rowOffset) {
       const panel = before.x === x ? before : { ...before, x };
+      x += panel.width;
+      return panel;
+    }
+    if (source.type === "groups") {
+      const panel = { ...layoutGroupPanel(source, clusters, { fontFamily, rowOffset, theme, tree,
+        fontSize: source.fontSize ?? ANNOTATION_DEFAULTS.fontSize,
+        cellHeight: source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight,
+        measureBounds: (value, options) => textBounds(value, source.fontSize ?? ANNOTATION_DEFAULTS.fontSize, fontFamily, measureText, options),
+      }), x };
       x += panel.width;
       return panel;
     }
@@ -360,10 +375,11 @@ function projectAnnotationFrame(scene, preview) {
     let minY = Infinity, maxY = -Infinity;
     for (const row of rows) { minY = Math.min(minY, row.y); maxY = Math.max(maxY, row.y); }
     const top = minY - cellHeight / 2 - 10, bottom = maxY + cellHeight / 2 + 20;
-    return { ...panel, x: panel.x + dx, rows,
-      texts: [...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
+    const groupMarks = panel.markerGroups ? groupPanelMarks(panel, rows) : null;
+    return { ...panel, x: panel.x + dx, rows: groupMarks ? [] : rows,
+      texts: [...(groupMarks?.texts ?? []), ...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
         ...panel.footer.map((item) => ({ ...item, y: item.y + bottom }))],
-      rects: panel.key.map((item, keyIndex) => ({ ...item, keyIndex, y: item.y + bottom })) };
+      rects: groupMarks?.rects ?? panel.key.map((item, keyIndex) => ({ ...item, keyIndex, y: item.y + bottom })) };
   });
   let minY = Infinity, maxY = -Infinity;
   for (const frame of frames) {

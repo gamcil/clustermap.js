@@ -835,7 +835,7 @@ export async function createWebGpuRenderer(canvas) {
   let multisampleTexture = null;
   let annotationBuffer = null, annotationKeyBuffer = null;
   let annotationCount = 0, annotationKeyCount = 0;
-  let annotationPanels = null, annotationKeyPreview = null;
+  let annotationPanels = null, annotationKeyPreview = null, annotationGroupRows = null;
   const annotationRows = new Map(), annotationKeys = new Map();
 
   const appendRectangle = (values, rect, x, y, slot = 0) => {
@@ -846,7 +846,7 @@ export async function createWebGpuRenderer(canvas) {
       annotationBuffer?.destroy(); annotationKeyBuffer?.destroy();
       annotationBuffer = annotationKeyBuffer = null;
       annotationCount = annotationKeyCount = 0;
-      annotationPanels = scene.annotationPanels; annotationKeyPreview = null;
+      annotationPanels = scene.annotationPanels; annotationKeyPreview = annotationGroupRows = null;
       annotationRows.clear(); annotationKeys.clear();
       return;
     }
@@ -881,7 +881,9 @@ export async function createWebGpuRenderer(canvas) {
     // Keys follow the current bottom row. Only this small buffer changes
     // during a row drag; cells remain retained and use cluster transforms.
     const keyPreview = nextPreview?.type === "cluster-drag" ? nextPreview : null;
-    if (changed || annotationKeyPreview !== keyPreview) {
+    const groupRows = annotationPanels.some((panel) => panel.markerGroups) ? scene.clusters : null;
+    if (changed || annotationKeyPreview !== keyPreview || annotationGroupRows !== groupRows) {
+      annotationGroupRows = groupRows;
       annotationKeyPreview = keyPreview;
       annotationKeys.clear();
       const values = [];
