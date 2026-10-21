@@ -1,6 +1,6 @@
 import { select } from "d3-selection";
 import { drag } from "d3-drag";
-import { rgbaToRgb } from "./utils.js";
+import { linkColours } from "./links/style.mjs";
 import { filterLinks } from "./links/groups.mjs";
 import { getLinkPath, getLinkLabelPosition, interpolateLinkAnchors, interpolateLinkOpacity } from "./links/layout.mjs";
 import { renderSvgTree as renderTree } from "./treeSvgRenderer.mjs";
@@ -343,16 +343,13 @@ function renderPreview({ plot, data, scene, preview, config, scales, ids, intera
     const link = scene.links.get(uid);
     if (!link) continue;
     const geometry = linkGeometryForPreview(scene, link, preview, config);
-    const anchors = geometry.anchors ?? link.anchors;
+    const anchors = geometry.anchors;
     const visible = config.link.show && geometry.visible && anchors;
     const group = element(ids.link(link.source)).interrupt().attr("opacity", visible ? link.opacity ?? 1 : 0);
     if (!visible) continue;
-    const adjusted = [...anchors];
-    adjusted[0] += geometry.a || 0; adjusted[1] += geometry.a || 0;
-    adjusted[3] += geometry.b || 0; adjusted[4] += geometry.b || 0;
-    group.selectAll("path.geneLink,path.geneLinkHighlight").interrupt().attr("d", getLinkPath(adjusted, config.link));
+    group.selectAll("path.geneLink,path.geneLinkHighlight").interrupt().attr("d", getLinkPath(anchors, config.link));
     if (config.link.label.show) {
-      const label = getLinkLabelPosition(adjusted, config.link.label.position);
+      const label = getLinkLabelPosition(anchors, config.link.label.position);
       group.select("text.geneLinkLabel").attr("x", label.x).attr("y", label.y)
         .attr("opacity", 1);
     }
@@ -515,7 +512,7 @@ function updateGenes(selection, scene, config, scales, highlightGeneIds) {
     .style("stroke-width", Math.max(2, config.gene.shape.strokeWidth))
     .style("pointer-events", "none");
   selection
-    .selectAll("text.geneLabel")
+    .select("text.geneLabel")
     .text((gene) => gene.label || gene.name || gene.uid)
     .attr("dy", (gene) => geneLayout(gene)?.labelDy)
     .attr("display", config.gene.label.show ? "inherit" : "none")
@@ -527,20 +524,8 @@ function updateGenes(selection, scene, config, scales, highlightGeneIds) {
 
 function updateLinks(selection, scene, previousScene, config, scales, ids, highlightLinkIds) {
   const linkLayout = (link) => scene.links.get(link.uid);
-  const fill = (link) => {
-    if (config.link.asLine) return "none";
-    if (link.colour) return link.colour;
-    if (config.link.groupColour) return rgbaToRgb(scales.colour(scales.group(link.query.uid)));
-    return scales.score(link.identity);
-  };
-  const stroke = (link) => {
-    if (link.colour) return link.colour;
-    if (config.link.groupColour) {
-      const colour = scales.colour(scales.group(link.query.uid));
-      return config.link.asLine ? rgbaToRgb(colour) : colour;
-    }
-    return config.link.asLine ? scales.score(link.identity) : config.figureStyle.outline;
-  };
+  const fill = (link) => config.link.asLine ? "none" : linkColours(link, scales, config).fill;
+  const stroke = (link) => linkColours(link, scales, config).stroke;
 
   const opacity = (link) => interpolateLinkOpacity(
     previousScene?.links.get(link.uid),
@@ -557,42 +542,27 @@ function updateLinks(selection, scene, previousScene, config, scales, ids, highl
   } else {
     selection.attr("opacity", opacity);
   }
-  selection
-    .select("path.geneLink")
-    .call((path) => {
-      if (typeof path.attrTween === "function") path.attrTween("d", function (link) {
-        const previous = previousScene?.links.get(link.uid);
-        const next = linkLayout(link);
-        return (amount) => getLinkPath(
-          interpolateLinkAnchors(previousScene, previous, scene, next, amount),
-          config.link
-        );
-      });
-      else path.attr("d", (link) => linkLayout(link)?.path || "");
-    })
+  const updatePath = (path) => {
+    if (typeof path.attrTween === "function") path.attrTween("d", (link) => {
+      const previous = previousScene?.links.get(link.uid), next = linkLayout(link);
+      return (amount) => getLinkPath(
+        interpolateLinkAnchors(previousScene, previous, scene, next, amount), config.link
+      );
+    });
+    else path.attr("d", (link) => linkLayout(link)?.path || "");
+  };
+  selection.select("path.geneLink").call(updatePath)
     .style("fill", fill)
     .style("stroke", stroke)
     .style("stroke-width", `${config.link.strokeWidth}px`);
-  selection
-    .select("path.geneLinkHighlight")
-    .call((path) => {
-      if (typeof path.attrTween === "function") path.attrTween("d", function (link) {
-        const previous = previousScene?.links.get(link.uid);
-        const next = linkLayout(link);
-        return (amount) => getLinkPath(
-          interpolateLinkAnchors(previousScene, previous, scene, next, amount),
-          config.link
-        );
-      });
-      else path.attr("d", (link) => linkLayout(link)?.path || "");
-    })
+  selection.select("path.geneLinkHighlight").call(updatePath)
     .attr("display", (link) => (highlightLinkIds.has(link.uid) ? "inline" : "none"))
     .style("fill", config.link.asLine ? "none" : "rgba(22, 119, 255, 0.18)")
     .style("stroke", "#1677ff")
     .style("stroke-width", `${Math.max(2, config.link.strokeWidth + 1)}px`)
     .style("pointer-events", "none");
   selection
-    .selectAll("text")
+    .select("text.geneLinkLabel")
     .text((link) => link.label ?? link.identity.toFixed(2))
     .attr("opacity", (link) =>
       config.link.label.show && linkLayout(link)?.visible ? 1 : 0
@@ -649,27 +619,21 @@ function renderLegend({ plot, legend, interactions, transform }) {
     .attr("fill", (item) => item.colour)
     .attr("cursor", "pointer")
     .on("click", (event, item) => interactions.legendColour(event, item.source));
-  items
-    .select("text.legend-label")
-    .text((item) => item.label)
+  const updateLegendText = (text) => text
     .attr("x", (item) => item.textX)
-    .attr("y", (item) => item.textY)
-    .style("font-size", `${legend.fontSize}px`)
     .style("font-family", legend.fontFamily)
     .attr("cursor", "pointer")
     .on("click", (event, item) => interactions.legendText(event, item.source))
     .on("contextmenu", (event, item) => interactions.legendMenu(event, item.source));
-  items
-    .select("text.legend-subtitle")
+  items.select("text.legend-label").call(updateLegendText)
+    .text((item) => item.label)
+    .attr("y", (item) => item.textY)
+    .style("font-size", `${legend.fontSize}px`);
+  items.select("text.legend-subtitle").call(updateLegendText)
     .text((item) => item.subtitle)
-    .attr("x", (item) => item.textX)
     .attr("y", (item) => item.subtitleY ?? item.textY)
     .attr("opacity", (item) => item.subtitle ? 0.72 : 0)
-    .style("font-size", `${legend.subtitleFontSize}px`)
-    .style("font-family", legend.fontFamily)
-    .attr("cursor", "pointer")
-    .on("click", (event, item) => interactions.legendText(event, item.source))
-    .on("contextmenu", (event, item) => interactions.legendMenu(event, item.source));
+    .style("font-size", `${legend.subtitleFontSize}px`);
 }
 
 function renderScaleBar({ plot, scaleBar, interactions, transform }) {

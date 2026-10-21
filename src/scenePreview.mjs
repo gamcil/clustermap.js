@@ -406,7 +406,12 @@ export function linkGeometryForPreview(scene, link, preview, config) {
       target?.locus?.source?.uid === preview.locusUid;
     return { visible, anchors: visible && affected ? previewLinkAnchors(scene, link, preview) : link.anchors };
   }
-  return { ...linkOffsetsForPreview(scene, link, preview), visible };
+  const anchors = link.anchors;
+  if (!preview || !anchors) return { visible, anchors };
+  const { a, b } = linkOffsetsForPreview(scene, link, preview);
+  return { visible, anchors: a || b
+    ? [anchors[0] + a, anchors[1] + a, anchors[2], anchors[3] + b, anchors[4] + b, anchors[5]]
+    : anchors };
 }
 
 export function linkVisibleForPreview(scene, link, preview, config) {
@@ -441,7 +446,6 @@ export function recordsForPreview(scene, preview, { includeClusters = false } = 
       loci: new Set(),
       genes: new Set(),
       links: new Set(),
-      full: false,
       clusterOffsets: true,
     };
   }
@@ -480,7 +484,7 @@ export function recordsForPreview(scene, preview, { includeClusters = false } = 
       if (genes.has(link.source.query.uid) || genes.has(link.source.target.uid)) links.add(link.source.uid);
     }
   }
-  return { loci, genes, links, full: false };
+  return { loci, genes, links };
 }
 
 

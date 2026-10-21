@@ -1,4 +1,4 @@
-import { rgbaToRgb } from "./utils.js";
+import { linkColours } from "./links/style.mjs";
 import { hitTest } from "./hitTest.mjs";
 import { boundsInViewport, worldViewport } from "./camera.mjs";
 import { figureConfig } from "./theme.mjs";
@@ -14,7 +14,6 @@ import {
   geneVisibleForPreview,
   locusGeometryForPreview,
   previewOffsetsForLocus,
-  previewLinkAnchors,
 } from "./scenePreview.mjs";
 import { figureBoundsForChrome } from "./layout.mjs";
 import { interpolateLinkAnchors, interpolateLinkOpacity, traceLinkPath, getLinkLabelPosition } from "./links/layout.mjs";
@@ -247,7 +246,7 @@ export function canvasFigureBounds(context, scene, config, tree = null, { previe
     for (const link of scene.links.values()) {
       const geometry = linkGeometryForPreview(scene, link, preview, config);
       if (!geometry.visible || !link.labelPosition) continue;
-      const anchors = preview ? previewLinkAnchors(scene, link, preview) : link.anchors;
+      const anchors = geometry.anchors;
       const position = preview && anchors ? getLinkLabelPosition(anchors, config.link.label.position) : link.labelPosition;
       includeText(link.source.label ?? link.source.identity.toFixed(2), position.x, position.y,
         { fontSize: config.link.label.fontSize, align: "center" });
@@ -419,71 +418,40 @@ function polygon(context, points) {
   context.closePath();
 }
 
-function drawLinkLabel(context, layout, source, config, anchors, geometry = {}) {
-  if (!config.link.label.show || !(geometry.labelPosition || layout.labelPosition)) return;
-  let [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  ax1 += geometry.a || 0;
-  ax2 += geometry.a || 0;
-  bx1 += geometry.b || 0;
-  bx2 += geometry.b || 0;
-  const aMid = (ax1 + ax2) / 2;
-  const bMid = (bx1 + bx2) / 2;
-  const labelPosition = geometry.labelPosition || {
-    x: aMid + (bMid - aMid) * config.link.label.position,
-    y: ay + Math.abs(by - ay) * config.link.label.position,
-  };
+function drawLinkLabel(context, link, config, anchors) {
+  if (!config.link.label.show || !link.labelPosition) return;
+  const labelPosition = getLinkLabelPosition(anchors, config.link.label.position);
   context.fillStyle = "white";
   context.font = `${config.link.label.fontSize}px ${config.plot.fontFamily}`;
   context.textAlign = "center";
   context.textBaseline = "alphabetic";
-  context.fillText(source.label ?? source.identity.toFixed(2), labelPosition.x, labelPosition.y);
+  context.fillText(link.source.label ?? link.source.identity.toFixed(2), labelPosition.x, labelPosition.y);
 }
 
-function drawLink(context, layout, source, config, scales, geometry, showLabel) {
-  const visible = geometry.visible ?? layout.visible;
-  const anchors = geometry.anchors ?? layout.anchors;
+function drawLink(context, link, config, scales, { visible, anchors }, showLabel) {
   if (!visible || !anchors) return;
   context.save();
-  context.globalAlpha *= layout.opacity ?? 1;
-  let [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  ax1 += geometry.a || 0;
-  ax2 += geometry.a || 0;
-  bx1 += geometry.b || 0;
-  bx2 += geometry.b || 0;
-  const group = scales.group(source.query.uid);
-  const colour = source.colour || scales.colour(group);
-  const score = scales.score(source.identity);
-
+  context.globalAlpha *= link.opacity ?? 1;
+  const { fill, stroke } = linkColours(link.source, scales, config);
   context.beginPath();
-  const adjustedAnchors = [ax1, ax2, ay, bx1, bx2, by];
-  traceLinkPath(context, adjustedAnchors, config.link);
-  if (config.link.asLine) {
-    context.strokeStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
-  } else {
-    context.fillStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
+  traceLinkPath(context, anchors, config.link);
+  if (!config.link.asLine) {
+    context.fillStyle = fill;
     context.fill();
-    context.strokeStyle = source.colour || (config.link.groupColour ? colour : config.figureStyle.outline);
   }
+  context.strokeStyle = stroke;
   context.lineWidth = config.link.strokeWidth;
   context.stroke();
 
-  if (showLabel) drawLinkLabel(context, layout, source, config, anchors, geometry);
+  if (showLabel) drawLinkLabel(context, link, config, anchors);
   context.restore();
 }
 
-function drawLinkHighlight(context, layout, source, config, geometry = {}) {
-  const visible = geometry.visible ?? layout.visible;
-  const anchors = geometry.anchors ?? layout.anchors;
+function drawLinkHighlight(context, config, { visible, anchors }) {
   if (!visible || !anchors) return;
-  let [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  ax1 += geometry.a || 0;
-  ax2 += geometry.a || 0;
-  bx1 += geometry.b || 0;
-  bx2 += geometry.b || 0;
   context.beginPath();
-  traceLinkPath(context, [ax1, ax2, ay, bx1, bx2, by], config.link);
-  if (config.link.asLine) {
-  } else {
+  traceLinkPath(context, anchors, config.link);
+  if (!config.link.asLine) {
     context.fillStyle = "rgba(22, 119, 255, 0.18)";
     context.fill();
   }
@@ -977,9 +945,7 @@ export function renderCanvas({
     ? previewRecords?.links || recordsFor(displayScene.links, visible?.links, "links")
     : []) {
     const geometry = linkGeometryForPreview(displayScene, link, preview, config);
-    // Ordinary frames retain anchors on the link layout; only dynamic previews
-    // provide replacement anchors in their sparse geometry patch.
-    const anchors = geometry.anchors ?? link.anchors;
+    const anchors = geometry.anchors;
     if (!geometry.visible || !anchors) continue;
     if (
       clusterPreview &&
@@ -992,8 +958,8 @@ export function renderCanvas({
     ) {
       continue;
     }
-    if (showLinks) drawLink(context, link, link.source, config, scales, geometry, showLinkLabels);
-    else drawLinkLabel(context, link, link.source, config, anchors, geometry);
+    if (showLinks) drawLink(context, link, config, scales, geometry, showLinkLabels);
+    else drawLinkLabel(context, link, config, anchors);
   }
   if (show("tree")) drawTree(context, tree, displayScene, config, preview, {
     trackAnchor: treeTrackAnchor,
@@ -1007,7 +973,7 @@ export function renderCanvas({
       if (visible?.links && !visible.links.includes(uid)) continue;
       const link = displayScene.links.get(uid);
       if (!link) continue;
-      drawLinkHighlight(context, link, link.source, config, linkGeometryForPreview(displayScene, link, preview));
+      drawLinkHighlight(context, config, linkGeometryForPreview(displayScene, link, preview, config));
     }
   }
   const loci = showLoci

@@ -6,6 +6,7 @@ import { color } from "d3-color";
 import { worldViewport } from "./camera.mjs";
 import { figureConfig } from "./theme.mjs";
 import { sampleLinkGeometry } from "./links/layout.mjs";
+import { linkColours } from "./links/style.mjs";
 import {
   clusterPreviewInViewport,
   genePolygonForPreview,
@@ -429,16 +430,8 @@ function linkVertices(scene, link, scales, config, preview = null) {
   const fill = [];
   const edge = [];
   const visible = linkVisibleForPreview(scene, link, preview, config);
-  const colour = rgba(
-    link.source.colour || (config.link.groupColour
-      ? scales.colour(scales.group(link.source.query.uid))
-      : scales.score(link.source.identity))
-  );
-  const stroke = rgba(
-    link.source.colour || (config.link.groupColour
-      ? scales.colour(scales.group(link.source.query.uid))
-      : config.figureStyle?.outline || "black")
-  );
+  const colours = linkColours(link.source, scales, config);
+  const colour = rgba(colours.fill), stroke = rgba(colours.stroke);
   const opacity = link.opacity ?? 1;
   colour[3] *= opacity;
   stroke[3] *= opacity;
@@ -468,16 +461,8 @@ function linkRecordForGpu(scene, link, scales, config, locusSlots, clusterOffset
   const query = scene.genes.get(link.source.query.uid);
   const target = scene.genes.get(link.source.target.uid);
   if (!query || !target) return null;
-  const fill = rgba(
-    link.source.colour || (config.link.groupColour
-      ? scales.colour(scales.group(link.source.query.uid))
-      : scales.score(link.source.identity))
-  );
-  const stroke = rgba(
-    link.source.colour || (config.link.groupColour
-      ? scales.colour(scales.group(link.source.query.uid))
-      : "black")
-  );
+  const colours = linkColours(link.source, scales, config);
+  const fill = rgba(colours.fill), stroke = rgba(colours.stroke);
   fill[3] *= link.opacity ?? 1;
   stroke[3] *= link.opacity ?? 1;
   return new Float32Array([
@@ -547,14 +532,14 @@ function translateVertices(values, offsetX, offsetY, stride) {
   return translated;
 }
 
-function buildGeometry(scene, scales, config, preview = null, clusterSlots = null) {
+function buildGeometry(scene, scales, config) {
   const links = [];
   const genes = [];
   const linkEdges = [];
   const geneEdges = [];
   const tracks = [];
   const ranges = { links: new Map(), genes: new Map(), loci: new Map() };
-  const slots = clusterSlots || new Map(
+  const slots = new Map(
     [...scene.clusters.keys()].map((uid, index) => [uid, index + 1])
   );
   // Each locus gets one slot shared by its genes, track, and link endpoints.
@@ -569,7 +554,7 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
     // exception is a link hidden solely by a committed trim: it can reappear
     // during an expanding trim preview.
     if (!link.visible && !linkCanChangeTrimVisibility(scene, link)) continue;
-    const vertices = linkVertices(scene, link, scales, config, preview);
+    const vertices = linkVertices(scene, link, scales, config);
     ranges.links.set(link.source.uid, {
       links: append(links, vertices.links),
       linkEdges: append(linkEdges, vertices.linkEdges),
@@ -583,7 +568,7 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
     const vertices = geneVertices(
       gene,
       scales,
-      preview,
+      null,
       locusSlots.get(gene.locus.source.uid),
       config.gene.shape.strokeWidth, config.gene.shape.stroke
     );
@@ -594,7 +579,7 @@ function buildGeometry(scene, scales, config, preview = null, clusterSlots = nul
   }
   for (const locus of scene.loci.values()) {
     ranges.loci.set(locus.source.uid, {
-      tracks: append(tracks, trackVertices(locus, config, preview, locusSlots.get(locus.source.uid))),
+      tracks: append(tracks, trackVertices(locus, config, null, locusSlots.get(locus.source.uid))),
     });
   }
   return {
@@ -1034,12 +1019,6 @@ export async function createWebGpuRenderer(canvas) {
     if (!buffer || !range || range.length !== values.length) return;
     device.queue.writeBuffer(buffer, range.offset * 4, values.buffer, values.byteOffset, values.byteLength);
   };
-  const writeAll = (data) => {
-    for (const name of Object.keys(data)) {
-      const buffer = bufferForName(name);
-      if (buffer && data[name].byteLength) device.queue.writeBuffer(buffer, 0, data[name]);
-    }
-  };
   const uploadGeometry = (nextGeometry) => {
     const { data } = nextGeometry;
     linkBuffer = bufferFor(device, linkBuffer, data.links);
@@ -1067,25 +1046,10 @@ export async function createWebGpuRenderer(canvas) {
   };
   const restorePreview = (records) => {
     if (!records || !geometry) return;
-    if (records.full) {
-      writeAll(geometry.data);
-      return;
-    }
-    for (const uid of records.links) {
-      const ranges = geometry.ranges.links.get(uid);
-      if (!ranges) continue;
-      write("links", ranges.links, geometry.data.links.subarray(ranges.links.offset, ranges.links.offset + ranges.links.length));
-      write("linkEdges", ranges.linkEdges, geometry.data.linkEdges.subarray(ranges.linkEdges.offset, ranges.linkEdges.offset + ranges.linkEdges.length));
-    }
-    for (const uid of records.genes) {
-      const ranges = geometry.ranges.genes.get(uid);
-      if (!ranges) continue;
-      write("genes", ranges.genes, geometry.data.genes.subarray(ranges.genes.offset, ranges.genes.offset + ranges.genes.length));
-      write("geneEdges", ranges.geneEdges, geometry.data.geneEdges.subarray(ranges.geneEdges.offset, ranges.geneEdges.offset + ranges.geneEdges.length));
-    }
-    for (const uid of records.loci) {
-      const ranges = geometry.ranges.loci.get(uid);
-      if (ranges) write("tracks", ranges.tracks, geometry.data.tracks.subarray(ranges.tracks.offset, ranges.tracks.offset + ranges.tracks.length));
+    for (const kind of ["links", "genes", "loci"]) for (const uid of records[kind]) {
+      for (const [name, range] of Object.entries(geometry.ranges[kind].get(uid) || {})) {
+        write(name, range, geometry.data[name].subarray(range.offset, range.offset + range.length));
+      }
     }
   };
   const applyPreview = (nextPreview, scales, config, viewport) => {
@@ -1125,10 +1089,6 @@ export async function createWebGpuRenderer(canvas) {
       return;
     }
     previewLinksActive = false;
-    if (patchedRecords.full) {
-      writeAll(buildGeometry(scene, scales, config, nextPreview, geometry.clusterSlots).data);
-      return;
-    }
     for (const uid of patchedRecords.links) {
       const ranges = geometry.ranges.links.get(uid);
       const link = scene.links.get(uid);

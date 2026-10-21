@@ -4693,7 +4693,12 @@
         target?.locus?.source?.uid === preview.locusUid;
       return { visible, anchors: visible && affected ? previewLinkAnchors(scene, link, preview) : link.anchors };
     }
-    return { ...linkOffsetsForPreview(scene, link, preview), visible };
+    const anchors = link.anchors;
+    if (!preview || !anchors) return { visible, anchors };
+    const { a, b } = linkOffsetsForPreview(scene, link, preview);
+    return { visible, anchors: a || b
+      ? [anchors[0] + a, anchors[1] + a, anchors[2], anchors[3] + b, anchors[4] + b, anchors[5]]
+      : anchors };
   }
 
   function linkVisibleForPreview(scene, link, preview, config) {
@@ -4728,7 +4733,6 @@
         loci: new Set(),
         genes: new Set(),
         links: new Set(),
-        full: false,
         clusterOffsets: true,
       };
     }
@@ -4767,7 +4771,7 @@
         if (genes.has(link.source.query.uid) || genes.has(link.source.target.uid)) links.add(link.source.uid);
       }
     }
-    return { loci, genes, links, full: false };
+    return { loci, genes, links };
   }
 
 
@@ -8111,6 +8115,15 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     );
   }
 
+  function linkColours(source, scales, config) {
+    const { asLine, groupColour } = config.link;
+    const colour = source.colour || (groupColour
+      ? scales.colour(scales.group(source.query.uid)) : scales.score(source.identity));
+    const fill = !source.colour && groupColour ? rgbaToRgb(colour) : colour;
+    const stroke = asLine ? fill : source.colour || (groupColour ? colour : config.figureStyle?.outline || "black");
+    return { fill, stroke };
+  }
+
   const DEFAULT_CELL_WIDTH = 100;
   const DEFAULT_CELL_HEIGHT = 50;
 
@@ -9594,7 +9607,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       for (const link of scene.links.values()) {
         const geometry = linkGeometryForPreview(scene, link, preview, config);
         if (!geometry.visible || !link.labelPosition) continue;
-        const anchors = preview ? previewLinkAnchors(scene, link, preview) : link.anchors;
+        const anchors = geometry.anchors;
         const position = preview && anchors ? getLinkLabelPosition(anchors, config.link.label.position) : link.labelPosition;
         includeText(link.source.label ?? link.source.identity.toFixed(2), position.x, position.y,
           { fontSize: config.link.label.fontSize, align: "center" });
@@ -9766,70 +9779,40 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     context.closePath();
   }
 
-  function drawLinkLabel(context, layout, source, config, anchors, geometry = {}) {
-    if (!config.link.label.show || !(geometry.labelPosition || layout.labelPosition)) return;
-    let [ax1, ax2, ay, bx1, bx2, by] = anchors;
-    ax1 += geometry.a || 0;
-    ax2 += geometry.a || 0;
-    bx1 += geometry.b || 0;
-    bx2 += geometry.b || 0;
-    const aMid = (ax1 + ax2) / 2;
-    const bMid = (bx1 + bx2) / 2;
-    const labelPosition = geometry.labelPosition || {
-      x: aMid + (bMid - aMid) * config.link.label.position,
-      y: ay + Math.abs(by - ay) * config.link.label.position,
-    };
+  function drawLinkLabel(context, link, config, anchors) {
+    if (!config.link.label.show || !link.labelPosition) return;
+    const labelPosition = getLinkLabelPosition(anchors, config.link.label.position);
     context.fillStyle = "white";
     context.font = `${config.link.label.fontSize}px ${config.plot.fontFamily}`;
     context.textAlign = "center";
     context.textBaseline = "alphabetic";
-    context.fillText(source.label ?? source.identity.toFixed(2), labelPosition.x, labelPosition.y);
+    context.fillText(link.source.label ?? link.source.identity.toFixed(2), labelPosition.x, labelPosition.y);
   }
 
-  function drawLink(context, layout, source, config, scales, geometry, showLabel) {
-    const visible = geometry.visible ?? layout.visible;
-    const anchors = geometry.anchors ?? layout.anchors;
+  function drawLink(context, link, config, scales, { visible, anchors }, showLabel) {
     if (!visible || !anchors) return;
     context.save();
-    context.globalAlpha *= layout.opacity ?? 1;
-    let [ax1, ax2, ay, bx1, bx2, by] = anchors;
-    ax1 += geometry.a || 0;
-    ax2 += geometry.a || 0;
-    bx1 += geometry.b || 0;
-    bx2 += geometry.b || 0;
-    const group = scales.group(source.query.uid);
-    const colour = source.colour || scales.colour(group);
-    const score = scales.score(source.identity);
-
+    context.globalAlpha *= link.opacity ?? 1;
+    const { fill, stroke } = linkColours(link.source, scales, config);
     context.beginPath();
-    const adjustedAnchors = [ax1, ax2, ay, bx1, bx2, by];
-    traceLinkPath(context, adjustedAnchors, config.link);
-    if (config.link.asLine) {
-      context.strokeStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
-    } else {
-      context.fillStyle = source.colour || (config.link.groupColour ? rgbaToRgb(colour) : score);
+    traceLinkPath(context, anchors, config.link);
+    if (!config.link.asLine) {
+      context.fillStyle = fill;
       context.fill();
-      context.strokeStyle = source.colour || (config.link.groupColour ? colour : config.figureStyle.outline);
     }
+    context.strokeStyle = stroke;
     context.lineWidth = config.link.strokeWidth;
     context.stroke();
 
-    if (showLabel) drawLinkLabel(context, layout, source, config, anchors, geometry);
+    if (showLabel) drawLinkLabel(context, link, config, anchors);
     context.restore();
   }
 
-  function drawLinkHighlight(context, layout, source, config, geometry = {}) {
-    const visible = geometry.visible ?? layout.visible;
-    const anchors = geometry.anchors ?? layout.anchors;
+  function drawLinkHighlight(context, config, { visible, anchors }) {
     if (!visible || !anchors) return;
-    let [ax1, ax2, ay, bx1, bx2, by] = anchors;
-    ax1 += geometry.a || 0;
-    ax2 += geometry.a || 0;
-    bx1 += geometry.b || 0;
-    bx2 += geometry.b || 0;
     context.beginPath();
-    traceLinkPath(context, [ax1, ax2, ay, bx1, bx2, by], config.link);
-    if (config.link.asLine) ; else {
+    traceLinkPath(context, anchors, config.link);
+    if (!config.link.asLine) {
       context.fillStyle = "rgba(22, 119, 255, 0.18)";
       context.fill();
     }
@@ -10323,9 +10306,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       ? previewRecords?.links || recordsFor(displayScene.links, visible?.links, "links")
       : []) {
       const geometry = linkGeometryForPreview(displayScene, link, preview, config);
-      // Ordinary frames retain anchors on the link layout; only dynamic previews
-      // provide replacement anchors in their sparse geometry patch.
-      const anchors = geometry.anchors ?? link.anchors;
+      const anchors = geometry.anchors;
       if (!geometry.visible || !anchors) continue;
       if (
         clusterPreview &&
@@ -10338,8 +10319,8 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       ) {
         continue;
       }
-      if (showLinks) drawLink(context, link, link.source, config, scales, geometry, showLinkLabels);
-      else drawLinkLabel(context, link, link.source, config, anchors, geometry);
+      if (showLinks) drawLink(context, link, config, scales, geometry, showLinkLabels);
+      else drawLinkLabel(context, link, config, anchors);
     }
     if (show("tree")) drawTree(context, tree, displayScene, config, preview, {
       trackAnchor: treeTrackAnchor,
@@ -10353,7 +10334,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
         if (visible?.links && !visible.links.includes(uid)) continue;
         const link = displayScene.links.get(uid);
         if (!link) continue;
-        drawLinkHighlight(context, link, link.source, config, linkGeometryForPreview(displayScene, link, preview));
+        drawLinkHighlight(context, config, linkGeometryForPreview(displayScene, link, preview, config));
       }
     }
     const loci = showLoci
@@ -11690,16 +11671,13 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
       const link = scene.links.get(uid);
       if (!link) continue;
       const geometry = linkGeometryForPreview(scene, link, preview, config);
-      const anchors = geometry.anchors ?? link.anchors;
+      const anchors = geometry.anchors;
       const visible = config.link.show && geometry.visible && anchors;
       const group = element(ids.link(link.source)).interrupt().attr("opacity", visible ? link.opacity ?? 1 : 0);
       if (!visible) continue;
-      const adjusted = [...anchors];
-      adjusted[0] += geometry.a || 0; adjusted[1] += geometry.a || 0;
-      adjusted[3] += geometry.b || 0; adjusted[4] += geometry.b || 0;
-      group.selectAll("path.geneLink,path.geneLinkHighlight").interrupt().attr("d", getLinkPath(adjusted, config.link));
+      group.selectAll("path.geneLink,path.geneLinkHighlight").interrupt().attr("d", getLinkPath(anchors, config.link));
       if (config.link.label.show) {
-        const label = getLinkLabelPosition(adjusted, config.link.label.position);
+        const label = getLinkLabelPosition(anchors, config.link.label.position);
         group.select("text.geneLinkLabel").attr("x", label.x).attr("y", label.y)
           .attr("opacity", 1);
       }
@@ -11862,7 +11840,7 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
       .style("stroke-width", Math.max(2, config.gene.shape.strokeWidth))
       .style("pointer-events", "none");
     selection
-      .selectAll("text.geneLabel")
+      .select("text.geneLabel")
       .text((gene) => gene.label || gene.name || gene.uid)
       .attr("dy", (gene) => geneLayout(gene)?.labelDy)
       .attr("display", config.gene.label.show ? "inherit" : "none")
@@ -11874,20 +11852,8 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
 
   function updateLinks(selection, scene, previousScene, config, scales, ids, highlightLinkIds) {
     const linkLayout = (link) => scene.links.get(link.uid);
-    const fill = (link) => {
-      if (config.link.asLine) return "none";
-      if (link.colour) return link.colour;
-      if (config.link.groupColour) return rgbaToRgb(scales.colour(scales.group(link.query.uid)));
-      return scales.score(link.identity);
-    };
-    const stroke = (link) => {
-      if (link.colour) return link.colour;
-      if (config.link.groupColour) {
-        const colour = scales.colour(scales.group(link.query.uid));
-        return config.link.asLine ? rgbaToRgb(colour) : colour;
-      }
-      return config.link.asLine ? scales.score(link.identity) : config.figureStyle.outline;
-    };
+    const fill = (link) => config.link.asLine ? "none" : linkColours(link, scales, config).fill;
+    const stroke = (link) => linkColours(link, scales, config).stroke;
 
     const opacity = (link) => interpolateLinkOpacity(
       previousScene?.links.get(link.uid),
@@ -11904,42 +11870,27 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
     } else {
       selection.attr("opacity", opacity);
     }
-    selection
-      .select("path.geneLink")
-      .call((path) => {
-        if (typeof path.attrTween === "function") path.attrTween("d", function (link) {
-          const previous = previousScene?.links.get(link.uid);
-          const next = linkLayout(link);
-          return (amount) => getLinkPath(
-            interpolateLinkAnchors(previousScene, previous, scene, next, amount),
-            config.link
-          );
-        });
-        else path.attr("d", (link) => linkLayout(link)?.path || "");
-      })
+    const updatePath = (path) => {
+      if (typeof path.attrTween === "function") path.attrTween("d", (link) => {
+        const previous = previousScene?.links.get(link.uid), next = linkLayout(link);
+        return (amount) => getLinkPath(
+          interpolateLinkAnchors(previousScene, previous, scene, next, amount), config.link
+        );
+      });
+      else path.attr("d", (link) => linkLayout(link)?.path || "");
+    };
+    selection.select("path.geneLink").call(updatePath)
       .style("fill", fill)
       .style("stroke", stroke)
       .style("stroke-width", `${config.link.strokeWidth}px`);
-    selection
-      .select("path.geneLinkHighlight")
-      .call((path) => {
-        if (typeof path.attrTween === "function") path.attrTween("d", function (link) {
-          const previous = previousScene?.links.get(link.uid);
-          const next = linkLayout(link);
-          return (amount) => getLinkPath(
-            interpolateLinkAnchors(previousScene, previous, scene, next, amount),
-            config.link
-          );
-        });
-        else path.attr("d", (link) => linkLayout(link)?.path || "");
-      })
+    selection.select("path.geneLinkHighlight").call(updatePath)
       .attr("display", (link) => (highlightLinkIds.has(link.uid) ? "inline" : "none"))
       .style("fill", config.link.asLine ? "none" : "rgba(22, 119, 255, 0.18)")
       .style("stroke", "#1677ff")
       .style("stroke-width", `${Math.max(2, config.link.strokeWidth + 1)}px`)
       .style("pointer-events", "none");
     selection
-      .selectAll("text")
+      .select("text.geneLinkLabel")
       .text((link) => link.label ?? link.identity.toFixed(2))
       .attr("opacity", (link) =>
         config.link.label.show && linkLayout(link)?.visible ? 1 : 0
@@ -11996,27 +11947,21 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
       .attr("fill", (item) => item.colour)
       .attr("cursor", "pointer")
       .on("click", (event, item) => interactions.legendColour(event, item.source));
-    items
-      .select("text.legend-label")
-      .text((item) => item.label)
+    const updateLegendText = (text) => text
       .attr("x", (item) => item.textX)
-      .attr("y", (item) => item.textY)
-      .style("font-size", `${legend.fontSize}px`)
       .style("font-family", legend.fontFamily)
       .attr("cursor", "pointer")
       .on("click", (event, item) => interactions.legendText(event, item.source))
       .on("contextmenu", (event, item) => interactions.legendMenu(event, item.source));
-    items
-      .select("text.legend-subtitle")
+    items.select("text.legend-label").call(updateLegendText)
+      .text((item) => item.label)
+      .attr("y", (item) => item.textY)
+      .style("font-size", `${legend.fontSize}px`);
+    items.select("text.legend-subtitle").call(updateLegendText)
       .text((item) => item.subtitle)
-      .attr("x", (item) => item.textX)
       .attr("y", (item) => item.subtitleY ?? item.textY)
       .attr("opacity", (item) => item.subtitle ? 0.72 : 0)
-      .style("font-size", `${legend.subtitleFontSize}px`)
-      .style("font-family", legend.fontFamily)
-      .attr("cursor", "pointer")
-      .on("click", (event, item) => interactions.legendText(event, item.source))
-      .on("contextmenu", (event, item) => interactions.legendMenu(event, item.source));
+      .style("font-size", `${legend.subtitleFontSize}px`);
   }
 
   function renderScaleBar({ plot, scaleBar, interactions, transform }) {
@@ -13948,16 +13893,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const fill = [];
     const edge = [];
     const visible = linkVisibleForPreview(scene, link, preview, config);
-    const colour = rgba(
-      link.source.colour || (config.link.groupColour
-        ? scales.colour(scales.group(link.source.query.uid))
-        : scales.score(link.source.identity))
-    );
-    const stroke = rgba(
-      link.source.colour || (config.link.groupColour
-        ? scales.colour(scales.group(link.source.query.uid))
-        : config.figureStyle?.outline || "black")
-    );
+    const colours = linkColours(link.source, scales, config);
+    const colour = rgba(colours.fill), stroke = rgba(colours.stroke);
     const opacity = link.opacity ?? 1;
     colour[3] *= opacity;
     stroke[3] *= opacity;
@@ -13987,16 +13924,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const query = scene.genes.get(link.source.query.uid);
     const target = scene.genes.get(link.source.target.uid);
     if (!query || !target) return null;
-    const fill = rgba(
-      link.source.colour || (config.link.groupColour
-        ? scales.colour(scales.group(link.source.query.uid))
-        : scales.score(link.source.identity))
-    );
-    const stroke = rgba(
-      link.source.colour || (config.link.groupColour
-        ? scales.colour(scales.group(link.source.query.uid))
-        : "black")
-    );
+    const colours = linkColours(link.source, scales, config);
+    const fill = rgba(colours.fill), stroke = rgba(colours.stroke);
     fill[3] *= link.opacity ?? 1;
     stroke[3] *= link.opacity ?? 1;
     return new Float32Array([
@@ -14066,14 +13995,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     return translated;
   }
 
-  function buildGeometry(scene, scales, config, preview = null, clusterSlots = null) {
+  function buildGeometry(scene, scales, config) {
     const links = [];
     const genes = [];
     const linkEdges = [];
     const geneEdges = [];
     const tracks = [];
     const ranges = { links: new Map(), genes: new Map(), loci: new Map() };
-    const slots = clusterSlots || new Map(
+    const slots = new Map(
       [...scene.clusters.keys()].map((uid, index) => [uid, index + 1])
     );
     // Each locus gets one slot shared by its genes, track, and link endpoints.
@@ -14088,7 +14017,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       // exception is a link hidden solely by a committed trim: it can reappear
       // during an expanding trim preview.
       if (!link.visible && !linkCanChangeTrimVisibility(scene, link)) continue;
-      const vertices = linkVertices(scene, link, scales, config, preview);
+      const vertices = linkVertices(scene, link, scales, config);
       ranges.links.set(link.source.uid, {
         links: append(links, vertices.links),
         linkEdges: append(linkEdges, vertices.linkEdges),
@@ -14102,7 +14031,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const vertices = geneVertices(
         gene,
         scales,
-        preview,
+        null,
         locusSlots.get(gene.locus.source.uid),
         config.gene.shape.strokeWidth, config.gene.shape.stroke
       );
@@ -14113,7 +14042,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     }
     for (const locus of scene.loci.values()) {
       ranges.loci.set(locus.source.uid, {
-        tracks: append(tracks, trackVertices(locus, config, preview, locusSlots.get(locus.source.uid))),
+        tracks: append(tracks, trackVertices(locus, config, null, locusSlots.get(locus.source.uid))),
       });
     }
     return {
@@ -14553,12 +14482,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (!buffer || !range || range.length !== values.length) return;
       device.queue.writeBuffer(buffer, range.offset * 4, values.buffer, values.byteOffset, values.byteLength);
     };
-    const writeAll = (data) => {
-      for (const name of Object.keys(data)) {
-        const buffer = bufferForName(name);
-        if (buffer && data[name].byteLength) device.queue.writeBuffer(buffer, 0, data[name]);
-      }
-    };
     const uploadGeometry = (nextGeometry) => {
       const { data } = nextGeometry;
       linkBuffer = bufferFor(device, linkBuffer, data.links);
@@ -14586,25 +14509,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     };
     const restorePreview = (records) => {
       if (!records || !geometry) return;
-      if (records.full) {
-        writeAll(geometry.data);
-        return;
-      }
-      for (const uid of records.links) {
-        const ranges = geometry.ranges.links.get(uid);
-        if (!ranges) continue;
-        write("links", ranges.links, geometry.data.links.subarray(ranges.links.offset, ranges.links.offset + ranges.links.length));
-        write("linkEdges", ranges.linkEdges, geometry.data.linkEdges.subarray(ranges.linkEdges.offset, ranges.linkEdges.offset + ranges.linkEdges.length));
-      }
-      for (const uid of records.genes) {
-        const ranges = geometry.ranges.genes.get(uid);
-        if (!ranges) continue;
-        write("genes", ranges.genes, geometry.data.genes.subarray(ranges.genes.offset, ranges.genes.offset + ranges.genes.length));
-        write("geneEdges", ranges.geneEdges, geometry.data.geneEdges.subarray(ranges.geneEdges.offset, ranges.geneEdges.offset + ranges.geneEdges.length));
-      }
-      for (const uid of records.loci) {
-        const ranges = geometry.ranges.loci.get(uid);
-        if (ranges) write("tracks", ranges.tracks, geometry.data.tracks.subarray(ranges.tracks.offset, ranges.tracks.offset + ranges.tracks.length));
+      for (const kind of ["links", "genes", "loci"]) for (const uid of records[kind]) {
+        for (const [name, range] of Object.entries(geometry.ranges[kind].get(uid) || {})) {
+          write(name, range, geometry.data[name].subarray(range.offset, range.offset + range.length));
+        }
       }
     };
     const applyPreview = (nextPreview, scales, config, viewport) => {
@@ -14644,10 +14552,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         return;
       }
       previewLinksActive = false;
-      if (patchedRecords.full) {
-        writeAll(buildGeometry(scene, scales, config, nextPreview, geometry.clusterSlots).data);
-        return;
-      }
       for (const uid of patchedRecords.links) {
         const ranges = geometry.ranges.links.get(uid);
         const link = scene.links.get(uid);
