@@ -1,3 +1,4 @@
+import { measureCanvasText } from "./canvasText.mjs";
 import { linkColours } from "./links/style.mjs";
 import { hitTest } from "./hitTest.mjs";
 import { boundsInViewport, worldViewport } from "./camera.mjs";
@@ -164,7 +165,7 @@ export function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = 
  * Scene layout deliberately records only renderer-neutral chrome extents; the
  * raster adapter owns glyph measurement for initial camera fitting.
  */
-export function canvasFigureBounds(context, scene, config, tree = null, { preview = null, textMetrics = null } = {}) {
+export function canvasFigureBounds(context, scene, config, tree = null, { preview = null } = {}) {
   if (!scene?.bounds) return null;
   let structural = scene.bounds;
   const chrome = preview?.chrome || scene.chrome;
@@ -192,17 +193,7 @@ export function canvasFigureBounds(context, scene, config, tree = null, { previe
     fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
     if (!text) return;
     const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-    const key = JSON.stringify([font, align, baseline, String(text)]);
-    let metrics = textMetrics?.get(key);
-    if (!metrics) {
-      context.save();
-      context.font = font;
-      context.textAlign = align;
-      context.textBaseline = baseline;
-      metrics = context.measureText(String(text));
-      context.restore();
-      textMetrics?.set(key, metrics);
-    }
+    const metrics = measureCanvasText(context, scene, text, { font, align, baseline });
     const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
     const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
     const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
@@ -312,12 +303,8 @@ function clusterLabelHit(context, scene, point, config) {
     const anchorX = cluster.x + cluster.info.x;
     const nameFont = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
     const locusFont = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
-    context.save();
-    context.font = nameFont;
-    const nameWidth = context.measureText(cluster.source.name || "").width;
-    context.font = locusFont;
-    const locusWidth = context.measureText(cluster.info.locusText).width;
-    context.restore();
+    const nameWidth = measureCanvasText(context, scene, cluster.source.name || "", { font: nameFont, align: "left", baseline: "alphabetic" }).width;
+    const locusWidth = measureCanvasText(context, scene, cluster.info.locusText, { font: locusFont, align: "left", baseline: "alphabetic" }).width;
     const width = Math.max(nameWidth, locusWidth);
     if (
       point.x >= anchorX - width &&
@@ -350,9 +337,9 @@ function chromeHit(context, scene, point) {
         return { action: "legend-colour", group: item.source };
       }
       const textX = x + item.textX;
-      const labelWidth = context.measureText(item.label).width;
+      const labelWidth = measureCanvasText(context, scene, item.label).width;
       context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
-      const subtitleWidth = item.subtitle ? context.measureText(item.subtitle).width : 0;
+      const subtitleWidth = item.subtitle ? measureCanvasText(context, scene, item.subtitle).width : 0;
       context.font = `${legend.fontSize}px ${legend.fontFamily}`;
       const textWidth = Math.max(labelWidth, subtitleWidth);
       if (
@@ -373,7 +360,7 @@ function chromeHit(context, scene, point) {
     const y = scaleBar.position.y + scaleBar.height + 5;
     context.save();
     context.font = `${scaleBar.fontSize}px ${scaleBar.fontFamily}`;
-    const width = context.measureText(scaleBar.label).width;
+    const width = measureCanvasText(context, scene, scaleBar.label).width;
     context.restore();
     if (
       point.x >= x - width / 2 &&

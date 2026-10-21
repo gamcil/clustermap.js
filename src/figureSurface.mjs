@@ -3,16 +3,14 @@ import { canvasFigureBounds } from "./canvasRenderer.js";
 /** One backdrop shared by all renderers; camera changes only update its transform. */
 export function createFigureSurface() {
   let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
-  const textMetrics = new Map();
 
   function bounds(container, scene, config, tree, preview = null) {
     if (!container || !scene?.bounds) return null;
     // Reordering moves rows within the figure without changing its extent.
     if (preview?.type === "cluster-drag") preview = null;
-    if (scene !== measuredScene || config !== measuredConfig) textMetrics.clear();
     if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
       context ||= container.ownerDocument.createElement("canvas").getContext("2d");
-      measuredBounds = canvasFigureBounds(context, scene, config, tree, { preview, textMetrics });
+      measuredBounds = canvasFigureBounds(context, scene, config, tree, { preview });
       measuredScene = scene;
       measuredConfig = config;
       measuredPreview = preview;
@@ -51,7 +49,6 @@ export function createFigureSurface() {
 
   function clear() {
     context = measuredScene = measuredConfig = measuredBounds = measuredPreview = null;
-    textMetrics.clear();
   }
 
   return { bounds, update, clear };

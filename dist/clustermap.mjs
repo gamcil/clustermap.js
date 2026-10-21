@@ -8086,6 +8086,32 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
   doc.head.append(style);
 }
 
+const sceneMetrics = new WeakMap();
+const textProperties = ["direction", "fontKerning", "fontStretch", "fontVariantCaps", "letterSpacing", "wordSpacing"];
+
+/** Share native text metrics across Canvas consumers without changing their context. */
+function measureCanvasText(context, scene, text, {
+  font = context.font, align = context.textAlign, baseline = context.textBaseline,
+} = {}) {
+  let cache = sceneMetrics.get(scene);
+  if (!cache) { cache = new Map(); sceneMetrics.set(scene, cache); }
+  text = String(text);
+  const key = JSON.stringify([font, align, baseline, ...textProperties.map((name) => context[name]), text]);
+  if (cache.has(key)) return cache.get(key);
+  context.save();
+  let metrics;
+  try {
+    context.font = font;
+    context.textAlign = align;
+    context.textBaseline = baseline;
+    metrics = context.measureText(text);
+  } finally { context.restore(); }
+  // Preview coordinate labels can change on every drag frame.
+  if (cache.size >= 4096) cache.delete(cache.keys().next().value);
+  cache.set(key, metrics);
+  return metrics;
+}
+
 function isObject(a) {
   return !!a && a.constructor === Object;
 }
@@ -9275,29 +9301,21 @@ function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = 
 /** Canvas owns text metrics; all tree geometry comes from the shared layout. */
 function layoutCanvasTree(context, tree, scene, config, options = {}) {
   if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
-  context.save();
-  try {
-    return layoutTree({
-      ...options,
-      tree, scene, config,
-      measureText: (text, style) => {
-        context.font = `${style.fontStyle || "normal"} ${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`;
-        context.textAlign = "left";
-        context.textBaseline = "alphabetic";
-        const metrics = context.measureText(text);
-        const overhang = Math.max(0, metrics.actualBoundingBoxLeft || 0, (metrics.actualBoundingBoxRight || 0) - metrics.width);
-        return { width: metrics.width + overhang * 2, overhang, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
-      },
-      measureLabel: (cluster, locusText) => {
-        context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
-        const nameWidth = context.measureText(cluster.source.name || "").width;
-        context.font = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
-        return Math.max(nameWidth, context.measureText(locusText).width);
-      },
-    });
-  } finally {
-    context.restore();
-  }
+  const measure = (text, font) => measureCanvasText(context, scene, text,
+    { font, align: "left", baseline: "alphabetic" });
+  return layoutTree({
+    ...options,
+    tree, scene, config,
+    measureText: (text, style) => {
+      const metrics = measure(text, `${style.fontStyle || "normal"} ${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`);
+      const overhang = Math.max(0, metrics.actualBoundingBoxLeft || 0, (metrics.actualBoundingBoxRight || 0) - metrics.width);
+      return { width: metrics.width + overhang * 2, overhang, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
+    },
+    measureLabel: (cluster, locusText) => Math.max(
+      measure(cluster.source.name || "", `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`).width,
+      measure(locusText, `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`).width
+    ),
+  });
 }
 
 function traceLines(context, lines) {
@@ -9520,7 +9538,7 @@ function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
  * Scene layout deliberately records only renderer-neutral chrome extents; the
  * raster adapter owns glyph measurement for initial camera fitting.
  */
-function canvasFigureBounds(context, scene, config, tree = null, { preview = null, textMetrics = null } = {}) {
+function canvasFigureBounds(context, scene, config, tree = null, { preview = null } = {}) {
   if (!scene?.bounds) return null;
   let structural = scene.bounds;
   const chrome = preview?.chrome || scene.chrome;
@@ -9548,17 +9566,7 @@ function canvasFigureBounds(context, scene, config, tree = null, { preview = nul
     fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
     if (!text) return;
     const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-    const key = JSON.stringify([font, align, baseline, String(text)]);
-    let metrics = textMetrics?.get(key);
-    if (!metrics) {
-      context.save();
-      context.font = font;
-      context.textAlign = align;
-      context.textBaseline = baseline;
-      metrics = context.measureText(String(text));
-      context.restore();
-      textMetrics?.set(key, metrics);
-    }
+    const metrics = measureCanvasText(context, scene, text, { font, align, baseline });
     const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
     const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
     const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
@@ -9668,12 +9676,8 @@ function clusterLabelHit(context, scene, point, config) {
     const anchorX = cluster.x + cluster.info.x;
     const nameFont = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
     const locusFont = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
-    context.save();
-    context.font = nameFont;
-    const nameWidth = context.measureText(cluster.source.name || "").width;
-    context.font = locusFont;
-    const locusWidth = context.measureText(cluster.info.locusText).width;
-    context.restore();
+    const nameWidth = measureCanvasText(context, scene, cluster.source.name || "", { font: nameFont, align: "left", baseline: "alphabetic" }).width;
+    const locusWidth = measureCanvasText(context, scene, cluster.info.locusText, { font: locusFont, align: "left", baseline: "alphabetic" }).width;
     const width = Math.max(nameWidth, locusWidth);
     if (
       point.x >= anchorX - width &&
@@ -9706,9 +9710,9 @@ function chromeHit(context, scene, point) {
         return { action: "legend-colour", group: item.source };
       }
       const textX = x + item.textX;
-      const labelWidth = context.measureText(item.label).width;
+      const labelWidth = measureCanvasText(context, scene, item.label).width;
       context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
-      const subtitleWidth = item.subtitle ? context.measureText(item.subtitle).width : 0;
+      const subtitleWidth = item.subtitle ? measureCanvasText(context, scene, item.subtitle).width : 0;
       context.font = `${legend.fontSize}px ${legend.fontFamily}`;
       const textWidth = Math.max(labelWidth, subtitleWidth);
       if (
@@ -9729,7 +9733,7 @@ function chromeHit(context, scene, point) {
     const y = scaleBar.position.y + scaleBar.height + 5;
     context.save();
     context.font = `${scaleBar.fontSize}px ${scaleBar.fontFamily}`;
-    const width = context.measureText(scaleBar.label).width;
+    const width = measureCanvasText(context, scene, scaleBar.label).width;
     context.restore();
     if (
       point.x >= x - width / 2 &&
@@ -10404,16 +10408,14 @@ function renderCanvas({
 /** One backdrop shared by all renderers; camera changes only update its transform. */
 function createFigureSurface() {
   let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
-  const textMetrics = new Map();
 
   function bounds(container, scene, config, tree, preview = null) {
     if (!container || !scene?.bounds) return null;
     // Reordering moves rows within the figure without changing its extent.
     if (preview?.type === "cluster-drag") preview = null;
-    if (scene !== measuredScene || config !== measuredConfig) textMetrics.clear();
     if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
       context ||= container.ownerDocument.createElement("canvas").getContext("2d");
-      measuredBounds = canvasFigureBounds(context, scene, config, tree, { preview, textMetrics });
+      measuredBounds = canvasFigureBounds(context, scene, config, tree, { preview });
       measuredScene = scene;
       measuredConfig = config;
       measuredPreview = preview;
@@ -10452,7 +10454,6 @@ function createFigureSurface() {
 
   function clear() {
     context = measuredScene = measuredConfig = measuredBounds = measuredPreview = null;
-    textMetrics.clear();
   }
 
   return { bounds, update, clear };
