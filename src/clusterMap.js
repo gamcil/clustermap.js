@@ -1791,7 +1791,7 @@ export default function clusterMap() {
             editData: (panelUid) => !container.node().dispatchEvent(new CustomEvent("clustermap:edit-annotation", {
               bubbles: true, cancelable: true, detail: { chart: my, panelUid },
             })),
-            getTree: () => currentData?.tree, getClusters: () => currentData?.clusters || [], getPanels: () => currentData?.annotationPanels || [],
+            getData: () => currentData,
             patch: (operations) => my.patch(operations) });
           annotationOverlay.update(annotationUiContext);
         }).catch((error) => console.error("Could not load optional annotation controls", error))

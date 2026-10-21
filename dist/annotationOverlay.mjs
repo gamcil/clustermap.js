@@ -477,148 +477,10 @@ function createActionRunner(report) {
   };
 }
 
-/** Shared controls and table primitives for the packaged and inline data editors. */
-function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
-  const node = document.createElement("label"); node.className = "cm-data-search";
-  const input = document.createElement("input"); input.type = "search";
-  input.placeholder = placeholder; input.setAttribute("aria-label", "Filter records");
-  if (onInput) input.oninput = () => onInput(input.value);
-  node.append(input);
-  return { node, input };
-}
-
-/** Shared content layout for every data view, including the standalone editor. */
-function createDataPanel(document, { label = "Editable chart data" } = {}) {
-  installDataEditorStyle(document);
-  const ui = createControls(document), node = ui.el("div", undefined, null, "cm-data-panel");
-  const tools = ui.el("div", undefined, node, "cm-data-tools"); tools.hidden = true;
-  const meta = ui.el("div", undefined, node, "cm-data-meta");
-  const summary = ui.el("span", undefined, meta);
-  const selectVisible = ui.button(meta, "Select all visible", null);
-  const actions = ui.el("div", undefined, node, "cm-data-actions"); actions.hidden = true;
-  const viewport = ui.el("div", undefined, node, "cm-data-table");
-  viewport.setAttribute("role", "region"); viewport.setAttribute("aria-label", label);
-  return { node, tools, meta, summary, selectVisible, actions, viewport,
-    sync() { tools.hidden = ![...tools.children].some((child) => !child.hidden); } };
-}
-
-/** Keep selection controls independent of the table's row and action rendering. */
-function createSelectionControls(panel, { selection, onChange, checkbox } = {}) {
-  const ui = createControls(panel.node.ownerDocument);
-  const count = ui.el("strong", undefined, panel.actions);
-  const actions = ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
-  const clear = ui.button(panel.actions, "Clear selection", () => { selection.clear(); onChange(); });
-  let visibleIds = [];
-  panel.selectVisible.onclick = () => { selection.setMany(visibleIds); onChange(); };
-  if (checkbox) checkbox.onchange = () => { selection.setMany(visibleIds, checkbox.checked); onChange(); };
-  return { actions,
-    update({ ids, summary, noun, selectSuffix = "" }) {
-      visibleIds = ids;
-      const selectedVisible = ids.reduce((total, id) => total + Number(selection.has(id)), 0);
-      const all = ids.length > 0 && selectedVisible === ids.length;
-      panel.summary.textContent = summary;
-      panel.selectVisible.hidden = !ids.length;
-      panel.selectVisible.disabled = all;
-      panel.selectVisible.textContent = `Select all ${ids.length.toLocaleString()} visible${selectSuffix}`;
-      panel.actions.hidden = !selection.size;
-      count.textContent = `${selection.size.toLocaleString()} ${noun}${selection.size === 1 ? "" : "s"} selected`;
-      clear.disabled = !selection.size;
-      if (checkbox) {
-        checkbox.checked = all;
-        checkbox.indeterminate = selectedVisible > 0 && !all;
-        checkbox.disabled = !ids.length;
-      }
-    },
-  };
-}
-
-const cellClass = (selection) => `cm-data-cell${selection ? " cm-data-cell--select" : ""}`;
-function createDataCell(document, tag = "td", selection = false) {
-  const node = document.createElement(tag); node.className = cellClass(selection); return node;
-}
-
-function installDataEditorStyle(document) {
-  if (document.getElementById("cm-data-editor-style")) return;
-  const style = document.createElement("style"); style.id = "cm-data-editor-style";
-  style.textContent = `
-@layer clinker-editor {
-.cm-data-ui { color:var(--cm-foreground,#273444); font:13px/1.4 system-ui,sans-serif; }
-.cm-data-ui [hidden] { display:none!important; }
-.cm-data-ui :is(button,input,select,textarea) { font:inherit; color:inherit; box-sizing:border-box; }
-.cm-data-ui :where(button,select,input:not([type=color]):not([type=checkbox]):not([type=range]),textarea) { min-height:var(--cm-control-height,30px); padding:var(--cm-control-padding,4px 8px); border:1px solid var(--cm-border,#cbd3de); border-radius:var(--cm-control-radius,6px); background:var(--cm-surface,#fff); }
-.cm-data-ui input[type=checkbox] { cursor:pointer; }
-.cm-data-ui input[type=color] { width:30px; height:22px; padding:0; border:0; background:transparent; }
-.cm-data-ui button { cursor:pointer; }
-.cm-data-ui button:hover:not(:disabled) { border-color:var(--cm-accent,#78a9ed); background:var(--cm-hover,#f4f8ff); }
-.cm-data-ui :where(button,summary):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:2px; }
-.cm-data-ui summary { cursor:pointer; }
-.cm-data-ui summary:hover { color:var(--cm-accent,#1677ff); }
-.cm-data-ui button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
-.cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
-.cm-data-search { display:flex; flex:1; min-width:140px; }
-.cm-data-search input { width:100%; }
-.cm-data-error { color:var(--cm-danger,#b42318); font-size:12px; margin:6px 0; }
-.cm-data-error:empty { display:none; }
-.cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
-.cm-data-tools { flex-shrink:0; }
-.cm-data-meta { display:flex; align-items:center; justify-content:space-between; min-height:30px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
-.cm-data-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; padding:8px 10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-subtle,#f3f6fa); }
-.cm-data-actions strong { padding:4px 7px; border-radius:5px; background:var(--cm-selection,#d6e6fc); color:var(--cm-foreground,#273444); }
-.cm-data-selection-actions { display:contents; }
-.cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
-.cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; font-weight:650; text-align:left; }
-.cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:34px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; }
-.cm-data-row > :is(th,td) { height:34px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
-.cm-data-row:is(:hover,:focus-within) { --cm-row-background:var(--cm-hover,#e3ecf8); }
-.cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
-.cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
-span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
-.cm-data-cell--select input { margin:0; }
-.cm-data-ui .cm-data-cell .cm-data-field { padding-inline:0; margin-inline:-1px; }
-.cm-data-ui input.cm-data-field.cm-data-cell { padding-inline:7px; }
-.cm-data-placeholder { color:var(--cm-muted,#687586); font-style:normal; }
-.cm-data-ui .cm-data-field { min-width:0; border-color:transparent!important; background:transparent!important; }
-.cm-data-ui .cm-data-row .cm-data-field { height:28px; min-height:28px; padding-block:2px; line-height:20px; }
-.cm-data-ui .cm-data-field:is(:hover,:focus) { border-color:var(--cm-accent,#c6d8f0)!important; background:var(--cm-surface,#fff)!important; }
-.cm-data-ui .cm-data-field:focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:-2px; }
-.cm-data-field::placeholder { color:var(--cm-muted,#7b8796); }
-.cm-data-field[type=number]:not(:hover):not(:focus) { appearance:textfield; -moz-appearance:textfield; }
-.cm-data-field[type=number]:not(:hover):not(:focus)::-webkit-inner-spin-button { appearance:none; }
-select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
-}
-`;
-  document.head.append(style);
-}
-
-/** Selection shared by flat rows, tree leaves and annotation matrices. */
-class RowSelection extends Set {
-  #anchor = null;
-
-  select(id, checked, { orderedIds = [], range = false } = {}) {
-    const start = orderedIds.indexOf(this.#anchor), end = orderedIds.indexOf(id);
-    const ids = range && start >= 0 && end >= 0
-      ? orderedIds.slice(Math.min(start, end), Math.max(start, end) + 1) : [id];
-    this.setMany(ids, checked);
-    this.#anchor = id;
-  }
-
-  setMany(ids, checked = true) {
-    for (const id of ids) { if (checked) this.add(id); else this.delete(id); }
-    this.#anchor = null;
-  }
-
-  prune(ids) {
-    const valid = ids instanceof Set ? ids : new Set(ids);
-    for (const id of this) if (!valid.has(id)) this.delete(id);
-    if (!valid.has(this.#anchor)) this.#anchor = null;
-  }
-
-  clear() { super.clear(); this.#anchor = null; }
-}
-
 /** Shared fixed-height row window for scrollable data editors. */
-function virtualRowWindow(count, scrollTop, height, { rowHeight = 34, overscan = 8, threshold = 200 } = {}) {
+const DATA_ROW_HEIGHT = 34;
+
+function virtualRowWindow(count, scrollTop, height, { rowHeight = DATA_ROW_HEIGHT, overscan = 8, threshold = 200 } = {}) {
   const virtual = count > threshold;
   const first = virtual ? Math.min(Math.max(0, count - 1), Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)) : 0;
   const last = virtual ? Math.min(count, first + Math.ceil((height || 320) / rowHeight) + overscan * 2) : count;
@@ -694,6 +556,159 @@ function createVirtualRows({ viewport, container, key, createRow, updateRow,
       top.remove(); bottom.remove(); empty?.remove(); mounted.clear();
     },
   };
+}
+
+/** Shared controls and table primitives for the packaged and inline data editors. */
+function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
+  const ui = createControls(document), node = ui.el("label", undefined, null, "cm-data-search");
+  const input = ui.input(node, "Filter records", "", "search"); input.placeholder = placeholder;
+  if (onInput) input.oninput = () => onInput(input.value);
+  return { node, input };
+}
+
+/** Shared content layout for every data view, including the standalone editor. */
+function createDataPanel(document, { label = "Editable chart data" } = {}) {
+  installDataEditorStyle(document);
+  const ui = createControls(document), node = ui.el("div", undefined, null, "cm-data-panel");
+  const tools = ui.el("div", undefined, node, "cm-data-tools"); tools.hidden = true;
+  const meta = ui.el("div", undefined, node, "cm-data-meta");
+  const summary = ui.el("span", undefined, meta);
+  const selectVisible = ui.button(meta, "Select all visible", null);
+  const actions = ui.el("div", undefined, node, "cm-data-actions"); actions.hidden = true;
+  const viewport = ui.el("div", undefined, node, "cm-data-table");
+  viewport.setAttribute("role", "region"); viewport.setAttribute("aria-label", label);
+  return { node, tools, meta, summary, selectVisible, actions, viewport,
+    sync() { tools.hidden = ![...tools.children].some((child) => !child.hidden); } };
+}
+
+/** Keep selection controls independent of the table's row and action rendering. */
+function createSelectionControls(panel, { selection, onChange, checkbox } = {}) {
+  const ui = createControls(panel.node.ownerDocument);
+  const count = ui.el("strong", undefined, panel.actions);
+  const actions = ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
+  ui.button(panel.actions, "Clear selection", () => { selection.clear(); onChange(); });
+  let visibleIds = [];
+  panel.selectVisible.onclick = () => { selection.setMany(visibleIds); onChange(); };
+  if (checkbox) checkbox.onchange = () => { selection.setMany(visibleIds, checkbox.checked); onChange(); };
+  return { actions,
+    update({ ids, summary, noun, selectSuffix = "" }) {
+      visibleIds = ids;
+      const selectedVisible = ids.reduce((total, id) => total + Number(selection.has(id)), 0);
+      const all = ids.length > 0 && selectedVisible === ids.length;
+      panel.summary.textContent = summary;
+      panel.selectVisible.hidden = !ids.length;
+      panel.selectVisible.disabled = all;
+      panel.selectVisible.textContent = `Select all ${ids.length.toLocaleString()} visible${selectSuffix}`;
+      panel.actions.hidden = !selection.size;
+      count.textContent = `${selection.size.toLocaleString()} ${noun}${selection.size === 1 ? "" : "s"} selected`;
+      if (checkbox) {
+        checkbox.checked = all;
+        checkbox.indeterminate = selectedVisible > 0 && !all;
+        checkbox.disabled = !ids.length;
+      }
+    },
+  };
+}
+
+const cellClass = (selection) => `cm-data-cell${selection ? " cm-data-cell--select" : ""}`;
+function createDataCell(document, tag = "td", selection = false) {
+  const node = document.createElement(tag); node.className = cellClass(selection); return node;
+}
+
+function installDataEditorStyle(document) {
+  if (document.getElementById("cm-data-editor-style")) return;
+  const style = document.createElement("style"); style.id = "cm-data-editor-style";
+  style.textContent = `
+@layer clinker-editor {
+.cm-data-ui { color:var(--cm-foreground,#273444); font:13px/1.4 system-ui,sans-serif; }
+.cm-data-ui [hidden] { display:none!important; }
+.cm-data-ui form { margin:0; }
+.cm-data-ui :is(button,input,select,textarea) { font:inherit; color:inherit; box-sizing:border-box; }
+.cm-data-ui :where(button,select,input:not([type=color]):not([type=checkbox]):not([type=range]),textarea) { min-height:var(--cm-control-height,30px); padding:var(--cm-control-padding,4px 8px); border:1px solid var(--cm-border,#cbd3de); border-radius:var(--cm-control-radius,6px); background:var(--cm-surface,#fff); }
+.cm-data-ui input[type=checkbox] { cursor:pointer; }
+.cm-data-ui input[type=color] { width:30px; height:22px; padding:0; border:0; background:transparent; }
+.cm-data-ui button { cursor:pointer; }
+.cm-data-ui button:hover:not(:disabled) { border-color:var(--cm-accent,#78a9ed); background:var(--cm-hover,#f4f8ff); }
+.cm-data-ui :where(button,summary):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:2px; }
+.cm-data-ui summary { cursor:pointer; }
+.cm-data-ui summary:hover { color:var(--cm-accent,#1677ff); }
+.cm-data-ui button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
+.cm-data-segmented { display:flex; padding:3px; border:1px solid var(--cm-border,#e0e5eb); border-radius:7px; background:var(--cm-subtle,#f3f6fa); }
+.cm-data-segmented button { min-height:28px; border:0; background:transparent; }
+.cm-data-segmented button[aria-pressed=true] { background:var(--cm-surface,#fff); box-shadow:0 1px 2px rgba(29,43,61,.16); font-weight:600; }
+.cm-data-segmented button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-foreground,#273444); }
+.cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,#64748b); line-height:1; }
+.cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-accent,#1677ff); }
+.cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.cm-data-ui .cm-data-icon-button--edit { --cm-icon-size:20px; display:none; flex:0 0 20px; }
+.cm-data-row:is(:hover,:focus-within,.is-selected) .cm-data-icon-button--edit { display:inline-grid; }
+.cm-data-icon-button--edit svg { width:14px; height:14px; }
+.cm-data-action-group { display:flex; align-items:center; gap:6px; }
+.cm-data-action-group + .cm-data-action-group { border-left:1px solid var(--cm-border,#d5e0ee); padding-left:10px; }
+.cm-data-action-group label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+.cm-data-action-group input[type=number] { width:112px; }
+.cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
+.cm-data-search { display:flex; flex:1; min-width:140px; }
+.cm-data-search input { width:100%; }
+.cm-data-error { color:var(--cm-danger,#b42318); font-size:12px; margin:6px 0; }
+.cm-data-error:empty { display:none; }
+.cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
+.cm-data-tools { flex-shrink:0; }
+.cm-data-meta { display:flex; align-items:center; justify-content:space-between; min-height:30px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
+.cm-data-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; padding:8px 10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-subtle,#f3f6fa); }
+.cm-data-actions strong { padding:4px 7px; border-radius:5px; background:var(--cm-selection,#d6e6fc); color:var(--cm-foreground,#273444); }
+.cm-data-selection-actions { display:contents; }
+.cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
+.cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
+.cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; line-height:20px; }
+.cm-data-row > :is(th,td) { height:${DATA_ROW_HEIGHT}px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
+.cm-data-row:is(:hover,:focus-within) { --cm-row-background:var(--cm-hover,#e3ecf8); }
+.cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
+.cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; vertical-align:middle; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
+span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
+.cm-data-cell--select input { display:block; margin:auto; }
+.cm-data-cell > input[type=color] { display:block; }
+.cm-data-ui .cm-data-cell .cm-data-field { padding-inline:0; margin-inline:-1px; }
+.cm-data-ui input.cm-data-field.cm-data-cell { padding-inline:7px; }
+.cm-data-placeholder { color:var(--cm-muted,#687586); font-style:normal; }
+.cm-data-ui .cm-data-field { min-width:0; border-color:transparent!important; background:transparent!important; }
+.cm-data-ui .cm-data-row .cm-data-field { height:28px; min-height:28px; padding-block:2px; line-height:20px; }
+.cm-data-ui .cm-data-field:is(:hover,:focus) { border-color:var(--cm-accent,#c6d8f0)!important; background:var(--cm-surface,#fff)!important; }
+.cm-data-ui .cm-data-field:focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:-2px; }
+.cm-data-field::placeholder { color:var(--cm-muted,#7b8796); }
+.cm-data-field[type=number]:not(:hover):not(:focus) { appearance:textfield; -moz-appearance:textfield; }
+.cm-data-field[type=number]:not(:hover):not(:focus)::-webkit-inner-spin-button { appearance:none; }
+select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
+}
+`;
+  document.head.append(style);
+}
+
+/** Selection shared by flat rows, tree leaves and annotation matrices. */
+class RowSelection extends Set {
+  #anchor = null;
+
+  select(id, checked, { orderedIds = [], range = false } = {}) {
+    const start = orderedIds.indexOf(this.#anchor), end = orderedIds.indexOf(id);
+    const ids = range && start >= 0 && end >= 0
+      ? orderedIds.slice(Math.min(start, end), Math.max(start, end) + 1) : [id];
+    this.setMany(ids, checked);
+    this.#anchor = id;
+  }
+
+  setMany(ids, checked = true) {
+    for (const id of ids) { if (checked) this.add(id); else this.delete(id); }
+    this.#anchor = null;
+  }
+
+  prune(ids) {
+    const valid = ids instanceof Set ? ids : new Set(ids);
+    for (const id of this) if (!valid.has(id)) this.delete(id);
+    if (!valid.has(this.#anchor)) this.#anchor = null;
+  }
+
+  clear() { super.clear(); this.#anchor = null; }
 }
 
 var EOL = {},
@@ -909,7 +924,7 @@ function mapAnnotationValues(values, map) {
 }
 
 /** Small data-entry form; panel validation and history remain in the patch API. */
-function createAnnotationCreateControls({ document, getClusters, getPanels, getTree, patch, onCreate, annotationApi }) {
+function createAnnotationCreateControls({ document, getData, patch, onCreate, annotationApi }) {
   const { validateAnnotationPanels } = annotationApi;
   const node = document.createElement("form");
   const ui = createControls(document);
@@ -924,7 +939,7 @@ function createAnnotationCreateControls({ document, getClusters, getPanels, getT
     help.textContent = groups ? "Define groups as JSON. Each needs a uid, a label, and either clusterIds or a tree nodeUid. Colours are optional."
       : tableHelp;
     data.value = groups ? JSON.stringify({ groups: [{ uid: "group-1", label: "Example group",
-      clusterIds: getClusters().slice(0, 2).map((cluster) => cluster.uid) }] }, null, 2) : tableTemplate;
+      clusterIds: getData().clusters.slice(0, 2).map((cluster) => cluster.uid) }] }, null, 2) : tableTemplate;
   };
   const help = document.createElement("p");
   const tableHelp = "Paste CSV or a tab-separated table. First column: cluster ID; remaining headings: data columns. Blank cells are missing. Bars use one data column. JSON {columns, values} is also accepted.";
@@ -932,7 +947,7 @@ function createAnnotationCreateControls({ document, getClusters, getPanels, getT
   node.append(help);
   const data = ui.el("textarea", undefined, ui.row(node, "Data")); data.setAttribute("aria-label", "Data"); data.rows = 8; data.spellcheck = false;
   data.parentElement.className = "cm-annotation-data";
-  const tableTemplate = csvFormatRows([["cluster", "Value"], ...getClusters().map((cluster) => [cluster.uid, ""])]);
+  const tableTemplate = csvFormatRows([["cluster", "Value"], ...getData().clusters.map((cluster) => [cluster.uid, ""])]);
   data.value = tableTemplate;
   const error = document.createElement("p"); error.dataset.annotationError = ""; error.setAttribute("role", "alert"); node.append(error);
   const submit = document.createElement("button"); submit.type = "submit"; submit.textContent = "Add panel"; node.append(submit);
@@ -944,13 +959,13 @@ function createAnnotationCreateControls({ document, getClusters, getPanels, getT
       let columns, values, groups;
       if (type.value === "groups") ({ groups } = JSON.parse(raw));
       else ({ columns, values } = parseAnnotationTable(raw, scale.value === "categorical"));
-      const ids = new Set(getPanels().map((panel) => panel.uid));
+      const ids = new Set((getData()?.annotationPanels || []).map((panel) => panel.uid));
       let serial = 1;
       while (ids.has(`${type.value}-${serial}`)) serial++;
       const panel = { uid: `${type.value}-${serial}`, type: type.value,
         title: title.value.trim() || (type.value === "groups" ? "Groups" : type.value === "bar" ? "Bar chart" : "Heatmap"),
         ...(type.value === "groups" ? { groups } : { columns, values, scale: { type: scale.value } }) };
-      validateAnnotationPanels([panel], getClusters(), { tree: getTree?.() });
+      validateAnnotationPanels([panel], getData().clusters, { tree: getData().tree });
       patch([{ type: "annotationPanels.create", panel }]);
       onCreate(panel.uid);
     });
@@ -959,7 +974,7 @@ function createAnnotationCreateControls({ document, getClusters, getPanels, getT
 }
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
-function createAnnotationDataControls({ document, getPanels, getClusters, getTree, patch, annotationApi, embedded = false }) {
+function createAnnotationDataControls({ document, getData, patch, annotationApi, embedded = false }) {
   installDataEditorStyle(document);
   installStyle$1(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
@@ -969,6 +984,7 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
   let disposeView = () => {}, filterRows = () => {}, filterSelection = () => {};
   const selection = new RowSelection();
   let selectionPanel = null, batchColumn = "0", batchValue = "";
+  const getPanels = () => getData()?.annotationPanels || [];
   const current = () => getPanels().find((panel) => panel.uid === selected);
   const { el, button, input, select, field } = createControls(document);
   const error = (message) => { node.querySelector('[data-data-error]').textContent = message; };
@@ -1016,18 +1032,18 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
     const used = new Set(colours.map((value) => colourHex(value)));
     const nextColour = ANNOTATION_PALETTES.Qualitative.find((value) => !used.has(colourHex(value))) ??
       ANNOTATION_PALETTES.Qualitative[domain.length % ANNOTATION_PALETTES.Qualitative.length];
-    const swatch = input(row, "New category colour", nextColour, "color", () => {});
+    const colourInput = input(row, "New category colour", nextColour, "color");
     const name = input(row, "New category name", "", "text", () => {}); name.placeholder = "New category";
     button(row, "+", () => {
       if (!name.value.trim()) { name.focus(); return; }
-      update({ scale: categoryScale(panel, [...domain, name.value.trim()], [...colours, swatch.value]) });
+      update({ scale: categoryScale(panel, [...domain, name.value.trim()], [...colours, colourInput.value]) });
     }).setAttribute("aria-label", "Add category");
   };
   const renderMatrix = (layout, panel) => {
     const categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel);
     if (categorical && batchValue !== "" && !resolved.domain[Number(batchValue)]) batchValue = "";
     const { viewport: tableArea } = layout;
-    const all = input(null, "Select all filtered clusters", "", "checkbox", () => {});
+    const all = input(null, "Select all filtered clusters", false, "checkbox");
     const selectionControls = createSelectionControls(layout, { selection, checkbox: all, onChange: () => syncSelection() });
     const batch = selectionControls.actions;
     const columns = select(batch, "Columns to edit", batchColumn,
@@ -1063,8 +1079,9 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
       } });
       if (panel.type === "heatmap") {
         const remove = button(row, "×", () => update({ columns: panel.columns.filter((_, i) => i !== index),
-          values: Object.fromEntries(Object.entries(current().values).map(([uid, values]) => [uid, values.filter((_, i) => i !== index)])) }));
-        remove.disabled = panel.columns.length === 1; remove.setAttribute("aria-label", `Remove column ${column}`);
+          values: Object.fromEntries(Object.entries(current().values).map(([uid, values]) => [uid, values.filter((_, i) => i !== index)])) }), "cm-data-icon-button");
+        remove.setAttribute("aria-label", `Remove column ${column}`);
+        remove.disabled = panel.columns.length === 1;
       }
     });
     for (const cell of head.children) cell.classList.add("cm-data-head");
@@ -1109,7 +1126,7 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
     };
     const createRow = (cluster) => {
       const row = el("tr"), selectionCell = cell("td", row, true);
-      const check = input(selectionCell, `Select ${cluster.name || cluster.uid}`, "", "checkbox", () => {});
+      const check = input(selectionCell, `Select ${cluster.name || cluster.uid}`, false, "checkbox");
       check.onclick = (event) => toggleRow(cluster.uid, check.checked, event.shiftKey);
       const name = cell("th", row); name.textContent = cluster.name || cluster.uid;
       name.onclick = (event) => toggleRow(cluster.uid, !selection.has(cluster.uid), event.shiftKey);
@@ -1141,7 +1158,7 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
     disposeView = () => list.destroy();
     filterRows = () => {
       const needle = filter.trim().toLowerCase();
-      clusters = getClusters().filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle));
+      clusters = getData().clusters.filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle));
       tableArea.scrollTop = 0; list.setRows(clusters);
     };
     filterRows();
@@ -1169,7 +1186,7 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
     button(actions, "Cancel", () => { box.hidden = true; layout.sync(); });
     return () => {
       box.hidden = !box.hidden; layout.sync();
-      if (!box.hidden) { data.value = annotationTableText(current(), getClusters()); data.focus(); }
+      if (!box.hidden) { data.value = annotationTableText(current(), getData().clusters); data.focus(); }
     };
   };
   const renderGroups = (parent, panel) => {
@@ -1181,20 +1198,20 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
       input(row, "Group colour", group.colour ?? panel.colour ?? "#267c9e", "color", (colour) => editGroup(index, { colour }));
       const remove = button(row, "Remove group", () => update({ groups: panel.groups.filter((_, i) => i !== index) }));
       remove.disabled = panel.groups.length === 1;
-      const tree = getTree?.();
+      const tree = getData().tree;
       select(row, "Membership", group.nodeUid === undefined ? "clusters" : "tree",
         [["clusters", "Selected clusters"], ...(tree ? [["tree", "Tree clade"]] : [])], (mode) => {
           const groups = [...current().groups];
           const { nodeUid, clusterIds, ...style } = groups[index];
-          groups[index] = mode === "tree" ? { ...style, nodeUid: tree.root } : { ...style, clusterIds: [getClusters()[0].uid] };
+          groups[index] = mode === "tree" ? { ...style, nodeUid: tree.root } : { ...style, clusterIds: [getData().clusters[0].uid] };
           update({ groups });
         });
       if (group.nodeUid !== undefined) select(box, "Tree node", group.nodeUid,
         tree.nodes.map((node) => [node.uid, node.label || node.uid]), (nodeUid) => editGroup(index, { nodeUid }));
       else {
-        const members = el("select", undefined, box); members.multiple = true; members.size = Math.min(5, getClusters().length);
+        const members = el("select", undefined, box); members.multiple = true; members.size = Math.min(5, getData().clusters.length);
         members.setAttribute("aria-label", `Clusters in ${group.label || group.uid}`);
-        for (const cluster of getClusters()) {
+        for (const cluster of getData().clusters) {
           const option = el("option", `${cluster.name || cluster.uid} (${cluster.uid})`, members);
           option.value = cluster.uid; option.selected = group.clusterIds.includes(cluster.uid);
         }
@@ -1203,7 +1220,7 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
     });
     button(parent, "Add group", () => {
       let serial = 1; while (panel.groups.some((group) => group.uid === `group-${serial}`)) serial++;
-      update({ groups: [...panel.groups, { uid: `group-${serial}`, label: `Group ${serial}`, clusterIds: [getClusters()[0].uid] }] });
+      update({ groups: [...panel.groups, { uid: `group-${serial}`, label: `Group ${serial}`, clusterIds: [getData().clusters[0].uid] }] });
     });
   };
   function render() {
@@ -1215,7 +1232,7 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
     node.replaceChildren();
     toolbar.replaceChildren();
     if (!embedded) node.append(toolbar);
-    const panels = getPanels(); renderedPanels = panels; renderedClusters = getClusters();
+    const panels = getPanels(); renderedPanels = panels; renderedClusters = getData().clusters;
     if (!panels.some((panel) => panel.uid === selected)) selected = panels[0]?.uid ?? null;
     if (panels.length) select(toolbar, "Annotation panel", selected, panels.map((panel) => [panel.uid, panel.title || panel.uid]),
       (uid) => { selected = uid; deleting = null; creating = false; render(); });
@@ -1223,7 +1240,7 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
     const status = el("div", undefined, node); status.className = "cm-data-error"; status.dataset.dataError = ""; status.setAttribute("role", "alert");
     const body = el("div", undefined, node); body.className = "cm-annotation-data-body";
     if (creating) {
-      const form = createAnnotationCreateControls({ document, getPanels, getClusters, getTree, patch, annotationApi,
+      const form = createAnnotationCreateControls({ document, getData, patch, annotationApi,
         onCreate: (uid) => { selected = uid; creating = false; render(); } });
       body.append(form.node); return;
     }
@@ -1231,7 +1248,7 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
     if (selectionPanel !== panel?.uid) {
       selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = "";
     }
-    const validRows = new Set(getClusters().map((cluster) => cluster.uid));
+    const validRows = new Set(getData().clusters.map((cluster) => cluster.uid));
     selection.prune(validRows);
     if (batchColumn !== "all" && Number(batchColumn) >= (panel?.columns?.length || 0)) batchColumn = "0";
     if (!panel) { el("p", "No annotation panels. Add a panel to attach data to cluster rows.", body); return; }
@@ -1253,12 +1270,7 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
       if (panel.scale?.type === "categorical") {
         const categories = el("details", undefined, layout.tools); categories.className = "cm-annotation-categories";
         categories.open = categoriesOpen || deleting !== null;
-        const summary = el("summary", "Categories", categories);
-        const scale = resolveAnnotationScale(panel);
-        for (const category of scale.domain) {
-          const chip = el("span", category, summary); chip.className = "cm-annotation-category-chip";
-          chip.style.setProperty("--category-colour", scale.colour(category));
-        }
+        el("summary", `Categories (${resolveAnnotationScale(panel).domain.length})`, categories);
         renderCategories(el("div", undefined, categories), panel);
       }
       renderMatrix(layout, panel);
@@ -1285,7 +1297,7 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
       if (replace) { selection.clear(); selected = selectionPanel = null; }
     },
     destroy() { disposeView(); toolbar.remove(); },
-    update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters || !node.childElementCount)) render(); } };
+    update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getData().clusters !== renderedClusters || !node.childElementCount)) render(); } };
 }
 
 function installStyle$1(document) {
@@ -1303,14 +1315,12 @@ function installStyle$1(document) {
 .cm-annotation-data-editor summary { cursor:pointer; color:var(--cm-muted,#687586); }
 .cm-annotation-categories { padding:0; }
 .cm-annotation-categories > div { display:flex; flex-wrap:wrap; gap:6px 16px; padding:8px 0 2px; }
-.cm-annotation-category-chip { display:inline-flex; align-items:center; gap:4px; margin-left:12px; font-size:12px; }
-.cm-annotation-category-chip::before { content:""; width:9px; height:9px; border-radius:2px; background:var(--category-colour); }
 .cm-annotation-category { display:flex; align-items:center; gap:5px; }
 .cm-annotation-category input[type=text] { min-width:0; width:140px; }
 .cm-annotation-category-remove { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:6px; border:1px solid var(--cm-border,#cbd3de); border-radius:4px; }
 .cm-annotation-matrix { position:relative; }
 .cm-annotation-data-editor .cm-data-actions input[type=number] { width:112px; }
-.cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font-size:13px; width:max-content; min-width:100%; }
+.cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }
 
 .cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,#f3f6fa); }
 .cm-annotation-matrix tr > :first-child { position:sticky; left:0; z-index:1; width:32px; min-width:32px; background:var(--cm-row-background,var(--cm-subtle,#f3f6fa)); }
@@ -1321,7 +1331,7 @@ function installStyle$1(document) {
 .cm-annotation-matrix :is(input:not([type=checkbox]),select) { width:140px; }
 .cm-annotation-column { display:flex; align-items:center; }
 .cm-annotation-column input { font-weight:inherit; }
-.cm-annotation-column button { visibility:hidden; border:0; padding:0 4px; min-height:24px; }
+.cm-annotation-column button { --cm-icon-size:24px; visibility:hidden; }
 .cm-annotation-column:is(:hover,:focus-within) button { visibility:visible; }
 .cm-annotation-add-column { width:36px; }
 .cm-annotation-add-column form { display:flex; gap:4px; }
@@ -1339,12 +1349,12 @@ function installStyle$1(document) {
 }
 
 /** Quick styling stays in the plot; data and membership editing live in the data editor. */
-function createAnnotationControls({ getPanels, patch, document, panelUid, annotationApi, onEditData }) {
+function createAnnotationControls({ getData, patch, document, panelUid, annotationApi, onEditData }) {
   const { ANNOTATION_DEFAULTS: defaults, ANNOTATION_PALETTES: palettes, resolveAnnotationScale } = annotationApi;
   const node = document.createElement("fieldset"); node.className = "cm-annotation-controls";
   let applying = false;
   const run = createActionRunner((message) => { node.querySelector("[data-annotation-error]").textContent = message; });
-  const current = () => getPanels().find((panel) => panel.uid === panelUid);
+  const current = () => (getData()?.annotationPanels || []).find((panel) => panel.uid === panelUid);
   const ui = createControls(document), { el, row } = ui;
   const input = (parent, label, field, value, type = "text", options = {}) => {
     const control = ui.input(row(parent, label), label, value, type, undefined, options);
@@ -1553,7 +1563,8 @@ function installStyle(document) {
 }
 
 /** Renderer-independent editing affordances, kept outside the exported scene. */
-function createAnnotationOverlay({ container, getPanels, getClusters, getTree, patch, annotationApi, editData }) {
+function createAnnotationOverlay({ container, getData, patch, annotationApi, editData }) {
+  const getPanels = () => getData()?.annotationPanels || [];
   const { annotationPanelsForFrame, annotationPanelBounds } = annotationApi;
   const document = container.ownerDocument, window = document.defaultView;
   installDataEditorStyle(document);
@@ -1653,12 +1664,12 @@ function createAnnotationOverlay({ container, getPanels, getClusters, getTree, p
     const panel = getPanels().find((panel) => panel.uid === uid);
     if (!panel) return;
     const state = beginMenu("panel", panel.title || uid, button, uid);
-    state.controls = createAnnotationControls({ getPanels, patch, document, panelUid: uid, annotationApi,
+    state.controls = createAnnotationControls({ getData, patch, document, panelUid: uid, annotationApi,
       onEditData: () => {
         if (editData?.(uid)) { close(); return; }
         const dataState = beginMenu("data", "Annotation data", edit, uid);
         menu.classList.add("cm-annotation-menu--data");
-        dataState.controls = createAnnotationDataControls({ document, getPanels, getClusters, getTree, patch, annotationApi });
+        dataState.controls = createAnnotationDataControls({ document, getData, patch, annotationApi });
         dataState.controls.select(uid); menu.append(dataState.controls.node); positionMenu();
       } });
     menu.append(state.controls.node);
@@ -1685,7 +1696,7 @@ function createAnnotationOverlay({ container, getPanels, getClusters, getTree, p
   edit.onclick = () => { if (hovered) openPanel(hovered, edit); };
   add.onclick = () => {
     beginMenu("add", "Add annotation panel", add);
-    const form = createAnnotationCreateControls({ document, getPanels, getClusters, getTree, patch, annotationApi,
+    const form = createAnnotationCreateControls({ document, getData, patch, annotationApi,
       onCreate: (uid) => openPanel(uid, add) });
     menu.append(form.node); showAddFrame(); positionMenu();
     form.node.querySelector("select")?.focus({ preventScroll: true });

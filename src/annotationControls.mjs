@@ -1,12 +1,12 @@
 import { createControls, createActionRunner, colourHex as hex } from "./uiControls.mjs";
 
 /** Quick styling stays in the plot; data and membership editing live in the data editor. */
-export function createAnnotationControls({ getPanels, patch, document, panelUid, annotationApi, onEditData }) {
+export function createAnnotationControls({ getData, patch, document, panelUid, annotationApi, onEditData }) {
   const { ANNOTATION_DEFAULTS: defaults, ANNOTATION_PALETTES: palettes, resolveAnnotationScale } = annotationApi;
   const node = document.createElement("fieldset"); node.className = "cm-annotation-controls";
   let applying = false;
   const run = createActionRunner((message) => { node.querySelector("[data-annotation-error]").textContent = message; });
-  const current = () => getPanels().find((panel) => panel.uid === panelUid);
+  const current = () => (getData()?.annotationPanels || []).find((panel) => panel.uid === panelUid);
   const ui = createControls(document), { el, row } = ui;
   const input = (parent, label, field, value, type = "text", options = {}) => {
     const control = ui.input(row(parent, label), label, value, type, undefined, options);

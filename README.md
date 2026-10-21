@@ -251,16 +251,18 @@ document.querySelector("clinker-editor").chart = chart;
 ```
 
 The data views share a panel layout, cell spacing, row selection, keyed virtual
-scrolling and native controls. The shared layout owns optional tools, record
-counts, batch actions and the scrolling table viewport. Shared selection controls
+scrolling and native controls. Selectors, checkboxes, colour controls, icon
+buttons and batch-action groups use common styles. The shared layout owns
+optional tools, record counts, batch actions and the scrolling table viewport. Shared selection controls
 manage selected counts, select-visible and clear-selection actions, and header
 checkbox state where present.
 Inline fields share native validation and keyboard handling: Enter finishes an
 input edit, and Escape restores the last saved value. Data changes invalidate
 the editor's derived rows, indexes, selection validity and annotation view together.
 Scrolling updates the visible row window without rebuilding headers or batch
-controls. Appearance fields are created when their tab is first opened, then
-synchronized in place as settings change. All edits use the chart's patch or
+controls. Group order can be changed by dragging, arrow keys or the Position
+field, which commits on change without a separate Move button. Appearance fields
+are created when their tab is first opened, then synchronized in place as settings change. All edits use the chart's patch or
 configuration API, with rejected edits reported in the editor.
 
 `<clinker-editor>` uses light DOM and installs the shared native-control styles.

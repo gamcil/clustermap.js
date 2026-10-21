@@ -1,12 +1,30 @@
-import { createControls } from "./uiControls.mjs";
+import { createControls, escapeHtml, colourHex } from "./uiControls.mjs";
+import { DATA_ROW_HEIGHT } from "./virtualRows.mjs";
+
+const attributesMarkup = (attributes) => Object.entries(attributes)
+  .filter(([, value]) => value !== false && value != null)
+  .map(([key, value]) => ` ${key}="${escapeHtml(value === true ? "" : value)}"`).join("");
+
+export const dataCheckboxMarkup = ({ label, checked = false, attributes = {} }) =>
+  `<input${attributesMarkup({ type: "checkbox", "aria-label": label, checked, ...attributes })}>`;
+export const dataColourMarkup = ({ value, label = "Colour", attributes = {} }) =>
+  `<input${attributesMarkup({ type: "color", "aria-label": label, value: colourHex(value), ...attributes })}>`;
+export const dataIconButtonMarkup = ({ label, icon, className = "", attributes = {} }) =>
+  `<button${attributesMarkup({ type: "button", class: `cm-data-icon-button ${className}`.trim(), "aria-label": label, title: label, ...attributes })}>${icon}</button>`;
+
+export const segmentedControlMarkup = ({ label, items, attribute, value, attributes = {} }) =>
+  `<div${attributesMarkup({ class: "cm-data-segmented", role: "group", "aria-label": label, ...attributes })}>${items.map(([key, text]) =>
+    `<button type="button"${attributesMarkup({ [attribute]: key, "aria-pressed": String(key === value) })}>${escapeHtml(text)}</button>`).join("")}</div>`;
+export const updateSegmentedControl = (root, attribute, value) => root.querySelectorAll(`[${attribute}]`)
+  .forEach((button) => button.setAttribute("aria-pressed", String(button.getAttribute(attribute) === value)));
+
+export const dataActionGroupMarkup = (content) => `<span class="cm-data-action-group">${content}</span>`;
 
 /** Shared controls and table primitives for the packaged and inline data editors. */
 export function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
-  const node = document.createElement("label"); node.className = "cm-data-search";
-  const input = document.createElement("input"); input.type = "search";
-  input.placeholder = placeholder; input.setAttribute("aria-label", "Filter records");
+  const ui = createControls(document), node = ui.el("label", undefined, null, "cm-data-search");
+  const input = ui.input(node, "Filter records", "", "search"); input.placeholder = placeholder;
   if (onInput) input.oninput = () => onInput(input.value);
-  node.append(input);
   return { node, input };
 }
 
@@ -30,7 +48,7 @@ export function createSelectionControls(panel, { selection, onChange, checkbox }
   const ui = createControls(panel.node.ownerDocument);
   const count = ui.el("strong", undefined, panel.actions);
   const actions = ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
-  const clear = ui.button(panel.actions, "Clear selection", () => { selection.clear(); onChange(); });
+  ui.button(panel.actions, "Clear selection", () => { selection.clear(); onChange(); });
   let visibleIds = [];
   panel.selectVisible.onclick = () => { selection.setMany(visibleIds); onChange(); };
   if (checkbox) checkbox.onchange = () => { selection.setMany(visibleIds, checkbox.checked); onChange(); };
@@ -45,7 +63,6 @@ export function createSelectionControls(panel, { selection, onChange, checkbox }
       panel.selectVisible.textContent = `Select all ${ids.length.toLocaleString()} visible${selectSuffix}`;
       panel.actions.hidden = !selection.size;
       count.textContent = `${selection.size.toLocaleString()} ${noun}${selection.size === 1 ? "" : "s"} selected`;
-      clear.disabled = !selection.size;
       if (checkbox) {
         checkbox.checked = all;
         checkbox.indeterminate = selectedVisible > 0 && !all;
@@ -70,6 +87,7 @@ export function installDataEditorStyle(document) {
 @layer clinker-editor {
 .cm-data-ui { color:var(--cm-foreground,#273444); font:13px/1.4 system-ui,sans-serif; }
 .cm-data-ui [hidden] { display:none!important; }
+.cm-data-ui form { margin:0; }
 .cm-data-ui :is(button,input,select,textarea) { font:inherit; color:inherit; box-sizing:border-box; }
 .cm-data-ui :where(button,select,input:not([type=color]):not([type=checkbox]):not([type=range]),textarea) { min-height:var(--cm-control-height,30px); padding:var(--cm-control-padding,4px 8px); border:1px solid var(--cm-border,#cbd3de); border-radius:var(--cm-control-radius,6px); background:var(--cm-surface,#fff); }
 .cm-data-ui input[type=checkbox] { cursor:pointer; }
@@ -80,6 +98,20 @@ export function installDataEditorStyle(document) {
 .cm-data-ui summary { cursor:pointer; }
 .cm-data-ui summary:hover { color:var(--cm-accent,#1677ff); }
 .cm-data-ui button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
+.cm-data-segmented { display:flex; padding:3px; border:1px solid var(--cm-border,#e0e5eb); border-radius:7px; background:var(--cm-subtle,#f3f6fa); }
+.cm-data-segmented button { min-height:28px; border:0; background:transparent; }
+.cm-data-segmented button[aria-pressed=true] { background:var(--cm-surface,#fff); box-shadow:0 1px 2px rgba(29,43,61,.16); font-weight:600; }
+.cm-data-segmented button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-foreground,#273444); }
+.cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,#64748b); line-height:1; }
+.cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-accent,#1677ff); }
+.cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.cm-data-ui .cm-data-icon-button--edit { --cm-icon-size:20px; display:none; flex:0 0 20px; }
+.cm-data-row:is(:hover,:focus-within,.is-selected) .cm-data-icon-button--edit { display:inline-grid; }
+.cm-data-icon-button--edit svg { width:14px; height:14px; }
+.cm-data-action-group { display:flex; align-items:center; gap:6px; }
+.cm-data-action-group + .cm-data-action-group { border-left:1px solid var(--cm-border,#d5e0ee); padding-left:10px; }
+.cm-data-action-group label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+.cm-data-action-group input[type=number] { width:112px; }
 .cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
 .cm-data-search { display:flex; flex:1; min-width:140px; }
 .cm-data-search input { width:100%; }
@@ -92,15 +124,16 @@ export function installDataEditorStyle(document) {
 .cm-data-actions strong { padding:4px 7px; border-radius:5px; background:var(--cm-selection,#d6e6fc); color:var(--cm-foreground,#273444); }
 .cm-data-selection-actions { display:contents; }
 .cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
-.cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; font-weight:650; text-align:left; }
-.cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:34px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; }
-.cm-data-row > :is(th,td) { height:34px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
+.cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
+.cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; line-height:20px; }
+.cm-data-row > :is(th,td) { height:${DATA_ROW_HEIGHT}px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
 .cm-data-row:is(:hover,:focus-within) { --cm-row-background:var(--cm-hover,#e3ecf8); }
 .cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
-.cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; vertical-align:middle; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
 span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
-.cm-data-cell--select input { margin:0; }
+.cm-data-cell--select input { display:block; margin:auto; }
+.cm-data-cell > input[type=color] { display:block; }
 .cm-data-ui .cm-data-cell .cm-data-field { padding-inline:0; margin-inline:-1px; }
 .cm-data-ui input.cm-data-field.cm-data-cell { padding-inline:7px; }
 .cm-data-placeholder { color:var(--cm-muted,#687586); font-style:normal; }

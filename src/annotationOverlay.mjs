@@ -53,7 +53,8 @@ function installStyle(document) {
 }
 
 /** Renderer-independent editing affordances, kept outside the exported scene. */
-export function createAnnotationOverlay({ container, getPanels, getClusters, getTree, patch, annotationApi, editData }) {
+export function createAnnotationOverlay({ container, getData, patch, annotationApi, editData }) {
+  const getPanels = () => getData()?.annotationPanels || [];
   const { annotationPanelsForFrame, annotationPanelBounds } = annotationApi;
   const document = container.ownerDocument, window = document.defaultView;
   installDataEditorStyle(document);
@@ -153,12 +154,12 @@ export function createAnnotationOverlay({ container, getPanels, getClusters, get
     const panel = getPanels().find((panel) => panel.uid === uid);
     if (!panel) return;
     const state = beginMenu("panel", panel.title || uid, button, uid);
-    state.controls = createAnnotationControls({ getPanels, patch, document, panelUid: uid, annotationApi,
+    state.controls = createAnnotationControls({ getData, patch, document, panelUid: uid, annotationApi,
       onEditData: () => {
         if (editData?.(uid)) { close(); return; }
         const dataState = beginMenu("data", "Annotation data", edit, uid);
         menu.classList.add("cm-annotation-menu--data");
-        dataState.controls = createAnnotationDataControls({ document, getPanels, getClusters, getTree, patch, annotationApi });
+        dataState.controls = createAnnotationDataControls({ document, getData, patch, annotationApi });
         dataState.controls.select(uid); menu.append(dataState.controls.node); positionMenu();
       } });
     menu.append(state.controls.node);
@@ -185,7 +186,7 @@ export function createAnnotationOverlay({ container, getPanels, getClusters, get
   edit.onclick = () => { if (hovered) openPanel(hovered, edit); };
   add.onclick = () => {
     beginMenu("add", "Add annotation panel", add);
-    const form = createAnnotationCreateControls({ document, getPanels, getClusters, getTree, patch, annotationApi,
+    const form = createAnnotationCreateControls({ document, getData, patch, annotationApi,
       onCreate: (uid) => openPanel(uid, add) });
     menu.append(form.node); showAddFrame(); positionMenu();
     form.node.querySelector("select")?.focus({ preventScroll: true });

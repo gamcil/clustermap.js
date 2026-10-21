@@ -10572,6 +10572,9 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     };
   }
 
+  /** Shared fixed-height row window for scrollable data editors. */
+  const DATA_ROW_HEIGHT = 34;
+
   function installDataEditorStyle(document) {
     if (document.getElementById("cm-data-editor-style")) return;
     const style = document.createElement("style"); style.id = "cm-data-editor-style";
@@ -10579,6 +10582,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
 @layer clinker-editor {
 .cm-data-ui { color:var(--cm-foreground,#273444); font:13px/1.4 system-ui,sans-serif; }
 .cm-data-ui [hidden] { display:none!important; }
+.cm-data-ui form { margin:0; }
 .cm-data-ui :is(button,input,select,textarea) { font:inherit; color:inherit; box-sizing:border-box; }
 .cm-data-ui :where(button,select,input:not([type=color]):not([type=checkbox]):not([type=range]),textarea) { min-height:var(--cm-control-height,30px); padding:var(--cm-control-padding,4px 8px); border:1px solid var(--cm-border,#cbd3de); border-radius:var(--cm-control-radius,6px); background:var(--cm-surface,#fff); }
 .cm-data-ui input[type=checkbox] { cursor:pointer; }
@@ -10589,6 +10593,20 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
 .cm-data-ui summary { cursor:pointer; }
 .cm-data-ui summary:hover { color:var(--cm-accent,#1677ff); }
 .cm-data-ui button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
+.cm-data-segmented { display:flex; padding:3px; border:1px solid var(--cm-border,#e0e5eb); border-radius:7px; background:var(--cm-subtle,#f3f6fa); }
+.cm-data-segmented button { min-height:28px; border:0; background:transparent; }
+.cm-data-segmented button[aria-pressed=true] { background:var(--cm-surface,#fff); box-shadow:0 1px 2px rgba(29,43,61,.16); font-weight:600; }
+.cm-data-segmented button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-foreground,#273444); }
+.cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,#64748b); line-height:1; }
+.cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-accent,#1677ff); }
+.cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.cm-data-ui .cm-data-icon-button--edit { --cm-icon-size:20px; display:none; flex:0 0 20px; }
+.cm-data-row:is(:hover,:focus-within,.is-selected) .cm-data-icon-button--edit { display:inline-grid; }
+.cm-data-icon-button--edit svg { width:14px; height:14px; }
+.cm-data-action-group { display:flex; align-items:center; gap:6px; }
+.cm-data-action-group + .cm-data-action-group { border-left:1px solid var(--cm-border,#d5e0ee); padding-left:10px; }
+.cm-data-action-group label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+.cm-data-action-group input[type=number] { width:112px; }
 .cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
 .cm-data-search { display:flex; flex:1; min-width:140px; }
 .cm-data-search input { width:100%; }
@@ -10601,15 +10619,16 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
 .cm-data-actions strong { padding:4px 7px; border-radius:5px; background:var(--cm-selection,#d6e6fc); color:var(--cm-foreground,#273444); }
 .cm-data-selection-actions { display:contents; }
 .cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
-.cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; font-weight:650; text-align:left; }
-.cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:34px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; }
-.cm-data-row > :is(th,td) { height:34px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
+.cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
+.cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; line-height:20px; }
+.cm-data-row > :is(th,td) { height:${DATA_ROW_HEIGHT}px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
 .cm-data-row:is(:hover,:focus-within) { --cm-row-background:var(--cm-hover,#e3ecf8); }
 .cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
-.cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; vertical-align:middle; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
 span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
-.cm-data-cell--select input { margin:0; }
+.cm-data-cell--select input { display:block; margin:auto; }
+.cm-data-cell > input[type=color] { display:block; }
 .cm-data-ui .cm-data-cell .cm-data-field { padding-inline:0; margin-inline:-1px; }
 .cm-data-ui input.cm-data-field.cm-data-cell { padding-inline:7px; }
 .cm-data-placeholder { color:var(--cm-muted,#687586); font-style:normal; }
@@ -17073,7 +17092,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
               editData: (panelUid) => !container.node().dispatchEvent(new CustomEvent("clustermap:edit-annotation", {
                 bubbles: true, cancelable: true, detail: { chart: my, panelUid },
               })),
-              getTree: () => currentData?.tree, getClusters: () => currentData?.clusters || [], getPanels: () => currentData?.annotationPanels || [],
+              getData: () => currentData,
               patch: (operations) => my.patch(operations) });
             annotationOverlay.update(annotationUiContext);
           }).catch((error) => console.error("Could not load optional annotation controls", error))

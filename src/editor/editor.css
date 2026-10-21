@@ -4,51 +4,38 @@
   clinker-editor.cm-editor[resizable] { overflow: hidden; }
   clinker-editor .cm-editor__resize-handle { height: 10px; flex: 0 0 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }
   clinker-editor .cm-editor__resize-handle::after { display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: var(--cm-muted,#aaa); content: ""; }
-  clinker-editor .cm-editor__header, clinker-editor .cm-editor__toolbar { display: flex; align-items: center; gap: 8px; }
+  clinker-editor .cm-editor__header { display: flex; align-items: center; gap: 8px; }
   clinker-editor .cm-editor__header { justify-content: space-between; margin-bottom: 8px; }
   clinker-editor .cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }
   clinker-editor .cm-editor__tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--cm-border,#e1e5ea); }
   clinker-editor .cm-editor__tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; }
   clinker-editor .cm-editor__tabs button[aria-selected="true"] { border-bottom-color: var(--cm-accent,#1677ff); font-weight: 600; }
   clinker-editor .cm-editor__panel { display: flex; min-height: 0; flex: 1; flex-direction: column; }
-  clinker-editor .cm-editor__panel[hidden] { display: none; }
   clinker-editor [data-panel="data"] { gap:8px; }
   clinker-editor .cm-editor__annotation-editor { display:flex; flex:1; min-height:0; }
   clinker-editor .cm-editor__annotation-editor > .cm-annotation-data-editor { flex:1; min-width:0; }
-  /* These elements have layout display rules, so restate hidden explicitly. */
-  clinker-editor .cm-editor__segmented[hidden], clinker-editor .cm-editor__head[hidden] { display: none; }
-  clinker-editor .cm-editor__segmented { display: flex; padding: 3px; border: 1px solid var(--cm-border,#e0e5eb); border-radius: 7px; background: var(--cm-subtle,#f3f6fa); }
-  clinker-editor .cm-editor__segmented button { min-height: 28px; border: 0; background: transparent; }
-  clinker-editor .cm-editor__segmented button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-foreground,#273444); }
-  clinker-editor .cm-editor__segmented button[aria-pressed="true"] { background: var(--cm-surface,#fff); box-shadow: 0 1px 2px rgba(29,43,61,.16); font-weight: 600; }
-  clinker-editor .cm-editor__segmented button[aria-pressed="true"]:hover { background:var(--cm-hover,#e3ecf8); }
   clinker-editor .cm-editor__search { display: flex; min-width: 180px; flex: 1; }
   clinker-editor .cm-editor__search input { width: 100%; }
   clinker-editor .cm-editor__member-filter { display: flex; align-items: center; gap: 6px; color: var(--cm-muted,#526178); font-size: 12px; }
-  clinker-editor .cm-editor__member-filter[hidden] { display: none; }
   clinker-editor .cm-editor__member-filter button, clinker-editor .cm-editor__appearance-toolbar > button { display: grid; place-items: center; width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,#64748b); font-size: 17px; line-height: 1; }
-  clinker-editor .cm-editor__action-group { display: flex; align-items: center; gap: 6px; }
-  clinker-editor .cm-editor__action-group + .cm-editor__action-group { border-left: 1px solid var(--cm-border,#d5e0ee); padding-left: 10px; }
-  clinker-editor .cm-editor__action-group label { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
-  clinker-editor .cm-editor__action-group input[type="number"] { width: 112px; }
   clinker-editor .cm-editor__danger { border-color: var(--cm-danger,#e4aaa5); color: var(--cm-danger,#b3261e); background: var(--cm-hover,#fffafa); }
   clinker-editor .cm-editor__annotation-toolbar, clinker-editor .cm-editor__annotation-toolbar > .cm-data-toolbar { display:contents; }
-  clinker-editor .cm-editor__annotation-toolbar[hidden] { display:none; }
   clinker-editor .cm-editor__annotation-toolbar select { max-width:220px; }
   clinker-editor .cm-editor__head, clinker-editor .cm-editor__row { display: grid; align-items: center; gap:0; min-width:640px; padding:0; box-sizing: border-box; }
-  clinker-editor .cm-editor__head { min-height:32px; }
+  clinker-editor .cm-editor__head { position:sticky; top:0; z-index:2; }
   clinker-editor .cm-editor__sort { display: flex; align-items: center; gap: 2px; min-height:24px; border:0; background:transparent; color:inherit; font-size:inherit; font-weight:inherit; text-align:left; }
   clinker-editor .cm-editor__sort:hover { border: 0; background: transparent; color: var(--cm-accent,#145da8); }
   clinker-editor .cm-editor__sort span { color: var(--cm-muted,#7b8a9e); font-size: 12px; }
   clinker-editor .cm-editor__row { cursor: pointer; }
-  clinker-editor .cm-editor__head--groups, clinker-editor .cm-editor__row--groups { grid-template-columns: 32px 28px minmax(180px, 1fr) minmax(150px, 300px) 86px 28px 56px; }
+  clinker-editor .cm-editor__head--groups, clinker-editor .cm-editor__row--groups { min-width:660px; grid-template-columns: 32px 28px minmax(180px, 1fr) minmax(150px, 300px) 86px 28px 56px; }
   clinker-editor .cm-editor__head--genes, clinker-editor .cm-editor__row--genes { grid-template-columns: 32px minmax(160px, 1.3fr) minmax(100px, .85fr) minmax(110px, 1fr) minmax(100px, .85fr) 56px; }
-  clinker-editor .cm-editor__head--links, clinker-editor .cm-editor__row--links { grid-template-columns: 32px minmax(120px, 1fr) minmax(120px, 1fr) 76px minmax(150px, .95fr) minmax(120px, .8fr) 28px 56px; }
-  clinker-editor .cm-editor__tree-row { display: grid; grid-template-columns: 22px 32px minmax(180px, 1fr); align-items: center; gap:0; padding:0 0 0 calc(var(--depth, 0) * 18px); box-sizing: border-box; }
-  clinker-editor .cm-editor__tree-gene { grid-template-columns: 32px minmax(180px, 1fr) minmax(120px, .75fr) 56px; }
+  clinker-editor .cm-editor__head--links, clinker-editor .cm-editor__row--links { min-width:802px; grid-template-columns: 32px minmax(120px, 1fr) minmax(120px, 1fr) 76px minmax(150px, .95fr) minmax(120px, .8fr) 28px 56px; }
+  clinker-editor .cm-editor__head--tree, clinker-editor .cm-editor__tree-row { grid-template-columns:32px 28px minmax(180px, 1fr) minmax(120px, .75fr) 56px; }
+  clinker-editor .cm-editor__tree-row { display:grid; align-items:center; min-width:640px; gap:0; padding:0; }
+  clinker-editor .cm-editor__tree-parent > :last-child { grid-column:3 / -1; margin-left:calc(var(--depth, 0) * 18px); }
+  clinker-editor .cm-editor__tree-gene > .cm-editor__editable-field { padding-left:calc(8px + var(--depth, 0) * 18px); }
   clinker-editor .cm-editor__tree-parent { --cm-row-background:var(--cm-subtle,#f3f6fa); font-weight: 550; }
-  clinker-editor .cm-editor__tree-toggle { width: 20px; min-width: 20px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,#64748b); font-size: 14px; }
-  clinker-editor .cm-editor__tree-toggle:hover { background: transparent; color: var(--cm-accent,#145da8); }
+  clinker-editor .cm-editor__tree-toggle { --cm-icon-size:24px; font-size:14px; }
   clinker-editor .cm-editor__tree-separator { color: var(--cm-muted,#96a4b5); font-size: 12px; }
   clinker-editor .cm-editor__tree-combined { display: flex; min-width: 0; align-items: center; gap: 4px; }
   /* A hover-only pencil must not make the adjacent cluster or locus label
@@ -58,15 +45,10 @@
   clinker-editor .cm-editor__tree-combined > .cm-editor__editable-field:first-child { color: var(--cm-foreground,#324155); font-weight: 650; }
   clinker-editor .cm-editor__tree-combined > .cm-editor__editable-field:nth-of-type(2) { color: var(--cm-muted,#526178); font-weight: 550; }
   clinker-editor .cm-editor__tree-combined .cm-editor-inline-input, clinker-editor .cm-editor__tree-name-with-count .cm-editor-inline-input { flex: 0 1 auto; width: auto; min-width: 8ch; }
-  clinker-editor .cm-editor__tree-combined .cm-editor-inline-input--fixed, clinker-editor .cm-editor__tree-name-with-count .cm-editor-inline-input--fixed { flex: 0 0 auto; }
   clinker-editor .cm-editor__tree-count { color: var(--cm-muted,#5f6d7f); font-size: 12px; font-weight: 600; white-space: nowrap; }
   clinker-editor .cm-editor__tree-name-with-count { display: flex; align-items: center; gap: 5px; min-width: 0; }
   clinker-editor .cm-editor-inline-input { width: 100%; min-width: 0; }
-  clinker-editor .cm-editor__visibility { display: inline-grid; place-items: center; width: 28px; min-width: 28px; min-height: 28px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,#64748b); }
-  clinker-editor .cm-editor__visibility:hover { background: transparent; color: var(--cm-accent,#145da8); }
-  clinker-editor .cm-editor__visibility svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  clinker-editor .cm-editor__reorder { width: 24px; min-width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,#8a96a6); cursor: grab; font-size: 15px; letter-spacing: -3px; }
-  clinker-editor .cm-editor__reorder:hover, clinker-editor .cm-editor__reorder:focus-visible { background: var(--cm-hover,#e7f0ff); color: var(--cm-accent,#145da8); }
+  clinker-editor .cm-editor__reorder { --cm-icon-size:24px; cursor:grab; font-size:15px; letter-spacing:-3px; }
   clinker-editor .cm-editor__drop-target { box-shadow: inset 0 2px var(--cm-accent,#1677ff); }
   clinker-editor .cm-editor__editable-field { position: relative; display: flex; min-width: 0; align-items: center; }
   clinker-editor .cm-editor__editable-field .cm-editor-inline-input { flex: 1; }
@@ -74,16 +56,8 @@
      retain the measured label width in WebKit as well as Chromium/Firefox. */
   clinker-editor .cm-editor__tree-combined .cm-editor-inline-input--fixed, clinker-editor .cm-editor__tree-name-with-count .cm-editor-inline-input--fixed { flex: 0 0 auto; }
   clinker-editor .cm-editor__editable-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* Keep edit affordances out of the resting layout.  Unlike an absolute
-     overlay, a hovered pencil occupies normal flow and cannot cover the next
-     cluster/locus label or steal its click target. */
-  clinker-editor .cm-editor__edit-icon { display: none; flex: 0 0 20px; place-items: center; width: 20px; min-width: 20px; min-height: 20px; padding: 0; border: 0; background: transparent; color: var(--cm-accent,#5d82b1); }
-  clinker-editor .cm-editor__row:hover .cm-editor__edit-icon, clinker-editor .cm-editor__row:focus-within .cm-editor__edit-icon, clinker-editor .cm-editor__row.is-selected .cm-editor__edit-icon, clinker-editor .cm-editor__tree-row:hover .cm-editor__edit-icon, clinker-editor .cm-editor__tree-row:focus-within .cm-editor__edit-icon, clinker-editor .cm-editor__tree-row.is-selected .cm-editor__edit-icon { display: grid; }
-  clinker-editor .cm-editor__edit-icon:hover { background: transparent; color: var(--cm-accent,#145da8); }
-  clinker-editor .cm-editor__edit-icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   clinker-editor .cm-editor__empty { padding: 16px; color: var(--cm-muted,#667386); text-align: center; }
   clinker-editor .cm-editor__appearance-toolbar { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
-  clinker-editor .cm-editor__appearance-toolbar > button[hidden] { display: none; }
   clinker-editor .cm-editor__appearance { display: block; overflow: auto; padding: 4px 0; }
   clinker-editor .cm-editor__appearance-tree { min-width:0; }
   clinker-editor .cm-editor__appearance-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px 20px; }

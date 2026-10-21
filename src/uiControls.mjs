@@ -1,5 +1,8 @@
 import { color } from "d3-color";
 
+export const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+
 export const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
 
 /** Native controls with consistent labels, values and validity handling. */
