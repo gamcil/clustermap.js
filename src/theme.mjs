@@ -13,16 +13,16 @@ export function resolveTheme(mode = "auto") {
 /** Figure colours are independent of the interface/system theme. */
 export function figureConfig(config) {
   if (config.figureStyle) return config;
-  const theme = { background: config.plot.background, foreground: "#000000",
+  const theme = { background: config.plot?.background ?? "#ffffff", foreground: "#000000",
     outline: "#000000", branch: "#555555", guide: "#999999",
     muted: "#687586", missing: "#eeeeee" };
   return { ...config, figureStyle: theme,
     tree: { ...config.tree, textColour: theme.foreground,
-      branch: { ...config.tree.branch, colour: config.tree.branch.colour ?? theme.branch },
-      leafGuide: { ...config.tree.leafGuide, colour: config.tree.leafGuide.colour ?? theme.guide } },
-    gene: { ...config.gene, shape: { ...config.gene.shape, stroke: config.gene.shape.stroke ?? theme.outline } },
-    locus: { ...config.locus, trackBar: { ...config.locus.trackBar, colour: config.locus.trackBar.colour ?? theme.outline } },
-    scaleBar: { ...config.scaleBar, colour: config.scaleBar.colour ?? theme.foreground },
+      branch: { ...config.tree?.branch, colour: config.tree?.branch?.colour ?? theme.branch },
+      leafGuide: { ...config.tree?.leafGuide, colour: config.tree?.leafGuide?.colour ?? theme.guide } },
+    gene: { ...config.gene, shape: { ...config.gene?.shape, stroke: config.gene?.shape?.stroke ?? theme.outline } },
+    locus: { ...config.locus, trackBar: { ...config.locus?.trackBar, colour: config.locus?.trackBar?.colour ?? theme.outline } },
+    scaleBar: { ...config.scaleBar, colour: config.scaleBar?.colour ?? theme.foreground },
   };
 }
 

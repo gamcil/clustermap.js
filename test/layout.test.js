@@ -114,6 +114,7 @@ test("scene derives world-space geometry without DOM state", async () => {
   const { chrome: previewChrome, ...previewWithoutChrome } = locusOffsetPreview;
   assert.deepEqual(previewWithoutChrome, {
     type: "locus-offset",
+    contentMaxX: 39,
     locusUid: "top-locus",
     offsetX: 13,
     clusterLabelOffsets: new Map([
