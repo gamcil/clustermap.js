@@ -10528,7 +10528,33 @@ function createControls(document) {
     if (onChange) node.onchange = () => onChange(node.value);
     return node;
   };
-  return { el, row, button, input, select };
+  const field = (parent, label, value, { type = "text", entries, options, commit, cancel } = {}) =>
+    bindEditableField(entries ? select(parent, label, value, entries) : input(parent, label, value, type, undefined, options),
+      { commit, cancel });
+  return { el, row, button, input, select, field };
+}
+
+/** The same inline-field behaviour for DOM-built and markup-built tables. */
+function bindEditableField(control, { commit, cancel }) {
+  control.classList.add("cm-data-field");
+  let saved = control.value;
+  control.onchange = () => {
+    control.setCustomValidity("");
+    if (!control.checkValidity()) { control.reportValidity(); return; }
+    if (control.value === saved) return;
+    if (commit(control.value, control) !== false) saved = control.value;
+    else control.reportValidity();
+  };
+  control.onkeydown = (event) => {
+    if (event.isComposing) return;
+    if (event.key === "Escape") {
+      event.preventDefault(); event.stopPropagation();
+      control.value = saved; control.setCustomValidity(""); cancel?.();
+    } else if (event.key === "Enter" && control.tagName === "INPUT") {
+      event.preventDefault(); control.blur();
+    }
+  };
+  return control;
 }
 
 /** Report rejected UI edits consistently while leaving validation in the model. */

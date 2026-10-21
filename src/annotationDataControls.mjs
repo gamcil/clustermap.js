@@ -17,17 +17,17 @@ export function createAnnotationDataControls({ document, getPanels, getClusters,
   const selection = new RowSelection();
   let selectionPanel = null, batchColumn = "0", batchValue = "";
   const current = () => getPanels().find((panel) => panel.uid === selected);
-  const { el, button, input, select } = createControls(document);
+  const { el, button, input, select, field } = createControls(document);
   const error = (message) => { node.querySelector('[data-data-error]').textContent = message; };
   const run = createActionRunner(error);
-  const commit = (operations, refresh = true) => {
+  const commit = (operations, refresh = true, control) => {
     applying = true;
-    try { run(() => {
+    try { return run(() => {
       patch(operations);
       if (refresh) render(); else { renderedPanel = current(); renderedPanels = getPanels(); }
-    }); } finally { applying = false; }
+    }, control); } finally { applying = false; }
   };
-  const update = (changes, refresh = true) => commit([{ type: "annotationPanels.update", ids: [selected], changes }], refresh);
+  const update = (changes, refresh = true, control) => commit([{ type: "annotationPanels.update", ids: [selected], changes }], refresh, control);
   const categoryScale = (panel, domain, colours) => ({ ...panel.scale, type: "categorical", domain,
     colours: colours.length ? colours : [...ANNOTATION_PALETTES.Qualitative] });
   const renderCategories = (parent, panel) => {
@@ -104,9 +104,10 @@ export function createAnnotationDataControls({ document, getPanels, getClusters,
     cell("th", head).textContent = "Cluster";
     panel.columns.forEach((column, index) => {
       const heading = cell("th", head), row = el("div", undefined, heading); row.className = "cm-annotation-column";
-      input(row, `Column ${index + 1} name`, column, "text", (value) => {
-        const columns = [...current().columns]; columns[index] = value; update({ columns });
-      }).classList.add("cm-data-field");
+      field(row, `Column ${index + 1} name`, column, { commit: (value, control) => {
+        const columns = [...current().columns]; columns[index] = value;
+        return update({ columns }, true, control);
+      } });
       if (panel.type === "heatmap") {
         const remove = button(row, "×", () => update({ columns: panel.columns.filter((_, i) => i !== index),
           values: Object.fromEntries(Object.entries(current().values).map(([uid, values]) => [uid, values.filter((_, i) => i !== index)])) }));
@@ -164,22 +165,20 @@ export function createAnnotationDataControls({ document, getPanels, getClusters,
       panel.columns.forEach((column, index) => {
         const valueCell = cell("td", row), label = `${cluster.name || cluster.uid}: ${column}`;
         const value = current().values[cluster.uid]?.[index] ?? null;
-        const change = (value) => {
+        const change = (value, control) => {
           const source = current(), values = [...(source.values[cluster.uid] ?? source.columns.map(() => null))];
           values[index] = value;
-          update({ values: { ...source.values, [cluster.uid]: values },
+          return update({ values: { ...source.values, [cluster.uid]: values },
             ...(categorical && !source.scale?.domain ? { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } : {}),
-          }, false);
+          }, false, control);
         };
-        if (categorical) select(valueCell, label, value === null ? "missing" : String(resolved.domain.indexOf(value)),
-          [["missing", "Missing"], ...resolved.domain.map((item, i) => [String(i), item])],
-          (key) => change(key === "missing" ? null : resolved.domain[Number(key)]));
-        else {
-          const field = input(valueCell, label, value, "number", (value) => change(value === "" ? null : Number(value)));
-          field.placeholder = "—";
-        }
+        if (categorical) field(valueCell, label, value === null ? "missing" : String(resolved.domain.indexOf(value)), {
+          entries: [["missing", "Missing"], ...resolved.domain.map((item, i) => [String(i), item])],
+          commit: (key, control) => change(key === "missing" ? null : resolved.domain[Number(key)], control),
+        });
+        else field(valueCell, label, value, { type: "number", options: { placeholder: "—" },
+          commit: (value, control) => change(value === "" ? null : Number(value), control) });
       });
-      for (const field of row.querySelectorAll("input:not([type=checkbox]),select")) field.classList.add("cm-data-field");
       if (extra) cell("td", row);
       return row;
     };
@@ -328,6 +327,10 @@ export function createAnnotationDataControls({ document, getPanels, getClusters,
     clearSelection,
     get filter() { return filter; },
     setFilter(value) { filter = value; filterRows(); },
+    invalidate({ replace = false } = {}) {
+      renderedPanel = renderedPanels = renderedClusters = null;
+      if (replace) { selection.clear(); selected = selectionPanel = null; }
+    },
     destroy() { disposeView(); toolbar.remove(); },
     update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters || !node.childElementCount)) render(); } };
 }

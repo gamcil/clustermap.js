@@ -439,7 +439,33 @@ function createControls(document) {
     if (onChange) node.onchange = () => onChange(node.value);
     return node;
   };
-  return { el, row, button, input, select };
+  const field = (parent, label, value, { type = "text", entries, options, commit, cancel } = {}) =>
+    bindEditableField(entries ? select(parent, label, value, entries) : input(parent, label, value, type, undefined, options),
+      { commit, cancel });
+  return { el, row, button, input, select, field };
+}
+
+/** The same inline-field behaviour for DOM-built and markup-built tables. */
+function bindEditableField(control, { commit, cancel }) {
+  control.classList.add("cm-data-field");
+  let saved = control.value;
+  control.onchange = () => {
+    control.setCustomValidity("");
+    if (!control.checkValidity()) { control.reportValidity(); return; }
+    if (control.value === saved) return;
+    if (commit(control.value, control) !== false) saved = control.value;
+    else control.reportValidity();
+  };
+  control.onkeydown = (event) => {
+    if (event.isComposing) return;
+    if (event.key === "Escape") {
+      event.preventDefault(); event.stopPropagation();
+      control.value = saved; control.setCustomValidity(""); cancel?.();
+    } else if (event.key === "Enter" && control.tagName === "INPUT") {
+      event.preventDefault(); control.blur();
+    }
+  };
+  return control;
 }
 
 /** Report rejected UI edits consistently while leaving validation in the model. */
@@ -954,17 +980,17 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
   const selection = new RowSelection();
   let selectionPanel = null, batchColumn = "0", batchValue = "";
   const current = () => getPanels().find((panel) => panel.uid === selected);
-  const { el, button, input, select } = createControls(document);
+  const { el, button, input, select, field } = createControls(document);
   const error = (message) => { node.querySelector('[data-data-error]').textContent = message; };
   const run = createActionRunner(error);
-  const commit = (operations, refresh = true) => {
+  const commit = (operations, refresh = true, control) => {
     applying = true;
-    try { run(() => {
+    try { return run(() => {
       patch(operations);
       if (refresh) render(); else { renderedPanel = current(); renderedPanels = getPanels(); }
-    }); } finally { applying = false; }
+    }, control); } finally { applying = false; }
   };
-  const update = (changes, refresh = true) => commit([{ type: "annotationPanels.update", ids: [selected], changes }], refresh);
+  const update = (changes, refresh = true, control) => commit([{ type: "annotationPanels.update", ids: [selected], changes }], refresh, control);
   const categoryScale = (panel, domain, colours) => ({ ...panel.scale, type: "categorical", domain,
     colours: colours.length ? colours : [...ANNOTATION_PALETTES.Qualitative] });
   const renderCategories = (parent, panel) => {
@@ -1041,9 +1067,10 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
     cell("th", head).textContent = "Cluster";
     panel.columns.forEach((column, index) => {
       const heading = cell("th", head), row = el("div", undefined, heading); row.className = "cm-annotation-column";
-      input(row, `Column ${index + 1} name`, column, "text", (value) => {
-        const columns = [...current().columns]; columns[index] = value; update({ columns });
-      }).classList.add("cm-data-field");
+      field(row, `Column ${index + 1} name`, column, { commit: (value, control) => {
+        const columns = [...current().columns]; columns[index] = value;
+        return update({ columns }, true, control);
+      } });
       if (panel.type === "heatmap") {
         const remove = button(row, "×", () => update({ columns: panel.columns.filter((_, i) => i !== index),
           values: Object.fromEntries(Object.entries(current().values).map(([uid, values]) => [uid, values.filter((_, i) => i !== index)])) }));
@@ -1101,22 +1128,20 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
       panel.columns.forEach((column, index) => {
         const valueCell = cell("td", row), label = `${cluster.name || cluster.uid}: ${column}`;
         const value = current().values[cluster.uid]?.[index] ?? null;
-        const change = (value) => {
+        const change = (value, control) => {
           const source = current(), values = [...(source.values[cluster.uid] ?? source.columns.map(() => null))];
           values[index] = value;
-          update({ values: { ...source.values, [cluster.uid]: values },
+          return update({ values: { ...source.values, [cluster.uid]: values },
             ...(categorical && !source.scale?.domain ? { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } : {}),
-          }, false);
+          }, false, control);
         };
-        if (categorical) select(valueCell, label, value === null ? "missing" : String(resolved.domain.indexOf(value)),
-          [["missing", "Missing"], ...resolved.domain.map((item, i) => [String(i), item])],
-          (key) => change(key === "missing" ? null : resolved.domain[Number(key)]));
-        else {
-          const field = input(valueCell, label, value, "number", (value) => change(value === "" ? null : Number(value)));
-          field.placeholder = "—";
-        }
+        if (categorical) field(valueCell, label, value === null ? "missing" : String(resolved.domain.indexOf(value)), {
+          entries: [["missing", "Missing"], ...resolved.domain.map((item, i) => [String(i), item])],
+          commit: (key, control) => change(key === "missing" ? null : resolved.domain[Number(key)], control),
+        });
+        else field(valueCell, label, value, { type: "number", options: { placeholder: "—" },
+          commit: (value, control) => change(value === "" ? null : Number(value), control) });
       });
-      for (const field of row.querySelectorAll("input:not([type=checkbox]),select")) field.classList.add("cm-data-field");
       if (extra) cell("td", row);
       return row;
     };
@@ -1265,6 +1290,10 @@ function createAnnotationDataControls({ document, getPanels, getClusters, getTre
     clearSelection,
     get filter() { return filter; },
     setFilter(value) { filter = value; filterRows(); },
+    invalidate({ replace = false } = {}) {
+      renderedPanel = renderedPanels = renderedClusters = null;
+      if (replace) { selection.clear(); selected = selectionPanel = null; }
+    },
     destroy() { disposeView(); toolbar.remove(); },
     update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters || !node.childElementCount)) render(); } };
 }
@@ -2983,7 +3012,8 @@ function editableCell(kind, id, value, placeholder, compact = false, width = nul
   const fixed = Number.isFinite(width);
   const size = compact && !fixed ? ` size="${Math.max(8, Math.min(30, length + 1))}"` : "";
   const style = Number.isFinite(width) ? ` style="width:${Math.ceil(width) + 2}px;min-width:${Math.ceil(width) + 2}px"` : "";
-  return `<input class="cm-data-cell cm-data-field cm-editor-inline-input${fixed ? " cm-editor-inline-input--fixed" : ""}" data-edit="${kind}" data-id="${escapeHtml(id)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"${size}${style}>`;
+  const constraints = kind === "link:identity" ? ' type="number" min="0" max="100" step="any" required' : ' type="text"';
+  return `<input${constraints} aria-label="${escapeHtml(placeholder)}: ${escapeHtml(id)}" class="cm-data-cell cm-data-field cm-editor-inline-input${fixed ? " cm-editor-inline-input--fixed" : ""}" data-edit="${kind}" data-id="${escapeHtml(id)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"${size}${style}>`;
 }
 
 function editableField(kind, id, value, placeholder, label, editing, compact = false, width = null) {
@@ -3074,10 +3104,8 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.#unsubscribe?.();
     this.#unsubscribe = null;
     this.#chart = value || null;
-    this.#selected.clear(); this.#selectionData = null; this.#rowsCache = null;
-    this.#dataCache = null;
+    this.#invalidateData({ replace: true });
     this.#subscribe();
-    this.#initializeExpanded();
     this.#render();
   }
 
@@ -3169,16 +3197,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
     this.#unsubscribe = this.#chart.on("change", (change) => {
       if (change.type === "data.apply" || change.type === "data.replace") {
-        // Patches can mutate the existing data object, so identity alone does
-        // not invalidate derived rows, indexes or deleted-record selections.
-        this.#dataCache = null;
-        this.#rowsCache = null;
-        this.#selectionData = null;
-      }
-      if (change.type === "data.replace") {
-        this.#selected.clear();
-        this.#expanded.clear();
-        this.#initializeExpanded();
+        this.#invalidateData({ replace: change.type === "data.replace" });
       }
       if (change.type === "data.apply" || change.type === "data.replace") this.#renderData();
       else if (change.type === "config.change" || change.type === "theme.change") this.#renderAppearance();
@@ -3222,15 +3241,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     });
     this.addEventListener("keydown", (event) => {
       if (event.defaultPrevented) return;
-      if (event.key === "Escape" && event.target.matches("[data-edit]")) {
-        event.preventDefault();
-        this.#editWidths.delete(this.#editingKey);
-        this.#editingKey = null;
-        this.#renderData();
-        return;
-      }
       if (event.key === "Escape") this.#activeDataView?.clearSelection();
-      if (event.key === "Enter" && event.target.matches("[data-edit]")) event.target.blur();
       const grip = event.target.closest("[data-reorder]");
       if (grip && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
         event.preventDefault();
@@ -3470,10 +3481,6 @@ class ClinkerEditorElement extends HTMLElementBase {
       this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { colour: target.value } });
       return;
     }
-    if (target.matches("[data-edit]")) {
-      this.#edit(target);
-      return;
-    }
     if (target.matches("[data-batch-colour]")) {
       this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: { colour: target.value } });
       return;
@@ -3486,27 +3493,22 @@ class ClinkerEditorElement extends HTMLElementBase {
     if (target.matches("[data-config]")) this.#setConfig(target);
   }
 
-  #apply(operation) {
-    if (!this.#chart?.patch) return;
-    this.#runEdit(() => this.#chart.patch([operation]));
+  #apply(operation, control) {
+    if (!this.#chart?.patch) return false;
+    return this.#runEdit(() => this.#chart.patch([operation]), control);
   }
 
   #edit(input) {
     const [type, field] = input.dataset.edit.split(":");
     const id = this.#id(input.dataset.id);
     let value = input.value.trim();
-    if (field === "identity") {
-      value = Number(value) / 100;
-      if (!Number.isFinite(value) || value < 0 || value > 1) {
-        this.#editingKey = null;
-        return this.#renderData();
-      }
-    }
+    if (field === "identity") value = Number(value) / 100;
     const operationType = type === "cluster" ? "clusters.update" : type === "locus" ? "loci.update" : `${type}s.update`;
     const changeField = type === "cluster" || type === "locus" ? "name" : field;
     this.#editWidths.delete(this.#editingKey);
     this.#editingKey = null;
-    if (value || field === "subtitle" || field === "label") this.#apply({ type: operationType, ids: [id], changes: { [changeField]: value } });
+    if (value || field === "identity" || field === "subtitle" || field === "label") return this.#apply({ type: operationType, ids: [id], changes: { [changeField]: value } }, input);
+    this.#renderData();
   }
 
   #setConfig(input) {
@@ -3516,6 +3518,25 @@ class ClinkerEditorElement extends HTMLElementBase {
     let config = value;
     for (const key of keys.slice().reverse()) config = { [key]: config };
     this.#runEdit(() => this.#chart.config(config), input);
+  }
+
+  #cancelEdit() {
+    this.#editWidths.delete(this.#editingKey);
+    this.#editingKey = null;
+    this.#renderData();
+  }
+
+  #invalidateData({ replace = false } = {}) {
+    // Patches can mutate data in place; invalidate all derived state together.
+    this.#dataCache = null;
+    this.#rowsCache = null;
+    this.#selectionData = null;
+    this.#annotationEditor?.invalidate({ replace });
+    if (replace) {
+      this.#selected.clear(); this.#expanded.clear(); this.#editWidths.clear();
+      this.#editingKey = null; this.#memberGroupId = null;
+      this.#initializeExpanded();
+    }
   }
 
   #data() { return this.#chart?.data?.() || null; }
@@ -3812,7 +3833,11 @@ class ClinkerEditorElement extends HTMLElementBase {
       const markup = new WeakMap();
       const build = (row, html = row.type ? this.#treeRowMarkup(row) : this.#rowMarkup(row)) => {
         const template = this.ownerDocument.createElement("template"); template.innerHTML = html;
-        const node = template.content.firstElementChild; markup.set(node, html); return node;
+        const node = template.content.firstElementChild;
+        for (const control of node.querySelectorAll("[data-edit]")) bindEditableField(control, {
+          commit: () => this.#edit(control), cancel: () => this.#cancelEdit(),
+        });
+        markup.set(node, html); return node;
       };
       this.#rowView = createVirtualRows({ viewport: table, container: list,
         key: (row) => `${this.#kind}:${row.type || "row"}:${row.key ?? row.id}`,

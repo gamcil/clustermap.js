@@ -3,7 +3,7 @@ import { RowSelection } from "../rowSelection.mjs";
 import { createVirtualRows } from "../virtualRows.mjs";
 import { createAnnotationDataControls } from "../annotationDataControls.mjs";
 import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale, validateAnnotationPanels } from "../annotations.mjs";
-import { colourHex as colourFor, createActionRunner, setMarkup } from "../uiControls.mjs";
+import { colourHex as colourFor, createActionRunner, setMarkup, bindEditableField } from "../uiControls.mjs";
 import { applyTheme, resolveTheme, figureConfig } from "../theme.mjs";
 import { createAppearanceControls } from "./appearanceControls.mjs";
 
@@ -28,7 +28,8 @@ function editableCell(kind, id, value, placeholder, compact = false, width = nul
   const fixed = Number.isFinite(width);
   const size = compact && !fixed ? ` size="${Math.max(8, Math.min(30, length + 1))}"` : "";
   const style = Number.isFinite(width) ? ` style="width:${Math.ceil(width) + 2}px;min-width:${Math.ceil(width) + 2}px"` : "";
-  return `<input class="cm-data-cell cm-data-field cm-editor-inline-input${fixed ? " cm-editor-inline-input--fixed" : ""}" data-edit="${kind}" data-id="${escapeHtml(id)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"${size}${style}>`;
+  const constraints = kind === "link:identity" ? ' type="number" min="0" max="100" step="any" required' : ' type="text"';
+  return `<input${constraints} aria-label="${escapeHtml(placeholder)}: ${escapeHtml(id)}" class="cm-data-cell cm-data-field cm-editor-inline-input${fixed ? " cm-editor-inline-input--fixed" : ""}" data-edit="${kind}" data-id="${escapeHtml(id)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"${size}${style}>`;
 }
 
 function editableField(kind, id, value, placeholder, label, editing, compact = false, width = null) {
@@ -119,10 +120,8 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.#unsubscribe?.();
     this.#unsubscribe = null;
     this.#chart = value || null;
-    this.#selected.clear(); this.#selectionData = null; this.#rowsCache = null;
-    this.#dataCache = null;
+    this.#invalidateData({ replace: true });
     this.#subscribe();
-    this.#initializeExpanded();
     this.#render();
   }
 
@@ -214,16 +213,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
     if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
     this.#unsubscribe = this.#chart.on("change", (change) => {
       if (change.type === "data.apply" || change.type === "data.replace") {
-        // Patches can mutate the existing data object, so identity alone does
-        // not invalidate derived rows, indexes or deleted-record selections.
-        this.#dataCache = null;
-        this.#rowsCache = null;
-        this.#selectionData = null;
-      }
-      if (change.type === "data.replace") {
-        this.#selected.clear();
-        this.#expanded.clear();
-        this.#initializeExpanded();
+        this.#invalidateData({ replace: change.type === "data.replace" });
       }
       if (change.type === "data.apply" || change.type === "data.replace") this.#renderData();
       else if (change.type === "config.change" || change.type === "theme.change") this.#renderAppearance();
@@ -267,15 +257,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
     });
     this.addEventListener("keydown", (event) => {
       if (event.defaultPrevented) return;
-      if (event.key === "Escape" && event.target.matches("[data-edit]")) {
-        event.preventDefault();
-        this.#editWidths.delete(this.#editingKey);
-        this.#editingKey = null;
-        this.#renderData();
-        return;
-      }
       if (event.key === "Escape") this.#activeDataView?.clearSelection();
-      if (event.key === "Enter" && event.target.matches("[data-edit]")) event.target.blur();
       const grip = event.target.closest("[data-reorder]");
       if (grip && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
         event.preventDefault();
@@ -515,10 +497,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { colour: target.value } });
       return;
     }
-    if (target.matches("[data-edit]")) {
-      this.#edit(target);
-      return;
-    }
     if (target.matches("[data-batch-colour]")) {
       this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: { colour: target.value } });
       return;
@@ -531,27 +509,22 @@ export class ClinkerEditorElement extends HTMLElementBase {
     if (target.matches("[data-config]")) this.#setConfig(target);
   }
 
-  #apply(operation) {
-    if (!this.#chart?.patch) return;
-    this.#runEdit(() => this.#chart.patch([operation]));
+  #apply(operation, control) {
+    if (!this.#chart?.patch) return false;
+    return this.#runEdit(() => this.#chart.patch([operation]), control);
   }
 
   #edit(input) {
     const [type, field] = input.dataset.edit.split(":");
     const id = this.#id(input.dataset.id);
     let value = input.value.trim();
-    if (field === "identity") {
-      value = Number(value) / 100;
-      if (!Number.isFinite(value) || value < 0 || value > 1) {
-        this.#editingKey = null;
-        return this.#renderData();
-      }
-    }
+    if (field === "identity") value = Number(value) / 100;
     const operationType = type === "cluster" ? "clusters.update" : type === "locus" ? "loci.update" : `${type}s.update`;
     const changeField = type === "cluster" || type === "locus" ? "name" : field;
     this.#editWidths.delete(this.#editingKey);
     this.#editingKey = null;
-    if (value || field === "subtitle" || field === "label") this.#apply({ type: operationType, ids: [id], changes: { [changeField]: value } });
+    if (value || field === "identity" || field === "subtitle" || field === "label") return this.#apply({ type: operationType, ids: [id], changes: { [changeField]: value } }, input);
+    this.#renderData();
   }
 
   #setConfig(input) {
@@ -561,6 +534,25 @@ export class ClinkerEditorElement extends HTMLElementBase {
     let config = value;
     for (const key of keys.slice().reverse()) config = { [key]: config };
     this.#runEdit(() => this.#chart.config(config), input);
+  }
+
+  #cancelEdit() {
+    this.#editWidths.delete(this.#editingKey);
+    this.#editingKey = null;
+    this.#renderData();
+  }
+
+  #invalidateData({ replace = false } = {}) {
+    // Patches can mutate data in place; invalidate all derived state together.
+    this.#dataCache = null;
+    this.#rowsCache = null;
+    this.#selectionData = null;
+    this.#annotationEditor?.invalidate({ replace });
+    if (replace) {
+      this.#selected.clear(); this.#expanded.clear(); this.#editWidths.clear();
+      this.#editingKey = null; this.#memberGroupId = null;
+      this.#initializeExpanded();
+    }
   }
 
   #data() { return this.#chart?.data?.() || null; }
@@ -857,7 +849,11 @@ export class ClinkerEditorElement extends HTMLElementBase {
       const markup = new WeakMap();
       const build = (row, html = row.type ? this.#treeRowMarkup(row) : this.#rowMarkup(row)) => {
         const template = this.ownerDocument.createElement("template"); template.innerHTML = html;
-        const node = template.content.firstElementChild; markup.set(node, html); return node;
+        const node = template.content.firstElementChild;
+        for (const control of node.querySelectorAll("[data-edit]")) bindEditableField(control, {
+          commit: () => this.#edit(control), cancel: () => this.#cancelEdit(),
+        });
+        markup.set(node, html); return node;
       };
       this.#rowView = createVirtualRows({ viewport: table, container: list,
         key: (row) => `${this.#kind}:${row.type || "row"}:${row.key ?? row.id}`,

@@ -255,6 +255,9 @@ scrolling and native controls. The shared layout owns optional tools, record
 counts, batch actions and the scrolling table viewport. Shared selection controls
 manage selected counts, select-visible and clear-selection actions, and header
 checkbox state where present.
+Inline fields share native validation and keyboard handling: Enter finishes an
+input edit, and Escape restores the last saved value. Data changes invalidate
+the editor's derived rows, indexes, selection validity and annotation view together.
 Scrolling updates the visible row window without rebuilding headers or batch
 controls. Appearance fields are created when their tab is first opened, then
 synchronized in place as settings change. All edits use the chart's patch or
