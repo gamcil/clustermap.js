@@ -53,7 +53,7 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }) => { expect(pageErrors.get(page)).toEqual([]); });
 
 const editor = (page) => page.locator("clinker-editor");
-const view = (page, kind) => editor(page).locator(`[data-kind="${kind}"]`).click();
+const view = (page, kind) => editor(page).locator(`[data-kind-picker] button[value="${kind}"]`).click();
 const matrixRows = (page) => editor(page).locator(".cm-annotation-matrix tbody .cm-data-row");
 async function annotation(page, categorical = false) {
   await view(page, "annotations");
@@ -86,7 +86,7 @@ for (const theme of ["light", "dark"]) {
       else {
         await view(page, ["tree", "list"].includes(kind) ? "genes" : kind);
         if (["tree", "list"].includes(kind)) {
-          await editor(page).locator(`[data-gene-view-kind="${kind}"]`).click();
+          await editor(page).locator(`[data-gene-view] button[value="${kind}"]`).click();
           if (kind === "tree") await editor(page).locator("[data-tree-toggle]").first().click();
         }
       }
@@ -146,7 +146,7 @@ for (const theme of ["light", "dark"]) {
         expect(fieldBox.y + fieldBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height);
         await field.press("Escape");
       }
-      const tab = editor(page).locator('[data-kind="links"]');
+      const tab = editor(page).locator('[data-kind-picker] button[value="links"]');
       await tab.hover();
       await expect(tab).toHaveCSS("background-color", tokens.hover);
       await expect(tab).toHaveCSS("cursor", "pointer");
@@ -819,7 +819,7 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
     expect(await page.evaluate(() => chart.canUndo())).toBe(false);
     await plotToolbar(page).locator("summary").filter({ hasText: /^More…$/ }).click();
     await plotToolbar(page).getByRole("button", { name: "Edit data…", exact: true }).click();
-    await expect(editor(page).locator('[data-kind="genes"]')).toHaveAttribute("aria-pressed", "true");
+    await expect(editor(page).locator('[data-kind-picker] button[value="genes"]')).toHaveAttribute("aria-pressed", "true");
     await expect(editor(page).locator(".cm-data-meta").first()).toContainText("2 genes selected");
     await expect(editor(page).locator(".cm-editor__tree-gene.is-selected")).toHaveCount(2);
     await page.keyboard.press("Escape");
@@ -913,7 +913,7 @@ test("editor parent ranges and contextual actions keep the table stationary", as
   expect((await rows.first().boundingBox()).y).toBe(before.y);
   await expect(editor(page).locator(".cm-data-meta").first()).toContainText("4 genes selected");
   expect(await page.evaluate(() => window.getSelection().toString())).toBe("");
-  await editor(page).locator('[data-gene-view-kind="groups"]').click();
+  await editor(page).locator('[data-gene-view] button[value="groups"]').click();
   const groups = editor(page).locator(".cm-editor__tree-parent");
   await groups.last().getByRole("checkbox").click({ modifiers: ["Shift"] });
   await editor(page).locator(".cm-data-actions clinker-action-menu summary").filter({ hasText: /^Remove…$/ }).click();

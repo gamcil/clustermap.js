@@ -601,9 +601,6 @@ function createDataActionMenu(document, label, content) {
   node.setAttribute("label", label); if (content) node.append(content);
   return node;
 }
-const updateSegmentedControl = (root, attribute, value) => root.querySelectorAll(`[${attribute}]`)
-  .forEach((button) => button.setAttribute("aria-pressed", String(button.getAttribute(attribute) === value)));
-
 /** Shared controls and table primitives for the packaged and inline data editors. */
 function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
   const node = searchTemplate(document).firstElementChild, input = node.querySelector("input");
@@ -670,10 +667,6 @@ function installDataEditorStyle(document) {
 .cm-data-ui summary { cursor:pointer; }
 .cm-data-ui summary:hover { color:var(--cm-accent,#1677ff); }
 .cm-data-ui button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
-.cm-data-segmented { display:flex; padding:3px; border:1px solid var(--cm-border,#e0e5eb); border-radius:7px; background:var(--cm-subtle,#f3f6fa); }
-.cm-data-segmented button { min-height:28px; border:0; background:transparent; }
-.cm-data-segmented button[aria-pressed=true] { background:var(--cm-surface,#fff); box-shadow:0 1px 2px rgba(29,43,61,.16); font-weight:600; }
-.cm-data-segmented button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-foreground,#273444); }
 .cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,#64748b); line-height:1; }
 .cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-accent,#1677ff); }
 .cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
@@ -739,15 +732,15 @@ class RowSelection extends Set {
   clear() { super.clear(); this.#anchor = null; }
 }
 
-const [markup$2, css$2] = await Promise.all([
+const [markup$3, css$3] = await Promise.all([
   "<span part=\"label\"></span>\n<button type=\"button\" part=\"edit-button\">\n  <svg aria-hidden=\"true\" viewBox=\"0 0 24 24\">\n    <path d=\"m4 20 4.1-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.1 16 4 20Z\"></path>\n    <path d=\"m13.8 7.2 3 3\"></path>\n  </svg>\n</button>\n<input type=\"text\" part=\"input\" hidden>\n<select part=\"input\" hidden></select>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  color: inherit;\n  font: inherit;\n}\n:host([hidden]), [hidden] { display: none !important; }\n:host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }\nspan { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }\nspan[data-placeholder] { color: var(--cm-muted, #687586); }\nbutton, input, select { box-sizing: border-box; font: inherit; color: inherit; }\nbutton {\n  display: inline-grid;\n  place-items: center;\n  flex: 0 0 20px;\n  height: 20px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #64748b);\n  cursor: pointer;\n  opacity: var(--cm-edit-affordance-opacity, 0);\n}\n:host(:hover) button, :host(:focus-within) button { opacity: 1; }\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { cursor: default; opacity: .45; }\nsvg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }\ninput, select {\n  width: 100%;\n  min-width: 0;\n  height: 28px;\n  margin-inline: -1px;\n  padding: 2px 7px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  line-height: 20px;\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus, select:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
 ]);
-const template$2 = createTemplate(markup$2);
-const HTMLElementBase$3 = globalThis.HTMLElement || class {};
+const template$3 = createTemplate(markup$3);
+const HTMLElementBase$4 = globalThis.HTMLElement || class {};
 
 /** A field owns its draft; consumers accept or cancel value-commit events. */
-class EditableField extends HTMLElementBase$3 {
+class EditableField extends HTMLElementBase$4 {
   static observedAttributes = ["label", "placeholder", "type", "min", "max", "step", "required", "disabled"];
   #value = "";
   #revision = 0;
@@ -762,8 +755,8 @@ class EditableField extends HTMLElementBase$3 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$2;
-    root.append(style, template$2(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$3;
+    root.append(style, template$3(this.ownerDocument));
     this.#text = root.querySelector("span");
     this.#button = root.querySelector("button");
     this.#input = root.querySelector("input");
@@ -864,14 +857,14 @@ function defineEditableField() {
   if (!customElements.get("clinker-editable-field")) customElements.define("clinker-editable-field", EditableField);
 }
 
-const [markup$1, css$1] = await Promise.all([
+const [markup$2, css$2] = await Promise.all([
   "<span part=\"summary\"></span>\n<div part=\"actions\" hidden>\n  <slot name=\"actions\"></slot>\n  <button type=\"button\" data-clear aria-label=\"Clear selection\">Clear</button>\n</div>\n<button type=\"button\" data-all hidden>Select all visible</button>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  height: 32px;\n  min-width: 0;\n  flex-shrink: 0;\n  color: var(--cm-muted, #687586);\n  font: 12px/1.4 system-ui, sans-serif;\n}\n:host([hidden]), [hidden] { display: none !important; }\nspan { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\nspan.is-selected { color: var(--cm-foreground, #273444); font-weight: 600; }\ndiv { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }\nslot { display: contents; }\nbutton {\n  flex-shrink: 0;\n  box-sizing: border-box;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton:hover:not(:disabled) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n",
 ]);
-const template$1 = createTemplate(markup$1);
-const HTMLElementBase$2 = globalThis.HTMLElement || class {};
+const template$2 = createTemplate(markup$2);
+const HTMLElementBase$3 = globalThis.HTMLElement || class {};
 
-class SelectionBar extends HTMLElementBase$2 {
+class SelectionBar extends HTMLElementBase$3 {
   #summary;
   #actions;
   #all;
@@ -879,8 +872,8 @@ class SelectionBar extends HTMLElementBase$2 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$1;
-    root.append(style, template$1(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$2;
+    root.append(style, template$2(this.ownerDocument));
     this.#summary = root.querySelector("span");
     this.#actions = root.querySelector("div");
     this.#all = root.querySelector("[data-all]");
@@ -904,15 +897,15 @@ function defineSelectionBar() {
   if (!customElements.get("clinker-selection-bar")) customElements.define("clinker-selection-bar", SelectionBar);
 }
 
-const [markup, css] = await Promise.all([
+const [markup$1, css$1] = await Promise.all([
   "<details>\n  <summary part=\"trigger\"></summary>\n  <div part=\"panel\"><slot></slot></div>\n</details>\n",
   ":host { display: block; position: relative; color: var(--cm-foreground, #273444); font: inherit; }\n:host([hidden]) { display: none !important; }\nsummary {\n  display: block;\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: 4px 8px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 6px;\n  background: var(--cm-surface, #fff);\n  list-style: none;\n  white-space: nowrap;\n  cursor: pointer;\n}\nsummary::-webkit-details-marker { display: none; }\nsummary:hover, details[open] > summary { background: var(--cm-hover, #e3ecf8); border-color: var(--cm-accent, #78a9ed); }\nsummary:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\ndiv {\n  position: absolute;\n  right: 0;\n  top: calc(100% + 4px);\n  z-index: 10;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  width: max-content;\n  max-width: min(340px, 80vw);\n  max-height: 50vh;\n  overflow: auto;\n  padding: 10px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 8px;\n  background: var(--cm-surface, #fff);\n  box-shadow: 0 4px 16px #0002;\n}\nslot { display: contents; }\n::slotted(button) { text-align: left; }\n::slotted(label) { display: flex; align-items: center; gap: 6px; }\n::slotted(input[type=number]) { width: 112px; }\n",
 ]);
-const template = createTemplate(markup);
+const template$1 = createTemplate(markup$1);
 const activeMenus = new WeakMap();
-const HTMLElementBase$1 = globalThis.HTMLElement || class {};
+const HTMLElementBase$2 = globalThis.HTMLElement || class {};
 
-class ActionMenu extends HTMLElementBase$1 {
+class ActionMenu extends HTMLElementBase$2 {
   static observedAttributes = ["label", "open"];
   #details;
   #trigger;
@@ -921,8 +914,8 @@ class ActionMenu extends HTMLElementBase$1 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
-    root.append(style, template(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$1;
+    root.append(style, template$1(this.ownerDocument));
     this.#details = root.querySelector("details");
     this.#trigger = root.querySelector("summary");
     this.#details.ontoggle = () => { this.open = this.#details.open; };
@@ -3410,43 +3403,83 @@ function createAppearanceControls({ document, patch, preview, rotate }) {
   } };
 }
 
-const shellTemplate = createTemplate(`
-      <div class="cm-editor__resize-handle" data-resize role="separator" aria-label="Resize plot editor" aria-orientation="horizontal"></div>
-      <header class="cm-editor__header">
-        <h2 class="cm-editor__title">Plot editor</h2>
-        <div class="cm-editor__history">
-          <button type="button" data-command="undo" disabled>Undo</button>
-          <button type="button" data-command="redo" disabled>Redo</button>
-        </div>
-      </header>
-      <div class="cm-editor__tabs" role="tablist" aria-label="Plot editor sections">
-        <button type="button" data-tab="data" role="tab" aria-selected="true">Data</button>
-        <button type="button" data-tab="appearance" role="tab" aria-selected="false">Appearance</button>
-      </div>
-      <div data-editor-error class="cm-data-error" role="alert" hidden></div>
-      <section data-panel="data" class="cm-editor__panel">
-        <div class="cm-editor__toolbar cm-data-toolbar">
-          <div class="cm-data-segmented" role="group" aria-label="Data type">
-            <button type="button" data-kind="groups">Groups</button><button type="button" data-kind="genes">Genes</button>
-            <button type="button" data-kind="links">Links</button><button type="button" data-kind="annotations">Annotations</button>
-          </div>
-          <div class="cm-data-segmented" role="group" aria-label="Gene view" data-gene-view hidden>
-            <button type="button" data-gene-view-kind="tree">By locus</button><button type="button" data-gene-view-kind="groups">By group</button>
-            <button type="button" data-gene-view-kind="list">List</button>
-          </div>
-          <button type="button" data-command="toggle-tree" hidden>Expand visible</button>
-          <button type="button" data-command="new-group">Create group…</button>
-          <div data-annotation-toolbar class="cm-editor__annotation-toolbar" hidden></div>
-          <span data-search-slot></span>
-          <button type="button" data-command="clear-filter" aria-label="Clear filter" title="Clear filter" hidden>×</button>
-        </div>
-        <div data-annotation-editor class="cm-editor__annotation-editor" hidden></div>
-        <div data-record-editor></div>
-      </section>
-      <section data-panel="appearance" class="cm-editor__panel" hidden>
-        <div class="cm-editor__appearance-toolbar"><label class="cm-editor__search"><span class="cm-editor__sr-only">Find an appearance setting</span><input type="search" data-appearance-filter placeholder="Find a setting"></label><button type="button" data-command="clear-appearance-filter" aria-label="Clear appearance filter" title="Clear appearance filter" hidden>×</button></div>
-        <div class="cm-editor__appearance" data-appearance></div>
-      </section>`);
+const [markup, css] = await Promise.all([
+  "<div role=\"group\"></div>\n<template><button type=\"button\"></button></template>\n",
+  ":host { display: block; color: inherit; font: inherit; }\n:host([hidden]) { display: none !important; }\ndiv {\n  display: flex;\n  padding: 3px;\n  border: 1px solid var(--cm-border, #e0e5eb);\n  border-radius: 7px;\n  background: var(--cm-subtle, #f3f6fa);\n}\nbutton {\n  box-sizing: border-box;\n  min-height: 28px;\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  white-space: nowrap;\n  cursor: pointer;\n}\nbutton[aria-pressed=true] { background: var(--cm-surface, #fff); box-shadow: 0 1px 2px #1d2b3d29; font-weight: 600; }\nbutton:hover:not(:disabled) { background: var(--cm-hover, #e3ecf8); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n",
+]);
+const template = createTemplate(markup);
+const HTMLElementBase$1 = globalThis.HTMLElement || class {};
+
+class ViewSwitcher extends HTMLElementBase$1 {
+  static observedAttributes = ["value", "label"];
+  #group;
+  #template;
+  #buttons = [];
+  #observer;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = css;
+    root.append(style, template(this.ownerDocument));
+    this.#group = root.querySelector("div"); this.#template = root.querySelector("template");
+    this.#group.onclick = (event) => this.#choose(event.target.closest("button"));
+    this.#group.onkeydown = (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      const buttons = this.#buttons.filter((button) => !button.disabled);
+      if (!buttons.length) return;
+      const index = buttons.indexOf(event.target);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+        : (index + (event.key === "ArrowLeft" ? -1 : 1) + buttons.length) % buttons.length;
+      event.preventDefault(); buttons[next].focus(); this.#choose(buttons[next]);
+    };
+    this.#observer = new this.ownerDocument.defaultView.MutationObserver((records) => {
+      if (records.some((record) => record.target !== this || record.type === "childList")) this.#renderOptions();
+    });
+  }
+
+  get value() { return this.getAttribute("value") || ""; }
+  set value(value) { if (this.value !== String(value)) this.setAttribute("value", String(value)); }
+  attributeChangedCallback() { this.#sync(); }
+  connectedCallback() {
+    this.#renderOptions();
+    this.#observer.observe(this, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["value", "label", "disabled"] });
+  }
+  disconnectedCallback() { this.#observer.disconnect(); }
+
+  #renderOptions() {
+    this.#buttons = [...this.querySelectorAll("option")].map((option) => {
+      const button = this.ownerDocument.importNode(this.#template.content, true).firstElementChild;
+      button.value = option.value; button.textContent = option.label; button.disabled = option.disabled;
+      return button;
+    });
+    this.#group.replaceChildren(...this.#buttons);
+    if (!this.hasAttribute("value")) this.value = this.#buttons.find((button) => !button.disabled)?.value || "";
+    this.#sync();
+  }
+
+  #sync() {
+    this.#group.setAttribute("aria-label", this.getAttribute("label") || "View");
+    const active = this.#buttons.find((button) => !button.disabled && button.value === this.value)
+      || this.#buttons.find((button) => !button.disabled);
+    for (const button of this.#buttons) {
+      button.setAttribute("aria-pressed", String(button.value === this.value));
+      button.tabIndex = button === active ? 0 : -1;
+    }
+  }
+
+  #choose(button) {
+    if (!button || button.disabled || button.value === this.value) return;
+    this.value = button.value;
+    this.dispatchEvent(new CustomEvent("value-change", { detail: { value: this.value }, bubbles: true, composed: true }));
+  }
+}
+
+function defineViewSwitcher() {
+  if (!customElements.get("clinker-view-switcher")) customElements.define("clinker-view-switcher", ViewSwitcher);
+}
+
+const shellTemplate = createTemplate(await "<div class=\"cm-editor__resize-handle\" data-resize role=\"separator\" aria-label=\"Resize plot editor\" aria-orientation=\"horizontal\"></div>\n<header class=\"cm-editor__header\">\n  <h2 class=\"cm-editor__title\">Plot editor</h2>\n  <div class=\"cm-editor__history\">\n    <button type=\"button\" data-command=\"undo\" disabled>Undo</button>\n    <button type=\"button\" data-command=\"redo\" disabled>Redo</button>\n  </div>\n</header>\n<div class=\"cm-editor__tabs\" role=\"tablist\" aria-label=\"Plot editor sections\">\n  <button type=\"button\" data-tab=\"data\" role=\"tab\" aria-selected=\"true\">Data</button>\n  <button type=\"button\" data-tab=\"appearance\" role=\"tab\" aria-selected=\"false\">Appearance</button>\n</div>\n<div data-editor-error class=\"cm-data-error\" role=\"alert\" hidden></div>\n<section data-panel=\"data\" class=\"cm-editor__panel\">\n  <div class=\"cm-editor__toolbar cm-data-toolbar\">\n    <clinker-view-switcher data-kind-picker label=\"Data type\" value=\"groups\">\n      <option value=\"groups\">Groups</option><option value=\"genes\">Genes</option>\n      <option value=\"links\">Links</option><option value=\"annotations\">Annotations</option>\n    </clinker-view-switcher>\n    <clinker-view-switcher data-gene-view label=\"Gene view\" value=\"tree\" hidden>\n      <option value=\"tree\">By locus</option><option value=\"groups\">By group</option><option value=\"list\">List</option>\n    </clinker-view-switcher>\n    <button type=\"button\" data-command=\"toggle-tree\" hidden>Expand visible</button>\n    <button type=\"button\" data-command=\"new-group\">Create group…</button>\n    <div data-annotation-toolbar class=\"cm-editor__annotation-toolbar\" hidden></div>\n    <span data-search-slot></span>\n    <button type=\"button\" data-command=\"clear-filter\" aria-label=\"Clear filter\" title=\"Clear filter\" hidden>×</button>\n  </div>\n  <div data-annotation-editor class=\"cm-editor__annotation-editor\" hidden></div>\n  <div data-record-editor></div>\n</section>\n<section data-panel=\"appearance\" class=\"cm-editor__panel\" hidden>\n  <div class=\"cm-editor__appearance-toolbar\"><label class=\"cm-editor__search\"><span class=\"cm-editor__sr-only\">Find an appearance setting</span><input type=\"search\" data-appearance-filter placeholder=\"Find a setting\"></label><button type=\"button\" data-command=\"clear-appearance-filter\" aria-label=\"Clear appearance filter\" title=\"Clear appearance filter\" hidden>×</button></div>\n  <div class=\"cm-editor__appearance\" data-appearance></div>\n</section>\n");
 
 const memberFilterTemplate = createTemplate(`<div class="cm-editor__member-filter" data-member-filter hidden>
   <span>Group: <strong data-member-label></strong></span><button type="button" data-command="clear-member-filter" aria-label="Clear group member filter" title="Clear group member filter">×</button>
@@ -3510,7 +3543,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    defineEditableField(); defineSelectionBar(); defineActionMenu();
+    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher();
     this.classList.add("cm-editor", "cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();
@@ -3554,7 +3587,6 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.#selected.clear();
     this.querySelectorAll("[data-tab]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.tab === "data")));
     this.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== "data"; });
-    updateSegmentedControl(this, "data-kind", "annotations");
     this.#renderData();
     if (panelUid) this.#annotationEditor?.select(panelUid);
     this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true }));
@@ -3580,8 +3612,6 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.#selected.clear(); this.#selected.setMany(genes); this.#rowsCache = null;
     this.querySelectorAll("[data-tab]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.tab === "data")));
     this.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== "data"; });
-    updateSegmentedControl(this, "data-kind", "genes");
-    updateSegmentedControl(this, "data-gene-view-kind", "tree");
     this.#renderData(); this.#syncHighlight();
     const first = this.#rows().findIndex((row) => row.selectIds?.some((id) => this.#selected.has(id)));
     this.querySelector(".cm-editor__table").scrollTop = Math.max(0, first) * DATA_ROW_HEIGHT;
@@ -3603,8 +3633,6 @@ class ClinkerEditorElement extends HTMLElementBase {
 
   #renderShell() {
     this.replaceChildren(shellTemplate(this.ownerDocument));
-    updateSegmentedControl(this, "data-kind", this.#kind);
-    updateSegmentedControl(this, "data-gene-view-kind", this.#geneView);
     const panel = createDataPanel(this.ownerDocument);
     panel.node.dataset.recordEditor = "";
     panel.tools.dataset.recordTools = "";
@@ -3640,6 +3668,16 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.dataset.bound = "true";
     this.addEventListener("click", (event) => this.#click(event));
     this.addEventListener("change", (event) => this.#change(event));
+    this.addEventListener("value-change", (event) => {
+      if (event.target.matches("[data-kind-picker]")) {
+        this.#kind = event.detail.value;
+        if (this.#kind !== "genes") this.#memberGroupId = null;
+        this.#selected.clear();
+      } else if (event.target.matches("[data-gene-view]")) this.#geneView = event.detail.value;
+      else return;
+      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
+      this.#renderData();
+    });
     this.addEventListener("toggle", (event) => {
       const details = event.target.closest("details[data-appearance-section]");
       if (!details) return;
@@ -3764,24 +3802,6 @@ class ClinkerEditorElement extends HTMLElementBase {
       this.querySelectorAll("[data-tab]").forEach((node) => node.setAttribute("aria-selected", String(node === button)));
       this.querySelectorAll("[data-panel]").forEach((node) => { node.hidden = node.dataset.panel !== tab; });
       if (tab === "appearance") this.#renderAppearance(); else this.#renderData();
-      return;
-    }
-    const kind = button.dataset.kind;
-    if (kind) {
-      this.#kind = kind;
-      if (kind !== "genes") this.#memberGroupId = null;
-      this.#selected.clear();
-      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-      updateSegmentedControl(this, "data-kind", kind);
-      this.#renderData();
-      return;
-    }
-    const geneView = button.dataset.geneViewKind;
-    if (geneView) {
-      this.#geneView = geneView;
-      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-      updateSegmentedControl(this, "data-gene-view-kind", geneView);
-      this.#renderData();
       return;
     }
     if (button.dataset.removeRecord) {
@@ -4130,6 +4150,8 @@ class ClinkerEditorElement extends HTMLElementBase {
     const annotations = this.#kind === "annotations";
     const annotationHost = this.querySelector("[data-annotation-editor]");
     if (!annotationHost) return;
+    this.querySelector("[data-kind-picker]").value = this.#kind;
+    this.querySelector("[data-gene-view]").value = this.#geneView;
     annotationHost.hidden = !annotations;
     this.querySelector("[data-annotation-toolbar]").hidden = !annotations;
     const search = this.querySelector("[data-filter]");
@@ -4277,8 +4299,6 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.#geneView = "list";
     this.#selected.clear();
     this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-    updateSegmentedControl(this, "data-kind", "genes");
-    updateSegmentedControl(this, "data-gene-view-kind", "list");
     this.#syncHighlight();
     this.#renderData();
   }

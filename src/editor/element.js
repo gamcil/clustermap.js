@@ -1,4 +1,4 @@
-import { createDataPanel, createSelectionControls, createDataSearch, installDataEditorStyle, updateSegmentedControl } from "../dataEditorUi.mjs";
+import { createDataPanel, createSelectionControls, createDataSearch, installDataEditorStyle } from "../dataEditorUi.mjs";
 import { RowSelection } from "../rowSelection.mjs";
 import { createVirtualRows, DATA_ROW_HEIGHT } from "../virtualRows.mjs";
 import { createAnnotationDataControls } from "../annotationDataControls.mjs";
@@ -11,44 +11,10 @@ import { createAppearanceControls } from "./appearanceControls.mjs";
 import { defineEditableField } from "./components/editable-field/editable-field.js";
 import { defineSelectionBar } from "./components/selection-bar/selection-bar.js";
 import { defineActionMenu } from "./components/action-menu/action-menu.js";
+import { defineViewSwitcher } from "./components/view-switcher/view-switcher.js";
+import { textAsset } from "./shared/textAsset.js";
 
-const shellTemplate = createTemplate(`
-      <div class="cm-editor__resize-handle" data-resize role="separator" aria-label="Resize plot editor" aria-orientation="horizontal"></div>
-      <header class="cm-editor__header">
-        <h2 class="cm-editor__title">Plot editor</h2>
-        <div class="cm-editor__history">
-          <button type="button" data-command="undo" disabled>Undo</button>
-          <button type="button" data-command="redo" disabled>Redo</button>
-        </div>
-      </header>
-      <div class="cm-editor__tabs" role="tablist" aria-label="Plot editor sections">
-        <button type="button" data-tab="data" role="tab" aria-selected="true">Data</button>
-        <button type="button" data-tab="appearance" role="tab" aria-selected="false">Appearance</button>
-      </div>
-      <div data-editor-error class="cm-data-error" role="alert" hidden></div>
-      <section data-panel="data" class="cm-editor__panel">
-        <div class="cm-editor__toolbar cm-data-toolbar">
-          <div class="cm-data-segmented" role="group" aria-label="Data type">
-            <button type="button" data-kind="groups">Groups</button><button type="button" data-kind="genes">Genes</button>
-            <button type="button" data-kind="links">Links</button><button type="button" data-kind="annotations">Annotations</button>
-          </div>
-          <div class="cm-data-segmented" role="group" aria-label="Gene view" data-gene-view hidden>
-            <button type="button" data-gene-view-kind="tree">By locus</button><button type="button" data-gene-view-kind="groups">By group</button>
-            <button type="button" data-gene-view-kind="list">List</button>
-          </div>
-          <button type="button" data-command="toggle-tree" hidden>Expand visible</button>
-          <button type="button" data-command="new-group">Create group…</button>
-          <div data-annotation-toolbar class="cm-editor__annotation-toolbar" hidden></div>
-          <span data-search-slot></span>
-          <button type="button" data-command="clear-filter" aria-label="Clear filter" title="Clear filter" hidden>×</button>
-        </div>
-        <div data-annotation-editor class="cm-editor__annotation-editor" hidden></div>
-        <div data-record-editor></div>
-      </section>
-      <section data-panel="appearance" class="cm-editor__panel" hidden>
-        <div class="cm-editor__appearance-toolbar"><label class="cm-editor__search"><span class="cm-editor__sr-only">Find an appearance setting</span><input type="search" data-appearance-filter placeholder="Find a setting"></label><button type="button" data-command="clear-appearance-filter" aria-label="Clear appearance filter" title="Clear appearance filter" hidden>×</button></div>
-        <div class="cm-editor__appearance" data-appearance></div>
-      </section>`);
+const shellTemplate = createTemplate(await textAsset(new URL("./element.html", import.meta.url)));
 
 const memberFilterTemplate = createTemplate(`<div class="cm-editor__member-filter" data-member-filter hidden>
   <span>Group: <strong data-member-label></strong></span><button type="button" data-command="clear-member-filter" aria-label="Clear group member filter" title="Clear group member filter">×</button>
@@ -112,7 +78,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    defineEditableField(); defineSelectionBar(); defineActionMenu();
+    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher();
     this.classList.add("cm-editor", "cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();
@@ -156,7 +122,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.#selected.clear();
     this.querySelectorAll("[data-tab]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.tab === "data")));
     this.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== "data"; });
-    updateSegmentedControl(this, "data-kind", "annotations");
     this.#renderData();
     if (panelUid) this.#annotationEditor?.select(panelUid);
     this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true }));
@@ -182,8 +147,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.#selected.clear(); this.#selected.setMany(genes); this.#rowsCache = null;
     this.querySelectorAll("[data-tab]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.tab === "data")));
     this.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== "data"; });
-    updateSegmentedControl(this, "data-kind", "genes");
-    updateSegmentedControl(this, "data-gene-view-kind", "tree");
     this.#renderData(); this.#syncHighlight();
     const first = this.#rows().findIndex((row) => row.selectIds?.some((id) => this.#selected.has(id)));
     this.querySelector(".cm-editor__table").scrollTop = Math.max(0, first) * DATA_ROW_HEIGHT;
@@ -205,8 +168,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
 
   #renderShell() {
     this.replaceChildren(shellTemplate(this.ownerDocument));
-    updateSegmentedControl(this, "data-kind", this.#kind);
-    updateSegmentedControl(this, "data-gene-view-kind", this.#geneView);
     const panel = createDataPanel(this.ownerDocument);
     panel.node.dataset.recordEditor = "";
     panel.tools.dataset.recordTools = "";
@@ -242,6 +203,16 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.dataset.bound = "true";
     this.addEventListener("click", (event) => this.#click(event));
     this.addEventListener("change", (event) => this.#change(event));
+    this.addEventListener("value-change", (event) => {
+      if (event.target.matches("[data-kind-picker]")) {
+        this.#kind = event.detail.value;
+        if (this.#kind !== "genes") this.#memberGroupId = null;
+        this.#selected.clear();
+      } else if (event.target.matches("[data-gene-view]")) this.#geneView = event.detail.value;
+      else return;
+      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
+      this.#renderData();
+    });
     this.addEventListener("toggle", (event) => {
       const details = event.target.closest("details[data-appearance-section]");
       if (!details) return;
@@ -366,24 +337,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.querySelectorAll("[data-tab]").forEach((node) => node.setAttribute("aria-selected", String(node === button)));
       this.querySelectorAll("[data-panel]").forEach((node) => { node.hidden = node.dataset.panel !== tab; });
       if (tab === "appearance") this.#renderAppearance(); else this.#renderData();
-      return;
-    }
-    const kind = button.dataset.kind;
-    if (kind) {
-      this.#kind = kind;
-      if (kind !== "genes") this.#memberGroupId = null;
-      this.#selected.clear();
-      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-      updateSegmentedControl(this, "data-kind", kind);
-      this.#renderData();
-      return;
-    }
-    const geneView = button.dataset.geneViewKind;
-    if (geneView) {
-      this.#geneView = geneView;
-      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-      updateSegmentedControl(this, "data-gene-view-kind", geneView);
-      this.#renderData();
       return;
     }
     if (button.dataset.removeRecord) {
@@ -732,6 +685,8 @@ export class ClinkerEditorElement extends HTMLElementBase {
     const annotations = this.#kind === "annotations";
     const annotationHost = this.querySelector("[data-annotation-editor]");
     if (!annotationHost) return;
+    this.querySelector("[data-kind-picker]").value = this.#kind;
+    this.querySelector("[data-gene-view]").value = this.#geneView;
     annotationHost.hidden = !annotations;
     this.querySelector("[data-annotation-toolbar]").hidden = !annotations;
     const search = this.querySelector("[data-filter]");
@@ -879,8 +834,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.#geneView = "list";
     this.#selected.clear();
     this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-    updateSegmentedControl(this, "data-kind", "genes");
-    updateSegmentedControl(this, "data-gene-view-kind", "list");
     this.#syncHighlight();
     this.#renderData();
   }
