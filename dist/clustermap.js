@@ -14797,6 +14797,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let latestPaint = null;
     let generation = 0;
 
+    const release = () => {
+      generation += 1;
+      renderer?.destroy();
+      renderer = canvas = initialization = null;
+      unavailable = false;
+    };
+
     const draw = () => {
       if (renderer && latestPaint) renderer.render({ ...latestPaint, nextScene: pendingScene });
     };
@@ -14828,12 +14835,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           // A redraw can replace the DOM canvas while adapter setup is still in
           // flight. Invalidate that setup before allowing the new canvas to
           // acquire a WebGPU context.
-          generation += 1;
-          renderer?.destroy();
-          renderer = null;
-          canvas = null;
-          initialization = null;
-          unavailable = false;
+          release();
         }
         if (initialization) return;
 
@@ -14867,12 +14869,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       },
       adoptScene: (...args) => renderer?.adoptScene(...args) || false,
       destroy: () => {
-        generation += 1;
-        renderer?.destroy();
-        renderer = null;
-        canvas = null;
-        initialization = null;
-        unavailable = false;
+        release();
         pendingScene = null;
         latestPaint = null;
       },

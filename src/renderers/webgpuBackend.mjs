@@ -12,6 +12,13 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
   let latestPaint = null;
   let generation = 0;
 
+  const release = () => {
+    generation += 1;
+    renderer?.destroy();
+    renderer = canvas = initialization = null;
+    unavailable = false;
+  };
+
   const draw = () => {
     if (renderer && latestPaint) renderer.render({ ...latestPaint, nextScene: pendingScene });
   };
@@ -43,12 +50,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
         // A redraw can replace the DOM canvas while adapter setup is still in
         // flight. Invalidate that setup before allowing the new canvas to
         // acquire a WebGPU context.
-        generation += 1;
-        renderer?.destroy();
-        renderer = null;
-        canvas = null;
-        initialization = null;
-        unavailable = false;
+        release();
       }
       if (initialization) return;
 
@@ -82,12 +84,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
     },
     adoptScene: (...args) => renderer?.adoptScene(...args) || false,
     destroy: () => {
-      generation += 1;
-      renderer?.destroy();
-      renderer = null;
-      canvas = null;
-      initialization = null;
-      unavailable = false;
+      release();
       pendingScene = null;
       latestPaint = null;
     },
