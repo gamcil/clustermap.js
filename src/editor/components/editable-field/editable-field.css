@@ -1,5 +1,4 @@
 :host {
-  position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
@@ -10,28 +9,25 @@
 }
 :host([hidden]), [hidden] { display: none !important; }
 :host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }
-span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+:host(:hover), :host(:focus-within) { --cm-edit-icon-width:20px; }
+span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
 span[data-placeholder] { color: var(--cm-muted, #687586); }
 button, input, select { box-sizing: border-box; font: inherit; color: inherit; }
 button {
-  position: absolute;
-  inset-inline-end: 4px;
-  top: 50%;
-  transform: translateY(-50%);
   display: inline-grid;
   place-items: center;
-  width: 20px;
+  flex: 0 0 auto;
+  width: var(--cm-edit-icon-width, 0px);
+  min-width: 0;
   height: 20px;
+  overflow: hidden;
   padding: 0;
   border: 0;
   border-radius: var(--cm-control-radius, 6px);
-  background: var(--cm-row-background, var(--cm-surface, #fff));
+  background: transparent;
   color: var(--cm-muted, #64748b);
   cursor: pointer;
-  opacity: var(--cm-edit-affordance-opacity, 0);
-  pointer-events: none;
 }
-:host(:hover) button, :host(:focus-within) button { opacity: 1; pointer-events: auto; }
 button:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }
 button:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }
 button:disabled { cursor: default; opacity: .45; }

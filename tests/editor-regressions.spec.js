@@ -53,6 +53,7 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }) => { expect(pageErrors.get(page)).toEqual([]); });
 
 const editor = (page) => page.locator("clinker-editor");
+const editField = async (field) => { await field.hover(); await field.getByRole("button").click(); };
 const view = (page, kind) => editor(page).locator(`[data-kind-picker] button[value="${kind}"]`).click();
 const matrixRows = (page) => editor(page).locator(".cm-annotation-matrix tbody .cm-data-row");
 async function annotation(page, categorical = false) {
@@ -133,7 +134,7 @@ for (const theme of ["light", "dark"]) {
       await check.uncheck();
       const component = rows.first().locator("clinker-editable-field").first();
       const encapsulated = await component.count() > 0;
-      if (encapsulated) await component.getByRole("button").click();
+      if (encapsulated) await editField(component);
       const field = encapsulated ? component.locator("input:visible, select:visible") : rows.first().locator(".cm-data-field").first();
       if (await field.count()) {
         await field.focus();
@@ -194,10 +195,10 @@ test("annotation inline edits, selection and batch values support undo/redo", as
   const uid = await annotation(page), before = await panelData(page, uid);
   const ids = await page.evaluate(() => chart.data().clusters.slice(0, 2).map((cluster) => cluster.uid));
   const field = matrixRows(page).first().locator("clinker-editable-field").first(), input = field.locator("input");
-  await field.getByRole("button").click();
+  await editField(field);
   await input.fill("0.75"); await input.press("Enter");
   expect((await panelData(page, uid)).values[ids[0]][0]).toBe(0.75);
-  await field.getByRole("button").click();
+  await editField(field);
   await input.fill("0.2"); await input.press("Escape");
   await expect(input).toHaveValue("0.75");
   for (let i = 0; i < 2; i++) await matrixRows(page).nth(i).getByRole("checkbox").check();
@@ -335,7 +336,7 @@ for (const renderer of ["svg", "canvas"]) {
 
     await annotation(page);
     const field = matrixRows(page).first().locator("clinker-editable-field").first(), value = field.getByRole("spinbutton");
-    await field.getByRole("button").click();
+    await editField(field);
     await value.fill("0.75"); await value.press("Enter");
     await page.evaluate(() => chart.patch([
       { type: "groups.update", ids: [chart.data().groups[0].uid], changes: { label: "Edited gene family", colour: "#315b9a" } },
@@ -934,20 +935,20 @@ test("editable components preserve drafts and normalize commits through history"
   const field = editor(page).locator('.cm-editor__row--groups clinker-editable-field[data-field="label"]').first();
   const input = field.getByRole("textbox"), uid = await field.getAttribute("data-id");
   const label = () => page.evaluate((uid) => chart.data().groups.find((group) => String(group.uid) === uid).label, uid);
-  await field.getByRole("button").click(); await input.fill("Uncommitted draft");
+  await editField(field); await input.fill("Uncommitted draft");
   await page.evaluate((uid) => chart.patch([{ type: "groups.update", ids: [uid], changes: { label: "Application edit" } }]), uid);
   await expect(input).toHaveValue("Uncommitted draft");
   await input.press("Escape");
   expect(await field.evaluate((field) => field.value)).toBe("Application edit");
   expect(await label()).toBe("Application edit");
-  await field.getByRole("button").click(); await input.fill("  Normalized label  "); await input.press("Enter");
+  await editField(field); await input.fill("  Normalized label  "); await input.press("Enter");
   expect(await label()).toBe("Normalized label");
   expect(await field.evaluate((field) => field.value)).toBe("Normalized label");
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
   expect(await label()).toBe("Application edit");
   await editor(page).getByRole("button", { name: "Redo", exact: true }).click();
   expect(await label()).toBe("Normalized label");
-  await field.getByRole("button").click(); await input.fill("Blur commits once");
+  await editField(field); await input.fill("Blur commits once");
   await editor(page).locator("[data-filter] input").focus();
   expect(await label()).toBe("Blur commits once");
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
@@ -968,13 +969,13 @@ test("cluster and locus fields keep their footprint, selection and distinct patc
       return records.find((record) => String(record.uid) === id).name;
     }, { type, id: before.id });
     const sourceBefore = await sourceName();
-    await field.getByRole("button").click();
+    await editField(field);
     expect(Math.abs((await field.boundingBox()).width - before.width)).toBeLessThanOrEqual(1);
     await input.fill(""); await input.press("Enter");
     await expect(input).toBeVisible(); expect(await sourceName()).toBe(sourceBefore);
     await input.press("Escape");
     await expect(summary).toHaveText(selected);
-    await field.getByRole("button").click(); await input.fill(`Edited ${type}`); await input.press("Enter");
+    await editField(field); await input.fill(`Edited ${type}`); await input.press("Enter");
     expect(await sourceName()).toBe(`Edited ${type}`);
     expect(await field.evaluate((field) => field.value)).toBe(`Edited ${type}`);
     expect(Math.abs((await field.boundingBox()).height - 28)).toBeLessThanOrEqual(1);
@@ -991,14 +992,14 @@ test("numeric component validation rejects invalid identities without changing h
   const uid = await field.getAttribute("data-id");
   const identity = () => page.evaluate((uid) => chart.data().links.find((link) => String(link.uid) === uid).identity, uid);
   const before = await identity();
-  await field.getByRole("button").click();
+  await editField(field);
   for (const value of ["101", "-1", ""]) {
     await input.fill(value); await input.press("Enter");
     expect(await input.evaluate((input) => input.checkValidity())).toBe(false);
     expect(await identity()).toBe(before); expect(await page.evaluate(() => chart.canUndo())).toBe(false);
   }
   await input.press("Escape"); await expect(input).toBeHidden();
-  await field.getByRole("button").click(); await input.fill("75"); await input.press("Enter");
+  await editField(field); await input.fill("75"); await input.press("Enter");
   expect(await identity()).toBe(0.75);
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click(); expect(await identity()).toBe(before);
   await editor(page).getByRole("button", { name: "Redo", exact: true }).click(); expect(await identity()).toBe(0.75);
@@ -1013,12 +1014,12 @@ test("virtualized component fields commit on blur and discard drafts when data i
   const rows = editor(page).locator(".cm-editor__row--groups"), table = editor(page).locator(".cm-editor__table");
   expect(await rows.count()).toBeLessThan(80);
   const field = rows.first().locator('clinker-editable-field[data-field="label"]');
-  await field.getByRole("button").click(); await field.getByRole("textbox").fill("Saved before scrolling");
+  await editField(field); await field.getByRole("textbox").fill("Saved before scrolling");
   await table.evaluate((node) => { node.scrollTop = node.scrollHeight; });
   await expect(rows.last()).toContainText("Group 259");
   await table.evaluate((node) => { node.scrollTop = 0; });
   await expect(rows.first()).toContainText("Saved before scrolling");
-  await field.getByRole("button").click(); await field.getByRole("textbox").fill("Discard this draft");
+  await editField(field); await field.getByRole("textbox").fill("Discard this draft");
   await page.evaluate(() => {
     const data = structuredClone(chart.data()); data.groups[0].label = "Replacement data"; chart.data(data);
   });

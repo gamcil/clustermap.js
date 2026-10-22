@@ -10730,7 +10730,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
 .cm-data-row > :is(th,td) { height:${DATA_ROW_HEIGHT}px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
 .cm-data-row:is(:hover,:focus-within) { --cm-row-background:var(--cm-hover,#e3ecf8); }
 .cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
-.cm-data-row:is(:hover,:focus-within,.is-selected) { --cm-edit-affordance-opacity:1; }
+.cm-data-row:is(:hover,:focus-within,.is-selected) { --cm-edit-icon-width:20px; }
 .cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; vertical-align:middle; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
 span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
