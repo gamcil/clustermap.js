@@ -5,7 +5,7 @@ import { createAnnotationDataControls } from "../annotationDataControls.mjs";
 import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale, validateAnnotationPanels } from "../annotations.mjs";
 import { createActionRunner, createTemplate } from "../uiControls.mjs";
 import { applyTheme, resolveTheme, figureConfig } from "../theme.mjs";
-import { createDataHeader, createEditorActions } from "./dataTableControls.mjs";
+import { createDataHeader } from "./dataTableControls.mjs";
 import { createEditorRow } from "./dataRows.mjs";
 import { createAppearanceControls } from "./appearanceControls.mjs";
 import { defineEditableField } from "./components/editable-field/editable-field.js";
@@ -14,6 +14,7 @@ import { defineActionMenu } from "./components/action-menu/action-menu.js";
 import { defineViewSwitcher } from "./components/view-switcher/view-switcher.js";
 import { defineSearchField } from "./components/search-field/search-field.js";
 import { defineTabs } from "./components/tabs/tabs.js";
+import { defineRecordActions } from "./components/record-actions/record-actions.js";
 import { textAsset } from "./shared/textAsset.js";
 
 const shellTemplate = createTemplate(await textAsset(new URL("./element.html", import.meta.url)));
@@ -56,7 +57,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #selected = new RowSelection();
   #rowView = null;
   #updateHeader = null;
-  #updateActions = null;
+  #actions = null;
   #selectionControls = null;
   #rowsCache = null;
   #selectionData = null;
@@ -80,7 +81,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField(); defineTabs();
+    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField(); defineTabs(); defineRecordActions();
     this.classList.add("cm-editor", "cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();
@@ -175,7 +176,9 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.#selectionControls = createSelectionControls(panel, { selection: this.#selected,
       onChange: () => { this.#renderData(); this.#syncHighlight(); } });
     this.#selectionControls.actions.dataset.actions = "";
-    this.#updateActions = createEditorActions(this.ownerDocument, this.#selectionControls.actions);
+    this.#actions = this.ownerDocument.createElement("clinker-record-actions");
+    this.#actions.addEventListener("selection-action", (event) => this.#command(event.detail.command, event.detail.value));
+    this.#selectionControls.actions.append(this.#actions);
     panel.viewport.classList.add("cm-editor__table");
     panel.viewport.append(tableTemplate(this.ownerDocument));
     this.#updateHeader = createDataHeader(this.ownerDocument, panel.viewport.querySelector("[data-head]"));
@@ -244,7 +247,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.addEventListener("keydown", (event) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape") this.#clearDataSelection();
-      if (event.key === "Enter" && event.target.matches("[data-group-position]")) event.target.blur();
       const grip = event.target.closest("[data-reorder]");
       if (grip && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
         event.preventDefault();
@@ -337,7 +339,10 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.#removeRecords(button.dataset.removeRecord, [this.#id(button.dataset.id)]);
       return;
     }
-    const command = button.dataset.command;
+    this.#command(button.dataset.command);
+  }
+
+  #command(command, value) {
     if (command === "remove-loci" || command === "remove-clusters") {
       const kind = command === "remove-loci" ? "loci" : "clusters";
       this.#removeRecords(kind, this.#selectedParents(kind));
@@ -354,30 +359,32 @@ export class ClinkerEditorElement extends HTMLElementBase {
         this.#apply({ type: "groups.create", group: { uid: this.#nextGroupUid(), label: label.trim() }, geneIds });
       }
     } else if (command === "assign") {
-      const select = this.querySelector("[data-assign-group]");
-      if (select?.value) this.#apply({ type: "groups.assignGenes", groupId: this.#groupId(select.value), geneIds: [...this.#selected] });
+      if (value) this.#apply({ type: "groups.assignGenes", groupId: this.#groupId(value), geneIds: [...this.#selected] });
     } else if (command === "unassign") {
       this.#apply({ type: "groups.unassignGenes", geneIds: [...this.#selected] });
     } else if (command === "focus") {
       this.#focusSelected();
     } else if (command === "batch-label") {
-      const input = this.querySelector("[data-batch-label]");
-      if (input?.value.trim()) {
-        this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: { label: input.value.trim() } });
+      if (value?.trim()) {
+        this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: { label: value.trim() } });
       }
     } else if (command === "batch-identity") {
-      const input = this.querySelector("[data-batch-identity]");
-      const identity = Number(input?.value);
+      const identity = Number(value);
       if (Number.isFinite(identity) && identity >= 0 && identity <= 100) {
         this.#apply({ type: "links.update", ids: [...this.#selected], changes: { identity: identity / 100 } });
       }
     } else if (command === "merge") {
-      const targetId = this.#groupId(this.querySelector("[data-merge-target]")?.value);
+      const targetId = this.#groupId(value);
       if (targetId !== undefined) {
         const sourceIds = this.#selectedGroups().map((group) => group.uid);
         this.#selected.clear();
         this.#apply({ type: "groups.merge", targetId, sourceIds });
       }
+    } else if (command === "batch-colour" || command === "batch-visibility") {
+      const changes = command === "batch-colour" ? { colour: value } : { hidden: value === "hide" };
+      this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes });
+    } else if (command === "group-position") {
+      this.#moveGroup(this.#selectedGroups()[0]?.uid, value);
     } else if (command === "view-members") {
       const groupId = this.#selectedGroups()[0]?.uid;
       if (groupId !== undefined) this.#viewGroupMembers(groupId);
@@ -419,16 +426,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { colour: target.value } });
       return;
     }
-    if (target.matches("[data-batch-colour]")) {
-      this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: { colour: target.value } });
-      return;
-    }
-    if (target.matches("[data-batch-visibility]") && target.value) {
-      this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: { hidden: target.value === "hide" } });
-      target.value = "";
-      return;
-    }
-    if (target.matches("[data-group-position]") && target.reportValidity()) this.#moveGroup(this.#selectedGroups()[0]?.uid, Number(target.value) - 1);
     if (target.matches("[data-config]")) this.#setConfig(target);
   }
 
@@ -704,7 +701,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.#disposeRows();
       this.#updateHeader([], null); list.textContent = "Set the chart property to edit a ClusterMap chart.";
       this.#selectionControls.update({ ids: [], summary: "No chart attached.", noun: this.#kind.slice(0, -1) });
-      this.#updateActions({ kind: this.#kind, count: 0, groups: [], allGroups: [], loci: [], clusters: [] });
+      this.#actions.state = { kind: this.#kind, count: 0, groups: [], allGroups: [], loci: [], clusters: [] };
       return;
     }
     const geneView = this.querySelector("[data-gene-view]");
@@ -767,8 +764,8 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.#selectionControls.update({ ids: this.#selectableIds(rows), summary: summaryText,
       noun: this.#kind.slice(0, -1), selectSuffix: isTree ? " genes" : "" });
     const parentRemoval = this.#kind === "genes" && this.#geneView === "tree" && this.#chart?.remove;
-    this.#updateActions({ kind: this.#kind, count: this.#selected.size, groups: this.#selectedGroups(), allGroups: data.groups,
-      loci: parentRemoval ? this.#selectedParents("loci") : [], clusters: parentRemoval ? this.#selectedParents("clusters") : [] });
+    this.#actions.state = { kind: this.#kind, count: this.#selected.size, groups: this.#selectedGroups(), allGroups: data.groups,
+      loci: parentRemoval ? this.#selectedParents("loci") : [], clusters: parentRemoval ? this.#selectedParents("clusters") : [] };
   }
 
   #selectedGroups() {

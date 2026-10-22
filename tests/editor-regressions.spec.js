@@ -919,8 +919,8 @@ test("editor parent ranges and contextual actions keep the table stationary", as
   const groups = editor(page).locator(".cm-editor__tree-parent");
   await groups.last().getByRole("checkbox").click({ modifiers: ["Shift"] });
   await editor(page).locator(".cm-data-actions clinker-action-menu summary").filter({ hasText: /^Remove…$/ }).click();
-  await expect(editor(page).locator('[data-command="remove-loci"]')).toHaveCount(0);
-  await expect(editor(page).locator('[data-command="remove-clusters"]')).toHaveCount(0);
+  await expect(editor(page).locator('[data-command="remove-loci"]')).toBeHidden();
+  await expect(editor(page).locator('[data-command="remove-clusters"]')).toBeHidden();
   await expect(editor(page).locator('[data-command="delete-groups"]')).toBeVisible();
   const geneCount = await page.evaluate(() => chart.data().clusters.flatMap((cluster) => cluster.loci).flatMap((locus) => locus.genes).length);
   page.once("dialog", (dialog) => dialog.accept());

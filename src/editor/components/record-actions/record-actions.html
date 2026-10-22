@@ -1,0 +1,29 @@
+<button type="button" data-command="focus">Focus in plot</button>
+<clinker-action-menu label="Assign…" data-menu="assign">
+  <label>Move to <select data-assign-group aria-label="Move to group"></select></label>
+  <button type="button" data-command="assign">Move</button>
+  <button type="button" data-command="unassign">Remove from groups</button>
+  <button type="button" data-command="new-group-for-selection">New group…</button>
+</clinker-action-menu>
+<clinker-action-menu label="Edit…" data-menu="edit">
+  <input data-batch-label placeholder="Set label" aria-label="Set label">
+  <button type="button" data-command="batch-label">Set label</button>
+  <label>Set colour <input type="color" value="#888888" aria-label="Set colour" data-batch-colour></label>
+  <select data-batch-visibility aria-label="Set visibility"><option value="">Visibility…</option><option value="show">Show</option><option value="hide">Hide</option></select>
+  <input type="number" data-batch-identity min="0" max="100" step=".1" placeholder="Set identity (%)" aria-label="Set identity (%)">
+  <button type="button" data-command="batch-identity">Set identity</button>
+</clinker-action-menu>
+<clinker-action-menu label="Merge…" data-menu="merge">
+  <select data-merge-target aria-label="Group to keep"></select>
+  <button type="button" data-command="merge">Merge groups</button>
+</clinker-action-menu>
+<clinker-action-menu label="Group…" data-menu="group">
+  <button type="button" data-command="view-members">View member genes</button>
+  <label>Position <input type="number" data-group-position required min="1"></label>
+</clinker-action-menu>
+<clinker-action-menu label="Remove…" data-menu="remove">
+  <button type="button" data-command="delete" class="danger"></button>
+  <button type="button" data-command="remove-loci"></button>
+  <button type="button" data-command="remove-clusters"></button>
+  <button type="button" data-command="delete-groups" title="Genes remain in the plot"></button>
+</clinker-action-menu>
