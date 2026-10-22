@@ -9,7 +9,7 @@
 }
 :host([hidden]), [hidden] { display: none !important; }
 :host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }
-:host(:hover), :host(:focus-within) { --cm-edit-icon-width:20px; }
+:host(:hover) { --cm-edit-icon-width:20px; }
 span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
 span[data-placeholder] { color: var(--cm-muted, #687586); }
 button, input, select { box-sizing: border-box; font: inherit; color: inherit; }
@@ -29,7 +29,7 @@ button {
   cursor: pointer;
 }
 button:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }
-button:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }
+button:focus-visible { width:20px; outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }
 button:disabled { cursor: default; opacity: .45; }
 svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 input, select {
