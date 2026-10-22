@@ -15,6 +15,15 @@ export class DataPanelModel {
       : (this.#data?.[kind] || []).map(({ uid }) => uid);
   }
 
+  plotTarget(kind, ids) {
+    if (kind === "links") return { links: [...ids] };
+    if (kind === "groups") {
+      const selected = new Set(ids);
+      ids = (this.#data?.groups || []).filter((group) => selected.has(group.uid)).flatMap((group) => group.genes || []);
+    }
+    return { genes: [...ids] };
+  }
+
   selectedParents(kind, selection) {
     if (!selection.size) return [];
     const clusters = this.#records().clusters;

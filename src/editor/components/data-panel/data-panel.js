@@ -171,9 +171,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     } else if (action === "remove") this.#removeRecords(type, [id]);
     else if (action === "reorder") this.#moveGroup(id, this.#data().groups.findIndex((group) => group.uid === id) + event.detail.direction);
     else if (action === "place") this.#placeGroup(id, event.detail.targetId, event.detail.after);
-    else if (action === "hover") {
-      if (row) this.#highlightRow(row); else this.#applySelectionHighlight();
-    }
+    else if (action === "hover") this.#highlight(row);
   }
 
   #command(command, value) {
@@ -196,7 +194,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     } else if (command === "unassign") {
       this.#apply({ type: "groups.unassignGenes", geneIds: [...this.#selected] });
     } else if (command === "focus") {
-      this.#focusSelected();
+      if (this.#selected.size) this.#chart?.focus?.(this.#model.plotTarget(this.#kind, this.#selected));
     } else if (command === "update") {
       this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: value });
     } else if (command === "merge") {
@@ -382,17 +380,6 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.#renderData();
   }
 
-  #selectionTarget() {
-    if (this.#kind === "links") return { links: [...this.#selected] };
-    const genes = this.#kind === "groups"
-      ? this.#selectedGroups().flatMap((group) => group.genes || []) : [...this.#selected];
-    return { genes };
-  }
-
-  #focusSelected() {
-    if (this.#selected.size) this.#chart?.focus?.(this.#selectionTarget());
-  }
-
   #placeGroup(uid, targetUid, after) {
     const ids = this.#data().groups.map((group) => group.uid);
     const from = ids.indexOf(uid), target = ids.indexOf(targetUid);
@@ -408,17 +395,11 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 
   #syncHighlight() {
     this.#table?.cancelHover();
-    this.#applySelectionHighlight();
+    this.#highlight();
   }
 
-  #applySelectionHighlight() { this.#chart?.highlight?.(this.#selectionTarget()); }
-
-  #highlightRow(row) {
-    if (!this.#chart?.highlight) return;
-    if (this.#kind === "links") { this.#chart.highlight({ links: [row.id] }); return; }
-    const genes = row.selectIds || (this.#kind === "groups"
-      ? this.#data()?.groups.find((group) => group.uid === row.id)?.genes || [] : [row.id]);
-    this.#chart.highlight({ genes });
+  #highlight(row) {
+    this.#chart?.highlight?.(this.#model.plotTarget(this.#kind, row ? row.selectIds || [row.id] : this.#selected));
   }
 
 }
