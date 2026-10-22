@@ -1,20 +1,20 @@
-import { createControls, escapeHtml, colourHex } from "./uiControls.mjs";
+import { createControls, createTemplate, escapeHtml } from "./uiControls.mjs";
 import { DATA_ROW_HEIGHT } from "./virtualRows.mjs";
 
-const attributesMarkup = (attributes) => Object.entries(attributes)
-  .filter(([, value]) => value !== false && value != null)
-  .map(([key, value]) => ` ${key}="${escapeHtml(value === true ? "" : value)}"`).join("");
-
-export const dataCheckboxMarkup = ({ label, checked = false, attributes = {} }) =>
-  `<input${attributesMarkup({ type: "checkbox", "aria-label": label, checked, ...attributes })}>`;
-export const dataColourMarkup = ({ value, label = "Colour", attributes = {} }) =>
-  `<input${attributesMarkup({ type: "color", "aria-label": label, value: colourHex(value), ...attributes })}>`;
-export const dataIconButtonMarkup = ({ label, icon, className = "", attributes = {} }) =>
-  `<button${attributesMarkup({ type: "button", class: `cm-data-icon-button ${className}`.trim(), "aria-label": label, title: label, ...attributes })}>${icon}</button>`;
-
-export const segmentedControlMarkup = ({ label, items, attribute, value, attributes = {} }) =>
-  `<div${attributesMarkup({ class: "cm-data-segmented", role: "group", "aria-label": label, ...attributes })}>${items.map(([key, text]) =>
-    `<button type="button"${attributesMarkup({ [attribute]: key, "aria-pressed": String(key === value) })}>${escapeHtml(text)}</button>`).join("")}</div>`;
+const searchTemplate = createTemplate(`<label class="cm-data-search"><input type="search" aria-label="Filter records"></label>`);
+const panelTemplate = createTemplate(`
+  <div class="cm-data-panel">
+    <div class="cm-data-tools" hidden></div>
+    <div class="cm-data-meta"><span></span><div class="cm-data-actions" hidden></div><button type="button">Select all visible</button></div>
+    <div class="cm-data-table" role="region"></div>
+  </div>`);
+const menuTemplate = createTemplate('<details class="cm-data-action-menu"><summary></summary><div class="cm-data-action-menu-body"></div></details>');
+export function createDataActionMenu(document, label, content) {
+  const node = menuTemplate(document).firstElementChild;
+  node.querySelector("summary").textContent = label;
+  const body = node.querySelector("div"); if (content) body.append(content);
+  return { node, body };
+}
 export const updateSegmentedControl = (root, attribute, value) => root.querySelectorAll(`[${attribute}]`)
   .forEach((button) => button.setAttribute("aria-pressed", String(button.getAttribute(attribute) === value)));
 
@@ -40,8 +40,8 @@ export function bindDataActionMenus(root) {
 
 /** Shared controls and table primitives for the packaged and inline data editors. */
 export function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
-  const ui = createControls(document), node = ui.el("label", undefined, null, "cm-data-search");
-  const input = ui.input(node, "Filter records", "", "search"); input.placeholder = placeholder;
+  const node = searchTemplate(document).firstElementChild, input = node.querySelector("input");
+  input.placeholder = placeholder;
   if (onInput) input.oninput = () => onInput(input.value);
   return { node, input };
 }
@@ -49,20 +49,15 @@ export function createDataSearch(document, { placeholder = "Search names, labels
 /** Shared content layout for every data view, including the standalone editor. */
 export function createDataPanel(document, { label = "Editable chart data" } = {}) {
   installDataEditorStyle(document);
-  const ui = createControls(document), node = ui.el("div", undefined, null, "cm-data-panel");
-  const tools = ui.el("div", undefined, node, "cm-data-tools"); tools.hidden = true;
-  const meta = ui.el("div", undefined, node, "cm-data-meta");
-  const summary = ui.el("span", undefined, meta);
-  const selectVisible = ui.button(meta, "Select all visible", null);
-  const actions = ui.el("div", undefined, meta, "cm-data-actions"); actions.hidden = true;
-  meta.append(selectVisible);
+  const node = panelTemplate(document).firstElementChild;
+  const tools = node.querySelector(".cm-data-tools"), meta = node.querySelector(".cm-data-meta");
+  const summary = meta.querySelector("span"), selectVisible = meta.querySelector("button"), actions = meta.querySelector(".cm-data-actions");
   bindDataActionMenus(node);
   node.addEventListener("mousedown", (event) => {
     if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
-        !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable]')) event.preventDefault();
+        !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable], clinker-editable-field')) event.preventDefault();
   });
-  const viewport = ui.el("div", undefined, node, "cm-data-table");
-  viewport.setAttribute("role", "region"); viewport.setAttribute("aria-label", label);
+  const viewport = node.querySelector(".cm-data-table"); viewport.setAttribute("aria-label", label);
   return { node, tools, meta, summary, selectVisible, actions, viewport,
     sync() { tools.hidden = ![...tools.children].some((child) => !child.hidden); } };
 }
@@ -70,8 +65,9 @@ export function createDataPanel(document, { label = "Editable chart data" } = {}
 /** Keep selection controls independent of the table's row and action rendering. */
 export function createSelectionControls(panel, { selection, onChange, checkbox, menuLabel } = {}) {
   const ui = createControls(panel.node.ownerDocument);
-  if (menuLabel) panel.actions.innerHTML = dataActionMenuMarkup(menuLabel, "");
-  const actions = menuLabel ? panel.actions.querySelector(".cm-data-action-menu-body")
+  const menu = menuLabel && createDataActionMenu(panel.node.ownerDocument, menuLabel);
+  if (menu) panel.actions.append(menu.node);
+  const actions = menu ? menu.body
     : ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
   ui.button(panel.actions, "Clear", () => { selection.clear(); onChange(); }).setAttribute("aria-label", "Clear selection");
   let visibleIds = [];
@@ -99,14 +95,6 @@ export function createSelectionControls(panel, { selection, onChange, checkbox, 
   };
 }
 
-const cellClass = (selection) => `cm-data-cell${selection ? " cm-data-cell--select" : ""}`;
-export function createDataCell(document, tag = "td", selection = false) {
-  const node = document.createElement(tag); node.className = cellClass(selection); return node;
-}
-export function dataCell(content, selection = false) {
-  return `<span class="${cellClass(selection)}">${content}</span>`;
-}
-
 export function installDataEditorStyle(document) {
   if (document.getElementById("cm-data-editor-style")) return;
   const style = document.createElement("style"); style.id = "cm-data-editor-style";
@@ -132,9 +120,6 @@ export function installDataEditorStyle(document) {
 .cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,#64748b); line-height:1; }
 .cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-accent,#1677ff); }
 .cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
-.cm-data-ui .cm-data-icon-button--edit { --cm-icon-size:20px; display:none; flex:0 0 20px; }
-.cm-data-row:is(:hover,:focus-within,.is-selected) .cm-data-icon-button--edit { display:inline-grid; }
-.cm-data-icon-button--edit svg { width:14px; height:14px; }
 .cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
 .cm-data-search { display:flex; flex:1; min-width:140px; }
 .cm-data-search input { width:100%; }
@@ -162,14 +147,13 @@ export function installDataEditorStyle(document) {
 .cm-data-row > :is(th,td) { height:${DATA_ROW_HEIGHT}px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
 .cm-data-row:is(:hover,:focus-within) { --cm-row-background:var(--cm-hover,#e3ecf8); }
 .cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
+.cm-data-row:is(:hover,:focus-within,.is-selected) { --cm-edit-affordance-opacity:1; }
 .cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; vertical-align:middle; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
 span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
 .cm-data-cell--select input { display:block; margin:auto; }
 .cm-data-cell > input[type=color] { display:block; }
 .cm-data-ui .cm-data-cell .cm-data-field { padding-inline:0; margin-inline:-1px; }
-.cm-data-ui input.cm-data-field.cm-data-cell { padding-inline:7px; }
-.cm-data-placeholder { color:var(--cm-muted,#687586); font-style:normal; }
 .cm-data-ui .cm-data-field { min-width:0; border-color:transparent!important; background:transparent!important; }
 .cm-data-ui .cm-data-row .cm-data-field { height:28px; min-height:28px; padding-block:2px; line-height:20px; }
 .cm-data-ui .cm-data-field:is(:hover,:focus) { border-color:var(--cm-accent,#c6d8f0)!important; background:var(--cm-surface,#fff)!important; }

@@ -10587,16 +10587,46 @@ function createFigureSurface() {
 
 const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
 
+/** Parse static markup once per document; each mount receives its own nodes. */
+function createTemplate(markup) {
+  const templates = new WeakMap();
+  return (document) => {
+    let template = templates.get(document);
+    if (!template) {
+      template = document.createElement("template"); template.innerHTML = markup;
+      templates.set(document, template);
+    }
+    return document.importNode(template.content, true);
+  };
+}
+
+const controlTemplates = Object.fromEntries(["button", "input", "select", "option"].map((tag) =>
+  [tag, createTemplate(tag === "input" ? "<input>" : `<${tag}></${tag}>`)]));
+const labelTemplate = createTemplate("<label><span></span></label>");
+const selectOptions = new WeakMap();
+function updateSelectOptions(control, entries) {
+  const options = entries.map((entry) => Array.isArray(entry) ? entry : [entry, entry]);
+  const key = JSON.stringify(options);
+  if (selectOptions.get(control) === key) return;
+  const value = control.value;
+  control.replaceChildren(...options.map(([value, label]) => {
+    const option = controlTemplates.option(control.ownerDocument).firstElementChild;
+    option.value = value; option.textContent = label; return option;
+  }));
+  control.value = value; selectOptions.set(control, key);
+}
+
 /** Native controls with consistent labels, values and validity handling. */
 function createControls(document) {
   const el = (tag, text, parent, className) => {
-    const node = document.createElement(tag);
+    const node = controlTemplates[tag]?.(document).firstElementChild || document.createElement(tag);
     if (text !== undefined) node.textContent = text;
     if (className) node.className = className;
     parent?.append(node); return node;
   };
   const row = (parent, label) => {
-    const node = el("label", undefined, parent); el("span", label, node); return node;
+    const node = labelTemplate(document).firstElementChild;
+    node.firstElementChild.textContent = label; parent?.append(node); return node;
   };
   const button = (parent, label, action, className) => {
     const node = el("button", label, parent, className); node.type = "button"; node.onclick = action; return node;
@@ -10612,10 +10642,7 @@ function createControls(document) {
   };
   const select = (parent, label, value, entries, onChange) => {
     const node = el("select", undefined, parent); node.setAttribute("aria-label", label);
-    for (const entry of entries) {
-      const [key, title] = Array.isArray(entry) ? entry : [entry, entry];
-      el("option", title, node).value = key;
-    }
+    updateSelectOptions(node, entries);
     node.value = value;
     if (onChange) node.onchange = () => onChange(node.value);
     return node;
@@ -10626,22 +10653,24 @@ function createControls(document) {
   return { el, row, button, input, select, field };
 }
 
-/** The same inline-field behaviour for DOM-built and markup-built tables. */
+const fieldValues = new WeakMap();
+
+/** Shared commit, validation and cancellation for editable fields. */
 function bindEditableField(control, { commit, cancel }) {
   control.classList.add("cm-data-field");
-  let saved = control.value;
+  fieldValues.set(control, control.value);
   control.onchange = () => {
     control.setCustomValidity("");
     if (!control.checkValidity()) { control.reportValidity(); return; }
-    if (control.value === saved) return;
-    if (commit(control.value, control) !== false) saved = control.value;
+    if (control.value === fieldValues.get(control)) return;
+    if (commit(control.value, control) !== false) fieldValues.set(control, control.value);
     else control.reportValidity();
   };
   control.onkeydown = (event) => {
     if (event.isComposing) return;
     if (event.key === "Escape") {
       event.preventDefault(); event.stopPropagation();
-      control.value = saved; control.setCustomValidity(""); cancel?.();
+      control.value = fieldValues.get(control); control.setCustomValidity(""); cancel?.();
     } else if (event.key === "Enter" && control.tagName === "INPUT") {
       event.preventDefault(); control.blur();
     }
@@ -10686,9 +10715,6 @@ function installDataEditorStyle(document) {
 .cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,#64748b); line-height:1; }
 .cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-accent,#1677ff); }
 .cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
-.cm-data-ui .cm-data-icon-button--edit { --cm-icon-size:20px; display:none; flex:0 0 20px; }
-.cm-data-row:is(:hover,:focus-within,.is-selected) .cm-data-icon-button--edit { display:inline-grid; }
-.cm-data-icon-button--edit svg { width:14px; height:14px; }
 .cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
 .cm-data-search { display:flex; flex:1; min-width:140px; }
 .cm-data-search input { width:100%; }
@@ -10716,14 +10742,13 @@ function installDataEditorStyle(document) {
 .cm-data-row > :is(th,td) { height:${DATA_ROW_HEIGHT}px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
 .cm-data-row:is(:hover,:focus-within) { --cm-row-background:var(--cm-hover,#e3ecf8); }
 .cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
+.cm-data-row:is(:hover,:focus-within,.is-selected) { --cm-edit-affordance-opacity:1; }
 .cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; vertical-align:middle; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
 span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
 .cm-data-cell--select input { display:block; margin:auto; }
 .cm-data-cell > input[type=color] { display:block; }
 .cm-data-ui .cm-data-cell .cm-data-field { padding-inline:0; margin-inline:-1px; }
-.cm-data-ui input.cm-data-field.cm-data-cell { padding-inline:7px; }
-.cm-data-placeholder { color:var(--cm-muted,#687586); font-style:normal; }
 .cm-data-ui .cm-data-field { min-width:0; border-color:transparent!important; background:transparent!important; }
 .cm-data-ui .cm-data-row .cm-data-field { height:28px; min-height:28px; padding-block:2px; line-height:20px; }
 .cm-data-ui .cm-data-field:is(:hover,:focus) { border-color:var(--cm-accent,#c6d8f0)!important; background:var(--cm-surface,#fff)!important; }

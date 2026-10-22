@@ -90,6 +90,7 @@ for (const theme of ["light", "dark"]) {
           if (kind === "tree") await editor(page).locator("[data-tree-toggle]").first().click();
         }
       }
+      await editor(page).locator("[data-filter]").focus();
       await page.mouse.move(0, 0);
       const panel = editor(page).locator(".cm-data-panel:visible");
       const head = panel.locator(".cm-data-head").first();
@@ -99,13 +100,13 @@ for (const theme of ["light", "dark"]) {
         header: node.querySelector(".cm-data-head").getBoundingClientRect().height,
         rows: [...node.querySelectorAll(".cm-data-row")].slice(0, 8).map((row) => {
           const rect = row.getBoundingClientRect(), check = row.querySelector('input[type="checkbox"]').getBoundingClientRect();
-          return { height: rect.height, x: check.x, offset: check.y - rect.y };
+          return { height: rect.height, x: check.x, center: check.y - rect.y + check.height / 2 };
         }),
       }));
       expect(geometry.header, kind).toBe(32);
       for (const row of geometry.rows) {
         expect(row.height, kind).toBe(34);
-        expect(row.offset, kind).toBe(10);
+        expect(Math.abs(row.center - row.height / 2), kind).toBeLessThanOrEqual(1);
         checkboxX ??= row.x;
         expect(row.x, kind).toBeCloseTo(checkboxX, 1);
       }
@@ -130,14 +131,20 @@ for (const theme of ["light", "dark"]) {
         await expect(rows.first().locator("th")).toHaveCSS("background-color", tokens.selection);
       }
       await check.uncheck();
-      const field = rows.first().locator(".cm-data-field").first();
+      const component = rows.first().locator("clinker-editable-field").first();
+      const encapsulated = await component.count() > 0;
+      if (encapsulated) await component.getByRole("button").click();
+      const field = encapsulated ? component.locator("input") : rows.first().locator(".cm-data-field").first();
       if (await field.count()) {
         await field.focus();
+        if (!encapsulated) { await field.press("Shift+Tab"); await page.keyboard.press("Tab"); }
+        await expect(field).toBeFocused();
         await expect(field).toHaveCSS("color", tokens.foreground);
         await expect(field).toHaveCSS("outline-style", "solid");
         const fieldBox = await field.boundingBox(), rowBox = await rows.first().boundingBox();
         expect(fieldBox.y).toBeGreaterThanOrEqual(rowBox.y);
         expect(fieldBox.y + fieldBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height);
+        await field.press("Escape");
       }
       const tab = editor(page).locator('[data-kind="links"]');
       await tab.hover();
@@ -152,14 +159,14 @@ test("inline edits, external edits and merges stay synchronized through history"
   const original = await page.evaluate(() => chart.data().groups[0].label);
   const row = editor(page).locator(".cm-editor__row--groups").first();
   await row.hover();
-  await row.locator('[data-focus-edit="group:label"]').click();
-  const input = row.locator('[data-edit="group:label"]');
+  await row.locator('clinker-editable-field[data-field="label"] button').click();
+  const input = row.locator('clinker-editable-field[data-field="label"] input');
   expect((await input.boundingBox()).height).toBeLessThanOrEqual(34);
   await input.fill("Renamed family"); await input.press("Enter");
   await expect.poll(() => page.evaluate(() => chart.data().groups[0].label)).toBe("Renamed family");
   await expect(row).toContainText("Renamed family");
   await expect(page.locator("#plot .legend-label").filter({ hasText: "Renamed family" })).toHaveCount(1);
-  await row.hover(); await row.locator('[data-focus-edit="group:label"]').click();
+  await row.hover(); await row.locator('clinker-editable-field[data-field="label"] button').click();
   await input.fill("Cancelled"); await input.press("Escape");
   await expect(row).toContainText("Renamed family");
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
@@ -917,4 +924,103 @@ test("editor parent ranges and contextual actions keep the table stationary", as
   expect(await page.evaluate(() => chart.data().clusters.flatMap((cluster) => cluster.loci).flatMap((locus) => locus.genes).length)).toBe(geneCount);
   await page.evaluate(() => chart.undo());
   expect(await page.evaluate(() => chart.data().groups.length)).toBe(3);
+});
+
+test("editable components preserve drafts and normalize commits through history", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  const field = editor(page).locator('.cm-editor__row--groups clinker-editable-field[data-field="label"]').first();
+  const input = field.getByRole("textbox"), uid = await field.getAttribute("data-id");
+  const label = () => page.evaluate((uid) => chart.data().groups.find((group) => String(group.uid) === uid).label, uid);
+  await field.getByRole("button").click(); await input.fill("Uncommitted draft");
+  await page.evaluate((uid) => chart.patch([{ type: "groups.update", ids: [uid], changes: { label: "Application edit" } }]), uid);
+  await expect(input).toHaveValue("Uncommitted draft");
+  await input.press("Escape");
+  expect(await field.evaluate((field) => field.value)).toBe("Application edit");
+  expect(await label()).toBe("Application edit");
+  await field.getByRole("button").click(); await input.fill("  Normalized label  "); await input.press("Enter");
+  expect(await label()).toBe("Normalized label");
+  expect(await field.evaluate((field) => field.value)).toBe("Normalized label");
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await label()).toBe("Application edit");
+  await editor(page).getByRole("button", { name: "Redo", exact: true }).click();
+  expect(await label()).toBe("Normalized label");
+  await field.getByRole("button").click(); await input.fill("Blur commits once");
+  await editor(page).locator("[data-filter]").focus();
+  expect(await label()).toBe("Blur commits once");
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await label()).toBe("Normalized label");
+});
+
+test("cluster and locus fields keep their footprint, selection and distinct patch targets", async ({ page }) => {
+  await view(page, "genes");
+  const row = editor(page).locator(".cm-editor__tree-parent").first();
+  await row.getByRole("checkbox").check();
+  const summary = editor(page).locator(".cm-data-meta > span").first();
+  const selected = await summary.innerText();
+  for (const type of ["clusters", "loci"]) {
+    const field = row.locator(`clinker-editable-field[data-type="${type}"]`), input = field.getByRole("textbox");
+    const before = await field.evaluate((field) => ({ id: field.dataset.id, value: field.value, width: field.getBoundingClientRect().width }));
+    const sourceName = () => page.evaluate(({ type, id }) => {
+      const records = type === "clusters" ? chart.data().clusters : chart.data().clusters.flatMap((cluster) => cluster.loci);
+      return records.find((record) => String(record.uid) === id).name;
+    }, { type, id: before.id });
+    const sourceBefore = await sourceName();
+    await field.getByRole("button").click();
+    expect(Math.abs((await field.boundingBox()).width - before.width)).toBeLessThanOrEqual(1);
+    await input.fill(""); await input.press("Enter");
+    await expect(input).toBeVisible(); expect(await sourceName()).toBe(sourceBefore);
+    await input.press("Escape");
+    await expect(summary).toHaveText(selected);
+    await field.getByRole("button").click(); await input.fill(`Edited ${type}`); await input.press("Enter");
+    expect(await sourceName()).toBe(`Edited ${type}`);
+    expect(await field.evaluate((field) => field.value)).toBe(`Edited ${type}`);
+    expect(Math.abs((await field.boundingBox()).height - 28)).toBeLessThanOrEqual(1);
+    await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+    expect(await sourceName()).toBe(sourceBefore);
+    expect(await field.evaluate((field) => field.value)).toBe(before.value);
+  }
+});
+
+test("numeric component validation rejects invalid identities without changing history", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await view(page, "links");
+  const field = editor(page).locator('clinker-editable-field[data-field="identity"]').first(), input = field.getByRole("spinbutton");
+  const uid = await field.getAttribute("data-id");
+  const identity = () => page.evaluate((uid) => chart.data().links.find((link) => String(link.uid) === uid).identity, uid);
+  const before = await identity();
+  await field.getByRole("button").click();
+  for (const value of ["101", "-1", ""]) {
+    await input.fill(value); await input.press("Enter");
+    expect(await input.evaluate((input) => input.checkValidity())).toBe(false);
+    expect(await identity()).toBe(before); expect(await page.evaluate(() => chart.canUndo())).toBe(false);
+  }
+  await input.press("Escape"); await expect(input).toBeHidden();
+  await field.getByRole("button").click(); await input.fill("75"); await input.press("Enter");
+  expect(await identity()).toBe(0.75);
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click(); expect(await identity()).toBe(before);
+  await editor(page).getByRole("button", { name: "Redo", exact: true }).click(); expect(await identity()).toBe(0.75);
+});
+
+test("virtualized component fields commit on blur and discard drafts when data is replaced", async ({ page }) => {
+  await page.evaluate(() => {
+    const genes = Array.from({ length: 260 }, (_, i) => ({ uid: `gene-${i}`, start: i * 100, end: i * 100 + 80, strand: 1 }));
+    chart.data({ config: { updateGroups: false }, clusters: [{ uid: "c", name: "Cluster", loci: [{ uid: "l", start: 0, end: 26000, genes }] }],
+      links: [], groups: genes.map((gene, i) => ({ uid: `group-${i}`, label: `Group ${i}`, genes: [gene.uid] })) });
+  });
+  const rows = editor(page).locator(".cm-editor__row--groups"), table = editor(page).locator(".cm-editor__table");
+  expect(await rows.count()).toBeLessThan(80);
+  const field = rows.first().locator('clinker-editable-field[data-field="label"]');
+  await field.getByRole("button").click(); await field.getByRole("textbox").fill("Saved before scrolling");
+  await table.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+  await expect(rows.last()).toContainText("Group 259");
+  await table.evaluate((node) => { node.scrollTop = 0; });
+  await expect(rows.first()).toContainText("Saved before scrolling");
+  await field.getByRole("button").click(); await field.getByRole("textbox").fill("Discard this draft");
+  await page.evaluate(() => {
+    const data = structuredClone(chart.data()); data.groups[0].label = "Replacement data"; chart.data(data);
+  });
+  await expect(field.getByRole("textbox")).toBeHidden();
+  expect(await field.evaluate((field) => field.value)).toBe("Replacement data");
+  expect(await page.evaluate(() => chart.data().groups[0].label)).toBe("Replacement data");
+  expect(await page.evaluate(() => chart.canUndo())).toBe(false);
 });

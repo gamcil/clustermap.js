@@ -10,7 +10,7 @@ export function virtualRowWindow(count, scrollTop, height, { rowHeight = DATA_RO
 
 /** Own scrolling, resizing and keyed DOM rows; callers supply row/spacer elements. */
 export function createVirtualRows({ viewport, container, key, createRow, updateRow,
-  createSpacer, createEmpty, headerHeight = () => 0, onRender = () => {} }) {
+  disposeRow = () => {}, createSpacer, createEmpty, headerHeight = () => 0, onRender = () => {} }) {
   const document = container.ownerDocument, view = document.defaultView;
   if (!viewport.hasAttribute("tabindex")) viewport.tabIndex = -1;
   const spacer = () => {
@@ -33,24 +33,16 @@ export function createVirtualRows({ viewport, container, key, createRow, updateR
       const visible = rows.slice(first, last), ids = new Set(visible.map(key));
       const remove = (node) => {
         if (node.contains(document.activeElement)) { document.activeElement.blur(); viewport.focus({ preventScroll: true }); }
-        node.remove();
+        disposeRow(node); node.remove();
       };
       for (const [id, entry] of mounted) if (!ids.has(id)) { remove(entry.node); mounted.delete(id); }
       if (empty) empty.hidden = rows.length > 0;
-      let next = empty || bottom, restoreFocus = null;
+      let next = empty || bottom;
       for (let index = visible.length - 1; index >= 0; index--) {
         const row = visible[index], id = key(row);
         let entry = mounted.get(id);
         if (!entry) { entry = { node: createRow(row) }; mounted.set(id, entry); }
-        else if (updateRow) {
-          const updated = updateRow(entry.node, row);
-          if (updated && updated !== entry.node) {
-            const active = document.activeElement, label = active?.getAttribute("aria-label");
-            if (label && entry.node.contains(active)) restoreFocus = [...updated.querySelectorAll("[aria-label]")]
-              .find((control) => control.tagName === active.tagName && control.type === active.type && control.getAttribute("aria-label") === label);
-            remove(entry.node); entry.node = updated;
-          }
-        }
+        else updateRow?.(entry.node, row);
         entry.node.setAttribute("aria-rowindex", first + index + 2);
         if (entry.node.nextSibling !== next) container.insertBefore(entry.node, next);
         next = entry.node;
@@ -62,7 +54,6 @@ export function createVirtualRows({ viewport, container, key, createRow, updateR
       // its position, especially when jumping to the end of a native table.
       viewport.scrollTop = scrollTop;
       onRender([...mounted.values()].map((entry) => entry.node));
-      restoreFocus?.focus({ preventScroll: true });
     } finally {
       rendering = false;
       if (pending && !destroyed) { pending = false; view.queueMicrotask(() => render(true)); }
@@ -77,7 +68,7 @@ export function createVirtualRows({ viewport, container, key, createRow, updateR
     destroy() {
       destroyed = true; observer.disconnect(); viewport.removeEventListener("scroll", schedule);
       if (frame !== null) view.cancelAnimationFrame(frame);
-      for (const { node } of mounted.values()) node.remove();
+      for (const { node } of mounted.values()) { disposeRow(node); node.remove(); }
       top.remove(); bottom.remove(); empty?.remove(); mounted.clear();
     },
   };

@@ -12,4 +12,6 @@ test("published core and editor bundles do not require a consumer D3 shim", asyn
   assert.doesNotMatch(core, /from\s*["']d3(?:-[^"']+)?["']/);
   assert.doesNotMatch(editor, /from\s*["']d3(?:-[^"']+)?["']/);
   assert.doesNotMatch(core, /global\.d3|require\(["']d3["']\)/);
+  assert.doesNotMatch(editor, /textAsset\(|from\s*["'][^"']+\.(?:html|css)["']/);
+  assert.match(editor, /clinker-editable-field/);
 });

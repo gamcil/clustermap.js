@@ -404,21 +404,48 @@ function hsl2rgb(h, m1, m2) {
       : m1) * 255;
 }
 
-const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;")
-  .replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-
 const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
+
+/** Parse static markup once per document; each mount receives its own nodes. */
+function createTemplate(markup) {
+  const templates = new WeakMap();
+  return (document) => {
+    let template = templates.get(document);
+    if (!template) {
+      template = document.createElement("template"); template.innerHTML = markup;
+      templates.set(document, template);
+    }
+    return document.importNode(template.content, true);
+  };
+}
+
+const controlTemplates = Object.fromEntries(["button", "input", "select", "option"].map((tag) =>
+  [tag, createTemplate(tag === "input" ? "<input>" : `<${tag}></${tag}>`)]));
+const labelTemplate = createTemplate("<label><span></span></label>");
+const selectOptions = new WeakMap();
+function updateSelectOptions(control, entries) {
+  const options = entries.map((entry) => Array.isArray(entry) ? entry : [entry, entry]);
+  const key = JSON.stringify(options);
+  if (selectOptions.get(control) === key) return;
+  const value = control.value;
+  control.replaceChildren(...options.map(([value, label]) => {
+    const option = controlTemplates.option(control.ownerDocument).firstElementChild;
+    option.value = value; option.textContent = label; return option;
+  }));
+  control.value = value; selectOptions.set(control, key);
+}
 
 /** Native controls with consistent labels, values and validity handling. */
 function createControls(document) {
   const el = (tag, text, parent, className) => {
-    const node = document.createElement(tag);
+    const node = controlTemplates[tag]?.(document).firstElementChild || document.createElement(tag);
     if (text !== undefined) node.textContent = text;
     if (className) node.className = className;
     parent?.append(node); return node;
   };
   const row = (parent, label) => {
-    const node = el("label", undefined, parent); el("span", label, node); return node;
+    const node = labelTemplate(document).firstElementChild;
+    node.firstElementChild.textContent = label; parent?.append(node); return node;
   };
   const button = (parent, label, action, className) => {
     const node = el("button", label, parent, className); node.type = "button"; node.onclick = action; return node;
@@ -434,10 +461,7 @@ function createControls(document) {
   };
   const select = (parent, label, value, entries, onChange) => {
     const node = el("select", undefined, parent); node.setAttribute("aria-label", label);
-    for (const entry of entries) {
-      const [key, title] = Array.isArray(entry) ? entry : [entry, entry];
-      el("option", title, node).value = key;
-    }
+    updateSelectOptions(node, entries);
     node.value = value;
     if (onChange) node.onchange = () => onChange(node.value);
     return node;
@@ -448,22 +472,29 @@ function createControls(document) {
   return { el, row, button, input, select, field };
 }
 
-/** The same inline-field behaviour for DOM-built and markup-built tables. */
+const fieldValues = new WeakMap();
+function updateFieldValue(control, value) {
+  if (control === control.ownerDocument.activeElement) return;
+  control.value = value ?? "";
+  fieldValues.set(control, control.value);
+}
+
+/** Shared commit, validation and cancellation for editable fields. */
 function bindEditableField(control, { commit, cancel }) {
   control.classList.add("cm-data-field");
-  let saved = control.value;
+  fieldValues.set(control, control.value);
   control.onchange = () => {
     control.setCustomValidity("");
     if (!control.checkValidity()) { control.reportValidity(); return; }
-    if (control.value === saved) return;
-    if (commit(control.value, control) !== false) saved = control.value;
+    if (control.value === fieldValues.get(control)) return;
+    if (commit(control.value, control) !== false) fieldValues.set(control, control.value);
     else control.reportValidity();
   };
   control.onkeydown = (event) => {
     if (event.isComposing) return;
     if (event.key === "Escape") {
       event.preventDefault(); event.stopPropagation();
-      control.value = saved; control.setCustomValidity(""); cancel?.();
+      control.value = fieldValues.get(control); control.setCustomValidity(""); cancel?.();
     } else if (event.key === "Enter" && control.tagName === "INPUT") {
       event.preventDefault(); control.blur();
     }
@@ -492,7 +523,7 @@ function virtualRowWindow(count, scrollTop, height, { rowHeight = DATA_ROW_HEIGH
 
 /** Own scrolling, resizing and keyed DOM rows; callers supply row/spacer elements. */
 function createVirtualRows({ viewport, container, key, createRow, updateRow,
-  createSpacer, createEmpty, headerHeight = () => 0, onRender = () => {} }) {
+  disposeRow = () => {}, createSpacer, createEmpty, headerHeight = () => 0, onRender = () => {} }) {
   const document = container.ownerDocument, view = document.defaultView;
   if (!viewport.hasAttribute("tabindex")) viewport.tabIndex = -1;
   const spacer = () => {
@@ -515,24 +546,16 @@ function createVirtualRows({ viewport, container, key, createRow, updateRow,
       const visible = rows.slice(first, last), ids = new Set(visible.map(key));
       const remove = (node) => {
         if (node.contains(document.activeElement)) { document.activeElement.blur(); viewport.focus({ preventScroll: true }); }
-        node.remove();
+        disposeRow(node); node.remove();
       };
       for (const [id, entry] of mounted) if (!ids.has(id)) { remove(entry.node); mounted.delete(id); }
       if (empty) empty.hidden = rows.length > 0;
-      let next = empty || bottom, restoreFocus = null;
+      let next = empty || bottom;
       for (let index = visible.length - 1; index >= 0; index--) {
         const row = visible[index], id = key(row);
         let entry = mounted.get(id);
         if (!entry) { entry = { node: createRow(row) }; mounted.set(id, entry); }
-        else if (updateRow) {
-          const updated = updateRow(entry.node, row);
-          if (updated && updated !== entry.node) {
-            const active = document.activeElement, label = active?.getAttribute("aria-label");
-            if (label && entry.node.contains(active)) restoreFocus = [...updated.querySelectorAll("[aria-label]")]
-              .find((control) => control.tagName === active.tagName && control.type === active.type && control.getAttribute("aria-label") === label);
-            remove(entry.node); entry.node = updated;
-          }
-        }
+        else updateRow?.(entry.node, row);
         entry.node.setAttribute("aria-rowindex", first + index + 2);
         if (entry.node.nextSibling !== next) container.insertBefore(entry.node, next);
         next = entry.node;
@@ -544,7 +567,6 @@ function createVirtualRows({ viewport, container, key, createRow, updateRow,
       // its position, especially when jumping to the end of a native table.
       viewport.scrollTop = scrollTop;
       onRender([...mounted.values()].map((entry) => entry.node));
-      restoreFocus?.focus({ preventScroll: true });
     } finally {
       rendering = false;
       if (pending && !destroyed) { pending = false; view.queueMicrotask(() => render(true)); }
@@ -559,14 +581,26 @@ function createVirtualRows({ viewport, container, key, createRow, updateRow,
     destroy() {
       destroyed = true; observer.disconnect(); viewport.removeEventListener("scroll", schedule);
       if (frame !== null) view.cancelAnimationFrame(frame);
-      for (const { node } of mounted.values()) node.remove();
+      for (const { node } of mounted.values()) { disposeRow(node); node.remove(); }
       top.remove(); bottom.remove(); empty?.remove(); mounted.clear();
     },
   };
 }
 
-const dataActionMenuMarkup = (label, content) =>
-  `<details class="cm-data-action-menu"><summary>${escapeHtml(label)}</summary><div class="cm-data-action-menu-body">${content}</div></details>`;
+const searchTemplate = createTemplate(`<label class="cm-data-search"><input type="search" aria-label="Filter records"></label>`);
+const panelTemplate = createTemplate(`
+  <div class="cm-data-panel">
+    <div class="cm-data-tools" hidden></div>
+    <div class="cm-data-meta"><span></span><div class="cm-data-actions" hidden></div><button type="button">Select all visible</button></div>
+    <div class="cm-data-table" role="region"></div>
+  </div>`);
+const menuTemplate = createTemplate('<details class="cm-data-action-menu"><summary></summary><div class="cm-data-action-menu-body"></div></details>');
+function createDataActionMenu(document, label, content) {
+  const node = menuTemplate(document).firstElementChild;
+  node.querySelector("summary").textContent = label;
+  const body = node.querySelector("div"); if (content) body.append(content);
+  return { node, body };
+}
 
 /** Menu behaviour shared by table actions and the plot selection toolbar. */
 function bindDataActionMenus(root) {
@@ -587,8 +621,8 @@ function bindDataActionMenus(root) {
 
 /** Shared controls and table primitives for the packaged and inline data editors. */
 function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
-  const ui = createControls(document), node = ui.el("label", undefined, null, "cm-data-search");
-  const input = ui.input(node, "Filter records", "", "search"); input.placeholder = placeholder;
+  const node = searchTemplate(document).firstElementChild, input = node.querySelector("input");
+  input.placeholder = placeholder;
   if (onInput) input.oninput = () => onInput(input.value);
   return { node, input };
 }
@@ -596,20 +630,15 @@ function createDataSearch(document, { placeholder = "Search names, labels, loci,
 /** Shared content layout for every data view, including the standalone editor. */
 function createDataPanel(document, { label = "Editable chart data" } = {}) {
   installDataEditorStyle(document);
-  const ui = createControls(document), node = ui.el("div", undefined, null, "cm-data-panel");
-  const tools = ui.el("div", undefined, node, "cm-data-tools"); tools.hidden = true;
-  const meta = ui.el("div", undefined, node, "cm-data-meta");
-  const summary = ui.el("span", undefined, meta);
-  const selectVisible = ui.button(meta, "Select all visible", null);
-  const actions = ui.el("div", undefined, meta, "cm-data-actions"); actions.hidden = true;
-  meta.append(selectVisible);
+  const node = panelTemplate(document).firstElementChild;
+  const tools = node.querySelector(".cm-data-tools"), meta = node.querySelector(".cm-data-meta");
+  const summary = meta.querySelector("span"), selectVisible = meta.querySelector("button"), actions = meta.querySelector(".cm-data-actions");
   bindDataActionMenus(node);
   node.addEventListener("mousedown", (event) => {
     if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
-        !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable]')) event.preventDefault();
+        !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable], clinker-editable-field')) event.preventDefault();
   });
-  const viewport = ui.el("div", undefined, node, "cm-data-table");
-  viewport.setAttribute("role", "region"); viewport.setAttribute("aria-label", label);
+  const viewport = node.querySelector(".cm-data-table"); viewport.setAttribute("aria-label", label);
   return { node, tools, meta, summary, selectVisible, actions, viewport,
     sync() { tools.hidden = ![...tools.children].some((child) => !child.hidden); } };
 }
@@ -617,8 +646,9 @@ function createDataPanel(document, { label = "Editable chart data" } = {}) {
 /** Keep selection controls independent of the table's row and action rendering. */
 function createSelectionControls(panel, { selection, onChange, checkbox, menuLabel } = {}) {
   const ui = createControls(panel.node.ownerDocument);
-  if (menuLabel) panel.actions.innerHTML = dataActionMenuMarkup(menuLabel, "");
-  const actions = menuLabel ? panel.actions.querySelector(".cm-data-action-menu-body")
+  const menu = menuLabel && createDataActionMenu(panel.node.ownerDocument, menuLabel);
+  if (menu) panel.actions.append(menu.node);
+  const actions = menu ? menu.body
     : ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
   ui.button(panel.actions, "Clear", () => { selection.clear(); onChange(); }).setAttribute("aria-label", "Clear selection");
   let visibleIds = [];
@@ -646,11 +676,6 @@ function createSelectionControls(panel, { selection, onChange, checkbox, menuLab
   };
 }
 
-const cellClass = (selection) => `cm-data-cell${selection ? " cm-data-cell--select" : ""}`;
-function createDataCell(document, tag = "td", selection = false) {
-  const node = document.createElement(tag); node.className = cellClass(selection); return node;
-}
-
 function installDataEditorStyle(document) {
   if (document.getElementById("cm-data-editor-style")) return;
   const style = document.createElement("style"); style.id = "cm-data-editor-style";
@@ -676,9 +701,6 @@ function installDataEditorStyle(document) {
 .cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,#64748b); line-height:1; }
 .cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-accent,#1677ff); }
 .cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
-.cm-data-ui .cm-data-icon-button--edit { --cm-icon-size:20px; display:none; flex:0 0 20px; }
-.cm-data-row:is(:hover,:focus-within,.is-selected) .cm-data-icon-button--edit { display:inline-grid; }
-.cm-data-icon-button--edit svg { width:14px; height:14px; }
 .cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
 .cm-data-search { display:flex; flex:1; min-width:140px; }
 .cm-data-search input { width:100%; }
@@ -706,14 +728,13 @@ function installDataEditorStyle(document) {
 .cm-data-row > :is(th,td) { height:${DATA_ROW_HEIGHT}px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
 .cm-data-row:is(:hover,:focus-within) { --cm-row-background:var(--cm-hover,#e3ecf8); }
 .cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
+.cm-data-row:is(:hover,:focus-within,.is-selected) { --cm-edit-affordance-opacity:1; }
 .cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; vertical-align:middle; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
 span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
 .cm-data-cell--select input { display:block; margin:auto; }
 .cm-data-cell > input[type=color] { display:block; }
 .cm-data-ui .cm-data-cell .cm-data-field { padding-inline:0; margin-inline:-1px; }
-.cm-data-ui input.cm-data-field.cm-data-cell { padding-inline:7px; }
-.cm-data-placeholder { color:var(--cm-muted,#687586); font-style:normal; }
 .cm-data-ui .cm-data-field { min-width:0; border-color:transparent!important; background:transparent!important; }
 .cm-data-ui .cm-data-row .cm-data-field { height:28px; min-height:28px; padding-block:2px; line-height:20px; }
 .cm-data-ui .cm-data-field:is(:hover,:focus) { border-color:var(--cm-accent,#c6d8f0)!important; background:var(--cm-surface,#fff)!important; }
@@ -966,14 +987,22 @@ function mapAnnotationValues(values, map) {
   return Object.fromEntries(Object.entries(values).map(([uid, row]) => [uid, row.map(map)]));
 }
 
+const formTemplate = createTemplate(`<form>
+  <label><span>Type</span><select aria-label="Type"><option value="heatmap">Heatmap</option><option value="bar">Bar chart</option><option value="groups">Group markers</option></select></label>
+  <label><span>Title</span><input type="text" aria-label="Title"></label>
+  <label><span>Values</span><select aria-label="Values"><option value="continuous">Numeric</option><option value="categorical">Categories</option></select></label>
+  <p data-help></p>
+  <label class="cm-annotation-data"><span>Data</span><textarea aria-label="Data" rows="8" spellcheck="false"></textarea></label>
+  <p data-annotation-error role="alert"></p><button type="submit">Add panel</button>
+</form>`);
+
 /** Small data-entry form; panel validation and history remain in the patch API. */
 function createAnnotationCreateControls({ document, getData, patch, onCreate, annotationApi }) {
   const { validateAnnotationPanels } = annotationApi;
-  const node = document.createElement("form");
-  const ui = createControls(document);
-  const type = ui.select(ui.row(node, "Type"), "Type", "heatmap", [["heatmap", "Heatmap"], ["bar", "Bar chart"], ["groups", "Group markers"]]);
-  const title = ui.input(ui.row(node, "Title"), "Title", "");
-  const scale = ui.select(ui.row(node, "Values"), "Values", "continuous", [["continuous", "Numeric"], ["categorical", "Categories"]]);
+  const node = formTemplate(document).firstElementChild;
+  const type = node.querySelector('[aria-label="Type"]'), title = node.querySelector('[aria-label="Title"]');
+  const scale = node.querySelector('[aria-label="Values"]'), help = node.querySelector("[data-help]");
+  const data = node.querySelector("textarea"), error = node.querySelector("[data-annotation-error]");
   type.onchange = () => {
     const groups = type.value === "groups";
     scale.parentElement.hidden = groups;
@@ -984,16 +1013,10 @@ function createAnnotationCreateControls({ document, getData, patch, onCreate, an
     data.value = groups ? JSON.stringify({ groups: [{ uid: "group-1", label: "Example group",
       clusterIds: getData().clusters.slice(0, 2).map((cluster) => cluster.uid) }] }, null, 2) : tableTemplate;
   };
-  const help = document.createElement("p");
   const tableHelp = "Paste CSV or a tab-separated table. First column: cluster ID; remaining headings: data columns. Blank cells are missing. Bars use one data column. JSON {columns, values} is also accepted.";
   help.textContent = tableHelp;
-  node.append(help);
-  const data = ui.el("textarea", undefined, ui.row(node, "Data")); data.setAttribute("aria-label", "Data"); data.rows = 8; data.spellcheck = false;
-  data.parentElement.className = "cm-annotation-data";
   const tableTemplate = csvFormatRows([["cluster", "Value"], ...getData().clusters.map((cluster) => [cluster.uid, ""])]);
   data.value = tableTemplate;
-  const error = document.createElement("p"); error.dataset.annotationError = ""; error.setAttribute("role", "alert"); node.append(error);
-  const submit = document.createElement("button"); submit.type = "submit"; submit.textContent = "Add panel"; node.append(submit);
   const run = createActionRunner((message) => { error.textContent = message; });
   node.onsubmit = (event) => {
     event.preventDefault(); error.textContent = "";
@@ -1016,74 +1039,168 @@ function createAnnotationCreateControls({ document, getData, patch, onCreate, an
   return { node };
 }
 
+const editorTemplate = createTemplate(`<div class="cm-data-ui cm-annotation-data-editor" tabindex="-1">
+  <div class="cm-data-toolbar">
+    <select aria-label="Annotation panel"></select><button type="button" data-add>Add panel</button>
+    <button type="button" data-replace>Replace data…</button><button type="button" data-show>Hide</button>
+    <button type="button" data-left aria-label="Move left" title="Move left">←</button>
+    <button type="button" data-right aria-label="Move right" title="Move right">→</button>
+    <button type="button" data-remove aria-label="Remove panel">Remove</button>
+  </div>
+  <div class="cm-data-error" data-data-error role="alert"></div><div class="cm-annotation-data-body"></div>
+</div>`);
+const tableTemplate = createTemplate(`<table><thead><tr>
+  <th class="cm-data-cell cm-data-cell--select cm-data-head"><input type="checkbox" aria-label="Select all filtered clusters"></th>
+  <th class="cm-data-cell cm-data-head">Cluster</th>
+</tr></thead><tbody></tbody></table>`);
+const columnTemplate = createTemplate(`<th class="cm-data-cell cm-data-head"><div class="cm-annotation-column">
+  <input type="text"><button type="button" class="cm-data-icon-button">×</button>
+</div></th>`);
+const addColumnTemplate = createTemplate(`<th class="cm-data-cell cm-data-head cm-annotation-add-column"><form>
+  <button type="button" aria-label="Add column">+</button>
+  <input type="text" aria-label="New column name" placeholder="Column name" hidden><button type="submit" hidden>Add</button>
+</form></th>`);
+const rowTemplate = createTemplate(`<tr class="cm-data-row">
+  <td class="cm-data-cell cm-data-cell--select"><input type="checkbox"></td><th class="cm-data-cell" scope="row"></th>
+</tr>`);
+const numericCellTemplate = createTemplate('<td class="cm-data-cell"><input type="number" step="any" placeholder="—"></td>');
+const categoryCellTemplate = createTemplate('<td class="cm-data-cell"><select></select></td>');
+const emptyCellTemplate = createTemplate('<td class="cm-data-cell"></td>');
+const spacerTemplate = createTemplate('<tr class="cm-annotation-spacer" aria-hidden="true"><td></td></tr>');
+const batchTemplate = createTemplate(`<div class="cm-data-selection-actions">
+  <select aria-label="Columns to edit"></select><span data-value></span>
+  <button type="button" data-set>Set values</button><button type="button" data-clear>Clear values</button>
+</div>`);
+const categoriesTemplate = createTemplate('<details class="cm-annotation-categories"><summary></summary><div></div></details>');
+const categoryTemplate = createTemplate(`<div class="cm-annotation-category">
+  <input type="color"><input type="text"><button type="button">×</button>
+</div>`);
+const categoryRemovalTemplate = createTemplate(`<div class="cm-annotation-category-remove"><span></span>
+  <select aria-label="Replacement category"></select><button type="button" data-remove>Remove</button><button type="button" data-cancel>Cancel</button>
+</div>`);
+const replacementTemplate = createTemplate(`<div class="cm-annotation-replacement" hidden>
+  <textarea rows="5" spellcheck="false" aria-label="Replacement annotation data (CSV, TSV or JSON)"></textarea>
+  <div class="cm-data-toolbar"><button type="button" data-replace>Replace data</button><button type="button" data-cancel>Cancel</button></div>
+</div>`);
+const groupTemplate = createTemplate(`<fieldset><legend></legend><div class="cm-data-toolbar cm-annotation-data-toolbar">
+  <input type="text" aria-label="Group label"><input type="color" aria-label="Group colour">
+  <button type="button">Remove group</button><select aria-label="Membership"></select>
+</div><select data-members></select></fieldset>`);
+const addGroupTemplate = createTemplate('<button type="button">Add group</button>');
+const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to attach data to cluster rows.</p>');
+
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  installDataEditorStyle(document);
-  installStyle$1(document);
+  installDataEditorStyle(document); installStyle$1(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
-  const toolbar = document.createElement("div"); toolbar.className = "cm-data-toolbar";
-  const node = document.createElement("div"); node.className = "cm-data-ui cm-annotation-data-editor"; node.tabIndex = -1;
-  let selected = null, applying = false, renderedPanel = null, renderedPanels = null, renderedClusters = null, filter = "", deleting = null, creating = false;
-  let disposeView = () => {}, filterRows = () => {}, filterSelection = () => {};
+  const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector(".cm-data-toolbar");
+  const body = node.querySelector(".cm-annotation-data-body"), status = node.querySelector("[data-data-error]");
+  const panelSelect = toolbar.querySelector("select");
+  const control = (name) => toolbar.querySelector(`[data-${name}]`);
+  if (embedded) toolbar.remove();
+  let selected = null, applying = false, renderedPanel = null, renderedPanels = null, renderedClusters = null;
+  let filter = "", deleting = null, creating = false, view = null, viewKey = null;
   const selection = new RowSelection();
   let selectionPanel = null, batchColumn = "0", batchValue = "";
   const getPanels = () => getData()?.annotationPanels || [];
   const current = () => getPanels().find((panel) => panel.uid === selected);
-  const { el, button, input, select, field } = createControls(document);
-  const error = (message) => { node.querySelector('[data-data-error]').textContent = message; };
+  const error = (message) => { status.textContent = message; };
   const run = createActionRunner(error);
   const commit = (operations, refresh = true, control) => {
     applying = true;
     try { return run(() => {
       patch(operations);
-      if (refresh) render(); else { renderedPanel = current(); renderedPanels = getPanels(); }
+      if (refresh) {
+        for (const menu of node.querySelectorAll(".cm-data-action-menu")) menu.open = false;
+        render();
+      } else { renderedPanel = current(); renderedPanels = getPanels(); }
     }, control); } finally { applying = false; }
   };
   const update = (changes, refresh = true, control) => commit([{ type: "annotationPanels.update", ids: [selected], changes }], refresh, control);
   const categoryScale = (panel, domain, colours) => ({ ...panel.scale, type: "categorical", domain,
     colours: colours.length ? colours : [...ANNOTATION_PALETTES.Qualitative] });
-  const renderCategories = (parent, panel) => {
-    const { domain, colour } = resolveAnnotationScale(panel), colours = domain.map(colour);
+  const clearSelection = () => { selection.clear(); view?.syncSelection?.(); };
+  panelSelect.onchange = () => { selected = panelSelect.value; deleting = null; creating = false; render(); };
+  control("add").onclick = () => { creating = !creating; render(); };
+  control("show").onclick = () => update({ show: current().show === false });
+  control("remove").onclick = () => commit([{ type: "annotationPanels.delete", ids: [selected] }]);
+  for (const [name, direction] of [["left", -1], ["right", 1]]) control(name).onclick = () => {
+    const ids = getPanels().map((panel) => panel.uid), index = ids.indexOf(selected);
+    [ids[index], ids[index + direction]] = [ids[index + direction], ids[index]];
+    commit([{ type: "annotationPanels.reorder", ids }]);
+  };
+  const search = !embedded && createDataSearch(document, { placeholder: "Find a cluster", onInput: (value) => {
+    filter = value; view?.filterRows?.();
+  } });
+  if (search) toolbar.append(search.node);
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !event.defaultPrevented && selection.size) { event.preventDefault(); clearSelection(); }
+  });
 
+  function renderCategories(parent) {
+    const panel = current(), { domain, colour } = resolveAnnotationScale(panel), colours = domain.map(colour);
+    parent.replaceChildren();
     domain.forEach((name, index) => {
-      const row = el("div", undefined, parent); row.className = "cm-annotation-category";
-      input(row, `Colour for ${name}`, colour(name), "color", (value) => {
-        const next = [...colours]; next[index] = value; update({ scale: categoryScale(current(), domain, next) });
-      });
-      input(row, `Rename category ${name}`, name, "text", (value) => {
-        if (!value.trim()) { error("Category names cannot be empty."); return; }
-        update({ values: mapAnnotationValues(current().values, (item) => item === name ? value : item),
-          scale: categoryScale(panel, domain.map((item) => item === name ? value : item), colours) });
-      });
-      button(row, "×", () => { deleting = name; render(); }).setAttribute("aria-label", `Remove category ${name}`);
+      const row = categoryTemplate(document).firstElementChild;
+      const swatch = row.querySelector('[type="color"]'), label = row.querySelector('[type="text"]'), remove = row.querySelector("button");
+      swatch.value = colourHex(colour(name)); swatch.setAttribute("aria-label", `Colour for ${name}`);
+      swatch.onchange = () => { const next = [...colours]; next[index] = swatch.value; update({ scale: categoryScale(current(), domain, next) }); };
+      label.value = name; label.setAttribute("aria-label", `Rename category ${name}`);
+      label.onchange = () => {
+        if (!label.value.trim()) { error("Category names cannot be empty."); return; }
+        update({ values: mapAnnotationValues(current().values, (item) => item === name ? label.value : item),
+          scale: categoryScale(current(), domain.map((item) => item === name ? label.value : item), colours) });
+      };
+      remove.setAttribute("aria-label", `Remove category ${name}`); remove.onclick = () => { deleting = name; render(); };
+      parent.append(row);
       if (deleting === name) {
-        const remove = el("div", undefined, parent); remove.className = "cm-annotation-category-remove";
-        el("span", `Replace “${name}” with`, remove);
-        // Index values keep the missing option distinct from arbitrary category names.
-        const replacement = select(remove, "Replacement category", "missing", [["missing", "Missing"],
-          ...domain.flatMap((item, i) => item === name ? [] : [[String(i), item]])], () => {});
-        button(remove, "Remove", () => {
-          const value = replacement.value === "missing" ? null : domain[Number(replacement.value)];
-          deleting = null;
+        const box = categoryRemovalTemplate(document).firstElementChild, replacement = box.querySelector("select");
+        box.querySelector("span").textContent = `Replace “${name}” with`;
+        updateSelectOptions(replacement, [["missing", "Missing"], ...domain.flatMap((item, i) => item === name ? [] : [[String(i), item]])]);
+        replacement.value = "missing";
+        box.querySelector("[data-remove]").onclick = () => {
+          const value = replacement.value === "missing" ? null : domain[Number(replacement.value)]; deleting = null;
           update({ values: mapAnnotationValues(current().values, (item) => item === name ? value : item),
-            scale: categoryScale(panel, domain.filter((item) => item !== name), colours.filter((_, i) => i !== index)) });
-        });
-        button(remove, "Cancel", () => { deleting = null; render(); });
+            scale: categoryScale(current(), domain.filter((item) => item !== name), colours.filter((_, i) => i !== index)) });
+        };
+        box.querySelector("[data-cancel]").onclick = () => { deleting = null; render(); }; parent.append(box);
       }
     });
-    const row = el("div", undefined, parent); row.className = "cm-annotation-category";
+    const row = categoryTemplate(document).firstElementChild;
+    const swatch = row.querySelector('[type="color"]'), name = row.querySelector('[type="text"]'), add = row.querySelector("button");
     const used = new Set(colours.map((value) => colourHex(value)));
-    const nextColour = ANNOTATION_PALETTES.Qualitative.find((value) => !used.has(colourHex(value))) ??
-      ANNOTATION_PALETTES.Qualitative[domain.length % ANNOTATION_PALETTES.Qualitative.length];
-    const colourInput = input(row, "New category colour", nextColour, "color");
-    const name = input(row, "New category name", "", "text", () => {}); name.placeholder = "New category";
-    button(row, "+", () => {
+    swatch.value = colourHex(ANNOTATION_PALETTES.Qualitative.find((value) => !used.has(colourHex(value))) ?? ANNOTATION_PALETTES.Qualitative[domain.length % ANNOTATION_PALETTES.Qualitative.length]);
+    swatch.setAttribute("aria-label", "New category colour"); name.setAttribute("aria-label", "New category name"); name.placeholder = "New category";
+    add.textContent = "+"; add.setAttribute("aria-label", "Add category"); add.onclick = () => {
       if (!name.value.trim()) { name.focus(); return; }
-      update({ scale: categoryScale(panel, [...domain, name.value.trim()], [...colours, colourInput.value]) });
-    }).setAttribute("aria-label", "Add category");
-  };
-  const renderMatrix = (layout, panel) => {
-    const categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel);
+      update({ scale: categoryScale(current(), [...domain, name.value.trim()], [...colours, swatch.value]) });
+    };
+    parent.append(row);
+  }
+
+  function createMatrix(layout) {
+    const panel = current(), categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel), extra = panel.type === "heatmap";
+    const tableArea = layout.viewport; tableArea.classList.add("cm-annotation-matrix");
+    const table = tableTemplate(document).firstElementChild, head = table.querySelector("tr"), all = head.querySelector("input");
+    tableArea.append(table);
+    let clusters = [], mounted = [];
+    const rowIds = new WeakMap();
+    const syncSelection = () => {
+      selectionControls.update({ ids: clusters.map((cluster) => cluster.uid), summary: `${clusters.length.toLocaleString()} visible clusters`, noun: "cluster" });
+      for (const row of mounted) {
+        const checked = selection.has(rowIds.get(row)); row.classList.toggle("is-selected", checked); row.setAttribute("aria-selected", String(checked));
+        row.querySelector('[type="checkbox"]').checked = checked;
+      }
+    };
+    const selectionControls = createSelectionControls(layout, { selection, checkbox: all, menuLabel: "Edit values…", onChange: syncSelection });
+    const batch = batchTemplate(document).firstElementChild, columns = batch.querySelector("select");
+    selectionControls.actions.append(batch);
+    updateSelectOptions(columns, [["all", "All columns"], ...panel.columns.map((name, index) => [String(index), name])]); columns.value = batchColumn;
+    columns.onchange = () => { batchColumn = columns.value; };
+    const value = (categorical ? categoryCellTemplate : numericCellTemplate)(document).firstElementChild.firstElementChild;
+    value.setAttribute("aria-label", "Batch value"); value.placeholder = "Value";
+    if (categorical) updateSelectOptions(value, [["", "Missing"], ...resolved.domain.map((name, index) => [String(index), name])]);
+    value.value = batchValue; value.onchange = () => { batchValue = value.value; }; batch.querySelector("[data-value]").replaceWith(value);
     const updateRows = (values, refresh = true, control) => {
       const source = current();
       return commit([
@@ -1092,265 +1209,194 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
         { type: "annotationPanels.updateRows", uid: selected, values },
       ], refresh, control);
     };
-    if (categorical && batchValue !== "" && !resolved.domain[Number(batchValue)]) batchValue = "";
-    const { viewport: tableArea } = layout;
-    const all = input(null, "Select all filtered clusters", false, "checkbox");
-    const selectionControls = createSelectionControls(layout, { selection, checkbox: all, menuLabel: "Edit values…", onChange: () => syncSelection() });
-    const batch = selectionControls.actions;
-    const columns = select(batch, "Columns to edit", batchColumn,
-      [["all", "All columns"], ...panel.columns.map((name, index) => [String(index), name])], (value) => { batchColumn = value; });
-    const value = categorical
-      ? select(batch, "Batch value", batchValue, [["", "Missing"], ...resolved.domain.map((name, index) => [String(index), name])], (value) => { batchValue = value; })
-      : input(batch, "Batch value", batchValue, "number", (value) => { batchValue = value; });
-    if (!categorical) value.placeholder = "Value";
     const applyValues = (clear) => {
       if (!clear && !value.checkValidity()) { value.reportValidity(); return; }
       const source = current(), values = {};
       const next = clear || value.value === "" ? null : categorical ? resolved.domain[Number(value.value)] : Number(value.value);
       for (const uid of selection) {
         const row = [...(source.values[uid] || source.columns.map(() => null))];
-        source.columns.forEach((_, index) => { if (columns.value === "all" || index === Number(columns.value)) row[index] = next; });
-        values[uid] = row;
+        source.columns.forEach((_, index) => { if (columns.value === "all" || index === Number(columns.value)) row[index] = next; }); values[uid] = row;
       }
       updateRows(values);
     };
-    button(batch, "Set values", () => applyValues(false));
-    button(batch, "Clear values", () => applyValues(true));
-    tableArea.classList.add("cm-annotation-matrix");
-    const table = el("table", undefined, tableArea), head = el("tr", undefined, el("thead", undefined, table));
-    const cell = (tag, parent, selection = false) => { const node = createDataCell(document, tag, selection); parent.append(node); return node; };
-    const selectionHead = cell("th", head, true);
-    selectionHead.append(all);
-    cell("th", head).textContent = "Cluster";
+    batch.querySelector("[data-set]").onclick = () => applyValues(false); batch.querySelector("[data-clear]").onclick = () => applyValues(true);
     panel.columns.forEach((column, index) => {
-      const heading = cell("th", head), row = el("div", undefined, heading); row.className = "cm-annotation-column";
-      field(row, `Column ${index + 1} name`, column, { commit: (value, control) => {
-        const columns = [...current().columns]; columns[index] = value;
-        return update({ columns }, true, control);
+      const heading = columnTemplate(document).firstElementChild, field = heading.querySelector("input"), remove = heading.querySelector("button");
+      field.value = column; field.setAttribute("aria-label", `Column ${index + 1} name`);
+      bindEditableField(field, { commit: (value, control) => {
+        const columns = [...current().columns]; columns[index] = value; return update({ columns }, true, control);
       } });
-      if (panel.type === "heatmap") {
-        const remove = button(row, "×", () => update({ columns: panel.columns.filter((_, i) => i !== index),
-          values: Object.fromEntries(Object.entries(current().values).map(([uid, values]) => [uid, values.filter((_, i) => i !== index)])) }), "cm-data-icon-button");
-        remove.setAttribute("aria-label", `Remove column ${column}`);
-        remove.disabled = panel.columns.length === 1;
-      }
+      if (extra) {
+        remove.setAttribute("aria-label", `Remove column ${column}`); remove.disabled = panel.columns.length === 1;
+        remove.onclick = () => update({ columns: current().columns.filter((_, i) => i !== index),
+          values: Object.fromEntries(Object.entries(current().values).map(([uid, values]) => [uid, values.filter((_, i) => i !== index)])) });
+      } else remove.remove();
+      head.append(heading);
     });
-    for (const cell of head.children) cell.classList.add("cm-data-head");
-    const extra = panel.type === "heatmap";
     if (extra) {
-      const heading = cell("th", head); heading.classList.add("cm-data-head", "cm-annotation-add-column");
-      const form = el("form", undefined, heading);
-      const add = button(form, "+", () => { add.hidden = true; name.hidden = save.hidden = false; name.focus(); });
-      add.setAttribute("aria-label", "Add column");
-      const name = input(form, "New column name", "", "text", () => {}); name.placeholder = "Column name"; name.hidden = true;
-      const save = button(form, "Add", () => {}); save.type = "submit"; save.hidden = true;
+      const heading = addColumnTemplate(document).firstElementChild, form = heading.querySelector("form");
+      const [add, save] = form.querySelectorAll("button"), name = form.querySelector("input");
+      add.onclick = () => { add.hidden = true; name.hidden = save.hidden = false; name.focus(); };
       form.onsubmit = (event) => {
-        event.preventDefault();
-        if (!name.value.trim()) return;
-        update({ columns: [...panel.columns, name.value.trim()], values: Object.fromEntries(
-          Object.entries(current().values).map(([uid, values]) => [uid, [...values, null]])) });
+        event.preventDefault(); if (!name.value.trim()) return;
+        update({ columns: [...current().columns, name.value.trim()], values: Object.fromEntries(Object.entries(current().values).map(([uid, values]) => [uid, [...values, null]])) });
       };
       name.onkeydown = (event) => { if (event.key === "Escape") { event.preventDefault(); name.hidden = save.hidden = true; add.hidden = false; add.focus(); } };
+      head.append(heading);
     }
-    const body = el("tbody", undefined, table);
-    let mounted = [];
-    const rowIds = new WeakMap();
-    const spacer = () => {
-      const row = el("tr"), cell = el("td", undefined, row);
-      row.className = "cm-annotation-spacer"; row.setAttribute("aria-hidden", "true");
-      cell.colSpan = panel.columns.length + 2 + Number(extra); return row;
-    };
-    let clusters = [];
-    const syncSelection = () => {
-      selectionControls.update({ ids: clusters.map((cluster) => cluster.uid),
-        summary: `${clusters.length.toLocaleString()} visible clusters`, noun: "cluster" });
-      for (const row of mounted) {
-        const checked = selection.has(rowIds.get(row));
-        row.classList.toggle("is-selected", checked); row.setAttribute("aria-selected", String(checked));
-        row.querySelector('input[type="checkbox"]').checked = checked;
-      }
-    };
-    filterSelection = syncSelection;
-    const toggleRow = (uid, checked, shift) => {
-      selection.select(uid, checked, { range: shift, orderedIds: clusters.map((cluster) => cluster.uid) });
-      syncSelection();
+    const toggleRow = (cluster, checked, shift) => {
+      selection.select(cluster.uid, checked, { range: shift, orderedIds: clusters.map((cluster) => cluster.uid) }); syncSelection();
     };
     const createRow = (cluster) => {
-      const row = el("tr"), selectionCell = cell("td", row, true);
-      const check = input(selectionCell, `Select ${cluster.name || cluster.uid}`, false, "checkbox");
-      check.onclick = (event) => toggleRow(cluster.uid, check.checked, event.shiftKey);
-      const name = cell("th", row); name.textContent = cluster.name || cluster.uid;
-      name.onclick = (event) => toggleRow(cluster.uid, !selection.has(cluster.uid), event.shiftKey);
-      row.className = "cm-data-row"; rowIds.set(row, cluster.uid);
-      name.scope = "row"; name.title = cluster.uid;
+      const row = rowTemplate(document).firstElementChild, check = row.querySelector("input"), name = row.querySelector("th");
+      rowIds.set(row, cluster.uid); check.onclick = (event) => toggleRow(cluster, check.checked, event.shiftKey);
+      name.onclick = (event) => toggleRow(cluster, !selection.has(cluster.uid), event.shiftKey);
       panel.columns.forEach((column, index) => {
-        const valueCell = cell("td", row), label = `${cluster.name || cluster.uid}: ${column}`;
-        const value = current().values[cluster.uid]?.[index] ?? null;
-        const change = (value, control) => {
+        const cell = (categorical ? categoryCellTemplate : numericCellTemplate)(document).firstElementChild, field = cell.firstElementChild;
+        if (categorical) updateSelectOptions(field, [["missing", "Missing"], ...resolved.domain.map((name, i) => [String(i), name])]);
+        bindEditableField(field, { commit: (value, control) => {
           const source = current(), values = [...(source.values[cluster.uid] ?? source.columns.map(() => null))];
-          values[index] = value;
+          values[index] = categorical ? value === "missing" ? null : resolved.domain[Number(value)] : value === "" ? null : Number(value);
           return updateRows({ [cluster.uid]: values }, false, control);
-        };
-        if (categorical) field(valueCell, label, value === null ? "missing" : String(resolved.domain.indexOf(value)), {
-          entries: [["missing", "Missing"], ...resolved.domain.map((item, i) => [String(i), item])],
-          commit: (key, control) => change(key === "missing" ? null : resolved.domain[Number(key)], control),
-        });
-        else field(valueCell, label, value, { type: "number", options: { placeholder: "—" },
-          commit: (value, control) => change(value === "" ? null : Number(value), control) });
+        } });
+        row.append(cell);
       });
-      if (extra) cell("td", row);
+      if (extra) row.append(emptyCellTemplate(document));
+      return updateRow(row, cluster);
+    };
+    const updateRow = (row, cluster) => {
+      const name = row.querySelector("th"), label = cluster.name || cluster.uid;
+      name.textContent = label; name.title = cluster.uid; row.querySelector("input").setAttribute("aria-label", `Select ${label}`);
+      [...row.querySelectorAll(".cm-data-field")].forEach((field, index) => {
+        const value = current().values[cluster.uid]?.[index] ?? null;
+        field.setAttribute("aria-label", `${label}: ${panel.columns[index]}`);
+        updateFieldValue(field, categorical ? value === null ? "missing" : String(resolved.domain.indexOf(value)) : value);
+      });
       return row;
     };
-    const list = createVirtualRows({ viewport: tableArea, container: body, key: (cluster) => cluster.uid,
-      createRow, createSpacer: spacer, headerHeight: () => head.offsetHeight,
-      onRender: (nodes) => { mounted = nodes; table.setAttribute("aria-rowcount", clusters.length + 1); syncSelection(); } });
-    disposeView = () => list.destroy();
-    filterRows = () => {
-      const needle = filter.trim().toLowerCase();
-      clusters = getClusters().filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle));
-      tableArea.scrollTop = 0; list.setRows(clusters);
+    const list = createVirtualRows({ viewport: tableArea, container: table.querySelector("tbody"), key: (cluster) => cluster.uid, createRow, updateRow,
+      createSpacer: () => { const row = spacerTemplate(document).firstElementChild; row.firstElementChild.colSpan = panel.columns.length + 2 + Number(extra); return row; },
+      headerHeight: () => head.offsetHeight, onRender: (nodes) => { mounted = nodes; table.setAttribute("aria-rowcount", clusters.length + 1); syncSelection(); } });
+    const filterRows = () => {
+      const needle = filter.trim().toLowerCase(); clusters = getClusters().filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle)); list.setRows(clusters);
     };
-    filterRows();
-  };
-  const renderReplacement = (layout, panel) => {
-    const parent = layout.tools;
-    const categorical = panel.scale?.type === "categorical";
-    const box = el("div", undefined, parent); box.className = "cm-annotation-replacement"; box.hidden = true;
-    const data = el("textarea", undefined, box); data.rows = 5;
-    data.setAttribute("aria-label", "Replacement annotation data (CSV, TSV or JSON)"); data.spellcheck = false;
-    const actions = el("div", undefined, box); actions.className = "cm-data-toolbar";
-    button(actions, "Replace data", () => {
-      try {
-        const changes = parseAnnotationTable(data.value, categorical);
-        if (categorical) {
-          const source = current(), scale = resolveAnnotationScale(source), domain = new Set(scale.domain);
-          for (const row of Object.values(changes.values)) for (const value of row) if (value !== null) domain.add(value);
-          const categories = [...domain];
-          changes.scale = categoryScale(source, categories, categories.map((value, i) =>
-            scale.domain.includes(value) ? scale.colour(value) : ANNOTATION_PALETTES.Qualitative[i % ANNOTATION_PALETTES.Qualitative.length]));
-        }
-        update(changes);
-      } catch (exception) { error(exception.message); }
-    });
-    button(actions, "Cancel", () => { box.hidden = true; layout.sync(); });
+    return { update: filterRows, filterRows() { tableArea.scrollTop = 0; filterRows(); }, syncSelection, destroy: () => list.destroy() };
+  }
+
+  function createReplacement(layout) {
+    const box = replacementTemplate(document).firstElementChild, data = box.querySelector("textarea"); layout.tools.append(box);
+    box.querySelector("[data-replace]").onclick = () => { try {
+      const source = current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(data.value, categorical);
+      if (categorical) {
+        const scale = resolveAnnotationScale(source), domain = new Set(scale.domain);
+        for (const row of Object.values(changes.values)) for (const value of row) if (value !== null) domain.add(value);
+        const categories = [...domain]; changes.scale = categoryScale(source, categories, categories.map((value, i) =>
+          scale.domain.includes(value) ? scale.colour(value) : ANNOTATION_PALETTES.Qualitative[i % ANNOTATION_PALETTES.Qualitative.length]));
+      }
+      if (update(changes)) { box.hidden = true; layout.sync(); }
+    } catch (exception) { error(exception.message); } };
+    box.querySelector("[data-cancel]").onclick = () => { box.hidden = true; layout.sync(); };
     return () => {
       box.hidden = !box.hidden; layout.sync();
       if (!box.hidden) { data.value = annotationTableText(current(), getClusters()); data.focus(); }
     };
-  };
-  const renderGroups = (parent, panel) => {
-    const editGroup = (index, changes) => update({ groups: current().groups.map((group, i) => i === index ? { ...group, ...changes } : group) });
-    panel.groups.forEach((group, index) => {
-      const box = el("fieldset", undefined, parent); el("legend", group.label || group.uid, box);
-      const row = el("div", undefined, box); row.className = "cm-data-toolbar cm-annotation-data-toolbar";
-      input(row, "Group label", group.label ?? group.uid, "text", (label) => editGroup(index, { label }));
-      input(row, "Group colour", group.colour ?? panel.colour ?? "#267c9e", "color", (colour) => editGroup(index, { colour }));
-      const remove = button(row, "Remove group", () => update({ groups: panel.groups.filter((_, i) => i !== index) }));
-      remove.disabled = panel.groups.length === 1;
-      const tree = getData().tree;
-      select(row, "Membership", group.nodeUid === undefined ? "clusters" : "tree",
-        [["clusters", "Selected clusters"], ...(tree ? [["tree", "Tree clade"]] : [])], (mode) => {
-          const groups = [...current().groups];
-          const { nodeUid, clusterIds, ...style } = groups[index];
-          if (mode !== "tree" && !getClusters().length) return;
-          groups[index] = mode === "tree" ? { ...style, nodeUid: tree.root } : { ...style, clusterIds: [getClusters()[0].uid] };
-          update({ groups });
-        });
-      if (group.nodeUid !== undefined) select(box, "Tree node", group.nodeUid,
-        tree.nodes.map((node) => [node.uid, node.label || node.uid]), (nodeUid) => editGroup(index, { nodeUid }));
-      else {
-        const members = el("select", undefined, box); members.multiple = true; members.size = Math.min(5, getClusters().length);
-        members.setAttribute("aria-label", `Clusters in ${group.label || group.uid}`);
-        for (const cluster of getClusters()) {
-          const option = el("option", `${cluster.name || cluster.uid} (${cluster.uid})`, members);
-          option.value = cluster.uid; option.selected = group.clusterIds.includes(cluster.uid);
-        }
-        members.onchange = () => editGroup(index, { clusterIds: [...members.selectedOptions].map((option) => option.value) });
-      }
-    });
-    button(parent, "Add group", () => {
-      if (!getClusters().length) return;
-      let serial = 1; while (panel.groups.some((group) => group.uid === `group-${serial}`)) serial++;
-      update({ groups: [...panel.groups, { uid: `group-${serial}`, label: `Group ${serial}`, clusterIds: [getClusters()[0].uid] }] });
-    });
-  };
-  function render() {
-    const active = document.activeElement, restoreFocus = node.contains(active) || toolbar.contains(active);
-    const samePanel = renderedPanel?.uid === selected;
-    const scroll = samePanel ? node.querySelector(".cm-annotation-matrix")?.scrollTop || 0 : 0;
-    const categoriesOpen = samePanel && node.querySelector(".cm-annotation-categories")?.open;
-    disposeView(); disposeView = () => {}; filterRows = () => {}; filterSelection = () => {};
-    node.replaceChildren();
-    toolbar.replaceChildren();
-    if (!embedded) node.append(toolbar);
-    const panels = getPanels(); renderedPanels = panels; renderedClusters = getClusters();
-    if (!panels.some((panel) => panel.uid === selected)) selected = panels[0]?.uid ?? null;
-    if (panels.length) select(toolbar, "Annotation panel", selected, panels.map((panel) => [panel.uid, panel.title || panel.uid]),
-      (uid) => { selected = uid; deleting = null; creating = false; render(); });
-    button(toolbar, creating ? "Cancel" : "Add panel", () => { creating = !creating; render(); });
-    const status = el("div", undefined, node); status.className = "cm-data-error"; status.dataset.dataError = ""; status.setAttribute("role", "alert");
-    const body = el("div", undefined, node); body.className = "cm-annotation-data-body";
-    if (creating) {
-      const form = createAnnotationCreateControls({ document, getData, patch, annotationApi,
-        onCreate: (uid) => { selected = uid; creating = false; render(); } });
-      body.append(form.node); return;
-    }
-    const panel = current(); renderedPanel = panel;
-    if (selectionPanel !== panel?.uid) {
-      selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = "";
-    }
-    const validRows = new Set(getClusters().map((cluster) => cluster.uid));
-    selection.prune(validRows);
-    if (batchColumn !== "all" && Number(batchColumn) >= (panel?.columns?.length || 0)) batchColumn = "0";
-    if (!panel) { el("p", "No annotation panels. Add a panel to attach data to cluster rows.", body); return; }
-    const layout = createDataPanel(document, { label: "Editable annotation data" }); body.append(layout.node);
-    if (panel.type !== "groups") button(toolbar, "Replace data…", renderReplacement(layout, panel));
-    button(toolbar, panel.show === false ? "Show" : "Hide", () => update({ show: panel.show === false }));
-    const index = panels.indexOf(panel);
-    for (const [label, symbol, direction] of [["Move left", "←", -1], ["Move right", "→", 1]]) {
-      const move = button(toolbar, symbol, () => {
-        const ids = panels.map((item) => item.uid); [ids[index], ids[index + direction]] = [ids[index + direction], ids[index]];
-        commit([{ type: "annotationPanels.reorder", ids }]);
-      });
-      move.title = label; move.setAttribute("aria-label", label);
-      move.disabled = index + direction < 0 || index + direction >= panels.length;
-    }
-    button(toolbar, "Remove", () => commit([{ type: "annotationPanels.delete", ids: [selected] }])).setAttribute("aria-label", "Remove panel");
-    if (panel.type === "groups") { layout.meta.hidden = true; renderGroups(layout.viewport, panel); }
-    else {
-      if (panel.scale?.type === "categorical") {
-        const categories = el("details", undefined, layout.tools); categories.className = "cm-annotation-categories";
-        categories.open = categoriesOpen || deleting !== null;
-        el("summary", `Categories (${resolveAnnotationScale(panel).domain.length})`, categories);
-        renderCategories(el("div", undefined, categories), panel);
-      }
-      renderMatrix(layout, panel);
-    }
-    layout.sync();
-    if (!embedded && panel.type !== "groups") {
-      const search = createDataSearch(document, { placeholder: "Find a cluster", onInput: (value) => { filter = value; filterRows(); } });
-      search.input.value = filter; toolbar.append(search.node);
-    }
-    const matrix = node.querySelector(".cm-annotation-matrix"); if (matrix) matrix.scrollTop = scroll;
-    if (restoreFocus && !active.isConnected) node.focus({ preventScroll: true });
   }
-  const clearSelection = () => { selection.clear(); filterSelection(); };
-  node.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !event.defaultPrevented && selection.size) { event.preventDefault(); clearSelection(); }
-  });
+
+  function createGroups(parent) {
+    const groups = new Map(), add = addGroupTemplate(document).firstElementChild; parent.append(add);
+    const editGroup = (uid, changes) => update({ groups: current().groups.map((group) => group.uid === uid ? { ...group, ...changes } : group) });
+    add.onclick = () => {
+      if (!getClusters().length) return;
+      const panel = current(); let serial = 1; while (panel.groups.some((group) => group.uid === `group-${serial}`)) serial++;
+      update({ groups: [...panel.groups, { uid: `group-${serial}`, label: `Group ${serial}`, clusterIds: [getClusters()[0].uid] }] });
+    };
+    return { update() {
+      const panel = current(), tree = getData().tree;
+      for (const [uid, box] of groups) if (!panel.groups.some((group) => group.uid === uid)) { box.remove(); groups.delete(uid); }
+      for (const group of panel.groups) {
+        let box = groups.get(group.uid);
+        if (!box) { box = groupTemplate(document).firstElementChild; groups.set(group.uid, box); }
+        parent.insertBefore(box, add);
+        const label = box.querySelector('[type="text"]'), colour = box.querySelector('[type="color"]');
+        box.querySelector("legend").textContent = group.label || group.uid; updateFieldValue(label, group.label ?? group.uid);
+        colour.value = colourHex(group.colour ?? panel.colour ?? "#267c9e");
+        label.onchange = () => editGroup(group.uid, { label: label.value }); colour.onchange = () => editGroup(group.uid, { colour: colour.value });
+        const remove = box.querySelector("button"), mode = box.querySelector("select"), members = box.querySelector("[data-members]");
+        remove.disabled = panel.groups.length === 1; remove.onclick = () => update({ groups: current().groups.filter((item) => item.uid !== group.uid) });
+        updateSelectOptions(mode, [["clusters", "Selected clusters"], ...(tree ? [["tree", "Tree clade"]] : [])]); mode.value = group.nodeUid === undefined ? "clusters" : "tree";
+        mode.onchange = () => {
+          const { nodeUid, clusterIds, ...style } = group;
+          if (mode.value !== "tree" && !getClusters().length) return;
+          editGroup(group.uid, mode.value === "tree" ? { ...style, clusterIds: undefined, nodeUid: tree.root } : { ...style, nodeUid: undefined, clusterIds: [getClusters()[0].uid] });
+        };
+        members.multiple = group.nodeUid === undefined; members.size = members.multiple ? Math.min(5, getClusters().length) : 0;
+        members.setAttribute("aria-label", members.multiple ? `Clusters in ${group.label || group.uid}` : "Tree node");
+        updateSelectOptions(members, members.multiple ? getClusters().map((cluster) => [cluster.uid, `${cluster.name || cluster.uid} (${cluster.uid})`]) : tree.nodes.map((node) => [node.uid, node.label || node.uid]));
+        for (const option of members.options) option.selected = members.multiple ? group.clusterIds.some((uid) => String(uid) === option.value) : String(group.nodeUid) === option.value;
+        members.onchange = () => editGroup(group.uid, members.multiple ? { clusterIds: [...members.selectedOptions].map((option) => option.value) } : { nodeUid: members.value });
+      }
+    } };
+  }
+
+  function render() {
+    const panels = getPanels();
+    if (!panels.some((panel) => panel.uid === selected)) selected = panels[0]?.uid ?? null;
+    const panel = current(); renderedPanel = panel; renderedPanels = panels; renderedClusters = getClusters();
+    updateSelectOptions(panelSelect, panels.map((panel) => [panel.uid, panel.title || panel.uid])); panelSelect.value = selected;
+    panelSelect.hidden = !panels.length; control("add").textContent = creating ? "Cancel" : "Add panel";
+    for (const name of ["replace", "show", "left", "right", "remove"]) control(name).hidden = !panel || creating || name === "replace" && panel.type === "groups";
+    if (search) { search.node.hidden = !panel || creating || panel.type === "groups"; search.input.value = filter; }
+    if (panel) {
+      control("show").textContent = panel.show === false ? "Show" : "Hide";
+      control("left").disabled = panels.indexOf(panel) === 0; control("right").disabled = panels.indexOf(panel) === panels.length - 1;
+    }
+    if (selectionPanel !== panel?.uid) { selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = ""; deleting = null; }
+    selection.prune(new Set(getClusters().map((cluster) => cluster.uid)));
+    if (batchColumn !== "all" && Number(batchColumn) >= (panel?.columns?.length || 0)) batchColumn = "0";
+    const categorical = panel?.scale?.type === "categorical";
+    if (categorical && batchValue !== "" && !resolveAnnotationScale(panel).domain[Number(batchValue)]) batchValue = "";
+    const key = creating ? "create" : panel ? JSON.stringify([panel.uid, panel.type, panel.columns, categorical && resolveAnnotationScale(panel).domain]) : "empty";
+    if (key !== viewKey) {
+      const scroll = viewKey && panel?.uid === view?.uid ? view.layout.viewport.scrollTop : 0;
+      const categoriesOpen = panel?.uid === view?.uid && view?.categories?.open;
+      view?.destroy?.(); body.replaceChildren(); view = null; viewKey = key;
+      if (creating) body.append(createAnnotationCreateControls({ document, getData, patch, annotationApi,
+        onCreate: (uid) => { selected = uid; creating = false; render(); } }).node);
+      else if (!panel) body.append(emptyTemplate(document));
+      else {
+        const layout = createDataPanel(document, { label: "Editable annotation data" }); body.append(layout.node);
+        if (panel.type === "groups") { layout.meta.hidden = true; view = createGroups(layout.viewport); }
+        else {
+          control("replace").onclick = createReplacement(layout);
+          view = createMatrix(layout);
+          if (categorical) {
+            view.categories = categoriesTemplate(document).firstElementChild; layout.tools.prepend(view.categories);
+            view.categories.open = Boolean(categoriesOpen);
+          }
+        }
+        Object.assign(view, { uid: panel.uid, layout }); view.update(); layout.viewport.scrollTop = scroll;
+      }
+    } else view?.update();
+    if (view?.categories) {
+      const key = JSON.stringify([panel.scale, deleting]);
+      if (key !== view.categoryKey) {
+        view.categories.querySelector("summary").textContent = `Categories (${resolveAnnotationScale(panel).domain.length})`;
+        renderCategories(view.categories.querySelector("div")); view.categoryKey = key;
+      }
+      if (deleting !== null) view.categories.open = true;
+    }
+    view?.layout.sync();
+  }
   render();
-  return { node, toolbar, select(uid) { selected = uid; creating = false; deleting = null; render(); },
-    clearSelection,
-    get filter() { return filter; },
-    setFilter(value) { filter = value; filterRows(); },
+  return { node, toolbar, select(uid) { selected = uid; creating = false; deleting = null; render(); }, clearSelection,
+    get filter() { return filter; }, setFilter(value) { filter = value; view?.filterRows?.(); },
     invalidate({ replace = false } = {}) {
       renderedPanel = renderedPanels = renderedClusters = null;
       if (replace) { selection.clear(); selected = selectionPanel = null; }
     },
-    destroy() { disposeView(); toolbar.remove(); },
-    update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters || !node.childElementCount)) render(); } };
+    destroy() { view?.destroy?.(); toolbar.remove(); },
+    update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters)) render(); } };
 }
-
 function installStyle$1(document) {
   if (document.getElementById("cm-annotation-data-style")) return;
   const style = document.createElement("style"); style.id = "cm-annotation-data-style";

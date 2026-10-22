@@ -5,16 +5,46 @@ export const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;"
 
 export const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
 
+/** Parse static markup once per document; each mount receives its own nodes. */
+export function createTemplate(markup) {
+  const templates = new WeakMap();
+  return (document) => {
+    let template = templates.get(document);
+    if (!template) {
+      template = document.createElement("template"); template.innerHTML = markup;
+      templates.set(document, template);
+    }
+    return document.importNode(template.content, true);
+  };
+}
+
+const controlTemplates = Object.fromEntries(["button", "input", "select", "option"].map((tag) =>
+  [tag, createTemplate(tag === "input" ? "<input>" : `<${tag}></${tag}>`)]));
+const labelTemplate = createTemplate("<label><span></span></label>");
+const selectOptions = new WeakMap();
+export function updateSelectOptions(control, entries) {
+  const options = entries.map((entry) => Array.isArray(entry) ? entry : [entry, entry]);
+  const key = JSON.stringify(options);
+  if (selectOptions.get(control) === key) return;
+  const value = control.value;
+  control.replaceChildren(...options.map(([value, label]) => {
+    const option = controlTemplates.option(control.ownerDocument).firstElementChild;
+    option.value = value; option.textContent = label; return option;
+  }));
+  control.value = value; selectOptions.set(control, key);
+}
+
 /** Native controls with consistent labels, values and validity handling. */
 export function createControls(document) {
   const el = (tag, text, parent, className) => {
-    const node = document.createElement(tag);
+    const node = controlTemplates[tag]?.(document).firstElementChild || document.createElement(tag);
     if (text !== undefined) node.textContent = text;
     if (className) node.className = className;
     parent?.append(node); return node;
   };
   const row = (parent, label) => {
-    const node = el("label", undefined, parent); el("span", label, node); return node;
+    const node = labelTemplate(document).firstElementChild;
+    node.firstElementChild.textContent = label; parent?.append(node); return node;
   };
   const button = (parent, label, action, className) => {
     const node = el("button", label, parent, className); node.type = "button"; node.onclick = action; return node;
@@ -30,10 +60,7 @@ export function createControls(document) {
   };
   const select = (parent, label, value, entries, onChange) => {
     const node = el("select", undefined, parent); node.setAttribute("aria-label", label);
-    for (const entry of entries) {
-      const [key, title] = Array.isArray(entry) ? entry : [entry, entry];
-      el("option", title, node).value = key;
-    }
+    updateSelectOptions(node, entries);
     node.value = value;
     if (onChange) node.onchange = () => onChange(node.value);
     return node;
@@ -44,22 +71,29 @@ export function createControls(document) {
   return { el, row, button, input, select, field };
 }
 
-/** The same inline-field behaviour for DOM-built and markup-built tables. */
+const fieldValues = new WeakMap();
+export function updateFieldValue(control, value) {
+  if (control === control.ownerDocument.activeElement) return;
+  control.value = value ?? "";
+  fieldValues.set(control, control.value);
+}
+
+/** Shared commit, validation and cancellation for editable fields. */
 export function bindEditableField(control, { commit, cancel }) {
   control.classList.add("cm-data-field");
-  let saved = control.value;
+  fieldValues.set(control, control.value);
   control.onchange = () => {
     control.setCustomValidity("");
     if (!control.checkValidity()) { control.reportValidity(); return; }
-    if (control.value === saved) return;
-    if (commit(control.value, control) !== false) saved = control.value;
+    if (control.value === fieldValues.get(control)) return;
+    if (commit(control.value, control) !== false) fieldValues.set(control, control.value);
     else control.reportValidity();
   };
   control.onkeydown = (event) => {
     if (event.isComposing) return;
     if (event.key === "Escape") {
       event.preventDefault(); event.stopPropagation();
-      control.value = saved; control.setCustomValidity(""); cancel?.();
+      control.value = fieldValues.get(control); control.setCustomValidity(""); cancel?.();
     } else if (event.key === "Enter" && control.tagName === "INPUT") {
       event.preventDefault(); control.blur();
     }

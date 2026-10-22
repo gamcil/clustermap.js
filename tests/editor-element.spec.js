@@ -56,16 +56,16 @@ test("tree-row pencils stay in flow and edit the intended cluster or locus", asy
   await page.getByRole("button", { name: "Genes", exact: true }).click();
   const row = page.locator("clinker-editor .cm-editor__tree-parent").first();
   await row.hover();
-  await expect(row.locator('[data-focus-edit="cluster:label"]')).toBeVisible();
-  await expect(row.locator('[data-focus-edit="locus:label"]')).toBeVisible();
+  await expect(row.locator('clinker-editable-field[data-type="clusters"] button')).toBeVisible();
+  await expect(row.locator('clinker-editable-field[data-type="loci"] button')).toBeVisible();
 
-  await row.locator('[data-focus-edit="locus:label"]').click();
-  await expect(row.locator('[data-edit="locus:label"]')).toBeFocused();
-  await row.locator('[data-edit="locus:label"]').press("Escape");
+  await row.locator('clinker-editable-field[data-type="loci"] button').click();
+  await expect(row.locator('clinker-editable-field[data-type="loci"] input')).toBeFocused();
+  await row.locator('clinker-editable-field[data-type="loci"] input').press("Escape");
 
   await row.hover();
-  await row.locator('[data-focus-edit="cluster:label"]').click();
-  await expect(row.locator('[data-edit="cluster:label"]')).toBeFocused();
+  await row.locator('clinker-editable-field[data-type="clusters"] button').click();
+  await expect(row.locator('clinker-editable-field[data-type="clusters"] input')).toBeFocused();
 });
 
 test("tree label editing preserves the label's rendered footprint", async ({ page }) => {
@@ -73,12 +73,12 @@ test("tree label editing preserves the label's rendered footprint", async ({ pag
   await page.getByRole("button", { name: "Genes", exact: true }).click();
   const row = page.locator("clinker-editor .cm-editor__tree-parent").first();
   await expect(row).toHaveCSS("display", "grid");
-  const cluster = row.locator(".cm-editor__tree-combined > .cm-editor__editable-field").first();
-  const width = await cluster.locator(".cm-editor__editable-label").evaluate((node) => node.getBoundingClientRect().width);
+  const cluster = row.locator('clinker-editable-field[data-type="clusters"]');
+  const width = await cluster.evaluate((node) => node.getBoundingClientRect().width);
   await row.hover();
-  await cluster.locator('[data-focus-edit="cluster:label"]').click();
-  const inputWidth = await row.locator('[data-edit="cluster:label"]').evaluate((node) => node.getBoundingClientRect().width);
-  expect(Math.abs(inputWidth - width)).toBeLessThanOrEqual(1);
+  await cluster.getByRole("button").click();
+  const editedWidth = await cluster.evaluate((node) => node.getBoundingClientRect().width);
+  expect(Math.abs(editedWidth - width)).toBeLessThanOrEqual(1);
 });
 
 test("hovering group and hierarchy rows highlights their genes in the plot", async ({ page }) => {
@@ -122,9 +122,9 @@ test("the packaged editor edits and reorders the live chart model", async ({ pag
   await expect.poll(() => page.evaluate(() => window.__demoChart.data().groups.map((group) => group.uid))).toEqual(["group2", "group1", "group3"]);
 
   await page.locator("clinker-editor .cm-editor__row--groups").first().hover();
-  await page.locator('clinker-editor [data-focus-edit="group:subtitle"]').first().click();
-  await page.locator('clinker-editor [data-edit="group:subtitle"]').first().fill("Conserved enzyme");
-  await page.locator('clinker-editor [data-edit="group:subtitle"]').first().press("Enter");
+  await page.locator('clinker-editor clinker-editable-field[data-field="subtitle"] button').first().click();
+  await page.locator('clinker-editor clinker-editable-field[data-field="subtitle"] input').first().fill("Conserved enzyme");
+  await page.locator('clinker-editor clinker-editable-field[data-field="subtitle"] input').first().press("Enter");
   await expect.poll(() => page.evaluate(() => window.__demoChart.data().groups[0].subtitle)).toBe("Conserved enzyme");
 });
 
@@ -132,9 +132,9 @@ test("chart-owned history replays editor and application edits without replacing
   await page.goto("http://127.0.0.1:8080/?test=1&editor=component");
   const editor = page.locator("clinker-editor");
   await page.locator("clinker-editor .cm-editor__row--groups").first().hover();
-  await page.locator('clinker-editor [data-focus-edit="group:subtitle"]').first().click();
-  await page.locator('clinker-editor [data-edit="group:subtitle"]').first().fill("Temporary subtitle");
-  await page.locator('clinker-editor [data-edit="group:subtitle"]').first().press("Enter");
+  await page.locator('clinker-editor clinker-editable-field[data-field="subtitle"] button').first().click();
+  await page.locator('clinker-editor clinker-editable-field[data-field="subtitle"] input').first().fill("Temporary subtitle");
+  await page.locator('clinker-editor clinker-editable-field[data-field="subtitle"] input').first().press("Enter");
   await editor.getByRole("button", { name: "Undo" }).click();
   await expect.poll(() => page.evaluate(() => window.__demoChart.data().groups[0].subtitle)).toBeUndefined();
   await editor.getByRole("button", { name: "Redo" }).click();
@@ -194,13 +194,13 @@ test("list rows select by click, use pencil editing, and sort by their columns",
   await page.getByRole("button", { name: "List", exact: true }).click();
   await editor.locator(".cm-editor__row--genes").first().click();
   await expect(editor.locator("[data-actions]")).toContainText("1 gene selected");
-  await editor.locator('[data-focus-edit="gene:label"]').first().click();
-  await editor.locator('[data-edit="gene:label"]').fill("Renamed gene");
-  await editor.locator('[data-edit="gene:label"]').press("Enter");
+  await editor.locator('clinker-editable-field[data-type="genes"] button').first().click();
+  await editor.locator('clinker-editable-field[data-type="genes"] input').first().fill("Renamed gene");
+  await editor.locator('clinker-editable-field[data-type="genes"] input').first().press("Enter");
   await expect.poll(() => page.evaluate(() => window.__demoChart.data().clusters.some((cluster) => cluster.loci.some((locus) => locus.genes.some((gene) => gene.label === "Renamed gene"))))).toBe(true);
 
   await page.getByRole("button", { name: /Sort by Gene/ }).click();
-  const genes = await editor.locator(".cm-editor__row--genes .cm-editor__editable-label").allTextContents();
+  const genes = await editor.locator('.cm-editor__row--genes clinker-editable-field[data-field="label"]').evaluateAll((fields) => fields.map((field) => field.value));
   expect(genes).toEqual([...genes].sort((a, b) => b.localeCompare(a, undefined, { numeric: true })));
 
   await page.getByRole("button", { name: "Links", exact: true }).click();
@@ -214,8 +214,10 @@ test("the packaged editor exposes live link presentation controls", async ({ pag
 
   await page.getByRole("button", { name: "Links", exact: true }).click();
   await expect(page.locator("clinker-editor [data-head]")).toContainText("Endpoint groups");
-  await page.locator("clinker-editor [data-edit=\"link:identity\"]").first().fill("75");
-  await page.locator("clinker-editor [data-edit=\"link:identity\"]").first().press("Enter");
+  const identity = page.locator('clinker-editor clinker-editable-field[data-field="identity"]').first();
+  await identity.getByRole("button").click();
+  await identity.getByRole("spinbutton").fill("75");
+  await identity.getByRole("spinbutton").press("Enter");
   await expect.poll(() => page.evaluate(() => window.__demoChart.data().links[0].identity)).toBe(.75);
 
   await page.locator("clinker-editor [data-visible]").first().click();

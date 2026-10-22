@@ -1,6 +1,21 @@
 import { terser } from "rollup-plugin-terser";
 import { nodeResolve } from "@rollup/plugin-node-resolve";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+
+const componentAssets = {
+  name: "component-assets",
+  async transform(code, id) {
+    const pattern = /textAsset\(new URL\((["'])([^"']+\.(?:html|css))\1,\s*import\.meta\.url\)\)/g;
+    const assets = await Promise.all([...code.matchAll(pattern)].map(async ([expression, , path]) => {
+      const filename = resolve(dirname(id), path); this.addWatchFile(filename);
+      return [expression, JSON.stringify(await readFile(filename, "utf8"))];
+    }));
+    if (!assets.length) return null;
+    for (const [expression, text] of assets) code = code.replace(expression, () => text);
+    return { code, map: null };
+  },
+};
 
 const copyEditorCss = {
   name: "copy-editor-css",
@@ -47,7 +62,7 @@ const core = {
 const editor = {
   input: "src/editor.js",
   output: { file: "dist/editor.mjs", format: "es" },
-  plugins: [nodeResolve({ browser: true }), stripTrailingWhitespace],
+  plugins: [componentAssets, nodeResolve({ browser: true }), stripTrailingWhitespace],
 };
 
 const annotationUi = {

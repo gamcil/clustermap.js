@@ -1,0 +1,101 @@
+<template id="groups">
+  <div class="cm-data-row cm-editor__row cm-editor__row--groups">
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <button type="button" class="cm-data-icon-button cm-editor__reorder" draggable="true" data-reorder>⠿</button>
+    <clinker-editable-field class="cm-data-cell" data-type="groups" data-field="label" label="Group name" placeholder="Group name"></clinker-editable-field>
+    <clinker-editable-field class="cm-data-cell" data-type="groups" data-field="subtitle" label="Legend label" placeholder="Add subtitle…"></clinker-editable-field>
+    <span class="cm-data-cell" data-count></span>
+    <button type="button" class="cm-data-icon-button cm-editor__visibility" data-visible>
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6Z"></path>
+        <circle cx="12" cy="12" r="2.75"></circle><path data-slash d="m4 4 16 16"></path>
+      </svg>
+    </button>
+    <span class="cm-data-cell"><input type="color" data-colour aria-label="Colour"></span>
+  </div>
+</template>
+
+<template id="links">
+  <div class="cm-data-row cm-editor__row cm-editor__row--links">
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <span class="cm-data-cell" data-text="source"></span>
+    <span class="cm-data-cell" data-text="target"></span>
+    <clinker-editable-field class="cm-data-cell" data-type="links" data-field="identity" label="Identity" type="number" min="0" max="100" step="any" required></clinker-editable-field>
+    <span class="cm-data-cell" data-text="groups"></span>
+    <clinker-editable-field class="cm-data-cell" data-type="links" data-field="label" label="Link label" placeholder="Add label…"></clinker-editable-field>
+    <button type="button" class="cm-data-icon-button cm-editor__visibility" data-visible>
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6Z"></path>
+        <circle cx="12" cy="12" r="2.75"></circle><path data-slash d="m4 4 16 16"></path>
+      </svg>
+    </button>
+    <span class="cm-data-cell"><input type="color" data-colour aria-label="Colour"></span>
+  </div>
+</template>
+
+<template id="genes">
+  <div class="cm-data-row cm-editor__row cm-editor__row--genes">
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <clinker-editable-field class="cm-data-cell" data-type="genes" data-field="label" label="Gene label" placeholder="Gene label"></clinker-editable-field>
+    <span class="cm-data-cell" data-text="locus"></span>
+    <span class="cm-data-cell" data-text="cluster"></span>
+    <span class="cm-data-cell" data-text="group"></span>
+    <span class="cm-data-cell"><input type="color" data-colour aria-label="Colour"></span>
+  </div>
+</template>
+
+<template id="gene">
+  <div class="cm-data-row cm-editor__tree-row cm-editor__tree-gene">
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <span aria-hidden="true"></span>
+    <clinker-editable-field class="cm-data-cell" data-type="genes" data-field="label" label="Gene label" placeholder="Gene label"></clinker-editable-field>
+    <span class="cm-data-cell" data-text="group"></span>
+    <span class="cm-data-cell"><input type="color" data-colour aria-label="Colour"></span>
+  </div>
+</template>
+
+<template id="cluster">
+  <div class="cm-data-row cm-editor__tree-row cm-editor__tree-parent">
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <button type="button" class="cm-data-icon-button cm-editor__tree-toggle" data-tree-toggle></button>
+    <span class="cm-editor__tree-name-with-count">
+      <clinker-editable-field class="cm-data-cell" data-type="clusters" data-field="name" label="Cluster name" placeholder="Cluster name" compact required></clinker-editable-field>
+      <span class="cm-editor__tree-count"></span>
+      <button type="button" class="cm-data-icon-button" data-remove-record>×</button>
+    </span>
+  </div>
+</template>
+
+<template id="locus">
+  <div class="cm-data-row cm-editor__tree-row cm-editor__tree-parent">
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <button type="button" class="cm-data-icon-button cm-editor__tree-toggle" data-tree-toggle></button>
+    <span class="cm-editor__tree-name-with-count">
+      <clinker-editable-field class="cm-data-cell" data-type="loci" data-field="name" label="Locus name" placeholder="Locus name" compact required></clinker-editable-field>
+      <span class="cm-editor__tree-count"></span>
+      <button type="button" class="cm-data-icon-button" data-remove-record>×</button>
+    </span>
+  </div>
+</template>
+
+<template id="cluster-locus">
+  <div class="cm-data-row cm-editor__tree-row cm-editor__tree-parent">
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <button type="button" class="cm-data-icon-button cm-editor__tree-toggle" data-tree-toggle></button>
+    <div class="cm-editor__tree-combined">
+      <clinker-editable-field class="cm-data-cell" data-type="clusters" data-field="name" label="Cluster name" placeholder="Cluster name" compact required></clinker-editable-field>
+      <span class="cm-editor__tree-separator">·</span>
+      <clinker-editable-field class="cm-data-cell" data-type="loci" data-field="name" label="Locus name" placeholder="Locus name" compact required></clinker-editable-field>
+      <span class="cm-editor__tree-count"></span>
+      <button type="button" class="cm-data-icon-button" data-remove-record>×</button>
+    </div>
+  </div>
+</template>
+
+<template id="gene-group">
+  <div class="cm-data-row cm-editor__tree-row cm-editor__tree-parent">
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <button type="button" class="cm-data-icon-button cm-editor__tree-toggle" data-tree-toggle></button>
+    <span class="cm-data-cell cm-editor__tree-group-label"><span data-text="label"></span> <span class="cm-editor__tree-count"></span></span>
+  </div>
+</template>

@@ -1,15 +1,23 @@
-import { createControls, createActionRunner } from "./uiControls.mjs";
+import { createTemplate, createActionRunner } from "./uiControls.mjs";
 import { csvFormatRows } from "d3-dsv";
 import { parseAnnotationTable } from "./annotationData.mjs";
+
+const formTemplate = createTemplate(`<form>
+  <label><span>Type</span><select aria-label="Type"><option value="heatmap">Heatmap</option><option value="bar">Bar chart</option><option value="groups">Group markers</option></select></label>
+  <label><span>Title</span><input type="text" aria-label="Title"></label>
+  <label><span>Values</span><select aria-label="Values"><option value="continuous">Numeric</option><option value="categorical">Categories</option></select></label>
+  <p data-help></p>
+  <label class="cm-annotation-data"><span>Data</span><textarea aria-label="Data" rows="8" spellcheck="false"></textarea></label>
+  <p data-annotation-error role="alert"></p><button type="submit">Add panel</button>
+</form>`);
 
 /** Small data-entry form; panel validation and history remain in the patch API. */
 export function createAnnotationCreateControls({ document, getData, patch, onCreate, annotationApi }) {
   const { validateAnnotationPanels } = annotationApi;
-  const node = document.createElement("form");
-  const ui = createControls(document);
-  const type = ui.select(ui.row(node, "Type"), "Type", "heatmap", [["heatmap", "Heatmap"], ["bar", "Bar chart"], ["groups", "Group markers"]]);
-  const title = ui.input(ui.row(node, "Title"), "Title", "");
-  const scale = ui.select(ui.row(node, "Values"), "Values", "continuous", [["continuous", "Numeric"], ["categorical", "Categories"]]);
+  const node = formTemplate(document).firstElementChild;
+  const type = node.querySelector('[aria-label="Type"]'), title = node.querySelector('[aria-label="Title"]');
+  const scale = node.querySelector('[aria-label="Values"]'), help = node.querySelector("[data-help]");
+  const data = node.querySelector("textarea"), error = node.querySelector("[data-annotation-error]");
   type.onchange = () => {
     const groups = type.value === "groups";
     scale.parentElement.hidden = groups;
@@ -20,16 +28,10 @@ export function createAnnotationCreateControls({ document, getData, patch, onCre
     data.value = groups ? JSON.stringify({ groups: [{ uid: "group-1", label: "Example group",
       clusterIds: getData().clusters.slice(0, 2).map((cluster) => cluster.uid) }] }, null, 2) : tableTemplate;
   };
-  const help = document.createElement("p");
   const tableHelp = "Paste CSV or a tab-separated table. First column: cluster ID; remaining headings: data columns. Blank cells are missing. Bars use one data column. JSON {columns, values} is also accepted.";
   help.textContent = tableHelp;
-  node.append(help);
-  const data = ui.el("textarea", undefined, ui.row(node, "Data")); data.setAttribute("aria-label", "Data"); data.rows = 8; data.spellcheck = false;
-  data.parentElement.className = "cm-annotation-data";
   const tableTemplate = csvFormatRows([["cluster", "Value"], ...getData().clusters.map((cluster) => [cluster.uid, ""])]);
   data.value = tableTemplate;
-  const error = document.createElement("p"); error.dataset.annotationError = ""; error.setAttribute("role", "alert"); node.append(error);
-  const submit = document.createElement("button"); submit.type = "submit"; submit.textContent = "Add panel"; node.append(submit);
   const run = createActionRunner((message) => { error.textContent = message; });
   node.onsubmit = (event) => {
     event.preventDefault(); error.textContent = "";
