@@ -158,6 +158,7 @@ for (const theme of ["light", "dark"]) {
 }
 
 test("inline edits, external edits and merges stay synchronized through history", async ({ page }) => {
+  await selectionFixture(page, "svg");
   const original = await page.evaluate(() => chart.data().groups[0].label);
   const row = editor(page).locator(".cm-editor__row--groups").first();
   await row.hover();
@@ -219,6 +220,7 @@ test("annotation inline edits, selection and batch values support undo/redo", as
 });
 
 test("categories can be added, assigned, renamed and removed with replacement", async ({ page }) => {
+  await selectionFixture(page, "svg");
   const uid = await annotation(page, true);
   await editor(page).locator(".cm-annotation-categories summary").click();
   await editor(page).getByRole("textbox", { name: "New category name", exact: true }).fill("Test category");
@@ -1126,6 +1128,7 @@ test("editable components preserve drafts and normalize commits through history"
 });
 
 test("cluster and locus fields keep their footprint, selection and distinct patch targets", async ({ page }) => {
+  await page.evaluate(async () => chart.data(await (await fetch("/fixtures/heatmap.json")).json()));
   await view(page, "genes");
   const row = editor(page).locator(".cm-editor__tree-parent").first();
   await row.getByRole("checkbox").check();
