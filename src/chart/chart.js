@@ -58,7 +58,6 @@ import {
 } from "../scene/preview.mjs";
 import { exportChartSvg } from "../renderers/export.mjs";
 import { createChartRuntime } from "./runtime.js";
-import { createRetainedSceneBackend } from "../renderers/retainedBackend.mjs";
 import { createCanvasBackend } from "../renderers/canvasBackend.mjs";
 import { createWebGpuBackend } from "../renderers/webgpuBackend.mjs";
 import { ensureSvgSurface } from "../renderers/svgSurface.mjs";
@@ -124,7 +123,6 @@ export default function clusterMap() {
   let hasInitialView = false;
   let chartState = null;
   let canvasHoverLocusUid = null;
-  let canvasScene = null;
   let rasterAnimation = null;
   let treeAnimation = null;
   let scenePreview = null;
@@ -184,10 +182,6 @@ export default function clusterMap() {
     },
   });
   const canvasBackend = createCanvasBackend();
-  const svgBackend = createRetainedSceneBackend({
-    render: renderSvg,
-    surface: "plot",
-  });
   const webgpuBackend = createWebGpuBackend();
   const rasterMinimap = createRasterMinimap();
   const rasterMotion = createRasterMotion({
@@ -360,10 +354,10 @@ export default function clusterMap() {
       beginInteractionState();
       flipLocus(chartState, locus);
       if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
+        const sourceScene = rasterAnimation?.previousScene || canvasBackend.pendingScene || runtime.getScene();
         stopRasterAnimation();
         cancelCanvasFlip?.();
         const previewProgress = 0.12;
-        const sourceScene = canvasScene || runtime.getScene();
         const pending = { locus, sourceScene, targetScene: null,
           clusterLabelText: runtime.locusTextForCluster(locus.clusterUid) };
         canvasPendingFlip = pending;
@@ -388,7 +382,7 @@ export default function clusterMap() {
               scales: runtime.scales, config: runtime.renderConfig,
             });
             webgpuBackend.setScene(targetScene);
-          } else svgBackend.setScene(targetScene);
+          }
           scenePreview = null;
           cancelSceneFlip = null;
           scheduleScenePaint();
@@ -404,7 +398,6 @@ export default function clusterMap() {
             clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
           });
           if (useGpu) webgpuBackend.setScene(sourceScene);
-          else svgBackend.setScene(sourceScene);
           scheduleScenePaint();
         }, finish);
         return;
@@ -447,8 +440,7 @@ export default function clusterMap() {
       pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, plotData);
       commitInteractionState();
     }
-    canvasScene = pending.targetScene;
-    canvasBackend.setScene(canvasScene);
+    canvasBackend.setScene(pending.targetScene);
     scenePreview = null;
     canvasPendingFlip = null;
     canvasBackend.clearFlip();
@@ -469,12 +461,11 @@ export default function clusterMap() {
       cancelCanvasFlip = null;
       scenePreview = null;
       canvasPendingFlip = null;
-      canvasScene = pending.targetScene;
-      canvasBackend.setScene(canvasScene);
+      canvasBackend.setScene(pending.targetScene);
       paintScene();
       canvasBackend.clearFlip();
       scheduleScenePaint();
-      scheduleMinimapBase(canvasScene);
+      scheduleMinimapBase(pending.targetScene);
     };
     const duration = runtime.config.plot.transitionDuration;
     if (!duration) { finish(); return; }
@@ -852,7 +843,7 @@ export default function clusterMap() {
     const svg = container?.select("svg.clusterMap");
     if (!svg || svg.empty()) return;
     updateFigureSurface();
-    return svgBackend.paint({ ...sceneFrame(svgBackend.pendingScene || runtime.getScene()),
+    return renderSvg({ ...sceneFrame(runtime.getScene()),
       plot: svg.select("g.clusterMapG"), data: plotData, annotationsOnly, previousScene, animate,
       annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
       transition: animate ? createTransition().duration(runtime.config.plot.transitionDuration) : null,
@@ -971,13 +962,12 @@ export default function clusterMap() {
     const renderer = runtime.config.plot.renderer;
     const useWebGpu = isWebGpuRenderer(renderer);
     const backend = useWebGpu ? webgpuBackend : canvasBackend;
-    const previousScene = useWebGpu ? backend.pendingScene : canvasScene;
+    const previousScene = useWebGpu ? backend.pendingScene : rasterAnimation?.previousScene || backend.pendingScene;
     stopRasterAnimation();
     const duration = runtime.config.plot.transitionDuration;
     const finish = () => {
       rasterAnimation = null;
       treeAnimation = null;
-      if (!useWebGpu) canvasScene = scene;
       backend.setScene(scene);
       paintScene();
     };
@@ -1023,6 +1013,7 @@ export default function clusterMap() {
       themeMedia = globalThis.matchMedia("(prefers-color-scheme: dark)");
       themeMedia.addEventListener("change", systemThemeChanged);
     }
+    const previousScene = runtime.getScene();
     const committedScene = sceneCommit;
     sceneCommit = null;
     if (!updatingTreeMenu || !retainedOverlay?.isTreeMenuOpen(currentData.tree)) {
@@ -1050,7 +1041,6 @@ export default function clusterMap() {
     }
     if (!useRaster) { disposeRasterInteraction(); disposeRasterInteraction = () => {}; }
     if (!useCanvas) canvasBackend.destroy();
-    if (useRaster) svgBackend.destroy();
     const minimapOptions = runtime.config.plot.minimap || {};
     // The overview is a separate 2D canvas, so it works for both raster
     // backends. WebGPU owns only the main plot surface.
@@ -1177,8 +1167,6 @@ export default function clusterMap() {
       scheduleMinimapBase(scene);
       animateRaster(scene, hasInitialView && animate);
     } else {
-      const previousScene = svgBackend.pendingScene;
-      svgBackend.setScene(scene);
       paintSvg({ annotationsOnly, previousScene, animate: hasInitialView && animate });
 
       if (!hasInitialView) fitInitialView(svg, plot);
@@ -1567,7 +1555,6 @@ export default function clusterMap() {
     rasterMinimap.clear();
     webgpuBackend.destroy();
     canvasBackend.destroy();
-    svgBackend.destroy();
     container
       ?.selectAll([
         "svg.clusterMap",
@@ -1589,7 +1576,6 @@ export default function clusterMap() {
     canvasZoom = null;
     hasInitialView = false;
     canvasHoverLocusUid = null;
-    canvasScene = null;
     rasterCanvas = overlayCanvas = minimapCanvas = minimapScene = minimapMeasurement = null;
     sceneCommit = null;
     chartIndex = null;

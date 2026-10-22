@@ -13283,28 +13283,6 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   };
   }
 
-  // Retain a synchronous renderer's scene between full redraws and preview paints.
-  function createRetainedSceneBackend({ render, surface }) {
-    let pendingScene = null;
-
-    return {
-      get pendingScene() {
-        return pendingScene;
-      },
-      setScene: (scene) => {
-        pendingScene = scene;
-      },
-      paint: (request) => {
-        if (request.scene) pendingScene = request.scene;
-        if (!request[surface] || !pendingScene) return null;
-        return render({ ...request, scene: pendingScene });
-      },
-      destroy: () => {
-        pendingScene = null;
-      },
-    };
-  }
-
   function recordBounds(scene, records) {
     let result = null;
     for (const [type, ids] of Object.entries(records)) for (const uid of ids) {
@@ -15272,7 +15250,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let hasInitialView = false;
     let chartState = null;
     let canvasHoverLocusUid = null;
-    let canvasScene = null;
     let rasterAnimation = null;
     let treeAnimation = null;
     let scenePreview = null;
@@ -15332,10 +15309,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       },
     });
     const canvasBackend = createCanvasBackend();
-    const svgBackend = createRetainedSceneBackend({
-      render: renderSvg,
-      surface: "plot",
-    });
     const webgpuBackend = createWebGpuBackend();
     const rasterMinimap = createRasterMinimap();
     const rasterMotion = createRasterMotion({
@@ -15508,10 +15481,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         beginInteractionState();
         flipLocus(chartState, locus);
         if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
+          const sourceScene = rasterAnimation?.previousScene || canvasBackend.pendingScene || runtime.getScene();
           stopRasterAnimation();
           cancelCanvasFlip?.();
           const previewProgress = 0.12;
-          const sourceScene = canvasScene || runtime.getScene();
           const pending = { locus, sourceScene, targetScene: null,
             clusterLabelText: runtime.locusTextForCluster(locus.clusterUid) };
           canvasPendingFlip = pending;
@@ -15536,7 +15509,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
                 scales: runtime.scales, config: runtime.renderConfig,
               });
               webgpuBackend.setScene(targetScene);
-            } else svgBackend.setScene(targetScene);
+            }
             scenePreview = null;
             cancelSceneFlip = null;
             scheduleScenePaint();
@@ -15552,7 +15525,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
               clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
             });
             if (useGpu) webgpuBackend.setScene(sourceScene);
-            else svgBackend.setScene(sourceScene);
             scheduleScenePaint();
           }, finish);
           return;
@@ -15595,8 +15567,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, plotData);
         commitInteractionState();
       }
-      canvasScene = pending.targetScene;
-      canvasBackend.setScene(canvasScene);
+      canvasBackend.setScene(pending.targetScene);
       scenePreview = null;
       canvasPendingFlip = null;
       canvasBackend.clearFlip();
@@ -15617,12 +15588,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         cancelCanvasFlip = null;
         scenePreview = null;
         canvasPendingFlip = null;
-        canvasScene = pending.targetScene;
-        canvasBackend.setScene(canvasScene);
+        canvasBackend.setScene(pending.targetScene);
         paintScene();
         canvasBackend.clearFlip();
         scheduleScenePaint();
-        scheduleMinimapBase(canvasScene);
+        scheduleMinimapBase(pending.targetScene);
       };
       const duration = runtime.config.plot.transitionDuration;
       if (!duration) { finish(); return; }
@@ -16000,7 +15970,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const svg = container?.select("svg.clusterMap");
       if (!svg || svg.empty()) return;
       updateFigureSurface();
-      return svgBackend.paint({ ...sceneFrame(svgBackend.pendingScene || runtime.getScene()),
+      return renderSvg({ ...sceneFrame(runtime.getScene()),
         plot: svg.select("g.clusterMapG"), data: plotData, annotationsOnly, previousScene, animate,
         annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
         transition: animate ? transition().duration(runtime.config.plot.transitionDuration) : null,
@@ -16119,13 +16089,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const renderer = runtime.config.plot.renderer;
       const useWebGpu = isWebGpuRenderer(renderer);
       const backend = useWebGpu ? webgpuBackend : canvasBackend;
-      const previousScene = useWebGpu ? backend.pendingScene : canvasScene;
+      const previousScene = useWebGpu ? backend.pendingScene : rasterAnimation?.previousScene || backend.pendingScene;
       stopRasterAnimation();
       const duration = runtime.config.plot.transitionDuration;
       const finish = () => {
         rasterAnimation = null;
         treeAnimation = null;
-        if (!useWebGpu) canvasScene = scene;
         backend.setScene(scene);
         paintScene();
       };
@@ -16171,6 +16140,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         themeMedia = globalThis.matchMedia("(prefers-color-scheme: dark)");
         themeMedia.addEventListener("change", systemThemeChanged);
       }
+      const previousScene = runtime.getScene();
       const committedScene = sceneCommit;
       sceneCommit = null;
       if (!updatingTreeMenu || !retainedOverlay?.isTreeMenuOpen(currentData.tree)) {
@@ -16198,7 +16168,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       }
       if (!useRaster) { disposeRasterInteraction(); disposeRasterInteraction = () => {}; }
       if (!useCanvas) canvasBackend.destroy();
-      if (useRaster) svgBackend.destroy();
       const minimapOptions = runtime.config.plot.minimap || {};
       // The overview is a separate 2D canvas, so it works for both raster
       // backends. WebGPU owns only the main plot surface.
@@ -16325,8 +16294,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         scheduleMinimapBase(scene);
         animateRaster(scene, hasInitialView && animate);
       } else {
-        const previousScene = svgBackend.pendingScene;
-        svgBackend.setScene(scene);
         paintSvg({ annotationsOnly, previousScene, animate: hasInitialView && animate });
 
         if (!hasInitialView) fitInitialView(svg, plot);
@@ -16715,7 +16682,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       rasterMinimap.clear();
       webgpuBackend.destroy();
       canvasBackend.destroy();
-      svgBackend.destroy();
       container
         ?.selectAll([
           "svg.clusterMap",
@@ -16737,7 +16703,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       canvasZoom = null;
       hasInitialView = false;
       canvasHoverLocusUid = null;
-      canvasScene = null;
       rasterCanvas = overlayCanvas = minimapCanvas = minimapScene = minimapMeasurement = null;
       sceneCommit = null;
       chartIndex = null;
