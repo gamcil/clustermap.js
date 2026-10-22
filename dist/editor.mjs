@@ -3970,6 +3970,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   #annotationEditor = null;
   #unsubscribe = null;
   #editing = false;
+  #pendingEdit = null;
   #kind = "groups";
   #geneView = "tree";
   #selected = new RowSelection();
@@ -4000,6 +4001,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     }
     if (!this.#table) this.#renderShell();
     this.#subscribe(); this.#syncTheme(); this.#refreshData();
+    const edit = this.#pendingEdit; this.#pendingEdit = null; edit?.();
   }
 
   disconnectedCallback() {
@@ -4034,6 +4036,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   }
 
   editAnnotations(panelUid) {
+    if (!this.isConnected) { this.#pendingEdit = () => this.editAnnotations(panelUid); return this; }
     this.#kind = "annotations";
     this.#selected.clear();
     this.#renderData();
@@ -4042,6 +4045,10 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   }
 
   editSelection({ kind, ids }) {
+    if (!this.isConnected) {
+      const selection = { kind, ids: [...ids] };
+      this.#pendingEdit = () => this.editSelection(selection); return this;
+    }
     this.#kind = "genes"; this.#geneView = "tree";
     this.#filter = ""; this.#memberGroupId = null;
     const selected = new Set(ids), genes = [];
@@ -4370,7 +4377,6 @@ class ClinkerEditorElement extends HTMLElementBase {
   }
 
   connectedCallback() {
-    defineTabs(); defineDataPanel(); defineAppearancePanel();
     this.classList.add("cm-editor", "cm-data-ui");
     if (!this.#dataPanel) this.#renderShell();
     this.ownerDocument.addEventListener("clustermap:edit-annotation", this.#editAnnotation);
@@ -4396,6 +4402,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   editSelection(selection) { this.#openData().editSelection(selection); return this; }
 
   #openData() {
+    if (!this.#dataPanel) { this.#renderShell(); this.#render(); }
     this.hidden = false;
     this.querySelector("[data-editor-tabs]")?.setAttribute("value", "data");
     this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true }));
@@ -4408,6 +4415,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #renderShell() {
+    defineTabs(); defineDataPanel(); defineAppearancePanel();
     this.replaceChildren(shellTemplate(this.ownerDocument));
     this.#dataPanel = this.querySelector("clinker-data-panel");
     this.#appearancePanel = this.querySelector("clinker-appearance-panel");
@@ -4422,9 +4430,9 @@ class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #render() {
-    if (!this.isConnected) return;
-    if (this.#dataPanel) this.#dataPanel.chart = this.#chart;
-    if (this.#appearancePanel) this.#appearancePanel.chart = this.#chart;
+    if (!this.#dataPanel) return;
+    this.#dataPanel.chart = this.#chart;
+    this.#appearancePanel.chart = this.#chart;
     this.#syncTheme(); this.#renderHistory();
   }
 

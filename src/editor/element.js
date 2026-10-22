@@ -43,7 +43,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   connectedCallback() {
-    defineTabs(); defineDataPanel(); defineAppearancePanel();
     this.classList.add("cm-editor", "cm-data-ui");
     if (!this.#dataPanel) this.#renderShell();
     this.ownerDocument.addEventListener("clustermap:edit-annotation", this.#editAnnotation);
@@ -69,6 +68,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   editSelection(selection) { this.#openData().editSelection(selection); return this; }
 
   #openData() {
+    if (!this.#dataPanel) { this.#renderShell(); this.#render(); }
     this.hidden = false;
     this.querySelector("[data-editor-tabs]")?.setAttribute("value", "data");
     this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true }));
@@ -81,6 +81,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #renderShell() {
+    defineTabs(); defineDataPanel(); defineAppearancePanel();
     this.replaceChildren(shellTemplate(this.ownerDocument));
     this.#dataPanel = this.querySelector("clinker-data-panel");
     this.#appearancePanel = this.querySelector("clinker-appearance-panel");
@@ -95,9 +96,9 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #render() {
-    if (!this.isConnected) return;
-    if (this.#dataPanel) this.#dataPanel.chart = this.#chart;
-    if (this.#appearancePanel) this.#appearancePanel.chart = this.#chart;
+    if (!this.#dataPanel) return;
+    this.#dataPanel.chart = this.#chart;
+    this.#appearancePanel.chart = this.#chart;
     this.#syncTheme(); this.#renderHistory();
   }
 

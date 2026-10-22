@@ -197,6 +197,10 @@ and attach the chart to `<clinker-data-panel>` through its `.chart` property.
 It owns navigation, filtering, selection and batch actions; it can be mounted
 without the editor tabs or history buttons.
 
+Both editors expose `editAnnotations(panelUid)` and `editSelection({ kind, ids })`,
+where `kind` is `"clusters"` or `"loci"`. Assign `.chart` first; navigation requested
+before connection is applied when the component mounts.
+
 For appearance controls alone, use `defineAppearancePanel()` and
 `<clinker-appearance-panel>` with the same `.chart` property.
 

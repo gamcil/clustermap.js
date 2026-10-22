@@ -31,6 +31,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   #annotationEditor = null;
   #unsubscribe = null;
   #editing = false;
+  #pendingEdit = null;
   #kind = "groups";
   #geneView = "tree";
   #selected = new RowSelection();
@@ -61,6 +62,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     }
     if (!this.#table) this.#renderShell();
     this.#subscribe(); this.#syncTheme(); this.#refreshData();
+    const edit = this.#pendingEdit; this.#pendingEdit = null; edit?.();
   }
 
   disconnectedCallback() {
@@ -95,6 +97,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   editAnnotations(panelUid) {
+    if (!this.isConnected) { this.#pendingEdit = () => this.editAnnotations(panelUid); return this; }
     this.#kind = "annotations";
     this.#selected.clear();
     this.#renderData();
@@ -103,6 +106,10 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   editSelection({ kind, ids }) {
+    if (!this.isConnected) {
+      const selection = { kind, ids: [...ids] };
+      this.#pendingEdit = () => this.editSelection(selection); return this;
+    }
     this.#kind = "genes"; this.#geneView = "tree";
     this.#filter = ""; this.#memberGroupId = null;
     const selected = new Set(ids), genes = [];
