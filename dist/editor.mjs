@@ -4005,12 +4005,14 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   disconnectedCallback() {
     this.#unsubscribe?.(); this.#unsubscribe = null;
     this.#table?.reset();
+    this.#chart?.highlight?.([]);
   }
 
   get chart() { return this.#chart; }
   set chart(value) {
     if (value === this.#chart) return;
     this.#unsubscribe?.(); this.#unsubscribe = null;
+    this.#table?.cancelHover(); this.#chart?.highlight?.([]);
     this.#chart = value || null;
     this.#subscribe(); this.#syncTheme(); this.#refreshData({ replace: true });
   }
@@ -4370,21 +4372,20 @@ class ClinkerEditorElement extends HTMLElementBase {
   connectedCallback() {
     defineTabs(); defineDataPanel(); defineAppearancePanel();
     this.classList.add("cm-editor", "cm-data-ui");
-    if (!this.hasChildNodes()) this.#renderShell();
+    if (!this.#dataPanel) this.#renderShell();
     this.ownerDocument.addEventListener("clustermap:edit-annotation", this.#editAnnotation);
     this.#subscribe(); this.#render();
   }
 
   disconnectedCallback() {
     this.ownerDocument.removeEventListener("clustermap:edit-annotation", this.#editAnnotation);
-    this.#chart?.previewTreePresentation?.(null);
+    this.#resizeStart = null;
     this.#unsubscribe?.(); this.#unsubscribe = null;
   }
 
   get chart() { return this.#chart; }
   set chart(value) {
     if (value === this.#chart) return;
-    this.#chart?.previewTreePresentation?.(null);
     this.#unsubscribe?.(); this.#unsubscribe = null;
     this.#chart = value || null;
     this.#subscribe(); this.#render();
@@ -4402,7 +4403,6 @@ class ClinkerEditorElement extends HTMLElementBase {
   }
 
   reset() {
-    this.#chart?.previewTreePresentation?.(null);
     this.#renderShell(); this.#render();
     return this;
   }

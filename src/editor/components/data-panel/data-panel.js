@@ -66,12 +66,14 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   disconnectedCallback() {
     this.#unsubscribe?.(); this.#unsubscribe = null;
     this.#table?.reset();
+    this.#chart?.highlight?.([]);
   }
 
   get chart() { return this.#chart; }
   set chart(value) {
     if (value === this.#chart) return;
     this.#unsubscribe?.(); this.#unsubscribe = null;
+    this.#table?.cancelHover(); this.#chart?.highlight?.([]);
     this.#chart = value || null;
     this.#subscribe(); this.#syncTheme(); this.#refreshData({ replace: true });
   }
