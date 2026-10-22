@@ -1,0 +1,11 @@
+<form>
+  <div data-create>
+    <label><span>Type</span><select name="type" aria-label="Type"><option value="heatmap">Heatmap</option><option value="bar">Bar chart</option><option value="groups">Group markers</option></select></label>
+    <label><span>Title</span><input name="title" type="text" aria-label="Title"></label>
+    <label data-scale><span>Values</span><select name="scale" aria-label="Values"><option value="continuous">Numeric</option><option value="categorical">Categories</option></select></label>
+    <p data-help></p>
+  </div>
+  <label class="data"><span>Data</span><textarea name="data" aria-label="Data" rows="8" spellcheck="false"></textarea></label>
+  <p data-error role="alert" hidden></p>
+  <div class="actions"><button type="submit">Add panel</button><button type="button" data-cancel hidden>Cancel</button></div>
+</form>

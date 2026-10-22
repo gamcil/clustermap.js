@@ -5,6 +5,7 @@ import { defineActionMenu } from "./editor/components/action-menu/action-menu.js
 import { defineSearchField } from "./editor/components/search-field/search-field.js";
 import { defineCategoryEditor } from "./editor/components/category-editor/category-editor.js";
 import { defineAnnotationToolbar } from "./editor/components/annotation-toolbar/annotation-toolbar.js";
+import { defineAnnotationDataForm } from "./editor/components/annotation-data-form/annotation-data-form.js";
 import { textAsset } from "./editor/shared/textAsset.js";
 import { RowSelection } from "./rowSelection.mjs";
 import { createVirtualRows } from "./virtualRows.mjs";
@@ -26,10 +27,7 @@ const batchTemplate = createTemplate(`<div class="cm-data-selection-actions">
   <button type="button" data-set>Set values</button><button type="button" data-clear>Clear values</button>
 </div>`);
 const categoriesTemplate = createTemplate('<clinker-category-editor class="cm-annotation-categories"></clinker-category-editor>');
-const replacementTemplate = createTemplate(`<div class="cm-annotation-replacement" hidden>
-  <textarea rows="5" spellcheck="false" aria-label="Replacement annotation data (CSV, TSV or JSON)"></textarea>
-  <div class="cm-data-toolbar"><button type="button" data-replace>Replace data</button><button type="button" data-cancel>Cancel</button></div>
-</div>`);
+const replacementTemplate = createTemplate('<clinker-annotation-data-form mode="replace" hidden></clinker-annotation-data-form>');
 const groupTemplate = createTemplate(`<fieldset><legend></legend><div class="cm-data-toolbar cm-annotation-data-toolbar">
   <input type="text" aria-label="Group label"><input type="color" aria-label="Group colour">
   <button type="button">Remove group</button><select aria-label="Membership"></select>
@@ -39,7 +37,7 @@ const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to at
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 export function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar();
+  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector("clinker-annotation-toolbar");
@@ -201,9 +199,9 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
   }
 
   function createReplacement(layout) {
-    const box = replacementTemplate(document).firstElementChild, data = box.querySelector("textarea"); layout.tools.append(box);
-    box.querySelector("[data-replace]").onclick = () => { try {
-      const source = current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(data.value, categorical);
+    const box = replacementTemplate(document).firstElementChild; layout.tools.append(box);
+    box.addEventListener("data-submit", (event) => { try {
+      const source = current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(event.detail.data, categorical);
       if (categorical) {
         const scale = resolveAnnotationScale(source), domain = new Set(scale.domain);
         for (const row of Object.values(changes.values)) for (const value of row) if (value !== null) domain.add(value);
@@ -211,11 +209,11 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
           scale.domain.includes(value) ? scale.colour(value) : ANNOTATION_PALETTES.Qualitative[i % ANNOTATION_PALETTES.Qualitative.length]));
       }
       if (update(changes)) { box.hidden = true; layout.sync(); }
-    } catch (exception) { error(exception.message); } };
-    box.querySelector("[data-cancel]").onclick = () => { box.hidden = true; layout.sync(); };
+    } catch (exception) { box.error = exception.message; layout.sync(); } });
+    box.addEventListener("data-cancel", () => { box.hidden = true; layout.sync(); });
     return () => {
       box.hidden = !box.hidden; layout.sync();
-      if (!box.hidden) { data.value = annotationTableText(current(), getClusters()); data.focus(); }
+      if (!box.hidden) { box.value = { data: annotationTableText(current(), getClusters()) }; box.error = ""; box.focus(); }
     };
   }
 
@@ -345,8 +343,6 @@ function installStyle(document) {
 .cm-annotation-spacer > td { height:0; border:0; padding:0; }
 .cm-annotation-data-editor fieldset { flex-shrink:0; border:1px solid var(--cm-border,#cbd3de); border-radius:4px; padding:8px; margin:0 0 8px; }
 .cm-annotation-data-editor fieldset > select { margin-top:6px; max-width:100%; }
-.cm-annotation-replacement { flex-shrink:0; }
-.cm-annotation-data-editor textarea { display:block; width:100%; margin:6px 0; resize:vertical; }
 .cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }
 .cm-annotation-data-editor [data-data-error]:empty { display:none; }
 

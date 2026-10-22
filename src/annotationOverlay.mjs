@@ -18,8 +18,6 @@ function installStyle(document) {
 .cm-annotation-add button { top:50%; right:50%; transform:translate(50%,-50%); font-size:22px; width:32px; height:32px; }
 .cm-annotation-actions { display:flex; gap:5px; border-top:1px solid var(--cm-border,#e5e9ef); margin-top:8px; padding-top:8px; }
 .cm-annotation-menu p { font-size:11px; color:var(--cm-muted,#607086); }
-.cm-annotation-menu .cm-annotation-data { display:block; }
-.cm-annotation-menu textarea { display:block; width:100%; margin-top:4px; resize:vertical; border:1px solid var(--cm-border,#cbd3de); border-radius:4px; padding:5px; }
 .cm-annotation-menu { width:280px; max-width:calc(100vw - 16px); max-height:calc(100vh - 16px); overflow:auto; padding:8px; border:1px solid var(--cm-border,#cbd3de); border-radius:4px; background:var(--cm-surface,#fff); box-shadow:0 2px 8px rgba(0,0,0,.2); }
 .cm-annotation-menu header { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
 .cm-annotation-menu header strong { flex:1; min-width:0; overflow-wrap:anywhere; }
@@ -189,7 +187,7 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
     const form = createAnnotationCreateControls({ document, getData, patch, annotationApi,
       onCreate: (uid) => openPanel(uid, add) });
     menu.append(form.node); showAddFrame(); positionMenu();
-    form.node.querySelector("select")?.focus({ preventScroll: true });
+    form.node.focus({ preventScroll: true });
   };
   hiddenButton.onclick = () => {
     beginMenu("hidden", "Hidden annotation panels", hiddenButton);
