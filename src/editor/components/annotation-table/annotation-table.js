@@ -27,7 +27,6 @@ class AnnotationTable extends HTMLElementBase {
   #rowIds = new WeakMap();
   #selectionBar;
   #batch;
-  #draft = { column: "0", value: "" };
 
   constructor() {
     super();
@@ -39,7 +38,6 @@ class AnnotationTable extends HTMLElementBase {
     this.#selectionBar.addEventListener("clear-selection", () => this.clearSelection());
     this.#selectionBar.addEventListener("select-all", (event) => { this.#selection.setMany(event.detail.ids); this.#syncSelection(); });
     this.#batch = root.querySelector("clinker-annotation-value-actions");
-    this.#batch.addEventListener("draft-change", (event) => { event.stopPropagation(); this.#draft = event.detail; });
     this.#batch.addEventListener("values-commit", (event) => {
       event.stopPropagation();
       const { column, value } = event.detail;
@@ -54,7 +52,7 @@ class AnnotationTable extends HTMLElementBase {
 
   set state({ panel, clusters, domain = null, filter = "" }) {
     const changed = this.#panel?.uid !== panel.uid, filtered = this.#filter !== filter;
-    if (changed) { this.#selection.clear(); this.#draft = { column: "0", value: "" }; }
+    if (changed) this.#selection.clear();
     this.#panel = panel; this.#domain = domain; this.#filter = filter;
     this.#selection.prune(new Set(clusters.map(({ uid }) => uid)));
     const scroll = changed || filtered ? 0 : this.#viewport.scrollTop;
@@ -103,9 +101,7 @@ class AnnotationTable extends HTMLElementBase {
     this.#table = this.#element("table"); viewport.replaceChildren(this.#table);
     const head = this.#table.querySelector("tr");
     head.querySelector("input").onchange = (event) => { this.#selection.setMany(this.#filtered.map(({ uid }) => uid), event.target.checked); this.#syncSelection(); };
-    if (this.#draft.column !== "all" && Number(this.#draft.column) >= panel.columns.length) this.#draft.column = "0";
-    if (this.#domain !== null && this.#draft.value !== "" && this.#domain[Number(this.#draft.value)] === undefined) this.#draft.value = "";
-    this.#batch.state = { columns: panel.columns, domain: this.#domain, draft: this.#draft };
+    this.#batch.state = { uid: panel.uid, columns: panel.columns, domain: this.#domain };
     panel.columns.forEach((column, index) => {
       const heading = this.#element("column"), field = heading.querySelector("clinker-editable-field"), remove = heading.querySelector("button");
       field.value = column; field.setAttribute("label", `Column ${index + 1} name`);

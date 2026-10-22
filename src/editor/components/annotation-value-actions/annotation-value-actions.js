@@ -10,6 +10,7 @@ const template = createTemplate(markup);
 const HTMLElementBase = globalThis.HTMLElement || class {};
 
 class AnnotationValueActions extends HTMLElementBase {
+  #uid;
   #columns;
   #numeric;
   #categories;
@@ -21,27 +22,25 @@ class AnnotationValueActions extends HTMLElementBase {
     const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
     root.append(style, template(this.ownerDocument));
     this.#columns = root.querySelector("[data-columns]"); this.#numeric = root.querySelector("input"); this.#categories = root.querySelector("[data-categories]");
-    root.addEventListener("change", () => this.#draftChanged());
     root.querySelector("[data-set]").onclick = () => this.#submit(false);
     root.querySelector("[data-clear]").onclick = () => this.#submit(true);
   }
 
-  set state({ columns, domain = null, draft = { column: "0", value: "" } }) {
-    this.#domain = domain;
+  set state({ uid, columns, domain = null }) {
+    const changed = this.#uid !== uid, value = changed ? "" : this.#input.value;
+    this.#uid = uid; this.#domain = domain;
     this.#numeric.hidden = domain !== null; this.#categories.hidden = domain === null;
     updateSelectOptions(this.#columns, [["all", "All columns"], ...columns.map((name, index) => [String(index), name])]);
     if (domain !== null) updateSelectOptions(this.#categories, [["", "Missing"], ...domain.map((name, index) => [String(index), name])]);
-    this.#columns.value = draft.column; this.#input.value = draft.value;
+    if (changed || !this.#columns.value) this.#columns.value = "0";
+    this.#input.value = value;
+    if (domain !== null && this.#categories.selectedIndex < 0) this.#categories.value = "";
   }
 
   get #input() { return this.#domain === null ? this.#numeric : this.#categories; }
-  #draftChanged() {
-    this.dispatchEvent(new CustomEvent("draft-change", { detail: { column: this.#columns.value, value: this.#input.value }, bubbles: true, composed: true }));
-  }
   #submit(clear) {
     const input = this.#input;
     if (!clear && !input.reportValidity()) return;
-    this.#draftChanged();
     const value = clear || input.value === "" ? null : this.#domain === null ? Number(input.value) : this.#domain[Number(input.value)];
     const column = this.#columns.value === "all" ? "all" : Number(this.#columns.value);
     this.dispatchEvent(new CustomEvent("values-commit", { detail: { column, value }, bubbles: true, composed: true, cancelable: true }));

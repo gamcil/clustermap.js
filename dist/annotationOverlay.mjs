@@ -1546,6 +1546,7 @@ const template$2 = createTemplate(markup$2);
 const HTMLElementBase$2 = globalThis.HTMLElement || class {};
 
 class AnnotationValueActions extends HTMLElementBase$2 {
+  #uid;
   #columns;
   #numeric;
   #categories;
@@ -1557,27 +1558,25 @@ class AnnotationValueActions extends HTMLElementBase$2 {
     const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$2;
     root.append(style, template$2(this.ownerDocument));
     this.#columns = root.querySelector("[data-columns]"); this.#numeric = root.querySelector("input"); this.#categories = root.querySelector("[data-categories]");
-    root.addEventListener("change", () => this.#draftChanged());
     root.querySelector("[data-set]").onclick = () => this.#submit(false);
     root.querySelector("[data-clear]").onclick = () => this.#submit(true);
   }
 
-  set state({ columns, domain = null, draft = { column: "0", value: "" } }) {
-    this.#domain = domain;
+  set state({ uid, columns, domain = null }) {
+    const changed = this.#uid !== uid, value = changed ? "" : this.#input.value;
+    this.#uid = uid; this.#domain = domain;
     this.#numeric.hidden = domain !== null; this.#categories.hidden = domain === null;
     updateSelectOptions(this.#columns, [["all", "All columns"], ...columns.map((name, index) => [String(index), name])]);
     if (domain !== null) updateSelectOptions(this.#categories, [["", "Missing"], ...domain.map((name, index) => [String(index), name])]);
-    this.#columns.value = draft.column; this.#input.value = draft.value;
+    if (changed || !this.#columns.value) this.#columns.value = "0";
+    this.#input.value = value;
+    if (domain !== null && this.#categories.selectedIndex < 0) this.#categories.value = "";
   }
 
   get #input() { return this.#domain === null ? this.#numeric : this.#categories; }
-  #draftChanged() {
-    this.dispatchEvent(new CustomEvent("draft-change", { detail: { column: this.#columns.value, value: this.#input.value }, bubbles: true, composed: true }));
-  }
   #submit(clear) {
     const input = this.#input;
     if (!clear && !input.reportValidity()) return;
-    this.#draftChanged();
     const value = clear || input.value === "" ? null : this.#domain === null ? Number(input.value) : this.#domain[Number(input.value)];
     const column = this.#columns.value === "all" ? "all" : Number(this.#columns.value);
     this.dispatchEvent(new CustomEvent("values-commit", { detail: { column, value }, bubbles: true, composed: true, cancelable: true }));
@@ -1607,7 +1606,6 @@ class AnnotationTable extends HTMLElementBase$1 {
   #rowIds = new WeakMap();
   #selectionBar;
   #batch;
-  #draft = { column: "0", value: "" };
 
   constructor() {
     super();
@@ -1619,7 +1617,6 @@ class AnnotationTable extends HTMLElementBase$1 {
     this.#selectionBar.addEventListener("clear-selection", () => this.clearSelection());
     this.#selectionBar.addEventListener("select-all", (event) => { this.#selection.setMany(event.detail.ids); this.#syncSelection(); });
     this.#batch = root.querySelector("clinker-annotation-value-actions");
-    this.#batch.addEventListener("draft-change", (event) => { event.stopPropagation(); this.#draft = event.detail; });
     this.#batch.addEventListener("values-commit", (event) => {
       event.stopPropagation();
       const { column, value } = event.detail;
@@ -1634,7 +1631,7 @@ class AnnotationTable extends HTMLElementBase$1 {
 
   set state({ panel, clusters, domain = null, filter = "" }) {
     const changed = this.#panel?.uid !== panel.uid, filtered = this.#filter !== filter;
-    if (changed) { this.#selection.clear(); this.#draft = { column: "0", value: "" }; }
+    if (changed) this.#selection.clear();
     this.#panel = panel; this.#domain = domain; this.#filter = filter;
     this.#selection.prune(new Set(clusters.map(({ uid }) => uid)));
     const scroll = changed || filtered ? 0 : this.#viewport.scrollTop;
@@ -1683,9 +1680,7 @@ class AnnotationTable extends HTMLElementBase$1 {
     this.#table = this.#element("table"); viewport.replaceChildren(this.#table);
     const head = this.#table.querySelector("tr");
     head.querySelector("input").onchange = (event) => { this.#selection.setMany(this.#filtered.map(({ uid }) => uid), event.target.checked); this.#syncSelection(); };
-    if (this.#draft.column !== "all" && Number(this.#draft.column) >= panel.columns.length) this.#draft.column = "0";
-    if (this.#domain !== null && this.#draft.value !== "" && this.#domain[Number(this.#draft.value)] === undefined) this.#draft.value = "";
-    this.#batch.state = { columns: panel.columns, domain: this.#domain, draft: this.#draft };
+    this.#batch.state = { uid: panel.uid, columns: panel.columns, domain: this.#domain };
     panel.columns.forEach((column, index) => {
       const heading = this.#element("column"), field = heading.querySelector("clinker-editable-field"), remove = heading.querySelector("button");
       field.value = column; field.setAttribute("label", `Column ${index + 1} name`);
