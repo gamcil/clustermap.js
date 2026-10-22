@@ -38,7 +38,8 @@
   clinker-editor .cm-editor__tree-parent { --cm-row-background:var(--cm-subtle,#f3f6fa); font-weight: 550; }
   clinker-editor .cm-editor__tree-toggle { --cm-icon-size:24px; font-size:14px; }
   clinker-editor .cm-editor__tree-separator { color: var(--cm-muted,#96a4b5); font-size: 12px; }
-  clinker-editor .cm-editor__tree-combined { display: flex; min-width: 0; align-items: center; gap: 4px; }
+  clinker-editor .cm-editor__tree-combined { display: flex; min-width: 0; align-items: center; gap: 4px; padding-inline:8px; }
+  clinker-editor .cm-editor__tree-combined > clinker-editable-field { padding-inline:0; }
   clinker-editor .cm-editor__tree-combined > [data-type="clusters"] { color:var(--cm-foreground,#324155); font-weight:650; }
   clinker-editor .cm-editor__tree-combined > [data-type="loci"] { color:var(--cm-muted,#526178); font-weight:550; }
   clinker-editor .cm-editor__tree-count { color: var(--cm-muted,#5f6d7f); font-size: 12px; font-weight: 600; white-space: nowrap; }
