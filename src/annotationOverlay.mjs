@@ -1,7 +1,8 @@
 import { installDataEditorStyle } from "./editor/shared/styles.mjs";
 import { defineAnnotationEditor } from "./editor/components/annotation-editor/annotation-editor.js";
 import { createAnnotationControls } from "./annotationControls.mjs";
-import { createAnnotationForm } from "./editor/components/annotation-data-form/create.js";
+import { defineAnnotationDataForm } from "./editor/components/annotation-data-form/annotation-data-form.js";
+import { createAnnotationPanel } from "./annotationData.mjs";
 import { createAnnotationTooltip } from "./annotationTooltip.mjs";
 
 function installStyle(document) {
@@ -192,8 +193,14 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
   edit.onclick = () => { if (hovered) openPanel(hovered, edit); };
   add.onclick = () => {
     beginMenu("add", "Add annotation panel", add);
-    const form = createAnnotationForm({ document, getData, patch,
-      onCreate: (uid) => openPanel(uid, add) });
+    defineAnnotationDataForm();
+    const form = document.createElement("clinker-annotation-data-form"); form.clusters = getData().clusters;
+    form.addEventListener("data-submit", (event) => {
+      try {
+        const panel = createAnnotationPanel(event.detail, getPanels());
+        patch([{ type: "annotationPanels.create", panel }]); openPanel(panel.uid, add);
+      } catch (exception) { form.error = exception.message; }
+    });
     menu.append(form); showAddFrame(); positionMenu();
     form.focus({ preventScroll: true });
   };

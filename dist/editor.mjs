@@ -3240,6 +3240,17 @@ function parseAnnotationTable(text, categorical = false) {
   return { columns, values };
 }
 
+function createAnnotationPanel({ type, title, scale, data }, panels = []) {
+  const raw = data.trim();
+  const contents = type === "groups" ? { groups: JSON.parse(raw).groups } : parseAnnotationTable(raw, scale === "categorical");
+  const ids = new Set(panels.map(({ uid }) => uid));
+  let serial = 1;
+  while (ids.has(`${type}-${serial}`)) serial++;
+  return { uid: `${type}-${serial}`, type,
+    title: title.trim() || (type === "groups" ? "Groups" : type === "bar" ? "Bar chart" : "Heatmap"),
+    ...contents, ...(type === "groups" ? {} : { scale: { type: scale } }) };
+}
+
 function annotationTableText(panel, clusters) {
   return csvFormatRows([["cluster", ...panel.columns], ...clusters.map((cluster) =>
     [cluster.uid, ...(panel.values[cluster.uid] ?? panel.columns.map(() => null))])]);
@@ -3249,31 +3260,8 @@ function mapAnnotationValues(values, map) {
   return Object.fromEntries(Object.entries(values).map(([uid, row]) => [uid, row.map(map)]));
 }
 
-function createAnnotationForm({ document, getData, patch, onCreate }) {
-  defineAnnotationDataForm();
-  const node = document.createElement("clinker-annotation-data-form");
-  node.clusters = getData().clusters;
-  const run = createActionRunner((message) => { node.error = message; });
-  node.addEventListener("data-submit", (event) => {
-    run(() => {
-      const { type, title, scale, data } = event.detail;
-      const raw = data.trim();
-      const contents = type === "groups" ? { groups: JSON.parse(raw).groups } : parseAnnotationTable(raw, scale === "categorical");
-      const ids = new Set((getData()?.annotationPanels || []).map((panel) => panel.uid));
-      let serial = 1;
-      while (ids.has(`${type}-${serial}`)) serial++;
-      const panel = { uid: `${type}-${serial}`, type,
-        title: title.trim() || (type === "groups" ? "Groups" : type === "bar" ? "Bar chart" : "Heatmap"),
-        ...contents, ...(type === "groups" ? {} : { scale: { type: scale } }) };
-      patch([{ type: "annotationPanels.create", panel }]);
-      onCreate(panel.uid);
-    });
-  });
-  return node;
-}
-
 const [markup$4, css$4] = await Promise.all([
-  "<template id=\"editor\">\n<div class=\"cm-annotation-layout\">\n  <clinker-annotation-toolbar>\n    <clinker-search-field label=\"Filter records\" placeholder=\"Find a cluster\"></clinker-search-field>\n  </clinker-annotation-toolbar>\n  <div class=\"cm-annotation-content\">\n    <div class=\"cm-data-error\" data-data-error role=\"alert\"></div>\n    <div class=\"cm-annotation-data-body\"></div>\n  </div>\n</div>\n</template>\n\n<template id=\"matrix\">\n<clinker-annotation-table></clinker-annotation-table>\n</template>\n\n<template id=\"categories\">\n<clinker-category-editor slot=\"tools\" class=\"cm-annotation-categories\"></clinker-category-editor>\n</template>\n\n<template id=\"replacement\">\n<clinker-annotation-data-form slot=\"tools\" mode=\"replace\" hidden></clinker-annotation-data-form>\n</template>\n\n<template id=\"groups\">\n<div class=\"cm-data-panel cm-annotation-group-list\" role=\"region\" aria-label=\"Editable annotation data\" tabindex=\"-1\"><clinker-annotation-group-editor></clinker-annotation-group-editor></div>\n</template>\n\n<template id=\"empty\">\n<p>No annotation panels. Add a panel to attach data to cluster rows.</p>\n</template>\n",
+  "<template id=\"editor\">\n<div class=\"cm-annotation-layout\">\n  <clinker-annotation-toolbar>\n    <clinker-search-field label=\"Filter records\" placeholder=\"Find a cluster\"></clinker-search-field>\n  </clinker-annotation-toolbar>\n  <div class=\"cm-annotation-content\">\n    <div class=\"cm-data-error\" data-data-error role=\"alert\"></div>\n    <div class=\"cm-annotation-data-body\"></div>\n  </div>\n</div>\n</template>\n\n<template id=\"matrix\">\n<clinker-annotation-table></clinker-annotation-table>\n</template>\n\n<template id=\"categories\">\n<clinker-category-editor slot=\"tools\" class=\"cm-annotation-categories\"></clinker-category-editor>\n</template>\n\n<template id=\"creation\">\n<clinker-annotation-data-form></clinker-annotation-data-form>\n</template>\n\n<template id=\"replacement\">\n<clinker-annotation-data-form slot=\"tools\" mode=\"replace\" hidden></clinker-annotation-data-form>\n</template>\n\n<template id=\"groups\">\n<div class=\"cm-data-panel cm-annotation-group-list\" role=\"region\" aria-label=\"Editable annotation data\" tabindex=\"-1\"><clinker-annotation-group-editor></clinker-annotation-group-editor></div>\n</template>\n\n<template id=\"empty\">\n<p>No annotation panels. Add a panel to attach data to cluster rows.</p>\n</template>\n",
   "@layer clinker-editor {\n.cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }\n.cm-annotation-layout, .cm-annotation-content { display:flex; flex-direction:column; flex:1; gap:8px; min-width:0; min-height:0; }\nclinker-annotation-editor[embedded], clinker-annotation-editor[embedded] > .cm-annotation-layout { display:contents; }\nclinker-annotation-editor[hidden] { display:none; }\nclinker-annotation-editor[embedded] .cm-annotation-layout > clinker-annotation-toolbar { grid-area:tools; min-width:0; }\nclinker-annotation-editor[embedded] .cm-annotation-content { grid-area:content; }\n.cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }\n.cm-annotation-group-list { overflow:auto; }\n.cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }\n.cm-annotation-data-editor [data-data-error]:empty { display:none; }\n\n}\n",
 ]);
 const template$4 = createTemplate(markup$4);
@@ -3292,7 +3280,7 @@ class AnnotationEditor extends HTMLElementBase$5 {
   #view;
   #viewKey;
   #categories;
-  #replacement;
+  #form;
   #run = createActionRunner((message) => { this.#status.textContent = message; });
 
   connectedCallback() {
@@ -3359,16 +3347,16 @@ class AnnotationEditor extends HTMLElementBase$5 {
       else return;
       if (this.#update(changes) === false) event.preventDefault();
     });
-    this.#body.addEventListener("data-submit", (event) => { if (event.target === this.#replacement) this.#replace(event.detail.data); });
-    this.#body.addEventListener("data-cancel", (event) => { if (event.target === this.#replacement) this.#replacement.hidden = true; });
+    this.#body.addEventListener("data-submit", (event) => { if (event.target === this.#form) this.#submit(event.detail); });
+    this.#body.addEventListener("data-cancel", (event) => { if (event.target === this.#form) this.#form.hidden = true; });
   }
   #action(action) {
     if (action === "add") { this.#creating = !this.#creating; this.#render(); }
-    else if (action === "replace" && this.#replacement) {
-      this.#replacement.hidden = !this.#replacement.hidden;
-      if (!this.#replacement.hidden) {
-        this.#replacement.value = { data: annotationTableText(this.#current(), this.#state.clusters) };
-        this.#replacement.error = ""; this.#replacement.focus();
+    else if (action === "replace" && this.#form) {
+      this.#form.hidden = !this.#form.hidden;
+      if (!this.#form.hidden) {
+        this.#form.value = { data: annotationTableText(this.#current(), this.#state.clusters) };
+        this.#form.error = ""; this.#form.focus();
       }
     } else if (action === "show") this.#update({ show: this.#current().show === false });
     else if (action === "remove") this.#commit([{ type: "annotationPanels.delete", ids: [this.#selected] }]);
@@ -3379,17 +3367,21 @@ class AnnotationEditor extends HTMLElementBase$5 {
       this.#commit([{ type: "annotationPanels.reorder", ids }]);
     }
   }
-  #replace(data) {
+  #submit(detail) {
     try {
-      const source = this.#current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(data, categorical);
+      if (this.#creating) {
+        const panel = createAnnotationPanel(detail, this.#panels());
+        this.#state.patch([{ type: "annotationPanels.create", panel }]); this.select(panel.uid); return;
+      }
+      const source = this.#current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(detail.data, categorical);
       if (categorical) {
         const scale = this.#scale(source), domain = new Set(scale.domain);
         for (const row of Object.values(changes.values)) for (const value of row) if (value !== null) domain.add(value);
         const names = [...domain]; changes.scale = this.#categoryScale(source, names, names.map((value, i) =>
           scale.domain.includes(value) ? scale.colour(value) : this.#palette[i % this.#palette.length]));
       }
-      if (this.#update(changes)) this.#replacement.hidden = true;
-    } catch (exception) { this.#replacement.error = exception.message; }
+      if (this.#update(changes)) this.#form.hidden = true;
+    } catch (exception) { this.#form.error = exception.message; }
   }
   #syncView() {
     if (!this.#view) return;
@@ -3406,15 +3398,15 @@ class AnnotationEditor extends HTMLElementBase$5 {
     const categorical = panel?.scale?.type === "categorical";
     const key = this.#creating ? "create" : panel ? JSON.stringify([panel.uid, panel.type]) : "empty";
     if (key !== this.#viewKey) {
-      this.#cancelEdit(); this.#body.replaceChildren(); this.#view = this.#categories = this.#replacement = null; this.#viewKey = key;
-      if (this.#creating) this.#body.append(createAnnotationForm({ document: this.ownerDocument,
-        getData: () => this.#state.data, patch: (operations) => this.#state.patch(operations), onCreate: (uid) => this.select(uid) }));
-      else if (!panel) this.#body.append(this.#element("empty"));
+      this.#cancelEdit(); this.#body.replaceChildren(); this.#view = this.#categories = this.#form = null; this.#viewKey = key;
+      if (this.#creating) {
+        this.#form = this.#element("creation"); this.#form.clusters = this.#state.clusters; this.#body.append(this.#form);
+      } else if (!panel) this.#body.append(this.#element("empty"));
       else if (panel.type === "groups") {
         const region = this.#element("groups"); this.#body.append(region); this.#view = region.firstElementChild;
       } else {
         this.#view = this.#element("matrix"); this.#body.append(this.#view);
-        this.#replacement = this.#element("replacement"); this.#view.append(this.#replacement);
+        this.#form = this.#element("replacement"); this.#view.append(this.#form);
       }
     }
     this.#syncView();

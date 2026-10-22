@@ -31,6 +31,17 @@ export function parseAnnotationTable(text, categorical = false) {
   return { columns, values };
 }
 
+export function createAnnotationPanel({ type, title, scale, data }, panels = []) {
+  const raw = data.trim();
+  const contents = type === "groups" ? { groups: JSON.parse(raw).groups } : parseAnnotationTable(raw, scale === "categorical");
+  const ids = new Set(panels.map(({ uid }) => uid));
+  let serial = 1;
+  while (ids.has(`${type}-${serial}`)) serial++;
+  return { uid: `${type}-${serial}`, type,
+    title: title.trim() || (type === "groups" ? "Groups" : type === "bar" ? "Bar chart" : "Heatmap"),
+    ...contents, ...(type === "groups" ? {} : { scale: { type: scale } }) };
+}
+
 export function annotationTableText(panel, clusters) {
   return csvFormatRows([["cluster", ...panel.columns], ...clusters.map((cluster) =>
     [cluster.uid, ...(panel.values[cluster.uid] ?? panel.columns.map(() => null))])]);

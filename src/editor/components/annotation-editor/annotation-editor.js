@@ -6,8 +6,7 @@ import { defineAnnotationDataForm } from "../annotation-data-form/annotation-dat
 import { defineAnnotationGroupEditor } from "../annotation-group-editor/annotation-group-editor.js";
 import { defineAnnotationTable } from "../annotation-table/annotation-table.js";
 import { createTemplate, createActionRunner } from "../../../uiControls.mjs";
-import { parseAnnotationTable, annotationTableText, mapAnnotationValues } from "../../../annotationData.mjs";
-import { createAnnotationForm } from "../annotation-data-form/create.js";
+import { createAnnotationPanel, parseAnnotationTable, annotationTableText, mapAnnotationValues } from "../../../annotationData.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 
 const [markup, css] = await Promise.all([
@@ -30,7 +29,7 @@ class AnnotationEditor extends HTMLElementBase {
   #view;
   #viewKey;
   #categories;
-  #replacement;
+  #form;
   #run = createActionRunner((message) => { this.#status.textContent = message; });
 
   connectedCallback() {
@@ -97,16 +96,16 @@ class AnnotationEditor extends HTMLElementBase {
       else return;
       if (this.#update(changes) === false) event.preventDefault();
     });
-    this.#body.addEventListener("data-submit", (event) => { if (event.target === this.#replacement) this.#replace(event.detail.data); });
-    this.#body.addEventListener("data-cancel", (event) => { if (event.target === this.#replacement) this.#replacement.hidden = true; });
+    this.#body.addEventListener("data-submit", (event) => { if (event.target === this.#form) this.#submit(event.detail); });
+    this.#body.addEventListener("data-cancel", (event) => { if (event.target === this.#form) this.#form.hidden = true; });
   }
   #action(action) {
     if (action === "add") { this.#creating = !this.#creating; this.#render(); }
-    else if (action === "replace" && this.#replacement) {
-      this.#replacement.hidden = !this.#replacement.hidden;
-      if (!this.#replacement.hidden) {
-        this.#replacement.value = { data: annotationTableText(this.#current(), this.#state.clusters) };
-        this.#replacement.error = ""; this.#replacement.focus();
+    else if (action === "replace" && this.#form) {
+      this.#form.hidden = !this.#form.hidden;
+      if (!this.#form.hidden) {
+        this.#form.value = { data: annotationTableText(this.#current(), this.#state.clusters) };
+        this.#form.error = ""; this.#form.focus();
       }
     } else if (action === "show") this.#update({ show: this.#current().show === false });
     else if (action === "remove") this.#commit([{ type: "annotationPanels.delete", ids: [this.#selected] }]);
@@ -117,17 +116,21 @@ class AnnotationEditor extends HTMLElementBase {
       this.#commit([{ type: "annotationPanels.reorder", ids }]);
     }
   }
-  #replace(data) {
+  #submit(detail) {
     try {
-      const source = this.#current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(data, categorical);
+      if (this.#creating) {
+        const panel = createAnnotationPanel(detail, this.#panels());
+        this.#state.patch([{ type: "annotationPanels.create", panel }]); this.select(panel.uid); return;
+      }
+      const source = this.#current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(detail.data, categorical);
       if (categorical) {
         const scale = this.#scale(source), domain = new Set(scale.domain);
         for (const row of Object.values(changes.values)) for (const value of row) if (value !== null) domain.add(value);
         const names = [...domain]; changes.scale = this.#categoryScale(source, names, names.map((value, i) =>
           scale.domain.includes(value) ? scale.colour(value) : this.#palette[i % this.#palette.length]));
       }
-      if (this.#update(changes)) this.#replacement.hidden = true;
-    } catch (exception) { this.#replacement.error = exception.message; }
+      if (this.#update(changes)) this.#form.hidden = true;
+    } catch (exception) { this.#form.error = exception.message; }
   }
   #syncView() {
     if (!this.#view) return;
@@ -144,15 +147,15 @@ class AnnotationEditor extends HTMLElementBase {
     const categorical = panel?.scale?.type === "categorical";
     const key = this.#creating ? "create" : panel ? JSON.stringify([panel.uid, panel.type]) : "empty";
     if (key !== this.#viewKey) {
-      this.#cancelEdit(); this.#body.replaceChildren(); this.#view = this.#categories = this.#replacement = null; this.#viewKey = key;
-      if (this.#creating) this.#body.append(createAnnotationForm({ document: this.ownerDocument,
-        getData: () => this.#state.data, patch: (operations) => this.#state.patch(operations), onCreate: (uid) => this.select(uid) }));
-      else if (!panel) this.#body.append(this.#element("empty"));
+      this.#cancelEdit(); this.#body.replaceChildren(); this.#view = this.#categories = this.#form = null; this.#viewKey = key;
+      if (this.#creating) {
+        this.#form = this.#element("creation"); this.#form.clusters = this.#state.clusters; this.#body.append(this.#form);
+      } else if (!panel) this.#body.append(this.#element("empty"));
       else if (panel.type === "groups") {
         const region = this.#element("groups"); this.#body.append(region); this.#view = region.firstElementChild;
       } else {
         this.#view = this.#element("matrix"); this.#body.append(this.#view);
-        this.#replacement = this.#element("replacement"); this.#view.append(this.#replacement);
+        this.#form = this.#element("replacement"); this.#view.append(this.#form);
       }
     }
     this.#syncView();
