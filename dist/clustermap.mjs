@@ -785,7 +785,6 @@ function linkVisibleForPreview(scene, link, preview, config) {
   );
 }
 
-
 function recordsForPreview(scene, preview, { includeClusters = false } = {}) {
   if (!preview) return null;
   if (preview.type === "cluster-drag" && !includeClusters) {
@@ -836,7 +835,6 @@ function recordsForPreview(scene, preview, { includeClusters = false } = {}) {
   }
   return { loci, genes, links };
 }
-
 
 function genePolygonForPreview(preview, gene, { includeClusterOffset = true } = {}) {
   const { x, y } = previewOffsetsForLocus(preview, gene.locus);
@@ -9425,24 +9423,16 @@ function inverseOperation(data, index, operation) {
   if (operation.type === "groups.reorder") {
     return [{ type: "groups.reorder", ids: data.groups.map((group) => group.uid) }];
   }
-  if (operation.type === "groups.create") {
+  if (["groups.create", "groups.assignGenes", "groups.unassignGenes"].includes(operation.type)) {
     const affected = new Set(operation.geneIds);
-    const restore = data.groups
-      .map((group) => ({ group, geneIds: (group.genes || []).filter((uid) => affected.has(uid)) }))
-      .filter(({ geneIds }) => geneIds.length);
+    // Restore complete memberships so undo preserves member order as well.
+    const restore = data.groups.filter((group) => group.genes?.some((uid) => affected.has(uid)))
+      .map((group) => ({ type: "groups.assignGenes", groupId: group.uid, geneIds: [...group.genes] }));
     return [
-      { type: "groups.delete", ids: [operation.group.uid] },
-      ...restore.map(({ group, geneIds }) => ({ type: "groups.assignGenes", groupId: group.uid, geneIds })),
-    ];
-  }
-  if (operation.type === "groups.assignGenes" || operation.type === "groups.unassignGenes") {
-    const affected = new Set(operation.geneIds);
-    const restore = data.groups
-      .map((group) => ({ group, geneIds: (group.genes || []).filter((uid) => affected.has(uid)) }))
-      .filter(({ geneIds }) => geneIds.length);
-    return [
-      { type: "groups.unassignGenes", geneIds: operation.geneIds },
-      ...restore.map(({ group, geneIds }) => ({ type: "groups.assignGenes", groupId: group.uid, geneIds })),
+      operation.type === "groups.create"
+        ? { type: "groups.delete", ids: [operation.group.uid] }
+        : { type: "groups.unassignGenes", geneIds: operation.geneIds },
+      ...restore,
     ];
   }
   if (operation.type === "groups.delete") {
@@ -10521,7 +10511,6 @@ function renderCanvasMinimap({
   return { width, height, pixelRatio, viewport: visible };
 }
 
-
 /**
  * Return the portion of chart-world space covered by a Canvas. A small
  * screen-space margin prevents records from popping at its edge while panning.
@@ -10529,7 +10518,6 @@ function renderCanvasMinimap({
 function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
   return worldViewport(camera, dimensions || canvas.getBoundingClientRect(), overscan);
 }
-
 
 function clusterLabelHit(context, scene, point, config) {
   for (const cluster of [...scene.clusters.values()].reverse()) {
@@ -10956,7 +10944,6 @@ function drawColourBar(context, colourBar) {
   context.fillText(colourBar.endLabel, colourBar.width, colourBar.height + 5);
   context.restore();
 }
-
 
 const trimIndicatorPresence = new WeakMap();
 function hasTrimIndicators(loci) {
