@@ -5,7 +5,7 @@ const rowTemplates = createTemplate(await textAsset(new URL("./rows.html", impor
 const definitions = new WeakMap();
 
 /** Stable rows assembled from HTML templates; fields own their editing behavior. */
-export function createEditorRow(document, kind, type, change) {
+export function createEditorRow(document, kind, type) {
   if (!definitions.has(document)) definitions.set(document, rowTemplates(document));
   const template = definitions.get(document).getElementById(type || kind);
   const node = document.importNode(template.content, true).firstElementChild;
@@ -15,11 +15,6 @@ export function createEditorRow(document, kind, type, change) {
   const remove = node.querySelector("[data-remove-record]"), count = node.querySelector("[data-count], .cm-editor__tree-count");
   const reorder = node.querySelector("[data-reorder]"), fields = [...node.querySelectorAll("clinker-editable-field")];
   const texts = [...node.querySelectorAll("[data-text]")];
-  for (const field of fields) field.addEventListener("value-commit", (event) => {
-    const { type, id, field: name } = field.dataset;
-    const value = name === "identity" ? Number(event.detail.value) / 100 : event.detail.value.trim();
-    if (change(type, id, { [name]: value }, field) === false) event.preventDefault();
-  });
   return { node, update(row, selection) {
     const selected = parent ? row.selectIds.length > 0 && row.selectIds.every((id) => selection.has(id)) : selection.has(row.id);
     node.classList.toggle("is-selected", selected);

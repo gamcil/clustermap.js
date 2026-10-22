@@ -3427,7 +3427,7 @@ const rowTemplates = createTemplate(await "<template id=\"groups\">\n  <div clas
 const definitions = new WeakMap();
 
 /** Stable rows assembled from HTML templates; fields own their editing behavior. */
-function createEditorRow(document, kind, type, change) {
+function createEditorRow(document, kind, type) {
   if (!definitions.has(document)) definitions.set(document, rowTemplates(document));
   const template = definitions.get(document).getElementById(type || kind);
   const node = document.importNode(template.content, true).firstElementChild;
@@ -3437,11 +3437,6 @@ function createEditorRow(document, kind, type, change) {
   const remove = node.querySelector("[data-remove-record]"), count = node.querySelector("[data-count], .cm-editor__tree-count");
   const reorder = node.querySelector("[data-reorder]"), fields = [...node.querySelectorAll("clinker-editable-field")];
   const texts = [...node.querySelectorAll("[data-text]")];
-  for (const field of fields) field.addEventListener("value-commit", (event) => {
-    const { type, id, field: name } = field.dataset;
-    const value = name === "identity" ? Number(event.detail.value) / 100 : event.detail.value.trim();
-    if (change(type, id, { [name]: value }, field) === false) event.preventDefault();
-  });
   return { node, update(row, selection) {
     const selected = parent ? row.selectIds.length > 0 && row.selectIds.every((id) => selection.has(id)) : selection.has(row.id);
     node.classList.toggle("is-selected", selected);
@@ -3751,6 +3746,13 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   #renderShell() {
     this.replaceChildren(template(this.ownerDocument));
     this.#table = this.querySelector("clinker-data-table");
+    this.#table.addEventListener("value-commit", (event) => {
+      if (event.defaultPrevented) return;
+      const { type, id, field } = event.target.dataset;
+      if (!type || !field) return;
+      const value = field === "identity" ? Number(event.detail.value) / 100 : event.detail.value.trim();
+      if (!this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { [field]: value } }, event.target)) event.preventDefault();
+    });
     this.#selectionBar = this.querySelector("clinker-selection-bar");
     this.#selectionBar.addEventListener("clear-selection", () => this.#clearDataSelection());
     this.#selectionBar.addEventListener("select-all", (event) => {
@@ -3831,7 +3833,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     const checkbox = event.target.closest("[data-select], [data-select-row]");
     if (checkbox) {
       this.#selectRow(checkbox.dataset.selectRow ?? this.#id(checkbox.dataset.select), checkbox.checked, event.shiftKey);
-      this.#renderData(); this.#syncHighlight(); return;
+      return;
     }
     const sort = event.target.closest("[data-sort]");
     if (sort) {
@@ -3855,8 +3857,6 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       const parent = row.querySelector("[data-select-row]");
       const id = parent?.dataset.selectRow ?? this.#id(row.dataset.id);
       this.#selectRow(id, parent ? !parent.checked : !this.#selected.has(id), event.shiftKey);
-      this.#renderData();
-      this.#syncHighlight();
       return;
     }
     const visibility = event.target.closest("[data-visible]");
@@ -3934,19 +3934,12 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       const row = this.#rows().find((row) => row.key === target.dataset.selectRow);
       if (!row || row.selectIds.every((id) => this.#selected.has(id)) === target.checked) return;
       this.#selectRow(row.key, target.checked, false);
-      this.#renderData(); this.#syncHighlight(); return;
+      return;
     }
     if (target.matches("[data-select]")) {
       const id = this.#id(target.dataset.select);
       if (this.#selected.has(id) === target.checked) return;
       this.#selectRow(id, target.checked, false);
-      this.#renderData();
-      this.#syncHighlight();
-      return;
-    }
-    if (target.matches("[data-visible]")) {
-      const { type, id, hidden } = target.dataset;
-      this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { hidden: hidden !== "true" } });
       return;
     }
     if (target.matches("[data-colour]")) {
@@ -4046,6 +4039,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     const rows = new Map(this.#rows().map((row) => [row.key ?? row.id, row]));
     this.#selected.select(id, checked, { range, orderedIds: [...rows.keys()],
       idsFor: (key) => rows.get(key).selectIds || [rows.get(key).id] });
+    this.#renderData(); this.#syncHighlight();
   }
 
   #selectableIds(rows = this.#rows()) {
@@ -4253,8 +4247,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
         key: (row) => `${kind}:${row.type || "row"}:${row.key ?? row.id}`,
         headerHeight: () => head.offsetHeight,
         createRow: (row) => {
-          const component = createEditorRow(this.ownerDocument, kind, row.type,
-            (type, id, changes, control) => this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes }, control));
+          const component = createEditorRow(this.ownerDocument, kind, row.type);
           components.set(component.node, component); return updateRow(component.node, row);
         },
         disposeRow: (node) => components.get(node).destroy(), updateRow };
