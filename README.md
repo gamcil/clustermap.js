@@ -215,11 +215,13 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | `clearHistory()` | Clear both history stacks; history retains at most 100 edits. |
 | `on("change", listener)` | Subscribe to chart changes; returns an unsubscribe function. |
 | `highlight(ids)` / `highlight()` | Set / read gene highlights. Pass `{genes, links}` to highlight both kinds, or `[]` to clear. |
+| `selection({kind, ids})` / `selection()` | Set / read transient plot selection; `kind` is `"loci"` or `"clusters"`. Only one kind is active. |
 | `locusSelection(ids)` / `locusSelection()` | Set / read loci selected for batch operations. |
+| `clusterSelection(ids)` / `clusterSelection()` | Set / read clusters selected for batch reordering and removal. |
 | `flipLoci(ids)` | Flip supplied loci, or the current selection when omitted. |
 | `trimLoci(ids)` | Trim supplied/selected loci to their outermost displayed genes. |
 | `restoreLoci(ids)` | Restore full locus bounds while retaining flips and offsets. |
-| `focus({genes, links})` | Frame selected records without changing selection. |
+| `focus({genes, links, loci, clusters})` | Frame supplied record IDs without changing selection. |
 | `figureBounds()` | Read unpadded `{minX, minY, maxX, maxY}` in world coordinates; returns `null` before mounting or after destruction. |
 | `exportSvg({padding})` | Export the complete figure as an SVG string from any renderer. Padding defaults to 20. |
 | `destroy()` | Release chart-owned handlers, animations, rendering resources and DOM. |
@@ -267,10 +269,12 @@ A locus may supply an initial `offset` in sequence-coordinate units. Explicit
 offsets override default packing on first initialization; restored state and
 user drags take precedence.
 
-Shift-click toggles locus selection. Ctrl/Cmd+Shift-click adds, and
-Alt/Option+Shift-click removes, loci in the displayed cluster range from the
-last clicked locus. Dragging a cluster containing a selected locus reorders
-the selected clusters together while retaining their relative order.
+Shift-click or Ctrl/Cmd-click toggles a single record's selection.
+Use a locus body for locus selection or a cluster label for cluster selection.
+Ctrl/Cmd+Shift-click adds a range; Alt/Option+Shift-click subtracts one.
+Dragging a selected cluster reorders the selected clusters together.
+The plot toolbar applies locus operations to selected loci or, through its
+Loci menu, to the member loci of selected clusters.
 
 ## Development checks
 

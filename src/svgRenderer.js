@@ -1,5 +1,6 @@
 import { select } from "d3-selection";
 import { drag } from "d3-drag";
+import { plotSelectionOptions } from "./interactionController.mjs";
 import { linkColours } from "./links/style.mjs";
 import { getLinkPath, getLinkLabelPosition, interpolateLinkAnchors, interpolateLinkOpacity } from "./links/layout.mjs";
 import { renderSvgTree as renderTree } from "./treeSvgRenderer.mjs";
@@ -36,11 +37,12 @@ export function renderSvg({
   highlightGeneIds = new Set(),
   highlightLinkIds = new Set(),
   highlightLocusIds = new Set(),
+  highlightClusterIds = new Set(),
 }) {
   config = figureConfig(config);
   plot.attr("fill", config.figureStyle.foreground);
   if (preview) return renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
-    highlightGeneIds, highlightLocusIds });
+    highlightGeneIds, highlightLocusIds, highlightClusterIds });
   previewStates.delete(plot.node());
   if (annotationsOnly) {
     renderChrome({ plot, chrome: scene.chrome, ids, interactions });
@@ -71,7 +73,13 @@ export function renderSvg({
           .attr("id", ids.clusterInfo)
           .attr("class", "clusterInfo")
           .attr("transform", "translate(-10, 0)")
-          .call(createClusterDrag({ plot, ids, interactions }));
+          .call(createClusterDrag({ plot, ids, interactions }))
+          .on("click", (event, cluster) => {
+            if (event.shiftKey || event.ctrlKey || event.metaKey) interactions.toggleClusterSelection(cluster.uid, plotSelectionOptions(event));
+          })
+          .on("mousedown.selection", (event) => {
+            if (event.shiftKey || event.ctrlKey || event.metaKey) { event.preventDefault(); event.stopPropagation(); }
+          });
 
         info
           .append("text")
@@ -113,9 +121,9 @@ export function renderSvg({
     animate ? selection.interrupt().transition(transition) : selection.interrupt();
   // Cluster labels describe committed locus state. Keep them responsive even
   // when locus geometry is still travelling through an SVG transition.
-  updateClusters(clusters.interrupt(), scene, { labelsOnly: true });
+  updateClusters(clusters.interrupt(), scene, { labelsOnly: true, highlightClusterIds });
   const clusterRender = updateRender(clusters);
-  updateClusters(clusterRender, scene);
+  updateClusters(clusterRender, scene, { highlightClusterIds });
 
   const loci = clusters
     .select("g.loci")
@@ -159,6 +167,9 @@ export function renderSvg({
           .attr("width", 8)
           .attr("cursor", "pointer");
         enter
+          .on("mousedown.selection", (event) => {
+            if (event.shiftKey || event.ctrlKey || event.metaKey) { event.preventDefault(); event.stopPropagation(); }
+          })
           .on("mouseenter", (event) => {
             if (!interactions.isDragging()) {
               select(event.target).select("g.hover").transition().attr("opacity", 1);
@@ -170,13 +181,12 @@ export function renderSvg({
             }
           })
           .on("click", (event, locus) => {
-            if (event.shiftKey) {
-              interactions.toggleLocusSelection(locus, {
-                clusterRange: event.altKey ? "remove" : (event.ctrlKey || event.metaKey ? "add" : null),
-              });
+            if (event.shiftKey || event.ctrlKey || event.metaKey) {
+              interactions.toggleLocusSelection(locus, plotSelectionOptions(event));
             }
           })
           .on("dblclick", (event, locus) => {
+            if (event.shiftKey || event.ctrlKey || event.metaKey) return;
             // The hover rectangle describes pointer affordances, not locus
             // geometry. It would otherwise remain visible while the locus
             // itself animates through a flip.
@@ -285,7 +295,7 @@ export function renderSvg({
 // Apply renderer-neutral patches to retained SVG elements. Geometry, adjacency,
 // visibility, and label movement come from the same accessors as raster marks.
 function renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
-  highlightGeneIds, highlightLocusIds }) {
+  highlightGeneIds, highlightLocusIds, highlightClusterIds }) {
   const current = recordsForPreview(scene, preview, { includeClusters: true });
   // Select the node directly: selection.select() would replace its bound datum
   // with the plot datum, and UID strings need not be valid CSS identifiers.
@@ -294,7 +304,7 @@ function renderPreview({ plot, data, scene, preview, config, scales, ids, intera
   const affected = (kind) => new Set([
     ...current[kind], ...(previous?.scene === scene ? previous.records[kind] : []),
   ]);
-  updateClusters(plot.selectAll("g.cluster").interrupt(), scene, { preview });
+  updateClusters(plot.selectAll("g.cluster").interrupt(), scene, { preview, highlightClusterIds });
 
   // DOM parents carry row and locus translations. Only trim/flip previews need
   // per-gene geometry; ordinary dragging never rewrites the gene polygons.
@@ -355,8 +365,9 @@ function renderPreview({ plot, data, scene, preview, config, scales, ids, intera
   previewStates.set(plot.node(), { scene, records: current, type: preview.type });
 }
 
-function updateClusters(selection, scene, { labelsOnly = false, preview = null } = {}) {
+function updateClusters(selection, scene, { labelsOnly = false, preview = null, highlightClusterIds = new Set() } = {}) {
   const layout = (cluster) => scene.clusters.get(cluster.uid);
+  selection.selectAll("g.clusterInfo").style("fill", (cluster) => highlightClusterIds.has(cluster.uid) ? "#1677ff" : null);
   if (!labelsOnly) {
     selection.attr("transform", (cluster) => {
       const { x, y } = layout(cluster);
@@ -377,6 +388,7 @@ function updateClusters(selection, scene, { labelsOnly = false, preview = null }
 function createClusterDrag({ plot, ids, interactions }) {
   const clusterSelection = (uid) => plot.selectAll(`#${ids.cluster({ uid })}`);
   return drag()
+    .filter((event) => !event.button && !event.shiftKey && !event.ctrlKey && !event.metaKey)
     .container(function () { return this.parentNode.parentNode; })
     .on("start", (event, cluster) => {
       clusterSelection(cluster.uid).classed("active", true).attr("cursor", "grabbing");
@@ -391,6 +403,7 @@ function createClusterDrag({ plot, ids, interactions }) {
 
 function createLocusPositionDrag({ plot, interactions }) {
   return drag()
+    .filter((event) => !event.button && !event.shiftKey && !event.ctrlKey && !event.metaKey)
     .container(() => plot.node())
     .on("start", (event, locus) => interactions.beginLocusDrag(locus.uid, event.x))
     .on("drag", (event) => interactions.moveLocusDrag(event.x))
@@ -399,6 +412,7 @@ function createLocusPositionDrag({ plot, interactions }) {
 
 function createLocusResizeDrag({ plot, interactions }) {
   return drag()
+    .filter((event) => !event.button && !event.shiftKey && !event.ctrlKey && !event.metaKey)
     // Trimming uses chart-world coordinates, matching Canvas and WebGPU.
     .container(() => plot.node())
     .on("start", () => interactions.beginLocusTrim())

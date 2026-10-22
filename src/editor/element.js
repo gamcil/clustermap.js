@@ -1,6 +1,6 @@
 import { createDataPanel, createSelectionControls, dataCell, createDataSearch, installDataEditorStyle, segmentedControlMarkup, updateSegmentedControl, dataCheckboxMarkup, dataColourMarkup, dataIconButtonMarkup, dataActionMenuMarkup } from "../dataEditorUi.mjs";
 import { RowSelection } from "../rowSelection.mjs";
-import { createVirtualRows } from "../virtualRows.mjs";
+import { createVirtualRows, DATA_ROW_HEIGHT } from "../virtualRows.mjs";
 import { createAnnotationDataControls } from "../annotationDataControls.mjs";
 import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale, validateAnnotationPanels } from "../annotations.mjs";
 import { createActionRunner, setMarkup, bindEditableField, escapeHtml } from "../uiControls.mjs";
@@ -130,6 +130,34 @@ export class ClinkerEditorElement extends HTMLElementBase {
     updateSegmentedControl(this, "data-kind", "annotations");
     this.#renderData();
     if (panelUid) this.#annotationEditor?.select(panelUid);
+    this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true }));
+    return this;
+  }
+
+  /** Reveal the plot's selected loci or clusters in the gene hierarchy. */
+  editSelection({ kind, ids }) {
+    this.hidden = false;
+    this.#kind = "genes"; this.#geneView = "tree";
+    this.#filter = ""; this.#memberGroupId = null;
+    const selected = new Set(ids), genes = [];
+    for (const cluster of this.#data()?.clusters || []) {
+      const loci = cluster.loci.filter((locus) => selected.has(kind === "clusters" ? cluster.uid : locus.uid));
+      if (!loci.length) continue;
+      this.#expanded.add(`cluster:${cluster.uid}`);
+      this.#expanded.add(`cluster-locus:${cluster.uid}:${cluster.loci[0]?.uid}`);
+      for (const locus of loci) {
+        this.#expanded.add(`locus:${locus.uid}`);
+        genes.push(...locus.genes.map((gene) => gene.uid));
+      }
+    }
+    this.#selected.clear(); this.#selected.setMany(genes); this.#rowsCache = null;
+    this.querySelectorAll("[data-tab]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.tab === "data")));
+    this.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== "data"; });
+    updateSegmentedControl(this, "data-kind", "genes");
+    updateSegmentedControl(this, "data-gene-view-kind", "tree");
+    this.#renderData(); this.#syncHighlight();
+    const first = this.#rows().findIndex((row) => row.selectIds?.some((id) => this.#selected.has(id)));
+    this.querySelector(".cm-editor__table").scrollTop = Math.max(0, first) * DATA_ROW_HEIGHT;
     this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true }));
     return this;
   }

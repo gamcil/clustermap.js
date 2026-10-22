@@ -72,7 +72,6 @@ import {
   isWebGpuRenderer,
 } from "./rendererMode.mjs";
 import { chartStateFromSnapshot, createChartStateSerializer } from "./chartStateSnapshot.mjs";
-import { lociForClusterRange } from "./locusSelection.mjs";
 
 let nextChartInstance = 0;
 const projectFormat = "clinker-project";
@@ -150,8 +149,14 @@ export default function clusterMap() {
   let chartIndex = null;
   let highlightGeneIds = new Set();
   let highlightLinkIds = new Set();
-  let selectedLocusIds = new Set();
-  let locusSelectionAnchorUid = null;
+  let plotSelection = { kind: "loci", ids: new Set() };
+  let selectionAnchor = null;
+  const noSelection = new Set();
+  const selectedLocusIds = () => plotSelection.kind === "loci" ? plotSelection.ids : noSelection;
+  const selectedClusterIds = () => plotSelection.kind === "clusters" ? plotSelection.ids : noSelection;
+  const selectedLoci = () => plotSelection.kind === "loci" ? plotSelection.ids : new Set(
+    [...plotSelection.ids].flatMap((uid) => runtime.lookup.clusterData(uid)?.loci.map((locus) => locus.uid) || [])
+  );
   let disposeRasterInteraction = () => {};
   let rasterHitSurface = null;
   let retainedOverlay = null;
@@ -216,13 +221,8 @@ export default function clusterMap() {
     getClusterPosition: (uid) => runtime.getScene().clusters.get(uid).y,
     getTree: () => plotData?.tree || null,
     getLocusOffset: (uid) => getLocusOffset(chartState, uid),
-    selectedLocusIds: () => [...selectedLocusIds],
-    selectedClusterIds: () => new Set(
-      [...selectedLocusIds]
-        .map(locusForId)
-        .filter(Boolean)
-        .map((locus) => locus.clusterUid)
-    ),
+    selectedLocusIds: () => [...selectedLocusIds()],
+    selectedClusterIds,
     setDragging: (dragging) => {
       if (dragging) beginInteractionState();
       setDragging(chartState, dragging);
@@ -536,9 +536,6 @@ export default function clusterMap() {
     plotDataDirty = true;
     chartIndex = createChartIndex(currentData);
     refreshGroups();
-    selectedLocusIds = new Set(
-      [...selectedLocusIds].map(locusForId).filter(Boolean).map((locus) => locus.uid)
-    );
     chartState = createChartState(currentData, chartState);
     runtime.setChartIndex(chartIndex);
     runtime.setChartState(chartState);
@@ -677,12 +674,40 @@ export default function clusterMap() {
   }
 
   function highlightedGeneIds() {
-    if (!selectedLocusIds.size) return highlightGeneIds;
+    if (plotSelection.kind === "clusters") return highlightGeneIds;
+    const loci = selectedLoci();
+    if (!loci.size) return highlightGeneIds;
     const ids = new Set(highlightGeneIds);
-    for (const locusUid of selectedLocusIds) {
+    for (const locusUid of loci) {
       for (const gene of chartIndex?.locusById.get(locusUid)?.genes || []) ids.add(gene.uid);
     }
     return ids;
+  }
+
+  function selectionIds(kind, ids) {
+    const records = kind === "clusters" ? chartIndex?.clusterById : chartIndex?.locusById;
+    if (!records) return new Set(ids);
+    return new Set([...ids].map((uid) => records.get(uid) ||
+      [...records.values()].find((record) => String(record.uid) === String(uid)))
+      .filter((record) => record && !chartState.excludedClusters.has(kind === "clusters" ? record.uid : record.clusterUid) &&
+        (kind === "clusters" || !chartState.excludedLoci.has(record.uid))).map((record) => record.uid));
+  }
+
+  function selectPlotRecord(kind, uid, { range = false, subtract = false } = {}) {
+    const order = kind === "clusters" ? displayClusterOrder() : displayClusterOrder().flatMap((id) =>
+      runtime.lookup.clusterData(id).loci.map((locus) => locus.uid));
+    const start = kind === plotSelection.kind ? order.indexOf(selectionAnchor) : -1;
+    const end = order.indexOf(uid);
+    const ids = new Set(plotSelection.kind === kind ? plotSelection.ids : []);
+    if (range && start >= 0 && end >= 0) {
+      for (const id of order.slice(Math.min(start, end), Math.max(start, end) + 1)) {
+        if (subtract) ids.delete(id); else ids.add(id);
+      }
+    } else if (subtract || ids.has(uid)) ids.delete(uid);
+    else ids.add(uid);
+    const anchor = range && start >= 0 ? selectionAnchor : uid;
+    my.selection({ kind, ids });
+    if (ids.size) selectionAnchor = anchor;
   }
 
   function locusForId(uid) {
@@ -718,7 +743,9 @@ export default function clusterMap() {
   // receives those records through its D3 joins.
   const rendererInteractions = {
     ...interactionController,
-    renameCluster: (event, cluster) => renameRecord(event, "clusters", cluster),
+    renameCluster: (event, cluster) => {
+      if (!event.shiftKey && !event.ctrlKey && !event.metaKey) renameRecord(event, "clusters", cluster);
+    },
     isDragging: () => isDragging(chartState),
     rotateTreeNode: (uid) => {
       if (!container) return;
@@ -744,35 +771,11 @@ export default function clusterMap() {
       redraw();
       commitInteractionState();
     },
-    toggleLocusSelection: (locus, { clusterRange = null } = {}) => {
-      const ids = new Set(selectedLocusIds);
-      const anchor = locusForId(locusSelectionAnchorUid);
-      if (clusterRange && anchor) {
-        const range = lociForClusterRange(
-          displayClusterOrder(),
-          chartIndex?.clusterById || new Map(),
-          anchor.clusterUid,
-          locus.clusterUid
-        );
-        if (range.length) {
-          range.forEach((uid) => {
-            if (clusterRange === "remove") ids.delete(uid);
-            else ids.add(uid);
-          });
-          my.locusSelection(ids);
-          if (ids.size) locusSelectionAnchorUid = locus.uid;
-          return;
-        }
-      }
-      if (ids.has(locus.uid)) ids.delete(locus.uid);
-      else ids.add(locus.uid);
-      my.locusSelection(ids);
-      if (ids.size) locusSelectionAnchorUid = locus.uid;
-    },
+    toggleLocusSelection: (locus, options) => selectPlotRecord("loci", locus.uid, options),
+    toggleClusterSelection: (uid, options) => selectPlotRecord("clusters", uid, options),
     onGeneClick: (event, gene) => {
-      // Shift-click belongs to the containing locus and must not also invoke
-      // the established single-gene anchor interaction.
-      if (event.shiftKey) return;
+      // Selection modifiers belong to the containing locus.
+      if (event.shiftKey || event.ctrlKey || event.metaKey) return;
       (runtime.config.gene.shape.onClick || ((_, record) => anchorGene(record)))(event, gene);
     },
     showTreeMenu: (...args) => retainedOverlay?.showTreeMenu(...args),
@@ -841,7 +844,8 @@ export default function clusterMap() {
       suppressLocusHover: scenePreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
       previousTree: treeAnimation?.previousTree, previousTreeScene: treeAnimation?.previousScene,
       treeTargetScene: treeAnimation?.targetScene, treeProgress: treeAnimation?.progress ?? 1,
-      highlightGeneIds: highlightedGeneIds(), highlightLinkIds, highlightLocusIds: selectedLocusIds,
+      highlightGeneIds: highlightedGeneIds(), highlightLinkIds, highlightLocusIds: selectedLoci(),
+      highlightClusterIds: selectedClusterIds(),
     };
   }
 
@@ -863,7 +867,7 @@ export default function clusterMap() {
       ids: runtime.ids, interactions: rendererInteractions });
   }
 
-  function focusCamera({ genes = [], links = [] } = {}) {
+  function focusCamera({ genes = [], links = [], loci = [], clusters = [] } = {}) {
     const scene = runtime.getScene();
     if (!container || !scene) return false;
     let bounds = null;
@@ -878,7 +882,9 @@ export default function clusterMap() {
       bounds.minY = Math.min(bounds.minY, candidate.minY);
       bounds.maxY = Math.max(bounds.maxY, candidate.maxY);
     };
-    for (const uid of genes) include(scene.genes.get(uid)?.bounds);
+    for (const [kind, ids] of Object.entries({ genes, loci, clusters })) {
+      for (const uid of ids) include(scene[kind].get(uid)?.bounds);
+    }
     for (const uid of links) {
       const rendered = scene.links.get(uid);
       if (rendered?.bounds) {
@@ -1053,8 +1059,8 @@ export default function clusterMap() {
       runtime.setChartIndex(plotData === currentData ? chartIndex : createChartIndex(plotData));
       plotDataDirty = false;
     }
-    selectedLocusIds = new Set([...selectedLocusIds].filter((uid) => !chartState.excludedLoci.has(uid) &&
-      !chartState.excludedClusters.has(locusForId(uid)?.clusterUid)));
+    plotSelection.ids = selectionIds(plotSelection.kind, plotSelection.ids);
+    if (!plotSelection.ids.size) selectionAnchor = null;
     const data = plotData;
 
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
@@ -1465,27 +1471,33 @@ export default function clusterMap() {
     else redraw({ animate: false });
     return my;
   };
-  /** Selected locus IDs used for batch plot operations. */
-  my.locusSelection = function (ids) {
-    if (!arguments.length) return [...selectedLocusIds];
-    const next = chartIndex
-      ? new Set([...(ids || [])].map(locusForId).filter(Boolean).map((locus) => locus.uid))
-      : new Set(ids || []);
-    if (
-      next.size === selectedLocusIds.size &&
-      [...next].every((uid) => selectedLocusIds.has(uid))
-    ) return my;
-    selectedLocusIds = next;
-    if (!next.size) locusSelectionAnchorUid = null;
+  /** Transient plot selection: one record kind at a time. */
+  my.selection = function (selection) {
+    if (!arguments.length) return { kind: plotSelection.kind, ids: [...plotSelection.ids] };
+    const { kind = "loci", ids = [] } = selection || {};
+    if (!["loci", "clusters"].includes(kind)) throw new TypeError("Selection kind must be loci or clusters.");
+    const next = selectionIds(kind, ids);
+    if (kind === plotSelection.kind && next.size === plotSelection.ids.size &&
+        [...next].every((uid) => plotSelection.ids.has(uid))) return my;
+    if (kind !== plotSelection.kind || !next.size) selectionAnchor = null;
+    plotSelection = { kind, ids: next };
+    canvasBackend.clearFlip();
     if (container && currentData) {
       if (isRasterRenderer(runtime.config.plot.renderer)) scheduleScenePaint();
       else redraw({ animate: false });
     }
-    emitChange({ type: "loci.select", locusIds: [...selectedLocusIds] });
+    emitChange({ type: "selection.change", selection: my.selection() });
+    emitChange({ type: "loci.select", locusIds: [...selectedLocusIds()] });
     return my;
   };
+  my.locusSelection = function (ids) {
+    return arguments.length ? my.selection({ kind: "loci", ids }) : [...selectedLocusIds()];
+  };
+  my.clusterSelection = function (ids) {
+    return arguments.length ? my.selection({ kind: "clusters", ids }) : [...selectedClusterIds()];
+  };
   /** Flip the supplied loci, or the current locus selection, as one operation. */
-  my.flipLoci = function (ids = selectedLocusIds) {
+  my.flipLoci = function (ids = selectedLoci()) {
     if (!container || !currentData || !chartIndex || !chartState) {
       throw new Error("Cannot flip loci before the chart has rendered.");
     }
@@ -1503,7 +1515,7 @@ export default function clusterMap() {
     return my;
   };
   /** Trim selected loci to their displayed outermost genes as one edit. */
-  my.trimLoci = function (ids = selectedLocusIds) {
+  my.trimLoci = function (ids = selectedLoci()) {
     if (!container || !currentData || !chartIndex || !chartState) {
       throw new Error("Cannot trim loci before the chart has rendered.");
     }
@@ -1524,7 +1536,7 @@ export default function clusterMap() {
     return my;
   };
   /** Restore selected loci to their full bounds as one edit. */
-  my.restoreLoci = function (ids = selectedLocusIds) {
+  my.restoreLoci = function (ids = selectedLoci()) {
     if (!container || !currentData || !chartIndex || !chartState) {
       throw new Error("Cannot restore loci before the chart has rendered.");
     }
@@ -1544,13 +1556,10 @@ export default function clusterMap() {
     remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
     return my;
   };
-  /** Frame selected genes and/or links without changing their selection. */
+  /** Frame supplied record IDs without changing their selection. */
   my.focus = function (ids) {
     const isScoped = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
-    focusCamera({
-      genes: isScoped ? ids.genes || [] : ids || [],
-      links: isScoped ? ids.links || [] : [],
-    });
+    focusCamera(isScoped ? ids : { genes: ids || [] });
     return my;
   };
   my.on = (type, listener) => {
@@ -1619,7 +1628,8 @@ export default function clusterMap() {
     chartIndex = null;
     highlightGeneIds.clear();
     highlightLinkIds.clear();
-    selectedLocusIds.clear();
+    plotSelection.ids.clear();
+    selectionAnchor = null;
     changeListeners.clear();
     return my;
   };

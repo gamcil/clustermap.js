@@ -245,12 +245,15 @@ function createLocusLayout(locus, clusterLayout, {
   locusOffset,
   shape,
   geneMidpoint,
+  clusterSpacing = 40,
 }) {
   const state = { ...getLocusState(locus) };
   const localX = locusOffset(locus.uid);
   const start = scaleX(state.start);
   const end = scaleX(state.end);
   const worldX = clusterLayout.x + localX;
+  const paddingY = Math.max(0, Math.min(10, clusterSpacing / 4));
+  const height = shape.tipHeight * 2 + shape.bodyHeight;
   return {
     source: locus,
     cluster: clusterLayout.source,
@@ -265,8 +268,8 @@ function createLocusLayout(locus, clusterLayout, {
     bounds: {
       minX: worldX + start,
       maxX: worldX + end,
-      minY: clusterLayout.y - 10,
-      maxY: clusterLayout.y + shape.tipHeight * 2 + shape.bodyHeight + 10,
+      minY: clusterLayout.y - paddingY,
+      maxY: clusterLayout.y + height + paddingY,
     },
     transform: { x: localX, y: 0 },
     track: {
@@ -279,9 +282,9 @@ function createLocusLayout(locus, clusterLayout, {
     },
     hover: {
       x: start,
-      y: -10,
+      y: -paddingY,
       width: end - start,
-      height: shape.tipHeight * 2 + shape.bodyHeight + 20,
+      height: height + paddingY * 2,
       leftHandleX: start - 8,
       rightHandleX: end,
     },
@@ -454,6 +457,7 @@ export function buildScene(
     getGeneState,
     areClustersAdjacent,
     clusterOrder = null,
+    clusterSpacing,
     shape,
     label,
     link,
@@ -492,6 +496,7 @@ export function buildScene(
         locusOffset,
         shape,
         geneMidpoint,
+        clusterSpacing,
       });
       loci.set(locus.uid, locusLayout);
       clusterLayout.loci.push(locusLayout);

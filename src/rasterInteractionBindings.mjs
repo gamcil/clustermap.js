@@ -32,6 +32,7 @@ export function createRasterInteractionBindings({
       flipLocus: (locusUid) => interactions.flipLocus(getLocus(locusUid)),
       toggleLocusSelection: (locusUid, options) =>
         interactions.toggleLocusSelection(getLocus(locusUid), options),
+      toggleClusterSelection: interactions.toggleClusterSelection,
       geneMenu: (event, geneUid) => interactions.showGeneMenu(event, getGene(geneUid)),
       legendMenu: interactions.legendMenu,
     },

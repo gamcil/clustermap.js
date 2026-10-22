@@ -204,6 +204,7 @@ function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
     getLocusState: locusState,
     getGeneState: (gene) => getGeneState(chartState, gene),
     clusterOrder,
+    clusterSpacing: config.cluster.spacing,
     shape: config.gene.shape,
     label: config.gene.label,
     link: {

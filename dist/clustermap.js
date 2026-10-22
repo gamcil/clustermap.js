@@ -8813,12 +8813,15 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     locusOffset,
     shape,
     geneMidpoint,
+    clusterSpacing = 40,
   }) {
     const state = { ...getLocusState(locus) };
     const localX = locusOffset(locus.uid);
     const start = scaleX(state.start);
     const end = scaleX(state.end);
     const worldX = clusterLayout.x + localX;
+    const paddingY = Math.max(0, Math.min(10, clusterSpacing / 4));
+    const height = shape.tipHeight * 2 + shape.bodyHeight;
     return {
       source: locus,
       cluster: clusterLayout.source,
@@ -8833,8 +8836,8 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       bounds: {
         minX: worldX + start,
         maxX: worldX + end,
-        minY: clusterLayout.y - 10,
-        maxY: clusterLayout.y + shape.tipHeight * 2 + shape.bodyHeight + 10,
+        minY: clusterLayout.y - paddingY,
+        maxY: clusterLayout.y + height + paddingY,
       },
       transform: { x: localX, y: 0 },
       track: {
@@ -8847,9 +8850,9 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       },
       hover: {
         x: start,
-        y: -10,
+        y: -paddingY,
         width: end - start,
-        height: shape.tipHeight * 2 + shape.bodyHeight + 20,
+        height: height + paddingY * 2,
         leftHandleX: start - 8,
         rightHandleX: end,
       },
@@ -9022,6 +9025,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       getGeneState,
       areClustersAdjacent,
       clusterOrder = null,
+      clusterSpacing,
       shape,
       label,
       link,
@@ -9060,6 +9064,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
           locusOffset,
           shape,
           geneMidpoint,
+          clusterSpacing,
         });
         loci.set(locus.uid, locusLayout);
         clusterLayout.loci.push(locusLayout);
@@ -9939,11 +9944,11 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     context,
     cluster,
     config,
-    { x: offsetX = 0, y: offsetY = 0, locusText = cluster.info.locusText } = {}
+    { x: offsetX = 0, y: offsetY = 0, locusText = cluster.info.locusText, selected = false } = {}
   ) {
     const { x, y } = cluster;
     const anchorX = x + cluster.info.x + offsetX;
-    context.fillStyle = config.figureStyle?.foreground || "black";
+    context.fillStyle = selected ? "#1677ff" : config.figureStyle?.foreground || "black";
     context.textAlign = "end";
     context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
     context.textBaseline = "alphabetic";
@@ -10339,6 +10344,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
     highlightGeneIds = null,
     highlightLinkIds = null,
     highlightLocusIds = null,
+    highlightClusterIds = null,
   }) {
     config = figureConfig(config);
     const show = (layer) => layers.includes(layer);
@@ -10447,6 +10453,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
       : [];
     for (const cluster of labelClusters) {
       drawClusterInfo(context, cluster, config, {
+        selected: highlightClusterIds?.has(cluster.source.uid),
         x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
         y: clusterOffsetForPreview(preview, cluster.source.uid),
         locusText: clusterLabelTextForPreview(
@@ -11144,6 +11151,10 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
     };
   }
 
+  function plotSelectionOptions({ shiftKey, ctrlKey, metaKey, altKey }) {
+    return { range: Boolean(shiftKey && (ctrlKey || metaKey || altKey)), subtract: Boolean(shiftKey && altKey) };
+  }
+
   // Translates renderer-independent pointer coordinates into chart-state actions.
   // Renderers only need to forward pointer events in chart-world coordinates.
   function createInteractionController({
@@ -11462,11 +11473,12 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
     highlightGeneIds = new Set(),
     highlightLinkIds = new Set(),
     highlightLocusIds = new Set(),
+    highlightClusterIds = new Set(),
   }) {
     config = figureConfig(config);
     plot.attr("fill", config.figureStyle.foreground);
     if (preview) return renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
-      highlightGeneIds, highlightLocusIds });
+      highlightGeneIds, highlightLocusIds, highlightClusterIds });
     previewStates.delete(plot.node());
     if (annotationsOnly) {
       renderChrome({ plot, chrome: scene.chrome, ids, interactions });
@@ -11497,7 +11509,13 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
             .attr("id", ids.clusterInfo)
             .attr("class", "clusterInfo")
             .attr("transform", "translate(-10, 0)")
-            .call(createClusterDrag({ plot, ids, interactions }));
+            .call(createClusterDrag({ plot, ids, interactions }))
+            .on("click", (event, cluster) => {
+              if (event.shiftKey || event.ctrlKey || event.metaKey) interactions.toggleClusterSelection(cluster.uid, plotSelectionOptions(event));
+            })
+            .on("mousedown.selection", (event) => {
+              if (event.shiftKey || event.ctrlKey || event.metaKey) { event.preventDefault(); event.stopPropagation(); }
+            });
 
           info
             .append("text")
@@ -11539,9 +11557,9 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
       animate ? selection.interrupt().transition(transition) : selection.interrupt();
     // Cluster labels describe committed locus state. Keep them responsive even
     // when locus geometry is still travelling through an SVG transition.
-    updateClusters(clusters.interrupt(), scene, { labelsOnly: true });
+    updateClusters(clusters.interrupt(), scene, { labelsOnly: true, highlightClusterIds });
     const clusterRender = updateRender(clusters);
-    updateClusters(clusterRender, scene);
+    updateClusters(clusterRender, scene, { highlightClusterIds });
 
     const loci = clusters
       .select("g.loci")
@@ -11585,6 +11603,9 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
             .attr("width", 8)
             .attr("cursor", "pointer");
           enter
+            .on("mousedown.selection", (event) => {
+              if (event.shiftKey || event.ctrlKey || event.metaKey) { event.preventDefault(); event.stopPropagation(); }
+            })
             .on("mouseenter", (event) => {
               if (!interactions.isDragging()) {
                 select(event.target).select("g.hover").transition().attr("opacity", 1);
@@ -11596,13 +11617,12 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
               }
             })
             .on("click", (event, locus) => {
-              if (event.shiftKey) {
-                interactions.toggleLocusSelection(locus, {
-                  clusterRange: event.altKey ? "remove" : (event.ctrlKey || event.metaKey ? "add" : null),
-                });
+              if (event.shiftKey || event.ctrlKey || event.metaKey) {
+                interactions.toggleLocusSelection(locus, plotSelectionOptions(event));
               }
             })
             .on("dblclick", (event, locus) => {
+              if (event.shiftKey || event.ctrlKey || event.metaKey) return;
               // The hover rectangle describes pointer affordances, not locus
               // geometry. It would otherwise remain visible while the locus
               // itself animates through a flip.
@@ -11711,7 +11731,7 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
   // Apply renderer-neutral patches to retained SVG elements. Geometry, adjacency,
   // visibility, and label movement come from the same accessors as raster marks.
   function renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
-    highlightGeneIds, highlightLocusIds }) {
+    highlightGeneIds, highlightLocusIds, highlightClusterIds }) {
     const current = recordsForPreview(scene, preview, { includeClusters: true });
     // Select the node directly: selection.select() would replace its bound datum
     // with the plot datum, and UID strings need not be valid CSS identifiers.
@@ -11720,7 +11740,7 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
     const affected = (kind) => new Set([
       ...current[kind], ...(previous?.scene === scene ? previous.records[kind] : []),
     ]);
-    updateClusters(plot.selectAll("g.cluster").interrupt(), scene, { preview });
+    updateClusters(plot.selectAll("g.cluster").interrupt(), scene, { preview, highlightClusterIds });
 
     // DOM parents carry row and locus translations. Only trim/flip previews need
     // per-gene geometry; ordinary dragging never rewrites the gene polygons.
@@ -11781,8 +11801,9 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
     previewStates.set(plot.node(), { scene, records: current, type: preview.type });
   }
 
-  function updateClusters(selection, scene, { labelsOnly = false, preview = null } = {}) {
+  function updateClusters(selection, scene, { labelsOnly = false, preview = null, highlightClusterIds = new Set() } = {}) {
     const layout = (cluster) => scene.clusters.get(cluster.uid);
+    selection.selectAll("g.clusterInfo").style("fill", (cluster) => highlightClusterIds.has(cluster.uid) ? "#1677ff" : null);
     if (!labelsOnly) {
       selection.attr("transform", (cluster) => {
         const { x, y } = layout(cluster);
@@ -11803,6 +11824,7 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
   function createClusterDrag({ plot, ids, interactions }) {
     const clusterSelection = (uid) => plot.selectAll(`#${ids.cluster({ uid })}`);
     return drag()
+      .filter((event) => !event.button && !event.shiftKey && !event.ctrlKey && !event.metaKey)
       .container(function () { return this.parentNode.parentNode; })
       .on("start", (event, cluster) => {
         clusterSelection(cluster.uid).classed("active", true).attr("cursor", "grabbing");
@@ -11817,6 +11839,7 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
 
   function createLocusPositionDrag({ plot, interactions }) {
     return drag()
+      .filter((event) => !event.button && !event.shiftKey && !event.ctrlKey && !event.metaKey)
       .container(() => plot.node())
       .on("start", (event, locus) => interactions.beginLocusDrag(locus.uid, event.x))
       .on("drag", (event) => interactions.moveLocusDrag(event.x))
@@ -11825,6 +11848,7 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
 
   function createLocusResizeDrag({ plot, interactions }) {
     return drag()
+      .filter((event) => !event.button && !event.shiftKey && !event.ctrlKey && !event.metaKey)
       // Trimming uses chart-world coordinates, matching Canvas and WebGPU.
       .container(() => plot.node())
       .on("start", () => interactions.beginLocusTrim())
@@ -12455,10 +12479,10 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
             const target = targetForEvent(this, event);
             if (!target) return;
             const locusUid = locusForTarget(target);
-            if (event.shiftKey && locusUid) {
-              actions.toggleLocusSelection(locusUid, {
-                clusterRange: event.altKey ? "remove" : (event.ctrlKey || event.metaKey ? "add" : null),
-              });
+            if ((event.shiftKey || event.ctrlKey || event.metaKey) && (target.action === "move-cluster" || locusUid)) {
+              const options = plotSelectionOptions(event);
+              if (target.action === "move-cluster") actions.toggleClusterSelection(target.clusterUid, options);
+              else actions.toggleLocusSelection(locusUid, options);
               event.preventDefault();
               return;
             }
@@ -12476,7 +12500,7 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
             finishGesture(this, event);
           })
           .on("dblclick.canvasInteraction", function (event) {
-            if (panMode) return;
+            if (panMode || event.shiftKey || event.ctrlKey || event.metaKey) return;
             const target = targetForEvent(this, event);
             const locusUid = locusForTarget(target);
             if (locusUid) actions.flipLocus(locusUid);
@@ -13169,6 +13193,7 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
       getLocusState: locusState,
       getGeneState: (gene) => getGeneState(chartState, gene),
       clusterOrder,
+      clusterSpacing: config.cluster.spacing,
       shape: config.gene.shape,
       label: config.gene.label,
       link: {
@@ -15171,6 +15196,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         flipLocus: (locusUid) => interactions.flipLocus(getLocus(locusUid)),
         toggleLocusSelection: (locusUid, options) =>
           interactions.toggleLocusSelection(getLocus(locusUid), options),
+        toggleClusterSelection: interactions.toggleClusterSelection,
         geneMenu: (event, geneUid) => interactions.showGeneMenu(event, getGene(geneUid)),
         legendMenu: interactions.legendMenu,
       },
@@ -15343,17 +15369,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     return restored;
   }
 
-  /** Return every locus in the inclusive displayed-cluster range. */
-  function lociForClusterRange(clusterOrder, clusterById, startClusterUid, endClusterUid) {
-    const start = clusterOrder.indexOf(startClusterUid);
-    const end = clusterOrder.indexOf(endClusterUid);
-    if (start < 0 || end < 0) return [];
-    return clusterOrder
-      .slice(Math.min(start, end), Math.max(start, end) + 1)
-      .flatMap((clusterUid) => clusterById.get(clusterUid)?.loci || [])
-      .map((locus) => locus.uid);
-  }
-
   let nextChartInstance = 0;
   const projectFormat = "clinker-project";
   const projectVersion = 1;
@@ -15430,8 +15445,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let chartIndex = null;
     let highlightGeneIds = new Set();
     let highlightLinkIds = new Set();
-    let selectedLocusIds = new Set();
-    let locusSelectionAnchorUid = null;
+    let plotSelection = { kind: "loci", ids: new Set() };
+    let selectionAnchor = null;
+    const noSelection = new Set();
+    const selectedLocusIds = () => plotSelection.kind === "loci" ? plotSelection.ids : noSelection;
+    const selectedClusterIds = () => plotSelection.kind === "clusters" ? plotSelection.ids : noSelection;
+    const selectedLoci = () => plotSelection.kind === "loci" ? plotSelection.ids : new Set(
+      [...plotSelection.ids].flatMap((uid) => runtime.lookup.clusterData(uid)?.loci.map((locus) => locus.uid) || [])
+    );
     let disposeRasterInteraction = () => {};
     let rasterHitSurface = null;
     let retainedOverlay = null;
@@ -15496,13 +15517,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       getClusterPosition: (uid) => runtime.getScene().clusters.get(uid).y,
       getTree: () => plotData?.tree || null,
       getLocusOffset: (uid) => getLocusOffset(chartState, uid),
-      selectedLocusIds: () => [...selectedLocusIds],
-      selectedClusterIds: () => new Set(
-        [...selectedLocusIds]
-          .map(locusForId)
-          .filter(Boolean)
-          .map((locus) => locus.clusterUid)
-      ),
+      selectedLocusIds: () => [...selectedLocusIds()],
+      selectedClusterIds,
       setDragging: (dragging) => {
         if (dragging) beginInteractionState();
         setDragging(chartState, dragging);
@@ -15816,9 +15832,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       plotDataDirty = true;
       chartIndex = createChartIndex(currentData);
       refreshGroups();
-      selectedLocusIds = new Set(
-        [...selectedLocusIds].map(locusForId).filter(Boolean).map((locus) => locus.uid)
-      );
       chartState = createChartState(currentData, chartState);
       runtime.setChartIndex(chartIndex);
       runtime.setChartState(chartState);
@@ -15957,12 +15970,40 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     }
 
     function highlightedGeneIds() {
-      if (!selectedLocusIds.size) return highlightGeneIds;
+      if (plotSelection.kind === "clusters") return highlightGeneIds;
+      const loci = selectedLoci();
+      if (!loci.size) return highlightGeneIds;
       const ids = new Set(highlightGeneIds);
-      for (const locusUid of selectedLocusIds) {
+      for (const locusUid of loci) {
         for (const gene of chartIndex?.locusById.get(locusUid)?.genes || []) ids.add(gene.uid);
       }
       return ids;
+    }
+
+    function selectionIds(kind, ids) {
+      const records = kind === "clusters" ? chartIndex?.clusterById : chartIndex?.locusById;
+      if (!records) return new Set(ids);
+      return new Set([...ids].map((uid) => records.get(uid) ||
+        [...records.values()].find((record) => String(record.uid) === String(uid)))
+        .filter((record) => record && !chartState.excludedClusters.has(kind === "clusters" ? record.uid : record.clusterUid) &&
+          (kind === "clusters" || !chartState.excludedLoci.has(record.uid))).map((record) => record.uid));
+    }
+
+    function selectPlotRecord(kind, uid, { range = false, subtract = false } = {}) {
+      const order = kind === "clusters" ? displayClusterOrder() : displayClusterOrder().flatMap((id) =>
+        runtime.lookup.clusterData(id).loci.map((locus) => locus.uid));
+      const start = kind === plotSelection.kind ? order.indexOf(selectionAnchor) : -1;
+      const end = order.indexOf(uid);
+      const ids = new Set(plotSelection.kind === kind ? plotSelection.ids : []);
+      if (range && start >= 0 && end >= 0) {
+        for (const id of order.slice(Math.min(start, end), Math.max(start, end) + 1)) {
+          if (subtract) ids.delete(id); else ids.add(id);
+        }
+      } else if (subtract || ids.has(uid)) ids.delete(uid);
+      else ids.add(uid);
+      const anchor = range && start >= 0 ? selectionAnchor : uid;
+      my.selection({ kind, ids });
+      if (ids.size) selectionAnchor = anchor;
     }
 
     function locusForId(uid) {
@@ -15998,7 +16039,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     // receives those records through its D3 joins.
     const rendererInteractions = {
       ...interactionController,
-      renameCluster: (event, cluster) => renameRecord(event, "clusters", cluster),
+      renameCluster: (event, cluster) => {
+        if (!event.shiftKey && !event.ctrlKey && !event.metaKey) renameRecord(event, "clusters", cluster);
+      },
       isDragging: () => isDragging(chartState),
       rotateTreeNode: (uid) => {
         if (!container) return;
@@ -16024,35 +16067,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         redraw();
         commitInteractionState();
       },
-      toggleLocusSelection: (locus, { clusterRange = null } = {}) => {
-        const ids = new Set(selectedLocusIds);
-        const anchor = locusForId(locusSelectionAnchorUid);
-        if (clusterRange && anchor) {
-          const range = lociForClusterRange(
-            displayClusterOrder(),
-            chartIndex?.clusterById || new Map(),
-            anchor.clusterUid,
-            locus.clusterUid
-          );
-          if (range.length) {
-            range.forEach((uid) => {
-              if (clusterRange === "remove") ids.delete(uid);
-              else ids.add(uid);
-            });
-            my.locusSelection(ids);
-            if (ids.size) locusSelectionAnchorUid = locus.uid;
-            return;
-          }
-        }
-        if (ids.has(locus.uid)) ids.delete(locus.uid);
-        else ids.add(locus.uid);
-        my.locusSelection(ids);
-        if (ids.size) locusSelectionAnchorUid = locus.uid;
-      },
+      toggleLocusSelection: (locus, options) => selectPlotRecord("loci", locus.uid, options),
+      toggleClusterSelection: (uid, options) => selectPlotRecord("clusters", uid, options),
       onGeneClick: (event, gene) => {
-        // Shift-click belongs to the containing locus and must not also invoke
-        // the established single-gene anchor interaction.
-        if (event.shiftKey) return;
+        // Selection modifiers belong to the containing locus.
+        if (event.shiftKey || event.ctrlKey || event.metaKey) return;
         (runtime.config.gene.shape.onClick || ((_, record) => anchorGene(record)))(event, gene);
       },
       showTreeMenu: (...args) => retainedOverlay?.showTreeMenu(...args),
@@ -16121,7 +16140,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         suppressLocusHover: scenePreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
         previousTree: treeAnimation?.previousTree, previousTreeScene: treeAnimation?.previousScene,
         treeTargetScene: treeAnimation?.targetScene, treeProgress: treeAnimation?.progress ?? 1,
-        highlightGeneIds: highlightedGeneIds(), highlightLinkIds, highlightLocusIds: selectedLocusIds,
+        highlightGeneIds: highlightedGeneIds(), highlightLinkIds, highlightLocusIds: selectedLoci(),
+        highlightClusterIds: selectedClusterIds(),
       };
     }
 
@@ -16143,7 +16163,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         ids: runtime.ids, interactions: rendererInteractions });
     }
 
-    function focusCamera({ genes = [], links = [] } = {}) {
+    function focusCamera({ genes = [], links = [], loci = [], clusters = [] } = {}) {
       const scene = runtime.getScene();
       if (!container || !scene) return false;
       let bounds = null;
@@ -16158,7 +16178,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         bounds.minY = Math.min(bounds.minY, candidate.minY);
         bounds.maxY = Math.max(bounds.maxY, candidate.maxY);
       };
-      for (const uid of genes) include(scene.genes.get(uid)?.bounds);
+      for (const [kind, ids] of Object.entries({ genes, loci, clusters })) {
+        for (const uid of ids) include(scene[kind].get(uid)?.bounds);
+      }
       for (const uid of links) {
         const rendered = scene.links.get(uid);
         if (rendered?.bounds) {
@@ -16333,8 +16355,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         runtime.setChartIndex(plotData === currentData ? chartIndex : createChartIndex(plotData));
         plotDataDirty = false;
       }
-      selectedLocusIds = new Set([...selectedLocusIds].filter((uid) => !chartState.excludedLoci.has(uid) &&
-        !chartState.excludedClusters.has(locusForId(uid)?.clusterUid)));
+      plotSelection.ids = selectionIds(plotSelection.kind, plotSelection.ids);
+      if (!plotSelection.ids.size) selectionAnchor = null;
       const data = plotData;
 
       const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
@@ -16745,27 +16767,33 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       else redraw({ animate: false });
       return my;
     };
-    /** Selected locus IDs used for batch plot operations. */
-    my.locusSelection = function (ids) {
-      if (!arguments.length) return [...selectedLocusIds];
-      const next = chartIndex
-        ? new Set([...(ids || [])].map(locusForId).filter(Boolean).map((locus) => locus.uid))
-        : new Set(ids || []);
-      if (
-        next.size === selectedLocusIds.size &&
-        [...next].every((uid) => selectedLocusIds.has(uid))
-      ) return my;
-      selectedLocusIds = next;
-      if (!next.size) locusSelectionAnchorUid = null;
+    /** Transient plot selection: one record kind at a time. */
+    my.selection = function (selection) {
+      if (!arguments.length) return { kind: plotSelection.kind, ids: [...plotSelection.ids] };
+      const { kind = "loci", ids = [] } = selection || {};
+      if (!["loci", "clusters"].includes(kind)) throw new TypeError("Selection kind must be loci or clusters.");
+      const next = selectionIds(kind, ids);
+      if (kind === plotSelection.kind && next.size === plotSelection.ids.size &&
+          [...next].every((uid) => plotSelection.ids.has(uid))) return my;
+      if (kind !== plotSelection.kind || !next.size) selectionAnchor = null;
+      plotSelection = { kind, ids: next };
+      canvasBackend.clearFlip();
       if (container && currentData) {
         if (isRasterRenderer(runtime.config.plot.renderer)) scheduleScenePaint();
         else redraw({ animate: false });
       }
-      emitChange({ type: "loci.select", locusIds: [...selectedLocusIds] });
+      emitChange({ type: "selection.change", selection: my.selection() });
+      emitChange({ type: "loci.select", locusIds: [...selectedLocusIds()] });
       return my;
     };
+    my.locusSelection = function (ids) {
+      return arguments.length ? my.selection({ kind: "loci", ids }) : [...selectedLocusIds()];
+    };
+    my.clusterSelection = function (ids) {
+      return arguments.length ? my.selection({ kind: "clusters", ids }) : [...selectedClusterIds()];
+    };
     /** Flip the supplied loci, or the current locus selection, as one operation. */
-    my.flipLoci = function (ids = selectedLocusIds) {
+    my.flipLoci = function (ids = selectedLoci()) {
       if (!container || !currentData || !chartIndex || !chartState) {
         throw new Error("Cannot flip loci before the chart has rendered.");
       }
@@ -16783,7 +16811,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       return my;
     };
     /** Trim selected loci to their displayed outermost genes as one edit. */
-    my.trimLoci = function (ids = selectedLocusIds) {
+    my.trimLoci = function (ids = selectedLoci()) {
       if (!container || !currentData || !chartIndex || !chartState) {
         throw new Error("Cannot trim loci before the chart has rendered.");
       }
@@ -16804,7 +16832,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       return my;
     };
     /** Restore selected loci to their full bounds as one edit. */
-    my.restoreLoci = function (ids = selectedLocusIds) {
+    my.restoreLoci = function (ids = selectedLoci()) {
       if (!container || !currentData || !chartIndex || !chartState) {
         throw new Error("Cannot restore loci before the chart has rendered.");
       }
@@ -16824,13 +16852,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
       return my;
     };
-    /** Frame selected genes and/or links without changing their selection. */
+    /** Frame supplied record IDs without changing their selection. */
     my.focus = function (ids) {
       const isScoped = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
-      focusCamera({
-        genes: isScoped ? ids.genes || [] : ids || [],
-        links: isScoped ? ids.links || [] : [],
-      });
+      focusCamera(isScoped ? ids : { genes: ids || [] });
       return my;
     };
     my.on = (type, listener) => {
@@ -16899,7 +16924,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       chartIndex = null;
       highlightGeneIds.clear();
       highlightLinkIds.clear();
-      selectedLocusIds.clear();
+      plotSelection.ids.clear();
+      selectionAnchor = null;
       changeListeners.clear();
       return my;
     };

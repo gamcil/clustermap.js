@@ -1,5 +1,9 @@
 import { isTreeOrderCompatible } from "./treeLayout.mjs";
 
+export function plotSelectionOptions({ shiftKey, ctrlKey, metaKey, altKey }) {
+  return { range: Boolean(shiftKey && (ctrlKey || metaKey || altKey)), subtract: Boolean(shiftKey && altKey) };
+}
+
 // Translates renderer-independent pointer coordinates into chart-state actions.
 // Renderers only need to forward pointer events in chart-world coordinates.
 export function createInteractionController({

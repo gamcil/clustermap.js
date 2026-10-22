@@ -451,11 +451,11 @@ function drawClusterInfo(
   context,
   cluster,
   config,
-  { x: offsetX = 0, y: offsetY = 0, locusText = cluster.info.locusText } = {}
+  { x: offsetX = 0, y: offsetY = 0, locusText = cluster.info.locusText, selected = false } = {}
 ) {
   const { x, y } = cluster;
   const anchorX = x + cluster.info.x + offsetX;
-  context.fillStyle = config.figureStyle?.foreground || "black";
+  context.fillStyle = selected ? "#1677ff" : config.figureStyle?.foreground || "black";
   context.textAlign = "end";
   context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
   context.textBaseline = "alphabetic";
@@ -851,6 +851,7 @@ export function renderCanvas({
   highlightGeneIds = null,
   highlightLinkIds = null,
   highlightLocusIds = null,
+  highlightClusterIds = null,
 }) {
   config = figureConfig(config);
   const show = (layer) => layers.includes(layer);
@@ -959,6 +960,7 @@ export function renderCanvas({
     : [];
   for (const cluster of labelClusters) {
     drawClusterInfo(context, cluster, config, {
+      selected: highlightClusterIds?.has(cluster.source.uid),
       x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
       y: clusterOffsetForPreview(preview, cluster.source.uid),
       locusText: clusterLabelTextForPreview(

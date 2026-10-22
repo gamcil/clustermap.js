@@ -1,44 +1,59 @@
-/**
- * Mount the small batch-locus toolbar inside a plot container.
- * It is intentionally separate from <clinker-editor>: selection and flipping
- * are plot operations, and applications may use them without opening data UI.
- */
+import { bindDataActionMenus, dataActionMenuMarkup, installDataEditorStyle } from "../dataEditorUi.mjs";
+import { setMarkup } from "../uiControls.mjs";
+
 let activeToolbar = null;
 
+/** Mount contextual plot actions without requiring the full data editor. */
 export function mountPlotSelectionToolbar(chart, container) {
-  if (!chart?.locusSelection || !chart?.flipLoci || !chart?.trimLoci || !chart?.restoreLoci) throw new TypeError("A mounted ClusterMap chart is required.");
+  if (!chart?.selection || !chart?.flipLoci || !chart?.trimLoci || !chart?.restoreLoci) throw new TypeError("A mounted ClusterMap chart is required.");
   if (!(container instanceof Element)) throw new TypeError("A plot container element is required.");
+  const document = container.ownerDocument;
+  installDataEditorStyle(document);
   const root = document.createElement("div");
-  root.className = "cm-plot-selection-toolbar";
+  root.className = "cm-data-ui cm-plot-selection-toolbar";
   root.hidden = true;
-  root.innerHTML = `<strong></strong><button type="button" data-flip>Flip selected loci</button><button type="button" data-trim>Trim selected loci</button><button type="button" data-restore>Restore full loci</button><button type="button" data-clear>Clear</button>`;
-  const summary = root.querySelector("strong");
+  bindDataActionMenus(root);
+  const button = (action, text) => `<button type="button" data-action="${action}">${text}</button>`;
+  const editor = () => [...document.querySelectorAll("clinker-editor")].find((editor) => editor.chart === chart);
+  const lociFor = ({ kind, ids }) => kind === "loci" ? ids :
+    (chart.visibleData()?.clusters || []).filter((cluster) => ids.includes(cluster.uid)).flatMap((cluster) => cluster.loci.map((locus) => locus.uid));
   const sync = () => {
-    const count = chart.locusSelection().length;
-    root.hidden = count === 0;
-    summary.textContent = `${count} ${count === 1 ? "locus" : "loci"} selected`;
+    const { kind, ids } = chart.selection(), clusters = kind === "clusters";
+    root.hidden = !ids.length;
+    const noun = ids.length === 1 ? (clusters ? "cluster" : "locus") : kind;
+    const locusActions = button("flip", clusters ? "Flip each locus" : "Flip") + button("trim", clusters ? "Trim each locus" : "Trim");
+    setMarkup(root, `<strong>${ids.length} ${noun} selected</strong>` + button("focus", "Focus") +
+      (clusters ? dataActionMenuMarkup("Loci…", locusActions + button("restore", "Restore full loci")) : locusActions) +
+      dataActionMenuMarkup("More…", (clusters ? "" : button("restore", "Restore full loci")) +
+        (editor() ? button("edit", "Edit data…") : "") + button("remove", `Remove selected ${kind}`)) + button("clear", "Clear"));
   };
-  const clear = () => chart.locusSelection([]);
+  const clear = () => chart.selection({ kind: chart.selection().kind, ids: [] });
   const activate = () => { activeToolbar = root; };
-  root.querySelector("[data-flip]").addEventListener("click", () => chart.flipLoci());
-  root.querySelector("[data-trim]").addEventListener("click", () => chart.trimLoci());
-  root.querySelector("[data-restore]").addEventListener("click", () => chart.restoreLoci());
-  root.querySelector("[data-clear]").addEventListener("click", clear);
+  root.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    if (!action) return;
+    const selection = chart.selection(), loci = lociFor(selection);
+    if (action === "flip") chart.flipLoci(loci);
+    else if (action === "trim") chart.trimLoci(loci);
+    else if (action === "restore") chart.restoreLoci(loci);
+    else if (action === "clear") clear();
+    else if (action === "edit") editor()?.editSelection(selection);
+    else if (action === "focus") chart.focus({ [selection.kind]: selection.ids });
+    else if (action === "remove" && document.defaultView.confirm(`Remove ${selection.ids.length} ${selection.kind} and their contents from the plot? This can be undone.`)) {
+      chart.remove({ [selection.kind]: selection.ids });
+    }
+    for (const menu of root.querySelectorAll("details[open]")) menu.open = false;
+  });
   const onKeyDown = (event) => {
-    if (activeToolbar !== root || event.key !== "Escape" || event.defaultPrevented || !chart.locusSelection().length) return;
+    if (activeToolbar !== root || event.key !== "Escape" || event.defaultPrevented || !chart.selection().ids.length) return;
     if (event.target.matches('input, textarea, select, [contenteditable="true"]')) return;
-    event.preventDefault();
-    clear();
+    event.preventDefault(); clear();
   };
-  // Keyboard focus is commonly still on <body> after an SVG/canvas click, so
-  // track the active chart at its container rather than requiring focusable
-  // renderer surfaces. This prevents one chart's Escape handler clearing all
-  // other charts on the page.
   container.addEventListener("pointerdown", activate);
   container.addEventListener("focusin", activate);
   document.addEventListener("keydown", onKeyDown);
   const unsubscribe = chart.on("change", (change) => {
-    if (change.type === "loci.select" || change.type === "state.replace") sync();
+    if (["selection.change", "state.replace", "data.apply", "data.replace"].includes(change.type)) sync();
   });
   container.append(root);
   sync();

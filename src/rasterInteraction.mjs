@@ -1,3 +1,5 @@
+import { plotSelectionOptions } from "./interactionController.mjs";
+
 function cursorForTarget(target) {
   if (!target) return "grab";
   if (target.action === "move-cluster") return "grab";
@@ -173,10 +175,10 @@ export function createRasterInteraction({
           const target = targetForEvent(this, event);
           if (!target) return;
           const locusUid = locusForTarget(target);
-          if (event.shiftKey && locusUid) {
-            actions.toggleLocusSelection(locusUid, {
-              clusterRange: event.altKey ? "remove" : (event.ctrlKey || event.metaKey ? "add" : null),
-            });
+          if ((event.shiftKey || event.ctrlKey || event.metaKey) && (target.action === "move-cluster" || locusUid)) {
+            const options = plotSelectionOptions(event);
+            if (target.action === "move-cluster") actions.toggleClusterSelection(target.clusterUid, options);
+            else actions.toggleLocusSelection(locusUid, options);
             event.preventDefault();
             return;
           }
@@ -194,7 +196,7 @@ export function createRasterInteraction({
           finishGesture(this, event);
         })
         .on("dblclick.canvasInteraction", function (event) {
-          if (panMode) return;
+          if (panMode || event.shiftKey || event.ctrlKey || event.metaKey) return;
           const target = targetForEvent(this, event);
           const locusUid = locusForTarget(target);
           if (locusUid) actions.flipLocus(locusUid);

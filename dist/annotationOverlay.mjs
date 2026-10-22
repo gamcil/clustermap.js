@@ -568,6 +568,23 @@ function createVirtualRows({ viewport, container, key, createRow, updateRow,
 const dataActionMenuMarkup = (label, content) =>
   `<details class="cm-data-action-menu"><summary>${escapeHtml(label)}</summary><div class="cm-data-action-menu-body">${content}</div></details>`;
 
+/** Menu behaviour shared by table actions and the plot selection toolbar. */
+function bindDataActionMenus(root) {
+  root.addEventListener("toggle", (event) => {
+    if (event.target.matches?.(".cm-data-action-menu[open]")) {
+      for (const menu of root.querySelectorAll(".cm-data-action-menu[open]")) if (menu !== event.target) menu.open = false;
+    }
+  }, true);
+  root.addEventListener("pointerdown", (event) => {
+    for (const menu of root.querySelectorAll(".cm-data-action-menu[open]")) if (!menu.contains(event.target)) menu.open = false;
+  });
+  root.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const menu = event.target.closest(".cm-data-action-menu[open]");
+    if (menu) { menu.open = false; menu.querySelector("summary").focus(); event.preventDefault(); event.stopPropagation(); }
+  });
+}
+
 /** Shared controls and table primitives for the packaged and inline data editors. */
 function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
   const ui = createControls(document), node = ui.el("label", undefined, null, "cm-data-search");
@@ -586,20 +603,10 @@ function createDataPanel(document, { label = "Editable chart data" } = {}) {
   const selectVisible = ui.button(meta, "Select all visible", null);
   const actions = ui.el("div", undefined, meta, "cm-data-actions"); actions.hidden = true;
   meta.append(selectVisible);
-  actions.addEventListener("toggle", (event) => {
-    if (event.target.open) for (const menu of actions.querySelectorAll("details[open]")) if (menu !== event.target) menu.open = false;
-  }, true);
-  node.addEventListener("pointerdown", (event) => {
-    for (const menu of actions.querySelectorAll("details[open]")) if (!menu.contains(event.target)) menu.open = false;
-  });
+  bindDataActionMenus(node);
   node.addEventListener("mousedown", (event) => {
     if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
         !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable]')) event.preventDefault();
-  });
-  actions.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    const menu = event.target.closest("details[open]");
-    if (menu) { menu.open = false; menu.querySelector("summary").focus(); event.preventDefault(); event.stopPropagation(); }
   });
   const viewport = ui.el("div", undefined, node, "cm-data-table");
   viewport.setAttribute("role", "region"); viewport.setAttribute("aria-label", label);
