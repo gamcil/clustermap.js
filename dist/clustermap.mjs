@@ -4373,7 +4373,6 @@ function createLinkLayout(source, order, {
     allowed,
     anchors,
     bounds: boundsFromLinkAnchors(anchors),
-    path: getLinkPath(anchors, link),
     labelPosition: anchors ? getLinkLabelPosition(anchors, link.labelPosition) : null,
     visible:
       Boolean(anchors) &&
@@ -11653,20 +11652,19 @@ function updateLinks(selection, scene, previousScene, config, scales, ids, highl
   } else {
     selection.attr("opacity", opacity);
   }
-  const updatePath = (path) => {
-    if (typeof path.attrTween === "function") path.attrTween("d", (link) => {
-      const previous = previousScene?.links.get(link.uid), next = linkLayout(link);
-      return (amount) => getLinkPath(
-        interpolateLinkAnchors(previousScene, previous, scene, next, amount), config.link
-      );
-    });
-    else path.attr("d", (link) => linkLayout(link)?.path || "");
-  };
-  selection.select("path.geneLink").call(updatePath)
+  const paths = selection.selectAll("path.geneLink,path.geneLinkHighlight");
+  if (typeof paths.attrTween === "function") paths.attrTween("d", (link) => {
+    const previous = previousScene?.links.get(link.uid), next = linkLayout(link);
+    return (amount) => getLinkPath(
+      interpolateLinkAnchors(previousScene, previous, scene, next, amount), config.link
+    );
+  });
+  else paths.attr("d", (link) => getLinkPath(linkLayout(link)?.anchors, config.link));
+  selection.select("path.geneLink")
     .style("fill", fill)
     .style("stroke", stroke)
     .style("stroke-width", `${config.link.strokeWidth}px`);
-  selection.select("path.geneLinkHighlight").call(updatePath)
+  selection.select("path.geneLinkHighlight")
     .attr("display", (link) => (highlightLinkIds.has(link.uid) ? "inline" : "none"))
     .style("fill", config.link.asLine ? "none" : "rgba(22, 119, 255, 0.18)")
     .style("stroke", "#1677ff")
@@ -12943,8 +12941,6 @@ function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
     shape: config.gene.shape,
     label: config.gene.label,
     link: {
-      asLine: config.link.asLine,
-      straight: config.link.straight,
       threshold: config.link.threshold,
       labelPosition: config.link.label.position,
     },

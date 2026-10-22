@@ -207,8 +207,6 @@ function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
     shape: config.gene.shape,
     label: config.gene.label,
     link: {
-      asLine: config.link.asLine,
-      straight: config.link.straight,
       threshold: config.link.threshold,
       labelPosition: config.link.label.position,
     },

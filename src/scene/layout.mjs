@@ -6,7 +6,6 @@ import {
   clusterPairKey,
   getLinkAnchors,
   getLinkLabelPosition,
-  getLinkPath,
 } from "../links/layout.mjs";
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
 import { arrangeTrimIndicators, createTrimIndicators, resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
@@ -355,7 +354,6 @@ function createLinkLayout(source, order, {
     allowed,
     anchors,
     bounds: boundsFromLinkAnchors(anchors),
-    path: getLinkPath(anchors, link),
     labelPosition: anchors ? getLinkLabelPosition(anchors, link.labelPosition) : null,
     visible:
       Boolean(anchors) &&
