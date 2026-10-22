@@ -256,6 +256,7 @@ test("categories can be added, assigned, renamed and removed with replacement", 
 });
 
 test("panel creation, visibility, ordering and removal are reflected in history", async ({ page }) => {
+  await selectionFixture(page, "svg");
   await annotation(page);
   const before = await page.evaluate(() => chart.data().annotationPanels.map((panel) => panel.uid));
   await editor(page).getByRole("button", { name: "Add panel", exact: true }).click();
@@ -1200,4 +1201,70 @@ test("virtualized component fields commit on blur and discard drafts when data i
   expect(await field.evaluate((field) => field.value)).toBe("Replacement data");
   expect(await page.evaluate(() => chart.data().groups[0].label)).toBe("Replacement data");
   expect(await page.evaluate(() => chart.canUndo())).toBe(false);
+});
+
+test("controller preserves parent range anchors after external edits", async ({ page }) => {
+  await selectionFixture(page, "svg"); await view(page, "genes");
+  await editor(page).getByRole("button", { name: "Collapse all", exact: true }).click();
+  const parents = editor(page).locator(".cm-editor__tree-parent");
+  await parents.first().getByRole("checkbox").check();
+  await page.evaluate(() => chart.patch([{ type: "groups.update", ids: ["alpha"], changes: { label: "Edited alpha" } }]));
+  await parents.nth(2).getByRole("checkbox").click({ modifiers: ["Shift"] });
+  await expect(editor(page).locator(".cm-data-meta").first()).toContainText("4 genes selected");
+  await expect(parents.nth(1).getByRole("checkbox")).toBeChecked();
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(editor(page).locator(".cm-data-meta").first()).toContainText("4 genes selected");
+});
+
+test("controller expands filtered combined branches without offering partial cluster removal", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await page.evaluate(() => chart.patch([{ type: "groups.assignGenes", groupId: "beta", geneIds: ["gene-a2"] }]));
+  await editor(page).locator(".cm-editor__row--groups").first().getByRole("checkbox").check();
+  const actions = editor(page).locator("clinker-record-actions");
+  await actions.locator('clinker-action-menu[label="Group…"] summary').click();
+  await actions.getByRole("button", { name: "View member genes", exact: true }).click();
+  await editor(page).locator('[data-gene-view] button[value="tree"]').click();
+  await expect(editor(page).locator(".cm-editor__tree-gene")).toHaveCount(0);
+  await editor(page).getByRole("button", { name: "Expand visible", exact: true }).click();
+  await expect(editor(page).locator(".cm-editor__tree-gene")).toHaveCount(1);
+  await editor(page).locator(".cm-editor__tree-parent").first().getByRole("checkbox").check();
+  await actions.locator('clinker-action-menu[label="Remove…"] summary').click();
+  await expect(actions.locator('[data-command="remove-loci"]')).toBeVisible();
+  await expect(actions.locator('[data-command="remove-clusters"]')).toBeHidden();
+});
+
+test("controller preserves selection on rejected edits and reconciles a subsequent merge", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  const rows = editor(page).locator(".cm-editor__row--groups");
+  await rows.nth(0).getByRole("checkbox").check(); await rows.nth(1).getByRole("checkbox").check();
+  await page.evaluate(() => { window.originalPatch = chart.patch; chart.patch = () => { throw new Error("Rejected test edit"); }; });
+  const actions = editor(page).locator("clinker-record-actions");
+  await actions.locator('clinker-action-menu[label="Remove…"] summary').click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await actions.getByRole("button", { name: "Delete selected groups", exact: true }).click();
+  await expect(editor(page).locator("[data-editor-error]")).toHaveText("Rejected test edit");
+  await expect(editor(page).locator(".cm-data-meta").first()).toContainText("2 groups selected");
+  await expect(rows.filter({ has: page.locator('input:checked') })).toHaveCount(2);
+  expect(await page.evaluate(() => ({ count: chart.data().groups.length, undo: chart.canUndo() }))).toEqual({ count: 3, undo: false });
+  await page.evaluate(() => { chart.patch = window.originalPatch; });
+  await actions.locator('clinker-action-menu[label="Merge…"] summary').click();
+  await actions.locator("[data-merge-target]").selectOption("alpha");
+  await actions.getByRole("button", { name: "Merge groups", exact: true }).click();
+  await expect(rows).toHaveCount(2);
+  await expect(editor(page).locator("[data-editor-error]")).toBeHidden();
+  await expect(rows.filter({ has: page.locator('input:checked') })).toHaveCount(0);
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click(); await expect(rows).toHaveCount(3);
+  await editor(page).getByRole("button", { name: "Redo", exact: true }).click(); await expect(rows).toHaveCount(2);
+});
+
+test("controller restores selection highlights when filtering removes the hovered row", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  const rows = editor(page).locator(".cm-editor__row--groups");
+  await rows.first().getByRole("checkbox").check();
+  await rows.nth(1).hover();
+  await expect.poll(() => page.evaluate(() => chart.highlight())).toEqual(["gene-b", "gene-c"]);
+  await editor(page).getByRole("searchbox", { name: "Filter records", exact: true }).fill("Alpha");
+  await expect(rows).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => chart.highlight())).toEqual(["gene-a", "gene-a2"]);
+  await expect(rows.first().getByRole("checkbox")).toBeChecked();
 });

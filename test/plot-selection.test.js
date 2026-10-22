@@ -93,6 +93,19 @@ test("plot modifier keys distinguish single toggles from explicit ranges", () =>
   assert.deepEqual(plotSelectionOptions({ shiftKey: true, altKey: true }), { range: true, subtract: true });
 });
 
+test("selection pruning validates parent anchors separately from member gene IDs", () => {
+  const selection = new RowSelection();
+  const members = new Map([["cluster:a", [1]], ["cluster:b", [2]], ["cluster:c", [3]]]);
+  const options = { orderedIds: [...members.keys()], idsFor: (key) => members.get(key) };
+  selection.select("cluster:a", true, options);
+  selection.prune([1, 2, 3], members.keys());
+  selection.select("cluster:c", true, { ...options, range: true });
+  assert.deepEqual([...selection], [1, 2, 3]);
+  selection.prune([2, 3], ["cluster:b", "cluster:c"]);
+  selection.select("cluster:c", false, { ...options, range: true });
+  assert.deepEqual([...selection], [2]);
+});
+
 test("shared highlight and hit geometry fits tight row gaps, including scene patches", async () => {
   const data = await fixture(), state = createChartState(data), runtime = createChartRuntime();
   runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state); runtime.updateGroups(data.groups);
