@@ -477,7 +477,8 @@ function createVirtualRows({ viewport, container, key, createRow, updateRow,
       first = window.first; last = window.last;
       const visible = rows.slice(first, last), ids = new Set(visible.map(key));
       const remove = (node) => {
-        if (node.contains(document.activeElement)) { document.activeElement.blur(); viewport.focus({ preventScroll: true }); }
+        const focused = container.getRootNode().activeElement || document.activeElement;
+        if (node.contains(focused)) { focused.blur(); viewport.focus({ preventScroll: true }); }
         disposeRow(node); node.remove();
       };
       for (const [id, entry] of mounted) if (!ids.has(id)) { remove(entry.node); mounted.delete(id); }
@@ -572,10 +573,7 @@ function createSelectionControls(panel, { selection, onChange, checkbox, menuLab
   };
 }
 
-function installDataEditorStyle(document) {
-  if (document.getElementById("cm-data-editor-style")) return;
-  const style = document.createElement("style"); style.id = "cm-data-editor-style";
-  style.textContent = `
+const DATA_EDITOR_CSS = `
 @layer clinker-editor {
 .cm-data-ui { color:var(--cm-foreground,#273444); font:13px/1.4 system-ui,sans-serif; }
 .cm-data-ui [hidden] { display:none!important; }
@@ -622,6 +620,11 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
 }
 `;
+
+function installDataEditorStyle(document) {
+  if (document.getElementById("cm-data-editor-style")) return;
+  const style = document.createElement("style"); style.id = "cm-data-editor-style";
+  style.textContent = DATA_EDITOR_CSS;
   document.head.append(style);
 }
 
@@ -650,6 +653,59 @@ class RowSelection extends Set {
   }
 
   clear() { super.clear(); this.#anchor = null; }
+}
+
+const [markup$f, css$f] = await Promise.all([
+  "<input type=\"search\" part=\"input\">\n<button type=\"button\" part=\"clear\" aria-label=\"Clear search\" title=\"Clear search\" hidden>×</button>\n",
+  ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput, button { box-sizing: border-box; color: inherit; font: inherit; }\ninput {\n  width: 100%;\n  min-width: 0;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #687586);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n",
+]);
+const template$f = createTemplate(markup$f);
+const HTMLElementBase$g = globalThis.HTMLElement || class {};
+
+class SearchField extends HTMLElementBase$g {
+  static observedAttributes = ["label", "placeholder"];
+  #input;
+  #clear;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$f;
+    root.append(style, template$f(this.ownerDocument));
+    this.#input = root.querySelector("input"); this.#clear = root.querySelector("button");
+    this.#input.oninput = () => this.#sync();
+    this.#clear.onclick = () => this.#clearValue();
+    this.#input.onkeydown = (event) => {
+      if (event.key !== "Escape" || !this.value || event.isComposing) return;
+      event.preventDefault(); event.stopPropagation(); this.#clearValue();
+    };
+    this.#sync();
+  }
+
+  get value() { return this.#input.value; }
+  set value(value) {
+    const next = String(value ?? "");
+    if (next !== this.value) this.#input.value = next;
+    this.#sync();
+  }
+  focus(options) { this.#input.focus(options); }
+  attributeChangedCallback() { this.#sync(); }
+
+  #sync() {
+    this.#input.setAttribute("aria-label", this.getAttribute("label") || "Filter records");
+    this.#input.placeholder = this.getAttribute("placeholder") || "Search";
+    this.#input.toggleAttribute("data-filled", Boolean(this.value));
+    this.#clear.hidden = !this.value;
+  }
+
+  #clearValue() {
+    this.value = ""; this.focus();
+    this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  }
+}
+
+function defineSearchField() {
+  if (!customElements.get("clinker-search-field")) customElements.define("clinker-search-field", SearchField);
 }
 
 const [markup$e, css$e] = await Promise.all([
@@ -778,165 +834,13 @@ function defineEditableField() {
 }
 
 const [markup$d, css$d] = await Promise.all([
-  "<span part=\"summary\"></span>\n<div part=\"actions\" hidden>\n  <slot name=\"actions\"></slot>\n  <button type=\"button\" data-clear aria-label=\"Clear selection\">Clear</button>\n</div>\n<button type=\"button\" data-all hidden>Select all visible</button>\n",
-  ":host {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  height: 32px;\n  min-width: 0;\n  flex-shrink: 0;\n  color: var(--cm-muted, #687586);\n  font: 12px/1.4 system-ui, sans-serif;\n}\n:host([hidden]), [hidden] { display: none !important; }\nspan { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\nspan.is-selected { color: var(--cm-foreground, #273444); font-weight: 600; }\ndiv { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }\nslot { display: contents; }\nbutton {\n  flex-shrink: 0;\n  box-sizing: border-box;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton:hover:not(:disabled) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n",
+  "<details>\n  <summary></summary>\n  <div data-items>\n    <template>\n      <div class=\"category\">\n        <input type=\"color\">\n        <clinker-editable-field required></clinker-editable-field>\n        <button type=\"button\" data-remove>×</button>\n      </div>\n    </template>\n    <form class=\"category\">\n      <input type=\"color\" aria-label=\"New category colour\">\n      <input type=\"text\" aria-label=\"New category name\" placeholder=\"New category\" required>\n      <button type=\"submit\" aria-label=\"Add category\">+</button>\n    </form>\n  </div>\n  <div data-removal hidden>\n    <span></span>\n    <select aria-label=\"Replacement category\"></select>\n    <button type=\"button\" data-confirm>Remove</button>\n    <button type=\"button\" data-cancel>Cancel</button>\n  </div>\n</details>\n",
+  ":host { display: block; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\nsummary { cursor: pointer; color: var(--cm-muted, #687586); }\nsummary:hover { color: var(--cm-accent, #1677ff); }\n[data-items] { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 0 2px; }\n.category, [data-removal] { display: flex; align-items: center; gap: 5px; }\n.category:hover { --cm-edit-icon-width:20px; }\nform { margin: 0; }\nclinker-editable-field, input[type=text] { width: 140px; min-width: 0; }\ninput, button, select { box-sizing: border-box; font: inherit; color: inherit; }\ninput[type=color] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }\ninput[type=text], button, select {\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\nbutton { cursor: pointer; }\nbutton:hover { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #e3ecf8); }\n:where(button, summary):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:where(input, select):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n[data-removal] { flex-wrap: wrap; margin-top: 6px; padding: 6px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 4px; }\n",
 ]);
 const template$d = createTemplate(markup$d);
 const HTMLElementBase$e = globalThis.HTMLElement || class {};
 
-class SelectionBar extends HTMLElementBase$e {
-  #summary;
-  #actions;
-  #all;
-
-  constructor() {
-    super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$d;
-    root.append(style, template$d(this.ownerDocument));
-    this.#summary = root.querySelector("span");
-    this.#actions = root.querySelector("div");
-    this.#all = root.querySelector("[data-all]");
-    for (const [selector, name] of [["[data-clear]", "clear-selection"], ["[data-all]", "select-all"]]) {
-      root.querySelector(selector).onclick = () => this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }));
-    }
-  }
-
-  set state({ count, total, all, summary, noun, selectSuffix = "" }) {
-    this.#summary.textContent = count ? `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"} selected` : summary;
-    this.#summary.classList.toggle("is-selected", count > 0);
-    this.#summary.title = summary;
-    this.#actions.hidden = !count;
-    this.#all.hidden = !total;
-    this.#all.disabled = all;
-    this.#all.textContent = `Select all ${total.toLocaleString()} visible${selectSuffix}`;
-  }
-}
-
-function defineSelectionBar() {
-  if (!customElements.get("clinker-selection-bar")) customElements.define("clinker-selection-bar", SelectionBar);
-}
-
-const [markup$c, css$c] = await Promise.all([
-  "<details>\n  <summary part=\"trigger\"></summary>\n  <div part=\"panel\"><slot></slot></div>\n</details>\n",
-  ":host { display: block; position: relative; color: var(--cm-foreground, #273444); font: inherit; }\n:host([hidden]) { display: none !important; }\nsummary {\n  display: block;\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: 4px 8px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 6px;\n  background: var(--cm-surface, #fff);\n  list-style: none;\n  white-space: nowrap;\n  cursor: pointer;\n}\nsummary::-webkit-details-marker { display: none; }\nsummary:hover, details[open] > summary { background: var(--cm-hover, #e3ecf8); border-color: var(--cm-accent, #78a9ed); }\nsummary:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\ndiv {\n  position: absolute;\n  right: 0;\n  top: calc(100% + 4px);\n  z-index: 10;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  width: max-content;\n  max-width: min(340px, 80vw);\n  max-height: 50vh;\n  overflow: auto;\n  padding: 10px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 8px;\n  background: var(--cm-surface, #fff);\n  box-shadow: 0 4px 16px #0002;\n}\nslot { display: contents; }\n::slotted(button) { text-align: left; }\n::slotted(label) { display: flex; align-items: center; gap: 6px; }\n::slotted(input[type=number]) { width: 112px; }\n",
-]);
-const template$c = createTemplate(markup$c);
-const activeMenus = new WeakMap();
-const HTMLElementBase$d = globalThis.HTMLElement || class {};
-
-class ActionMenu extends HTMLElementBase$d {
-  static observedAttributes = ["label", "open"];
-  #details;
-  #trigger;
-  #outside = (event) => { if (!event.composedPath().includes(this)) this.open = false; };
-
-  constructor() {
-    super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$c;
-    root.append(style, template$c(this.ownerDocument));
-    this.#details = root.querySelector("details");
-    this.#trigger = root.querySelector("summary");
-    this.#details.ontoggle = () => { this.open = this.#details.open; };
-    this.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape" || event.defaultPrevented || !this.open) return;
-      this.open = false; this.#trigger.focus(); event.preventDefault(); event.stopPropagation();
-    });
-  }
-
-  get open() { return this.#details.open; }
-  set open(value) {
-    this.#details.open = Boolean(value);
-    this.toggleAttribute("open", this.#details.open);
-  }
-  connectedCallback() { this.#syncOpen(); }
-  disconnectedCallback() { this.open = false; this.#release(); }
-
-  attributeChangedCallback(name) {
-    if (name === "label") this.#trigger.textContent = this.getAttribute("label") || "Actions";
-    else { this.#details.open = this.hasAttribute("open"); this.#syncOpen(); }
-  }
-
-  #syncOpen() {
-    if (!this.open || !this.isConnected) { this.#release(); return; }
-    const previous = activeMenus.get(this.ownerDocument);
-    if (previous && previous !== this) previous.open = false;
-    activeMenus.set(this.ownerDocument, this);
-    this.ownerDocument.addEventListener("pointerdown", this.#outside, true);
-  }
-
-  #release() {
-    this.ownerDocument.removeEventListener("pointerdown", this.#outside, true);
-    if (activeMenus.get(this.ownerDocument) === this) activeMenus.delete(this.ownerDocument);
-  }
-}
-
-function defineActionMenu() {
-  if (!customElements.get("clinker-action-menu")) customElements.define("clinker-action-menu", ActionMenu);
-}
-
-const [markup$b, css$b] = await Promise.all([
-  "<input type=\"search\" part=\"input\">\n<button type=\"button\" part=\"clear\" aria-label=\"Clear search\" title=\"Clear search\" hidden>×</button>\n",
-  ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput, button { box-sizing: border-box; color: inherit; font: inherit; }\ninput {\n  width: 100%;\n  min-width: 0;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #687586);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n",
-]);
-const template$b = createTemplate(markup$b);
-const HTMLElementBase$c = globalThis.HTMLElement || class {};
-
-class SearchField extends HTMLElementBase$c {
-  static observedAttributes = ["label", "placeholder"];
-  #input;
-  #clear;
-
-  constructor() {
-    super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$b;
-    root.append(style, template$b(this.ownerDocument));
-    this.#input = root.querySelector("input"); this.#clear = root.querySelector("button");
-    this.#input.oninput = () => this.#sync();
-    this.#clear.onclick = () => this.#clearValue();
-    this.#input.onkeydown = (event) => {
-      if (event.key !== "Escape" || !this.value || event.isComposing) return;
-      event.preventDefault(); event.stopPropagation(); this.#clearValue();
-    };
-    this.#sync();
-  }
-
-  get value() { return this.#input.value; }
-  set value(value) {
-    const next = String(value ?? "");
-    if (next !== this.value) this.#input.value = next;
-    this.#sync();
-  }
-  focus(options) { this.#input.focus(options); }
-  attributeChangedCallback() { this.#sync(); }
-
-  #sync() {
-    this.#input.setAttribute("aria-label", this.getAttribute("label") || "Filter records");
-    this.#input.placeholder = this.getAttribute("placeholder") || "Search";
-    this.#input.toggleAttribute("data-filled", Boolean(this.value));
-    this.#clear.hidden = !this.value;
-  }
-
-  #clearValue() {
-    this.value = ""; this.focus();
-    this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-  }
-}
-
-function defineSearchField() {
-  if (!customElements.get("clinker-search-field")) customElements.define("clinker-search-field", SearchField);
-}
-
-const [markup$a, css$a] = await Promise.all([
-  "<details>\n  <summary></summary>\n  <div data-items>\n    <template>\n      <div class=\"category\">\n        <input type=\"color\">\n        <clinker-editable-field required></clinker-editable-field>\n        <button type=\"button\" data-remove>×</button>\n      </div>\n    </template>\n    <form class=\"category\">\n      <input type=\"color\" aria-label=\"New category colour\">\n      <input type=\"text\" aria-label=\"New category name\" placeholder=\"New category\" required>\n      <button type=\"submit\" aria-label=\"Add category\">+</button>\n    </form>\n  </div>\n  <div data-removal hidden>\n    <span></span>\n    <select aria-label=\"Replacement category\"></select>\n    <button type=\"button\" data-confirm>Remove</button>\n    <button type=\"button\" data-cancel>Cancel</button>\n  </div>\n</details>\n",
-  ":host { display: block; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\nsummary { cursor: pointer; color: var(--cm-muted, #687586); }\nsummary:hover { color: var(--cm-accent, #1677ff); }\n[data-items] { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 0 2px; }\n.category, [data-removal] { display: flex; align-items: center; gap: 5px; }\n.category:hover { --cm-edit-icon-width:20px; }\nform { margin: 0; }\nclinker-editable-field, input[type=text] { width: 140px; min-width: 0; }\ninput, button, select { box-sizing: border-box; font: inherit; color: inherit; }\ninput[type=color] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }\ninput[type=text], button, select {\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\nbutton { cursor: pointer; }\nbutton:hover { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #e3ecf8); }\n:where(button, summary):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:where(input, select):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n[data-removal] { flex-wrap: wrap; margin-top: 6px; padding: 6px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 4px; }\n",
-]);
-const template$a = createTemplate(markup$a);
-const HTMLElementBase$b = globalThis.HTMLElement || class {};
-
-class CategoryEditor extends HTMLElementBase$b {
+class CategoryEditor extends HTMLElementBase$e {
   #value = [];
   #palette = ["#888888"];
   #revision = 0;
@@ -954,8 +858,8 @@ class CategoryEditor extends HTMLElementBase$b {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$a;
-    root.append(style, template$a(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$d;
+    root.append(style, template$d(this.ownerDocument));
     this.#details = root.querySelector("details"); this.#items = root.querySelector("[data-items]");
     this.#template = this.#items.querySelector("template"); this.#form = root.querySelector("form");
     this.#name = this.#form.querySelector('[type="text"]'); this.#colour = this.#form.querySelector('[type="color"]');
@@ -1061,22 +965,22 @@ function defineCategoryEditor() {
   if (!customElements.get("clinker-category-editor")) customElements.define("clinker-category-editor", CategoryEditor);
 }
 
-const [markup$9, css$9] = await Promise.all([
+const [markup$c, css$c] = await Promise.all([
   "<select aria-label=\"Annotation panel\"></select>\n<button type=\"button\" data-action=\"add\">Add panel</button>\n<button type=\"button\" data-action=\"replace\">Replace data…</button>\n<button type=\"button\" data-action=\"show\">Hide</button>\n<button type=\"button\" data-action=\"left\" aria-label=\"Move left\" title=\"Move left\">←</button>\n<button type=\"button\" data-action=\"right\" aria-label=\"Move right\" title=\"Move right\">→</button>\n<button type=\"button\" data-action=\"remove\" aria-label=\"Remove panel\">Remove</button>\n<slot></slot>\n",
   ":host { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-shrink: 0; color: inherit; font: inherit; }\n:host([embedded]), slot { display: contents; }\n:host([hidden]), [hidden] { display: none !important; }\nbutton, select {\n  box-sizing: border-box;\n  font: inherit;\n  color: inherit;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\nselect { max-width: 260px; }\n:host([embedded]) select { max-width: 220px; }\nbutton { cursor: pointer; }\nbutton:hover:not(:disabled) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #e3ecf8); }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nselect:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
 ]);
-const template$9 = createTemplate(markup$9);
-const HTMLElementBase$a = globalThis.HTMLElement || class {};
+const template$c = createTemplate(markup$c);
+const HTMLElementBase$d = globalThis.HTMLElement || class {};
 
-class AnnotationToolbar extends HTMLElementBase$a {
+class AnnotationToolbar extends HTMLElementBase$d {
   #select;
   #buttons;
 
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$9;
-    root.append(style, template$9(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$c;
+    root.append(style, template$c(this.ownerDocument));
     this.#select = root.querySelector("select");
     this.#buttons = Object.fromEntries([...root.querySelectorAll("button")].map((button) => [button.dataset.action, button]));
     this.#select.onchange = () => this.#emit("panel-change", { value: this.#select.value });
@@ -1279,14 +1183,14 @@ var csvFormatRows = csv.formatRows;
 var tsv = dsv("\t");
 var tsvParseRows = tsv.parseRows;
 
-const [markup$8, css$8] = await Promise.all([
+const [markup$b, css$b] = await Promise.all([
   "<form>\n  <div data-create>\n    <label><span>Type</span><select name=\"type\" aria-label=\"Type\"><option value=\"heatmap\">Heatmap</option><option value=\"bar\">Bar chart</option><option value=\"groups\">Group markers</option></select></label>\n    <label><span>Title</span><input name=\"title\" type=\"text\" aria-label=\"Title\"></label>\n    <label data-scale><span>Values</span><select name=\"scale\" aria-label=\"Values\"><option value=\"continuous\">Numeric</option><option value=\"categorical\">Categories</option></select></label>\n    <p data-help></p>\n  </div>\n  <label class=\"data\"><span>Data</span><textarea name=\"data\" aria-label=\"Data\" rows=\"8\" spellcheck=\"false\"></textarea></label>\n  <p data-error role=\"alert\" hidden></p>\n  <div class=\"actions\"><button type=\"submit\">Add panel</button><button type=\"button\" data-cancel hidden>Cancel</button></div>\n</form>\n",
   ":host { display: block; flex-shrink: 0; min-width: 0; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\nform { margin: 0; }\nlabel { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }\nlabel > span { flex: 1; min-width: 0; }\ninput, select { width: 140px; max-width: 65%; }\ninput, select, textarea, button {\n  box-sizing: border-box;\n  font: inherit;\n  color: inherit;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\n.data { display: block; }\ntextarea { display: block; width: 100%; margin-top: 4px; resize: vertical; }\np { margin: 8px 0; color: var(--cm-muted, #687586); }\n[data-error] { color: var(--cm-danger, #b42318); }\n.actions { display: flex; gap: 8px; }\nbutton { cursor: pointer; }\nbutton:hover { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #e3ecf8); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:is(input, select, textarea):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
 ]);
-const template$8 = createTemplate(markup$8);
-const HTMLElementBase$9 = globalThis.HTMLElement || class {};
+const template$b = createTemplate(markup$b);
+const HTMLElementBase$c = globalThis.HTMLElement || class {};
 
-class AnnotationDataForm extends HTMLElementBase$9 {
+class AnnotationDataForm extends HTMLElementBase$c {
   static observedAttributes = ["mode"];
   #form;
   #clusters = [];
@@ -1294,8 +1198,8 @@ class AnnotationDataForm extends HTMLElementBase$9 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$8;
-    root.append(style, template$8(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$b;
+    root.append(style, template$b(this.ownerDocument));
     this.#form = root.querySelector("form");
     this.#field("type").onchange = () => { this.#sync(); this.#example(); };
     this.#form.onsubmit = (event) => { event.preventDefault(); this.error = ""; this.#emit("data-submit", this.value); };
@@ -1340,14 +1244,14 @@ function defineAnnotationDataForm() {
   if (!customElements.get("clinker-annotation-data-form")) customElements.define("clinker-annotation-data-form", AnnotationDataForm);
 }
 
-const [markup$7, css$7] = await Promise.all([
+const [markup$a, css$a] = await Promise.all([
   "<div data-groups>\n  <template>\n    <fieldset>\n      <legend></legend>\n      <div class=\"controls\">\n        <clinker-editable-field label=\"Group label\"></clinker-editable-field>\n        <input type=\"color\" aria-label=\"Group colour\">\n        <select data-mode aria-label=\"Membership\"></select>\n        <button type=\"button\">Remove group</button>\n      </div>\n      <select data-members></select>\n    </fieldset>\n  </template>\n</div>\n<button type=\"button\" data-add>Add group</button>\n",
   ":host { display: block; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\nfieldset { min-width: 0; margin: 0 0 8px; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }\nlegend { padding: 0 4px; font-weight: 600; }\n.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }\nclinker-editable-field { width: 140px; }\nclinker-editable-field:hover { --cm-edit-icon-width: 20px; }\nbutton, select, input { box-sizing: border-box; color: inherit; font: inherit; }\nbutton, select {\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\nselect { max-width: 100%; }\n[data-members] { display: block; margin-top: 8px; }\ninput[type=color] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }\nbutton { cursor: pointer; }\nbutton:hover:not(:disabled) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #e3ecf8); }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:is(input, select):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
 ]);
-const template$7 = createTemplate(markup$7);
-const HTMLElementBase$8 = globalThis.HTMLElement || class {};
+const template$a = createTemplate(markup$a);
+const HTMLElementBase$b = globalThis.HTMLElement || class {};
 
-class AnnotationGroupEditor extends HTMLElementBase$8 {
+class AnnotationGroupEditor extends HTMLElementBase$b {
   #state = { groups: [], clusters: [], tree: null };
   #revision = 0;
   #rows = new Map();
@@ -1358,8 +1262,8 @@ class AnnotationGroupEditor extends HTMLElementBase$8 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$7;
-    root.append(style, template$7(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$a;
+    root.append(style, template$a(this.ownerDocument));
     this.#items = root.querySelector("[data-groups]"); this.#template = this.#items.querySelector("template");
     this.#add = root.querySelector("[data-add]");
     this.#add.onclick = () => {
@@ -1440,65 +1344,113 @@ function defineAnnotationGroupEditor() {
   if (!customElements.get("clinker-annotation-group-editor")) customElements.define("clinker-annotation-group-editor", AnnotationGroupEditor);
 }
 
-const [markup$6, controls$3, css$6] = await Promise.all([
-  "<select data-columns aria-label=\"Columns to edit\"></select>\n<input type=\"number\" step=\"any\" placeholder=\"Value\" aria-label=\"Batch value\">\n<select data-categories aria-label=\"Batch value\" hidden></select>\n<button type=\"button\" data-set>Set values</button>\n<button type=\"button\" data-clear>Clear values</button>\n",
-  "button, input, select { box-sizing: border-box; font: inherit; color: inherit; }\nbutton, input:not([type=color]):not([type=checkbox]):not([type=range]), select {\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\nbutton { cursor: pointer; }\nbutton:hover { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:is(input, select):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
-  ":host { display: flex; flex-direction: column; gap: 8px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\nbutton { text-align: left; }\ninput { width: 112px; }\n",
+const [markup$9, css$9] = await Promise.all([
+  "<span part=\"summary\"></span>\n<div part=\"actions\" hidden>\n  <slot name=\"actions\"></slot>\n  <button type=\"button\" data-clear aria-label=\"Clear selection\">Clear</button>\n</div>\n<button type=\"button\" data-all hidden>Select all visible</button>\n",
+  ":host {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  height: 32px;\n  min-width: 0;\n  flex-shrink: 0;\n  color: var(--cm-muted, #687586);\n  font: 12px/1.4 system-ui, sans-serif;\n}\n:host([hidden]), [hidden] { display: none !important; }\nspan { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\nspan.is-selected { color: var(--cm-foreground, #273444); font-weight: 600; }\ndiv { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }\nslot { display: contents; }\nbutton {\n  flex-shrink: 0;\n  box-sizing: border-box;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton:hover:not(:disabled) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n",
 ]);
-const template$6 = createTemplate(markup$6);
-const HTMLElementBase$7 = globalThis.HTMLElement || class {};
+const template$9 = createTemplate(markup$9);
+const HTMLElementBase$a = globalThis.HTMLElement || class {};
 
-class AnnotationValueActions extends HTMLElementBase$7 {
-  #columns;
-  #numeric;
-  #categories;
-  #domain = null;
+class SelectionBar extends HTMLElementBase$a {
+  #summary;
+  #actions;
+  #all;
 
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controls$3 + css$6;
-    root.append(style, template$6(this.ownerDocument));
-    this.#columns = root.querySelector("[data-columns]"); this.#numeric = root.querySelector("input"); this.#categories = root.querySelector("[data-categories]");
-    root.addEventListener("change", () => this.#draftChanged());
-    root.querySelector("[data-set]").onclick = () => this.#submit(false);
-    root.querySelector("[data-clear]").onclick = () => this.#submit(true);
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$9;
+    root.append(style, template$9(this.ownerDocument));
+    this.#summary = root.querySelector("span");
+    this.#actions = root.querySelector("div");
+    this.#all = root.querySelector("[data-all]");
+    for (const [selector, name] of [["[data-clear]", "clear-selection"], ["[data-all]", "select-all"]]) {
+      root.querySelector(selector).onclick = () => this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }));
+    }
   }
 
-  set state({ columns, domain = null, draft = { column: "0", value: "" } }) {
-    this.#domain = domain;
-    this.#numeric.hidden = domain !== null; this.#categories.hidden = domain === null;
-    updateSelectOptions(this.#columns, [["all", "All columns"], ...columns.map((name, index) => [String(index), name])]);
-    if (domain !== null) updateSelectOptions(this.#categories, [["", "Missing"], ...domain.map((name, index) => [String(index), name])]);
-    this.#columns.value = draft.column; this.#input.value = draft.value;
-  }
-
-  get #input() { return this.#domain === null ? this.#numeric : this.#categories; }
-  #draftChanged() {
-    this.dispatchEvent(new CustomEvent("draft-change", { detail: { column: this.#columns.value, value: this.#input.value }, bubbles: true, composed: true }));
-  }
-  #submit(clear) {
-    const input = this.#input;
-    if (!clear && !input.reportValidity()) return;
-    this.#draftChanged();
-    const value = clear || input.value === "" ? null : this.#domain === null ? Number(input.value) : this.#domain[Number(input.value)];
-    const column = this.#columns.value === "all" ? "all" : Number(this.#columns.value);
-    this.dispatchEvent(new CustomEvent("values-commit", { detail: { column, value }, bubbles: true, composed: true, cancelable: true }));
+  set state({ count, total, all, summary, noun, selectSuffix = "" }) {
+    this.#summary.textContent = count ? `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"} selected` : summary;
+    this.#summary.classList.toggle("is-selected", count > 0);
+    this.#summary.title = summary;
+    this.#actions.hidden = !count;
+    this.#all.hidden = !total;
+    this.#all.disabled = all;
+    this.#all.textContent = `Select all ${total.toLocaleString()} visible${selectSuffix}`;
   }
 }
 
-function defineAnnotationValueActions() {
-  if (!customElements.get("clinker-annotation-value-actions")) customElements.define("clinker-annotation-value-actions", AnnotationValueActions);
+function defineSelectionBar() {
+  if (!customElements.get("clinker-selection-bar")) customElements.define("clinker-selection-bar", SelectionBar);
 }
 
-const [markup$5, css$5] = await Promise.all([
+const [markup$8, css$8] = await Promise.all([
+  "<details>\n  <summary part=\"trigger\"></summary>\n  <div part=\"panel\"><slot></slot></div>\n</details>\n",
+  ":host { display: block; position: relative; color: var(--cm-foreground, #273444); font: inherit; }\n:host([hidden]) { display: none !important; }\nsummary {\n  display: block;\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: 4px 8px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 6px;\n  background: var(--cm-surface, #fff);\n  list-style: none;\n  white-space: nowrap;\n  cursor: pointer;\n}\nsummary::-webkit-details-marker { display: none; }\nsummary:hover, details[open] > summary { background: var(--cm-hover, #e3ecf8); border-color: var(--cm-accent, #78a9ed); }\nsummary:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\ndiv {\n  position: absolute;\n  right: 0;\n  top: calc(100% + 4px);\n  z-index: 10;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  width: max-content;\n  max-width: min(340px, 80vw);\n  max-height: 50vh;\n  overflow: auto;\n  padding: 10px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 8px;\n  background: var(--cm-surface, #fff);\n  box-shadow: 0 4px 16px #0002;\n}\nslot { display: contents; }\n::slotted(button) { text-align: left; }\n::slotted(label) { display: flex; align-items: center; gap: 6px; }\n::slotted(input[type=number]) { width: 112px; }\n",
+]);
+const template$8 = createTemplate(markup$8);
+const activeMenus = new WeakMap();
+const HTMLElementBase$9 = globalThis.HTMLElement || class {};
+
+class ActionMenu extends HTMLElementBase$9 {
+  static observedAttributes = ["label", "open"];
+  #details;
+  #trigger;
+  #outside = (event) => { if (!event.composedPath().includes(this)) this.open = false; };
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$8;
+    root.append(style, template$8(this.ownerDocument));
+    this.#details = root.querySelector("details");
+    this.#trigger = root.querySelector("summary");
+    this.#details.ontoggle = () => { this.open = this.#details.open; };
+    this.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || !this.open) return;
+      this.open = false; this.#trigger.focus(); event.preventDefault(); event.stopPropagation();
+    });
+  }
+
+  get open() { return this.#details.open; }
+  set open(value) {
+    this.#details.open = Boolean(value);
+    this.toggleAttribute("open", this.#details.open);
+  }
+  connectedCallback() { this.#syncOpen(); }
+  disconnectedCallback() { this.open = false; this.#release(); }
+
+  attributeChangedCallback(name) {
+    if (name === "label") this.#trigger.textContent = this.getAttribute("label") || "Actions";
+    else { this.#details.open = this.hasAttribute("open"); this.#syncOpen(); }
+  }
+
+  #syncOpen() {
+    if (!this.open || !this.isConnected) { this.#release(); return; }
+    const previous = activeMenus.get(this.ownerDocument);
+    if (previous && previous !== this) previous.open = false;
+    activeMenus.set(this.ownerDocument, this);
+    this.ownerDocument.addEventListener("pointerdown", this.#outside, true);
+  }
+
+  #release() {
+    this.ownerDocument.removeEventListener("pointerdown", this.#outside, true);
+    if (activeMenus.get(this.ownerDocument) === this) activeMenus.delete(this.ownerDocument);
+  }
+}
+
+function defineActionMenu() {
+  if (!customElements.get("clinker-action-menu")) customElements.define("clinker-action-menu", ActionMenu);
+}
+
+const [markup$7, css$7] = await Promise.all([
   "<div part=\"viewport\" tabindex=\"-1\"><slot name=\"header\"></slot><slot></slot><p part=\"empty\" hidden>No records match the filter.</p></div>\n<template id=\"heading\"><span class=\"cm-data-cell\"></span></template>\n<template id=\"sort\"><button type=\"button\" class=\"cm-data-cell cm-editor__sort\"><span data-label></span><span aria-hidden=\"true\"></span></button></template>\n",
   ":host { display: flex; flex: 1; min-width: 0; min-height: 120px; color: inherit; font: inherit; }\n:host([hidden]) { display: none !important; }\n[hidden] { display: none !important; }\n[part=viewport] { flex: 1; min-width: 0; min-height: 0; overflow: auto; overflow-anchor: none; outline: none; }\nslot { display: contents; }\n[part=empty] { padding: 16px; color: var(--cm-muted, #667386); text-align: center; }\n",
 ]);
-const template$5 = createTemplate(markup$5);
-const HTMLElementBase$6 = globalThis.HTMLElement || class {};
+const template$7 = createTemplate(markup$7);
+const HTMLElementBase$8 = globalThis.HTMLElement || class {};
 
-class DataTable extends HTMLElementBase$6 {
+class DataTable extends HTMLElementBase$8 {
   #viewport;
   #renderer = null;
   #rows = [];
@@ -1509,8 +1461,8 @@ class DataTable extends HTMLElementBase$6 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$5;
-    root.append(style, template$5(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$7;
+    root.append(style, template$7(this.ownerDocument));
     this.#viewport = root.querySelector("div");
   }
 
@@ -1563,6 +1515,223 @@ class DataTable extends HTMLElementBase$6 {
 
 function defineDataTable() {
   if (!customElements.get("clinker-data-table")) customElements.define("clinker-data-table", DataTable);
+}
+
+const [markup$6, controls$3, css$6] = await Promise.all([
+  "<select data-columns aria-label=\"Columns to edit\"></select>\n<input type=\"number\" step=\"any\" placeholder=\"Value\" aria-label=\"Batch value\">\n<select data-categories aria-label=\"Batch value\" hidden></select>\n<button type=\"button\" data-set>Set values</button>\n<button type=\"button\" data-clear>Clear values</button>\n",
+  "button, input, select { box-sizing: border-box; font: inherit; color: inherit; }\nbutton, input:not([type=color]):not([type=checkbox]):not([type=range]), select {\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\nbutton { cursor: pointer; }\nbutton:hover { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:is(input, select):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
+  ":host { display: flex; flex-direction: column; gap: 8px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\nbutton { text-align: left; }\ninput { width: 112px; }\n",
+]);
+const template$6 = createTemplate(markup$6);
+const HTMLElementBase$7 = globalThis.HTMLElement || class {};
+
+class AnnotationValueActions extends HTMLElementBase$7 {
+  #columns;
+  #numeric;
+  #categories;
+  #domain = null;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = controls$3 + css$6;
+    root.append(style, template$6(this.ownerDocument));
+    this.#columns = root.querySelector("[data-columns]"); this.#numeric = root.querySelector("input"); this.#categories = root.querySelector("[data-categories]");
+    root.addEventListener("change", () => this.#draftChanged());
+    root.querySelector("[data-set]").onclick = () => this.#submit(false);
+    root.querySelector("[data-clear]").onclick = () => this.#submit(true);
+  }
+
+  set state({ columns, domain = null, draft = { column: "0", value: "" } }) {
+    this.#domain = domain;
+    this.#numeric.hidden = domain !== null; this.#categories.hidden = domain === null;
+    updateSelectOptions(this.#columns, [["all", "All columns"], ...columns.map((name, index) => [String(index), name])]);
+    if (domain !== null) updateSelectOptions(this.#categories, [["", "Missing"], ...domain.map((name, index) => [String(index), name])]);
+    this.#columns.value = draft.column; this.#input.value = draft.value;
+  }
+
+  get #input() { return this.#domain === null ? this.#numeric : this.#categories; }
+  #draftChanged() {
+    this.dispatchEvent(new CustomEvent("draft-change", { detail: { column: this.#columns.value, value: this.#input.value }, bubbles: true, composed: true }));
+  }
+  #submit(clear) {
+    const input = this.#input;
+    if (!clear && !input.reportValidity()) return;
+    this.#draftChanged();
+    const value = clear || input.value === "" ? null : this.#domain === null ? Number(input.value) : this.#domain[Number(input.value)];
+    const column = this.#columns.value === "all" ? "all" : Number(this.#columns.value);
+    this.dispatchEvent(new CustomEvent("values-commit", { detail: { column, value }, bubbles: true, composed: true, cancelable: true }));
+  }
+}
+
+function defineAnnotationValueActions() {
+  if (!customElements.get("clinker-annotation-value-actions")) customElements.define("clinker-annotation-value-actions", AnnotationValueActions);
+}
+
+const [markup$5, css$5] = await Promise.all([
+  "<template id=\"tools\"><slot name=\"tools\"></slot></template>\n<template id=\"table\">\n<table><thead><tr>\n  <th class=\"cm-data-cell cm-data-cell--select cm-data-head\"><input type=\"checkbox\" aria-label=\"Select all filtered clusters\"></th>\n  <th class=\"cm-data-cell cm-data-head\">Cluster</th>\n</tr></thead><tbody></tbody></table>\n</template>\n\n<template id=\"column\">\n<th class=\"cm-data-cell cm-data-head\"><div class=\"cm-annotation-column\">\n  <clinker-editable-field required></clinker-editable-field><button type=\"button\" class=\"cm-data-icon-button\">×</button>\n</div></th>\n</template>\n\n<template id=\"add-column\">\n<th class=\"cm-data-cell cm-data-head cm-annotation-add-column\"><form>\n  <button type=\"button\" aria-label=\"Add column\">+</button>\n  <input type=\"text\" aria-label=\"New column name\" placeholder=\"Column name\" hidden><button type=\"submit\" hidden>Add</button>\n</form></th>\n</template>\n\n<template id=\"row\">\n<tr class=\"cm-data-row\">\n  <td class=\"cm-data-cell cm-data-cell--select\"><input type=\"checkbox\"></td><th class=\"cm-data-cell\" scope=\"row\"></th>\n</tr>\n</template>\n\n<template id=\"empty-cell\">\n<td class=\"cm-data-cell\"></td>\n</template>\n\n<template id=\"spacer\">\n<tr class=\"cm-annotation-spacer\" aria-hidden=\"true\"><td></td></tr>\n</template>\n\n<template id=\"cell\">\n  <td class=\"cm-data-cell\"><clinker-editable-field placeholder=\"—\" step=\"any\"></clinker-editable-field></td>\n</template>\n",
+  ":host { display:flex; flex:1; min-width:0; min-height:0; color:inherit; font:inherit; }\n:host([hidden]) { display:none!important; }\nslot { display:contents; }\n.cm-annotation-matrix { position:relative; }\n.cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }\n\n.cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,#f3f6fa); }\n.cm-annotation-matrix tr > :first-child { position:sticky; left:0; z-index:1; width:32px; min-width:32px; background:var(--cm-row-background,var(--cm-subtle,#f3f6fa)); }\n.cm-annotation-matrix tr > :nth-child(2) { position:sticky; left:32px; z-index:1; }\n.cm-annotation-matrix tbody th { background:var(--cm-row-background); }\n.cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,#f3f6fa); }\n.cm-annotation-matrix tbody th { cursor:pointer; min-width:200px; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }\n.cm-annotation-matrix :is(input:not([type=checkbox]),clinker-editable-field) { width:140px; }\n.cm-annotation-column { display:flex; align-items:center; }\n.cm-annotation-column button { --cm-icon-size:24px; visibility:hidden; }\n.cm-annotation-column:is(:hover,:focus-within) button { visibility:visible; }\n.cm-annotation-add-column { width:36px; }\n.cm-annotation-add-column form { display:flex; gap:4px; }\n.cm-annotation-spacer > td { height:0; border:0; padding:0; }\n",
+]);
+const template$5 = createTemplate(markup$5);
+const HTMLElementBase$6 = globalThis.HTMLElement || class {};
+
+class AnnotationTable extends HTMLElementBase$6 {
+  #templates;
+  #layout;
+  #panel;
+  #domain = null;
+  #filtered = [];
+  #filter = "";
+  #schema;
+  #table;
+  #selection = new RowSelection();
+  #rowIds = new WeakMap();
+  #selectionControls;
+  #batch;
+  #draft = { column: "0", value: "" };
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = DATA_EDITOR_CSS + css$5;
+    this.#templates = template$5(this.ownerDocument);
+    this.#layout = createDataPanel(this.ownerDocument, { label: "Editable annotation data" });
+    this.#layout.node.classList.add("cm-data-ui");
+    this.#layout.tools.replaceWith(this.#element("tools"));
+    this.#layout.viewport.classList.add("cm-annotation-matrix");
+    this.#selectionControls = createSelectionControls(this.#layout, { selection: this.#selection, menuLabel: "Edit values…", onChange: () => this.#syncSelection() });
+    this.#batch = this.ownerDocument.createElement("clinker-annotation-value-actions");
+    this.#selectionControls.actions.append(this.#batch);
+    this.#batch.addEventListener("draft-change", (event) => { event.stopPropagation(); this.#draft = event.detail; });
+    this.#batch.addEventListener("values-commit", (event) => {
+      event.stopPropagation();
+      const { column, value } = event.detail, values = {};
+      for (const uid of this.#selection) {
+        const row = [...(this.#panel.values[uid] || this.#panel.columns.map(() => null))];
+        row.forEach((_, index) => { if (column === "all" || column === index) row[index] = value; }); values[uid] = row;
+      }
+      if (!this.#emit("rows-change", { values })) event.preventDefault();
+    });
+    root.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !event.defaultPrevented && this.#selection.size) {
+        event.preventDefault(); event.stopPropagation(); this.clearSelection();
+      }
+    });
+    root.append(style, this.#layout.node);
+  }
+
+  set state({ panel, clusters, domain = null, filter = "" }) {
+    const changed = this.#panel?.uid !== panel.uid, filtered = this.#filter !== filter;
+    if (changed) { this.#selection.clear(); this.#draft = { column: "0", value: "" }; }
+    this.#panel = panel; this.#domain = domain; this.#filter = filter;
+    this.#selection.prune(new Set(clusters.map(({ uid }) => uid)));
+    const scroll = changed || filtered ? 0 : this.#layout.viewport.scrollTop;
+    const schema = JSON.stringify([panel.uid, panel.type, panel.columns, domain]);
+    if (this.#schema !== schema) { this.#schema = schema; this.#build(); }
+    const needle = filter.trim().toLowerCase();
+    this.#filtered = clusters.filter(({ uid, name }) => `${name} ${uid}`.toLowerCase().includes(needle));
+    this.#layout.viewport.rows = this.#filtered;
+    this.#layout.viewport.scrollTop = scroll;
+  }
+
+  clearSelection() { this.#selection.clear(); this.#syncSelection(); }
+  cancelEdit() { for (const field of this.shadowRoot.querySelectorAll("clinker-editable-field")) field.cancelEdit(); }
+  disconnectedCallback() { this.cancelEdit(); }
+
+  #element(name) { return this.ownerDocument.importNode(this.#templates.getElementById(name).content, true).firstElementChild; }
+  #emit(type, detail) {
+    const accepted = this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true, cancelable: true }));
+    if (accepted) for (const menu of this.shadowRoot.querySelectorAll("clinker-action-menu")) menu.open = false;
+    return accepted;
+  }
+  #columns(columns, values) { return this.#emit("columns-change", { columns, ...(values ? { values } : {}) }); }
+
+  #syncSelection() {
+    this.#selectionControls.update({ ids: this.#filtered.map(({ uid }) => uid), summary: `${this.#filtered.length.toLocaleString()} visible clusters`, noun: "cluster" });
+    if (!this.#table) return;
+    const all = this.#table.querySelector("thead input"), selected = this.#filtered.filter(({ uid }) => this.#selection.has(uid)).length;
+    all.checked = this.#filtered.length > 0 && selected === this.#filtered.length; all.indeterminate = selected > 0 && !all.checked;
+    for (const row of this.#table.querySelectorAll("tbody .cm-data-row")) {
+      const checked = this.#selection.has(this.#rowIds.get(row));
+      row.classList.toggle("is-selected", checked); row.setAttribute("aria-selected", String(checked)); row.querySelector("input").checked = checked;
+    }
+  }
+
+  #build() {
+    const viewport = this.#layout.viewport, panel = this.#panel, extra = panel.type === "heatmap";
+    this.cancelEdit(); viewport.renderer = null;
+    this.#table = this.#element("table"); viewport.replaceChildren(this.#table);
+    const head = this.#table.querySelector("tr");
+    head.querySelector("input").onchange = (event) => { this.#selection.setMany(this.#filtered.map(({ uid }) => uid), event.target.checked); this.#syncSelection(); };
+    if (this.#draft.column !== "all" && Number(this.#draft.column) >= panel.columns.length) this.#draft.column = "0";
+    if (this.#domain !== null && this.#draft.value !== "" && this.#domain[Number(this.#draft.value)] === undefined) this.#draft.value = "";
+    this.#batch.state = { columns: panel.columns, domain: this.#domain, draft: this.#draft };
+    panel.columns.forEach((column, index) => {
+      const heading = this.#element("column"), field = heading.querySelector("clinker-editable-field"), remove = heading.querySelector("button");
+      field.value = column; field.setAttribute("label", `Column ${index + 1} name`);
+      field.addEventListener("value-commit", (event) => {
+        event.stopPropagation(); const columns = [...this.#panel.columns]; columns[index] = event.detail.value.trim();
+        if (!this.#columns(columns)) event.preventDefault();
+      });
+      if (extra) {
+        remove.setAttribute("aria-label", `Remove column ${column}`); remove.disabled = panel.columns.length === 1;
+        remove.onclick = () => this.#columns(this.#panel.columns.filter((_, i) => i !== index),
+          Object.fromEntries(Object.entries(this.#panel.values).map(([uid, values]) => [uid, values.filter((_, i) => i !== index)])));
+      } else remove.remove();
+      head.append(heading);
+    });
+    if (extra) {
+      const heading = this.#element("add-column"), form = heading.querySelector("form"), [add, save] = form.querySelectorAll("button"), name = form.querySelector("input");
+      add.onclick = () => { add.hidden = true; name.hidden = save.hidden = false; name.focus(); };
+      form.onsubmit = (event) => {
+        event.preventDefault(); if (!name.value.trim()) return;
+        this.#columns([...this.#panel.columns, name.value.trim()], Object.fromEntries(Object.entries(this.#panel.values).map(([uid, values]) => [uid, [...values, null]])));
+      };
+      name.onkeydown = (event) => { if (event.key === "Escape") { event.preventDefault(); name.hidden = save.hidden = true; add.hidden = false; add.focus(); } };
+      head.append(heading);
+    }
+    viewport.renderer = { container: this.#table.querySelector("tbody"), key: ({ uid }) => uid,
+      createRow: (cluster) => this.#createRow(cluster, extra), updateRow: (row, cluster) => this.#updateRow(row, cluster),
+      disposeRow: (row) => { for (const field of row.querySelectorAll("clinker-editable-field")) field.cancelEdit(); },
+      createSpacer: () => { const row = this.#element("spacer"); row.firstElementChild.colSpan = panel.columns.length + 2 + Number(extra); return row; },
+      headerHeight: () => head.offsetHeight, onRender: () => { this.#table.setAttribute("aria-rowcount", this.#filtered.length + 1); this.#syncSelection(); } };
+  }
+
+  #createRow(cluster, extra) {
+    const row = this.#element("row"), check = row.querySelector("input"), name = row.querySelector("th"); this.#rowIds.set(row, cluster.uid);
+    const select = (checked, range) => { this.#selection.select(cluster.uid, checked, { range, orderedIds: this.#filtered.map(({ uid }) => uid) }); this.#syncSelection(); };
+    check.onclick = (event) => select(check.checked, event.shiftKey);
+    name.onclick = (event) => select(!this.#selection.has(cluster.uid), event.shiftKey);
+    this.#panel.columns.forEach((_, index) => {
+      const cell = this.#element("cell"), field = cell.firstElementChild;
+      if (this.#domain === null) field.setAttribute("type", "number");
+      else field.options = [["", "Missing"], ...this.#domain.map((name, i) => [String(i), name])];
+      field.addEventListener("value-commit", (event) => {
+        event.stopPropagation(); const values = [...(this.#panel.values[cluster.uid] || this.#panel.columns.map(() => null))], value = event.detail.value;
+        values[index] = value === "" ? null : this.#domain === null ? Number(value) : this.#domain[Number(value)];
+        if (!this.#emit("rows-change", { values: { [cluster.uid]: values } })) event.preventDefault();
+      });
+      row.append(cell);
+    });
+    if (extra) row.append(this.#element("empty-cell"));
+    return this.#updateRow(row, cluster);
+  }
+
+  #updateRow(row, cluster) {
+    const label = cluster.name || cluster.uid, name = row.querySelector("th"); name.textContent = label; name.title = cluster.uid;
+    row.querySelector("input").setAttribute("aria-label", `Select ${label}`);
+    [...row.querySelectorAll("clinker-editable-field")].forEach((field, index) => {
+      const value = this.#panel.values[cluster.uid]?.[index] ?? null;
+      field.setAttribute("label", `${label}: ${this.#panel.columns[index]}`);
+      field.value = this.#domain === null ? value : value === null ? "" : String(this.#domain.indexOf(value));
+    });
+    return row;
+  }
+}
+
+function defineAnnotationTable() {
+  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineDataTable(); defineAnnotationValueActions();
+  if (!customElements.get("clinker-annotation-table")) customElements.define("clinker-annotation-table", AnnotationTable);
 }
 
 /** Shared CSV/TSV/JSON boundary for creation and replacement. */
@@ -1635,8 +1804,7 @@ const editorTemplate = createTemplate(`<div class="cm-data-ui cm-annotation-data
   </clinker-annotation-toolbar>
   <div class="cm-data-error" data-data-error role="alert"></div><div class="cm-annotation-data-body"></div>
 </div>`);
-const matrixTemplate = createTemplate(await "<template id=\"table\">\n<table><thead><tr>\n  <th class=\"cm-data-cell cm-data-cell--select cm-data-head\"><input type=\"checkbox\" aria-label=\"Select all filtered clusters\"></th>\n  <th class=\"cm-data-cell cm-data-head\">Cluster</th>\n</tr></thead><tbody></tbody></table>\n</template>\n\n<template id=\"column\">\n<th class=\"cm-data-cell cm-data-head\"><div class=\"cm-annotation-column\">\n  <clinker-editable-field required></clinker-editable-field><button type=\"button\" class=\"cm-data-icon-button\">×</button>\n</div></th>\n</template>\n\n<template id=\"add-column\">\n<th class=\"cm-data-cell cm-data-head cm-annotation-add-column\"><form>\n  <button type=\"button\" aria-label=\"Add column\">+</button>\n  <input type=\"text\" aria-label=\"New column name\" placeholder=\"Column name\" hidden><button type=\"submit\" hidden>Add</button>\n</form></th>\n</template>\n\n<template id=\"row\">\n<tr class=\"cm-data-row\">\n  <td class=\"cm-data-cell cm-data-cell--select\"><input type=\"checkbox\"></td><th class=\"cm-data-cell\" scope=\"row\"></th>\n</tr>\n</template>\n\n<template id=\"empty-cell\">\n<td class=\"cm-data-cell\"></td>\n</template>\n\n<template id=\"spacer\">\n<tr class=\"cm-annotation-spacer\" aria-hidden=\"true\"><td></td></tr>\n</template>\n\n<template id=\"cell\">\n  <td class=\"cm-data-cell\"><clinker-editable-field placeholder=\"—\" step=\"any\"></clinker-editable-field></td>\n</template>\n");
-const batchTemplate = createTemplate('<clinker-annotation-value-actions></clinker-annotation-value-actions>');
+const matrixTemplate = createTemplate('<clinker-annotation-table></clinker-annotation-table>');
 const categoriesTemplate = createTemplate('<clinker-category-editor class="cm-annotation-categories"></clinker-category-editor>');
 const replacementTemplate = createTemplate('<clinker-annotation-data-form mode="replace" hidden></clinker-annotation-data-form>');
 const groupsTemplate = createTemplate('<clinker-annotation-group-editor></clinker-annotation-group-editor>');
@@ -1644,7 +1812,7 @@ const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to at
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm(); defineAnnotationGroupEditor(); defineAnnotationValueActions(); defineDataTable();
+  defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm(); defineAnnotationGroupEditor(); defineDataTable(); defineAnnotationTable();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector("clinker-annotation-toolbar");
@@ -1652,26 +1820,21 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
   if (embedded) { toolbar.setAttribute("embedded", ""); toolbar.querySelector("clinker-search-field").remove(); toolbar.remove(); }
   let selected = null, applying = false, renderedPanel = null, renderedPanels = null, renderedClusters = null;
   let filter = "", creating = false, view = null, viewKey = null;
-  const selection = new RowSelection();
-  let selectionPanel = null, batchColumn = "0", batchValue = "";
   const getPanels = () => getData()?.annotationPanels || [];
   const current = () => getPanels().find((panel) => panel.uid === selected);
   const error = (message) => { status.textContent = message; };
   const run = createActionRunner(error);
-  const commit = (operations, refresh = true, control) => {
+  const commit = (operations) => {
     applying = true;
     try { return run(() => {
       patch(operations);
-      if (refresh) {
-        for (const menu of node.querySelectorAll("clinker-action-menu")) menu.open = false;
-        render();
-      } else { renderedPanel = current(); renderedPanels = getPanels(); }
-    }, control); } finally { applying = false; }
+      render();
+    }); } finally { applying = false; }
   };
-  const update = (changes, refresh = true, control) => commit([{ type: "annotationPanels.update", ids: [selected], changes }], refresh, control);
+  const update = (changes) => commit([{ type: "annotationPanels.update", ids: [selected], changes }]);
   const categoryScale = (panel, domain, colours) => ({ ...panel.scale, type: "categorical", domain,
     colours: colours.length ? colours : [...ANNOTATION_PALETTES.Qualitative] });
-  const clearSelection = () => { selection.clear(); view?.syncSelection?.(); };
+  const clearSelection = () => view?.matrix?.clearSelection();
   toolbar.addEventListener("panel-change", (event) => { selected = event.detail.value; creating = false; render(); });
   toolbar.addEventListener("panel-action", (event) => {
     const { action } = event.detail;
@@ -1687,120 +1850,28 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
     }
   });
   const search = !embedded && toolbar.querySelector("clinker-search-field");
-  if (search) search.addEventListener("input", () => { filter = search.value; view?.filterRows?.(); });
-  node.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !event.defaultPrevented && selection.size) { event.preventDefault(); clearSelection(); }
-  });
+  if (search) search.addEventListener("input", () => { filter = search.value; view?.update(); });
+  const disposeView = () => { view?.matrix?.cancelEdit(); view?.categories?.cancelEdit(); view?.groups?.cancelEdit(); };
 
-  const disposeView = () => { view?.categories?.cancelEdit(); view?.groups?.cancelEdit(); view?.destroy?.(); };
-
-  function createMatrix(layout) {
-    const panel = current(), categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel), extra = panel.type === "heatmap";
-    const templates = matrixTemplate(document);
-    const element = (name) => document.importNode(templates.getElementById(name).content, true).firstElementChild;
-    const tableArea = layout.viewport; tableArea.classList.add("cm-annotation-matrix");
-    const table = element("table"), head = table.querySelector("tr"), all = head.querySelector("input");
-    tableArea.append(table);
-    let clusters = [], mounted = [];
-    const rowIds = new WeakMap();
-    const syncSelection = () => {
-      selectionControls.update({ ids: clusters.map((cluster) => cluster.uid), summary: `${clusters.length.toLocaleString()} visible clusters`, noun: "cluster" });
-      for (const row of mounted) {
-        const checked = selection.has(rowIds.get(row)); row.classList.toggle("is-selected", checked); row.setAttribute("aria-selected", String(checked));
-        row.querySelector('[type="checkbox"]').checked = checked;
-      }
-    };
-    const selectionControls = createSelectionControls(layout, { selection, checkbox: all, menuLabel: "Edit values…", onChange: syncSelection });
-    const batch = batchTemplate(document).firstElementChild;
-    selectionControls.actions.append(batch);
-    batch.state = { columns: panel.columns, domain: categorical ? resolved.domain : null, draft: { column: batchColumn, value: batchValue } };
-    batch.addEventListener("draft-change", (event) => { batchColumn = event.detail.column; batchValue = event.detail.value; });
-    const updateRows = (values, refresh = true, control) => {
-      const source = current();
-      return commit([
-        ...(categorical && !source.scale?.domain ? [{ type: "annotationPanels.update", ids: [selected],
-          changes: { scale: categoryScale(source, resolved.domain, resolved.domain.map(resolved.colour)) } }] : []),
-        { type: "annotationPanels.updateRows", uid: selected, values },
-      ], refresh, control);
-    };
-    batch.addEventListener("values-commit", (event) => {
-      const source = current(), values = {};
-      const { column, value } = event.detail;
-      for (const uid of selection) {
-        const row = [...(source.values[uid] || source.columns.map(() => null))];
-        source.columns.forEach((_, index) => { if (column === "all" || index === column) row[index] = value; }); values[uid] = row;
-      }
-      if (updateRows(values) === false) event.preventDefault();
+  function createMatrix(parent) {
+    const matrix = matrixTemplate(document).firstElementChild; parent.append(matrix);
+    matrix.addEventListener("columns-change", (event) => { if (update(event.detail) === false) event.preventDefault(); });
+    matrix.addEventListener("rows-change", (event) => {
+      const panel = current(), categorical = panel.scale?.type === "categorical", scale = resolveAnnotationScale(panel);
+      if (commit([
+        ...(categorical && !panel.scale?.domain ? [{ type: "annotationPanels.update", ids: [selected],
+          changes: { scale: categoryScale(panel, scale.domain, scale.domain.map(scale.colour)) } }] : []),
+        { type: "annotationPanels.updateRows", uid: selected, values: event.detail.values },
+      ]) === false) event.preventDefault();
     });
-    panel.columns.forEach((column, index) => {
-      const heading = element("column"), field = heading.querySelector("clinker-editable-field"), remove = heading.querySelector("button");
-      field.value = column; field.setAttribute("label", `Column ${index + 1} name`);
-      field.addEventListener("value-commit", (event) => {
-        const columns = [...current().columns]; columns[index] = event.detail.value.trim();
-        if (update({ columns }, true, field) === false) event.preventDefault();
-      });
-      if (extra) {
-        remove.setAttribute("aria-label", `Remove column ${column}`); remove.disabled = panel.columns.length === 1;
-        remove.onclick = () => update({ columns: current().columns.filter((_, i) => i !== index),
-          values: Object.fromEntries(Object.entries(current().values).map(([uid, values]) => [uid, values.filter((_, i) => i !== index)])) });
-      } else remove.remove();
-      head.append(heading);
-    });
-    if (extra) {
-      const heading = element("add-column"), form = heading.querySelector("form");
-      const [add, save] = form.querySelectorAll("button"), name = form.querySelector("input");
-      add.onclick = () => { add.hidden = true; name.hidden = save.hidden = false; name.focus(); };
-      form.onsubmit = (event) => {
-        event.preventDefault(); if (!name.value.trim()) return;
-        update({ columns: [...current().columns, name.value.trim()], values: Object.fromEntries(Object.entries(current().values).map(([uid, values]) => [uid, [...values, null]])) });
-      };
-      name.onkeydown = (event) => { if (event.key === "Escape") { event.preventDefault(); name.hidden = save.hidden = true; add.hidden = false; add.focus(); } };
-      head.append(heading);
-    }
-    const toggleRow = (cluster, checked, shift) => {
-      selection.select(cluster.uid, checked, { range: shift, orderedIds: clusters.map((cluster) => cluster.uid) }); syncSelection();
-    };
-    const createRow = (cluster) => {
-      const row = element("row"), check = row.querySelector("input"), name = row.querySelector("th");
-      rowIds.set(row, cluster.uid); check.onclick = (event) => toggleRow(cluster, check.checked, event.shiftKey);
-      name.onclick = (event) => toggleRow(cluster, !selection.has(cluster.uid), event.shiftKey);
-      panel.columns.forEach((column, index) => {
-        const cell = element("cell"), field = cell.firstElementChild;
-        if (categorical) field.options = [["", "Missing"], ...resolved.domain.map((name, i) => [String(i), name])];
-        else field.setAttribute("type", "number");
-        field.addEventListener("value-commit", (event) => {
-          const source = current(), values = [...(source.values[cluster.uid] ?? source.columns.map(() => null))];
-          const value = event.detail.value;
-          values[index] = value === "" ? null : categorical ? resolved.domain[Number(value)] : Number(value);
-          if (updateRows({ [cluster.uid]: values }, false, field) === false) event.preventDefault();
-        });
-        row.append(cell);
-      });
-      if (extra) row.append(element("empty-cell"));
-      return updateRow(row, cluster);
-    };
-    const updateRow = (row, cluster) => {
-      const name = row.querySelector("th"), label = cluster.name || cluster.uid;
-      name.textContent = label; name.title = cluster.uid; row.querySelector("input").setAttribute("aria-label", `Select ${label}`);
-      [...row.querySelectorAll("clinker-editable-field")].forEach((field, index) => {
-        const value = current().values[cluster.uid]?.[index] ?? null;
-        field.setAttribute("label", `${label}: ${panel.columns[index]}`);
-        field.value = categorical ? value === null ? "" : String(resolved.domain.indexOf(value)) : value;
-      });
-      return row;
-    };
-    const cancelFields = (root) => { for (const field of root.querySelectorAll("clinker-editable-field")) field.cancelEdit(); };
-    tableArea.renderer = { container: table.querySelector("tbody"), key: (cluster) => cluster.uid, createRow, updateRow, disposeRow: cancelFields,
-      createSpacer: () => { const row = element("spacer"); row.firstElementChild.colSpan = panel.columns.length + 2 + Number(extra); return row; },
-      headerHeight: () => head.offsetHeight, onRender: (nodes) => { mounted = nodes; table.setAttribute("aria-rowcount", clusters.length + 1); syncSelection(); } };
-    const filterRows = () => {
-      const needle = filter.trim().toLowerCase(); clusters = getClusters().filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle)); tableArea.rows = clusters;
-    };
-    return { update: filterRows, filterRows() { tableArea.scrollTop = 0; filterRows(); }, syncSelection, destroy() { tableArea.renderer = null; } };
+    return { matrix, update() {
+      const panel = current();
+      matrix.state = { panel, clusters: getClusters(), filter, domain: panel.scale?.type === "categorical" ? resolveAnnotationScale(panel).domain : null };
+    } };
   }
 
-  function createReplacement(layout) {
-    const box = replacementTemplate(document).firstElementChild; layout.tools.append(box);
+  function createReplacement(parent) {
+    const box = replacementTemplate(document).firstElementChild; box.slot = "tools"; parent.append(box);
     box.addEventListener("data-submit", (event) => { try {
       const source = current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(event.detail.data, categorical);
       if (categorical) {
@@ -1809,11 +1880,11 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
         const categories = [...domain]; changes.scale = categoryScale(source, categories, categories.map((value, i) =>
           scale.domain.includes(value) ? scale.colour(value) : ANNOTATION_PALETTES.Qualitative[i % ANNOTATION_PALETTES.Qualitative.length]));
       }
-      if (update(changes)) { box.hidden = true; layout.sync(); }
-    } catch (exception) { box.error = exception.message; layout.sync(); } });
-    box.addEventListener("data-cancel", () => { box.hidden = true; layout.sync(); });
+      if (update(changes)) box.hidden = true;
+    } catch (exception) { box.error = exception.message; } });
+    box.addEventListener("data-cancel", () => { box.hidden = true; });
     return () => {
-      box.hidden = !box.hidden; layout.sync();
+      box.hidden = !box.hidden;
       if (!box.hidden) { box.value = { data: annotationTableText(current(), getClusters()) }; box.error = ""; box.focus(); }
     };
   }
@@ -1832,40 +1903,36 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
     const panel = current(); renderedPanel = panel; renderedPanels = panels; renderedClusters = getClusters();
     toolbar.state = { panels, value: selected, creating };
     if (search) { search.hidden = !panel || creating || panel.type === "groups"; search.value = filter; }
-    if (selectionPanel !== panel?.uid) { selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = ""; }
-    selection.prune(new Set(getClusters().map((cluster) => cluster.uid)));
-    if (batchColumn !== "all" && Number(batchColumn) >= (panel?.columns?.length || 0)) batchColumn = "0";
     const categorical = panel?.scale?.type === "categorical";
-    if (categorical && batchValue !== "" && !resolveAnnotationScale(panel).domain[Number(batchValue)]) batchValue = "";
-    const key = creating ? "create" : panel ? JSON.stringify([panel.uid, panel.type, panel.columns, categorical && resolveAnnotationScale(panel).domain]) : "empty";
+    const key = creating ? "create" : panel ? JSON.stringify([panel.uid, panel.type]) : "empty";
     if (key !== viewKey) {
-      const scroll = viewKey && panel?.uid === view?.uid ? view.layout.viewport.scrollTop : 0;
-      const categoriesOpen = panel?.uid === view?.uid && view?.categories?.open;
       disposeView(); body.replaceChildren(); view = null; viewKey = key;
       if (creating) body.append(createAnnotationCreateControls({ document, getData, patch, annotationApi,
         onCreate: (uid) => { selected = uid; creating = false; render(); } }).node);
       else if (!panel) body.append(emptyTemplate(document));
       else {
-        const layout = createDataPanel(document, { label: "Editable annotation data" }); body.append(layout.node);
-        if (panel.type === "groups") { layout.meta.hidden = true; view = createGroups(layout.viewport); }
-        else {
-          view = createMatrix(layout);
-          view.replace = createReplacement(layout);
-          if (categorical) {
-            view.categories = categoriesTemplate(document).firstElementChild; layout.tools.prepend(view.categories);
-            view.categories.open = Boolean(categoriesOpen);
-            view.categories.palette = ANNOTATION_PALETTES.Qualitative;
-            view.categories.addEventListener("value-commit", (event) => {
-              const { value, replacements } = event.detail, mapping = new Map(replacements);
-              const changes = { scale: categoryScale(current(), value.map(({ name }) => name), value.map(({ colour }) => colour)) };
-              if (mapping.size) changes.values = mapAnnotationValues(current().values, (item) => mapping.has(item) ? mapping.get(item) : item);
-              if (update(changes) === false) event.preventDefault();
-            });
-          }
+        if (panel.type === "groups") {
+          const layout = createDataPanel(document, { label: "Editable annotation data" }); layout.meta.hidden = true;
+          body.append(layout.node); view = createGroups(layout.viewport);
+        } else {
+          view = createMatrix(body); view.replace = createReplacement(view.matrix);
         }
-        Object.assign(view, { uid: panel.uid, layout }); view.update(); layout.viewport.scrollTop = scroll;
       }
-    } else view?.update();
+    }
+    view?.update();
+    if (view?.matrix && categorical && !view.categories) {
+      view.categoryKey = null;
+      view.categories = categoriesTemplate(document).firstElementChild; view.categories.slot = "tools"; view.matrix.prepend(view.categories);
+      view.categories.palette = ANNOTATION_PALETTES.Qualitative;
+      view.categories.addEventListener("value-commit", (event) => {
+        const { value, replacements } = event.detail, mapping = new Map(replacements);
+        const changes = { scale: categoryScale(current(), value.map(({ name }) => name), value.map(({ colour }) => colour)) };
+        if (mapping.size) changes.values = mapAnnotationValues(current().values, (item) => mapping.has(item) ? mapping.get(item) : item);
+        if (update(changes) === false) event.preventDefault();
+      });
+    } else if (!categorical && view?.categories) {
+      view.categories.cancelEdit(); view.categories.remove(); view.categories = null;
+    }
     if (view?.categories) {
       const key = JSON.stringify(panel.scale);
       if (key !== view.categoryKey) {
@@ -1873,14 +1940,13 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
         view.categories.value = domain.map((name) => ({ name, colour: colour(name) })); view.categoryKey = key;
       }
     }
-    view?.layout.sync();
   }
   render();
   return { node, toolbar, select(uid) { selected = uid; creating = false; render(); }, clearSelection,
-    get filter() { return filter; }, setFilter(value) { filter = value; view?.filterRows?.(); },
+    get filter() { return filter; }, setFilter(value) { filter = value; view?.update(); },
     invalidate({ replace = false } = {}) {
       renderedPanel = renderedPanels = renderedClusters = null;
-      if (replace) { disposeView(); view = null; viewKey = null; selection.clear(); selected = selectionPanel = null; }
+      if (replace) { disposeView(); view = null; viewKey = null; selected = null; }
     },
     destroy() { disposeView(); toolbar.remove(); },
     update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters)) render(); } };
@@ -1892,24 +1958,6 @@ function installStyle(document) {
 @layer clinker-editor {
 .cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }
 .cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
-.cm-annotation-data-editor details { flex-shrink:0; }
-.cm-annotation-data-editor summary { cursor:pointer; color:var(--cm-muted,#687586); }
-.cm-annotation-matrix { position:relative; }
-.cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }
-
-.cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,#f3f6fa); }
-.cm-annotation-matrix tr > :first-child { position:sticky; left:0; z-index:1; width:32px; min-width:32px; background:var(--cm-row-background,var(--cm-subtle,#f3f6fa)); }
-.cm-annotation-matrix tr > :nth-child(2) { position:sticky; left:32px; z-index:1; }
-.cm-annotation-matrix tbody th { background:var(--cm-row-background); }
-.cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,#f3f6fa); }
-.cm-annotation-matrix tbody th { cursor:pointer; min-width:200px; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }
-.cm-annotation-matrix :is(input:not([type=checkbox]),clinker-editable-field) { width:140px; }
-.cm-annotation-column { display:flex; align-items:center; }
-.cm-annotation-column button { --cm-icon-size:24px; visibility:hidden; }
-.cm-annotation-column:is(:hover,:focus-within) button { visibility:visible; }
-.cm-annotation-add-column { width:36px; }
-.cm-annotation-add-column form { display:flex; gap:4px; }
-.cm-annotation-spacer > td { height:0; border:0; padding:0; }
 .cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }
 .cm-annotation-data-editor [data-data-error]:empty { display:none; }
 

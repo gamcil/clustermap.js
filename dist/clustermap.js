@@ -10696,10 +10696,7 @@ clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(
   /** Shared fixed-height row window for scrollable data editors. */
   const DATA_ROW_HEIGHT = 34;
 
-  function installDataEditorStyle(document) {
-    if (document.getElementById("cm-data-editor-style")) return;
-    const style = document.createElement("style"); style.id = "cm-data-editor-style";
-    style.textContent = `
+  const DATA_EDITOR_CSS = `
 @layer clinker-editor {
 .cm-data-ui { color:var(--cm-foreground,#273444); font:13px/1.4 system-ui,sans-serif; }
 .cm-data-ui [hidden] { display:none!important; }
@@ -10746,6 +10743,11 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
 }
 `;
+
+  function installDataEditorStyle(document) {
+    if (document.getElementById("cm-data-editor-style")) return;
+    const style = document.createElement("style"); style.id = "cm-data-editor-style";
+    style.textContent = DATA_EDITOR_CSS;
     document.head.append(style);
   }
 

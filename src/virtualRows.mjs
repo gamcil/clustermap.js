@@ -32,7 +32,8 @@ export function createVirtualRows({ viewport, container, key, createRow, updateR
       first = window.first; last = window.last;
       const visible = rows.slice(first, last), ids = new Set(visible.map(key));
       const remove = (node) => {
-        if (node.contains(document.activeElement)) { document.activeElement.blur(); viewport.focus({ preventScroll: true }); }
+        const focused = container.getRootNode().activeElement || document.activeElement;
+        if (node.contains(focused)) { focused.blur(); viewport.focus({ preventScroll: true }); }
         disposeRow(node); node.remove();
       };
       for (const [id, entry] of mounted) if (!ids.has(id)) { remove(entry.node); mounted.delete(id); }

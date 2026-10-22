@@ -246,6 +246,11 @@ test("categories can be added, assigned, renamed and removed with replacement", 
   expect(Object.values((await panelData(page, uid)).values).flat()).not.toContain("Renamed category");
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
   expect((await panelData(page, uid)).scale.domain).toContain("Renamed category");
+  const restored = await panelData(page, uid);
+  await page.evaluate((uid) => chart.patch([{ type: "annotationPanels.update", ids: [uid], changes: { scale: { type: "continuous" }, values: {} } }]), uid);
+  await expect(editor(page).locator("clinker-category-editor")).toHaveCount(0);
+  await page.evaluate(({ uid, scale, values }) => chart.patch([{ type: "annotationPanels.update", ids: [uid], changes: { scale, values } }]), restored);
+  await expect(editor(page).locator("clinker-category-editor clinker-editable-field")).toHaveCount(restored.scale.domain.length);
 });
 
 test("panel creation, visibility, ordering and removal are reflected in history", async ({ page }) => {
@@ -384,6 +389,36 @@ test("data table component mounts deferred rows and disposes them across reconne
   expect(result.removed).toBe(true); expect(result.reachedEnd).toBe(true); expect(result.empty).toBe(true); expect(result.cleared).toBe(true);
 });
 
+test("annotation table retains selection through column edits and cancels obsolete drafts", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  const uid = await annotation(page), before = await panelData(page, uid);
+  const matrix = editor(page).locator("clinker-annotation-table");
+  await matrix.evaluate((node) => { node.dataset.retained = "true"; });
+  await matrixRows(page).first().getByRole("checkbox").check();
+  const heading = matrix.locator('clinker-editable-field[label="Column 1 name"]');
+  await editField(heading); await heading.locator("input").fill("Renamed"); await heading.locator("input").press("Enter");
+  expect((await panelData(page, uid)).columns[0]).toBe("Renamed");
+  await matrix.getByRole("button", { name: "Add column", exact: true }).click();
+  await matrix.getByRole("textbox", { name: "New column name", exact: true }).fill("Extra");
+  await matrix.locator("thead form").getByRole("button", { name: "Add", exact: true }).click();
+  expect((await panelData(page, uid)).values.a).toEqual([...before.values.a, null]);
+  const remove = matrix.locator('button[aria-label="Remove column Extra"]');
+  await remove.locator("..").hover(); await remove.click();
+  expect((await panelData(page, uid)).values.a).toEqual(before.values.a);
+  await expect(matrix).toHaveAttribute("data-retained", "true");
+  await expect(matrix.locator(".cm-data-meta")).toContainText("1 cluster selected");
+  const field = matrixRows(page).first().locator("clinker-editable-field").first();
+  await editField(field); await field.locator("input").fill("99");
+  await page.evaluate((uid) => {
+    const panel = chart.data().annotationPanels.find((panel) => panel.uid === uid);
+    chart.patch([{ type: "annotationPanels.update", ids: [uid], changes: { columns: panel.columns.map((name, index) => index ? name : "External") } }]);
+  }, uid);
+  expect((await panelData(page, uid)).values.a).toEqual(before.values.a);
+  await expect(matrixRows(page).first().getByRole("checkbox")).toBeChecked();
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  expect((await panelData(page, uid)).columns[0]).toBe("Renamed");
+});
+
 test("annotation rows virtualize, preserve offscreen selection and filter all records", async ({ page }) => {
   // Exceed the shared 200-row virtualization threshold with a compact synthetic model.
   const ids = await page.evaluate(() => {
@@ -404,8 +439,11 @@ test("annotation rows virtualize, preserve offscreen selection and filter all re
   await expect(matrix.locator("table")).toHaveAttribute("aria-rowcount", "261");
   expect(await rows.count()).toBeLessThan(80);
   await rows.first().getByRole("checkbox").check();
+  const firstValue = rows.first().locator("clinker-editable-field").first();
+  await editField(firstValue); await firstValue.locator("input").fill("55");
   await matrix.evaluate((node) => { node.scrollTop = node.scrollHeight; });
   await expect(rows.last()).toContainText("Cluster 259");
+  expect((await panelData(page, "numeric")).values[ids[0]]).toEqual([55]);
   expect(await rows.count()).toBeLessThan(80);
   await rows.last().getByRole("checkbox").check();
   await editor(page).locator(".cm-data-actions clinker-action-menu summary").filter({ hasText: /^Edit values…$/ }).click();
