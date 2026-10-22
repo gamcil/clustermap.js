@@ -125,9 +125,8 @@ export default function clusterMap() {
   let chartState = null;
   let canvasHoverLocusUid = null;
   let canvasScene = null;
-  let canvasAnimation = null;
+  let rasterAnimation = null;
   let treeAnimation = null;
-  let webgpuAnimation = null;
   let scenePreview = null;
   let previewPaintFrame = null;
   let cancelCanvasFlip = null;
@@ -361,7 +360,7 @@ export default function clusterMap() {
       beginInteractionState();
       flipLocus(chartState, locus);
       if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
-        stopCanvasAnimation();
+        stopRasterAnimation();
         cancelCanvasFlip?.();
         const previewProgress = 0.12;
         const sourceScene = canvasScene || runtime.getScene();
@@ -510,11 +509,6 @@ export default function clusterMap() {
   function constrainZoom(scale) {
     const [minimum, maximum] = zoomExtent();
     return Math.max(minimum, Math.min(maximum, scale));
-  }
-
-  function stopWebGpuAnimation() {
-    webgpuAnimation?.cancel();
-    webgpuAnimation = null;
   }
 
   function my(selection, options) {
@@ -839,7 +833,7 @@ export default function clusterMap() {
       scene, camera: getCamera(chartState), config: runtime.renderConfig,
       scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(), tree: plotData.tree,
       preview: scenePreview, hoverLocusUid: canvasHoverLocusUid,
-      suppressLocusHover: scenePreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
+      suppressLocusHover: scenePreview?.type === "locus-flip",
       previousTree: treeAnimation?.previousTree, previousTreeScene: treeAnimation?.previousScene,
       treeTargetScene: treeAnimation?.targetScene, treeProgress: treeAnimation?.progress ?? 1,
       highlightGeneIds: highlightedGeneIds(), highlightLinkIds, highlightLocusIds: selectedLoci(),
@@ -914,11 +908,13 @@ export default function clusterMap() {
     return true;
   }
 
-  function paintCanvas(canvas = rasterCanvas, scene = canvasAnimation?.scene || canvasPendingFlip?.sourceScene || canvasBackend.pendingScene || runtime.getScene()) {
+  function paintCanvas(canvas = rasterCanvas, scene = null) {
+    const animation = rasterAnimation?.renderer === "canvas" ? rasterAnimation : null;
+    scene ||= animation?.scene || canvasPendingFlip?.sourceScene || canvasBackend.pendingScene || runtime.getScene();
     if (!canvas || !scene) return null;
     updateFigureSurface();
     const result = canvasBackend.paint({ ...sceneFrame(scene), canvas,
-      previousScene: canvasAnimation?.previousScene, progress: canvasAnimation?.progress });
+      previousScene: animation?.previousScene, progress: animation?.progress });
     paintMinimap();
     return result;
   }
@@ -966,55 +962,35 @@ export default function clusterMap() {
       renderBase: renderMinimapBase, onPaint: paintMinimap });
   }
 
-  function stopCanvasAnimation() {
-    canvasAnimation?.cancel();
-    canvasAnimation = null;
+  function stopRasterAnimation() {
+    rasterAnimation?.cancel();
+    rasterAnimation = null;
   }
 
-  function animateCanvas(scene, animate) {
-    stopCanvasAnimation();
-    if (!animate || !canvasScene || !runtime.config.plot.transitionDuration) {
-      treeAnimation = null;
-      canvasScene = scene;
-      paintCanvas();
-      return;
-    }
-    const previousScene = canvasScene;
-    if (treeAnimation) treeAnimation.targetScene = scene;
-    canvasAnimation = { previousScene, scene, progress: 0, cancel: null };
-    canvasAnimation.cancel = runAnimation(runtime.config.plot.transitionDuration, (progress) => {
-      if (treeAnimation) treeAnimation.progress = progress;
-      canvasAnimation.progress = progress;
-      paintCanvas();
-    }, () => {
-      canvasAnimation = null;
-      treeAnimation = null;
-      canvasScene = scene;
-      paintCanvas();
-    });
-  }
-
-  function animateWebGpu(previousScene, scene, animate) {
-    stopWebGpuAnimation();
+  function animateRaster(scene, animate) {
+    const renderer = runtime.config.plot.renderer;
+    const useWebGpu = isWebGpuRenderer(renderer);
+    const backend = useWebGpu ? webgpuBackend : canvasBackend;
+    const previousScene = useWebGpu ? backend.pendingScene : canvasScene;
+    stopRasterAnimation();
     const duration = runtime.config.plot.transitionDuration;
-    if (!animate || !previousScene || !duration) {
+    const finish = () => {
+      rasterAnimation = null;
       treeAnimation = null;
-      webgpuBackend.setScene(scene);
-      paintWebGpu(scene);
-      return;
-    }
+      if (!useWebGpu) canvasScene = scene;
+      backend.setScene(scene);
+      paintScene();
+    };
+    if (!animate || !previousScene || !duration) { finish(); return; }
     if (treeAnimation) treeAnimation.targetScene = scene;
-    webgpuAnimation = { cancel: runAnimation(duration, (progress) => {
-      const displayScene = interpolateScene(previousScene, scene, progress);
+    if (!useWebGpu) backend.setScene(scene);
+    rasterAnimation = { renderer, previousScene, scene, progress: 0, cancel: null };
+    rasterAnimation.cancel = runAnimation(duration, (progress) => {
+      rasterAnimation.progress = progress;
       if (treeAnimation) treeAnimation.progress = progress;
-      webgpuBackend.setScene(displayScene);
-      paintWebGpu(displayScene);
-    }, () => {
-      webgpuAnimation = null;
-      treeAnimation = null;
-      webgpuBackend.setScene(scene);
-      paintWebGpu(scene);
-    }) };
+      if (useWebGpu) backend.setScene(interpolateScene(previousScene, scene, progress));
+      paintScene();
+    }, finish);
   }
 
   const minimapInteractions = {
@@ -1064,7 +1040,7 @@ export default function clusterMap() {
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
-    if (!useWebGpu) stopWebGpuAnimation();
+    if (rasterAnimation?.renderer !== runtime.config.plot.renderer) stopRasterAnimation();
     if (!useWebGpu && webgpuBackend.hasResources()) {
       // A renderer owns the WebGPU context for its canvas. Dispose it before
       // the chart changes backend, and invalidate any async setup that might
@@ -1073,7 +1049,7 @@ export default function clusterMap() {
       sceneCommit = null;
     }
     if (!useRaster) { disposeRasterInteraction(); disposeRasterInteraction = () => {}; }
-    if (!useCanvas) { stopCanvasAnimation(); canvasBackend.destroy(); }
+    if (!useCanvas) canvasBackend.destroy();
     if (useRaster) svgBackend.destroy();
     const minimapOptions = runtime.config.plot.minimap || {};
     // The overview is a separate 2D canvas, so it works for both raster
@@ -1191,21 +1167,15 @@ export default function clusterMap() {
       ? runtime.patchScene(committedScene.sourceScene, committedScene.changes, data)
       : runtime.buildScene(data);
 
-    if (useCanvas) {
+    if (useRaster) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
-      canvasBackend.setScene(scene);
-      scheduleMinimapBase(scene);
-      animateCanvas(scene, hasInitialView && animate);
-    } else if (useWebGpu) {
-      if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
-      if (committedScene && !annotationsOnly) {
+      if (useWebGpu && committedScene && !annotationsOnly) {
         webgpuBackend.adoptScene(scene, committedScene.sourceScene, {
           scales: runtime.scales, config: runtime.renderConfig,
         });
       }
       scheduleMinimapBase(scene);
-      const previousScene = webgpuBackend.pendingScene;
-      animateWebGpu(previousScene, scene, hasInitialView && animate);
+      animateRaster(scene, hasInitialView && animate);
     } else {
       const previousScene = svgBackend.pendingScene;
       svgBackend.setScene(scene);
@@ -1219,7 +1189,7 @@ export default function clusterMap() {
         surfaces: [useRaster ? canvas.node() : svg.node()],
         getScene: () => runtime.getScene(), getPreview: () => scenePreview,
         getCamera: () => getCamera(chartState),
-        isBusy: () => isDragging(chartState) || Boolean(canvasAnimation || webgpuAnimation),
+        isBusy: () => isDragging(chartState) || Boolean(rasterAnimation),
         fontFamily: runtime.config.plot.fontFamily,
       };
       if (annotationOverlay) annotationOverlay.update(annotationUiContext);
@@ -1592,8 +1562,7 @@ export default function clusterMap() {
     retainedOverlay?.dispose();
     retainedOverlay = null;
     clearScenePreview();
-    stopCanvasAnimation();
-    stopWebGpuAnimation();
+    stopRasterAnimation();
     rasterMotion.dispose();
     rasterMinimap.clear();
     webgpuBackend.destroy();
