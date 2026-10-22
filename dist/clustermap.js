@@ -8222,35 +8222,16 @@
     return metrics;
   }
 
-  function isObject(a) {
-    return !!a && a.constructor === Object;
-  }
-
-  function updateConfig(target, source) {
-    for (const [key, value] of Object.entries(source)) {
-      if (!target.hasOwnProperty(key)) continue;
-      if (isObject(value)) {
-        updateConfig(target[key], value);
-      } else {
-        target[key] = value;
-      }
-    }
-  }
-
-  function rgbaToRgb(rgba, opacity = 0.6) {
-    let colour = color(rgba).rgb();
-    return rgb(
-      (1 - opacity) * 255 + opacity * colour.r,
-      (1 - opacity) * 255 + opacity * colour.g,
-      (1 - opacity) * 255 + opacity * colour.b
-    );
-  }
-
   function linkColours(source, scales, config) {
     const { asLine, groupColour } = config.link;
     const colour = source.colour || (groupColour
       ? scales.colour(scales.group(source.query.uid)) : scales.score(source.identity));
-    const fill = !source.colour && groupColour ? rgbaToRgb(colour) : colour;
+    let fill = colour;
+    if (!source.colour && groupColour) {
+      const { r, g, b } = color(colour).rgb();
+      // Group fills blend 40% white.
+      fill = rgb(102 + 0.6 * r, 102 + 0.6 * g, 102 + 0.6 * b);
+    }
     const stroke = asLine ? fill : source.colour || (groupColour ? colour : config.figureStyle?.outline || "black");
     return { fill, stroke };
   }
@@ -12878,6 +12859,14 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   /** Return independent, recursively cloned defaults for one chart instance. */
   function createDefaultConfig() {
     return cloneConfig(defaultConfig);
+  }
+
+  function updateConfig(target, source) {
+    for (const [key, value] of Object.entries(source)) {
+      if (!Object.hasOwn(target, key)) continue;
+      if (value && value.constructor === Object) updateConfig(target[key], value);
+      else target[key] = value;
+    }
   }
 
   function xDistance(scaleX, start, end) {

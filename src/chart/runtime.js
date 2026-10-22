@@ -2,8 +2,7 @@ import { max as d3max, min as d3min } from "d3-array";
 import { quantize } from "d3-interpolate";
 import { scaleLinear, scaleOrdinal, scaleSequential } from "d3-scale";
 import { interpolateGreys, interpolateRainbow } from "d3-scale-chromatic";
-import { updateConfig } from "../utils.js";
-import { createDefaultConfig } from "./config.js";
+import { createDefaultConfig, updateConfig } from "./config.js";
 import { validateTreeColouring, validateTreePresentation } from "../tree/presentation.mjs";
 import { filterLinks, getGroupScaleValues } from "../links/groups.mjs";
 import {

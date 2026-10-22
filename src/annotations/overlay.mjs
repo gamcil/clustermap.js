@@ -3,7 +3,6 @@ import { defineAnnotationEditor } from "../editor/components/annotation-editor/a
 import { createAnnotationControls } from "./controls.mjs";
 import { defineAnnotationDataForm } from "../editor/components/annotation-data-form/annotation-data-form.js";
 import { createAnnotationPanel } from "./data.mjs";
-import { createAnnotationTooltip } from "./tooltip.mjs";
 
 function installStyle(document) {
   if (document.getElementById("clustermap-annotation-ui-style")) return;
@@ -54,7 +53,7 @@ function installStyle(document) {
 /** Renderer-independent editing affordances, kept outside the exported scene. */
 export function createAnnotationOverlay({ container, getData, patch, annotationApi, editData }) {
   const getPanels = () => getData()?.annotationPanels || [];
-  const { annotationPanelsForFrame, annotationPanelBounds } = annotationApi;
+  const { annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell } = annotationApi;
   const document = container.ownerDocument, window = document.defaultView;
   installDataEditorStyle(document);
   installStyle(document);
@@ -71,12 +70,35 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
   hiddenButton.type = "button"; hiddenButton.hidden = true; hiddenButton.setAttribute("aria-haspopup", "dialog");
   const menu = element("div", "cm-data-ui cm-annotation-ui cm-annotation-menu"); menu.hidden = true;
   menu.setAttribute("role", "dialog"); menu.setAttribute("aria-label", "Annotation panel settings");
+  const tooltip = element("div", "annotation-tooltip"); tooltip.hidden = true;
+  tooltip.setAttribute("role", "tooltip");
+  Object.assign(tooltip.style, { position: "fixed", pointerEvents: "none", zIndex: "4",
+    maxWidth: "300px", padding: "8px 10px", border: "1px solid #cbd3de", borderRadius: "4px",
+    background: "white", boxShadow: "0 2px 8px rgba(0,0,0,.15)", color: "#273444",
+    fontSize: "12px", lineHeight: "1.5", overflowWrap: "anywhere" });
   let context = null, surfaces = [], hovered = null, menuState = null;
-  let tooltip = null;
+  let tooltipKey = null;
   let panelAreas = [], addArea = null;
   let areaScene = null, areaPreview = null;
   const contains = (bounds, point) => point.x >= bounds.minX && point.x <= bounds.maxX && point.y >= bounds.minY && point.y <= bounds.maxY;
   const hideFrame = () => { if (!menuState) { hovered = null; frame.hidden = true; addFrame.hidden = true; } };
+  const hideTooltip = () => { tooltip.hidden = true; tooltipKey = null; };
+  const updateTooltip = (event, point) => {
+    const cell = hitTestAnnotationCell(context.getScene(), point, context.getPreview());
+    if (!cell) { hideTooltip(); return; }
+    const key = JSON.stringify([cell.panelUid, cell.clusterUid, cell.column, cell.value]);
+    if (tooltipKey !== key) {
+      tooltipKey = key; tooltip.replaceChildren();
+      element("strong", "", tooltip).textContent = cell.title || cell.panelUid;
+      for (const value of [cell.clusterName, `${cell.column}: ${cell.value === null ? "Missing" : cell.value}`]) {
+        element("div", "", tooltip).textContent = value;
+      }
+    }
+    tooltip.hidden = false;
+    const bounds = tooltip.getBoundingClientRect();
+    tooltip.style.left = `${Math.max(8, Math.min(event.clientX + 12, window.innerWidth - bounds.width - 8))}px`;
+    tooltip.style.top = `${Math.max(8, Math.min(event.clientY + 12, window.innerHeight - bounds.height - 8))}px`;
+  };
   const positionMenu = () => {
     if (!menuState?.anchor) return;
     const { anchor } = menuState;
@@ -87,9 +109,9 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
     menu.style.top = `${Math.max(8, Math.min(anchor.top, window.innerHeight - bounds.height - 8))}px`;
   };
   const close = (returnFocus = false) => {
+    hideTooltip();
     if (!menuState && !hovered && frame.hidden && addFrame.hidden) return;
     const opener = menuState?.opener;
-    menuState?.controls?.destroy?.();
     menuState = null; hovered = null; menu.hidden = true; frame.hidden = true; addFrame.hidden = true;
     menu.replaceChildren();
     for (const button of [edit, hiddenButton, add]) button.setAttribute("aria-expanded", "false");
@@ -103,9 +125,9 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
       patch: (operations) => { patch(operations); syncDataEditor(state); } };
   };
   const beginMenu = (kind, title, button, uid = null) => {
+    hideTooltip();
     // Keep the menu anchored when creating a panel moves its opener offscreen.
     const anchor = button.closest("[hidden]") ? menuState?.anchor : button.getBoundingClientRect();
-    menuState?.controls?.destroy?.();
     menuState = { kind, uid, anchor, opener: button };
     hovered = null; frame.hidden = true; addFrame.hidden = true;
     for (const opener of [edit, hiddenButton, add]) opener.setAttribute("aria-expanded", String(opener === button));
@@ -214,7 +236,8 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
     positionMenu();
     menu.querySelector("button")?.focus({ preventScroll: true });
   };
-  const refresh = () => {
+  const refresh = (event) => {
+    if (event) hideTooltip();
     if (!context) return;
     const scene = context.getScene();
     const preview = context.getPreview();
@@ -252,12 +275,13 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
     positionMenu();
   };
   const move = (event) => {
-    if (menuState) return;
-    if (event.buttons || context.isBusy()) { hideFrame(); return; }
+    if (menuState) { hideTooltip(); return; }
+    if (event.buttons || context.isBusy()) { hideTooltip(); hideFrame(); return; }
     refresh();
     const surface = event.currentTarget.getBoundingClientRect(), camera = context.getCamera();
     const point = { x: (event.clientX - surface.left - camera.x) / camera.k,
       y: (event.clientY - surface.top - camera.y) / camera.k };
+    updateTooltip(event, point);
     const padded = (bounds) => ({ minX: bounds.minX - 10 / camera.k, maxX: bounds.maxX + 10 / camera.k,
       minY: bounds.minY - 12 / camera.k, maxY: bounds.maxY + 12 / camera.k });
     const area = [...panelAreas].reverse().find((area) => contains(padded(area.bounds), point));
@@ -271,6 +295,7 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
     }
   };
   const leave = (event) => {
+    hideTooltip();
     if (frame.contains(event.relatedTarget) || addFrame.contains(event.relatedTarget) || menu.contains(event.relatedTarget)) return;
     hideFrame();
   };
@@ -300,23 +325,14 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
     update(next) {
       const nextSurfaces = next.surfaces.filter(Boolean);
       const surfacesChanged = surfaces.length !== nextSurfaces.length || surfaces.some((surface, i) => surface !== nextSurfaces[i]);
-      const fontChanged = context?.fontFamily !== next.fontFamily;
       if (surfacesChanged) detach();
       context = next; surfaces = nextSurfaces;
-      for (const item of [frame, addFrame, menu, hiddenButton]) item.style.fontFamily = next.fontFamily;
+      for (const item of [frame, addFrame, menu, hiddenButton, tooltip]) item.style.fontFamily = next.fontFamily;
       if (surfacesChanged) for (const surface of surfaces) {
         surface.addEventListener("pointermove", move); surface.addEventListener("pointerleave", leave);
         surface.addEventListener("pointerdown", dismissForGesture); surface.addEventListener("wheel", dismissForGesture);
       }
-      const showTooltip = Boolean(context.getScene()?.annotationPanels?.length);
-      if (surfacesChanged || fontChanged || Boolean(tooltip) !== showTooltip) {
-        tooltip?.dispose();
-        tooltip = showTooltip ? createAnnotationTooltip({ container, surfaces, annotationApi,
-          getScene: () => context.getScene(), getPreview: () => context.getPreview(),
-          getCamera: () => context.getCamera(), isBusy: () => context.isBusy() || Boolean(menuState),
-          fontFamily: next.fontFamily }) : null;
-      }
-      tooltip?.hide();
+      hideTooltip();
       if (menuState?.editor) {
         const data = getData(), panel = data.annotationPanels?.find((panel) => panel.uid === menuState.editor.value);
         if (menuState.panels !== data.annotationPanels || menuState.panel !== panel || menuState.clusters !== data.clusters) {
@@ -326,11 +342,9 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
       refresh();
     },
     dispose() {
-      menuState?.controls?.destroy?.();
-      tooltip?.dispose();
       detach(); window.removeEventListener("click", outside); window.removeEventListener("keydown", escape);
       window.removeEventListener("resize", refresh); window.removeEventListener("scroll", refresh, true);
-      frame.remove(); addFrame.remove(); menu.remove(); hiddenButton.remove();
+      frame.remove(); addFrame.remove(); menu.remove(); hiddenButton.remove(); tooltip.remove();
     },
   };
 }
