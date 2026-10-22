@@ -1622,12 +1622,8 @@ class AnnotationTable extends HTMLElementBase$1 {
     this.#batch.addEventListener("draft-change", (event) => { event.stopPropagation(); this.#draft = event.detail; });
     this.#batch.addEventListener("values-commit", (event) => {
       event.stopPropagation();
-      const { column, value } = event.detail, values = {};
-      for (const uid of this.#selection) {
-        const row = [...(this.#panel.values[uid] || this.#panel.columns.map(() => null))];
-        row.forEach((_, index) => { if (column === "all" || column === index) row[index] = value; }); values[uid] = row;
-      }
-      if (!this.#emit("rows-change", { values })) event.preventDefault();
+      const { column, value } = event.detail;
+      if (!this.#setValues(this.#selection, column, value)) event.preventDefault();
     });
     root.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !event.defaultPrevented && this.#selection.size) {
@@ -1661,6 +1657,14 @@ class AnnotationTable extends HTMLElementBase$1 {
     return accepted;
   }
   #columns(columns, values) { return this.#emit("columns-change", { columns, ...(values ? { values } : {}) }); }
+  #setValues(ids, column, value) {
+    const values = {};
+    for (const uid of ids) {
+      const row = this.#panel.values[uid] || this.#panel.columns.map(() => null);
+      values[uid] = row.map((current, index) => column === "all" || column === index ? value : current);
+    }
+    return this.#emit("rows-change", { values });
+  }
 
   #syncSelection() {
     this.#selectionBar.state = { selection: this.#selection, ids: this.#filtered.map(({ uid }) => uid), summary: `${this.#filtered.length.toLocaleString()} visible clusters`, noun: "cluster" };
@@ -1723,9 +1727,8 @@ class AnnotationTable extends HTMLElementBase$1 {
       if (this.#domain === null) field.setAttribute("type", "number");
       else field.options = [["", "Missing"], ...this.#domain.map((name, i) => [String(i), name])];
       field.addEventListener("value-commit", (event) => {
-        event.stopPropagation(); const values = [...(this.#panel.values[cluster.uid] || this.#panel.columns.map(() => null))], value = event.detail.value;
-        values[index] = value === "" ? null : this.#domain === null ? Number(value) : this.#domain[Number(value)];
-        if (!this.#emit("rows-change", { values: { [cluster.uid]: values } })) event.preventDefault();
+        event.stopPropagation(); const value = event.detail.value;
+        if (!this.#setValues([cluster.uid], index, value === "" ? null : this.#domain === null ? Number(value) : this.#domain[Number(value)])) event.preventDefault();
       });
       row.append(cell);
     });
