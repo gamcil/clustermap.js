@@ -1,7 +1,7 @@
 <template id="groups">
   <div class="cm-data-row cm-editor__row cm-editor__row--groups">
-    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
-    <button type="button" class="cm-data-icon-button cm-editor__reorder" draggable="true" data-reorder>⠿</button>
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox" data-select></span>
+    <button type="button" class="cm-data-icon-button cm-editor__reorder" draggable="true" data-reorder title="Drag to reorder; Arrow Up or Arrow Down moves one place">⠿</button>
     <clinker-editable-field class="cm-data-cell" data-type="groups" data-field="label" label="Group name" placeholder="Group name"></clinker-editable-field>
     <clinker-editable-field class="cm-data-cell" data-type="groups" data-field="subtitle" label="Legend label" placeholder="Add subtitle…"></clinker-editable-field>
     <span class="cm-data-cell" data-count></span>
@@ -17,7 +17,7 @@
 
 <template id="links">
   <div class="cm-data-row cm-editor__row cm-editor__row--links">
-    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox" data-select></span>
     <span class="cm-data-cell" data-text="source"></span>
     <span class="cm-data-cell" data-text="target"></span>
     <clinker-editable-field class="cm-data-cell" data-type="links" data-field="identity" label="Identity" type="number" min="0" max="100" step="any" required></clinker-editable-field>
@@ -35,7 +35,7 @@
 
 <template id="genes">
   <div class="cm-data-row cm-editor__row cm-editor__row--genes">
-    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox" data-select></span>
     <clinker-editable-field class="cm-data-cell" data-type="genes" data-field="label" label="Gene label" placeholder="Gene label"></clinker-editable-field>
     <span class="cm-data-cell" data-text="locus"></span>
     <span class="cm-data-cell" data-text="cluster"></span>
@@ -46,7 +46,7 @@
 
 <template id="gene">
   <div class="cm-data-row cm-editor__tree-row cm-editor__tree-gene">
-    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox"></span>
+    <span class="cm-data-cell cm-data-cell--select"><input type="checkbox" data-select></span>
     <span aria-hidden="true"></span>
     <clinker-editable-field class="cm-data-cell" data-type="genes" data-field="label" label="Gene label" placeholder="Gene label"></clinker-editable-field>
     <span class="cm-data-cell" data-text="group"></span>
@@ -61,7 +61,7 @@
     <span class="cm-editor__tree-name-with-count">
       <clinker-editable-field class="cm-data-cell" data-type="clusters" data-field="name" label="Cluster name" placeholder="Cluster name" compact required></clinker-editable-field>
       <span class="cm-editor__tree-count"></span>
-      <button type="button" class="cm-data-icon-button" data-remove-record>×</button>
+      <button type="button" class="cm-data-icon-button" data-remove-record aria-label="Remove cluster from plot" title="Remove cluster from plot">×</button>
     </span>
   </div>
 </template>
@@ -73,7 +73,7 @@
     <span class="cm-editor__tree-name-with-count">
       <clinker-editable-field class="cm-data-cell" data-type="loci" data-field="name" label="Locus name" placeholder="Locus name" compact required></clinker-editable-field>
       <span class="cm-editor__tree-count"></span>
-      <button type="button" class="cm-data-icon-button" data-remove-record>×</button>
+      <button type="button" class="cm-data-icon-button" data-remove-record aria-label="Remove locus from plot" title="Remove locus from plot">×</button>
     </span>
   </div>
 </template>
@@ -87,7 +87,7 @@
       <span class="cm-editor__tree-separator">·</span>
       <clinker-editable-field class="cm-data-cell" data-type="loci" data-field="name" label="Locus name" placeholder="Locus name" compact required></clinker-editable-field>
       <span class="cm-editor__tree-count"></span>
-      <button type="button" class="cm-data-icon-button" data-remove-record>×</button>
+      <button type="button" class="cm-data-icon-button" data-remove-record aria-label="Remove cluster from plot" title="Remove cluster from plot">×</button>
     </div>
   </div>
 </template>

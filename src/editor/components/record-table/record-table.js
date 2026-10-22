@@ -39,8 +39,9 @@ class RecordTable extends HTMLElementBase {
     });
     this.addEventListener("value-commit", (event) => {
       if (event.defaultPrevented) return;
-      const { type, id, field } = event.target.dataset;
-      if (!type || !field) return;
+      const { type, field } = event.target.dataset, row = this.#records.get(event.target.closest(".cm-data-row"))?.data;
+      if (!row || !type || !field) return;
+      const id = type === "clusters" ? row.cluster.uid : type === "loci" ? row.locus.uid : row.id;
       event.stopPropagation();
       const value = field === "identity" ? Number(event.detail.value) / 100 : event.detail.value.trim();
       if (!this.#emit({ action: "update", type, id, changes: { [field]: value } }, event.target)) event.preventDefault();

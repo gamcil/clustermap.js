@@ -172,7 +172,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
       if (this.#expanded.has(key)) this.#expanded.delete(key); else this.#expanded.add(key);
       this.#renderData();
     } else if (action === "update") {
-      if (!this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes })) event.preventDefault();
+      if (!this.#apply({ type: `${type}.update`, ids: [id], changes })) event.preventDefault();
     } else if (action === "remove") this.#removeRecords(type, [id]);
     else if (action === "reorder") this.#moveGroup(id, this.#data().groups.findIndex((group) => group.uid === id) + event.detail.direction);
     else if (action === "place") this.#placeGroup(id, event.detail.targetId, event.detail.after);
