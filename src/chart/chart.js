@@ -132,7 +132,6 @@ export default function clusterMap() {
   let clusterCommitFrame = null;
   let sceneCommit = null;
   let rasterCanvas = null, overlayCanvas = null, minimapCanvas = null;
-  let minimapScene = null;
   let currentData = null;
   let plotData = null;
   let plotDataDirty = true;
@@ -927,7 +926,6 @@ export default function clusterMap() {
   function paintMinimap() {
     if (!minimapCanvas) return;
     rasterMinimap.paint({ minimap: minimapCanvas, surface: rasterCanvas,
-      scene: minimapScene || runtime.getScene(), options: runtime.config.plot.minimap,
       camera: getCamera(chartState), pixelRatio: globalThis.devicePixelRatio || 1 });
   }
 
@@ -946,7 +944,6 @@ export default function clusterMap() {
     if (plotData.tree && runtime.config.tree.show) {
       scene = { ...scene, figureBounds: figureSurface.bounds(container.node(), scene, runtime.renderConfig, plotData.tree) };
     }
-    minimapScene = scene;
     rasterMinimap.scheduleBase({ scene, minimap: minimapCanvas, options: runtime.config.plot.minimap,
       renderBase: renderMinimapBase, onPaint: paintMinimap });
   }
@@ -983,9 +980,7 @@ export default function clusterMap() {
 
   const minimapInteractions = {
     getSurface: () => rasterCanvas,
-    getScene: () => minimapScene || runtime.getScene(),
     getCamera: () => getCamera(chartState),
-    getOptions: () => runtime.config.plot.minimap,
     moveCamera: (camera) => {
       const mainCanvas = rasterCanvas;
       if (!camera || !mainCanvas) return;
@@ -1044,7 +1039,7 @@ export default function clusterMap() {
     // backends. WebGPU owns only the main plot surface.
     const showMinimap = useRaster && minimapOptions.show;
     if (!useCanvas) clearScenePreview();
-    if (!showMinimap) { rasterMinimap.clear(); minimapScene = null; }
+    if (!showMinimap) rasterMinimap.clear();
 
     const svgSurface = ensureSvgSurface({
       container,
@@ -1560,7 +1555,7 @@ export default function clusterMap() {
     canvasZoom = null;
     hasInitialView = false;
     canvasHoverLocusUid = null;
-    rasterCanvas = overlayCanvas = minimapCanvas = minimapScene = null;
+    rasterCanvas = overlayCanvas = minimapCanvas = null;
     sceneCommit = null;
     chartIndex = null;
     highlightGeneIds.clear();

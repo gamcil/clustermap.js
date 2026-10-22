@@ -1,3 +1,4 @@
+import { cameraForMinimapPoint, minimapViewport, createMinimapProjection } from "../src/renderers/minimap.mjs";
 import { measureFigureBounds } from "../src/scene/measure.mjs";
 import { interpolateScene } from "../src/scene/preview.mjs";
 import test from "node:test";
@@ -5,11 +6,8 @@ import assert from "node:assert/strict";
 
 test("canvas renderer draws world-space scene geometry through the camera", async () => {
   const {
-	    cameraForMinimapPoint,
-    canvasMinimapViewport,
     canvasPixelRatioForCamera,
     canvasWorldViewport,
-    createMinimapProjection,
     hitTestCanvas,
     renderCanvas,
   } = await import("../src/renderers/canvas.js");
@@ -25,7 +23,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   };
   assertCoordinates(minimap.frame, { x: 4, y: 12, width: 112, height: 56 });
   assertCoordinates(
-    canvasMinimapViewport(minimap, { x: -10, y: -20, k: 1 }, { width: 40, height: 30 }),
+    minimapViewport(minimap, { x: -10, y: -20, k: 1 }, { width: 40, height: 30 }),
     { x: 4, y: 12, width: 44.8, height: 33.6 }
   );
   assertCoordinates(

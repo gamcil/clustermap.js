@@ -10416,107 +10416,6 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     return devicePixelRatio;
   }
 
-  function clamp(value, minimum, maximum) {
-    return Math.max(minimum, Math.min(maximum, value));
-  }
-
-  /** Project the complete chart bounds into a fixed-size screen-space minimap. */
-  function createMinimapProjection({ bounds, width, height, padding = 4 }) {
-    if (!bounds || !width || !height) return null;
-    const worldWidth = Math.max(1, bounds.maxX - bounds.minX);
-    const worldHeight = Math.max(1, bounds.maxY - bounds.minY);
-    const availableWidth = Math.max(1, width - padding * 2);
-    const availableHeight = Math.max(1, height - padding * 2);
-    const scale = Math.min(availableWidth / worldWidth, availableHeight / worldHeight);
-    const frame = {
-      x: (width - worldWidth * scale) / 2,
-      y: (height - worldHeight * scale) / 2,
-      width: worldWidth * scale,
-      height: worldHeight * scale,
-    };
-    return {
-      bounds,
-      width,
-      height,
-      scale,
-      frame,
-      x: frame.x - bounds.minX * scale,
-      y: frame.y - bounds.minY * scale,
-    };
-  }
-
-  /** Return the main viewport rectangle in minimap screen coordinates. */
-  function canvasMinimapViewport(projection, camera, viewport) {
-    if (!projection || !camera || !viewport) return null;
-    const minX = -camera.x / camera.k;
-    const maxX = (viewport.width - camera.x) / camera.k;
-    const minY = -camera.y / camera.k;
-    const maxY = (viewport.height - camera.y) / camera.k;
-    const { bounds, scale, x, y, frame } = projection;
-    const left = clamp(x + minX * scale, frame.x, frame.x + frame.width);
-    const right = clamp(x + maxX * scale, frame.x, frame.x + frame.width);
-    const top = clamp(y + minY * scale, frame.y, frame.y + frame.height);
-    const bottom = clamp(y + maxY * scale, frame.y, frame.y + frame.height);
-    return { x: left, y: top, width: right - left, height: bottom - top };
-  }
-
-  /** Centre the existing camera scale on a point selected in the minimap. */
-  function cameraForMinimapPoint(projection, point, viewport, camera) {
-    const worldX = clamp(
-      (point.x - projection.x) / projection.scale,
-      projection.bounds.minX,
-      projection.bounds.maxX
-    );
-    const worldY = clamp(
-      (point.y - projection.y) / projection.scale,
-      projection.bounds.minY,
-      projection.bounds.maxY
-    );
-    return {
-      ...camera,
-      x: viewport.width / 2 - worldX * camera.k,
-      y: viewport.height / 2 - worldY * camera.k,
-    };
-  }
-
-  /** Composite a cached overview raster with the live main-camera viewport. */
-  function renderCanvasMinimap({
-    canvas,
-    baseCanvas = null,
-    projection,
-    camera,
-    viewport,
-    pixelRatio = globalThis.devicePixelRatio || 1,
-  }) {
-    if (!projection) return null;
-    const { width, height, frame } = projection;
-    const pixelWidth = Math.round(width * pixelRatio);
-    const pixelHeight = Math.round(height * pixelRatio);
-    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-      canvas.width = pixelWidth;
-      canvas.height = pixelHeight;
-    }
-    const context = canvas.getContext("2d");
-    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    context.clearRect(0, 0, width, height);
-    if (baseCanvas) context.drawImage(baseCanvas, 0, 0, width, height);
-    else {
-      context.fillStyle = "white";
-      context.fillRect(0, 0, width, height);
-    }
-    context.strokeStyle = "rgba(0, 0, 0, 0.55)";
-    context.lineWidth = 1;
-    context.strokeRect(frame.x, frame.y, frame.width, frame.height);
-    const visible = canvasMinimapViewport(projection, camera, viewport);
-    if (visible) {
-      context.fillStyle = "rgba(30, 120, 255, 0.16)";
-      context.fillRect(visible.x, visible.y, visible.width, visible.height);
-      context.strokeStyle = "rgb(30, 120, 255)";
-      context.strokeRect(visible.x, visible.y, visible.width, visible.height);
-    }
-    return { width, height, pixelRatio, viewport: visible };
-  }
-
   /**
    * Return the portion of chart-world space covered by a Canvas. A small
    * screen-space margin prevents records from popping at its edge while panning.
@@ -12026,29 +11925,117 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       .style("dominant-baseline", "hanging");
   }
 
-  /**
-   * Retain the overview bitmap separately from either raster backend. The
-   * controller deliberately knows nothing about D3 or chart state: callers
-   * provide the current scene, camera, and the callback that draws an overview.
-   */
+  function clamp(value, minimum, maximum) {
+    return Math.max(minimum, Math.min(maximum, value));
+  }
+
+  /** Project the complete chart bounds into a fixed-size screen-space minimap. */
+  function createMinimapProjection({ bounds, width, height, padding = 4 }) {
+    if (!bounds || !width || !height) return null;
+    const worldWidth = Math.max(1, bounds.maxX - bounds.minX);
+    const worldHeight = Math.max(1, bounds.maxY - bounds.minY);
+    const availableWidth = Math.max(1, width - padding * 2);
+    const availableHeight = Math.max(1, height - padding * 2);
+    const scale = Math.min(availableWidth / worldWidth, availableHeight / worldHeight);
+    const frame = {
+      x: (width - worldWidth * scale) / 2,
+      y: (height - worldHeight * scale) / 2,
+      width: worldWidth * scale,
+      height: worldHeight * scale,
+    };
+    return {
+      bounds,
+      width,
+      height,
+      scale,
+      frame,
+      x: frame.x - bounds.minX * scale,
+      y: frame.y - bounds.minY * scale,
+    };
+  }
+
+  /** Return the main viewport rectangle in minimap screen coordinates. */
+  function minimapViewport(projection, camera, viewport) {
+    if (!projection || !camera || !viewport) return null;
+    const { minX, maxX, minY, maxY } = worldViewport(camera, viewport, 0);
+    const { scale, x, y, frame } = projection;
+    const left = clamp(x + minX * scale, frame.x, frame.x + frame.width);
+    const right = clamp(x + maxX * scale, frame.x, frame.x + frame.width);
+    const top = clamp(y + minY * scale, frame.y, frame.y + frame.height);
+    const bottom = clamp(y + maxY * scale, frame.y, frame.y + frame.height);
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  }
+
+  /** Centre the existing camera scale on a point selected in the minimap. */
+  function cameraForMinimapPoint(projection, point, viewport, camera) {
+    const worldX = clamp(
+      (point.x - projection.x) / projection.scale,
+      projection.bounds.minX,
+      projection.bounds.maxX
+    );
+    const worldY = clamp(
+      (point.y - projection.y) / projection.scale,
+      projection.bounds.minY,
+      projection.bounds.maxY
+    );
+    return {
+      ...camera,
+      x: viewport.width / 2 - worldX * camera.k,
+      y: viewport.height / 2 - worldY * camera.k,
+    };
+  }
+
+  /** Composite a cached overview raster with the live main-camera viewport. */
+  function renderCanvasMinimap({
+    canvas,
+    baseCanvas = null,
+    projection,
+    camera,
+    viewport,
+    pixelRatio = globalThis.devicePixelRatio || 1,
+  }) {
+    if (!projection) return null;
+    const { width, height, frame } = projection;
+    const pixelWidth = Math.round(width * pixelRatio);
+    const pixelHeight = Math.round(height * pixelRatio);
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+    }
+    const context = canvas.getContext("2d");
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    if (baseCanvas) context.drawImage(baseCanvas, 0, 0, width, height);
+    else {
+      context.fillStyle = "white";
+      context.fillRect(0, 0, width, height);
+    }
+    context.strokeStyle = "rgba(0, 0, 0, 0.55)";
+    context.lineWidth = 1;
+    context.strokeRect(frame.x, frame.y, frame.width, frame.height);
+    const visible = minimapViewport(projection, camera, viewport);
+    if (visible) {
+      context.fillStyle = "rgba(30, 120, 255, 0.16)";
+      context.fillRect(visible.x, visible.y, visible.width, visible.height);
+      context.strokeStyle = "rgb(30, 120, 255)";
+      context.strokeRect(visible.x, visible.y, visible.width, visible.height);
+    }
+    return { width, height, pixelRatio, viewport: visible };
+  }
+
+  /** Retain the overview bitmap and its projection independently of the main renderer. */
   function createRasterMinimap({
     requestFrame = globalThis.requestAnimationFrame,
     cancelFrame = globalThis.cancelAnimationFrame,
     createCanvas = () => document.createElement("canvas"),
   } = {}) {
     let baseCanvas = null;
+    let projection = null;
     let baseFrame = null;
     let gesture = false;
     let binding = null;
 
-    const projectionFor = (scene, options) =>
-      createMinimapProjection({
-        bounds: scene?.figureBounds || scene?.bounds,
-        width: options.width,
-        height: options.height,
-      });
-    const cameraForPointer = ({ event, minimap, surface, scene, options, camera }) => {
-      const projection = projectionFor(scene, options);
+    const cameraForPointer = ({ event, minimap, surface, camera }) => {
       if (!projection || !minimap || !surface) return null;
       const minimapBounds = minimap.getBoundingClientRect();
       const surfaceBounds = surface.getBoundingClientRect();
@@ -12063,13 +12050,12 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     return {
       clear() {
         if (baseFrame !== null) cancelFrame(baseFrame);
-        baseFrame = null;
+        baseFrame = projection = null;
         gesture = false;
         binding?.on(".minimap", null); binding = null;
       },
 
-      paint({ minimap, surface, scene, options, camera, pixelRatio }) {
-        const projection = projectionFor(scene, options);
+      paint({ minimap, surface, camera, pixelRatio }) {
         if (!minimap || !surface || !projection) return null;
         const bounds = surface.getBoundingClientRect();
         return renderCanvasMinimap({
@@ -12084,13 +12070,15 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 
       scheduleBase({ scene, minimap, options, renderBase, onPaint }) {
         if (!scene?.bounds || !minimap) return;
+        const nextProjection = createMinimapProjection({ bounds: scene.figureBounds || scene.bounds,
+          width: options.width, height: options.height });
         if (baseFrame !== null) cancelFrame(baseFrame);
         baseFrame = requestFrame(() => {
           baseFrame = null;
-          const projection = projectionFor(scene, options);
-          if (!projection || !minimap.isConnected) return;
+          if (!nextProjection || !minimap.isConnected) return;
           if (!baseCanvas) baseCanvas = createCanvas();
-          renderBase({ canvas: baseCanvas, scene, projection });
+          renderBase({ canvas: baseCanvas, scene, projection: nextProjection });
+          projection = nextProjection;
           onPaint();
         });
       },
@@ -12099,9 +12087,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 
       bind(selection, {
         getSurface,
-        getScene,
         getCamera,
-        getOptions,
         moveCamera,
         beginMotion,
         endMotion,
@@ -12115,8 +12101,6 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
             event,
             minimap,
             surface: getSurface(),
-            scene: getScene(),
-            options: getOptions(),
             camera: getCamera(),
           });
           if (camera) moveCamera(camera);
@@ -15267,7 +15251,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let clusterCommitFrame = null;
     let sceneCommit = null;
     let rasterCanvas = null, overlayCanvas = null, minimapCanvas = null;
-    let minimapScene = null;
     let currentData = null;
     let plotData = null;
     let plotDataDirty = true;
@@ -16062,7 +16045,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     function paintMinimap() {
       if (!minimapCanvas) return;
       rasterMinimap.paint({ minimap: minimapCanvas, surface: rasterCanvas,
-        scene: minimapScene || runtime.getScene(), options: runtime.config.plot.minimap,
         camera: getCamera(chartState), pixelRatio: globalThis.devicePixelRatio || 1 });
     }
 
@@ -16081,7 +16063,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (plotData.tree && runtime.config.tree.show) {
         scene = { ...scene, figureBounds: figureSurface.bounds(container.node(), scene, runtime.renderConfig, plotData.tree) };
       }
-      minimapScene = scene;
       rasterMinimap.scheduleBase({ scene, minimap: minimapCanvas, options: runtime.config.plot.minimap,
         renderBase: renderMinimapBase, onPaint: paintMinimap });
     }
@@ -16118,9 +16099,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     const minimapInteractions = {
       getSurface: () => rasterCanvas,
-      getScene: () => minimapScene || runtime.getScene(),
       getCamera: () => getCamera(chartState),
-      getOptions: () => runtime.config.plot.minimap,
       moveCamera: (camera) => {
         const mainCanvas = rasterCanvas;
         if (!camera || !mainCanvas) return;
@@ -16179,7 +16158,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       // backends. WebGPU owns only the main plot surface.
       const showMinimap = useRaster && minimapOptions.show;
       if (!useCanvas) clearScenePreview();
-      if (!showMinimap) { rasterMinimap.clear(); minimapScene = null; }
+      if (!showMinimap) rasterMinimap.clear();
 
       const svgSurface = ensureSvgSurface({
         container,
@@ -16695,7 +16674,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       canvasZoom = null;
       hasInitialView = false;
       canvasHoverLocusUid = null;
-      rasterCanvas = overlayCanvas = minimapCanvas = minimapScene = null;
+      rasterCanvas = overlayCanvas = minimapCanvas = null;
       sceneCommit = null;
       chartIndex = null;
       highlightGeneIds.clear();

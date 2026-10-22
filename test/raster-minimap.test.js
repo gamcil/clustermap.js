@@ -61,8 +61,6 @@ test("raster minimap retains an overview and maps pointer movement to the shared
   const result = minimap.paint({
     minimap: overview,
     surface,
-    scene,
-    options: { width: 100, height: 80 },
     camera: { x: 0, y: 0, k: 1 },
     pixelRatio: 1,
   });
@@ -73,8 +71,6 @@ test("raster minimap retains an overview and maps pointer movement to the shared
     event: { clientX: 60, clientY: 60 },
     minimap: overview,
     surface,
-    scene,
-    options: { width: 100, height: 80 },
     camera: { x: 0, y: 0, k: 1 },
   });
   assert.ok(Math.abs(camera.x - 100) < 1e-9);
@@ -100,12 +96,9 @@ test("raster minimap retains an overview and maps pointer movement to the shared
   const cursors = [];
   let started = 0;
   let ended = 0;
-  let options = { width: 100, height: 80 };
   const bindings = {
     getSurface: () => surface,
-    getScene: () => scene,
     getCamera: () => ({ x: 0, y: 0, k: 1 }),
-    getOptions: () => options,
     moveCamera: (value) => moved.push(value),
     beginMotion: () => { started += 1; },
     endMotion: () => { ended += 1; },
@@ -123,13 +116,15 @@ test("raster minimap retains an overview and maps pointer movement to the shared
   const down = handlers.get("pointerdown.minimap");
   minimap.bind(selection, bindings);
   assert.equal(handlers.get("pointerdown.minimap"), down);
-  options = { width: 200, height: 80 };
+  minimap.scheduleBase({ scene, minimap: overview, options: { width: 200, height: 80 },
+    renderBase: () => {}, onPaint: () => {} });
+  frame();
   handlers.get("pointermove.minimap").call(pointer, pointerEvent);
   handlers.get("pointerup.minimap pointercancel.minimap").call(pointer, pointerEvent);
   assert.equal(started, 1);
   assert.equal(ended, 1);
   assert.equal(moved.length, 2, "rebinding preserves an active gesture");
-  assert.notDeepEqual(moved[0], moved[1], "pointer handling reads current minimap options");
+  assert.notDeepEqual(moved[0], moved[1], "pointer handling uses the current overview projection");
   assert.deepEqual(cursors, ["grabbing", "grab"]);
   minimap.clear();
   assert.equal(handlers.get(".minimap"), null);
