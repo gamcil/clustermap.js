@@ -197,6 +197,9 @@ and attach the chart to `<clinker-data-panel>` through its `.chart` property.
 It owns navigation, filtering, selection and batch actions; it can be mounted
 without the editor tabs or history buttons.
 
+For appearance controls alone, use `defineAppearancePanel()` and
+`<clinker-appearance-panel>` with the same `.chart` property.
+
 For the optional in-plot locus batch controls, import
 `mountPlotSelectionToolbar` from `clinker/editor` and call it with the mounted
 chart and a positioned plot container. It returns a cleanup function.

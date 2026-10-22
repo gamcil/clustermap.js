@@ -1,6 +1,6 @@
-import { createActionRunner, createTemplate } from "../uiControls.mjs";
-import { applyTheme, resolveTheme, figureConfig } from "../theme.mjs";
-import { createAppearanceControls } from "./appearanceControls.mjs";
+import { createTemplate } from "../uiControls.mjs";
+import { applyTheme, resolveTheme } from "../theme.mjs";
+import { defineAppearancePanel } from "./components/appearance-panel/appearance-panel.js";
 import { defineTabs } from "./components/tabs/tabs.js";
 import { defineDataPanel } from "./components/data-panel/data-panel.js";
 import { textAsset } from "./shared/textAsset.js";
@@ -12,13 +12,9 @@ const HTMLElementBase = globalThis.HTMLElement || class {};
 export class ClinkerEditorElement extends HTMLElementBase {
   #chart = null;
   #dataPanel = null;
-  #appearanceView = null;
+  #appearancePanel = null;
   #unsubscribe = null;
   #resizeStart = null;
-  #runEdit = createActionRunner((message) => {
-    const status = this.querySelector("[data-editor-error]");
-    if (status) { status.textContent = message; status.hidden = !message; }
-  });
   #editAnnotation = (event) => {
     if (event.defaultPrevented || event.detail?.chart !== this.#chart) return;
     event.preventDefault(); this.editAnnotations(event.detail.panelUid);
@@ -30,9 +26,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
       const command = event.target.closest("[data-command]")?.dataset.command;
       if (command === "undo") this.#chart?.undo?.();
       else if (command === "redo") this.#chart?.redo?.();
-    });
-    this.addEventListener("value-change", (event) => {
-      if (event.target.matches("[data-editor-tabs]") && event.detail.value === "appearance") this.#renderAppearance();
     });
     this.addEventListener("pointerdown", (event) => {
       if (!event.target.closest("[data-resize]") || !this.hasAttribute("resizable")) return;
@@ -50,7 +43,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   connectedCallback() {
-    defineTabs(); defineDataPanel();
+    defineTabs(); defineDataPanel(); defineAppearancePanel();
     this.classList.add("cm-editor", "cm-data-ui");
     if (!this.hasChildNodes()) this.#renderShell();
     this.ownerDocument.addEventListener("clustermap:edit-annotation", this.#editAnnotation);
@@ -85,7 +78,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
 
   reset() {
     this.#chart?.previewTreePresentation?.(null);
-    this.#appearanceView = null;
     this.#renderShell(); this.#render();
     return this;
   }
@@ -93,13 +85,13 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #renderShell() {
     this.replaceChildren(shellTemplate(this.ownerDocument));
     this.#dataPanel = this.querySelector("clinker-data-panel");
+    this.#appearancePanel = this.querySelector("clinker-appearance-panel");
   }
 
   #subscribe() {
     if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
     this.#unsubscribe = this.#chart.on("change", (change) => {
-      if (["config.change", "theme.change", "data.replace", "state.replace"].includes(change.type) ||
-          (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.presentation.")))) this.#renderAppearance();
+      if (["config.change", "theme.change", "state.replace"].includes(change.type)) this.#syncTheme();
       if (change.type === "history.change") this.#renderHistory();
     });
   }
@@ -107,7 +99,8 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #render() {
     if (!this.isConnected) return;
     if (this.#dataPanel) this.#dataPanel.chart = this.#chart;
-    this.#renderAppearance(); this.#renderHistory();
+    if (this.#appearancePanel) this.#appearancePanel.chart = this.#chart;
+    this.#syncTheme(); this.#renderHistory();
   }
 
   #renderHistory() {
@@ -117,31 +110,9 @@ export class ClinkerEditorElement extends HTMLElementBase {
     if (redo) redo.disabled = !this.#chart?.canRedo?.();
   }
 
-  #setConfig({ path, value }) {
-    if (!this.#chart?.config) return false;
-    const keys = path.split(".");
-    let config = value;
-    for (const key of keys.slice().reverse()) config = { [key]: config };
-    return this.#runEdit(() => this.#chart.config(config));
-  }
-
-  #renderAppearance() {
-    const container = this.querySelector("[data-appearance]");
-    const requestedConfig = this.#chart?.config?.();
-    const config = requestedConfig && figureConfig(requestedConfig);
+  #syncTheme() {
+    const config = this.#chart?.config?.();
     if (config) applyTheme(this, resolveTheme(config.plot.theme));
-    if (!container) return;
-    container.hidden = !config;
-    if (!config || this.querySelector('[data-panel="appearance"]')?.hidden) return;
-    if (!this.#appearanceView) {
-      this.#appearanceView = createAppearanceControls({ document: this.ownerDocument,
-        patch: (ops) => this.#chart.patch(ops), preview: (ops) => this.#chart.previewTreePresentation(ops) });
-      this.#appearanceView.node.addEventListener("config-change", (event) => {
-        if (this.#setConfig(event.detail) === false) event.preventDefault();
-      });
-      container.append(this.#appearanceView.node);
-    }
-    this.#appearanceView.update({ config, tree: this.#chart.data()?.tree });
   }
 
 }

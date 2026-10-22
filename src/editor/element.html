@@ -7,9 +7,6 @@
   </div>
 </header>
 <clinker-tabs data-editor-tabs label="Plot editor sections" value="data">
-  <div slot="status" data-editor-error class="cm-data-error" role="alert" hidden></div>
   <clinker-data-panel name="data" label="Data" data-panel="data"></clinker-data-panel>
-  <section name="appearance" label="Appearance" data-panel="appearance" class="cm-editor__panel" hidden>
-    <div class="cm-editor__appearance" data-appearance></div>
-  </section>
+  <clinker-appearance-panel name="appearance" label="Appearance" data-panel="appearance" hidden></clinker-appearance-panel>
 </clinker-tabs>

@@ -486,7 +486,7 @@ function applyTheme(element, theme) {
 [data-clustermap-theme] :is(button,select,input:not([type=color]):not([type=checkbox]),textarea):not(.cm-data-ui *) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }
 [data-clustermap-theme] button:hover:not(.cm-data-ui *) { background:var(--cm-hover)!important; }
 [data-clustermap-theme] button:disabled { opacity:.45; }
-:is(clinker-editor,clinker-data-panel)[data-clustermap-theme] { background:var(--cm-surface); color:var(--cm-foreground); border-color:var(--cm-border); }
+:is(clinker-editor,clinker-data-panel,clinker-appearance-panel)[data-clustermap-theme] { background:var(--cm-surface); color:var(--cm-foreground); border-color:var(--cm-border); }
 [data-clustermap-theme] .cm-annotation-menu :is(p,summary) { color:var(--cm-muted); }
 [data-clustermap-theme] :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { position:relative; z-index:1; background:transparent; color-scheme:light; }
 [data-clustermap-theme] .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border); }
@@ -494,6 +494,61 @@ function applyTheme(element, theme) {
 [data-clustermap-theme] canvas.clusterMapMinimap { color-scheme:light; }
 `;
   doc.head.append(style);
+}
+
+const controlStyles = await ":host([hidden]), [hidden] { display: none !important; }\nform { margin: 0; }\nbutton, input, select, textarea { box-sizing: border-box; font: inherit; color: inherit; }\nbutton, input:not([type=color]):not([type=checkbox]):not([type=range]), select, textarea {\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[type=color] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }\ninput[type=checkbox], button { cursor: pointer; }\ninput::placeholder, textarea::placeholder { color: var(--cm-muted, #687586); }\nbutton:where(:hover:not(:disabled)) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n:is(button, summary):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:is(input, select, textarea):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n";
+
+const [markup$h, css$h] = await Promise.all([
+  "<input type=\"search\" part=\"input\">\n<button type=\"button\" part=\"clear\" aria-label=\"Clear search\" title=\"Clear search\" hidden>×</button>\n",
+  ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput, button { box-sizing: border-box; color: inherit; font: inherit; }\ninput {\n  width: 100%;\n  min-width: 0;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #687586);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n",
+]);
+const template$h = createTemplate(markup$h);
+const HTMLElementBase$h = globalThis.HTMLElement || class {};
+
+class SearchField extends HTMLElementBase$h {
+  static observedAttributes = ["label", "placeholder"];
+  #input;
+  #clear;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$h;
+    root.append(style, template$h(this.ownerDocument));
+    this.#input = root.querySelector("input"); this.#clear = root.querySelector("button");
+    this.#input.oninput = () => this.#sync();
+    this.#clear.onclick = () => this.#clearValue();
+    this.#input.onkeydown = (event) => {
+      if (event.key !== "Escape" || !this.value || event.isComposing) return;
+      event.preventDefault(); event.stopPropagation(); this.#clearValue();
+    };
+    this.#sync();
+  }
+
+  get value() { return this.#input.value; }
+  set value(value) {
+    const next = String(value ?? "");
+    if (next !== this.value) this.#input.value = next;
+    this.#sync();
+  }
+  focus(options) { this.#input.focus(options); }
+  attributeChangedCallback() { this.#sync(); }
+
+  #sync() {
+    this.#input.setAttribute("aria-label", this.getAttribute("label") || "Filter records");
+    this.#input.placeholder = this.getAttribute("placeholder") || "Search";
+    this.#input.toggleAttribute("data-filled", Boolean(this.value));
+    this.#clear.hidden = !this.value;
+  }
+
+  #clearValue() {
+    this.value = ""; this.focus();
+    this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  }
+}
+
+function defineSearchField() {
+  if (!customElements.get("clinker-search-field")) customElements.define("clinker-search-field", SearchField);
 }
 
 const TREE_COLOURING_DEFAULTS = {
@@ -657,143 +712,15 @@ function resolveTreePresentation(tree, config = {}) {
   return value;
 }
 
-const controlStyles = await ":host([hidden]), [hidden] { display: none !important; }\nform { margin: 0; }\nbutton, input, select, textarea { box-sizing: border-box; font: inherit; color: inherit; }\nbutton, input:not([type=color]):not([type=checkbox]):not([type=range]), select, textarea {\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[type=color] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }\ninput[type=checkbox], button { cursor: pointer; }\ninput::placeholder, textarea::placeholder { color: var(--cm-muted, #687586); }\nbutton:where(:hover:not(:disabled)) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n:is(button, summary):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:is(input, select, textarea):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n";
-
-const [markup$h, css$h] = await Promise.all([
-  "<input type=\"search\" part=\"input\">\n<button type=\"button\" part=\"clear\" aria-label=\"Clear search\" title=\"Clear search\" hidden>×</button>\n",
-  ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput, button { box-sizing: border-box; color: inherit; font: inherit; }\ninput {\n  width: 100%;\n  min-width: 0;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #687586);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n",
-]);
-const template$h = createTemplate(markup$h);
-const HTMLElementBase$h = globalThis.HTMLElement || class {};
-
-class SearchField extends HTMLElementBase$h {
-  static observedAttributes = ["label", "placeholder"];
-  #input;
-  #clear;
-
-  constructor() {
-    super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$h;
-    root.append(style, template$h(this.ownerDocument));
-    this.#input = root.querySelector("input"); this.#clear = root.querySelector("button");
-    this.#input.oninput = () => this.#sync();
-    this.#clear.onclick = () => this.#clearValue();
-    this.#input.onkeydown = (event) => {
-      if (event.key !== "Escape" || !this.value || event.isComposing) return;
-      event.preventDefault(); event.stopPropagation(); this.#clearValue();
-    };
-    this.#sync();
-  }
-
-  get value() { return this.#input.value; }
-  set value(value) {
-    const next = String(value ?? "");
-    if (next !== this.value) this.#input.value = next;
-    this.#sync();
-  }
-  focus(options) { this.#input.focus(options); }
-  attributeChangedCallback() { this.#sync(); }
-
-  #sync() {
-    this.#input.setAttribute("aria-label", this.getAttribute("label") || "Filter records");
-    this.#input.placeholder = this.getAttribute("placeholder") || "Search";
-    this.#input.toggleAttribute("data-filled", Boolean(this.value));
-    this.#clear.hidden = !this.value;
-  }
-
-  #clearValue() {
-    this.value = ""; this.focus();
-    this.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-  }
-}
-
-function defineSearchField() {
-  if (!customElements.get("clinker-search-field")) customElements.define("clinker-search-field", SearchField);
-}
-
 const [markup$g, css$g] = await Promise.all([
-  "<div class=\"toolbar\"><clinker-search-field data-appearance-filter label=\"Find an appearance setting\" placeholder=\"Find a setting\"></clinker-search-field></div>\n<div class=\"settings\">\n  <fieldset>\n    <legend>Plot</legend>\n    <label><span>Interface theme</span><select data-config=\"plot.theme\" aria-label=\"Interface theme\"><option value=\"auto\">auto</option><option value=\"light\">light</option><option value=\"dark\">dark</option></select></label>\n    <label><span>Figure background</span><input type=\"color\" data-config=\"plot.background\" aria-label=\"Figure background\"></label>\n  </fieldset>\n  <fieldset>\n    <legend>Annotations</legend>\n    <label><span>Enable annotation panels</span><input type=\"checkbox\" data-config=\"annotations.enabled\" aria-label=\"Enable annotation panels\"></label>\n  </fieldset>\n  <fieldset>\n    <legend>Legend</legend>\n    <label><span>Show legend</span><input type=\"checkbox\" data-config=\"legend.show\" aria-label=\"Show legend\"></label>\n    <label><span>Position</span><select data-config=\"legend.position\" aria-label=\"Position\"><option value=\"right\">right</option><option value=\"bottom\">bottom</option></select></label>\n    <label><span>Columns</span><input type=\"number\" step=\"any\" data-config=\"legend.columns\" aria-label=\"Columns\"></label>\n    <details data-appearance-section=\"legend\">\n      <summary>Advanced</summary>\n      <label><span>Column width</span><input type=\"number\" step=\"any\" data-config=\"legend.columnWidth\" aria-label=\"Column width\"></label>\n      <label><span>Entry height</span><input type=\"number\" step=\"any\" data-config=\"legend.entryHeight\" aria-label=\"Entry height\"></label>\n      <label><span>Font size</span><input type=\"number\" step=\"any\" data-config=\"legend.fontSize\" aria-label=\"Font size\"></label>\n      <label><span>Subtitle size</span><input type=\"number\" step=\"any\" data-config=\"legend.subtitleFontSize\" aria-label=\"Subtitle size\"></label>\n      <label><span>Left margin</span><input type=\"number\" step=\"any\" data-config=\"legend.marginLeft\" aria-label=\"Left margin\"></label>\n      <label><span>Top margin</span><input type=\"number\" step=\"any\" data-config=\"legend.marginTop\" aria-label=\"Top margin\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Links</legend>\n    <label><span>Show links</span><input type=\"checkbox\" data-config=\"link.show\" aria-label=\"Show links\"></label>\n    <label><span>Draw as lines</span><input type=\"checkbox\" data-config=\"link.asLine\" aria-label=\"Draw as lines\"></label>\n    <label><span>Best match only</span><input type=\"checkbox\" data-config=\"link.bestOnly\" aria-label=\"Best match only\"></label>\n    <label><span>Minimum identity</span><input type=\"number\" step=\"any\" data-config=\"link.threshold\" aria-label=\"Minimum identity\"></label>\n    <details data-appearance-section=\"links\">\n      <summary>Advanced</summary>\n      <label><span>Straight links</span><input type=\"checkbox\" data-config=\"link.straight\" aria-label=\"Straight links\"></label>\n      <label><span>Use group colour</span><input type=\"checkbox\" data-config=\"link.groupColour\" aria-label=\"Use group colour\"></label>\n      <label><span>Stroke width</span><input type=\"number\" step=\"any\" data-config=\"link.strokeWidth\" aria-label=\"Stroke width\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Link labels</legend>\n    <label><span>Show link labels</span><input type=\"checkbox\" data-config=\"link.label.show\" aria-label=\"Show link labels\"></label>\n    <details data-appearance-section=\"link-labels\">\n      <summary>Advanced</summary>\n      <label><span>Label background</span><input type=\"checkbox\" data-config=\"link.label.background\" aria-label=\"Label background\"></label>\n      <label><span>Font size</span><input type=\"number\" step=\"any\" data-config=\"link.label.fontSize\" aria-label=\"Font size\"></label>\n      <label><span>Position</span><input type=\"number\" step=\"any\" data-config=\"link.label.position\" aria-label=\"Position\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Tree</legend>\n    <label><span>Show tree</span><input type=\"checkbox\" data-config=\"tree.show\" aria-label=\"Show tree\"></label>\n    <label><span>Tree width</span><input type=\"number\" step=\"any\" data-config=\"tree.width\" aria-label=\"Tree width\"></label>\n    <label><span>Use branch lengths</span><input type=\"checkbox\" data-config=\"tree.useBranchLengths\" aria-label=\"Use branch lengths\"></label>\n    <label><span>Branch stroke width</span><input type=\"number\" step=\"any\" data-config=\"tree.branch.width\" aria-label=\"Branch stroke width\"></label>\n    <label><span>Branch colour</span><input type=\"color\" data-config=\"tree.branch.colour\" aria-label=\"Branch colour\"></label>\n    <label><span>Show support values</span><input type=\"checkbox\" data-config=\"tree.support.show\" aria-label=\"Show support values\"></label>\n    <label><span>Show tree scale bar</span><input type=\"checkbox\" data-config=\"tree.scaleBar.show\" aria-label=\"Show tree scale bar\"></label>\n    <label><span>Show dashed leaf guides</span><input type=\"checkbox\" data-config=\"tree.leafGuide.show\" aria-label=\"Show dashed leaf guides\"></label>\n    <details data-appearance-section=\"tree\">\n      <summary>Advanced</summary>\n      <label><span>Support font size</span><input type=\"number\" step=\"any\" data-config=\"tree.support.fontSize\" aria-label=\"Support font size\"></label>\n      <label><span>Support precision</span><input type=\"number\" step=\"any\" data-config=\"tree.support.precision\" aria-label=\"Support precision\"></label>\n      <label><span>Leaf guide colour</span><input type=\"color\" data-config=\"tree.leafGuide.colour\" aria-label=\"Leaf guide colour\"></label>\n      <label><span>Leaf guide width</span><input type=\"number\" step=\"any\" data-config=\"tree.leafGuide.width\" aria-label=\"Leaf guide width\"></label>\n      <label><span>Leaf guide dash pattern</span><input type=\"text\" data-config=\"tree.leafGuide.dash\" aria-label=\"Leaf guide dash pattern\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Clusters &amp; loci</legend>\n    <label><span>Align cluster labels</span><input type=\"checkbox\" data-config=\"cluster.alignLabels\" aria-label=\"Align cluster labels\"></label>\n    <label><span>Hide locus coordinates</span><input type=\"checkbox\" data-config=\"cluster.hideLocusCoordinates\" aria-label=\"Hide locus coordinates\"></label>\n    <label><span>Show trim indicators</span><input type=\"checkbox\" data-config=\"locus.trimIndicators.show\" aria-label=\"Show trim indicators\"></label>\n    <label><span>Cluster spacing</span><input type=\"number\" step=\"any\" data-config=\"cluster.spacing\" aria-label=\"Cluster spacing\"></label>\n    <label><span>Locus spacing</span><input type=\"number\" step=\"any\" data-config=\"locus.spacing\" aria-label=\"Locus spacing\"></label>\n    <details data-appearance-section=\"clusters-loci\">\n      <summary>Advanced</summary>\n      <label><span>Cluster name size</span><input type=\"number\" step=\"any\" data-config=\"cluster.nameFontSize\" aria-label=\"Cluster name size\"></label>\n      <label><span>Locus label size</span><input type=\"number\" step=\"any\" data-config=\"cluster.lociFontSize\" aria-label=\"Locus label size\"></label>\n      <label><span>Trim indicator size</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.fontSize\" aria-label=\"Trim indicator size\"></label>\n      <label><span>Trim indicator weight</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.fontWeight\" aria-label=\"Trim indicator weight\"></label>\n      <label><span>Trim indicator border</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.borderWidth\" aria-label=\"Trim indicator border\"></label>\n      <label><span>Trim indicator border opacity</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.borderOpacity\" aria-label=\"Trim indicator border opacity\"></label>\n      <label><span>Track colour</span><input type=\"color\" data-config=\"locus.trackBar.colour\" aria-label=\"Track colour\"></label>\n      <label><span>Track stroke</span><input type=\"number\" step=\"any\" data-config=\"locus.trackBar.stroke\" aria-label=\"Track stroke\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Genes</legend>\n    <label><span>Show gene labels</span><input type=\"checkbox\" data-config=\"gene.label.show\" aria-label=\"Show gene labels\"></label>\n    <label><span>Label field</span><select data-config=\"gene.label.name\" aria-label=\"Label field\"><option value=\"uid\">uid</option><option value=\"name\">name</option><option value=\"label\">label</option></select></label>\n    <label><span>Label position</span><select data-config=\"gene.label.position\" aria-label=\"Label position\"><option value=\"top\">top</option><option value=\"bottom\">bottom</option></select></label>\n    <details data-appearance-section=\"genes\">\n      <summary>Advanced</summary>\n      <label><span>Label anchor</span><select data-config=\"gene.label.anchor\" aria-label=\"Label anchor\"><option value=\"start\">start</option><option value=\"middle\">middle</option><option value=\"end\">end</option></select></label>\n      <label><span>Label size</span><input type=\"number\" step=\"any\" data-config=\"gene.label.fontSize\" aria-label=\"Label size\"></label>\n      <label><span>Label rotation</span><input type=\"number\" step=\"any\" data-config=\"gene.label.rotation\" aria-label=\"Label rotation\"></label>\n      <label><span>Label spacing</span><input type=\"number\" step=\"any\" data-config=\"gene.label.spacing\" aria-label=\"Label spacing\"></label>\n      <label><span>Label start</span><input type=\"number\" step=\"any\" data-config=\"gene.label.start\" aria-label=\"Label start\"></label>\n      <label><span>Body height</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.bodyHeight\" aria-label=\"Body height\"></label>\n      <label><span>Tip height</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.tipHeight\" aria-label=\"Tip height\"></label>\n      <label><span>Tip length</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.tipLength\" aria-label=\"Tip length\"></label>\n      <label><span>Stroke colour</span><input type=\"color\" data-config=\"gene.shape.stroke\" aria-label=\"Stroke colour\"></label>\n      <label><span>Stroke width</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.strokeWidth\" aria-label=\"Stroke width\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Scale bars</legend>\n    <label><span>Show scale bar</span><input type=\"checkbox\" data-config=\"scaleBar.show\" aria-label=\"Show scale bar\"></label>\n    <label><span>Base pairs</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.basePair\" aria-label=\"Base pairs\"></label>\n    <label><span>Show identity bar</span><input type=\"checkbox\" data-config=\"colourBar.show\" aria-label=\"Show identity bar\"></label>\n    <label><span>Minimum source</span><select data-config=\"colourBar.domain.minMode\" aria-label=\"Minimum source\"><option value=\"fixed\">Custom value</option><option value=\"data\">Lowest identity in data</option></select></label>\n    <label><span>Minimum identity</span><input type=\"number\" step=\"any\" data-config=\"colourBar.domain.min\" aria-label=\"Minimum identity\"></label>\n    <label><span>Maximum source</span><select data-config=\"colourBar.domain.maxMode\" aria-label=\"Maximum source\"><option value=\"fixed\">Custom value</option><option value=\"data\">Highest identity in data</option></select></label>\n    <label><span>Maximum identity</span><input type=\"number\" step=\"any\" data-config=\"colourBar.domain.max\" aria-label=\"Maximum identity\"></label>\n    <details data-appearance-section=\"scale-bars\">\n      <summary>Advanced</summary>\n      <label><span>Height</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.height\" aria-label=\"Height\"></label>\n      <label><span>Font size</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.fontSize\" aria-label=\"Font size\"></label>\n      <label><span>Stroke</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.stroke\" aria-label=\"Stroke\"></label>\n      <label><span>Colour</span><input type=\"color\" data-config=\"scaleBar.colour\" aria-label=\"Colour\"></label>\n      <label><span>Scale margin</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.marginTop\" aria-label=\"Scale margin\"></label>\n      <label><span>Identity width</span><input type=\"number\" step=\"any\" data-config=\"colourBar.width\" aria-label=\"Identity width\"></label>\n      <label><span>Identity height</span><input type=\"number\" step=\"any\" data-config=\"colourBar.height\" aria-label=\"Identity height\"></label>\n      <label><span>Identity font size</span><input type=\"number\" step=\"any\" data-config=\"colourBar.fontSize\" aria-label=\"Identity font size\"></label>\n      <label><span>Identity margin</span><input type=\"number\" step=\"any\" data-config=\"colourBar.marginTop\" aria-label=\"Identity margin\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Plot &amp; navigation</legend>\n    <label><span>Renderer</span><select data-config=\"plot.renderer\" aria-label=\"Renderer\"><option value=\"svg\">svg</option><option value=\"canvas\">canvas</option><option value=\"webgpu\">webgpu</option></select></label>\n    <label><span>Show minimap</span><input type=\"checkbox\" data-config=\"plot.minimap.show\" aria-label=\"Show minimap\"></label>\n    <label><span>Minimum zoom</span><input type=\"number\" step=\"any\" data-config=\"plot.minZoom\" aria-label=\"Minimum zoom\"></label>\n    <label><span>Maximum zoom</span><input type=\"number\" step=\"any\" data-config=\"plot.maxZoom\" aria-label=\"Maximum zoom\"></label>\n    <details data-appearance-section=\"plot-navigation\">\n      <summary>Advanced</summary>\n      <label><span>Transition (ms)</span><input type=\"number\" step=\"any\" data-config=\"plot.transitionDuration\" aria-label=\"Transition (ms)\"></label>\n      <label><span>Scale factor</span><input type=\"number\" step=\"any\" data-config=\"plot.scaleFactor\" aria-label=\"Scale factor\"></label>\n      <label><span>Scale genes</span><input type=\"checkbox\" data-config=\"plot.scaleGenes\" aria-label=\"Scale genes\"></label>\n      <label><span>Font family</span><input type=\"text\" data-config=\"plot.fontFamily\" aria-label=\"Font family\"></label>\n      <label><span>Minimap links</span><input type=\"checkbox\" data-config=\"plot.minimap.showLinks\" aria-label=\"Minimap links\"></label>\n      <label><span>Minimap width</span><input type=\"number\" step=\"any\" data-config=\"plot.minimap.width\" aria-label=\"Minimap width\"></label>\n      <label><span>Minimap height</span><input type=\"number\" step=\"any\" data-config=\"plot.minimap.height\" aria-label=\"Minimap height\"></label>\n      <label><span>Minimap margin</span><input type=\"number\" step=\"any\" data-config=\"plot.minimap.margin\" aria-label=\"Minimap margin\"></label>\n    </details>\n  </fieldset>\n  <p class=\"empty\" hidden></p>\n  <slot name=\"tree\"></slot>\n</div>\n",
-  ":host { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; color: inherit; font: inherit; }\n.toolbar { display: flex; flex-shrink: 0; }\n.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 10px 20px; align-content: start; overflow: auto; padding: 4px 0; min-height: 0; }\nfieldset { min-width: 0; margin: 0; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }\nlegend { padding: 0 4px; font-weight: 600; }\nlabel { display: flex; align-items: center; gap: 6px; margin: 6px 0; }\nlabel > span { min-width: 0; flex: 1; }\nselect, input:not([type=checkbox]):not([type=color]) { width: 88px; min-width: 0; }\ndetails { margin-top: 8px; border-top: 1px solid var(--cm-border, #e5e9ef); }\nsummary { padding: 7px 0 1px; color: var(--cm-muted, #687586); cursor: pointer; font-size: 12px; font-weight: 600; }\nsummary:hover { color: var(--cm-accent, #1677ff); }\n.empty { grid-column: 1 / -1; padding: 16px; color: var(--cm-muted, #667386); text-align: center; }\n::slotted(*) { min-width: 0; }\n",
-]);
-const template$g = createTemplate(markup$g);
-const HTMLElementBase$g = globalThis.HTMLElement || class {};
-
-class AppearancePanel extends HTMLElementBase$g {
-  #config;
-  #hasTree = false;
-  #filter = "";
-  #expanded = new Set();
-  #sections;
-
-  constructor() {
-    super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$g;
-    root.append(style, template$g(this.ownerDocument));
-    this.#sections = [...root.querySelectorAll("fieldset")].map((box) => ({ box, details: box.querySelector("details"),
-      fields: [...box.querySelectorAll("[data-config]")].map((control) => ({ control, row: control.closest("label"), advanced: Boolean(control.closest("details")),
-        search: `${box.querySelector("legend").textContent} ${control.getAttribute("aria-label")} ${control.dataset.config}`.toLowerCase() })) }));
-    const search = root.querySelector("clinker-search-field");
-    search.addEventListener("input", () => { this.#filter = search.value.trim().toLowerCase(); this.#sync(); });
-    root.addEventListener("click", (event) => {
-      const details = event.target.closest("summary")?.parentElement;
-      if (!details || event.defaultPrevented || this.#filter) return;
-      const key = details.dataset.appearanceSection;
-      if (details.open) this.#expanded.delete(key); else this.#expanded.add(key);
-    });
-    root.addEventListener("change", (event) => {
-      const input = event.target;
-      if (!input.matches("[data-config]")) return;
-      if (!input.reportValidity()) return;
-      const value = input.type === "checkbox" ? input.checked : input.type === "number" ? Number(input.value) : input.value;
-      if (!this.dispatchEvent(new CustomEvent("config-change", { detail: { path: input.dataset.config, value }, bubbles: true, composed: true, cancelable: true }))) this.#syncField(input, true);
-    });
-  }
-
-  set state({ config, hasTree = false }) { this.#config = config; this.#hasTree = hasTree; this.#sync(); }
-
-  #syncField(control, force = false) {
-    const path = control.dataset.config, value = path.split(".").reduce((current, key) => current?.[key], this.#config);
-    if (control.type === "checkbox") control.checked = Boolean(value);
-    else if (force || control !== this.shadowRoot.activeElement) control.value = control.type === "color" ? colourHex(value) : value ?? "";
-    const bound = path === "colourBar.domain.min" ? "min" : path === "colourBar.domain.max" ? "max" : null;
-    control.disabled = Boolean(bound && this.#config?.colourBar?.domain?.[`${bound}Mode`] === "data");
-  }
-
-  #sync() {
-    let visible = 0;
-    for (const { box, details, fields } of this.#sections) {
-      for (const { control, row, search } of fields) {
-        this.#syncField(control); row.hidden = Boolean(this.#filter && !search.includes(this.#filter));
-      }
-      box.hidden = fields.every(({ row }) => row.hidden);
-      if (!box.hidden) visible++;
-      if (details) {
-        details.hidden = !fields.some(({ advanced, row }) => advanced && !row.hidden);
-        details.open = Boolean(this.#filter) || this.#expanded.has(details.dataset.appearanceSection);
-      }
-    }
-    const empty = this.shadowRoot.querySelector(".empty");
-    empty.hidden = visible > 0; empty.textContent = `No appearance settings match “${this.#filter}”.`;
-    this.shadowRoot.querySelector("slot").hidden = !this.#hasTree || Boolean(this.#filter && !/tree|clade|colour|color|annotation|branch|cut|palette/.test(this.#filter));
-  }
-}
-
-function defineAppearancePanel() {
-  defineSearchField();
-  if (!customElements.get("clinker-appearance-panel")) customElements.define("clinker-appearance-panel", AppearancePanel);
-}
-
-const [markup$f, css$f] = await Promise.all([
   "<fieldset hidden>\n  <legend>Clade colouring</legend>\n  <label><span>Colour clades</span><input type=\"checkbox\" data-enabled aria-label=\"Colour clades\"></label>\n  <div data-options hidden>\n    <label><span>Cut height</span><input type=\"number\" min=\"0\" step=\"any\" data-height aria-label=\"Cut height\"><button type=\"button\" data-auto title=\"Use automatic cut height (70%)\">Auto</button></label>\n    <input type=\"range\" min=\"0\" aria-label=\"Preview cut height\">\n    <label><span>Palette</span><select aria-label=\"Clade palette\"><option value=\"custom\" hidden>Custom</option><option value=\"muted\">Muted</option><option value=\"accessible\">Colorblind friendly</option></select></label>\n    <label><span>Show cut line</span><input type=\"checkbox\" data-line aria-label=\"Show cut line\"></label>\n  </div>\n</fieldset>\n<button type=\"button\" data-reset title=\"Clear manual tree styles and labels; keep automatic clade colouring.\" disabled>Reset all manual styles</button>\n<p role=\"status\" hidden></p>\n",
   ":host { display: block; min-width: 0; color: inherit; font: inherit; }\nfieldset { min-width: 0; margin: 0 0 10px; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }\nlegend { padding: 0 4px; font-weight: 600; }\nlabel { display: flex; align-items: center; gap: 6px; margin: 6px 0; }\nlabel > span { flex: 1; min-width: 0; }\ninput[type=number] { width: 64px; min-width: 0; }\ninput[type=range] { width: 100%; }\nselect { width: 132px; min-width: 0; }\nbutton[aria-pressed=true] { font-weight: 600; }\np { color: var(--cm-danger, #b42318); margin: 6px 0 0; }\n",
 ]);
-const template$f = createTemplate(markup$f);
+const template$g = createTemplate(markup$g);
 const palettes = { muted: TREE_COLOURING_DEFAULTS.palette, accessible: ["#0072b2", "#e69f00", "#009e73", "#cc79a7", "#d55e00", "#56b4e9"] };
-const HTMLElementBase$f = globalThis.HTMLElement || class {};
+const HTMLElementBase$g = globalThis.HTMLElement || class {};
 
-class TreeAppearance extends HTMLElementBase$f {
+class TreeAppearance extends HTMLElementBase$g {
   #state;
   #height;
   #slider;
@@ -803,8 +730,8 @@ class TreeAppearance extends HTMLElementBase$f {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$f;
-    root.append(style, template$f(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$g;
+    root.append(style, template$g(this.ownerDocument));
     this.#height = root.querySelector("[data-height]"); this.#slider = root.querySelector('[type="range"]');
     root.querySelector("[data-enabled]").onchange = (event) => this.#change({ mode: event.target.checked ? "cutHeight" : "none" });
     this.#height.onchange = () => { if (this.#height.reportValidity()) this.#change({ cutHeight: Number(this.#height.value) }); };
@@ -821,7 +748,16 @@ class TreeAppearance extends HTMLElementBase$f {
     this.#slider.onpointercancel = () => this.#cancelPreview();
   }
 
-  set state(value) { this.#state = value; this.#previewing = false; this.#sync(); }
+  set state({ tree, config }) {
+    if (!tree) { if (this.#previewing) this.#cancelPreview(); this.#state = null; return; }
+    const { policy, height } = resolveTreePresentation(tree, config);
+    let compatible = tree.distance?.kind === "mergeHeight";
+    try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...policy, mode: "cutHeight" } } }, config); }
+    catch { compatible = false; }
+    this.#state = { policy, height, compatible,
+      canReset: Boolean(Object.keys(tree.presentation?.nodes || {}).length || Object.keys(tree.presentation?.subtrees || {}).length) };
+    this.#previewing = false; this.#sync();
+  }
   set error(message) { const status = this.shadowRoot.querySelector("p"); status.textContent = message; status.hidden = !message; }
   disconnectedCallback() { if (this.#previewing) this.#cancelPreview(); }
 
@@ -850,117 +786,6 @@ class TreeAppearance extends HTMLElementBase$f {
 
 function defineTreeAppearance() {
   if (!customElements.get("clinker-tree-appearance")) customElements.define("clinker-tree-appearance", TreeAppearance);
-}
-
-function createAppearanceControls({ document, patch, preview }) {
-  defineAppearancePanel(); defineTreeAppearance();
-  const node = document.createElement("clinker-appearance-panel");
-  const controls = document.createElement("clinker-tree-appearance"); controls.slot = "tree"; node.append(controls);
-  const run = createActionRunner((message) => { controls.error = message; });
-  const runPreview = createActionRunner((message) => { if (message) controls.error = message; });
-  const colouring = (changes) => [{ type: "tree.presentation.update", scope: "tree", changes: { colouring: changes } }];
-  controls.addEventListener("colouring-change", (event) => { if (!run(() => patch(colouring(event.detail)))) event.preventDefault(); });
-  controls.addEventListener("colouring-preview", (event) => { if (!runPreview(() => preview?.(event.detail ? colouring(event.detail) : null))) event.preventDefault(); });
-  controls.addEventListener("reset-styles", (event) => { if (!run(() => patch([{ type: "tree.presentation.reset", scope: "manual" }]))) event.preventDefault(); });
-  return { node, update({ config, tree }) {
-    node.state = { config, hasTree: Boolean(tree) };
-    if (!tree) return;
-    const { policy, height } = resolveTreePresentation(tree, config.tree);
-    let compatible = tree.distance?.kind === "mergeHeight";
-    try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...policy, mode: "cutHeight" } } }, config.tree); }
-    catch { compatible = false; }
-    controls.state = { policy, height, compatible,
-      canReset: Boolean(Object.keys(tree.presentation?.nodes || {}).length || Object.keys(tree.presentation?.subtrees || {}).length) };
-  } };
-}
-
-/** Shared activation and horizontal keyboard navigation for option buttons. */
-function bindOptionButtons(group, choose) {
-  group.addEventListener("click", (event) => choose(event.target.closest("button")));
-  group.addEventListener("keydown", (event) => {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    const buttons = [...group.querySelectorAll("button:not(:disabled)")];
-    if (!buttons.length) return;
-    const index = buttons.indexOf(event.target);
-    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
-      : (index + (event.key === "ArrowLeft" ? -1 : 1) + buttons.length) % buttons.length;
-    event.preventDefault(); buttons[next].focus(); choose(buttons[next]);
-  });
-}
-
-const [markup$e, css$e] = await Promise.all([
-  "<div part=\"tab-list\" role=\"tablist\">\n  <template><button type=\"button\" role=\"tab\"></button></template>\n</div>\n<slot name=\"status\"></slot>\n<div part=\"panels\">\n  <template><div role=\"tabpanel\" tabindex=\"0\"><slot></slot></div></template>\n</div>\n",
-  ":host { display: flex; flex: 1; flex-direction: column; min-height: 0; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\n[role=tablist] { display: flex; flex-shrink: 0; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--cm-border, #e1e5ea); }\nbutton {\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 0;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton[aria-selected=true] { border-bottom-color: var(--cm-accent, #1677ff); font-weight: 600; }\nbutton:hover:not(:disabled) { background: var(--cm-hover, #e3ecf8); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n[part=panels], [role=tabpanel] { display: flex; flex: 1; flex-direction: column; min-height: 0; }\n[role=tabpanel]:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nslot { display: contents; }\n",
-]);
-const template$e = createTemplate(markup$e);
-const HTMLElementBase$e = globalThis.HTMLElement || class {};
-let nextId = 0;
-
-class Tabs extends HTMLElementBase$e {
-  static observedAttributes = ["value", "label"];
-  #prefix = `clinker-tabs-${++nextId}`;
-  #list;
-  #content;
-  #buttonTemplate;
-  #panelTemplate;
-  #tabs = [];
-  #observer;
-
-  constructor() {
-    super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$e;
-    root.append(style, template$e(this.ownerDocument));
-    this.#list = root.querySelector("[role=tablist]"); this.#content = root.querySelector("[part=panels]");
-    this.#buttonTemplate = this.#list.querySelector("template"); this.#panelTemplate = this.#content.querySelector("template");
-    bindOptionButtons(this.#list, (button) => {
-      if (!button || button.disabled || button.value === this.value) return;
-      this.value = button.value;
-      this.dispatchEvent(new CustomEvent("value-change", { detail: { value: this.value }, bubbles: true, composed: true }));
-    });
-    this.#observer = new this.ownerDocument.defaultView.MutationObserver((records) => {
-      if (records.some((record) => record.type === "childList" ? record.target === this : record.target.parentElement === this)) this.#mountPanels();
-    });
-  }
-
-  get value() { return this.getAttribute("value") || ""; }
-  set value(value) { if (this.value !== String(value)) this.setAttribute("value", String(value)); }
-  attributeChangedCallback() { this.#sync(); }
-  connectedCallback() {
-    this.#mountPanels();
-    this.#observer.observe(this, { childList: true, subtree: true, attributes: true, attributeFilter: ["name", "label", "disabled"] });
-  }
-  disconnectedCallback() { this.#observer.disconnect(); }
-
-  #mountPanels() {
-    this.#tabs = [...this.children].filter((panel) => panel.hasAttribute("name")).map((panel, index) => {
-      const button = this.ownerDocument.importNode(this.#buttonTemplate.content, true).firstElementChild;
-      const wrapper = this.ownerDocument.importNode(this.#panelTemplate.content, true).firstElementChild;
-      const id = `${this.#prefix}-${index}`, name = panel.getAttribute("name");
-      panel.slot = id; wrapper.id = id; wrapper.querySelector("slot").name = id;
-      button.id = `${id}-tab`; button.value = name; button.textContent = panel.getAttribute("label") || name;
-      button.disabled = panel.hasAttribute("disabled"); button.setAttribute("aria-controls", id); wrapper.setAttribute("aria-labelledby", button.id);
-      return { name, panel, button, wrapper };
-    });
-    this.#list.replaceChildren(this.#buttonTemplate, ...this.#tabs.map(({ button }) => button));
-    this.#content.replaceChildren(this.#panelTemplate, ...this.#tabs.map(({ wrapper }) => wrapper));
-    this.#sync();
-  }
-
-  #sync() {
-    this.#list.setAttribute("aria-label", this.getAttribute("label") || "Sections");
-    const active = this.#tabs.find((tab) => tab.name === this.value && !tab.button.disabled) || this.#tabs.find((tab) => !tab.button.disabled);
-    if (active && active.name !== this.value) { this.value = active.name; return; }
-    for (const tab of this.#tabs) {
-      const selected = tab === active;
-      tab.button.setAttribute("aria-selected", String(selected)); tab.button.tabIndex = selected ? 0 : -1;
-      tab.panel.hidden = tab.wrapper.hidden = !selected;
-    }
-  }
-}
-
-function defineTabs() {
-  if (!customElements.get("clinker-tabs")) customElements.define("clinker-tabs", Tabs);
 }
 
 /** Shared fixed-height row window for scrollable data editors. */
@@ -1092,6 +917,218 @@ function installDataEditorStyle(document) {
   const style = document.createElement("style"); style.id = "cm-data-editor-style";
   style.textContent = DATA_EDITOR_CSS;
   document.head.append(style);
+}
+
+const [markup$f, css$f] = await Promise.all([
+  "<div class=\"toolbar\"><clinker-search-field data-appearance-filter label=\"Find an appearance setting\" placeholder=\"Find a setting\"></clinker-search-field></div>\n<div class=\"settings\">\n  <fieldset>\n    <legend>Plot</legend>\n    <label><span>Interface theme</span><select data-config=\"plot.theme\" aria-label=\"Interface theme\"><option value=\"auto\">auto</option><option value=\"light\">light</option><option value=\"dark\">dark</option></select></label>\n    <label><span>Figure background</span><input type=\"color\" data-config=\"plot.background\" aria-label=\"Figure background\"></label>\n  </fieldset>\n  <fieldset>\n    <legend>Annotations</legend>\n    <label><span>Enable annotation panels</span><input type=\"checkbox\" data-config=\"annotations.enabled\" aria-label=\"Enable annotation panels\"></label>\n  </fieldset>\n  <fieldset>\n    <legend>Legend</legend>\n    <label><span>Show legend</span><input type=\"checkbox\" data-config=\"legend.show\" aria-label=\"Show legend\"></label>\n    <label><span>Position</span><select data-config=\"legend.position\" aria-label=\"Position\"><option value=\"right\">right</option><option value=\"bottom\">bottom</option></select></label>\n    <label><span>Columns</span><input type=\"number\" step=\"any\" data-config=\"legend.columns\" aria-label=\"Columns\"></label>\n    <details data-appearance-section=\"legend\">\n      <summary>Advanced</summary>\n      <label><span>Column width</span><input type=\"number\" step=\"any\" data-config=\"legend.columnWidth\" aria-label=\"Column width\"></label>\n      <label><span>Entry height</span><input type=\"number\" step=\"any\" data-config=\"legend.entryHeight\" aria-label=\"Entry height\"></label>\n      <label><span>Font size</span><input type=\"number\" step=\"any\" data-config=\"legend.fontSize\" aria-label=\"Font size\"></label>\n      <label><span>Subtitle size</span><input type=\"number\" step=\"any\" data-config=\"legend.subtitleFontSize\" aria-label=\"Subtitle size\"></label>\n      <label><span>Left margin</span><input type=\"number\" step=\"any\" data-config=\"legend.marginLeft\" aria-label=\"Left margin\"></label>\n      <label><span>Top margin</span><input type=\"number\" step=\"any\" data-config=\"legend.marginTop\" aria-label=\"Top margin\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Links</legend>\n    <label><span>Show links</span><input type=\"checkbox\" data-config=\"link.show\" aria-label=\"Show links\"></label>\n    <label><span>Draw as lines</span><input type=\"checkbox\" data-config=\"link.asLine\" aria-label=\"Draw as lines\"></label>\n    <label><span>Best match only</span><input type=\"checkbox\" data-config=\"link.bestOnly\" aria-label=\"Best match only\"></label>\n    <label><span>Minimum identity</span><input type=\"number\" step=\"any\" data-config=\"link.threshold\" aria-label=\"Minimum identity\"></label>\n    <details data-appearance-section=\"links\">\n      <summary>Advanced</summary>\n      <label><span>Straight links</span><input type=\"checkbox\" data-config=\"link.straight\" aria-label=\"Straight links\"></label>\n      <label><span>Use group colour</span><input type=\"checkbox\" data-config=\"link.groupColour\" aria-label=\"Use group colour\"></label>\n      <label><span>Stroke width</span><input type=\"number\" step=\"any\" data-config=\"link.strokeWidth\" aria-label=\"Stroke width\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Link labels</legend>\n    <label><span>Show link labels</span><input type=\"checkbox\" data-config=\"link.label.show\" aria-label=\"Show link labels\"></label>\n    <details data-appearance-section=\"link-labels\">\n      <summary>Advanced</summary>\n      <label><span>Label background</span><input type=\"checkbox\" data-config=\"link.label.background\" aria-label=\"Label background\"></label>\n      <label><span>Font size</span><input type=\"number\" step=\"any\" data-config=\"link.label.fontSize\" aria-label=\"Font size\"></label>\n      <label><span>Position</span><input type=\"number\" step=\"any\" data-config=\"link.label.position\" aria-label=\"Position\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Tree</legend>\n    <label><span>Show tree</span><input type=\"checkbox\" data-config=\"tree.show\" aria-label=\"Show tree\"></label>\n    <label><span>Tree width</span><input type=\"number\" step=\"any\" data-config=\"tree.width\" aria-label=\"Tree width\"></label>\n    <label><span>Use branch lengths</span><input type=\"checkbox\" data-config=\"tree.useBranchLengths\" aria-label=\"Use branch lengths\"></label>\n    <label><span>Branch stroke width</span><input type=\"number\" step=\"any\" data-config=\"tree.branch.width\" aria-label=\"Branch stroke width\"></label>\n    <label><span>Branch colour</span><input type=\"color\" data-config=\"tree.branch.colour\" aria-label=\"Branch colour\"></label>\n    <label><span>Show support values</span><input type=\"checkbox\" data-config=\"tree.support.show\" aria-label=\"Show support values\"></label>\n    <label><span>Show tree scale bar</span><input type=\"checkbox\" data-config=\"tree.scaleBar.show\" aria-label=\"Show tree scale bar\"></label>\n    <label><span>Show dashed leaf guides</span><input type=\"checkbox\" data-config=\"tree.leafGuide.show\" aria-label=\"Show dashed leaf guides\"></label>\n    <details data-appearance-section=\"tree\">\n      <summary>Advanced</summary>\n      <label><span>Support font size</span><input type=\"number\" step=\"any\" data-config=\"tree.support.fontSize\" aria-label=\"Support font size\"></label>\n      <label><span>Support precision</span><input type=\"number\" step=\"any\" data-config=\"tree.support.precision\" aria-label=\"Support precision\"></label>\n      <label><span>Leaf guide colour</span><input type=\"color\" data-config=\"tree.leafGuide.colour\" aria-label=\"Leaf guide colour\"></label>\n      <label><span>Leaf guide width</span><input type=\"number\" step=\"any\" data-config=\"tree.leafGuide.width\" aria-label=\"Leaf guide width\"></label>\n      <label><span>Leaf guide dash pattern</span><input type=\"text\" data-config=\"tree.leafGuide.dash\" aria-label=\"Leaf guide dash pattern\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Clusters &amp; loci</legend>\n    <label><span>Align cluster labels</span><input type=\"checkbox\" data-config=\"cluster.alignLabels\" aria-label=\"Align cluster labels\"></label>\n    <label><span>Hide locus coordinates</span><input type=\"checkbox\" data-config=\"cluster.hideLocusCoordinates\" aria-label=\"Hide locus coordinates\"></label>\n    <label><span>Show trim indicators</span><input type=\"checkbox\" data-config=\"locus.trimIndicators.show\" aria-label=\"Show trim indicators\"></label>\n    <label><span>Cluster spacing</span><input type=\"number\" step=\"any\" data-config=\"cluster.spacing\" aria-label=\"Cluster spacing\"></label>\n    <label><span>Locus spacing</span><input type=\"number\" step=\"any\" data-config=\"locus.spacing\" aria-label=\"Locus spacing\"></label>\n    <details data-appearance-section=\"clusters-loci\">\n      <summary>Advanced</summary>\n      <label><span>Cluster name size</span><input type=\"number\" step=\"any\" data-config=\"cluster.nameFontSize\" aria-label=\"Cluster name size\"></label>\n      <label><span>Locus label size</span><input type=\"number\" step=\"any\" data-config=\"cluster.lociFontSize\" aria-label=\"Locus label size\"></label>\n      <label><span>Trim indicator size</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.fontSize\" aria-label=\"Trim indicator size\"></label>\n      <label><span>Trim indicator weight</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.fontWeight\" aria-label=\"Trim indicator weight\"></label>\n      <label><span>Trim indicator border</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.borderWidth\" aria-label=\"Trim indicator border\"></label>\n      <label><span>Trim indicator border opacity</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.borderOpacity\" aria-label=\"Trim indicator border opacity\"></label>\n      <label><span>Track colour</span><input type=\"color\" data-config=\"locus.trackBar.colour\" aria-label=\"Track colour\"></label>\n      <label><span>Track stroke</span><input type=\"number\" step=\"any\" data-config=\"locus.trackBar.stroke\" aria-label=\"Track stroke\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Genes</legend>\n    <label><span>Show gene labels</span><input type=\"checkbox\" data-config=\"gene.label.show\" aria-label=\"Show gene labels\"></label>\n    <label><span>Label field</span><select data-config=\"gene.label.name\" aria-label=\"Label field\"><option value=\"uid\">uid</option><option value=\"name\">name</option><option value=\"label\">label</option></select></label>\n    <label><span>Label position</span><select data-config=\"gene.label.position\" aria-label=\"Label position\"><option value=\"top\">top</option><option value=\"bottom\">bottom</option></select></label>\n    <details data-appearance-section=\"genes\">\n      <summary>Advanced</summary>\n      <label><span>Label anchor</span><select data-config=\"gene.label.anchor\" aria-label=\"Label anchor\"><option value=\"start\">start</option><option value=\"middle\">middle</option><option value=\"end\">end</option></select></label>\n      <label><span>Label size</span><input type=\"number\" step=\"any\" data-config=\"gene.label.fontSize\" aria-label=\"Label size\"></label>\n      <label><span>Label rotation</span><input type=\"number\" step=\"any\" data-config=\"gene.label.rotation\" aria-label=\"Label rotation\"></label>\n      <label><span>Label spacing</span><input type=\"number\" step=\"any\" data-config=\"gene.label.spacing\" aria-label=\"Label spacing\"></label>\n      <label><span>Label start</span><input type=\"number\" step=\"any\" data-config=\"gene.label.start\" aria-label=\"Label start\"></label>\n      <label><span>Body height</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.bodyHeight\" aria-label=\"Body height\"></label>\n      <label><span>Tip height</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.tipHeight\" aria-label=\"Tip height\"></label>\n      <label><span>Tip length</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.tipLength\" aria-label=\"Tip length\"></label>\n      <label><span>Stroke colour</span><input type=\"color\" data-config=\"gene.shape.stroke\" aria-label=\"Stroke colour\"></label>\n      <label><span>Stroke width</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.strokeWidth\" aria-label=\"Stroke width\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Scale bars</legend>\n    <label><span>Show scale bar</span><input type=\"checkbox\" data-config=\"scaleBar.show\" aria-label=\"Show scale bar\"></label>\n    <label><span>Base pairs</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.basePair\" aria-label=\"Base pairs\"></label>\n    <label><span>Show identity bar</span><input type=\"checkbox\" data-config=\"colourBar.show\" aria-label=\"Show identity bar\"></label>\n    <label><span>Minimum source</span><select data-config=\"colourBar.domain.minMode\" aria-label=\"Minimum source\"><option value=\"fixed\">Custom value</option><option value=\"data\">Lowest identity in data</option></select></label>\n    <label><span>Minimum identity</span><input type=\"number\" step=\"any\" data-config=\"colourBar.domain.min\" aria-label=\"Minimum identity\"></label>\n    <label><span>Maximum source</span><select data-config=\"colourBar.domain.maxMode\" aria-label=\"Maximum source\"><option value=\"fixed\">Custom value</option><option value=\"data\">Highest identity in data</option></select></label>\n    <label><span>Maximum identity</span><input type=\"number\" step=\"any\" data-config=\"colourBar.domain.max\" aria-label=\"Maximum identity\"></label>\n    <details data-appearance-section=\"scale-bars\">\n      <summary>Advanced</summary>\n      <label><span>Height</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.height\" aria-label=\"Height\"></label>\n      <label><span>Font size</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.fontSize\" aria-label=\"Font size\"></label>\n      <label><span>Stroke</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.stroke\" aria-label=\"Stroke\"></label>\n      <label><span>Colour</span><input type=\"color\" data-config=\"scaleBar.colour\" aria-label=\"Colour\"></label>\n      <label><span>Scale margin</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.marginTop\" aria-label=\"Scale margin\"></label>\n      <label><span>Identity width</span><input type=\"number\" step=\"any\" data-config=\"colourBar.width\" aria-label=\"Identity width\"></label>\n      <label><span>Identity height</span><input type=\"number\" step=\"any\" data-config=\"colourBar.height\" aria-label=\"Identity height\"></label>\n      <label><span>Identity font size</span><input type=\"number\" step=\"any\" data-config=\"colourBar.fontSize\" aria-label=\"Identity font size\"></label>\n      <label><span>Identity margin</span><input type=\"number\" step=\"any\" data-config=\"colourBar.marginTop\" aria-label=\"Identity margin\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Plot &amp; navigation</legend>\n    <label><span>Renderer</span><select data-config=\"plot.renderer\" aria-label=\"Renderer\"><option value=\"svg\">svg</option><option value=\"canvas\">canvas</option><option value=\"webgpu\">webgpu</option></select></label>\n    <label><span>Show minimap</span><input type=\"checkbox\" data-config=\"plot.minimap.show\" aria-label=\"Show minimap\"></label>\n    <label><span>Minimum zoom</span><input type=\"number\" step=\"any\" data-config=\"plot.minZoom\" aria-label=\"Minimum zoom\"></label>\n    <label><span>Maximum zoom</span><input type=\"number\" step=\"any\" data-config=\"plot.maxZoom\" aria-label=\"Maximum zoom\"></label>\n    <details data-appearance-section=\"plot-navigation\">\n      <summary>Advanced</summary>\n      <label><span>Transition (ms)</span><input type=\"number\" step=\"any\" data-config=\"plot.transitionDuration\" aria-label=\"Transition (ms)\"></label>\n      <label><span>Scale factor</span><input type=\"number\" step=\"any\" data-config=\"plot.scaleFactor\" aria-label=\"Scale factor\"></label>\n      <label><span>Scale genes</span><input type=\"checkbox\" data-config=\"plot.scaleGenes\" aria-label=\"Scale genes\"></label>\n      <label><span>Font family</span><input type=\"text\" data-config=\"plot.fontFamily\" aria-label=\"Font family\"></label>\n      <label><span>Minimap links</span><input type=\"checkbox\" data-config=\"plot.minimap.showLinks\" aria-label=\"Minimap links\"></label>\n      <label><span>Minimap width</span><input type=\"number\" step=\"any\" data-config=\"plot.minimap.width\" aria-label=\"Minimap width\"></label>\n      <label><span>Minimap height</span><input type=\"number\" step=\"any\" data-config=\"plot.minimap.height\" aria-label=\"Minimap height\"></label>\n      <label><span>Minimap margin</span><input type=\"number\" step=\"any\" data-config=\"plot.minimap.margin\" aria-label=\"Minimap margin\"></label>\n    </details>\n  </fieldset>\n  <p class=\"empty\" hidden></p>\n  <clinker-tree-appearance hidden></clinker-tree-appearance>\n  <p class=\"error\" role=\"alert\" hidden></p>\n</div>\n",
+  ":host { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; color: inherit; font: inherit; }\n.toolbar { display: flex; flex-shrink: 0; }\n.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 10px 20px; align-content: start; overflow: auto; padding: 4px 0; min-height: 0; }\nfieldset { min-width: 0; margin: 0; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }\nlegend { padding: 0 4px; font-weight: 600; }\nlabel { display: flex; align-items: center; gap: 6px; margin: 6px 0; }\nlabel > span { min-width: 0; flex: 1; }\nselect, input:not([type=checkbox]):not([type=color]) { width: 88px; min-width: 0; }\ndetails { margin-top: 8px; border-top: 1px solid var(--cm-border, #e5e9ef); }\nsummary { padding: 7px 0 1px; color: var(--cm-muted, #687586); cursor: pointer; font-size: 12px; font-weight: 600; }\nsummary:hover { color: var(--cm-accent, #1677ff); }\n.empty { grid-column: 1 / -1; padding: 16px; color: var(--cm-muted, #667386); text-align: center; }\n.error { grid-column: 1 / -1; color: var(--cm-danger, #b42318); margin: 0; }\n",
+]);
+const template$f = createTemplate(markup$f);
+const HTMLElementBase$f = globalThis.HTMLElement || class {};
+
+class ClinkerAppearancePanelElement extends HTMLElementBase$f {
+  static observedAttributes = ["hidden"];
+  #chart = null;
+  #unsubscribe = null;
+  #config;
+  #tree;
+  #runEdit;
+  #hasTree = false;
+  #filter = "";
+  #expanded = new Set();
+  #sections;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$f;
+    root.append(style, template$f(this.ownerDocument));
+    this.#tree = root.querySelector("clinker-tree-appearance");
+    this.#runEdit = createActionRunner((message) => {
+      const status = root.querySelector(".error"); status.textContent = message; status.hidden = !message;
+    });
+    const runTreeEdit = createActionRunner((message) => { this.#tree.error = message; });
+    const runPreview = createActionRunner((message) => { if (message) this.#tree.error = message; });
+    const colouring = (changes) => [{ type: "tree.presentation.update", scope: "tree", changes: { colouring: changes } }];
+    this.#tree.addEventListener("colouring-change", (event) => { if (!runTreeEdit(() => this.#chart.patch(colouring(event.detail)))) event.preventDefault(); });
+    this.#tree.addEventListener("colouring-preview", (event) => { if (!runPreview(() => this.#chart?.previewTreePresentation(event.detail ? colouring(event.detail) : null))) event.preventDefault(); });
+    this.#tree.addEventListener("reset-styles", (event) => { if (!runTreeEdit(() => this.#chart.patch([{ type: "tree.presentation.reset", scope: "manual" }]))) event.preventDefault(); });
+    this.#sections = [...root.querySelectorAll("fieldset")].map((box) => ({ box, details: box.querySelector("details"),
+      fields: [...box.querySelectorAll("[data-config]")].map((control) => ({ control, row: control.closest("label"), advanced: Boolean(control.closest("details")),
+        search: `${box.querySelector("legend").textContent} ${control.getAttribute("aria-label")} ${control.dataset.config}`.toLowerCase() })) }));
+    const search = root.querySelector("clinker-search-field");
+    search.addEventListener("input", () => { this.#filter = search.value.trim().toLowerCase(); this.#sync(); });
+    root.addEventListener("click", (event) => {
+      const details = event.target.closest("summary")?.parentElement;
+      if (!details || event.defaultPrevented || this.#filter) return;
+      const key = details.dataset.appearanceSection;
+      if (details.open) this.#expanded.delete(key); else this.#expanded.add(key);
+    });
+    root.addEventListener("change", (event) => {
+      const input = event.target;
+      if (!input.matches("[data-config]")) return;
+      if (!input.reportValidity()) return;
+      const value = input.type === "checkbox" ? input.checked : input.type === "number" ? Number(input.value) : input.value;
+      const config = input.dataset.config.split(".").reduceRight((value, key) => ({ [key]: value }), value);
+      if (!this.#runEdit(() => this.#chart.config(config))) this.#syncField(input, true);
+    });
+  }
+
+  get chart() { return this.#chart; }
+  set chart(value) {
+    if (value === this.#chart) return;
+    this.#chart?.previewTreePresentation?.(null);
+    this.#unsubscribe?.(); this.#unsubscribe = null;
+    this.#chart = value || null; this.#subscribe(); this.#render();
+  }
+  connectedCallback() {
+    this.classList.add("cm-data-ui"); installDataEditorStyle(this.ownerDocument);
+    this.#subscribe(); this.#render();
+  }
+  disconnectedCallback() {
+    this.#chart?.previewTreePresentation?.(null);
+    this.#unsubscribe?.(); this.#unsubscribe = null;
+  }
+  attributeChangedCallback() { if (this.isConnected && !this.hidden) this.#render(); }
+  #subscribe() {
+    if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
+    this.#unsubscribe = this.#chart.on("change", (change) => {
+      if (["config.change", "theme.change", "data.replace", "state.replace"].includes(change.type) ||
+          (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.")))) this.#render();
+    });
+  }
+  #render() {
+    if (!this.isConnected) return;
+    const config = this.#chart?.config?.();
+    if (config) applyTheme(this, resolveTheme(config.plot.theme));
+    this.shadowRoot.querySelector(".toolbar").hidden = !config;
+    this.shadowRoot.querySelector(".settings").hidden = !config;
+    if (!config || this.hidden) return;
+    this.#config = figureConfig(config);
+    const tree = this.#chart.data()?.tree;
+    this.#hasTree = Boolean(tree); this.#tree.state = { tree, config: this.#config.tree };
+    this.#sync();
+  }
+
+  #syncField(control, force = false) {
+    const path = control.dataset.config, value = path.split(".").reduce((current, key) => current?.[key], this.#config);
+    if (control.type === "checkbox") control.checked = Boolean(value);
+    else if (force || control !== this.shadowRoot.activeElement) control.value = control.type === "color" ? colourHex(value) : value ?? "";
+    const bound = path === "colourBar.domain.min" ? "min" : path === "colourBar.domain.max" ? "max" : null;
+    control.disabled = Boolean(bound && this.#config?.colourBar?.domain?.[`${bound}Mode`] === "data");
+  }
+
+  #sync() {
+    let visible = 0;
+    for (const { box, details, fields } of this.#sections) {
+      for (const { control, row, search } of fields) {
+        this.#syncField(control); row.hidden = Boolean(this.#filter && !search.includes(this.#filter));
+      }
+      box.hidden = fields.every(({ row }) => row.hidden);
+      if (!box.hidden) visible++;
+      if (details) {
+        details.hidden = !fields.some(({ advanced, row }) => advanced && !row.hidden);
+        details.open = Boolean(this.#filter) || this.#expanded.has(details.dataset.appearanceSection);
+      }
+    }
+    const empty = this.shadowRoot.querySelector(".empty");
+    empty.hidden = visible > 0; empty.textContent = `No appearance settings match “${this.#filter}”.`;
+    this.#tree.hidden = !this.#hasTree || Boolean(this.#filter && !/tree|clade|colour|color|annotation|branch|cut|palette/.test(this.#filter));
+  }
+}
+
+function defineAppearancePanel() {
+  defineSearchField(); defineTreeAppearance();
+  if (!customElements.get("clinker-appearance-panel")) customElements.define("clinker-appearance-panel", ClinkerAppearancePanelElement);
+}
+
+/** Shared activation and horizontal keyboard navigation for option buttons. */
+function bindOptionButtons(group, choose) {
+  group.addEventListener("click", (event) => choose(event.target.closest("button")));
+  group.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const buttons = [...group.querySelectorAll("button:not(:disabled)")];
+    if (!buttons.length) return;
+    const index = buttons.indexOf(event.target);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+      : (index + (event.key === "ArrowLeft" ? -1 : 1) + buttons.length) % buttons.length;
+    event.preventDefault(); buttons[next].focus(); choose(buttons[next]);
+  });
+}
+
+const [markup$e, css$e] = await Promise.all([
+  "<div part=\"tab-list\" role=\"tablist\">\n  <template><button type=\"button\" role=\"tab\"></button></template>\n</div>\n<slot name=\"status\"></slot>\n<div part=\"panels\">\n  <template><div role=\"tabpanel\" tabindex=\"0\"><slot></slot></div></template>\n</div>\n",
+  ":host { display: flex; flex: 1; flex-direction: column; min-height: 0; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\n[role=tablist] { display: flex; flex-shrink: 0; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--cm-border, #e1e5ea); }\nbutton {\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 0;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton[aria-selected=true] { border-bottom-color: var(--cm-accent, #1677ff); font-weight: 600; }\nbutton:hover:not(:disabled) { background: var(--cm-hover, #e3ecf8); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n[part=panels], [role=tabpanel] { display: flex; flex: 1; flex-direction: column; min-height: 0; }\n[role=tabpanel]:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nslot { display: contents; }\n",
+]);
+const template$e = createTemplate(markup$e);
+const HTMLElementBase$e = globalThis.HTMLElement || class {};
+let nextId = 0;
+
+class Tabs extends HTMLElementBase$e {
+  static observedAttributes = ["value", "label"];
+  #prefix = `clinker-tabs-${++nextId}`;
+  #list;
+  #content;
+  #buttonTemplate;
+  #panelTemplate;
+  #tabs = [];
+  #observer;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$e;
+    root.append(style, template$e(this.ownerDocument));
+    this.#list = root.querySelector("[role=tablist]"); this.#content = root.querySelector("[part=panels]");
+    this.#buttonTemplate = this.#list.querySelector("template"); this.#panelTemplate = this.#content.querySelector("template");
+    bindOptionButtons(this.#list, (button) => {
+      if (!button || button.disabled || button.value === this.value) return;
+      this.value = button.value;
+      this.dispatchEvent(new CustomEvent("value-change", { detail: { value: this.value }, bubbles: true, composed: true }));
+    });
+    this.#observer = new this.ownerDocument.defaultView.MutationObserver((records) => {
+      if (records.some((record) => record.type === "childList" ? record.target === this : record.target.parentElement === this)) this.#mountPanels();
+    });
+  }
+
+  get value() { return this.getAttribute("value") || ""; }
+  set value(value) { if (this.value !== String(value)) this.setAttribute("value", String(value)); }
+  attributeChangedCallback() { this.#sync(); }
+  connectedCallback() {
+    this.#mountPanels();
+    this.#observer.observe(this, { childList: true, subtree: true, attributes: true, attributeFilter: ["name", "label", "disabled"] });
+  }
+  disconnectedCallback() { this.#observer.disconnect(); }
+
+  #mountPanels() {
+    this.#tabs = [...this.children].filter((panel) => panel.hasAttribute("name")).map((panel, index) => {
+      const button = this.ownerDocument.importNode(this.#buttonTemplate.content, true).firstElementChild;
+      const wrapper = this.ownerDocument.importNode(this.#panelTemplate.content, true).firstElementChild;
+      const id = `${this.#prefix}-${index}`, name = panel.getAttribute("name");
+      panel.slot = id; wrapper.id = id; wrapper.querySelector("slot").name = id;
+      button.id = `${id}-tab`; button.value = name; button.textContent = panel.getAttribute("label") || name;
+      button.disabled = panel.hasAttribute("disabled"); button.setAttribute("aria-controls", id); wrapper.setAttribute("aria-labelledby", button.id);
+      return { name, panel, button, wrapper };
+    });
+    this.#list.replaceChildren(this.#buttonTemplate, ...this.#tabs.map(({ button }) => button));
+    this.#content.replaceChildren(this.#panelTemplate, ...this.#tabs.map(({ wrapper }) => wrapper));
+    this.#sync();
+  }
+
+  #sync() {
+    this.#list.setAttribute("aria-label", this.getAttribute("label") || "Sections");
+    const active = this.#tabs.find((tab) => tab.name === this.value && !tab.button.disabled) || this.#tabs.find((tab) => !tab.button.disabled);
+    if (active && active.name !== this.value) { this.value = active.name; return; }
+    for (const tab of this.#tabs) {
+      const selected = tab === active;
+      tab.button.setAttribute("aria-selected", String(selected)); tab.button.tabIndex = selected ? 0 : -1;
+      tab.panel.hidden = tab.wrapper.hidden = !selected;
+    }
+  }
+}
+
+function defineTabs() {
+  if (!customElements.get("clinker-tabs")) customElements.define("clinker-tabs", Tabs);
 }
 
 /** Selection shared by flat rows, tree leaves and annotation matrices. */
@@ -4394,20 +4431,16 @@ function defineDataPanel() {
   if (!customElements.get("clinker-data-panel")) customElements.define("clinker-data-panel", ClinkerDataPanelElement);
 }
 
-const shellTemplate = createTemplate(await "<div class=\"cm-editor__resize-handle\" data-resize role=\"separator\" aria-label=\"Resize plot editor\" aria-orientation=\"horizontal\"></div>\n<header class=\"cm-editor__header\">\n  <h2 class=\"cm-editor__title\">Plot editor</h2>\n  <div class=\"cm-editor__history\">\n    <button type=\"button\" data-command=\"undo\" disabled>Undo</button>\n    <button type=\"button\" data-command=\"redo\" disabled>Redo</button>\n  </div>\n</header>\n<clinker-tabs data-editor-tabs label=\"Plot editor sections\" value=\"data\">\n  <div slot=\"status\" data-editor-error class=\"cm-data-error\" role=\"alert\" hidden></div>\n  <clinker-data-panel name=\"data\" label=\"Data\" data-panel=\"data\"></clinker-data-panel>\n  <section name=\"appearance\" label=\"Appearance\" data-panel=\"appearance\" class=\"cm-editor__panel\" hidden>\n    <div class=\"cm-editor__appearance\" data-appearance></div>\n  </section>\n</clinker-tabs>\n");
+const shellTemplate = createTemplate(await "<div class=\"cm-editor__resize-handle\" data-resize role=\"separator\" aria-label=\"Resize plot editor\" aria-orientation=\"horizontal\"></div>\n<header class=\"cm-editor__header\">\n  <h2 class=\"cm-editor__title\">Plot editor</h2>\n  <div class=\"cm-editor__history\">\n    <button type=\"button\" data-command=\"undo\" disabled>Undo</button>\n    <button type=\"button\" data-command=\"redo\" disabled>Redo</button>\n  </div>\n</header>\n<clinker-tabs data-editor-tabs label=\"Plot editor sections\" value=\"data\">\n  <clinker-data-panel name=\"data\" label=\"Data\" data-panel=\"data\"></clinker-data-panel>\n  <clinker-appearance-panel name=\"appearance\" label=\"Appearance\" data-panel=\"appearance\" hidden></clinker-appearance-panel>\n</clinker-tabs>\n");
 const HTMLElementBase = globalThis.HTMLElement || class {};
 
 /** Optional editor for an already rendered chart; edits use its public API. */
 class ClinkerEditorElement extends HTMLElementBase {
   #chart = null;
   #dataPanel = null;
-  #appearanceView = null;
+  #appearancePanel = null;
   #unsubscribe = null;
   #resizeStart = null;
-  #runEdit = createActionRunner((message) => {
-    const status = this.querySelector("[data-editor-error]");
-    if (status) { status.textContent = message; status.hidden = !message; }
-  });
   #editAnnotation = (event) => {
     if (event.defaultPrevented || event.detail?.chart !== this.#chart) return;
     event.preventDefault(); this.editAnnotations(event.detail.panelUid);
@@ -4419,9 +4452,6 @@ class ClinkerEditorElement extends HTMLElementBase {
       const command = event.target.closest("[data-command]")?.dataset.command;
       if (command === "undo") this.#chart?.undo?.();
       else if (command === "redo") this.#chart?.redo?.();
-    });
-    this.addEventListener("value-change", (event) => {
-      if (event.target.matches("[data-editor-tabs]") && event.detail.value === "appearance") this.#renderAppearance();
     });
     this.addEventListener("pointerdown", (event) => {
       if (!event.target.closest("[data-resize]") || !this.hasAttribute("resizable")) return;
@@ -4439,7 +4469,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   }
 
   connectedCallback() {
-    defineTabs(); defineDataPanel();
+    defineTabs(); defineDataPanel(); defineAppearancePanel();
     this.classList.add("cm-editor", "cm-data-ui");
     if (!this.hasChildNodes()) this.#renderShell();
     this.ownerDocument.addEventListener("clustermap:edit-annotation", this.#editAnnotation);
@@ -4474,7 +4504,6 @@ class ClinkerEditorElement extends HTMLElementBase {
 
   reset() {
     this.#chart?.previewTreePresentation?.(null);
-    this.#appearanceView = null;
     this.#renderShell(); this.#render();
     return this;
   }
@@ -4482,13 +4511,13 @@ class ClinkerEditorElement extends HTMLElementBase {
   #renderShell() {
     this.replaceChildren(shellTemplate(this.ownerDocument));
     this.#dataPanel = this.querySelector("clinker-data-panel");
+    this.#appearancePanel = this.querySelector("clinker-appearance-panel");
   }
 
   #subscribe() {
     if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
     this.#unsubscribe = this.#chart.on("change", (change) => {
-      if (["config.change", "theme.change", "data.replace", "state.replace"].includes(change.type) ||
-          (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.presentation.")))) this.#renderAppearance();
+      if (["config.change", "theme.change", "state.replace"].includes(change.type)) this.#syncTheme();
       if (change.type === "history.change") this.#renderHistory();
     });
   }
@@ -4496,7 +4525,8 @@ class ClinkerEditorElement extends HTMLElementBase {
   #render() {
     if (!this.isConnected) return;
     if (this.#dataPanel) this.#dataPanel.chart = this.#chart;
-    this.#renderAppearance(); this.#renderHistory();
+    if (this.#appearancePanel) this.#appearancePanel.chart = this.#chart;
+    this.#syncTheme(); this.#renderHistory();
   }
 
   #renderHistory() {
@@ -4506,31 +4536,9 @@ class ClinkerEditorElement extends HTMLElementBase {
     if (redo) redo.disabled = !this.#chart?.canRedo?.();
   }
 
-  #setConfig({ path, value }) {
-    if (!this.#chart?.config) return false;
-    const keys = path.split(".");
-    let config = value;
-    for (const key of keys.slice().reverse()) config = { [key]: config };
-    return this.#runEdit(() => this.#chart.config(config));
-  }
-
-  #renderAppearance() {
-    const container = this.querySelector("[data-appearance]");
-    const requestedConfig = this.#chart?.config?.();
-    const config = requestedConfig && figureConfig(requestedConfig);
+  #syncTheme() {
+    const config = this.#chart?.config?.();
     if (config) applyTheme(this, resolveTheme(config.plot.theme));
-    if (!container) return;
-    container.hidden = !config;
-    if (!config || this.querySelector('[data-panel="appearance"]')?.hidden) return;
-    if (!this.#appearanceView) {
-      this.#appearanceView = createAppearanceControls({ document: this.ownerDocument,
-        patch: (ops) => this.#chart.patch(ops), preview: (ops) => this.#chart.previewTreePresentation(ops) });
-      this.#appearanceView.node.addEventListener("config-change", (event) => {
-        if (this.#setConfig(event.detail) === false) event.preventDefault();
-      });
-      container.append(this.#appearanceView.node);
-    }
-    this.#appearanceView.update({ config, tree: this.#chart.data()?.tree });
   }
 
 }
@@ -4618,4 +4626,4 @@ function mountPlotSelectionToolbar(chart, container) {
   };
 }
 
-export { ClinkerDataPanelElement, ClinkerEditorElement, defineClinkerEditor, defineDataPanel, mountPlotSelectionToolbar };
+export { ClinkerAppearancePanelElement, ClinkerDataPanelElement, ClinkerEditorElement, defineAppearancePanel, defineClinkerEditor, defineDataPanel, mountPlotSelectionToolbar };

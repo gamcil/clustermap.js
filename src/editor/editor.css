@@ -7,8 +7,6 @@
   clinker-editor .cm-editor__header { display: flex; align-items: center; gap: 8px; }
   clinker-editor .cm-editor__header { justify-content: space-between; margin-bottom: 8px; }
   clinker-editor .cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }
-  clinker-editor .cm-editor__panel { display: flex; min-height: 0; flex: 1; flex-direction: column; }
-  clinker-editor .cm-editor__appearance { display:flex; flex:1; min-height:0; }
   clinker-editor .cm-editor__sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
   .cm-plot-selection-toolbar { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; align-items: center; gap: 6px; padding: 7px 8px; border: 1px solid var(--cm-border,#c7d9f1); border-radius: 8px; background: var(--cm-surface,rgba(255,255,255,.94)); box-shadow: 0 3px 12px rgba(23,36,54,.12); color: var(--cm-foreground,#273444); font: 13px/1.4 system-ui, sans-serif; }
   .cm-plot-selection-toolbar[hidden] { display: none; }

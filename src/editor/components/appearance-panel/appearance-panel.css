@@ -10,4 +10,4 @@ details { margin-top: 8px; border-top: 1px solid var(--cm-border, #e5e9ef); }
 summary { padding: 7px 0 1px; color: var(--cm-muted, #687586); cursor: pointer; font-size: 12px; font-weight: 600; }
 summary:hover { color: var(--cm-accent, #1677ff); }
 .empty { grid-column: 1 / -1; padding: 16px; color: var(--cm-muted, #667386); text-align: center; }
-::slotted(*) { min-width: 0; }
+.error { grid-column: 1 / -1; color: var(--cm-danger, #b42318); margin: 0; }

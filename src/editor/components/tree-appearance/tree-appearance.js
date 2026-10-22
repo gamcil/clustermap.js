@@ -1,5 +1,5 @@
 import { createTemplate } from "../../../uiControls.mjs";
-import { TREE_COLOURING_DEFAULTS } from "../../../treePresentation.mjs";
+import { TREE_COLOURING_DEFAULTS, resolveTreePresentation, validateTreePresentation } from "../../../treePresentation.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { controlStyles } from "../../shared/controlStyles.js";
 
@@ -39,7 +39,16 @@ class TreeAppearance extends HTMLElementBase {
     this.#slider.onpointercancel = () => this.#cancelPreview();
   }
 
-  set state(value) { this.#state = value; this.#previewing = false; this.#sync(); }
+  set state({ tree, config }) {
+    if (!tree) { if (this.#previewing) this.#cancelPreview(); this.#state = null; return; }
+    const { policy, height } = resolveTreePresentation(tree, config);
+    let compatible = tree.distance?.kind === "mergeHeight";
+    try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...policy, mode: "cutHeight" } } }, config); }
+    catch { compatible = false; }
+    this.#state = { policy, height, compatible,
+      canReset: Boolean(Object.keys(tree.presentation?.nodes || {}).length || Object.keys(tree.presentation?.subtrees || {}).length) };
+    this.#previewing = false; this.#sync();
+  }
   set error(message) { const status = this.shadowRoot.querySelector("p"); status.textContent = message; status.hidden = !message; }
   disconnectedCallback() { if (this.#previewing) this.#cancelPreview(); }
 
