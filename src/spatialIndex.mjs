@@ -110,6 +110,11 @@ export function queryViewport(index, viewport) {
   const maxColumn = Math.floor(viewport.maxX / index.cellWidth);
   const minRow = Math.floor(viewport.minY / index.cellHeight);
   const maxRow = Math.floor(viewport.maxY / index.cellHeight);
+  // At overview scales, checking each record is cheaper than visiting empty grid cells.
+  if ((maxColumn - minColumn + 1) * (maxRow - minRow + 1) > index.boundsById.size) {
+    for (const [id, bounds] of index.boundsById) if (intersects(bounds, viewport)) matches.add(id);
+    return matches;
+  }
   for (let column = minColumn; column <= maxColumn; column += 1) {
     for (let row = minRow; row <= maxRow; row += 1) {
       for (const id of index.cells.get(cellKey(column, row)) || []) {

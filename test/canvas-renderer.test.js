@@ -452,3 +452,30 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
   const collapsedTrack = interpolateCanvasScene(trackBefore, trackAfter, 0.5);
   assert.deepEqual(collapsedTrack.loci.get("locus").track, { x1: 5, x2: 5, y: 11 });
 });
+
+test("empty or disabled trim overlays skip locus queries but active trims still draw", async () => {
+  const { renderCanvas } = await import("../src/canvasRenderer.js");
+  const { createDefaultConfig } = await import("../src/config.js");
+  const { createSpatialIndex } = await import("../src/spatialIndex.mjs");
+  const text = [];
+  const context = new Proxy({}, { get: (target, key) => key === "fillText" ? (value) => text.push(value) : () => {} });
+  const canvas = { width: 100, height: 100, getContext: () => context };
+  const locus = { source: { uid: "locus" }, x: 0, y: 0, trimIndicators: [] };
+  const scene = { clusters: new Map(), genes: new Map(), links: new Map(), loci: new Map([["locus", locus]]), index: {} };
+  Object.defineProperty(scene.index, "loci", { configurable: true, get: () => { throw new Error("empty overlay queried loci"); } });
+  const config = createDefaultConfig();
+  const options = { canvas, scene, config, camera: { x: 0, y: 0, k: 1 }, scales: {}, dimensions: { width: 100, height: 100 }, layers: ["trimIndicators"] };
+  renderCanvas(options);
+  renderCanvas(options); // Reuse the cached absence of indicators.
+  Object.defineProperty(scene.index, "loci", { value: createSpatialIndex([["locus", { minX: 0, maxX: 20, minY: 0, maxY: 20 }]]), configurable: true });
+  const indicator = { text: "3 hidden genes", x: 0, y: 0, anchor: "start" };
+  renderCanvas({ ...options, preview: { type: "locus-trim", loci: new Map([["locus", { trimIndicators: [indicator] }]]) } });
+  assert.deepEqual(text, [indicator.text]);
+  const trimmed = { ...scene, loci: new Map([["locus", { ...locus, trimIndicators: [indicator] }]]) };
+  renderCanvas({ ...options, scene: trimmed });
+  assert.equal(text.length, 2, "new committed locus maps invalidate the cached presence");
+  config.locus.trimIndicators.show = false;
+  Object.defineProperty(scene.index, "loci", { get: () => { throw new Error("disabled overlay queried loci"); } });
+  renderCanvas({ ...options, scene: trimmed });
+  assert.equal(text.length, 2);
+});

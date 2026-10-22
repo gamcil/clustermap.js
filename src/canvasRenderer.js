@@ -813,6 +813,14 @@ export function interpolateCanvasScene(previous, scene, amount) {
   return { ...scene, clusters, loci, genes, links, annotationPanels };
 }
 
+const trimIndicatorPresence = new WeakMap();
+function hasTrimIndicators(loci) {
+  if (!trimIndicatorPresence.has(loci)) {
+    trimIndicatorPresence.set(loci, [...loci.values()].some((locus) => locus.trimIndicators?.length));
+  }
+  return trimIndicatorPresence.get(loci);
+}
+
 export const CANVAS_LAYERS = ["links", "linkLabels", "tracks", "trimIndicators", "genes", "geneLabels", "clusterLabels", "tree", "annotations", "annotationLabels", "chrome"];
 
 /** Draw selected layers of a renderer-neutral scene into Canvas 2D. */
@@ -847,10 +855,12 @@ export function renderCanvas({
   config = figureConfig(config);
   const show = (layer) => layers.includes(layer);
   const showLinks = show("links"), showGenes = show("genes");
-  const showLoci = show("trimIndicators") || show("tracks");
+  const displayScene = interpolateCanvasScene(previousScene, scene, progress);
+  const showTrimIndicators = show("trimIndicators") && config.locus.trimIndicators?.show !== false &&
+    (preview?.type === "locus-trim" || hasTrimIndicators(displayScene.loci));
+  const showLoci = showTrimIndicators || show("tracks");
   const showGeneLabels = show("geneLabels") && config.gene.label.show;
   const showLinkLabels = show("linkLabels") && config.link.label.show;
-  const displayScene = interpolateCanvasScene(previousScene, scene, progress);
   const context = canvas.getContext("2d");
   const bounds = dimensions || canvas.getBoundingClientRect();
   const width = bounds.width;
@@ -969,7 +979,7 @@ export function renderCanvas({
       );
     }
   }
-  if (show("trimIndicators")) {
+  if (showTrimIndicators) {
     for (const locus of loci) {
       drawLocusTrimIndicators(
         context,
