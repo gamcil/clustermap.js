@@ -80,6 +80,7 @@ const canvasPoint = (page, selector, fraction = 0.5) => page.evaluate(({ selecto
 
 for (const theme of ["light", "dark"]) {
   test(`${theme}: shared geometry and interactive colours across data views`, async ({ page }) => {
+    await selectionFixture(page, "svg");
     await page.evaluate((theme) => chart.config({ plot: { theme } }), theme);
     let checkboxX;
     for (const kind of ["groups", "links", "tree", "list", "numeric", "categorical"]) {
@@ -352,6 +353,35 @@ test("record action component commits batch values and validates identity", asyn
   expect(await page.evaluate(() => chart.data().links.map(({ identity }) => identity))).toEqual([0.75, 0.75]);
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
   expect(await page.evaluate(() => chart.data().links.map(({ identity }) => identity))).toEqual([1, 0.9]);
+});
+
+test("data table component mounts deferred rows and disposes them across reconnects", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const table = document.createElement("clinker-data-table"), container = document.createElement("div");
+    table.style.height = "120px"; table.append(container);
+    let created = 0, disposed = 0;
+    table.renderer = { container, key: (id) => id, createRow(id) {
+      created++; const row = document.createElement("div"); row.dataset.row = id; row.style.height = "34px"; row.textContent = `Row ${id}`; return row;
+    }, disposeRow() { disposed++; } };
+    table.rows = Array.from({ length: 250 }, (_, index) => index);
+    const deferred = created === 0;
+    document.body.append(table);
+    const initial = container.querySelectorAll("[data-row]").length;
+    table.remove();
+    const removed = created === disposed && container.children.length === 0;
+    document.body.append(table);
+    table.scrollTo({ top: table.scrollHeight });
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const reachedEnd = Boolean(container.querySelector('[data-row="249"]')) && table.scrollTop > 0;
+    table.rows = [];
+    const empty = !table.shadowRoot.querySelector('[part="empty"]').hidden && !container.querySelector("[data-row]");
+    table.renderer = null;
+    const cleared = created === disposed && container.children.length === 0 && table.shadowRoot.querySelector('[part="empty"]').hidden;
+    table.remove(); return { deferred, initial, removed, reachedEnd, empty, cleared };
+  });
+  expect(result.deferred).toBe(true);
+  expect(result.initial).toBeGreaterThan(0); expect(result.initial).toBeLessThan(80);
+  expect(result.removed).toBe(true); expect(result.reachedEnd).toBe(true); expect(result.empty).toBe(true); expect(result.cleared).toBe(true);
 });
 
 test("annotation rows virtualize, preserve offscreen selection and filter all records", async ({ page }) => {

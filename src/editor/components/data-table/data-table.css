@@ -1,0 +1,6 @@
+:host { display: flex; flex: 1; min-width: 0; min-height: 120px; color: inherit; font: inherit; }
+:host([hidden]) { display: none !important; }
+[hidden] { display: none !important; }
+[part=viewport] { flex: 1; min-width: 0; min-height: 0; overflow: auto; overflow-anchor: none; outline: none; }
+slot { display: contents; }
+[part=empty] { padding: 16px; color: var(--cm-muted, #667386); text-align: center; }

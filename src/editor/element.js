@@ -1,11 +1,10 @@
 import { createDataPanel, createSelectionControls, installDataEditorStyle } from "../dataEditorUi.mjs";
 import { RowSelection } from "../rowSelection.mjs";
-import { createVirtualRows, DATA_ROW_HEIGHT } from "../virtualRows.mjs";
+import { DATA_ROW_HEIGHT } from "../virtualRows.mjs";
 import { createAnnotationDataControls } from "../annotationDataControls.mjs";
 import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale, validateAnnotationPanels } from "../annotations.mjs";
 import { createActionRunner, createTemplate } from "../uiControls.mjs";
 import { applyTheme, resolveTheme, figureConfig } from "../theme.mjs";
-import { createDataHeader } from "./dataTableControls.mjs";
 import { createEditorRow } from "./dataRows.mjs";
 import { createAppearanceControls } from "./appearanceControls.mjs";
 import { defineEditableField } from "./components/editable-field/editable-field.js";
@@ -15,6 +14,7 @@ import { defineViewSwitcher } from "./components/view-switcher/view-switcher.js"
 import { defineSearchField } from "./components/search-field/search-field.js";
 import { defineTabs } from "./components/tabs/tabs.js";
 import { defineRecordActions } from "./components/record-actions/record-actions.js";
+import { defineDataTable } from "./components/data-table/data-table.js";
 import { textAsset } from "./shared/textAsset.js";
 
 const shellTemplate = createTemplate(await textAsset(new URL("./element.html", import.meta.url)));
@@ -22,8 +22,7 @@ const shellTemplate = createTemplate(await textAsset(new URL("./element.html", i
 const memberFilterTemplate = createTemplate(`<div class="cm-editor__member-filter" data-member-filter hidden>
   <span>Group: <strong data-member-label></strong></span><button type="button" data-command="clear-member-filter" aria-label="Clear group member filter" title="Clear group member filter">×</button>
 </div>`);
-const tableTemplate = createTemplate('<div data-head class="cm-editor__head"></div><div data-rows></div>');
-const emptyTemplate = createTemplate('<p class="cm-editor__empty">No records match the filter.</p>');
+const tableTemplate = createTemplate('<div slot="header" data-head class="cm-editor__head"></div><div data-rows></div>');
 
 const tagName = "clinker-editor";
 const HTMLElementBase = globalThis.HTMLElement || class {};
@@ -55,8 +54,8 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #kind = "groups";
   #geneView = "tree";
   #selected = new RowSelection();
-  #rowView = null;
-  #updateHeader = null;
+  #rowKind = null;
+  #table = null;
   #actions = null;
   #selectionControls = null;
   #rowsCache = null;
@@ -79,7 +78,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField(); defineTabs(); defineRecordActions();
+    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField(); defineTabs(); defineRecordActions(); defineDataTable();
     this.classList.add("cm-editor", "cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();
@@ -168,6 +167,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #renderShell() {
     this.replaceChildren(shellTemplate(this.ownerDocument));
     const panel = createDataPanel(this.ownerDocument);
+    this.#table = panel.viewport;
     panel.node.dataset.recordEditor = "";
     panel.tools.dataset.recordTools = "";
     panel.tools.append(memberFilterTemplate(this.ownerDocument));
@@ -179,7 +179,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.#selectionControls.actions.append(this.#actions);
     panel.viewport.classList.add("cm-editor__table");
     panel.viewport.append(tableTemplate(this.ownerDocument));
-    this.#updateHeader = createDataHeader(this.ownerDocument, panel.viewport.querySelector("[data-head]"));
     this.querySelector("[data-record-editor]").replaceWith(panel.node);
   }
 
@@ -430,8 +429,8 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #disposeRows() {
-    const view = this.#rowView; this.#rowView = null;
-    view?.destroy();
+    if (this.#table) this.#table.renderer = null;
+    this.#rowKind = null;
   }
 
   #invalidateData({ replace = false } = {}) {
@@ -681,11 +680,12 @@ export class ClinkerEditorElement extends HTMLElementBase {
       return;
     }
     const data = this.#data();
+    const table = this.#table;
     const head = this.querySelector("[data-head]");
     const list = this.querySelector("[data-rows]");
     if (!data) {
       this.#disposeRows();
-      this.#updateHeader([], null); list.textContent = "Set the chart property to edit a ClusterMap chart.";
+      table.header = { columns: [], sort: null }; list.textContent = "Set the chart property to edit a ClusterMap chart.";
       this.#selectionControls.update({ ids: [], summary: "No chart attached.", noun: this.#kind.slice(0, -1) });
       this.#actions.state = { kind: this.#kind, count: 0, groups: [], allGroups: [], loci: [], clusters: [] };
       return;
@@ -717,16 +717,16 @@ export class ClinkerEditorElement extends HTMLElementBase {
         : [{ label: "" }, { label: "Gene", sort: "label" }, { label: "Locus", sort: "locus" }, { label: "Cluster", sort: "cluster" }, { label: "Group", sort: "group" }, { label: "Colour" }];
     const sort = this.#sort[this.#kind];
     head.className = `cm-data-head cm-editor__head cm-editor__head--${isTree ? "tree" : this.#kind}`;
-    this.#updateHeader(columns, sort);
+    table.header = { columns, sort };
     list.className = `cm-editor__rows cm-editor__rows--${isTree ? "tree" : this.#kind}`;
-    const table = this.querySelector(".cm-editor__table");
-    if (this.#rowView?.kind !== this.#kind) this.#disposeRows();
-    if (!this.#rowView) {
+    if (this.#rowKind !== this.#kind) this.#disposeRows();
+    if (!this.#rowKind) {
       const kind = this.#kind;
+      this.#rowKind = kind;
       list.replaceChildren();
       const components = new WeakMap();
       const updateRow = (node, row) => components.get(node).update(row, this.#selected);
-      this.#rowView = { kind, ...createVirtualRows({ viewport: table, container: list,
+      table.renderer = { container: list,
         key: (row) => `${kind}:${row.type || "row"}:${row.key ?? row.id}`,
         headerHeight: () => head.offsetHeight,
         createRow: (row) => {
@@ -734,15 +734,14 @@ export class ClinkerEditorElement extends HTMLElementBase {
             (type, id, changes, control) => this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes }, control));
           components.set(component.node, component); return updateRow(component.node, row);
         },
-        createEmpty: () => emptyTemplate(this.ownerDocument).firstElementChild,
-        disposeRow: (node) => components.get(node).destroy(), updateRow }) };
+        disposeRow: (node) => components.get(node).destroy(), updateRow };
     }
     if (this.#selectionData !== data) {
       const cache = this.#cache();
       const records = this.#kind === "genes" ? cache.geneById.values() : this.#kind === "links" ? data.links : data.groups;
       this.#selected.prune([...records].map((record) => record.uid)); this.#selectionData = data;
     }
-    this.#rowView.setRows(rows);
+    table.rows = rows;
     const visibleGenes = isTree ? new Set(rows.flatMap((row) => row.selectIds || (row.type === "gene" ? [row.id] : []))).size : rows.length;
     const summaryText = isTree
       ? `${rows.filter((row) => row.type !== "gene").length.toLocaleString()} ${this.#geneView === "groups" ? "group" : "cluster/locus"} rows · ${visibleGenes.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
