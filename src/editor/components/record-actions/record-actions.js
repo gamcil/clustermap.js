@@ -1,6 +1,6 @@
 import { createTemplate, updateSelectOptions } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
-import { controlStyles } from "../../shared/controlStyles.js";
+import { controlStyles } from "../../shared/controls.mjs";
 import { defineActionMenu } from "../action-menu/action-menu.js";
 
 const [markup, css] = await Promise.all([

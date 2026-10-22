@@ -1,7 +1,7 @@
 import { csvFormatRows } from "d3-dsv";
 import { createTemplate } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
-import { controlStyles } from "../../shared/controlStyles.js";
+import { controlStyles } from "../../shared/controls.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./annotation-data-form.html", import.meta.url)),

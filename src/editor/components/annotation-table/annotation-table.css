@@ -1,5 +1,4 @@
 :host { display:flex; flex:1; min-width:0; min-height:0; color:inherit; font:inherit; }
-:host([hidden]) { display:none!important; }
 slot { display:contents; }
 .cm-annotation-matrix { position:relative; }
 .cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }

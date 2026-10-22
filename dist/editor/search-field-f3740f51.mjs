@@ -424,9 +424,6 @@ function createTemplate(markup) {
   };
 }
 
-const controlTemplates = Object.fromEntries(["button", "input", "select", "option"].map((tag) =>
-  [tag, createTemplate(tag === "input" ? "<input>" : `<${tag}></${tag}>`)]));
-const labelTemplate = createTemplate("<label><span></span></label>");
 const selectOptions = new WeakMap();
 function updateSelectOptions(control, entries) {
   const options = entries.map((entry) => Array.isArray(entry) ? entry : [entry, entry]);
@@ -434,84 +431,72 @@ function updateSelectOptions(control, entries) {
   if (selectOptions.get(control) === key) return;
   const value = control.value;
   control.replaceChildren(...options.map(([value, label]) => {
-    const option = controlTemplates.option(control.ownerDocument).firstElementChild;
+    const option = control.ownerDocument.createElement("option");
     option.value = value; option.textContent = label; return option;
   }));
   control.value = value; selectOptions.set(control, key);
 }
 
-/** Native controls with consistent labels, values and validity handling. */
+/** Native controls for in-plot popovers. */
 function createControls(document) {
   const el = (tag, text, parent, className) => {
-    const node = controlTemplates[tag]?.(document).firstElementChild || document.createElement(tag);
+    const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
     if (className) node.className = className;
     parent?.append(node); return node;
   };
   const row = (parent, label) => {
-    const node = labelTemplate(document).firstElementChild;
-    node.firstElementChild.textContent = label; parent?.append(node); return node;
+    const node = el("label", undefined, parent);
+    el("span", label, node); return node;
   };
   const button = (parent, label, action, className) => {
     const node = el("button", label, parent, className); node.type = "button"; node.onclick = action; return node;
   };
-  const input = (parent, label, value, type = "text", onChange, options = {}) => {
+  const input = (parent, label, value, type = "text", options = {}) => {
     const node = el("input", undefined, parent); Object.assign(node, { type, ...options });
     node.setAttribute("aria-label", label);
     if (type === "checkbox") node.checked = Boolean(value);
     else node.value = type === "color" ? colourHex(value) : value ?? "";
     if (type === "number" && options.step === undefined) node.step = "any";
-    if (onChange) node.onchange = () => { if (node.checkValidity()) onChange(type === "checkbox" ? node.checked : node.value); };
     return node;
   };
-  const select = (parent, label, value, entries, onChange) => {
+  const select = (parent, label, value, entries) => {
     const node = el("select", undefined, parent); node.setAttribute("aria-label", label);
     updateSelectOptions(node, entries);
     node.value = value;
-    if (onChange) node.onchange = () => onChange(node.value);
     return node;
   };
-  const field = (parent, label, value, { type = "text", entries, options, commit, cancel } = {}) =>
-    bindEditableField(entries ? select(parent, label, value, entries) : input(parent, label, value, type, undefined, options),
-      { commit, cancel });
-  return { el, row, button, input, select, field };
-}
-
-const fieldValues = new WeakMap();
-
-/** Shared commit, validation and cancellation for editable fields. */
-function bindEditableField(control, { commit, cancel }) {
-  control.classList.add("cm-data-field");
-  fieldValues.set(control, control.value);
-  control.onchange = () => {
-    control.setCustomValidity("");
-    if (!control.checkValidity()) { control.reportValidity(); return; }
-    if (control.value === fieldValues.get(control)) return;
-    if (commit(control.value, control) !== false) fieldValues.set(control, control.value);
-    else control.reportValidity();
-  };
-  control.onkeydown = (event) => {
-    if (event.isComposing) return;
-    if (event.key === "Escape") {
-      event.preventDefault(); event.stopPropagation();
-      control.value = fieldValues.get(control); control.setCustomValidity(""); cancel?.();
-    } else if (event.key === "Enter" && control.tagName === "INPUT") {
-      event.preventDefault(); control.blur();
-    }
-  };
-  return control;
+  return { el, row, button, input, select };
 }
 
 /** Report rejected UI edits consistently while leaving validation in the model. */
 function createActionRunner(report) {
-  return (action, control) => {
-    control?.setCustomValidity("");
+  return (action) => {
     try { action(); report(""); return true; }
-    catch (error) { report(error.message); control?.setCustomValidity(error.message); return false; }
+    catch (error) { report(error.message); return false; }
   };
 }
 
-const controlStyles = await ":host([hidden]), [hidden] { display: none !important; }\nform { margin: 0; }\nbutton, input, select, textarea { box-sizing: border-box; font: inherit; color: inherit; }\nbutton, input:not([type=color]):not([type=checkbox]):not([type=range]), select, textarea {\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[type=color] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }\ninput[type=checkbox], button { cursor: pointer; }\ninput::placeholder, textarea::placeholder { color: var(--cm-muted, #687586); }\nbutton:where(:hover:not(:disabled)) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n:is(button, summary):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:is(input, select, textarea):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n";
+// Shared by shadow components and light DOM popovers. Keep defaults easy to override.
+const controlStyles = `
+:host([hidden]), :where(.cm-data-ui)[hidden], :where(:host,.cm-data-ui) [hidden] { display:none!important; }
+:where(:host,.cm-data-ui) form { margin:0; }
+:where(:host,.cm-data-ui) :is(button,input,select,textarea) { box-sizing:border-box; font:inherit; color:inherit; }
+:where(:host,.cm-data-ui) :where(button,input:not([type=color]):not([type=checkbox]):not([type=range]),select,textarea) {
+  min-height:var(--cm-control-height,30px);
+  padding:var(--cm-control-padding,4px 8px);
+  border:1px solid var(--cm-border,#cbd3de);
+  border-radius:var(--cm-control-radius,6px);
+  background:var(--cm-surface,#fff);
+}
+:where(:host,.cm-data-ui) input[type=color] { width:30px; height:22px; padding:0; border:0; background:transparent; cursor:pointer; }
+:where(:host,.cm-data-ui) :is(input[type=checkbox],button,summary) { cursor:pointer; }
+:where(:host,.cm-data-ui) :is(input,textarea)::placeholder { color:var(--cm-muted,#687586); }
+:where(:host,.cm-data-ui) button:where(:hover:not(:disabled)) { border-color:var(--cm-accent,#78a9ed); background:var(--cm-hover,#f4f8ff); }
+:where(:host,.cm-data-ui) button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
+:where(:host,.cm-data-ui) :is(button,summary):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:2px; }
+:where(:host,.cm-data-ui) :is(input,select,textarea):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:-2px; }
+`;
 
 const [markup, css] = await Promise.all([
   "<input type=\"search\" part=\"input\">\n<button type=\"button\" part=\"clear\" aria-label=\"Clear search\" title=\"Clear search\" hidden>×</button>\n",

@@ -9,7 +9,7 @@ export function createAnnotationControls({ getData, patch, document, panelUid, a
   const current = () => (getData()?.annotationPanels || []).find((panel) => panel.uid === panelUid);
   const ui = createControls(document), { el, row } = ui;
   const input = (parent, label, field, value, type = "text", options = {}) => {
-    const control = ui.input(row(parent, label), label, value, type, undefined, options);
+    const control = ui.input(row(parent, label), label, value, type, options);
     control.dataset.annotationField = field; return control;
   };
   const select = (parent, label, field, value, entries) => {

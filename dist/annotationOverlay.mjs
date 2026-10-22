@@ -1,5 +1,5 @@
-import { i as installDataEditorStyle, h as defineAnnotationDataForm, j as createAnnotationPanel, f as defineAnnotationEditor } from './editor/annotation-editor-1b86fd52.mjs';
-import { f as createActionRunner, d as colourHex, h as createControls } from './editor/search-field-cf76fff2.mjs';
+import { i as installDataEditorStyle, h as defineAnnotationDataForm, j as createAnnotationPanel, f as defineAnnotationEditor } from './editor/annotation-editor-ae65b270.mjs';
+import { f as createActionRunner, d as colourHex, h as createControls } from './editor/search-field-f3740f51.mjs';
 
 /** Quick styling stays in the plot; data and membership editing live in the data editor. */
 function createAnnotationControls({ getData, patch, document, panelUid, annotationApi, onEditData }) {
@@ -10,7 +10,7 @@ function createAnnotationControls({ getData, patch, document, panelUid, annotati
   const current = () => (getData()?.annotationPanels || []).find((panel) => panel.uid === panelUid);
   const ui = createControls(document), { el, row } = ui;
   const input = (parent, label, field, value, type = "text", options = {}) => {
-    const control = ui.input(row(parent, label), label, value, type, undefined, options);
+    const control = ui.input(row(parent, label), label, value, type, options);
     control.dataset.annotationField = field; return control;
   };
   const select = (parent, label, field, value, entries) => {

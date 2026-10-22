@@ -1,6 +1,6 @@
 import { createTemplate, colourHex, createActionRunner, upgradeProperty } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
-import { controlStyles } from "../../shared/controlStyles.js";
+import { controlStyles } from "../../shared/controls.mjs";
 import { defineSearchField } from "../search-field/search-field.js";
 import { defineTreeAppearance } from "../tree-appearance/tree-appearance.js";
 import { figureConfig } from "../../../theme.mjs";

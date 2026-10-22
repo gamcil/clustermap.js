@@ -1,4 +1,4 @@
-import { e as updateSelectOptions, c as createTemplate, a as controlStyles, d as colourHex, g as defineSearchField, f as createActionRunner } from './search-field-cf76fff2.mjs';
+import { a as controlStyles, e as updateSelectOptions, c as createTemplate, d as colourHex, g as defineSearchField, f as createActionRunner } from './search-field-f3740f51.mjs';
 
 /** Shared fixed-height row window for scrollable data editors. */
 const DATA_ROW_HEIGHT = 34;
@@ -79,19 +79,9 @@ function createVirtualRows({ viewport, container, key, createRow, updateRow,
 
 const DATA_EDITOR_CSS = `
 @layer clinker-editor {
+${controlStyles}
 .cm-data-ui { color:var(--cm-foreground,#273444); font:var(--clinker-font,13px/1.4 system-ui,sans-serif); }
-.cm-data-ui [hidden] { display:none!important; }
-.cm-data-ui form { margin:0; }
-.cm-data-ui :is(button,input,select,textarea) { font:inherit; color:inherit; box-sizing:border-box; }
-.cm-data-ui :where(button,select,input:not([type=color]):not([type=checkbox]):not([type=range]),textarea) { min-height:var(--cm-control-height,30px); padding:var(--cm-control-padding,4px 8px); border:1px solid var(--cm-border,#cbd3de); border-radius:var(--cm-control-radius,6px); background:var(--cm-surface,#fff); }
-.cm-data-ui input[type=checkbox] { cursor:pointer; }
-.cm-data-ui input[type=color] { width:30px; height:22px; padding:0; border:0; background:transparent; }
-.cm-data-ui button { cursor:pointer; }
-.cm-data-ui button:hover:not(:disabled) { border-color:var(--cm-accent,#78a9ed); background:var(--cm-hover,#f4f8ff); }
-.cm-data-ui :where(button,summary):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:2px; }
-.cm-data-ui summary { cursor:pointer; }
 .cm-data-ui summary:hover { color:var(--cm-accent,#1677ff); }
-.cm-data-ui button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
 .cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,#64748b); line-height:1; }
 .cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-accent,#1677ff); }
 .cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
@@ -112,15 +102,6 @@ const DATA_EDITOR_CSS = `
 span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
 .cm-data-cell--select input { display:block; margin:auto; }
 .cm-data-cell > input[type=color] { display:block; }
-.cm-data-ui .cm-data-cell .cm-data-field { padding-inline:0; margin-inline:-1px; }
-.cm-data-ui .cm-data-field { min-width:0; border-color:transparent!important; background:transparent!important; }
-.cm-data-ui .cm-data-row .cm-data-field { height:28px; min-height:28px; padding-block:2px; line-height:20px; }
-.cm-data-ui .cm-data-field:is(:hover,:focus) { border-color:var(--cm-accent,#c6d8f0)!important; background:var(--cm-surface,#fff)!important; }
-.cm-data-ui .cm-data-field:focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:-2px; }
-.cm-data-field::placeholder { color:var(--cm-muted,#7b8796); }
-.cm-data-field[type=number]:not(:hover):not(:focus) { appearance:textfield; -moz-appearance:textfield; }
-.cm-data-field[type=number]:not(:hover):not(:focus)::-webkit-inner-spin-button { appearance:none; }
-select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
 }
 `;
 
@@ -1031,7 +1012,7 @@ function defineAnnotationValueActions() {
 
 const [markup$1, css$1] = await Promise.all([
   "<div class=\"cm-data-panel cm-data-ui\">\n  <slot name=\"tools\"></slot>\n  <clinker-selection-bar class=\"cm-data-meta\">\n    <div slot=\"actions\" class=\"cm-data-actions\">\n      <clinker-action-menu label=\"Edit values…\"><clinker-annotation-value-actions></clinker-annotation-value-actions></clinker-action-menu>\n    </div>\n  </clinker-selection-bar>\n  <clinker-data-table class=\"cm-data-table cm-annotation-matrix\" role=\"region\" aria-label=\"Editable annotation data\"></clinker-data-table>\n</div>\n<template id=\"table\">\n<table><thead><tr>\n  <th class=\"cm-data-cell cm-data-cell--select cm-data-head\"><input type=\"checkbox\" aria-label=\"Select all filtered clusters\"></th>\n  <th class=\"cm-data-cell cm-data-head\">Cluster</th>\n</tr></thead><tbody></tbody></table>\n</template>\n\n<template id=\"column\">\n<th class=\"cm-data-cell cm-data-head\"><div class=\"cm-annotation-column\">\n  <clinker-editable-field required></clinker-editable-field><button type=\"button\" class=\"cm-data-icon-button\">×</button>\n</div></th>\n</template>\n\n<template id=\"add-column\">\n<th class=\"cm-data-cell cm-data-head cm-annotation-add-column\"><form>\n  <button type=\"button\" aria-label=\"Add column\">+</button>\n  <input type=\"text\" aria-label=\"New column name\" placeholder=\"Column name\" hidden><button type=\"submit\" hidden>Add</button>\n</form></th>\n</template>\n\n<template id=\"row\">\n<tr class=\"cm-data-row\">\n  <td class=\"cm-data-cell cm-data-cell--select\"><input type=\"checkbox\"></td><th class=\"cm-data-cell\" scope=\"row\"></th>\n</tr>\n</template>\n\n<template id=\"empty-cell\">\n<td class=\"cm-data-cell\"></td>\n</template>\n\n<template id=\"spacer\">\n<tr class=\"cm-annotation-spacer\" aria-hidden=\"true\"><td></td></tr>\n</template>\n\n<template id=\"cell\">\n  <td class=\"cm-data-cell\"><clinker-editable-field placeholder=\"—\" step=\"any\"></clinker-editable-field></td>\n</template>\n",
-  ":host { display:flex; flex:1; min-width:0; min-height:0; color:inherit; font:inherit; }\n:host([hidden]) { display:none!important; }\nslot { display:contents; }\n.cm-annotation-matrix { position:relative; }\n.cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }\n\n.cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,#f3f6fa); }\n.cm-annotation-matrix tr > :first-child { position:sticky; left:0; z-index:1; width:32px; min-width:32px; background:var(--cm-row-background,var(--cm-subtle,#f3f6fa)); }\n.cm-annotation-matrix tr > :nth-child(2) { position:sticky; left:32px; z-index:1; }\n.cm-annotation-matrix tbody th { background:var(--cm-row-background); }\n.cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,#f3f6fa); }\n.cm-annotation-matrix tbody th { cursor:pointer; min-width:200px; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }\n.cm-annotation-matrix :is(input:not([type=checkbox]),clinker-editable-field) { width:140px; }\n.cm-annotation-column { display:flex; align-items:center; }\n.cm-annotation-column button { --cm-icon-size:24px; visibility:hidden; }\n.cm-annotation-column:is(:hover,:focus-within) button { visibility:visible; }\n.cm-annotation-add-column { width:36px; }\n.cm-annotation-add-column form { display:flex; gap:4px; }\n.cm-annotation-spacer > td { height:0; border:0; padding:0; }\n",
+  ":host { display:flex; flex:1; min-width:0; min-height:0; color:inherit; font:inherit; }\nslot { display:contents; }\n.cm-annotation-matrix { position:relative; }\n.cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }\n\n.cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,#f3f6fa); }\n.cm-annotation-matrix tr > :first-child { position:sticky; left:0; z-index:1; width:32px; min-width:32px; background:var(--cm-row-background,var(--cm-subtle,#f3f6fa)); }\n.cm-annotation-matrix tr > :nth-child(2) { position:sticky; left:32px; z-index:1; }\n.cm-annotation-matrix tbody th { background:var(--cm-row-background); }\n.cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,#f3f6fa); }\n.cm-annotation-matrix tbody th { cursor:pointer; min-width:200px; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }\n.cm-annotation-matrix :is(input:not([type=checkbox]),clinker-editable-field) { width:140px; }\n.cm-annotation-column { display:flex; align-items:center; }\n.cm-annotation-column button { --cm-icon-size:24px; visibility:hidden; }\n.cm-annotation-column:is(:hover,:focus-within) button { visibility:visible; }\n.cm-annotation-add-column { width:36px; }\n.cm-annotation-add-column form { display:flex; gap:4px; }\n.cm-annotation-spacer > td { height:0; border:0; padding:0; }\n",
 ]);
 const template$1 = createTemplate(markup$1);
 const HTMLElementBase$1 = globalThis.HTMLElement || class {};

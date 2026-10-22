@@ -1,6 +1,5 @@
 @layer clinker-editor {
   :host { display: flex; min-height: 180px; box-sizing: border-box; flex-direction: column; padding: 10px; border: 1px solid var(--cm-border,#d7dce3); border-radius: 10px; }
-  :host([hidden]) { display: none; }
   :host([resizable]) { overflow: hidden; }
   .cm-editor__resize-handle { height: 10px; flex: 0 0 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }
   .cm-editor__resize-handle::after { display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: var(--cm-muted,#aaa); content: ""; }

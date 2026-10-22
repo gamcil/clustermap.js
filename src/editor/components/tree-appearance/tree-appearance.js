@@ -1,7 +1,7 @@
 import { createTemplate } from "../../../uiControls.mjs";
 import { TREE_COLOURING_DEFAULTS, resolveTreePresentation, validateTreePresentation } from "../../../treePresentation.mjs";
 import { textAsset } from "../../shared/textAsset.js";
-import { controlStyles } from "../../shared/controlStyles.js";
+import { controlStyles } from "../../shared/controls.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./tree-appearance.html", import.meta.url)),

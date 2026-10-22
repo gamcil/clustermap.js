@@ -7,7 +7,6 @@ export const editorThemeStyles = `
   color:var(--cm-foreground); background:var(--cm-surface);
   font:var(--clinker-font,13px/1.4 system-ui,sans-serif);
 }
-:host([hidden]) { display:none!important; }
 `;
 
 export function applyEditorTheme(element, config) {

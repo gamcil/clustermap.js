@@ -136,12 +136,10 @@ for (const theme of ["light", "dark"]) {
       }
       await check.uncheck();
       const component = rows.first().locator("clinker-editable-field").first();
-      const encapsulated = await component.count() > 0;
-      if (encapsulated) await editField(component);
-      const field = encapsulated ? component.locator("input:visible, select:visible") : rows.first().locator(".cm-data-field").first();
-      if (await field.count()) {
+      if (await component.count()) {
+        await editField(component);
+        const field = component.locator("input:visible, select:visible");
         await field.focus();
-        if (!encapsulated) { await field.press("Shift+Tab"); await page.keyboard.press("Tab"); }
         await expect(field).toBeFocused();
         await expect(field).toHaveCSS("color", tokens.foreground);
         await expect(field).toHaveCSS("outline-style", "solid");

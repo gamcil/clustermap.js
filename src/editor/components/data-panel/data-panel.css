@@ -1,7 +1,6 @@
 @layer clinker-editor {
   :host { display:flex; flex:1; min-width:0; min-height:0; }
   .cm-data-layout { display:grid; flex:1; min-width:0; min-height:0; grid-template-columns:auto minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; grid-template-areas:"views tools" "content content" "error error"; gap:8px; }
-  :host([hidden]) { display:none; }
   .cm-data-layout > [data-kind-picker] { grid-area:views; align-self:center; }
   .cm-data-layout > [data-record-toolbar] { grid-area:tools; min-width:0; }
   .cm-data-layout > [data-record-editor] { grid-area:content; }

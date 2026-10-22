@@ -1,10 +1,10 @@
-import { c as createTemplate, a as controlStyles, u as upgradeProperty } from './editor/search-field-cf76fff2.mjs';
-import { e as editorThemeStyles, a as applyEditorTheme } from './editor/theme-841d3e1c.mjs';
-import { d as defineAppearancePanel } from './editor/appearance-panel-0c5afe60.mjs';
-export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-0c5afe60.mjs';
-import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-f22cff3e.mjs';
-export { C as ClinkerDataPanelElement, d as defineDataPanel } from './editor/data-panel-f22cff3e.mjs';
-import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-1b86fd52.mjs';
+import { c as createTemplate, a as controlStyles, u as upgradeProperty } from './editor/search-field-f3740f51.mjs';
+import { e as editorThemeStyles, a as applyEditorTheme } from './editor/theme-4b8fbd52.mjs';
+import { d as defineAppearancePanel } from './editor/appearance-panel-e9767cf3.mjs';
+export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-e9767cf3.mjs';
+import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-3852cde5.mjs';
+export { C as ClinkerDataPanelElement, d as defineDataPanel } from './editor/data-panel-3852cde5.mjs';
+import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-ae65b270.mjs';
 
 const [markup$1, css$2] = await Promise.all([
   "<div part=\"tab-list\" role=\"tablist\">\n  <template><button type=\"button\" role=\"tab\"></button></template>\n</div>\n<slot name=\"status\"></slot>\n<div part=\"panels\">\n  <template><div role=\"tabpanel\" tabindex=\"0\"><slot></slot></div></template>\n</div>\n",
@@ -83,7 +83,7 @@ function defineTabs() {
 
 const [markup, css$1] = await Promise.all([
   "<div data-editor-shell>\n<div class=\"cm-editor__resize-handle\" data-resize role=\"separator\" aria-label=\"Resize plot editor\" aria-orientation=\"horizontal\"></div>\n<header part=\"header\" class=\"cm-editor__header\">\n  <h2 class=\"cm-editor__title\">Plot editor</h2>\n  <div class=\"cm-editor__history\">\n    <button type=\"button\" data-command=\"undo\" disabled>Undo</button>\n    <button type=\"button\" data-command=\"redo\" disabled>Redo</button>\n  </div>\n</header>\n<clinker-tabs part=\"tabs\" data-editor-tabs label=\"Plot editor sections\" value=\"data\">\n  <clinker-data-panel part=\"data\" name=\"data\" label=\"Data\" data-panel=\"data\"></clinker-data-panel>\n  <clinker-appearance-panel part=\"appearance\" name=\"appearance\" label=\"Appearance\" data-panel=\"appearance\" hidden></clinker-appearance-panel>\n</clinker-tabs>\n</div>\n",
-  "@layer clinker-editor {\n  :host { display: flex; min-height: 180px; box-sizing: border-box; flex-direction: column; padding: 10px; border: 1px solid var(--cm-border,#d7dce3); border-radius: 10px; }\n  :host([hidden]) { display: none; }\n  :host([resizable]) { overflow: hidden; }\n  .cm-editor__resize-handle { height: 10px; flex: 0 0 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }\n  .cm-editor__resize-handle::after { display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: var(--cm-muted,#aaa); content: \"\"; }\n  .cm-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }\n  .cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }\n  [data-editor-shell] { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; }\n}\n",
+  "@layer clinker-editor {\n  :host { display: flex; min-height: 180px; box-sizing: border-box; flex-direction: column; padding: 10px; border: 1px solid var(--cm-border,#d7dce3); border-radius: 10px; }\n  :host([resizable]) { overflow: hidden; }\n  .cm-editor__resize-handle { height: 10px; flex: 0 0 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }\n  .cm-editor__resize-handle::after { display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: var(--cm-muted,#aaa); content: \"\"; }\n  .cm-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }\n  .cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }\n  [data-editor-shell] { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; }\n}\n",
 ]);
 const shellTemplate = createTemplate(markup);
 const HTMLElementBase = globalThis.HTMLElement || class {};

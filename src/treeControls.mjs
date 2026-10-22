@@ -17,7 +17,7 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
   const button = (parent, title, action, className) => ui.button(parent, title, () => run(action), className);
   const input = (parent, title, type, value, options = {}) => {
     const row = ui.row(parent, title); row.className = "cm-tree-row";
-    return ui.input(row, title, value, type, undefined, options);
+    return ui.input(row, title, value, type, options);
   };
   const nodesById = new Map(tree.nodes.map((node) => [node.uid, node]));
   const clusterNames = new Map(clusters.map((cluster) => [cluster.uid, cluster.name || cluster.label || cluster.uid]));
