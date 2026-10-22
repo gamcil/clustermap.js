@@ -5,6 +5,11 @@ export const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;"
 
 export const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
 
+export function upgradeProperty(element, name) {
+  if (!Object.prototype.hasOwnProperty.call(element, name)) return;
+  const value = element[name]; delete element[name]; element[name] = value;
+}
+
 /** Parse static markup once per document; each mount receives its own nodes. */
 export function createTemplate(markup) {
   const templates = new WeakMap();

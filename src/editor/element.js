@@ -1,11 +1,16 @@
-import { createTemplate } from "../uiControls.mjs";
-import { applyTheme, resolveTheme } from "../theme.mjs";
+import { createTemplate, upgradeProperty } from "../uiControls.mjs";
+import { applyEditorTheme, editorThemeStyles } from "./shared/theme.js";
+import { controlStyles } from "./shared/controlStyles.js";
 import { defineAppearancePanel } from "./components/appearance-panel/appearance-panel.js";
 import { defineTabs } from "./components/tabs/tabs.js";
 import { defineDataPanel } from "./components/data-panel/data-panel.js";
 import { textAsset } from "./shared/textAsset.js";
 
-const shellTemplate = createTemplate(await textAsset(new URL("./element.html", import.meta.url)));
+const [markup, css] = await Promise.all([
+  textAsset(new URL("./element.html", import.meta.url)),
+  textAsset(new URL("./editor.css", import.meta.url)),
+]);
+const shellTemplate = createTemplate(markup);
 const HTMLElementBase = globalThis.HTMLElement || class {};
 
 /** Optional editor for an already rendered chart; edits use its public API. */
@@ -15,19 +20,18 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #appearancePanel = null;
   #unsubscribe = null;
   #resizeStart = null;
-  #editAnnotation = (event) => {
-    if (event.defaultPrevented || event.detail?.chart !== this.#chart) return;
-    event.preventDefault(); this.editAnnotations(event.detail.panelUid);
-  };
 
   constructor() {
     super();
-    this.addEventListener("click", (event) => {
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + editorThemeStyles + css;
+    root.append(style);
+    root.addEventListener("click", (event) => {
       const command = event.target.closest("[data-command]")?.dataset.command;
       if (command === "undo") this.#chart?.undo?.();
       else if (command === "redo") this.#chart?.redo?.();
     });
-    this.addEventListener("pointerdown", (event) => {
+    root.addEventListener("pointerdown", (event) => {
       if (!event.target.closest("[data-resize]") || !this.hasAttribute("resizable")) return;
       event.preventDefault();
       this.#resizeStart = { pointerY: event.clientY, height: this.getBoundingClientRect().height };
@@ -40,17 +44,16 @@ export class ClinkerEditorElement extends HTMLElementBase {
     });
     this.addEventListener("pointerup", () => { this.#resizeStart = null; });
     this.addEventListener("pointercancel", () => { this.#resizeStart = null; });
+    upgradeProperty(this, "chart");
   }
 
   connectedCallback() {
     this.classList.add("cm-editor", "cm-data-ui");
     if (!this.#dataPanel) this.#renderShell();
-    this.ownerDocument.addEventListener("clustermap:edit-annotation", this.#editAnnotation);
     this.#subscribe(); this.#render();
   }
 
   disconnectedCallback() {
-    this.ownerDocument.removeEventListener("clustermap:edit-annotation", this.#editAnnotation);
     this.#resizeStart = null;
     this.#unsubscribe?.(); this.#unsubscribe = null;
   }
@@ -70,8 +73,8 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #openData() {
     if (!this.#dataPanel) { this.#renderShell(); this.#render(); }
     this.hidden = false;
-    this.querySelector("[data-editor-tabs]")?.setAttribute("value", "data");
-    this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true }));
+    this.shadowRoot.querySelector("[data-editor-tabs]")?.setAttribute("value", "data");
+    this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true, composed: true }));
     return this.#dataPanel;
   }
 
@@ -82,9 +85,10 @@ export class ClinkerEditorElement extends HTMLElementBase {
 
   #renderShell() {
     defineTabs(); defineDataPanel(); defineAppearancePanel();
-    this.replaceChildren(shellTemplate(this.ownerDocument));
-    this.#dataPanel = this.querySelector("clinker-data-panel");
-    this.#appearancePanel = this.querySelector("clinker-appearance-panel");
+    this.shadowRoot.querySelector("[data-editor-shell]")?.remove();
+    this.shadowRoot.append(shellTemplate(this.ownerDocument));
+    this.#dataPanel = this.shadowRoot.querySelector("clinker-data-panel");
+    this.#appearancePanel = this.shadowRoot.querySelector("clinker-appearance-panel");
   }
 
   #subscribe() {
@@ -103,15 +107,14 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #renderHistory() {
-    const undo = this.querySelector('[data-command="undo"]');
-    const redo = this.querySelector('[data-command="redo"]');
+    const undo = this.shadowRoot.querySelector('[data-command="undo"]');
+    const redo = this.shadowRoot.querySelector('[data-command="redo"]');
     if (undo) undo.disabled = !this.#chart?.canUndo?.();
     if (redo) redo.disabled = !this.#chart?.canRedo?.();
   }
 
   #syncTheme() {
-    const config = this.#chart?.config?.();
-    if (config) applyTheme(this, resolveTheme(config.plot.theme));
+    applyEditorTheme(this, this.#chart?.config?.());
   }
 
 }

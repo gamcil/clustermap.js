@@ -1,10 +1,10 @@
-import { createTemplate, colourHex, createActionRunner } from "../../../uiControls.mjs";
+import { createTemplate, colourHex, createActionRunner, upgradeProperty } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { controlStyles } from "../../shared/controlStyles.js";
 import { defineSearchField } from "../search-field/search-field.js";
 import { defineTreeAppearance } from "../tree-appearance/tree-appearance.js";
-import { installDataEditorStyle } from "../../shared/styles.mjs";
-import { applyTheme, resolveTheme, figureConfig } from "../../../theme.mjs";
+import { figureConfig } from "../../../theme.mjs";
+import { applyEditorTheme, editorThemeStyles } from "../../shared/theme.js";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./appearance-panel.html", import.meta.url)),
@@ -28,7 +28,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + editorThemeStyles + css;
     root.append(style, template(this.ownerDocument));
     this.#tree = root.querySelector("clinker-tree-appearance");
     this.#runEdit = createActionRunner((message) => {
@@ -59,6 +59,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
       const config = input.dataset.config.split(".").reduceRight((value, key) => ({ [key]: value }), value);
       if (!this.#runEdit(() => this.#chart.config(config))) this.#syncField(input, true);
     });
+    upgradeProperty(this, "chart");
   }
 
   get chart() { return this.#chart; }
@@ -69,7 +70,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
     this.#chart = value || null; this.#subscribe(); this.#render();
   }
   connectedCallback() {
-    this.classList.add("cm-data-ui"); installDataEditorStyle(this.ownerDocument);
+    this.classList.add("cm-data-ui");
     this.#subscribe(); this.#render();
   }
   disconnectedCallback() {
@@ -87,10 +88,11 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
   #render() {
     if (!this.isConnected) return;
     const config = this.#chart?.config?.();
-    if (config) applyTheme(this, resolveTheme(config.plot.theme));
+    applyEditorTheme(this, config);
     this.shadowRoot.querySelector(".toolbar").hidden = !config;
     this.shadowRoot.querySelector(".settings").hidden = !config;
-    if (!config || this.hidden) return;
+    if (!config) { this.#config = null; this.#hasTree = false; this.#tree.state = { tree: null }; return; }
+    if (this.hidden) return;
     this.#config = figureConfig(config);
     const tree = this.#chart.data()?.tree;
     this.#hasTree = Boolean(tree); this.#tree.state = { tree, config: this.#config.tree };

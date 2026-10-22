@@ -1,5 +1,5 @@
 import { createTemplate } from "../../../uiControls.mjs";
-import { installDataEditorStyle } from "../../shared/styles.mjs";
+import { installDataEditorStyle, installStyle } from "../../shared/styles.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { defineDataTable } from "../data-table/data-table.js";
 import { defineEditableField } from "../editable-field/editable-field.js";
@@ -79,12 +79,10 @@ class RecordTable extends HTMLElementBase {
   }
 
   connectedCallback() {
-    installDataEditorStyle(this.ownerDocument);
+    const root = this.getRootNode();
+    installDataEditorStyle(root);
     this.classList.add("cm-data-ui");
-    if (!this.ownerDocument.getElementById("clinker-record-table-style")) {
-      const style = this.ownerDocument.createElement("style"); style.id = "clinker-record-table-style"; style.textContent = css;
-      this.ownerDocument.head.append(style);
-    }
+    installStyle(root, "clinker-record-table-style", css);
     if (!this.#table) {
       this.append(template(this.ownerDocument));
       this.#table = this.querySelector("clinker-data-table"); this.#head = this.querySelector("[data-head]"); this.#list = this.querySelector("[data-rows]");

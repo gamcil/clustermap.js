@@ -1,8 +1,9 @@
+<div class="cm-data-ui cm-data-layout" part="content">
 <clinker-view-switcher data-kind-picker label="Data type" value="groups">
   <option value="groups">Groups</option><option value="genes">Genes</option>
   <option value="links">Links</option><option value="annotations">Annotations</option>
 </clinker-view-switcher>
-<div data-record-toolbar class="cm-editor__toolbar cm-data-toolbar">
+<div part="toolbar" data-record-toolbar class="cm-editor__toolbar cm-data-toolbar">
   <clinker-view-switcher data-gene-view label="Gene view" value="tree" hidden>
     <option value="tree">By locus</option><option value="groups">By group</option><option value="list">List</option>
   </clinker-view-switcher>
@@ -18,7 +19,8 @@
       <button type="button" data-command="clear-member-filter" aria-label="Clear group member filter" title="Clear group member filter">×</button>
     </div>
   </div>
-  <clinker-selection-bar class="cm-data-meta"><div slot="actions" class="cm-data-actions"><clinker-record-actions></clinker-record-actions></div></clinker-selection-bar>
-  <clinker-record-table class="cm-editor__table"></clinker-record-table>
+  <clinker-selection-bar part="selection" class="cm-data-meta"><div slot="actions" class="cm-data-actions"><clinker-record-actions></clinker-record-actions></div></clinker-selection-bar>
+  <clinker-record-table part="table" class="cm-editor__table"></clinker-record-table>
 </div>
 <div data-editor-error class="cm-data-error" role="alert" hidden></div>
+</div>

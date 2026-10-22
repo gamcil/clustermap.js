@@ -322,8 +322,9 @@ chart.patch([{
 
 Hosts can open an editor directly with `editor.editAnnotations(panelUid)`.
 The plot emits the cancelable, bubbling DOM event `clustermap:edit-annotation`
-with `detail: {chart, panelUid}`. An attached `<clinker-editor>` handles events
-for its own chart, opens Data → Annotations, and prevents the inline fallback.
-Custom hosts may handle this event and call `preventDefault()` instead.
+with `detail: {chart, panelUid}`. Hosts can handle this event, call
+`preventDefault()` to suppress the inline fallback, and route it to
+`editor.editAnnotations(event.detail.panelUid)`. Editors do not discover plots
+or attach document-wide annotation listeners.
 The editor emits `clinker-editor-open` when opened this way, so host buttons
 can update their expanded state.

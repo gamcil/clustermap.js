@@ -170,10 +170,7 @@ load editor code or styles.
 
 ```js
 import { ClusterMap } from "clinker";
-import { defineClinkerEditor } from "clinker/editor";
-import "clinker/editor.css"; // Optional default styling.
-
-defineClinkerEditor();
+import "clinker/editor";
 const chart = ClusterMap();
 // Mount the chart with D3 as usual, then attach the same chart instance.
 document.querySelector("clinker-editor").chart = chart;
@@ -188,25 +185,57 @@ Inline fields validate edits; Enter commits and Escape restores the saved value.
 Tables support search, selection, batch actions and virtual scrolling. Group
 order can be changed by dragging, arrow keys or the Position field.
 
-The component edits the attached chart through its public API and subscribes to
-`chart.on("change")`. It uses light DOM: load `clinker/editor.css` for layout,
-or style the `.cm-editor` and `.cm-data-*` classes in your application.
+The import registers the component and includes its internal styles. The editor
+uses shadow DOM; application styles do not need to target its implementation.
+Size and position the host element using ordinary CSS. Set `hidden` to control
+visibility and add `resizable` to enable its resize handle.
 
-For a data-only editor, import `defineDataPanel` from `clinker/editor`, call it,
-and attach the chart to `<clinker-data-panel>` through its `.chart` property.
-It owns navigation, filtering, selection and batch actions; it can be mounted
-without the editor tabs or history buttons.
+The chart owns data, validation and history. The editor calls its public methods
+and subscribes to `chart.on("change")`, including changes made elsewhere and
+undo/redo. Assigning another chart or setting `.chart = null` releases the old
+subscriptions, drafts, highlights and previews. Removing the element disconnects
+its subscriptions; reconnecting restores its view against the current chart.
 
-Both editors expose `editAnnotations(panelUid)` and `editSelection({ kind, ids })`,
+For a standalone data editor:
+
+```js
+import "clinker/editor/data-panel";
+document.querySelector("clinker-data-panel").chart = chart;
+```
+
+For appearance controls, import `"clinker/editor/appearance-panel"` and attach
+the chart to `<clinker-appearance-panel>` the same way. These imports share the
+underlying components without registering the full editor.
+
+The full editor and data panel expose `editAnnotations(panelUid)` and `editSelection({ kind, ids })`,
 where `kind` is `"clusters"` or `"loci"`. Assign `.chart` first; navigation requested
 before connection is applied when the component mounts.
 
-For appearance controls alone, use `defineAppearancePanel()` and
-`<clinker-appearance-panel>` with the same `.chart` property.
+Theme colors follow the chart. Public overrides include `--clinker-accent`,
+`--clinker-surface`, `--clinker-foreground`, `--clinker-border`, and
+`--clinker-font`. The full editor exposes `header`, `tabs`, `data`, and
+`appearance` parts; the data panel exposes `content`, `toolbar`, `selection`,
+and `table`; the appearance panel exposes `toolbar` and `settings`.
+
+The existing `defineClinkerEditor`, `defineDataPanel`, `defineAppearancePanel`,
+class exports, and `clinker/editor.css` entry remain available for compatibility.
+Explicit registration and the stylesheet are no longer needed for normal use.
 
 For the optional in-plot locus batch controls, import
 `mountPlotSelectionToolbar` from `clinker/editor` and call it with the mounted
-chart and a positioned plot container. It returns a cleanup function.
+chart and a positioned plot container. Pass `{ editor }` as the optional third
+argument to enable its “Edit data…” action. It does not search the document or
+mount an editor. It includes its styles and returns a cleanup function.
+
+Annotation requests use the cancelable `clustermap:edit-annotation` event. Hosts
+which provide an editor connect it explicitly:
+
+```js
+plotContainer.addEventListener("clustermap:edit-annotation", (event) => {
+  event.preventDefault();
+  editor.editAnnotations(event.detail.panelUid);
+});
+```
 
 ## Chart API
 

@@ -16,7 +16,6 @@
         "d3-zoom": "https://cdn.jsdelivr.net/npm/d3-zoom@3.0.0/+esm"
       } }
     </script>
-    <link rel="stylesheet" href="./dist/editor.css">
     <style>
       html, body, main { width: 100%; height: 100%; margin: 0; }
       body { overflow: hidden; }
@@ -52,7 +51,7 @@
     <script type="module">
       import * as d3 from "d3";
       import { ClusterMap } from "./dist/clustermap.mjs";
-      import { defineClinkerEditor, mountPlotSelectionToolbar } from "./dist/editor.mjs";
+      import { mountPlotSelectionToolbar } from "./dist/editor.mjs";
       import { createLargeTestingData, SYNTHETIC_FIXTURES } from "./largeTestingData.mjs";
       import { applyTheme, resolveTheme } from "./src/theme.mjs";
 
@@ -115,7 +114,6 @@
         });
       };
 
-      defineClinkerEditor();
       const editor = document.querySelector("clinker-editor");
       const status = document.querySelector("#data-import-status");
       source.then((loaded) => {
@@ -136,7 +134,12 @@
         if (project?.state) chart.state(project.state);
         editor.chart = chart;
         editor.addEventListener("clinker-editor-open", () => document.querySelector("#btn-editor").setAttribute("aria-expanded", "true"));
-        mountPlotSelectionToolbar(chart, document.querySelector("#workspace"));
+        const workspace = document.querySelector("#workspace");
+        workspace.addEventListener("clustermap:edit-annotation", (event) => {
+          if (event.detail.chart !== chart) return;
+          event.preventDefault(); editor.editAnnotations(event.detail.panelUid);
+        });
+        mountPlotSelectionToolbar(chart, workspace, { editor });
         document.querySelector("#btn-editor").addEventListener("click", () => {
           editor.hidden = !editor.hidden;
           document.querySelector("#btn-editor").setAttribute("aria-expanded", String(!editor.hidden));

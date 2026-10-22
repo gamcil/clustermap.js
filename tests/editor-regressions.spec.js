@@ -13,7 +13,7 @@ test.beforeAll(async () => {
     const pathname = new URL(request.url, "http://localhost").pathname;
     if (pathname === "/") {
       response.writeHead(200, { "Content-Type": "text/html" });
-      response.end('<!doctype html><link rel="stylesheet" href="/dist/editor.css"><style>#plot{width:1200px;height:320px}clinker-editor{height:550px}</style><div id="plot"></div><clinker-editor></clinker-editor><script src="/node_modules/d3/dist/d3.min.js"></script>');
+      response.end('<!doctype html><style>#plot{width:1200px;height:320px}clinker-editor{height:550px}</style><div id="plot"></div><clinker-editor>\n</clinker-editor><script src="/node_modules/d3/dist/d3.min.js"></script>');
       return;
     }
     const filename = resolve(root, `.${pathname}`);
@@ -23,7 +23,7 @@ test.beforeAll(async () => {
     }
     try {
       const body = await readFile(filename);
-      response.writeHead(200, { "Content-Type": ({ ".json": "application/json", ".css": "text/css" })[extname(filename)] || "text/javascript" });
+      response.writeHead(200, { "Content-Type": ({ ".html": "text/html", ".json": "application/json", ".css": "text/css" })[extname(filename)] || "text/javascript" });
       response.end(body);
     } catch { response.writeHead(404).end(); }
   });
@@ -42,8 +42,10 @@ test.beforeEach(async ({ page }) => {
   await page.goto(url);
   await page.evaluate(async () => {
     const { ClusterMap } = await import("/dist/clustermap.mjs");
-    const { defineClinkerEditor } = await import("/dist/editor.mjs");
-    defineClinkerEditor();
+    await import("/dist/editor.mjs");
+    document.querySelector("#plot").addEventListener("clustermap:edit-annotation", (event) => {
+      event.preventDefault(); document.querySelector("clinker-editor").editAnnotations(event.detail.panelUid);
+    });
     const project = await (await fetch("/fixtures/clinker-project-heatmap.json")).json();
     window.chart = ClusterMap().config({ plot: { renderer: "svg", transitionDuration: 0 }, annotations: { enabled: true } });
     d3.select("#plot").datum(project.data).call(chart);
@@ -114,7 +116,7 @@ for (const theme of ["light", "dark"]) {
       }
       // Compare computed colours to the active theme tokens, including native table cells.
       const tokens = await editor(page).evaluate((node) => {
-        const probe = document.createElement("span"); node.append(probe);
+        const probe = document.createElement("span"); node.shadowRoot.append(probe);
         const colour = (token) => { probe.style.color = `var(${token})`; return getComputedStyle(probe).color; };
         const result = Object.fromEntries(["surface", "subtle", "foreground", "hover", "selection"].map((name) => [name, colour(`--cm-${name}`)]));
         probe.remove(); return result;
@@ -941,7 +943,7 @@ async function selectionFixture(page, renderer) {
       cluster: { spacing: 10 }, annotations: { enabled: true } });
     d3.select("#plot").datum(data).call(chart);
     document.querySelector("clinker-editor").chart = chart;
-    window.disposePlotToolbar = mountPlotSelectionToolbar(chart, document.querySelector("#plot"));
+    window.disposePlotToolbar = mountPlotSelectionToolbar(chart, document.querySelector("#plot"), { editor: document.querySelector("clinker-editor") });
   }, renderer);
   if (renderer === "webgpu") {
     await expect.poll(() => page.locator("#plot canvas.clusterMapCanvas").getAttribute("data-webgpu"))
@@ -1267,4 +1269,138 @@ test("controller restores selection highlights when filtering removes the hovere
   await expect(rows).toHaveCount(1);
   await expect.poll(() => page.evaluate(() => chart.highlight())).toEqual(["gene-a", "gene-a2"]);
   await expect(rows.first().getByRole("checkbox")).toBeChecked();
+});
+
+test("editor styles are self-contained and expose explicit theme overrides", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await page.addStyleTag({ content: "button{font-size:40px!important;background:magenta!important}.cm-data-row{height:90px!important;background:magenta!important}" });
+  await editor(page).evaluate((node) => node.style.setProperty("--clinker-accent", "#7134c6"));
+  await expect(editor(page).getByRole("button", { name: "Undo", exact: true })).toHaveCSS("font-size", "13px");
+  await expect(editor(page).locator(".cm-data-row").first()).toHaveCSS("height", "34px");
+  await expect(editor(page).getByRole("tab", { name: "Data", exact: true })).toHaveCSS("border-bottom-color", "rgb(113, 52, 198)");
+  expect(await page.locator('link[href*="editor.css"]').count()).toBe(0);
+  expect(await page.evaluate(() => ({
+    privateHeader: document.querySelector(".cm-editor__header") === null,
+    dataShadow: Boolean(document.querySelector("clinker-editor").shadowRoot.querySelector("clinker-data-panel").shadowRoot),
+  }))).toEqual({ privateHeader: true, dataShadow: true });
+});
+
+for (const [entry, tag] of [["editor", "clinker-editor"], ["data-panel", "clinker-data-panel"], ["appearance-panel", "clinker-appearance-panel"]]) {
+  test(`${entry}: import upgrades early chart assignments inside another shadow root`, async ({ page }) => {
+    await page.goto(url);
+    await page.evaluate(async ({ entry, tag }) => {
+      document.querySelector("clinker-editor").remove();
+      const { ClusterMap } = await import("/dist/clustermap.mjs");
+      const data = await (await fetch("/fixtures/heatmap.json")).json();
+      window.chart = ClusterMap().config({ plot: { renderer: "svg", transitionDuration: 0, theme: "dark" } });
+      d3.select("#plot").datum(data).call(chart);
+      const panel = document.createElement(tag); panel.id = "standalone"; panel.style.height = "400px"; panel.chart = chart;
+      const host = document.createElement("section"); document.body.append(host);
+      host.attachShadow({ mode: "open" }).append(panel);
+      await import(entry === "editor" ? "/dist/editor.mjs" : `/dist/editor-${entry}.mjs`);
+    }, { entry, tag });
+    const panel = page.locator("#standalone");
+    expect(await panel.evaluate((node) => ({ connected: node.chart === chart, shadow: Boolean(node.shadowRoot), fullEditorRegistered: Boolean(customElements.get("clinker-editor")) })))
+      .toEqual({ connected: true, shadow: true, fullEditorRegistered: entry === "editor" });
+    await expect(panel).toHaveCSS("background-color", "rgb(35, 42, 53)");
+    if (entry !== "appearance-panel") {
+      if (entry === "editor") await page.evaluate(() => {
+        window.openEvents = 0;
+        document.addEventListener("clinker-editor-open", () => openEvents++);
+      });
+      await panel.evaluate((node) => node.editSelection({ kind: "clusters", ids: ["a"] }));
+      if (entry === "editor") expect(await page.evaluate(() => openEvents)).toBe(1);
+      await expect(panel.locator(".cm-data-meta").first()).toContainText("1 gene selected");
+      await page.evaluate(() => chart.patch([{ type: "clusters.update", ids: ["a"], changes: { name: "External name" } }]));
+      await expect(panel.locator(".cm-editor__tree-parent").first()).toContainText("External name");
+    } else {
+      await page.evaluate(() => chart.config({ legend: { show: false } }));
+      await expect(panel.locator('[data-config="legend.show"]')).not.toBeChecked();
+      await panel.locator('[data-config="legend.show"]').check();
+      expect(await page.evaluate(() => chart.config().legend.show)).toBe(true);
+    }
+  });
+}
+
+test("editor navigation can be configured before mounting and survives reconnects", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await editor(page).evaluate((node) => {
+    node.remove();
+    window.integrationEditor = document.createElement("clinker-editor");
+    integrationEditor.chart = chart;
+    const ids = ["d"]; integrationEditor.editSelection({ kind: "clusters", ids }); ids[0] = "a";
+    document.body.append(integrationEditor);
+  });
+  await expect(editor(page).locator(".cm-data-meta").first()).toContainText("1 gene selected");
+  await expect(editor(page).locator(".cm-editor__tree-parent.is-selected")).toContainText("Example D");
+  const uid = await page.evaluate(() => chart.data().annotationPanels.find((panel) => panel.type === "heatmap").uid);
+  await page.evaluate((uid) => { integrationEditor.remove(); integrationEditor.editAnnotations(uid); document.body.append(integrationEditor); }, uid);
+  await expect(editor(page).getByRole("combobox", { name: "Annotation panel", exact: true })).toHaveValue(uid);
+  await editor(page).evaluate((node) => node.reset());
+  await expect(editor(page).locator(".cm-editor__row--groups")).toHaveCount(3);
+});
+
+test("editor releases chart subscriptions and highlights on detach and replacement", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await page.evaluate(async () => {
+    window.disposePlotToolbar();
+    const editor = document.querySelector("clinker-editor"); editor.chart = null;
+    const { ClusterMap } = await import("/dist/clustermap.mjs");
+    const target = document.createElement("div"); document.body.append(target);
+    window.secondChart = ClusterMap().config({ plot: { renderer: "svg", transitionDuration: 0 } });
+    d3.select(target).datum(structuredClone(selectionInput)).call(secondChart);
+    window.integrationCounts = [chart, secondChart].map((source) => {
+      const count = { listeners: 0, previewClears: 0 }, on = source.on, preview = source.previewTreePresentation;
+      source.on = (...args) => { count.listeners++; const unsubscribe = on(...args); return () => { count.listeners--; unsubscribe(); }; };
+      source.previewTreePresentation = (value) => { if (value === null) count.previewClears++; return preview(value); };
+      return count;
+    });
+    editor.chart = chart;
+  });
+  await editor(page).locator(".cm-editor__row--groups").first().getByRole("checkbox").check();
+  expect(await page.evaluate(() => integrationCounts.map(({ listeners }) => listeners))).toEqual([3, 0]);
+  await editor(page).evaluate((node) => { window.detachedEditor = node; node.remove(); });
+  expect(await page.evaluate(() => ({ listeners: integrationCounts[0].listeners, highlight: chart.highlight(), preview: integrationCounts[0].previewClears })))
+    .toEqual({ listeners: 0, highlight: [], preview: 1 });
+  await page.evaluate(() => document.body.append(detachedEditor));
+  expect(await page.evaluate(() => integrationCounts.map(({ listeners }) => listeners))).toEqual([3, 0]);
+  await editor(page).evaluate((node) => { node.chart = secondChart; });
+  expect(await page.evaluate(() => ({ listeners: integrationCounts.map(({ listeners }) => listeners), oldHighlight: chart.highlight() })))
+    .toEqual({ listeners: [0, 3], oldHighlight: [] });
+  const uid = await annotation(page);
+  await expect(matrixRows(page)).toHaveCount(5);
+  await editor(page).evaluate((node) => { node.chart = null; });
+  expect(await page.evaluate(() => integrationCounts.map(({ listeners }) => listeners))).toEqual([0, 0]);
+  await expect(matrixRows(page)).toHaveCount(0);
+  const panelPicker = editor(page).getByRole("combobox", { name: "Annotation panel", exact: true });
+  await expect(panelPicker).toBeHidden();
+  await editor(page).evaluate((node) => { node.chart = secondChart; });
+  await expect(panelPicker).toHaveValue(uid);
+  await expect(matrixRows(page)).toHaveCount(5);
+  await editor(page).evaluate((node) => { node.chart = null; });
+  await view(page, "groups");
+  await expect(editor(page).locator("clinker-record-table")).toContainText("Set the chart property");
+});
+
+test("demo mounts the editor and routes annotation requests explicitly", async ({ page }) => {
+  await page.route("https://cdn.jsdelivr.net/npm/d3@7.9.0/+esm", (route) => route.fulfill({
+    contentType: "text/javascript",
+    body: `import "${url}/node_modules/d3/dist/d3.min.js"; export const select=window.d3.select; export const json=(path)=>fetch(path).then(response=>response.json());`,
+  }));
+  await page.goto(`${url}/index.html?fixture=heatmap&renderer=svg&test=1&editor=1`);
+  await expect(editor(page)).toBeVisible();
+  await expect(editor(page).locator(".cm-editor__row--groups").first()).toBeVisible();
+  expect(await editor(page).evaluate((node) => node.chart === window.__demoChart)).toBe(true);
+  await page.locator("#btn-editor").click();
+  await expect(editor(page)).toBeHidden();
+  const uid = await page.evaluate(() => {
+    const panelUid = __demoChart.data().annotationPanels.find((panel) => panel.type === "heatmap").uid;
+    const event = new CustomEvent("clustermap:edit-annotation", { bubbles: true, cancelable: true,
+      detail: { chart: __demoChart, panelUid } });
+    if (document.querySelector("#plot").dispatchEvent(event)) throw new Error("Annotation request was not handled");
+    return panelUid;
+  });
+  await expect(editor(page)).toBeVisible();
+  await expect(editor(page).getByRole("combobox", { name: "Annotation panel", exact: true })).toHaveValue(uid);
+  await expect(page.locator("#btn-editor")).toHaveAttribute("aria-expanded", "true");
 });

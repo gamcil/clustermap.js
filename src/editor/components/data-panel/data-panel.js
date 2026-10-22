@@ -1,10 +1,10 @@
-import { installDataEditorStyle } from "../../shared/styles.mjs";
+import { DATA_EDITOR_CSS } from "../../shared/styles.mjs";
 import { RowSelection } from "../../../rowSelection.mjs";
 import { DATA_ROW_HEIGHT } from "../../../virtualRows.mjs";
 import { ANNOTATION_PALETTES, resolveAnnotationScale } from "../../../annotations.mjs";
 import { defineAnnotationEditor } from "../annotation-editor/annotation-editor.js";
-import { createActionRunner, createTemplate } from "../../../uiControls.mjs";
-import { applyTheme, resolveTheme, figureConfig } from "../../../theme.mjs";
+import { createActionRunner, createTemplate, upgradeProperty } from "../../../uiControls.mjs";
+import { applyEditorTheme, editorThemeStyles } from "../../shared/theme.js";
 import { defineRecordTable } from "../record-table/record-table.js";
 import { DataPanelModel } from "./model.js";
 import { defineSelectionBar } from "../selection-bar/selection-bar.js";
@@ -24,7 +24,7 @@ const HTMLElementBase = globalThis.HTMLElement || class {};
 export class ClinkerDataPanelElement extends HTMLElementBase {
   #chart = null;
   #runEdit = createActionRunner((message) => {
-    const status = this.querySelector("[data-editor-error]");
+    const status = this.shadowRoot.querySelector("[data-editor-error]");
     if (status) { status.textContent = message; status.hidden = !message; }
     if (this.#table) this.#table.error = message;
   });
@@ -49,17 +49,16 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 
   constructor() {
     super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.id = "cm-data-editor-style"; style.textContent = DATA_EDITOR_CSS + editorThemeStyles + css;
+    root.append(style);
     this.#bind();
+    upgradeProperty(this, "chart");
   }
 
   connectedCallback() {
     defineSelectionBar(); defineViewSwitcher(); defineSearchField(); defineRecordActions(); defineRecordTable(); defineAnnotationEditor();
     this.classList.add("cm-data-ui");
-    installDataEditorStyle(this.ownerDocument);
-    if (!this.ownerDocument.getElementById("clinker-data-panel-style")) {
-      const style = this.ownerDocument.createElement("style"); style.id = "clinker-data-panel-style"; style.textContent = css;
-      this.ownerDocument.head.append(style);
-    }
     if (!this.#table) this.#renderShell();
     this.#subscribe(); this.#syncTheme(); this.#refreshData();
     const edit = this.#pendingEdit; this.#pendingEdit = null; edit?.();
@@ -81,8 +80,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #syncTheme() {
-    const config = this.#chart?.config?.();
-    if (config) applyTheme(this, resolveTheme(figureConfig(config).plot.theme));
+    applyEditorTheme(this, this.#chart?.config?.());
   }
 
   #subscribe() {
@@ -122,43 +120,43 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.#selected.clear(); this.#selected.setMany(genes);
     this.#renderData();
     const first = this.#view().rows.findIndex((row) => row.selectIds?.some((id) => this.#selected.has(id)));
-    this.querySelector(".cm-editor__table").scrollTop = Math.max(0, first) * DATA_ROW_HEIGHT;
+    this.shadowRoot.querySelector(".cm-editor__table").scrollTop = Math.max(0, first) * DATA_ROW_HEIGHT;
     return this;
   }
 
   #renderShell() {
-    this.replaceChildren(template(this.ownerDocument));
-    this.#annotationEditor = this.querySelector("clinker-annotation-editor");
-    this.#table = this.querySelector("clinker-record-table");
+    this.shadowRoot.append(template(this.ownerDocument));
+    this.#annotationEditor = this.shadowRoot.querySelector("clinker-annotation-editor");
+    this.#table = this.shadowRoot.querySelector("clinker-record-table");
     this.#table.addEventListener("record-action", (event) => this.#recordAction(event));
-    this.#selectionBar = this.querySelector("clinker-selection-bar");
+    this.#selectionBar = this.shadowRoot.querySelector("clinker-selection-bar");
     this.#selectionBar.addEventListener("clear-selection", () => this.#clearDataSelection());
     this.#selectionBar.addEventListener("select-all", (event) => {
       this.#selected.setMany(event.detail.ids); this.#renderData();
     });
-    this.#actions = this.querySelector("clinker-record-actions");
+    this.#actions = this.shadowRoot.querySelector("clinker-record-actions");
     this.#actions.addEventListener("selection-action", (event) => this.#command(event.detail.command, event.detail.value));
   }
 
   #bind() {
-    this.addEventListener("click", (event) => {
+    this.shadowRoot.addEventListener("click", (event) => {
       const command = event.target.closest("[data-command]")?.dataset.command;
       if (command) this.#command(command);
     });
-    this.addEventListener("value-change", (event) => {
+    this.shadowRoot.addEventListener("value-change", (event) => {
       if (event.target.matches("[data-kind-picker]")) {
         this.#kind = event.detail.value;
         if (this.#kind !== "genes") this.#memberGroupId = null;
         this.#selected.clear();
       } else if (event.target.matches("[data-gene-view]")) this.#geneView = event.detail.value;
       else return;
-      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
+      this.shadowRoot.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
       this.#renderData();
     });
-    this.addEventListener("input", (event) => {
+    this.shadowRoot.addEventListener("input", (event) => {
       if (event.target.matches("[data-filter]")) this.#setDataFilter(event.target.value);
     });
-    this.addEventListener("keydown", (event) => {
+    this.shadowRoot.addEventListener("keydown", (event) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape") this.#clearDataSelection();
     });
@@ -282,7 +280,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 
   #setDataFilter(text) {
     this.#filter = text.trim().toLowerCase();
-    this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
+    this.shadowRoot.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
     this.#renderData();
   }
 
@@ -295,12 +293,12 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     if (!this.isConnected || !this.#table) return;
     this.#table.cancelHover(); this.#highlight();
     const annotations = this.#kind === "annotations";
-    this.querySelector("[data-kind-picker]").value = this.#kind;
-    this.querySelector("[data-gene-view]").value = this.#geneView;
+    this.shadowRoot.querySelector("[data-kind-picker]").value = this.#kind;
+    this.shadowRoot.querySelector("[data-gene-view]").value = this.#geneView;
     this.#annotationEditor.hidden = !annotations;
-    this.querySelector("[data-record-toolbar]").hidden = annotations;
-    this.querySelector("[data-filter]").value = this.#filter;
-    this.querySelector("[data-record-editor]").hidden = annotations;
+    this.shadowRoot.querySelector("[data-record-toolbar]").hidden = annotations;
+    this.shadowRoot.querySelector("[data-filter]").value = this.#filter;
+    this.shadowRoot.querySelector("[data-record-editor]").hidden = annotations;
     if (annotations) {
       this.#table?.reset();
       this.#annotationEditor.state = { data: this.#chart?.data?.() || { clusters: [] }, annotationApi: { ANNOTATION_PALETTES, resolveAnnotationScale }, clusters: this.#model.data?.clusters || [],
@@ -315,16 +313,16 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
       this.#actions.state = { kind: this.#kind, count: 0, groups: [], allGroups: [], loci: [], clusters: [] };
       return;
     }
-    const geneView = this.querySelector("[data-gene-view]");
-    const memberFilter = this.querySelector("[data-member-filter]");
+    const geneView = this.shadowRoot.querySelector("[data-gene-view]");
+    const memberFilter = this.shadowRoot.querySelector("[data-member-filter]");
     const { rows, ids, parentCount, memberGroup, hasCollapsed } = this.#view();
     memberFilter.hidden = !memberGroup || this.#kind !== "genes";
-    this.querySelector("[data-record-tools]").hidden = memberFilter.hidden;
-    if (memberGroup) this.querySelector("[data-member-label]").textContent = memberGroup.label || memberGroup.name || memberGroup.uid;
+    this.shadowRoot.querySelector("[data-record-tools]").hidden = memberFilter.hidden;
+    if (memberGroup) this.shadowRoot.querySelector("[data-member-label]").textContent = memberGroup.label || memberGroup.name || memberGroup.uid;
     geneView.hidden = this.#kind !== "genes";
-    this.querySelector('[data-command="new-group"]').hidden = this.#kind !== "groups";
+    this.shadowRoot.querySelector('[data-command="new-group"]').hidden = this.#kind !== "groups";
     const isTree = this.#kind === "genes" && this.#geneView !== "list";
-    const treeButton = this.querySelector('[data-command="toggle-tree"]');
+    const treeButton = this.shadowRoot.querySelector('[data-command="toggle-tree"]');
     treeButton.hidden = !isTree || Boolean(this.#filter);
     if (isTree) {
       treeButton.textContent = hasCollapsed ? "Expand visible" : "Collapse all";
@@ -373,7 +371,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.#kind = "genes";
     this.#geneView = "list";
     this.#selected.clear();
-    this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
+    this.shadowRoot.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
     this.#renderData();
   }
 

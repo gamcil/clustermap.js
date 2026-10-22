@@ -1,6 +1,6 @@
 import { terser } from "rollup-plugin-terser";
 import { nodeResolve } from "@rollup/plugin-node-resolve";
-import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 const componentAssets = {
@@ -21,7 +21,7 @@ const copyEditorCss = {
   name: "copy-editor-css",
   async writeBundle() {
     await mkdir("dist", { recursive: true });
-    await copyFile("src/editor/editor.css", "dist/editor.css");
+    await writeFile("dist/editor.css", "/* Editor styles are included by the component imports. */\n");
   },
 };
 
@@ -60,15 +60,17 @@ const core = {
 };
 
 const editor = {
-  input: "src/editor.js",
-  output: { file: "dist/editor.mjs", format: "es" },
-  plugins: [componentAssets, nodeResolve({ browser: true }), stripTrailingWhitespace],
+  input: {
+    editor: "src/editor.js",
+    "editor-data-panel": "src/editor/data-panel.js",
+    "editor-appearance-panel": "src/editor/appearance-panel.js",
+    annotationOverlay: "src/annotationOverlay.mjs",
+  },
+  output: { dir: "dist", format: "es", entryFileNames: "[name].mjs", chunkFileNames: "editor/[name]-[hash].mjs" },
+  plugins: [
+    { name: "clean-editor-chunks", buildStart: () => rm("dist/editor", { recursive: true, force: true }) },
+    componentAssets, nodeResolve({ browser: true }), stripTrailingWhitespace,
+  ],
 };
 
-const annotationUi = {
-  input: "src/annotationOverlay.mjs",
-  output: { file: "dist/annotationOverlay.mjs", format: "es" },
-  plugins: [componentAssets, nodeResolve({ browser: true }), stripTrailingWhitespace],
-};
-
-export default [core, editor, annotationUi];
+export default [core, editor];

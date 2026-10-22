@@ -1,16 +1,1 @@
-@layer clinker-editor {
-  clinker-editor.cm-editor { display: flex; min-height: 180px; box-sizing: border-box; flex-direction: column; padding: 10px; border: 1px solid var(--cm-border,#d7dce3); border-radius: 10px; background: var(--cm-surface,rgba(255, 255, 255, .98)); color: var(--cm-foreground,#273444); font: 13px/1.4 system-ui, sans-serif; }
-  clinker-editor.cm-editor[hidden] { display: none; }
-  clinker-editor.cm-editor[resizable] { overflow: hidden; }
-  clinker-editor .cm-editor__resize-handle { height: 10px; flex: 0 0 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }
-  clinker-editor .cm-editor__resize-handle::after { display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: var(--cm-muted,#aaa); content: ""; }
-  clinker-editor .cm-editor__header { display: flex; align-items: center; gap: 8px; }
-  clinker-editor .cm-editor__header { justify-content: space-between; margin-bottom: 8px; }
-  clinker-editor .cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }
-  clinker-editor .cm-editor__sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
-  .cm-plot-selection-toolbar { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; align-items: center; gap: 6px; padding: 7px 8px; border: 1px solid var(--cm-border,#c7d9f1); border-radius: 8px; background: var(--cm-surface,rgba(255,255,255,.94)); box-shadow: 0 3px 12px rgba(23,36,54,.12); color: var(--cm-foreground,#273444); font: 13px/1.4 system-ui, sans-serif; }
-  .cm-plot-selection-toolbar[hidden] { display: none; }
-  .cm-plot-selection-toolbar strong { padding: 4px 6px; border-radius: 5px; background: var(--cm-hover,#e7f0ff); color: var(--cm-accent,#184a86); }
-  .cm-plot-selection-toolbar button { min-height: 28px; box-sizing: border-box; border: 1px solid var(--cm-border,#cbd3de); border-radius: 6px; padding: 3px 7px; background: var(--cm-surface,#fff); color: inherit; font: inherit; cursor: pointer; }
-  .cm-plot-selection-toolbar button:hover { border-color: var(--cm-accent,#78a9ed); background: var(--cm-hover,#f4f8ff); }
-}
+/* Editor styles are included by the component imports. */

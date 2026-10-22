@@ -10590,7 +10590,7 @@ const DATA_ROW_HEIGHT = 34;
 
 const DATA_EDITOR_CSS = `
 @layer clinker-editor {
-.cm-data-ui { color:var(--cm-foreground,#273444); font:13px/1.4 system-ui,sans-serif; }
+.cm-data-ui { color:var(--cm-foreground,#273444); font:var(--clinker-font,13px/1.4 system-ui,sans-serif); }
 .cm-data-ui [hidden] { display:none!important; }
 .cm-data-ui form { margin:0; }
 .cm-data-ui :is(button,input,select,textarea) { font:inherit; color:inherit; box-sizing:border-box; }
@@ -10635,12 +10635,14 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
 }
 `;
 
-function installDataEditorStyle(document) {
-  if (document.getElementById("cm-data-editor-style")) return;
-  const style = document.createElement("style"); style.id = "cm-data-editor-style";
-  style.textContent = DATA_EDITOR_CSS;
-  document.head.append(style);
+function installStyle(root, id, css) {
+  if (root.querySelector(`style[id="${id}"]`)) return;
+  const style = (root.ownerDocument || root).createElement("style");
+  style.id = id; style.textContent = css;
+  (root.head || root).append(style);
 }
+
+function installDataEditorStyle(root) { installStyle(root, "cm-data-editor-style", DATA_EDITOR_CSS); }
 
 const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
 

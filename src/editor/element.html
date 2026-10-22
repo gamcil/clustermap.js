@@ -1,12 +1,14 @@
+<div data-editor-shell>
 <div class="cm-editor__resize-handle" data-resize role="separator" aria-label="Resize plot editor" aria-orientation="horizontal"></div>
-<header class="cm-editor__header">
+<header part="header" class="cm-editor__header">
   <h2 class="cm-editor__title">Plot editor</h2>
   <div class="cm-editor__history">
     <button type="button" data-command="undo" disabled>Undo</button>
     <button type="button" data-command="redo" disabled>Redo</button>
   </div>
 </header>
-<clinker-tabs data-editor-tabs label="Plot editor sections" value="data">
-  <clinker-data-panel name="data" label="Data" data-panel="data"></clinker-data-panel>
-  <clinker-appearance-panel name="appearance" label="Appearance" data-panel="appearance" hidden></clinker-appearance-panel>
+<clinker-tabs part="tabs" data-editor-tabs label="Plot editor sections" value="data">
+  <clinker-data-panel part="data" name="data" label="Data" data-panel="data"></clinker-data-panel>
+  <clinker-appearance-panel part="appearance" name="appearance" label="Appearance" data-panel="appearance" hidden></clinker-appearance-panel>
 </clinker-tabs>
+</div>

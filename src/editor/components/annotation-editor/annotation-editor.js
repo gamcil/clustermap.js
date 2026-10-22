@@ -1,4 +1,4 @@
-import { installDataEditorStyle } from "../../shared/styles.mjs";
+import { installDataEditorStyle, installStyle } from "../../shared/styles.mjs";
 import { defineSearchField } from "../search-field/search-field.js";
 import { defineCategoryEditor } from "../category-editor/category-editor.js";
 import { defineAnnotationToolbar } from "../annotation-toolbar/annotation-toolbar.js";
@@ -33,12 +33,10 @@ class AnnotationEditor extends HTMLElementBase {
   #run = createActionRunner((message) => { this.#status.textContent = message; });
 
   connectedCallback() {
-    installDataEditorStyle(this.ownerDocument);
+    const root = this.getRootNode();
+    installDataEditorStyle(root);
     this.classList.add("cm-data-ui", "cm-annotation-data-editor");
-    if (!this.ownerDocument.getElementById("clinker-annotation-editor-style")) {
-      const style = this.ownerDocument.createElement("style"); style.id = "clinker-annotation-editor-style"; style.textContent = css;
-      this.ownerDocument.head.append(style);
-    }
+    installStyle(root, "clinker-annotation-editor-style", css);
     if (!this.#body) this.#mount();
     this.#render();
   }
@@ -49,8 +47,10 @@ class AnnotationEditor extends HTMLElementBase {
   clearSelection() { this.#view?.clearSelection?.(); }
   reset() {
     this.#cancelEdit(); this.#selected = this.#viewKey = null;
+    this.#state = { data: null, clusters: [], patch: () => {} };
     this.#creating = false;
     if (this.#search) this.#search.value = "";
+    if (this.#body) this.#render();
   }
   get #palette() { return this.#state.annotationApi.ANNOTATION_PALETTES.Qualitative; }
   #scale(panel) { return this.#state.annotationApi.resolveAnnotationScale(panel); }

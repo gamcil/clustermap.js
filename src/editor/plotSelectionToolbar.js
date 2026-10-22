@@ -1,18 +1,20 @@
-import { installDataEditorStyle } from "./shared/styles.mjs";
+import { installDataEditorStyle, installStyle } from "./shared/styles.mjs";
 import { createTemplate } from "../uiControls.mjs";
 import { textAsset } from "./shared/textAsset.js";
 import { defineActionMenu } from "./components/action-menu/action-menu.js";
 
 const toolbarTemplate = createTemplate(await textAsset(new URL("./components/plot-selection-toolbar/plot-selection-toolbar.html", import.meta.url)));
+const css = await textAsset(new URL("./components/plot-selection-toolbar/plot-selection-toolbar.css", import.meta.url));
 
 let activeToolbar = null;
 
 /** Mount contextual plot actions without requiring the full data editor. */
-export function mountPlotSelectionToolbar(chart, container) {
+export function mountPlotSelectionToolbar(chart, container, { editor = null } = {}) {
   if (!chart?.selection || !chart?.flipLoci || !chart?.trimLoci || !chart?.restoreLoci) throw new TypeError("A mounted ClusterMap chart is required.");
   if (!(container instanceof Element)) throw new TypeError("A plot container element is required.");
   const document = container.ownerDocument;
-  defineActionMenu(); installDataEditorStyle(document);
+  const scope = container.getRootNode();
+  defineActionMenu(); installDataEditorStyle(scope); installStyle(scope, "clinker-plot-selection-style", css);
   const root = document.createElement("div");
   root.className = "cm-data-ui cm-plot-selection-toolbar";
   root.hidden = true;
@@ -21,7 +23,6 @@ export function mountPlotSelectionToolbar(chart, container) {
   const flip = button("flip"), trim = button("trim"), restore = button("restore");
   const lociMenu = root.querySelector("[data-loci-menu]"), moreMenu = root.querySelector("[data-more-menu]");
   let clusterActions;
-  const editor = () => [...document.querySelectorAll("clinker-editor")].find((editor) => editor.chart === chart);
   const lociFor = ({ kind, ids }) => kind === "loci" ? ids :
     (chart.visibleData()?.clusters || []).filter((cluster) => ids.includes(cluster.uid)).flatMap((cluster) => cluster.loci.map((locus) => locus.uid));
   const sync = () => {
@@ -30,7 +31,7 @@ export function mountPlotSelectionToolbar(chart, container) {
     const noun = ids.length === 1 ? (clusters ? "cluster" : "locus") : kind;
     root.querySelector("strong").textContent = `${ids.length} ${noun} selected`;
     flip.textContent = clusters ? "Flip each locus" : "Flip"; trim.textContent = clusters ? "Trim each locus" : "Trim";
-    button("edit").hidden = !editor(); button("remove").textContent = `Remove selected ${kind}`;
+    button("edit").hidden = !editor; button("remove").textContent = `Remove selected ${kind}`;
     if (clusterActions !== clusters) {
       if (clusters) lociMenu.prepend(flip, trim, restore);
       else { root.insertBefore(flip, lociMenu); root.insertBefore(trim, lociMenu); moreMenu.prepend(restore); }
@@ -49,7 +50,7 @@ export function mountPlotSelectionToolbar(chart, container) {
     else if (action === "trim") chart.trimLoci(loci);
     else if (action === "restore") chart.restoreLoci(loci);
     else if (action === "clear") clear();
-    else if (action === "edit") editor()?.editSelection(selection);
+    else if (action === "edit") editor?.editSelection(selection);
     else if (action === "focus") chart.focus({ [selection.kind]: selection.ids });
     else if (action === "remove" && document.defaultView.confirm(`Remove ${selection.ids.length} ${selection.kind} and their contents from the plot? This can be undone.`)) {
       chart.remove({ [selection.kind]: selection.ids });
