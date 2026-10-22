@@ -1,7 +1,5 @@
 import {
-  getGeneLabelDy,
   getGeneLabelLayout,
-  getGeneLabelTransform,
   getGenePolygonCoordinates,
 } from "../genes/layout.mjs";
 import {
@@ -318,8 +316,6 @@ function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, labe
     polygon,
     bounds: boundsFromPoints(polygon),
     label: getGeneLabelLayout(display, { scaleX, shape, label }),
-    labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
-    labelDy: getGeneLabelDy(label.position),
   };
 }
 

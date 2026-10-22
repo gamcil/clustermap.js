@@ -1937,64 +1937,27 @@ function hitTestTreeNode(layout, point) {
 }
 
 function getGenePolygonCoordinates(gene, { scaleX, shape }) {
-  const scaledStart = scaleX(gene.start);
-  const scaledEnd = scaleX(gene.end);
-  const geneLength = scaledEnd - scaledStart;
+  const start = scaleX(gene.start), end = scaleX(gene.end);
+  const forward = gene.strand === 1;
+  const tail = forward ? start : end;
+  const tip = forward ? end : start;
+  const shaft = end - start < shape.tipLength ? tail
+    : tip + (forward ? -shape.tipLength : shape.tipLength);
   const bottom = shape.tipHeight * 2 + shape.bodyHeight;
-  const midpoint = bottom / 2;
-  const third = shape.tipHeight + shape.bodyHeight;
-  let points;
-
-  if (gene.strand === 1) {
-    const shaft = scaledEnd - shape.tipLength;
-    points = [
-      scaledStart,
-      shape.tipHeight,
-      shaft,
-      shape.tipHeight,
-      shaft,
-      0,
-      scaledEnd,
-      midpoint,
-      shaft,
-      bottom,
-      shaft,
-      third,
-      scaledStart,
-      third,
-    ];
-    if (geneLength < shape.tipLength) {
-      [2, 4, 8, 10].forEach((index) => (points[index] = scaledStart));
-    }
-  } else {
-    const shaft = scaledStart + shape.tipLength;
-    points = [
-      scaledEnd,
-      shape.tipHeight,
-      shaft,
-      shape.tipHeight,
-      shaft,
-      0,
-      scaledStart,
-      midpoint,
-      shaft,
-      bottom,
-      shaft,
-      third,
-      scaledEnd,
-      third,
-    ];
-    if (geneLength < shape.tipLength) {
-      [2, 4, 8, 10].forEach((index) => (points[index] = scaledEnd));
-    }
-  }
-
-  return points;
+  return [
+    tail, shape.tipHeight,
+    shaft, shape.tipHeight,
+    shaft, 0,
+    tip, bottom / 2,
+    shaft, bottom,
+    shaft, shape.tipHeight + shape.bodyHeight,
+    tail, shape.tipHeight + shape.bodyHeight,
+  ];
 }
 
 function getGeneLabelLayout(gene, { scaleX, shape, label }) {
-  const scaledLength = scaleX(gene.end) - scaleX(gene.start);
-  const x = scaleX(gene.start) + scaledLength * label.start;
+  const start = scaleX(gene.start), end = scaleX(gene.end);
+  const x = start + (end - start) * label.start;
   let y;
 
   if (label.position === "middle") {
@@ -2012,24 +1975,6 @@ function getGeneLabelLayout(gene, { scaleX, shape, label }) {
       ? -label.rotation
       : label.rotation,
   };
-}
-
-function getGeneLabelTransform(gene, options) {
-  const { x, y, rotation } = getGeneLabelLayout(gene, options);
-  return `translate(${x}, ${y}) rotate(${rotation})`;
-}
-
-function getGeneLabelDy(position) {
-  switch (position) {
-    case "top":
-      return "-0.4em";
-    case "middle":
-      return "0.4em";
-    case "bottom":
-      return "0.8em";
-    default:
-      return undefined;
-  }
 }
 
 const DEFAULT_CELL_WIDTH = 100;
@@ -4389,8 +4334,6 @@ function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, labe
     polygon,
     bounds: boundsFromPoints(polygon),
     label: getGeneLabelLayout(display, { scaleX, shape, label }),
-    labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
-    labelDy: getGeneLabelDy(label.position),
   };
 }
 
@@ -11489,8 +11432,8 @@ function renderPreview({ plot, data, scene, preview, config, scales, ids, intera
         : genePolygonForPreview(preview, gene, { includeClusterOffset: false })
           .map((value, index) => value - (index % 2 ? gene.locus.y : gene.locus.x));
       genes.set(uid, { ...gene, localPolygon: polygon, visible: geneVisibleForPreview(preview, gene),
-        labelTransform: geometry.labelX === undefined ? gene.labelTransform
-          : `translate(${geometry.labelX - gene.locus.x}, ${gene.label.y}) rotate(${gene.label.rotation})`,
+        label: geometry.labelX === undefined ? gene.label
+          : { ...gene.label, x: geometry.labelX - gene.locus.x },
       });
     }
     const geneScene = { ...scene, genes: { get: (uid) => genes.get(uid) || scene.genes.get(uid) } };
@@ -11679,9 +11622,12 @@ function updateGenes(selection, scene, config, scales, highlightGeneIds) {
   selection
     .select("text.geneLabel")
     .text((gene) => gene.label || gene.name || gene.uid)
-    .attr("dy", (gene) => geneLayout(gene)?.labelDy)
+    .attr("dy", { top: "-0.4em", middle: "0.4em", bottom: "0.8em" }[config.gene.label.position])
     .attr("display", config.gene.label.show ? "inherit" : "none")
-    .attr("transform", (gene) => geneLayout(gene)?.labelTransform)
+    .attr("transform", (gene) => {
+      const label = geneLayout(gene)?.label;
+      return label ? `translate(${label.x}, ${label.y}) rotate(${label.rotation})` : null;
+    })
     .attr("font-size", config.gene.label.fontSize)
     .attr("text-anchor", config.gene.label.anchor);
   return selection;

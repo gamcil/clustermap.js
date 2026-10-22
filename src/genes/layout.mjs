@@ -1,66 +1,25 @@
 export function getGenePolygonCoordinates(gene, { scaleX, shape }) {
-  const scaledStart = scaleX(gene.start);
-  const scaledEnd = scaleX(gene.end);
-  const geneLength = scaledEnd - scaledStart;
+  const start = scaleX(gene.start), end = scaleX(gene.end);
+  const forward = gene.strand === 1;
+  const tail = forward ? start : end;
+  const tip = forward ? end : start;
+  const shaft = end - start < shape.tipLength ? tail
+    : tip + (forward ? -shape.tipLength : shape.tipLength);
   const bottom = shape.tipHeight * 2 + shape.bodyHeight;
-  const midpoint = bottom / 2;
-  const third = shape.tipHeight + shape.bodyHeight;
-  let points;
-
-  if (gene.strand === 1) {
-    const shaft = scaledEnd - shape.tipLength;
-    points = [
-      scaledStart,
-      shape.tipHeight,
-      shaft,
-      shape.tipHeight,
-      shaft,
-      0,
-      scaledEnd,
-      midpoint,
-      shaft,
-      bottom,
-      shaft,
-      third,
-      scaledStart,
-      third,
-    ];
-    if (geneLength < shape.tipLength) {
-      [2, 4, 8, 10].forEach((index) => (points[index] = scaledStart));
-    }
-  } else {
-    const shaft = scaledStart + shape.tipLength;
-    points = [
-      scaledEnd,
-      shape.tipHeight,
-      shaft,
-      shape.tipHeight,
-      shaft,
-      0,
-      scaledStart,
-      midpoint,
-      shaft,
-      bottom,
-      shaft,
-      third,
-      scaledEnd,
-      third,
-    ];
-    if (geneLength < shape.tipLength) {
-      [2, 4, 8, 10].forEach((index) => (points[index] = scaledEnd));
-    }
-  }
-
-  return points;
-}
-
-export function getGenePolygonPoints(gene, options) {
-  return getGenePolygonCoordinates(gene, options).join(" ");
+  return [
+    tail, shape.tipHeight,
+    shaft, shape.tipHeight,
+    shaft, 0,
+    tip, bottom / 2,
+    shaft, bottom,
+    shaft, shape.tipHeight + shape.bodyHeight,
+    tail, shape.tipHeight + shape.bodyHeight,
+  ];
 }
 
 export function getGeneLabelLayout(gene, { scaleX, shape, label }) {
-  const scaledLength = scaleX(gene.end) - scaleX(gene.start);
-  const x = scaleX(gene.start) + scaledLength * label.start;
+  const start = scaleX(gene.start), end = scaleX(gene.end);
+  const x = start + (end - start) * label.start;
   let y;
 
   if (label.position === "middle") {
@@ -78,22 +37,4 @@ export function getGeneLabelLayout(gene, { scaleX, shape, label }) {
       ? -label.rotation
       : label.rotation,
   };
-}
-
-export function getGeneLabelTransform(gene, options) {
-  const { x, y, rotation } = getGeneLabelLayout(gene, options);
-  return `translate(${x}, ${y}) rotate(${rotation})`;
-}
-
-export function getGeneLabelDy(position) {
-  switch (position) {
-    case "top":
-      return "-0.4em";
-    case "middle":
-      return "0.4em";
-    case "bottom":
-      return "0.8em";
-    default:
-      return undefined;
-  }
 }

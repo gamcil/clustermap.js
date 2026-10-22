@@ -333,8 +333,8 @@ function renderPreview({ plot, data, scene, preview, config, scales, ids, intera
         : genePolygonForPreview(preview, gene, { includeClusterOffset: false })
           .map((value, index) => value - (index % 2 ? gene.locus.y : gene.locus.x));
       genes.set(uid, { ...gene, localPolygon: polygon, visible: geneVisibleForPreview(preview, gene),
-        labelTransform: geometry.labelX === undefined ? gene.labelTransform
-          : `translate(${geometry.labelX - gene.locus.x}, ${gene.label.y}) rotate(${gene.label.rotation})`,
+        label: geometry.labelX === undefined ? gene.label
+          : { ...gene.label, x: geometry.labelX - gene.locus.x },
       });
     }
     const geneScene = { ...scene, genes: { get: (uid) => genes.get(uid) || scene.genes.get(uid) } };
@@ -523,9 +523,12 @@ function updateGenes(selection, scene, config, scales, highlightGeneIds) {
   selection
     .select("text.geneLabel")
     .text((gene) => gene.label || gene.name || gene.uid)
-    .attr("dy", (gene) => geneLayout(gene)?.labelDy)
+    .attr("dy", { top: "-0.4em", middle: "0.4em", bottom: "0.8em" }[config.gene.label.position])
     .attr("display", config.gene.label.show ? "inherit" : "none")
-    .attr("transform", (gene) => geneLayout(gene)?.labelTransform)
+    .attr("transform", (gene) => {
+      const label = geneLayout(gene)?.label;
+      return label ? `translate(${label.x}, ${label.y}) rotate(${label.rotation})` : null;
+    })
     .attr("font-size", config.gene.label.fontSize)
     .attr("text-anchor", config.gene.label.anchor);
   return selection;
