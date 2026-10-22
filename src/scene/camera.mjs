@@ -66,3 +66,12 @@ export function fitCameraForBounds({
     cropped,
   };
 }
+
+/** Convert a pointer event on a surface into chart-world coordinates. */
+export function worldPoint(surface, event, camera) {
+  const bounds = surface.getBoundingClientRect();
+  return {
+    x: (event.clientX - bounds.left - camera.x) / camera.k,
+    y: (event.clientY - bounds.top - camera.y) / camera.k,
+  };
+}

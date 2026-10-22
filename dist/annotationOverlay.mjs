@@ -1,6 +1,17 @@
 import { i as installDataEditorStyle, a as installStyle, h as defineAnnotationDataForm, j as createAnnotationPanel, f as defineAnnotationEditor } from './editor/annotation-editor-0619543f.mjs';
 import { f as createActionRunner, d as colourHex, h as createControls } from './editor/search-field-8ffb9d31.mjs';
 
+/** Test world bounds after applying a preview translation. */
+
+/** Convert a pointer event on a surface into chart-world coordinates. */
+function worldPoint(surface, event, camera) {
+  const bounds = surface.getBoundingClientRect();
+  return {
+    x: (event.clientX - bounds.left - camera.x) / camera.k,
+    y: (event.clientY - bounds.top - camera.y) / camera.k,
+  };
+}
+
 /** Quick styling stays in the plot; data and membership editing live in the data editor. */
 function createAnnotationControls({ getData, patch, document, panelUid, annotationApi, onEditData }) {
   const { ANNOTATION_DEFAULTS: defaults, ANNOTATION_PALETTES: palettes, resolveAnnotationScale } = annotationApi;
@@ -333,9 +344,8 @@ function createAnnotationOverlay({ container, getData, patch, annotationApi, edi
     if (menuState) { hideTooltip(); return; }
     if (event.buttons || context.isBusy()) { hideTooltip(); hideFrame(); return; }
     refresh();
-    const surface = event.currentTarget.getBoundingClientRect(), camera = context.getCamera();
-    const point = { x: (event.clientX - surface.left - camera.x) / camera.k,
-      y: (event.clientY - surface.top - camera.y) / camera.k };
+    const camera = context.getCamera();
+    const point = worldPoint(event.currentTarget, event, camera);
     updateTooltip(event, point);
     const padded = (bounds) => ({ minX: bounds.minX - 10 / camera.k, maxX: bounds.maxX + 10 / camera.k,
       minY: bounds.minY - 12 / camera.k, maxY: bounds.maxY + 12 / camera.k });

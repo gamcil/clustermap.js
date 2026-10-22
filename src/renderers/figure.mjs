@@ -1,4 +1,4 @@
-import { canvasFigureBounds } from "./canvas.js";
+import { measureFigureBounds } from "../scene/measure.mjs";
 
 /** One backdrop shared by all renderers; camera changes only update its transform. */
 export function createFigureSurface() {
@@ -10,7 +10,7 @@ export function createFigureSurface() {
     if (preview?.type === "cluster-drag") preview = null;
     if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
       context ||= container.ownerDocument.createElement("canvas").getContext("2d");
-      measuredBounds = canvasFigureBounds(context, scene, config, tree, { preview });
+      measuredBounds = measureFigureBounds(context, scene, config, tree, { preview });
       measuredScene = scene;
       measuredConfig = config;
       measuredPreview = preview;

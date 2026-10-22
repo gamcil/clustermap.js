@@ -1,3 +1,4 @@
+import { worldPoint } from "../scene/camera.mjs";
 import { textAsset } from "../ui/assets.mjs";
 import { installDataEditorStyle, installStyle } from "../editor/shared/styles.mjs";
 import { defineAnnotationEditor } from "../editor/components/annotation-editor/annotation-editor.js";
@@ -231,9 +232,8 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
     if (menuState) { hideTooltip(); return; }
     if (event.buttons || context.isBusy()) { hideTooltip(); hideFrame(); return; }
     refresh();
-    const surface = event.currentTarget.getBoundingClientRect(), camera = context.getCamera();
-    const point = { x: (event.clientX - surface.left - camera.x) / camera.k,
-      y: (event.clientY - surface.top - camera.y) / camera.k };
+    const camera = context.getCamera();
+    const point = worldPoint(event.currentTarget, event, camera);
     updateTooltip(event, point);
     const padded = (bounds) => ({ minX: bounds.minX - 10 / camera.k, maxX: bounds.maxX + 10 / camera.k,
       minY: bounds.minY - 12 / camera.k, maxY: bounds.maxY + 12 / camera.k });

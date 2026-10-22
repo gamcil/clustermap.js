@@ -1,3 +1,4 @@
+import { measureFigureBounds } from "../scene/measure.mjs";
 import { visibleChartData } from "../data/visibility.mjs";
 import { animate as runAnimation, afterPaint } from "../renderers/animation.mjs";
 import { select } from "d3-selection";
@@ -33,16 +34,13 @@ import { isAnnotationOperation } from "../annotations/operations.mjs";
 import { updateSvgAnnotationViewport } from "../annotations/render.mjs";
 import { applyChartOperations } from "../data/operations.mjs";
 import { isTreeOperation, inverseTreeOperation, applyTreeOperation } from "../tree/operations.mjs";
-import { fitCameraForBounds, worldViewport } from "../scene/camera.mjs";
+import { fitCameraForBounds, worldViewport, worldPoint } from "../scene/camera.mjs";
 import { applyTheme, resolveTheme } from "../ui/theme.mjs";
 import { createFigureSurface } from "../renderers/figure.mjs";
 import { createHtmlOverlay } from "../ui/overlay.js";
 import { createInteractionController } from "../interaction/controller.mjs";
 import {
-  canvasFigureBounds,
-  canvasWorldPoint,
   hitTestCanvas,
-  interpolateCanvasScene,
   renderCanvas,
   CANVAS_LAYERS,
 } from "../renderers/canvas.js";
@@ -51,6 +49,7 @@ import { createRasterMinimap } from "../renderers/minimap.mjs";
 import { createRasterInteraction } from "../interaction/raster.mjs";
 import { createRasterMotion } from "../interaction/motion.mjs";
 import {
+  interpolateScene,
   createClusterDragPreview,
   createLocusFlipPreview,
   createLocusOffsetPreview,
@@ -820,7 +819,7 @@ export default function clusterMap() {
   const rasterInteraction = createRasterInteraction({
     targetForEvent,
     worldPoint: (surface, event) =>
-      canvasWorldPoint(surface, event, getCamera(chartState)),
+      worldPoint(surface, event, getCamera(chartState)),
     locusForTarget,
     setHoverLocus: (locusUid) => {
       if (canvasHoverLocusUid === locusUid) return false;
@@ -960,7 +959,7 @@ export default function clusterMap() {
     if (!minimapCanvas || !runtime.config.plot.minimap?.show) return;
     if (plotData.tree && runtime.config.tree.show) {
       minimapMeasurement ||= minimapCanvas.ownerDocument.createElement("canvas").getContext("2d");
-      scene = { ...scene, figureBounds: canvasFigureBounds(minimapMeasurement, scene, runtime.config, plotData.tree) };
+      scene = { ...scene, figureBounds: measureFigureBounds(minimapMeasurement, scene, runtime.config, plotData.tree) };
     }
     minimapScene = scene;
     rasterMinimap.scheduleBase({ scene, minimap: minimapCanvas, options: runtime.config.plot.minimap,
@@ -1006,7 +1005,7 @@ export default function clusterMap() {
     }
     if (treeAnimation) treeAnimation.targetScene = scene;
     webgpuAnimation = { cancel: runAnimation(duration, (progress) => {
-      const displayScene = interpolateCanvasScene(previousScene, scene, progress);
+      const displayScene = interpolateScene(previousScene, scene, progress);
       if (treeAnimation) treeAnimation.progress = progress;
       webgpuBackend.setScene(displayScene);
       paintWebGpu(displayScene);
@@ -1280,7 +1279,7 @@ export default function clusterMap() {
     const measurementCanvas = isWebGpuRenderer(runtime.config.plot.renderer)
       ? document.createElement("canvas")
       : canvas;
-    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, plotData.tree);
+    const bounds = measureFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, plotData.tree);
     if (!bounds) return;
 
     const camera = fitCameraForBounds({

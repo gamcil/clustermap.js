@@ -1,5 +1,5 @@
 import { boundsInViewport } from "./camera.mjs";
-import { clusterPairKey } from "../links/layout.mjs";
+import { clusterPairKey, interpolateLinkAnchors, interpolateLinkOpacity } from "../links/layout.mjs";
 import { arrangeTrimIndicators, createTrimIndicators } from "../loci/trimIndicators.mjs";
 
 function minStart(loci, startFor) {
@@ -435,7 +435,6 @@ export function linkVisibleForPreview(scene, link, preview, config) {
   );
 }
 
-
 export function recordsForPreview(scene, preview, { includeClusters = false } = {}) {
   if (!preview) return null;
   if (preview.type === "cluster-drag" && !includeClusters) {
@@ -487,7 +486,6 @@ export function recordsForPreview(scene, preview, { includeClusters = false } = 
   return { loci, genes, links };
 }
 
-
 export function genePolygonForPreview(preview, gene, { includeClusterOffset = true } = {}) {
   const { x, y } = previewOffsetsForLocus(preview, gene.locus);
   // Retained GPU vertices and SVG children apply cluster rows at their parent.
@@ -521,4 +519,93 @@ export function clusterPreviewInViewport(scene, preview, viewport, { includeLink
     }
   }
   return { clusters, pairs };
+}
+
+const interpolateNumber = (from, to, amount) => from + (to - from) * amount;
+
+function interpolateFields(from, to, amount, fields = ["x", "y"]) {
+  if (!from || !to || from === to) return to;
+  const result = { ...to };
+  for (const field of fields) result[field] = interpolateNumber(from[field] ?? to[field], to[field], amount);
+  return result;
+}
+
+function interpolateArray(from, to, amount) {
+  if (!from || !to || from.length !== to.length) return to;
+  return to.map((value, index) => interpolateNumber(from[index], value, amount));
+}
+
+function interpolateLocus(from, to, amount) {
+  if (!from) return to;
+  const trackX = (locus, side) =>
+    locus.track[side] ??
+    locus[side === "x1" ? "worldStart" : "worldEnd"] - locus.x;
+  return {
+    ...interpolateFields(from, to, amount, ["x", "y", "worldStart", "worldEnd"]),
+    transform: interpolateFields(from.transform, to.transform, amount),
+    track: {
+      ...to.track,
+      x1: interpolateNumber(trackX(from, "x1"), trackX(to, "x1"), amount),
+      x2: interpolateNumber(trackX(from, "x2"), trackX(to, "x2"), amount),
+      y: interpolateNumber(from.track.y, to.track.y, amount),
+    },
+    hover: interpolateFields(from.hover, to.hover, amount,
+      ["x", "y", "width", "height", "leftHandleX", "rightHandleX"]),
+  };
+}
+
+/**
+ * Interpolate compatible scene geometry for animation. Sources,
+ * hit-regions, and semantic state remain those of the target scene; only the
+ * pixels in flight are interpolated.
+ */
+export function interpolateScene(previous, scene, amount) {
+  if (!previous || amount >= 1) return scene;
+  const loci = new Map();
+  for (const [uid, locus] of scene.loci) {
+    loci.set(uid, interpolateLocus(previous.loci.get(uid), locus, amount));
+  }
+
+  const clusters = new Map();
+  for (const [uid, cluster] of scene.clusters) {
+    const prior = previous.clusters.get(uid);
+    clusters.set(uid, {
+      ...interpolateFields(prior, cluster, amount),
+      info: interpolateFields(prior?.info, cluster.info, amount),
+      loci: cluster.loci.map((locus) => loci.get(locus.source.uid)),
+    });
+  }
+
+  const genes = new Map();
+  for (const [uid, gene] of scene.genes) {
+    const prior = previous.genes.get(uid);
+    genes.set(uid, {
+      ...gene,
+      polygon: interpolateArray(prior?.polygon, gene.polygon, amount),
+      locus: interpolateFields(prior?.locus, gene.locus, amount),
+      label: interpolateFields(prior?.label, gene.label, amount, ["x", "y", "rotation"]),
+    });
+  }
+
+  const links = new Map();
+  for (const [uid, link] of scene.links) {
+    const prior = previous.links.get(uid);
+    const opacity = interpolateLinkOpacity(prior, link, amount);
+    const anchors = interpolateLinkAnchors(previous, prior, scene, link, amount);
+    links.set(uid, {
+      ...link,
+      // Retained scene link anchors are normalized upper-to-lower. During a
+      // row swap that reverses which endpoint is upper, so interpolate in
+      // stable query/target order to keep each end attached to its gene.
+      anchors,
+      labelPosition: interpolateFields(prior?.labelPosition, link.labelPosition, amount),
+      opacity,
+      visible: opacity > 0 && Boolean(prior?.visible || link.visible),
+    });
+  }
+
+  const priorPanels = new Map((previous.annotationPanels || []).map((panel) => [panel.uid, panel]));
+  const annotationPanels = (scene.annotationPanels || []).map((panel) => ({ ...panel,
+    x: interpolateNumber(priorPanels.get(panel.uid)?.x ?? panel.x, panel.x, amount) }));
+  return { ...scene, clusters, loci, genes, links, annotationPanels };
 }

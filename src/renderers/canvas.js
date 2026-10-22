@@ -1,10 +1,11 @@
-import { measureCanvasText } from "./text.mjs";
+import { measureCanvasText, measureTreeLayout } from "../scene/measure.mjs";
 import { linkColours } from "../links/style.mjs";
 import { hitTest } from "../scene/hitTest.mjs";
-import { boundsInViewport, worldViewport } from "../scene/camera.mjs";
+import { boundsInViewport, worldViewport, worldPoint } from "../scene/camera.mjs";
 import { figureConfig } from "../ui/theme.mjs";
 import { queryViewportOrdered } from "../scene/spatialIndex.mjs";
 import {
+  interpolateScene,
   clusterPreviewInViewport,
   offsetsForGene,
   geneGeometryForPreview,
@@ -16,12 +17,10 @@ import {
   locusGeometryForPreview,
   previewOffsetsForLocus,
 } from "../scene/preview.mjs";
-import { figureBoundsForChrome } from "../scene/layout.mjs";
-import { interpolateLinkAnchors, interpolateLinkOpacity, traceLinkPath, getLinkLabelPosition } from "../links/layout.mjs";
+import { traceLinkPath, getLinkLabelPosition } from "../links/layout.mjs";
 import { hitTestTreeNode, interpolateTreeLayout } from "../tree/layout.mjs";
-import { drawCanvasTree, layoutCanvasTree } from "../tree/canvas.mjs";
+import { drawCanvasTree } from "../tree/canvas.mjs";
 import { resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
-import { annotationPanelsForFrame, annotationFigureBounds } from "../annotations/model.mjs";
 import { drawCanvasAnnotations } from "../annotations/render.mjs";
 
 /**
@@ -144,158 +143,12 @@ export function renderCanvasMinimap({
   return { width, height, pixelRatio, viewport: visible };
 }
 
-export function canvasWorldPoint(canvas, event, camera) {
-  const bounds = canvas.getBoundingClientRect();
-  return {
-    x: (event.clientX - bounds.left - camera.x) / camera.k,
-    y: (event.clientY - bounds.top - camera.y) / camera.k,
-  };
-}
-
 /**
  * Return the portion of chart-world space covered by a Canvas. A small
  * screen-space margin prevents records from popping at its edge while panning.
  */
 export function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
   return worldViewport(camera, dimensions || canvas.getBoundingClientRect(), overscan);
-}
-
-/**
- * Extend the scene's structural figure bounds with exact Canvas text metrics.
- * Scene layout deliberately records only renderer-neutral chrome extents; the
- * raster adapter owns glyph measurement for initial camera fitting.
- */
-export function canvasFigureBounds(context, scene, config, tree = null, { preview = null } = {}) {
-  if (!scene?.bounds) return null;
-  let structural = scene.bounds;
-  const chrome = preview?.chrome || scene.chrome;
-  const panels = annotationPanelsForFrame(scene, preview);
-  if (preview) {
-    structural = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
-    for (const locus of scene.loci.values()) {
-      const geometry = locusGeometryForPreview(preview, locus);
-      const { x = 0, y = 0 } = geometry.offsets;
-      structural.minX = Math.min(structural.minX, geometry.worldStart ?? locus.worldStart + x);
-      structural.maxX = Math.max(structural.maxX, geometry.worldEnd ?? locus.worldEnd + x);
-      structural.minY = Math.min(structural.minY, locus.bounds.minY + y);
-      structural.maxY = Math.max(structural.maxY, locus.bounds.maxY + y);
-    }
-  }
-  const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome),
-    scene.annotationPanels || [], scene.clusters, panels) : scene.figureBounds || structural) };
-  const include = (x, y) => {
-    bounds.minX = Math.min(bounds.minX, x);
-    bounds.maxX = Math.max(bounds.maxX, x);
-    bounds.minY = Math.min(bounds.minY, y);
-    bounds.maxY = Math.max(bounds.maxY, y);
-  };
-  const includeText = (text, x, y, { fontSize, fontFamily = config.plot.fontFamily,
-    fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
-    if (!text) return;
-    const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-    const metrics = measureCanvasText(context, scene, text, { font, align, baseline });
-    const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
-    const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
-    const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
-    const x2 = Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight : left + metrics.width;
-    const y1 = Number.isFinite(metrics.actualBoundingBoxAscent) ? -metrics.actualBoundingBoxAscent : top;
-    const y2 = Number.isFinite(metrics.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : top + fontSize * 1.25;
-    const radians = rotation * Math.PI / 180;
-    const cos = Math.cos(radians), sin = Math.sin(radians);
-    for (const [tx, ty] of [[x1, y1], [x1, y2], [x2, y1], [x2, y2]]) {
-      const px = x + tx * cos - ty * sin, py = y + tx * sin + ty * cos;
-      include(px - border / 2, py - border / 2);
-      include(px + border / 2, py + border / 2);
-    }
-  };
-
-  // Structural scene bounds already enclose loci, gene polygons and ribbons.
-  // Add stroke extent without walking every homology link when labels are off.
-  const halfStroke = Math.max(config.gene.shape.strokeWidth || 0, config.locus.trackBar.stroke || 0,
-    config.link.show ? config.link.strokeWidth || 0 : 0) / 2;
-  include(structural.minX - halfStroke, structural.minY - halfStroke);
-  include(structural.maxX + halfStroke, structural.maxY + halfStroke);
-  for (const cluster of scene.clusters.values()) {
-    const x = cluster.x + cluster.info.x + clusterLabelOffsetForPreview(preview, cluster.source.uid);
-    const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
-    includeText(cluster.source.name, x, y + 8,
-      { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right" });
-    includeText(clusterLabelTextForPreview(preview, cluster.source.uid, cluster.info.locusText), x, y + 12,
-      { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
-  }
-  if (config.gene.label.show) {
-    for (const gene of scene.genes.values()) {
-      if (!geneVisibleForPreview(preview, gene)) continue;
-      const offsets = offsetsForGene(preview, gene);
-      const geometry = geneGeometryForPreview(preview, gene);
-      includeText(gene.source.label || gene.source.name || gene.source.uid,
-        (geometry.labelX ?? gene.locus.x + gene.label.x) + offsets.x, gene.locus.y + gene.label.y + offsets.y,
-        { fontSize: config.gene.label.fontSize, align: config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor, rotation: gene.label.rotation });
-    }
-  }
-  if (config.link.show && config.link.label.show) {
-    for (const link of scene.links.values()) {
-      const geometry = linkGeometryForPreview(scene, link, preview, config);
-      if (!geometry.visible || !link.labelPosition) continue;
-      const anchors = geometry.anchors;
-      const position = preview && anchors ? getLinkLabelPosition(anchors, config.link.label.position) : link.labelPosition;
-      includeText(link.source.label ?? link.source.identity.toFixed(2), position.x, position.y,
-        { fontSize: config.link.label.fontSize, align: "center" });
-    }
-  }
-  if (config.locus.trimIndicators?.show !== false) {
-    const style = resolveTrimIndicatorStyle(config.locus.trimIndicators);
-    for (const locus of scene.loci.values()) {
-      const geometry = locusGeometryForPreview(preview, locus);
-      const { x = 0, y = 0 } = geometry.offsets;
-      for (const indicator of geometry.trimIndicators || locus.trimIndicators || []) {
-        includeText(indicator.text, locus.x + indicator.x + x, locus.y + indicator.y + y,
-          { fontSize: style.fontSize, fontWeight: style.fontWeight, align: indicator.anchor, baseline: "top", border: style.borderWidth });
-      }
-    }
-  }
-  const treeLayout = layoutCanvasTree(context, tree, scene, config, { preview, trackAnchor: Boolean(preview) });
-  if (treeLayout) {
-    include(treeLayout.bounds.minX, treeLayout.bounds.minY);
-    include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
-  }
-  for (const panel of panels) {
-    for (const item of panel.texts) includeText(item.text, panel.x + item.x, item.y,
-      { fontSize: panel.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
-        align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
-  }
-  if (chrome?.legend.visible) {
-    const legend = chrome.legend;
-    const subtitleSize = legend.subtitleFontSize || Math.max(10, legend.fontSize * 0.72);
-    for (const item of legend.items) {
-      const x = legend.position.x + item.x, y = legend.position.y + item.y + item.circleY;
-      include(x - item.radius, y - item.radius);
-      include(x + item.radius, y + item.radius);
-      includeText(item.label, legend.position.x + item.textX, legend.position.y + item.y + item.textY,
-        { fontSize: legend.fontSize, fontFamily: legend.fontFamily, baseline: "middle" });
-      includeText(item.subtitle, legend.position.x + item.textX, legend.position.y + item.y + item.subtitleY,
-        { fontSize: subtitleSize, fontFamily: legend.fontFamily, baseline: "middle" });
-    }
-  }
-  if (chrome?.scaleBar.visible) {
-    const bar = chrome.scaleBar;
-    const half = bar.strokeWidth / 2;
-    include(bar.position.x - half, bar.position.y - half);
-    include(bar.position.x + bar.length + half, bar.position.y + bar.height + half);
-    includeText(bar.label, bar.position.x + bar.length / 2, bar.position.y + bar.height + 5,
-      { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
-  }
-  if (chrome?.colourBar.visible) {
-    const bar = chrome.colourBar;
-    include(bar.position.x - 0.5, bar.position.y - 0.5);
-    include(bar.position.x + bar.width + 0.5, bar.position.y + bar.height + 0.5);
-    const font = { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, baseline: "top" };
-    const y = bar.position.y + bar.height + 5;
-    includeText(bar.label, bar.position.x + bar.width / 2, y, { ...font, align: "center" });
-    includeText(bar.startLabel, bar.position.x, y, font);
-    includeText(bar.endLabel, bar.position.x + bar.width, y, { ...font, align: "right" });
-  }
-  return bounds;
 }
 
 function clusterLabelHit(context, scene, point, config) {
@@ -376,17 +229,17 @@ function chromeHit(context, scene, point) {
 }
 
 export function hitTestCanvas({ canvas, scene, camera, config, event, tree = null, treeDragging = false }) {
-  const point = canvasWorldPoint(canvas, event, camera);
+  const point = worldPoint(canvas, event, camera);
   const context = canvas.getContext("2d");
   return hitTest(scene, point) || treeNodeHit(context, scene, point, config, tree, treeDragging) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
 }
 
 function treeNodeHit(context, scene, point, config, tree, dragging = false) {
-  return hitTestTreeNode(layoutCanvasTree(context, tree, scene, config, { dragging }), point);
+  return hitTestTreeNode(measureTreeLayout(context, tree, scene, config, { dragging }), point);
 }
 
 function drawTree(context, tree, scene, config, preview, motion) {
-  const layout = layoutCanvasTree(context, tree, scene, config, {
+  const layout = measureTreeLayout(context, tree, scene, config, {
     preview,
     previousTree: motion.previousTree,
     previousScene: motion.previousScene,
@@ -724,95 +577,6 @@ function drawColourBar(context, colourBar) {
   context.restore();
 }
 
-const interpolateNumber = (from, to, amount) => from + (to - from) * amount;
-
-function interpolateFields(from, to, amount, fields = ["x", "y"]) {
-  if (!from || !to || from === to) return to;
-  const result = { ...to };
-  for (const field of fields) result[field] = interpolateNumber(from[field] ?? to[field], to[field], amount);
-  return result;
-}
-
-function interpolateArray(from, to, amount) {
-  if (!from || !to || from.length !== to.length) return to;
-  return to.map((value, index) => interpolateNumber(from[index], value, amount));
-}
-
-function interpolateLocus(from, to, amount) {
-  if (!from) return to;
-  const trackX = (locus, side) =>
-    locus.track[side] ??
-    locus[side === "x1" ? "worldStart" : "worldEnd"] - locus.x;
-  return {
-    ...interpolateFields(from, to, amount, ["x", "y", "worldStart", "worldEnd"]),
-    transform: interpolateFields(from.transform, to.transform, amount),
-    track: {
-      ...to.track,
-      x1: interpolateNumber(trackX(from, "x1"), trackX(to, "x1"), amount),
-      x2: interpolateNumber(trackX(from, "x2"), trackX(to, "x2"), amount),
-      y: interpolateNumber(from.track.y, to.track.y, amount),
-    },
-    hover: interpolateFields(from.hover, to.hover, amount,
-      ["x", "y", "width", "height", "leftHandleX", "rightHandleX"]),
-  };
-}
-
-/**
- * Interpolate compatible scene geometry for Canvas animation. Sources,
- * hit-regions, and semantic state remain those of the target scene; only the
- * pixels in flight are interpolated.
- */
-export function interpolateCanvasScene(previous, scene, amount) {
-  if (!previous || amount >= 1) return scene;
-  const loci = new Map();
-  for (const [uid, locus] of scene.loci) {
-    loci.set(uid, interpolateLocus(previous.loci.get(uid), locus, amount));
-  }
-
-  const clusters = new Map();
-  for (const [uid, cluster] of scene.clusters) {
-    const prior = previous.clusters.get(uid);
-    clusters.set(uid, {
-      ...interpolateFields(prior, cluster, amount),
-      info: interpolateFields(prior?.info, cluster.info, amount),
-      loci: cluster.loci.map((locus) => loci.get(locus.source.uid)),
-    });
-  }
-
-  const genes = new Map();
-  for (const [uid, gene] of scene.genes) {
-    const prior = previous.genes.get(uid);
-    genes.set(uid, {
-      ...gene,
-      polygon: interpolateArray(prior?.polygon, gene.polygon, amount),
-      locus: interpolateFields(prior?.locus, gene.locus, amount),
-      label: interpolateFields(prior?.label, gene.label, amount, ["x", "y", "rotation"]),
-    });
-  }
-
-  const links = new Map();
-  for (const [uid, link] of scene.links) {
-    const prior = previous.links.get(uid);
-    const opacity = interpolateLinkOpacity(prior, link, amount);
-    const anchors = interpolateLinkAnchors(previous, prior, scene, link, amount);
-    links.set(uid, {
-      ...link,
-      // Retained scene link anchors are normalized upper-to-lower. During a
-      // row swap that reverses which endpoint is upper, so interpolate in
-      // stable query/target order to keep each end attached to its gene.
-      anchors,
-      labelPosition: interpolateFields(prior?.labelPosition, link.labelPosition, amount),
-      opacity,
-      visible: opacity > 0 && Boolean(prior?.visible || link.visible),
-    });
-  }
-
-  const priorPanels = new Map((previous.annotationPanels || []).map((panel) => [panel.uid, panel]));
-  const annotationPanels = (scene.annotationPanels || []).map((panel) => ({ ...panel,
-    x: interpolateNumber(priorPanels.get(panel.uid)?.x ?? panel.x, panel.x, amount) }));
-  return { ...scene, clusters, loci, genes, links, annotationPanels };
-}
-
 const trimIndicatorPresence = new WeakMap();
 function hasTrimIndicators(loci) {
   if (!trimIndicatorPresence.has(loci)) {
@@ -856,7 +620,7 @@ export function renderCanvas({
   config = figureConfig(config);
   const show = (layer) => layers.includes(layer);
   const showLinks = show("links"), showGenes = show("genes");
-  const displayScene = interpolateCanvasScene(previousScene, scene, progress);
+  const displayScene = interpolateScene(previousScene, scene, progress);
   const showTrimIndicators = show("trimIndicators") && config.locus.trimIndicators?.show !== false &&
     (preview?.type === "locus-trim" || hasTrimIndicators(displayScene.loci));
   const showLoci = showTrimIndicators || show("tracks");

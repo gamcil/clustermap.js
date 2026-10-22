@@ -1,3 +1,5112 @@
+/** Test world bounds after applying a preview translation. */
+function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
+  return !viewport || !bounds || bounds.minX + x <= viewport.maxX && bounds.maxX + x >= viewport.minX &&
+    bounds.minY + y <= viewport.maxY && bounds.maxY + y >= viewport.minY;
+}
+
+function validBounds$1(bounds) {
+  return (
+    bounds &&
+    Number.isFinite(bounds.minX) &&
+    Number.isFinite(bounds.maxX) &&
+    Number.isFinite(bounds.minY) &&
+    Number.isFinite(bounds.maxY) &&
+    bounds.maxX > bounds.minX &&
+    bounds.maxY > bounds.minY
+  );
+}
+
+/** Camera-visible world rectangle, with overscan measured in screen pixels. */
+function worldViewport(camera, { width, height }, overscan = 20) {
+  const margin = overscan / camera.k;
+  return {
+    minX: -camera.x / camera.k - margin,
+    maxX: (width - camera.x) / camera.k + margin,
+    minY: -camera.y / camera.k - margin,
+    maxY: (height - camera.y) / camera.k + margin,
+  };
+}
+
+/**
+ * Fit a world-space figure envelope into a viewport.
+ *
+ * Renderers may obtain the envelope differently (SVG can use getBBox while
+ * raster renderers measure text), but camera policy stays shared: cap an
+ * ordinary fit, optionally retain a readable scale for oversized figures,
+ * and top-align whenever that scale crops the figure.
+ */
+function fitCameraForBounds({
+  bounds,
+  viewport,
+  padding = 20,
+  maximumFitScale = 1.2,
+  minimumReadableScale = 0,
+  constrainScale = (scale) => scale,
+} = {}) {
+  if (!validBounds$1(bounds) || !viewport?.width || !viewport?.height) return null;
+
+  const width = bounds.maxX - bounds.minX;
+  const height = bounds.maxY - bounds.minY;
+  const fitScale = Math.min(
+    maximumFitScale,
+    (viewport.width - padding * 2) / width,
+    (viewport.height - padding * 2) / height
+  );
+  const k = constrainScale(Math.max(fitScale, minimumReadableScale));
+  const cropped = k > fitScale;
+  return {
+    x: cropped
+      ? padding - bounds.minX * k
+      : (viewport.width - width * k) / 2 - bounds.minX * k,
+    y: cropped
+      ? padding - bounds.minY * k
+      : (viewport.height - height * k) / 2 - bounds.minY * k,
+    k,
+    fitScale,
+    cropped,
+  };
+}
+
+/** Convert a pointer event on a surface into chart-world coordinates. */
+function worldPoint(surface, event, camera) {
+  const bounds = surface.getBoundingClientRect();
+  return {
+    x: (event.clientX - bounds.left - camera.x) / camera.k,
+    y: (event.clientY - bounds.top - camera.y) / camera.k,
+  };
+}
+
+function clusterPairKey(left, right) {
+  return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
+}
+
+function getLinkAnchors(
+  link,
+  {
+    geneForUid,
+    areClustersAdjacent,
+    scaleX,
+    horizontalOffset,
+    verticalPosition,
+    geneMidpoint,
+  }
+) {
+  const query = geneForUid(link.query.uid);
+  const target = geneForUid(link.target.uid);
+
+  if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
+
+  const getGeneAnchors = (gene) => {
+    const offset = horizontalOffset(gene);
+    const left = scaleX(gene.start) + offset;
+    const right = scaleX(gene.end) + offset;
+    const forward = gene.strand === 1;
+    return [
+      forward ? left : right,
+      forward ? right : left,
+      verticalPosition(gene) + geneMidpoint,
+    ];
+  };
+
+  const [ax1, ax2, ay] = getGeneAnchors(query);
+  const [bx1, bx2, by] = getGeneAnchors(target);
+
+  return ay > by
+    ? [bx1, bx2, by, ax1, ax2, ay]
+    : [ax1, ax2, ay, bx1, bx2, by];
+}
+
+function interpolateLinkOpacity(previous, next, amount, enabled = true) {
+  const isRenderable = (link) => Boolean(enabled && link?.visible && link?.anchors);
+  const from = isRenderable(previous) ? 1 : 0;
+  const to = isRenderable(next) ? 1 : 0;
+  return from + (to - from) * amount;
+}
+
+function interpolateLinkAnchors(previousScene, previous, nextScene, next, amount) {
+  const inQueryOrder = (scene, link) => {
+    if (!link?.anchors) return null;
+    const query = scene?.genes.get(link.source.query.uid);
+    const queryY = query?.locus?.y;
+    if (!Number.isFinite(queryY)) return link.anchors;
+    const anchors = link.anchors;
+    const queryFirst = Math.abs(anchors[2] - queryY) <= Math.abs(anchors[5] - queryY);
+    return queryFirst ? anchors : [anchors[3], anchors[4], anchors[5], anchors[0], anchors[1], anchors[2]];
+  };
+  const from = inQueryOrder(previousScene, previous);
+  const to = inQueryOrder(nextScene, next);
+  if (!from) return to;
+  if (!to) return from;
+  return to.map((value, index) => from[index] + (value - from[index]) * amount);
+}
+
+function getLinkLabelPosition(
+  [ax1, ax2, ay, bx1, bx2, by],
+  position
+) {
+  const aMid = ax1 + (ax2 - ax1) / 2;
+  const bMid = bx1 + (bx2 - bx1) / 2;
+  return {
+    x: aMid + (bMid - aMid) * position,
+    y: ay + (by - ay) * position,
+  };
+}
+
+function linkPathCommands(anchors, { asLine = false, straight = false } = {}) {
+  if (!anchors) return [];
+  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+  const aMid = ax1 + (ax2 - ax1) / 2;
+  const bMid = bx1 + (bx2 - bx1) / 2;
+  const middle = ay + (by - ay) / 2;
+  if (asLine) {
+    return straight
+      ? [["M", aMid, ay], ["L", bMid, by]]
+      : [["M", aMid, ay], ["C", aMid, middle, bMid, middle, bMid, by]];
+  }
+  return straight
+    ? [["M", ax1, ay], ["L", ax2, ay], ["L", bx2, by], ["L", bx1, by], ["L", ax1, ay], ["Z"]]
+    : [
+        ["M", ax2, ay],
+        ["C", ax2, middle, bx2, middle, bx2, by],
+        ["L", bx1, by],
+        ["C", bx1, middle, ax1, middle, ax1, ay],
+        ["Z"],
+      ];
+}
+
+/** Trace the same link shape used by SVG onto a Canvas context. */
+function traceLinkPath(context, anchors, style) {
+  for (const [command, ...values] of linkPathCommands(anchors, style)) {
+    if (command === "M") context.moveTo(...values);
+    else if (command === "L") context.lineTo(...values);
+    else if (command === "C") context.bezierCurveTo(...values);
+    else context.closePath();
+  }
+}
+
+/**
+ * Sample a link in world coordinates for renderers that submit triangles and
+ * line segments directly rather than accepting SVG/Canvas path commands.
+ */
+function sampleLinkGeometry(anchors, { asLine = false, straight = false, segments = 10 } = {}) {
+  if (!anchors) return { asLine, upper: [], lower: [], line: [] };
+  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+  const middle = ay + (by - ay) / 2;
+  const pointFor = (startX, endX, amount) => straight
+    ? [startX + (endX - startX) * amount, ay + (by - ay) * amount]
+    : [
+        cubic(startX, startX, endX, endX, amount),
+        cubic(ay, middle, middle, by, amount),
+      ];
+  const count = straight ? 1 : Math.max(1, segments);
+  const samples = (startX, endX) => Array.from(
+    { length: count + 1 },
+    (_, index) => pointFor(startX, endX, index / count)
+  );
+  if (asLine) return {
+    asLine,
+    upper: [],
+    lower: [],
+    line: samples((ax1 + ax2) / 2, (bx1 + bx2) / 2),
+  };
+  return { asLine, upper: samples(ax2, bx2), lower: samples(ax1, bx1), line: [] };
+}
+
+function cubic(start, controlA, controlB, end, amount) {
+  const inverse = 1 - amount;
+  return (
+    inverse * inverse * inverse * start +
+    3 * inverse * inverse * amount * controlA +
+    3 * inverse * amount * amount * controlB +
+    amount * amount * amount * end
+  );
+}
+
+function getLinkPath(anchors, style) {
+  return linkPathCommands(anchors, style)
+    .map(([command, ...values]) => `${command}${values.join(",")}`)
+    .join("");
+}
+
+function formatLength(length) {
+  const rounded = Math.round(length);
+  if (rounded >= 1000) {
+    const kilobases = rounded / 1000;
+    return `${Number(kilobases.toFixed(kilobases >= 10 ? 0 : 1))} kb`;
+  }
+  return `${rounded} bp`;
+}
+
+function featureText(count) {
+  return `${count} ${count === 1 ? "feature" : "features"}`;
+}
+
+function boundedNumber(value, fallback, minimum, maximum) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
+}
+
+/**
+ * Shared text metrics for layout and renderers. The width estimate only
+ * chooses collision lanes; the renderer remains the source of exact glyph
+ * placement.
+ */
+function resolveTrimIndicatorStyle(style = {}) {
+  const fontSize = boundedNumber(style.fontSize, 10, 6, 48);
+  const fontWeight = boundedNumber(style.fontWeight, 600, 100, 900);
+  return {
+    fontSize,
+    fontWeight,
+    borderWidth: boundedNumber(style.borderWidth, 3, 0, 12),
+    borderOpacity: boundedNumber(style.borderOpacity, 1, 0, 1),
+    lineHeight: Math.ceil(fontSize * 1.2),
+    characterWidth: fontSize * (fontWeight >= 600 ? 0.6 : 0.56),
+  };
+}
+
+function indicatorBounds(locus, indicator, metrics) {
+  const width = indicator.text.length * metrics.characterWidth;
+  const x = locus.x + indicator.x;
+  const left = indicator.anchor === "end" ? x - width : x;
+  return {
+    left: left - 2,
+    right: left + width + 2,
+    top: locus.y + indicator.y - 1,
+    bottom: locus.y + indicator.y + metrics.fontSize + 1,
+  };
+}
+
+function overlaps(one, two) {
+  return (
+    one.left < two.right && one.right > two.left &&
+    one.top < two.bottom && one.bottom > two.top
+  );
+}
+
+/**
+ * Assign the smallest non-overlapping vertical lane to every trim label.
+ * This keeps both labels on one locus aligned whenever they fit, while also
+ * preventing labels from separate loci in the same cluster from colliding.
+ */
+function arrangeTrimIndicators(loci, replacements = new Map(), style = {}) {
+  const metrics = resolveTrimIndicatorStyle(style);
+  const arranged = new Map();
+  const placed = [];
+  for (const locus of [...loci].sort((one, two) => one.y - two.y || one.x - two.x)) {
+    const indicators = replacements.get(locus.source.uid) || locus.trimIndicators || [];
+    const positioned = [];
+    for (const indicator of indicators) {
+      const next = { ...indicator };
+      let bounds = indicatorBounds(locus, next, metrics);
+      while (placed.some((candidate) => overlaps(bounds, candidate))) {
+        next.y += metrics.lineHeight;
+        bounds = indicatorBounds(locus, next, metrics);
+      }
+      positioned.push(next);
+      placed.push(bounds);
+    }
+    arranged.set(locus.source.uid, positioned);
+  }
+  return arranged;
+}
+
+/**
+ * Describe the hidden flanks of a trimmed locus in its local display space.
+ * The resulting records are deliberately renderer-neutral: SVG can use them
+ * as text nodes while Canvas and WebGPU's Canvas overlay draw the same labels.
+ */
+function createTrimIndicators({ locus, state, getGeneState, scaleX, shape = {} }) {
+  if (!locus || !state) return [];
+  const start = Number(state.start);
+  const end = Number(state.end);
+  const fullStart = Number(locus.start);
+  const fullEnd = Number(locus.end);
+  if (![start, end, fullStart, fullEnd].every(Number.isFinite)) return [];
+
+  const genes = locus.genes || [];
+  const countBefore = (boundary) =>
+    genes.filter((gene) => Number(getGeneState(gene)?.end) <= boundary).length;
+  const countAfter = (boundary) =>
+    genes.filter((gene) => Number(getGeneState(gene)?.start) >= boundary).length;
+  const y = (shape.tipHeight || 0) * 2 + (shape.bodyHeight || 0) + 4;
+  const indicators = [];
+
+  if (start > fullStart) {
+    indicators.push({
+      side: "left",
+      x: scaleX(start) + 3,
+      y,
+      anchor: "start",
+      text: `← ${formatLength(start - fullStart)} · ${featureText(countBefore(start))}`,
+    });
+  }
+  if (end < fullEnd) {
+    indicators.push({
+      side: "right",
+      x: scaleX(end) - 3,
+      y,
+      anchor: "end",
+      text: `${featureText(countAfter(end))} · ${formatLength(fullEnd - end)} →`,
+    });
+  }
+  return indicators;
+}
+
+function minStart(loci, startFor) {
+  let start = Infinity;
+  for (const locus of loci) start = Math.min(start, startFor(locus));
+  return start;
+}
+
+function clusterUidForLocus(locus) {
+  return locus.cluster?.uid ?? locus.cluster?.source?.uid ?? locus.source.clusterUid;
+}
+
+function clusterLabelOffsetsForStarts(
+  scene,
+  startFor,
+  alignLabels,
+  affectedClusters = scene.clusters.values()
+) {
+  const offsets = new Map();
+  if (alignLabels) {
+    const offset = minStart(scene.loci.values(), startFor) -
+      minStart(scene.loci.values(), (locus) => locus.worldStart);
+    for (const cluster of scene.clusters.values()) offsets.set(cluster.source.uid, offset);
+    return offsets;
+  }
+  for (const cluster of affectedClusters) {
+    offsets.set(
+      cluster.source.uid,
+      minStart(cluster.loci, startFor) - minStart(cluster.loci, (locus) => locus.worldStart)
+    );
+  }
+  return offsets;
+}
+
+function chromeForPreview(scene, maxX) {
+  if (!scene.chrome) return null;
+  const dx = scene.annotationPanels?.length ? annotationOffsetForPreview(scene, { contentMaxX: maxX }) : maxX - scene.bounds.maxX;
+  return {
+    ...scene.chrome,
+    legend: {
+      ...scene.chrome.legend,
+      position: {
+        ...scene.chrome.legend.position,
+        x:
+          scene.chrome.legend.placement === "bottom"
+            ? scene.chrome.legend.position.x
+            : scene.chrome.legend.position.x + dx,
+      },
+    },
+  };
+}
+
+/** Keep the annotation group beyond stationary scales while loci move. */
+function annotationOffsetForPreview(scene, preview) {
+  if (!scene.annotationPanels?.length || preview?.contentMaxX === undefined) return 0;
+  let right = -Infinity;
+  for (const locus of scene.loci.values()) right = Math.max(right, locus.worldEnd);
+  const movingRight = scene.bounds.maxX + preview.contentMaxX - right;
+  return Math.max(movingRight, scene.annotationChromeRight ?? -Infinity) -
+    (scene.annotationAnchorX ?? scene.bounds.maxX);
+}
+
+function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClusters) {
+  let contentMaxX = -Infinity;
+  for (const locus of scene.loci.values()) contentMaxX = Math.max(contentMaxX, endFor(locus));
+  return {
+    ...fields,
+    contentMaxX,
+    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, affectedClusters),
+    chrome: chromeForPreview(scene, contentMaxX),
+  };
+}
+
+/**
+ * Describe a transient locus translation relative to an already projected
+ * scene. This is deliberately a sparse, renderer-neutral patch: it avoids
+ * rebuilding the scene while a drag is in progress.
+ */
+function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels }) {
+  const locus = scene.loci.get(locusUid);
+  if (!locus) return null;
+  const offsetX = offset - locus.localX;
+  const startFor = (candidate) =>
+    candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart;
+  const endFor = (candidate) =>
+    candidate.source.uid === locusUid ? candidate.worldEnd + offsetX : candidate.worldEnd;
+  return locusPreview(scene, {
+    type: "locus-offset",
+    locusUid,
+    offsetX,
+  }, startFor, endFor, alignLabels, [scene.clusters.get(locus.cluster.uid)]);
+}
+
+/** Describe several transient locus translations without rebuilding the scene. */
+function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
+  const locusOffsets = new Map();
+  const affectedClusters = new Set();
+  for (const [locusUid, offset] of offsets) {
+    const locus = scene.loci.get(locusUid);
+    if (!locus) continue;
+    locusOffsets.set(locusUid, offset - locus.localX);
+    const cluster = scene.clusters.get(locus.cluster.uid);
+    if (cluster) affectedClusters.add(cluster);
+  }
+  if (!locusOffsets.size) return null;
+  const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
+  const startFor = (candidate) => candidate.worldStart + offsetFor(candidate);
+  const endFor = (candidate) => candidate.worldEnd + offsetFor(candidate);
+  return locusPreview(scene, {
+    type: "locus-offsets",
+    locusOffsets,
+  }, startFor, endFor, alignLabels, affectedClusters);
+}
+
+/**
+ * Describe a transient trim using the current scene and updated locus-scale
+ * offsets. The controller updates scales (but not the scene) before calling
+ * this, so sibling loci retain their correct packed positions without a full
+ * data-to-scene projection for every pointer event.
+ */
+function createLocusTrimPreview(
+  scene,
+  locusUid,
+  state,
+  { localXFor, scaleX, alignLabels, shape, trimIndicatorStyle = {}, clusterLabelText = null }
+) {
+  const locus = scene.loci.get(locusUid);
+  if (!locus) return null;
+
+  const locusOffsets = new Map();
+  for (const candidate of scene.loci.values()) {
+    locusOffsets.set(candidate.source.uid, localXFor(candidate.source.uid) - candidate.localX);
+  }
+  const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
+  const trimmed = {
+    worldStart: locus.x + offsetFor(locus) + scaleX(state.start),
+    worldEnd: locus.x + offsetFor(locus) + scaleX(state.end),
+    track: {
+      ...locus.track,
+      x1: scaleX(state.start),
+      x2: scaleX(state.end),
+    },
+    hover: {
+      ...locus.hover,
+      x: scaleX(state.start),
+      width: scaleX(state.end) - scaleX(state.start),
+      leftHandleX: scaleX(state.start) - 8,
+      rightHandleX: scaleX(state.end),
+    },
+    trimIndicators: createTrimIndicators({
+      locus: locus.source,
+      state,
+      getGeneState: (gene) => scene.genes.get(gene.uid)?.display || gene,
+      scaleX,
+      shape,
+    }),
+  };
+  const locusGeometry = new Map([[locusUid, trimmed]]);
+  const arrangedTrimIndicators = arrangeTrimIndicators(
+    scene.loci.values(),
+    new Map([[locusUid, trimmed.trimIndicators]]),
+    trimIndicatorStyle
+  );
+  trimmed.trimIndicators = arrangedTrimIndicators.get(locusUid) || [];
+  const startFor = (candidate) =>
+    candidate.source.uid === locusUid
+      ? trimmed.worldStart
+      : candidate.worldStart + offsetFor(candidate);
+  const endFor = (candidate) =>
+    candidate.source.uid === locusUid
+      ? trimmed.worldEnd
+      : candidate.worldEnd + offsetFor(candidate);
+  const geneVisibility = new Map();
+  for (const gene of locus.genes) {
+    geneVisibility.set(
+      gene.source.uid,
+      gene.display.start >= state.start && gene.display.end <= state.end + 1
+    );
+  }
+
+  return locusPreview(scene, {
+    type: "locus-trim",
+    locusUid,
+    locusOffsets,
+    loci: locusGeometry,
+    geneVisibility,
+    ...(clusterLabelText === null
+      ? {}
+      : {
+          clusterLabelTexts: new Map([[
+            clusterUidForLocus(locus),
+            clusterLabelText,
+          ]]),
+        }),
+  }, startFor, endFor, alignLabels);
+}
+
+// Preview patches carry layout deltas rather than cloned scenes. These
+// accessors keep SVG, Canvas chrome, and dense WebGPU marks on the same
+// locus, cluster, and link geometry.
+function locusOffsetForPreview(preview, locusUid) {
+  if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
+  return preview?.type === "locus-offset" && preview.locusUid === locusUid
+    ? preview.offsetX
+    : 0;
+}
+
+function clusterLabelOffsetForPreview(preview, clusterUid) {
+  return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
+}
+
+function clusterLabelTextForPreview(preview, clusterUid, fallback) {
+  return preview?.clusterLabelTexts?.get(clusterUid) ?? fallback;
+}
+
+function clusterOffsetForPreview(preview, clusterUid) {
+  return preview?.clusterOffsets?.get(clusterUid) || 0;
+}
+
+function previewOffsetsForLocus(preview, locus) {
+  if (!preview || !locus) return { x: 0, y: 0 };
+  return {
+    x: locusOffsetForPreview(preview, locus.source?.uid),
+    y: clusterOffsetForPreview(preview, locus.cluster?.uid ?? locus.source?.clusterUid),
+  };
+}
+
+function locusGeometryForPreview(preview, locus) {
+  if (preview?.type === "locus-flip") {
+    const axis = preview.axes?.get(locus.source.uid);
+    if (axis !== undefined) {
+      const flip = (x) => x + (axis * 2 - x - x) * preview.progress;
+      const start = flip(locus.worldStart);
+      const end = flip(locus.worldEnd);
+      const hoverStart = flip(locus.x + locus.hover.x);
+      const hoverEnd = flip(locus.x + locus.hover.x + locus.hover.width);
+      const left = Math.min(start, end);
+      const right = Math.max(start, end);
+      return {
+        offsets: previewOffsetsForLocus(preview, locus),
+        worldStart: left,
+        worldEnd: right,
+        track: {
+          ...locus.track,
+          x1: flip(locus.x + locus.track.x1) - locus.x,
+          x2: flip(locus.x + locus.track.x2) - locus.x,
+        },
+        hover: {
+          ...locus.hover,
+          x: Math.min(hoverStart, hoverEnd) - locus.x,
+          width: Math.abs(hoverEnd - hoverStart),
+          leftHandleX: left - locus.x - 8,
+          rightHandleX: right - locus.x,
+        },
+      };
+    }
+  }
+  const trimmed = preview?.loci?.get(locus.source.uid);
+  return {
+    offsets: previewOffsetsForLocus(preview, locus),
+    ...(trimmed || {}),
+  };
+}
+
+function geneVisibleForPreview(preview, gene) {
+  return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
+}
+
+/** Describe flip frames without re-projecting the chart. */
+function createLocusFlipPreview(
+  scene,
+  locusUid,
+  { progress = 0, clusterLabelText = null } = {}
+) {
+  const locus = scene.loci.get(locusUid);
+  if (!locus) return null;
+  return {
+    type: "locus-flip",
+    locusUid,
+    progress,
+    ...(clusterLabelText === null
+      ? {}
+      : {
+          clusterLabelTexts: new Map([[
+            clusterUidForLocus(locus),
+            clusterLabelText,
+          ]]),
+        }),
+    // The projected bounds reflect the currently displayed locus, including
+    // any committed trim. Source coordinates describe the original record and
+    // must not determine the transient flip axis.
+    axes: new Map([[locusUid, (locus.worldStart + locus.worldEnd) / 2]]),
+  };
+}
+
+/** Describe temporary cluster rows without rebuilding a scene. */
+function createClusterDragPreview(scene, { clusterUid, position, positions, order, rows }) {
+  const clusterOffsets = new Map();
+  const clusterOrder = new Map();
+  for (const [index, uid] of order.entries()) {
+    const cluster = scene.clusters.get(uid);
+    if (!cluster) continue;
+    const y = positions?.get(uid) ?? (uid === clusterUid ? position : rows[index]);
+    clusterOffsets.set(uid, y - cluster.y);
+    clusterOrder.set(uid, index);
+  }
+  return { type: "cluster-drag", clusterUid, clusterOffsets, clusterOrder };
+}
+
+function offsetsForGene(preview, gene) {
+  return previewOffsetsForLocus(preview, gene.locus);
+}
+
+function flipAxisForGene(preview, gene) {
+  return preview?.type === "locus-flip"
+    ? preview.axes?.get(gene?.locus?.source?.uid)
+    : undefined;
+}
+
+function geneGeometryForPreview(preview, gene) {
+  const axis = flipAxisForGene(preview, gene);
+  if (axis === undefined) return {};
+  const progress = preview.progress;
+  const flipScale = 1 - 2 * progress;
+  const flip = (x) => axis + (x - axis) * flipScale;
+  return {
+    flipAxis: axis,
+    flipScale,
+    labelX: flip(gene.locus.x + gene.label.x),
+  };
+}
+
+function linkOffsetsForPreview(scene, link, preview) {
+  const query = scene.genes.get(link.source.query.uid);
+  const target = scene.genes.get(link.source.target.uid);
+  const offsetForGene = (gene) =>
+    locusOffsetForPreview(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
+  const queryOffset = offsetForGene(query);
+  const targetOffset = offsetForGene(target);
+  // Link anchors are ordered from the upper locus to the lower one, not from
+  // source.query to source.target.
+  return query?.locus?.y <= target?.locus?.y
+    ? { a: queryOffset, b: targetOffset }
+    : { a: targetOffset, b: queryOffset };
+}
+
+function previewLinkAnchors(scene, link, preview) {
+  const query = scene.genes.get(link.source.query.uid);
+  const target = scene.genes.get(link.source.target.uid);
+  if (!query || !target) return null;
+  const anchorForGene = (gene) => {
+    const offsets = offsetsForGene(preview, gene);
+    // Bounds are calculated when the retained scene is built and equal the
+    // polygon's horizontal extent. Reusing them avoids a vertex scan for each
+    // animated link endpoint on every frame.
+    let minX = gene.bounds?.minX;
+    let maxX = gene.bounds?.maxX;
+    // Retain support for compact third-party scenes that only expose a
+    // polygon. Production scenes always take the cached-bounds path above.
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+      minX = Infinity;
+      maxX = -Infinity;
+      for (let index = 0; index < gene.polygon.length; index += 2) {
+        minX = Math.min(minX, gene.polygon[index]);
+        maxX = Math.max(maxX, gene.polygon[index]);
+      }
+    }
+    minX += offsets.x;
+    maxX += offsets.x;
+    const forward = gene.display.strand === 1;
+    const axis = flipAxisForGene(preview, gene);
+    if (axis === undefined) {
+      return [
+        forward ? minX : maxX,
+        forward ? maxX : minX,
+        gene.locus.y + gene.locus.track.y + offsets.y,
+      ];
+    }
+    const progress = preview.progress;
+    const targetMin = axis * 2 - maxX;
+    const targetMax = axis * 2 - minX;
+    const from = forward ? [minX, maxX] : [maxX, minX];
+    const to = forward ? [targetMax, targetMin] : [targetMin, targetMax];
+    return [
+      from[0] + (to[0] - from[0]) * progress,
+      from[1] + (to[1] - from[1]) * progress,
+      gene.locus.y + gene.locus.track.y + offsets.y,
+    ];
+  };
+  const queryAnchor = anchorForGene(query);
+  const targetAnchor = anchorForGene(target);
+  return queryAnchor[2] <= targetAnchor[2]
+    ? [...queryAnchor, ...targetAnchor]
+    : [...targetAnchor, ...queryAnchor];
+}
+
+function linkGeometryForPreview(scene, link, preview, config) {
+  const visible = linkVisibleForPreview(scene, link, preview, config);
+  if (preview?.type === "cluster-drag" || preview?.type === "locus-flip") {
+    const query = scene.genes.get(link.source.query.uid);
+    const target = scene.genes.get(link.source.target.uid);
+    const affected = preview.type === "cluster-drag" ||
+      query?.locus?.source?.uid === preview.locusUid ||
+      target?.locus?.source?.uid === preview.locusUid;
+    return { visible, anchors: visible && affected ? previewLinkAnchors(scene, link, preview) : link.anchors };
+  }
+  const anchors = link.anchors;
+  if (!preview || !anchors) return { visible, anchors };
+  const { a, b } = linkOffsetsForPreview(scene, link, preview);
+  return { visible, anchors: a || b
+    ? [anchors[0] + a, anchors[1] + a, anchors[2], anchors[3] + b, anchors[4] + b, anchors[5]]
+    : anchors };
+}
+
+function linkVisibleForPreview(scene, link, preview, config) {
+  if (!preview) return link.visible;
+  const query = scene.genes.get(link.source.query.uid);
+  const target = scene.genes.get(link.source.target.uid);
+  if (!query || !target) return false;
+  if (!geneVisibleForPreview(preview, query) || !geneVisibleForPreview(preview, target)) return false;
+  if (preview?.type === "locus-trim") {
+    return link.allowed && !link.source.hidden && link.source.identity >= config.link.threshold;
+  }
+  if (preview?.type !== "cluster-drag") return link.visible;
+  const queryOrder = preview.clusterOrder.get(query.locus.cluster.uid);
+  const targetOrder = preview.clusterOrder.get(target.locus.cluster.uid);
+  return (
+    queryOrder !== undefined &&
+    targetOrder !== undefined &&
+    Math.abs(queryOrder - targetOrder) === 1 &&
+    link.allowed &&
+    link.source.identity >= config.link.threshold
+  );
+}
+
+
+function recordsForPreview(scene, preview, { includeClusters = false } = {}) {
+  if (!preview) return null;
+  if (preview.type === "cluster-drag" && !includeClusters) {
+    return {
+      // Genes, tracks, and instanced link ribbons all resolve their row
+      // offsets on the GPU, leaving only a compact visible-link index list to
+      // upload while the pointer moves.
+      loci: new Set(),
+      genes: new Set(),
+      links: new Set(),
+      clusterOffsets: true,
+    };
+  }
+  const loci = new Set();
+  if (preview.type === "cluster-drag") {
+    for (const locus of scene.loci.values()) {
+      if (clusterOffsetForPreview(preview, locus.cluster.uid)) loci.add(locus.source.uid);
+    }
+  }
+  if (preview.type === "locus-offset") loci.add(preview.locusUid);
+  if (preview.type === "locus-offsets") {
+    for (const locusUid of preview.locusOffsets.keys()) loci.add(locusUid);
+  }
+  if (preview.type === "locus-flip") loci.add(preview.locusUid);
+  if (preview.type === "locus-trim") {
+    const trimmed = scene.loci.get(preview.locusUid);
+    const clusterUid = trimmed?.cluster.uid;
+    // getLocusScaleValues packs loci independently within each cluster. A
+    // trim can therefore shift every sibling locus even when its individual
+    // offset happens to be zero in a particular preview frame.
+    for (const locus of scene.loci.values()) {
+      if (locus.cluster.uid === clusterUid) loci.add(locus.source.uid);
+    }
+  }
+  const genes = new Set();
+  for (const uid of loci) {
+    for (const gene of scene.loci.get(uid)?.genes || []) genes.add(gene.source.uid);
+  }
+  const links = new Set();
+  if (scene.linksByGene) {
+    for (const uid of genes) {
+      for (const link of scene.linksByGene.get(uid) || []) links.add(link.uid);
+    }
+  } else {
+    for (const link of scene.links.values()) {
+      if (genes.has(link.source.query.uid) || genes.has(link.source.target.uid)) links.add(link.source.uid);
+    }
+  }
+  return { loci, genes, links };
+}
+
+
+function genePolygonForPreview(preview, gene, { includeClusterOffset = true } = {}) {
+  const { x, y } = previewOffsetsForLocus(preview, gene.locus);
+  // Retained GPU vertices and SVG children apply cluster rows at their parent.
+  const bakedY = includeClusterOffset ? y : 0;
+  const axis = preview?.type === "locus-flip"
+    ? preview.axes?.get(gene.locus.source.uid)
+    : undefined;
+  if (!x && !y && axis === undefined) return gene.polygon;
+  const scale = axis === undefined ? 1 : 1 - 2 * preview.progress;
+  return gene.polygon.map((coordinate, index) =>
+    index % 2
+      ? coordinate + bakedY
+      : (axis === undefined ? coordinate : axis + (coordinate - axis) * scale) + x
+  );
+}
+
+/** Visible preview rows and their adjacent cluster pairs, shared by raster backends. */
+function clusterPreviewInViewport(scene, preview, viewport, { includeLinks = true } = {}) {
+  const clusters = [...scene.clusters.values()].filter((cluster) => boundsInViewport(
+    cluster.bounds, viewport, { y: clusterOffsetForPreview(preview, cluster.source.uid) }
+  ));
+  const pairs = new Set();
+  if (includeLinks) {
+    const clusterUidByOrder = new Map([...preview.clusterOrder].map(([uid, order]) => [order, uid]));
+    for (const cluster of clusters) {
+      const order = preview.clusterOrder.get(cluster.source.uid);
+      for (const neighbourOrder of [order - 1, order + 1]) {
+        const neighbour = clusterUidByOrder.get(neighbourOrder);
+        if (neighbour !== undefined) pairs.add(clusterPairKey(cluster.source.uid, neighbour));
+      }
+    }
+  }
+  return { clusters, pairs };
+}
+
+const interpolateNumber$1 = (from, to, amount) => from + (to - from) * amount;
+
+function interpolateFields(from, to, amount, fields = ["x", "y"]) {
+  if (!from || !to || from === to) return to;
+  const result = { ...to };
+  for (const field of fields) result[field] = interpolateNumber$1(from[field] ?? to[field], to[field], amount);
+  return result;
+}
+
+function interpolateArray(from, to, amount) {
+  if (!from || !to || from.length !== to.length) return to;
+  return to.map((value, index) => interpolateNumber$1(from[index], value, amount));
+}
+
+function interpolateLocus(from, to, amount) {
+  if (!from) return to;
+  const trackX = (locus, side) =>
+    locus.track[side] ??
+    locus[side === "x1" ? "worldStart" : "worldEnd"] - locus.x;
+  return {
+    ...interpolateFields(from, to, amount, ["x", "y", "worldStart", "worldEnd"]),
+    transform: interpolateFields(from.transform, to.transform, amount),
+    track: {
+      ...to.track,
+      x1: interpolateNumber$1(trackX(from, "x1"), trackX(to, "x1"), amount),
+      x2: interpolateNumber$1(trackX(from, "x2"), trackX(to, "x2"), amount),
+      y: interpolateNumber$1(from.track.y, to.track.y, amount),
+    },
+    hover: interpolateFields(from.hover, to.hover, amount,
+      ["x", "y", "width", "height", "leftHandleX", "rightHandleX"]),
+  };
+}
+
+/**
+ * Interpolate compatible scene geometry for animation. Sources,
+ * hit-regions, and semantic state remain those of the target scene; only the
+ * pixels in flight are interpolated.
+ */
+function interpolateScene(previous, scene, amount) {
+  if (!previous || amount >= 1) return scene;
+  const loci = new Map();
+  for (const [uid, locus] of scene.loci) {
+    loci.set(uid, interpolateLocus(previous.loci.get(uid), locus, amount));
+  }
+
+  const clusters = new Map();
+  for (const [uid, cluster] of scene.clusters) {
+    const prior = previous.clusters.get(uid);
+    clusters.set(uid, {
+      ...interpolateFields(prior, cluster, amount),
+      info: interpolateFields(prior?.info, cluster.info, amount),
+      loci: cluster.loci.map((locus) => loci.get(locus.source.uid)),
+    });
+  }
+
+  const genes = new Map();
+  for (const [uid, gene] of scene.genes) {
+    const prior = previous.genes.get(uid);
+    genes.set(uid, {
+      ...gene,
+      polygon: interpolateArray(prior?.polygon, gene.polygon, amount),
+      locus: interpolateFields(prior?.locus, gene.locus, amount),
+      label: interpolateFields(prior?.label, gene.label, amount, ["x", "y", "rotation"]),
+    });
+  }
+
+  const links = new Map();
+  for (const [uid, link] of scene.links) {
+    const prior = previous.links.get(uid);
+    const opacity = interpolateLinkOpacity(prior, link, amount);
+    const anchors = interpolateLinkAnchors(previous, prior, scene, link, amount);
+    links.set(uid, {
+      ...link,
+      // Retained scene link anchors are normalized upper-to-lower. During a
+      // row swap that reverses which endpoint is upper, so interpolate in
+      // stable query/target order to keep each end attached to its gene.
+      anchors,
+      labelPosition: interpolateFields(prior?.labelPosition, link.labelPosition, amount),
+      opacity,
+      visible: opacity > 0 && Boolean(prior?.visible || link.visible),
+    });
+  }
+
+  const priorPanels = new Map((previous.annotationPanels || []).map((panel) => [panel.uid, panel]));
+  const annotationPanels = (scene.annotationPanels || []).map((panel) => ({ ...panel,
+    x: interpolateNumber$1(priorPanels.get(panel.uid)?.x ?? panel.x, panel.x, amount) }));
+  return { ...scene, clusters, loci, genes, links, annotationPanels };
+}
+
+function define(constructor, factory, prototype) {
+  constructor.prototype = factory.prototype = prototype;
+  prototype.constructor = constructor;
+}
+
+function extend(parent, definition) {
+  var prototype = Object.create(parent.prototype);
+  for (var key in definition) prototype[key] = definition[key];
+  return prototype;
+}
+
+function Color() {}
+
+var darker = 0.7;
+var brighter = 1 / darker;
+
+var reI = "\\s*([+-]?\\d+)\\s*",
+    reN = "\\s*([+-]?(?:\\d*\\.)?\\d+(?:[eE][+-]?\\d+)?)\\s*",
+    reP = "\\s*([+-]?(?:\\d*\\.)?\\d+(?:[eE][+-]?\\d+)?)%\\s*",
+    reHex = /^#([0-9a-f]{3,8})$/,
+    reRgbInteger = new RegExp(`^rgb\\(${reI},${reI},${reI}\\)$`),
+    reRgbPercent = new RegExp(`^rgb\\(${reP},${reP},${reP}\\)$`),
+    reRgbaInteger = new RegExp(`^rgba\\(${reI},${reI},${reI},${reN}\\)$`),
+    reRgbaPercent = new RegExp(`^rgba\\(${reP},${reP},${reP},${reN}\\)$`),
+    reHslPercent = new RegExp(`^hsl\\(${reN},${reP},${reP}\\)$`),
+    reHslaPercent = new RegExp(`^hsla\\(${reN},${reP},${reP},${reN}\\)$`);
+
+var named = {
+  aliceblue: 0xf0f8ff,
+  antiquewhite: 0xfaebd7,
+  aqua: 0x00ffff,
+  aquamarine: 0x7fffd4,
+  azure: 0xf0ffff,
+  beige: 0xf5f5dc,
+  bisque: 0xffe4c4,
+  black: 0x000000,
+  blanchedalmond: 0xffebcd,
+  blue: 0x0000ff,
+  blueviolet: 0x8a2be2,
+  brown: 0xa52a2a,
+  burlywood: 0xdeb887,
+  cadetblue: 0x5f9ea0,
+  chartreuse: 0x7fff00,
+  chocolate: 0xd2691e,
+  coral: 0xff7f50,
+  cornflowerblue: 0x6495ed,
+  cornsilk: 0xfff8dc,
+  crimson: 0xdc143c,
+  cyan: 0x00ffff,
+  darkblue: 0x00008b,
+  darkcyan: 0x008b8b,
+  darkgoldenrod: 0xb8860b,
+  darkgray: 0xa9a9a9,
+  darkgreen: 0x006400,
+  darkgrey: 0xa9a9a9,
+  darkkhaki: 0xbdb76b,
+  darkmagenta: 0x8b008b,
+  darkolivegreen: 0x556b2f,
+  darkorange: 0xff8c00,
+  darkorchid: 0x9932cc,
+  darkred: 0x8b0000,
+  darksalmon: 0xe9967a,
+  darkseagreen: 0x8fbc8f,
+  darkslateblue: 0x483d8b,
+  darkslategray: 0x2f4f4f,
+  darkslategrey: 0x2f4f4f,
+  darkturquoise: 0x00ced1,
+  darkviolet: 0x9400d3,
+  deeppink: 0xff1493,
+  deepskyblue: 0x00bfff,
+  dimgray: 0x696969,
+  dimgrey: 0x696969,
+  dodgerblue: 0x1e90ff,
+  firebrick: 0xb22222,
+  floralwhite: 0xfffaf0,
+  forestgreen: 0x228b22,
+  fuchsia: 0xff00ff,
+  gainsboro: 0xdcdcdc,
+  ghostwhite: 0xf8f8ff,
+  gold: 0xffd700,
+  goldenrod: 0xdaa520,
+  gray: 0x808080,
+  green: 0x008000,
+  greenyellow: 0xadff2f,
+  grey: 0x808080,
+  honeydew: 0xf0fff0,
+  hotpink: 0xff69b4,
+  indianred: 0xcd5c5c,
+  indigo: 0x4b0082,
+  ivory: 0xfffff0,
+  khaki: 0xf0e68c,
+  lavender: 0xe6e6fa,
+  lavenderblush: 0xfff0f5,
+  lawngreen: 0x7cfc00,
+  lemonchiffon: 0xfffacd,
+  lightblue: 0xadd8e6,
+  lightcoral: 0xf08080,
+  lightcyan: 0xe0ffff,
+  lightgoldenrodyellow: 0xfafad2,
+  lightgray: 0xd3d3d3,
+  lightgreen: 0x90ee90,
+  lightgrey: 0xd3d3d3,
+  lightpink: 0xffb6c1,
+  lightsalmon: 0xffa07a,
+  lightseagreen: 0x20b2aa,
+  lightskyblue: 0x87cefa,
+  lightslategray: 0x778899,
+  lightslategrey: 0x778899,
+  lightsteelblue: 0xb0c4de,
+  lightyellow: 0xffffe0,
+  lime: 0x00ff00,
+  limegreen: 0x32cd32,
+  linen: 0xfaf0e6,
+  magenta: 0xff00ff,
+  maroon: 0x800000,
+  mediumaquamarine: 0x66cdaa,
+  mediumblue: 0x0000cd,
+  mediumorchid: 0xba55d3,
+  mediumpurple: 0x9370db,
+  mediumseagreen: 0x3cb371,
+  mediumslateblue: 0x7b68ee,
+  mediumspringgreen: 0x00fa9a,
+  mediumturquoise: 0x48d1cc,
+  mediumvioletred: 0xc71585,
+  midnightblue: 0x191970,
+  mintcream: 0xf5fffa,
+  mistyrose: 0xffe4e1,
+  moccasin: 0xffe4b5,
+  navajowhite: 0xffdead,
+  navy: 0x000080,
+  oldlace: 0xfdf5e6,
+  olive: 0x808000,
+  olivedrab: 0x6b8e23,
+  orange: 0xffa500,
+  orangered: 0xff4500,
+  orchid: 0xda70d6,
+  palegoldenrod: 0xeee8aa,
+  palegreen: 0x98fb98,
+  paleturquoise: 0xafeeee,
+  palevioletred: 0xdb7093,
+  papayawhip: 0xffefd5,
+  peachpuff: 0xffdab9,
+  peru: 0xcd853f,
+  pink: 0xffc0cb,
+  plum: 0xdda0dd,
+  powderblue: 0xb0e0e6,
+  purple: 0x800080,
+  rebeccapurple: 0x663399,
+  red: 0xff0000,
+  rosybrown: 0xbc8f8f,
+  royalblue: 0x4169e1,
+  saddlebrown: 0x8b4513,
+  salmon: 0xfa8072,
+  sandybrown: 0xf4a460,
+  seagreen: 0x2e8b57,
+  seashell: 0xfff5ee,
+  sienna: 0xa0522d,
+  silver: 0xc0c0c0,
+  skyblue: 0x87ceeb,
+  slateblue: 0x6a5acd,
+  slategray: 0x708090,
+  slategrey: 0x708090,
+  snow: 0xfffafa,
+  springgreen: 0x00ff7f,
+  steelblue: 0x4682b4,
+  tan: 0xd2b48c,
+  teal: 0x008080,
+  thistle: 0xd8bfd8,
+  tomato: 0xff6347,
+  turquoise: 0x40e0d0,
+  violet: 0xee82ee,
+  wheat: 0xf5deb3,
+  white: 0xffffff,
+  whitesmoke: 0xf5f5f5,
+  yellow: 0xffff00,
+  yellowgreen: 0x9acd32
+};
+
+define(Color, color, {
+  copy(channels) {
+    return Object.assign(new this.constructor, this, channels);
+  },
+  displayable() {
+    return this.rgb().displayable();
+  },
+  hex: color_formatHex, // Deprecated! Use color.formatHex.
+  formatHex: color_formatHex,
+  formatHex8: color_formatHex8,
+  formatHsl: color_formatHsl,
+  formatRgb: color_formatRgb,
+  toString: color_formatRgb
+});
+
+function color_formatHex() {
+  return this.rgb().formatHex();
+}
+
+function color_formatHex8() {
+  return this.rgb().formatHex8();
+}
+
+function color_formatHsl() {
+  return hslConvert(this).formatHsl();
+}
+
+function color_formatRgb() {
+  return this.rgb().formatRgb();
+}
+
+function color(format) {
+  var m, l;
+  format = (format + "").trim().toLowerCase();
+  return (m = reHex.exec(format)) ? (l = m[1].length, m = parseInt(m[1], 16), l === 6 ? rgbn(m) // #ff0000
+      : l === 3 ? new Rgb((m >> 8 & 0xf) | (m >> 4 & 0xf0), (m >> 4 & 0xf) | (m & 0xf0), ((m & 0xf) << 4) | (m & 0xf), 1) // #f00
+      : l === 8 ? rgba$1(m >> 24 & 0xff, m >> 16 & 0xff, m >> 8 & 0xff, (m & 0xff) / 0xff) // #ff000000
+      : l === 4 ? rgba$1((m >> 12 & 0xf) | (m >> 8 & 0xf0), (m >> 8 & 0xf) | (m >> 4 & 0xf0), (m >> 4 & 0xf) | (m & 0xf0), (((m & 0xf) << 4) | (m & 0xf)) / 0xff) // #f000
+      : null) // invalid hex
+      : (m = reRgbInteger.exec(format)) ? new Rgb(m[1], m[2], m[3], 1) // rgb(255, 0, 0)
+      : (m = reRgbPercent.exec(format)) ? new Rgb(m[1] * 255 / 100, m[2] * 255 / 100, m[3] * 255 / 100, 1) // rgb(100%, 0%, 0%)
+      : (m = reRgbaInteger.exec(format)) ? rgba$1(m[1], m[2], m[3], m[4]) // rgba(255, 0, 0, 1)
+      : (m = reRgbaPercent.exec(format)) ? rgba$1(m[1] * 255 / 100, m[2] * 255 / 100, m[3] * 255 / 100, m[4]) // rgb(100%, 0%, 0%, 1)
+      : (m = reHslPercent.exec(format)) ? hsla(m[1], m[2] / 100, m[3] / 100, 1) // hsl(120, 50%, 50%)
+      : (m = reHslaPercent.exec(format)) ? hsla(m[1], m[2] / 100, m[3] / 100, m[4]) // hsla(120, 50%, 50%, 1)
+      : named.hasOwnProperty(format) ? rgbn(named[format]) // eslint-disable-line no-prototype-builtins
+      : format === "transparent" ? new Rgb(NaN, NaN, NaN, 0)
+      : null;
+}
+
+function rgbn(n) {
+  return new Rgb(n >> 16 & 0xff, n >> 8 & 0xff, n & 0xff, 1);
+}
+
+function rgba$1(r, g, b, a) {
+  if (a <= 0) r = g = b = NaN;
+  return new Rgb(r, g, b, a);
+}
+
+function rgbConvert(o) {
+  if (!(o instanceof Color)) o = color(o);
+  if (!o) return new Rgb;
+  o = o.rgb();
+  return new Rgb(o.r, o.g, o.b, o.opacity);
+}
+
+function rgb(r, g, b, opacity) {
+  return arguments.length === 1 ? rgbConvert(r) : new Rgb(r, g, b, opacity == null ? 1 : opacity);
+}
+
+function Rgb(r, g, b, opacity) {
+  this.r = +r;
+  this.g = +g;
+  this.b = +b;
+  this.opacity = +opacity;
+}
+
+define(Rgb, rgb, extend(Color, {
+  brighter(k) {
+    k = k == null ? brighter : Math.pow(brighter, k);
+    return new Rgb(this.r * k, this.g * k, this.b * k, this.opacity);
+  },
+  darker(k) {
+    k = k == null ? darker : Math.pow(darker, k);
+    return new Rgb(this.r * k, this.g * k, this.b * k, this.opacity);
+  },
+  rgb() {
+    return this;
+  },
+  clamp() {
+    return new Rgb(clampi(this.r), clampi(this.g), clampi(this.b), clampa(this.opacity));
+  },
+  displayable() {
+    return (-0.5 <= this.r && this.r < 255.5)
+        && (-0.5 <= this.g && this.g < 255.5)
+        && (-0.5 <= this.b && this.b < 255.5)
+        && (0 <= this.opacity && this.opacity <= 1);
+  },
+  hex: rgb_formatHex, // Deprecated! Use color.formatHex.
+  formatHex: rgb_formatHex,
+  formatHex8: rgb_formatHex8,
+  formatRgb: rgb_formatRgb,
+  toString: rgb_formatRgb
+}));
+
+function rgb_formatHex() {
+  return `#${hex(this.r)}${hex(this.g)}${hex(this.b)}`;
+}
+
+function rgb_formatHex8() {
+  return `#${hex(this.r)}${hex(this.g)}${hex(this.b)}${hex((isNaN(this.opacity) ? 1 : this.opacity) * 255)}`;
+}
+
+function rgb_formatRgb() {
+  const a = clampa(this.opacity);
+  return `${a === 1 ? "rgb(" : "rgba("}${clampi(this.r)}, ${clampi(this.g)}, ${clampi(this.b)}${a === 1 ? ")" : `, ${a})`}`;
+}
+
+function clampa(opacity) {
+  return isNaN(opacity) ? 1 : Math.max(0, Math.min(1, opacity));
+}
+
+function clampi(value) {
+  return Math.max(0, Math.min(255, Math.round(value) || 0));
+}
+
+function hex(value) {
+  value = clampi(value);
+  return (value < 16 ? "0" : "") + value.toString(16);
+}
+
+function hsla(h, s, l, a) {
+  if (a <= 0) h = s = l = NaN;
+  else if (l <= 0 || l >= 1) h = s = NaN;
+  else if (s <= 0) h = NaN;
+  return new Hsl(h, s, l, a);
+}
+
+function hslConvert(o) {
+  if (o instanceof Hsl) return new Hsl(o.h, o.s, o.l, o.opacity);
+  if (!(o instanceof Color)) o = color(o);
+  if (!o) return new Hsl;
+  if (o instanceof Hsl) return o;
+  o = o.rgb();
+  var r = o.r / 255,
+      g = o.g / 255,
+      b = o.b / 255,
+      min = Math.min(r, g, b),
+      max = Math.max(r, g, b),
+      h = NaN,
+      s = max - min,
+      l = (max + min) / 2;
+  if (s) {
+    if (r === max) h = (g - b) / s + (g < b) * 6;
+    else if (g === max) h = (b - r) / s + 2;
+    else h = (r - g) / s + 4;
+    s /= l < 0.5 ? max + min : 2 - max - min;
+    h *= 60;
+  } else {
+    s = l > 0 && l < 1 ? 0 : h;
+  }
+  return new Hsl(h, s, l, o.opacity);
+}
+
+function hsl(h, s, l, opacity) {
+  return arguments.length === 1 ? hslConvert(h) : new Hsl(h, s, l, opacity == null ? 1 : opacity);
+}
+
+function Hsl(h, s, l, opacity) {
+  this.h = +h;
+  this.s = +s;
+  this.l = +l;
+  this.opacity = +opacity;
+}
+
+define(Hsl, hsl, extend(Color, {
+  brighter(k) {
+    k = k == null ? brighter : Math.pow(brighter, k);
+    return new Hsl(this.h, this.s, this.l * k, this.opacity);
+  },
+  darker(k) {
+    k = k == null ? darker : Math.pow(darker, k);
+    return new Hsl(this.h, this.s, this.l * k, this.opacity);
+  },
+  rgb() {
+    var h = this.h % 360 + (this.h < 0) * 360,
+        s = isNaN(h) || isNaN(this.s) ? 0 : this.s,
+        l = this.l,
+        m2 = l + (l < 0.5 ? l : 1 - l) * s,
+        m1 = 2 * l - m2;
+    return new Rgb(
+      hsl2rgb(h >= 240 ? h - 240 : h + 120, m1, m2),
+      hsl2rgb(h, m1, m2),
+      hsl2rgb(h < 120 ? h + 240 : h - 120, m1, m2),
+      this.opacity
+    );
+  },
+  clamp() {
+    return new Hsl(clamph(this.h), clampt(this.s), clampt(this.l), clampa(this.opacity));
+  },
+  displayable() {
+    return (0 <= this.s && this.s <= 1 || isNaN(this.s))
+        && (0 <= this.l && this.l <= 1)
+        && (0 <= this.opacity && this.opacity <= 1);
+  },
+  formatHsl() {
+    const a = clampa(this.opacity);
+    return `${a === 1 ? "hsl(" : "hsla("}${clamph(this.h)}, ${clampt(this.s) * 100}%, ${clampt(this.l) * 100}%${a === 1 ? ")" : `, ${a})`}`;
+  }
+}));
+
+function clamph(value) {
+  value = (value || 0) % 360;
+  return value < 0 ? value + 360 : value;
+}
+
+function clampt(value) {
+  return Math.max(0, Math.min(1, value || 0));
+}
+
+/* From FvD 13.37, CSS Color Module Level 3 */
+function hsl2rgb(h, m1, m2) {
+  return (h < 60 ? m1 + (m2 - m1) * h / 60
+      : h < 180 ? m2
+      : h < 240 ? m1 + (m2 - m1) * (240 - h) / 60
+      : m1) * 255;
+}
+
+const radians = Math.PI / 180;
+const degrees$1 = 180 / Math.PI;
+
+var A = -0.14861,
+    B = +1.78277,
+    C = -0.29227,
+    D = -0.90649,
+    E = +1.97294,
+    ED = E * D,
+    EB = E * B,
+    BC_DA = B * C - D * A;
+
+function cubehelixConvert(o) {
+  if (o instanceof Cubehelix) return new Cubehelix(o.h, o.s, o.l, o.opacity);
+  if (!(o instanceof Rgb)) o = rgbConvert(o);
+  var r = o.r / 255,
+      g = o.g / 255,
+      b = o.b / 255,
+      l = (BC_DA * b + ED * r - EB * g) / (BC_DA + ED - EB),
+      bl = b - l,
+      k = (E * (g - l) - C * bl) / D,
+      s = Math.sqrt(k * k + bl * bl) / (E * l * (1 - l)), // NaN if l=0 or l=1
+      h = s ? Math.atan2(k, bl) * degrees$1 - 120 : NaN;
+  return new Cubehelix(h < 0 ? h + 360 : h, s, l, o.opacity);
+}
+
+function cubehelix$1(h, s, l, opacity) {
+  return arguments.length === 1 ? cubehelixConvert(h) : new Cubehelix(h, s, l, opacity == null ? 1 : opacity);
+}
+
+function Cubehelix(h, s, l, opacity) {
+  this.h = +h;
+  this.s = +s;
+  this.l = +l;
+  this.opacity = +opacity;
+}
+
+define(Cubehelix, cubehelix$1, extend(Color, {
+  brighter(k) {
+    k = k == null ? brighter : Math.pow(brighter, k);
+    return new Cubehelix(this.h, this.s, this.l * k, this.opacity);
+  },
+  darker(k) {
+    k = k == null ? darker : Math.pow(darker, k);
+    return new Cubehelix(this.h, this.s, this.l * k, this.opacity);
+  },
+  rgb() {
+    var h = isNaN(this.h) ? 0 : (this.h + 120) * radians,
+        l = +this.l,
+        a = isNaN(this.s) ? 0 : this.s * l * (1 - l),
+        cosh = Math.cos(h),
+        sinh = Math.sin(h);
+    return new Rgb(
+      255 * (l + a * (A * cosh + B * sinh)),
+      255 * (l + a * (C * cosh + D * sinh)),
+      255 * (l + a * (E * cosh)),
+      this.opacity
+    );
+  }
+}));
+
+const TREE_COLOURING_DEFAULTS = {
+  mode: "none",
+  cutHeight: "auto",
+  palette: ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"],
+  showCutLine: false,
+};
+const metricsCache = new WeakMap();
+const stylesCache = new WeakMap();
+const fail$2 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
+const object$2 = (value) => value && typeof value === "object" && !Array.isArray(value);
+const own$1 = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+function fields$1(value, allowed, where) {
+  if (!object$2(value)) fail$2(`${where} must be an object.`);
+  for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$2(`${where}.${key} is unsupported.`);
+}
+function colour(value, where) {
+  if (typeof value !== "string" || !color(value)) fail$2(`${where} must be a valid colour.`);
+}
+function positive(value, where) {
+  if (!Number.isFinite(value) || value <= 0) fail$2(`${where} must be finite and positive.`);
+}
+function validateTreeColouring(policy) {
+  if (policy === undefined) return;
+  fields$1(policy, ["mode", "cutHeight", "palette", "showCutLine"], "colouring");
+  if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$2("colouring.mode must be none or cutHeight.");
+  if (own$1(policy, "cutHeight") && policy.cutHeight !== "auto" && (!Number.isFinite(policy.cutHeight) || policy.cutHeight < 0)) {
+    fail$2('colouring.cutHeight must be "auto" or a finite non-negative number.');
+  }
+  if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$2("colouring.showCutLine must be boolean.");
+  if (own$1(policy, "palette")) {
+    if (!Array.isArray(policy.palette) || !policy.palette.length) fail$2("colouring.palette must be a non-empty colour array.");
+    policy.palette.forEach((entry) => colour(entry, "colouring.palette"));
+  }
+}
+
+/** Biological distances and canonical ID order survive child rotation unchanged. */
+function treeMetrics(tree) {
+  if (metricsCache.has(tree)) return metricsCache.get(tree);
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const parents = new Map();
+  const distances = new Map([[tree.root, 0]]);
+  let complete = true;
+  const visit = (uid) => {
+    for (const child of nodes.get(uid).children || []) {
+      const length = nodes.get(child).branchLength;
+      if (!Number.isFinite(length) || length < 0) complete = false;
+      parents.set(child, uid);
+      distances.set(child, distances.get(uid) + (Number.isFinite(length) ? length : 0));
+      visit(child);
+    }
+  };
+  visit(tree.root);
+  const tips = tree.nodes.filter((node) => !node.children);
+  const height = Math.max(0, ...tips.map((node) => distances.get(node.uid)));
+  // Absolute 1e-12 plus relative 1e-9 tolerance, measured in input distance units.
+  const tolerance = 1e-12 + 1e-9 * height;
+  const ultrametric = complete && tips.every((node) => Math.abs(distances.get(node.uid) - height) <= tolerance);
+  const result = {
+    nodes, parents, height, ultrametric,
+    heights: new Map([...distances].map(([uid, distance]) => [uid, Math.max(0, height - distance)])),
+    canonical: [...tree.nodes].sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0),
+  };
+  metricsCache.set(tree, result);
+  return result;
+}
+
+function validateBranch(style, where) {
+  fields$1(style, ["colour", "width"], where);
+  if (own$1(style, "colour")) colour(style.colour, `${where}.colour`);
+  if (own$1(style, "width")) positive(style.width, `${where}.width`);
+}
+
+/** Validate optional data fields and the effective tree/config colouring policy. */
+function validateTreePresentation(tree, config = {}) {
+  validateTreeColouring(config.colouring);
+  if (!tree) return;
+  if (tree.distance !== undefined) {
+    fields$1(tree.distance, ["kind", "label"], "distance");
+    if (tree.distance.kind !== "mergeHeight") fail$2("distance.kind must be mergeHeight.");
+    if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$2("distance.label must be text.");
+  }
+  const presentation = tree.presentation;
+  if (presentation !== undefined) {
+    fields$1(presentation, ["colouring", "subtrees", "nodes"], "presentation");
+    validateTreeColouring(presentation.colouring);
+    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    for (const scope of ["subtrees", "nodes"]) {
+      if (presentation[scope] === undefined) continue;
+      if (!object$2(presentation[scope])) fail$2(`presentation.${scope} must be a node-ID dictionary.`);
+      for (const [uid, record] of Object.entries(presentation[scope])) {
+        const node = nodes.get(uid);
+        if (!node) fail$2(`presentation.${scope} refers to unknown node '${uid}'.`);
+        fields$1(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
+        if (scope === "subtrees" && !node.children) fail$2(`subtree '${uid}' must be an internal node.`);
+        if (record.branch !== undefined) {
+          if (scope === "nodes" && uid === tree.root) fail$2("the display root has no incoming edge to style.");
+          validateBranch(record.branch, `${scope}.${uid}.branch`);
+        }
+        if (record.label !== undefined) {
+          if (!node.children) fail$2(`annotation '${uid}' must belong to an internal node.`);
+          const label = record.label;
+          fields$1(label, ["text", "colour", "fontSize", "fontWeight", "fontStyle"], `nodes.${uid}.label`);
+          if (own$1(label, "text") && typeof label.text !== "string") fail$2(`annotation '${uid}' text must be a string.`);
+          if (own$1(label, "colour")) colour(label.colour, `annotation '${uid}' colour`);
+          if (own$1(label, "fontSize")) positive(label.fontSize, `annotation '${uid}' fontSize`);
+          if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$2("annotation fontWeight must be 400 or 700.");
+          if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$2("annotation fontStyle must be normal or italic.");
+        }
+      }
+    }
+  }
+  const policy = { ...TREE_COLOURING_DEFAULTS, ...config.colouring, ...presentation?.colouring };
+  if (policy.mode === "cutHeight") {
+    if (tree.distance?.kind !== "mergeHeight") fail$2("cutHeight colouring requires distance.kind = mergeHeight.");
+    if (!treeMetrics(tree).ultrametric) fail$2("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
+  }
+}
+
+function invalidateTreePresentation(tree) {
+  if (tree) stylesCache.delete(tree);
+}
+
+/** Resolve properties once per presentation/config revision, never per tween. */
+function resolveTreePresentation(tree, config = {}) {
+  const defaults = { ...TREE_COLOURING_DEFAULTS, ...config.colouring };
+  const signature = JSON.stringify([config.branch?.colour, config.branch?.width, config.textColour, defaults]);
+  const cached = stylesCache.get(tree);
+  if (cached && cached.presentation === tree.presentation && cached.signature === signature) return cached.value;
+  validateTreePresentation(tree, config);
+  const metrics = treeMetrics(tree);
+  const policy = { ...defaults, ...tree.presentation?.colouring };
+  const threshold = policy.cutHeight === "auto" ? metrics.height * 0.7 : policy.cutHeight;
+  const groups = new Map();
+  if (policy.mode === "cutHeight" && threshold > 0) {
+    for (const node of metrics.canonical) {
+      if (!node.children || metrics.heights.get(node.uid) >= threshold) continue;
+      const parent = metrics.parents.get(node.uid);
+      if (parent === undefined || metrics.heights.get(parent) >= threshold) {
+        groups.set(node.uid, policy.palette[groups.size % policy.palette.length]);
+      }
+    }
+  }
+  const base = { colour: config.branch?.colour || "#555", width: Number(config.branch?.width) || 1.5 };
+  const branches = new Map();
+  const stems = new Map();
+  const annotations = new Map();
+  const visit = (uid, inherited = {}, groupColour = null) => {
+    const node = metrics.nodes.get(uid);
+    const automatic = groups.get(uid) || groupColour;
+    const subtree = { ...inherited, ...tree.presentation?.subtrees?.[uid]?.branch };
+    const mergeStyle = { ...base, ...(automatic ? { colour: automatic } : {}), ...subtree };
+    if (node.children) stems.set(uid, mergeStyle);
+    const label = tree.presentation?.nodes?.[uid]?.label;
+    if (label?.text) annotations.set(uid, { colour: config.textColour || "#333", fontSize: 10, fontWeight: 400, fontStyle: "normal", ...label });
+    for (const child of node.children || []) {
+      branches.set(child, { ...mergeStyle, ...tree.presentation?.nodes?.[child]?.branch });
+      visit(child, subtree, automatic);
+    }
+  };
+  visit(tree.root);
+  const value = { base, branches, stems, annotations, policy, height: metrics.height, threshold, metric: policy.mode === "cutHeight" };
+  stylesCache.set(tree, { presentation: tree.presentation, signature, value });
+  return value;
+}
+
+const leafXAnchors = new WeakMap();
+
+/** Return whether an order keeps every tree clade contiguous. */
+function isTreeOrderCompatible(tree, order) {
+  if (!tree) return true;
+  const positions = new Map(order.map((uid, index) => [uid, index]));
+  if (positions.size !== order.length) return false;
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const span = (uid) => {
+    const node = nodes.get(uid);
+    if (!node) return null;
+    if (!node.children?.length) {
+      const position = positions.get(node.cluster);
+      return position === undefined ? null : { min: position, max: position, count: 1 };
+    }
+    let min = Infinity, max = -Infinity, count = 0;
+    for (const child of node.children) {
+      const range = span(child);
+      if (!range) return null;
+      min = Math.min(min, range.min);
+      max = Math.max(max, range.max);
+      count += range.count;
+    }
+    return max - min + 1 === count ? { min, max, count } : null;
+  };
+  return span(tree.root)?.count === order.length;
+}
+
+/** Keep the tree in its base position until a dragged label reaches a leaf. */
+function treeLeafX(tree, proposedX, dragging = false) {
+  if (!tree || typeof tree !== "object") return proposedX;
+  if (!dragging || !leafXAnchors.has(tree)) leafXAnchors.set(tree, proposedX);
+  return Math.min(proposedX, leafXAnchors.get(tree));
+}
+
+function niceScaleValue(maxDistance) {
+  const target = maxDistance / 4;
+  const power = 10 ** Math.floor(Math.log10(target));
+  const fraction = target / power;
+  const multiplier = fraction >= 5 ? 5 : fraction >= 2 ? 2 : 1;
+  const value = multiplier * power;
+  return { value, label: String(Number(value.toPrecision(2))) };
+}
+
+/** Lay out branch x positions using lengths when every edge has one. */
+function treeHorizontalLayout(tree, leafX, width, useBranchLengths = true) {
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const distances = new Map([[tree.root, 0]]);
+  const depths = new Map([[tree.root, 0]]);
+  const visit = (uid) => {
+    const node = nodes.get(uid);
+    for (const childUid of node.children || []) {
+      const child = nodes.get(childUid);
+      distances.set(childUid, distances.get(uid) + (Number(child.branchLength) || 0));
+      depths.set(childUid, depths.get(uid) + 1);
+      visit(childUid);
+    }
+  };
+  visit(tree.root);
+  const maxDepth = Math.max(...depths.values());
+  const maxDistance = Math.max(...tree.nodes
+    .filter((node) => !node.children)
+    .map((node) => distances.get(node.uid) || 0));
+  const completeLengths = tree.nodes
+    .filter((node) => node.uid !== tree.root)
+    .every((node) => Number.isFinite(node.branchLength));
+  const proportional = useBranchLengths && completeLengths && maxDistance > 0;
+  const leftX = leafX - width;
+  const xs = new Map();
+  for (const node of tree.nodes) {
+    const position = proportional
+      ? (distances.get(node.uid) / maxDistance) * width
+      : (depths.get(node.uid) / Math.max(1, maxDepth)) * width;
+    xs.set(node.uid, leftX + position);
+  }
+  if (proportional) {
+    const scale = niceScaleValue(maxDistance);
+    return {
+      xs,
+      maxDepth,
+      maxDistance,
+      proportional,
+      scaleBarLength: (scale.value / maxDistance) * width,
+      scaleBarLabel: scale.label,
+    };
+  }
+  return {
+    xs,
+    maxDepth,
+    maxDistance,
+    proportional,
+    scaleBarLength: width / Math.max(1, maxDepth),
+    scaleBarLabel: "1 branch",
+  };
+}
+
+/** Place the tree as far right as possible without leaf tips reaching labels. */
+function treeLeafAnchorX(tree, labelStarts, width, relative, clearance = 16) {
+  if (!tree || !labelStarts?.size) return 0;
+  let anchor = Infinity;
+  for (const node of tree.nodes) {
+    if (node.children?.length) continue;
+    const labelStart = labelStarts.get(node.cluster);
+    if (!Number.isFinite(labelStart)) continue;
+    anchor = Math.min(anchor, labelStart - clearance + width - relative.get(node.uid));
+  }
+  return Number.isFinite(anchor) ? anchor : 0;
+}
+
+function treeNodeYPositions(tree, scene, leafY = (node, sourceScene) =>
+  sourceScene.clusters.get(node.cluster)?.y ?? 0
+) {
+  if (!tree || !scene) return new Map();
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const positions = new Map();
+  const yFor = (uid) => {
+    if (positions.has(uid)) return positions.get(uid);
+    const node = nodes.get(uid);
+    const children = (node.children || []).map(yFor);
+    const y = children.length
+      ? (Math.min(...children) + Math.max(...children)) / 2
+      : leafY(node, scene);
+    positions.set(uid, y);
+    return y;
+  };
+  yFor(tree.root);
+  return positions;
+}
+
+/**
+ * Build renderer-neutral tree marks after the adapter has measured labels.
+ * scene supplies displayed label positions; targetScene supplies final row
+ * positions during a retained-scene animation. Keeping these separate prevents
+ * an interpolated scene from applying the tree motion a second time.
+ */
+function layoutTree({
+  tree,
+  scene,
+  config,
+  measureLabel,
+  measureText = (text, style) => ({ width: text.length * style.fontSize * 0.6, height: style.fontSize }),
+  preview = null,
+  previousTree = null,
+  previousScene = null,
+  targetScene = scene,
+  dragging = preview?.type === "cluster-drag",
+  trackAnchor = true,
+}) {
+  if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
+  const labelStarts = new Map();
+  for (const cluster of scene.clusters.values()) {
+    const uid = cluster.source.uid;
+    const text = clusterLabelTextForPreview(preview, uid, cluster.info.locusText || "");
+    labelStarts.set(uid, cluster.x + cluster.info.x +
+      clusterLabelOffsetForPreview(preview, uid) - measureLabel(cluster, text));
+  }
+  const width = Number(config.tree.width) || 100;
+  const horizontal = treeHorizontalLayout(tree, width, width, config.tree.useBranchLengths !== false);
+  const leafY = (node, sourceScene) =>
+    (sourceScene.clusters.get(node.cluster)?.y ?? 0) +
+    config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2 +
+    clusterOffsetForPreview(preview, node.cluster);
+  const ys = treeNodeYPositions(tree, targetScene, leafY);
+  const previousYs = previousTree && previousScene
+    ? treeNodeYPositions(previousTree, previousScene, leafY)
+    : null;
+  const presentation = resolveTreePresentation(tree, config.tree);
+  const branch = presentation.base;
+  const annotations = [...presentation.annotations].map(([uid, style]) => {
+    const font = { ...style, fontFamily: config.plot.fontFamily };
+    return { uid, ...font, ...measureText(style.text, font), x: horizontal.xs.get(uid) + 6, y: ys.get(uid) + 6 };
+  });
+  let proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
+  const rows = [...scene.clusters.values()].map((cluster) => {
+    const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
+    return { top: y + 8 - (config.cluster?.nameFontSize ?? 12), bottom: y + 12 + (config.cluster?.lociFontSize ?? 10), start: labelStarts.get(cluster.source.uid) };
+  }).sort((a, b) => a.top - b.top);
+  for (const label of annotations) {
+    let low = 0, high = rows.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (rows[middle].bottom < label.y) low = middle + 1;
+      else high = middle;
+    }
+    for (let index = low; index < rows.length; index++) {
+      const row = rows[index];
+      if (row.top > label.y + label.height) break;
+      if (row.bottom >= label.y) proposedX = Math.min(proposedX, row.start - 16 + width - label.x - label.width);
+    }
+  }
+  const leafX = trackAnchor ? treeLeafX(tree, proposedX, dragging) : proposedX;
+  const xs = new Map([...horizontal.xs].map(([uid, x]) => [uid, x + leafX - width]));
+  for (const label of annotations) label.x += leafX - width;
+  const guide = {
+    colour: config.tree.leafGuide?.colour || "#999",
+    width: Number(config.tree.leafGuide?.width) || 1,
+    dash: String(config.tree.leafGuide?.dash || "4 3").split(/[ ,]+/).map(Number).filter(Number.isFinite),
+  };
+  const support = {
+    fontSize: Number(config.tree.support?.fontSize) || 9,
+    fontFamily: config.plot.fontFamily,
+    colour: branch.colour,
+  };
+  const rootX = xs.get(tree.root);
+  const branches = [];
+  const stems = [];
+  const nodes = [];
+  const guides = [];
+  const supports = [];
+  for (const node of tree.nodes) {
+    const x = xs.get(node.uid);
+    if (node.children?.length) {
+      nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
+      // Stems and horizontal edges are separate marks. Square stem caps fill
+      // the outer corners without extending leaf tips or changing distances.
+      if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children, style: presentation.stems.get(node.uid), lineCap: "square" });
+      for (const child of node.children) {
+        branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child), style: presentation.branches.get(child) });
+      }
+    } else if (config.tree.leafGuide?.show && Number.isFinite(labelStarts.get(node.cluster))) {
+      guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: labelStarts.get(node.cluster) });
+    }
+    if (node.uid !== tree.root && config.tree.support?.show && node.support) {
+      const text = Number(node.support.value).toFixed(config.tree.support.precision ?? 1);
+      supports.push({
+        uid: node.uid,
+        x: x - 4,
+        text, ...measureText(text, support),
+      });
+    }
+  }
+  let scaleBar = null;
+  if (config.tree.scaleBar?.show !== false) {
+    const style = scene.chrome?.scaleBar || config.scaleBar || {};
+    const height = Number(style.height) || 12;
+    const length = horizontal.scaleBarLength;
+    const y = scene.chrome?.scaleBar?.position?.y ??
+      Math.max(...[...scene.clusters.values()].map((cluster) => cluster.y)) +
+        config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight + 20;
+    scaleBar = {
+      colour: style.colour || "black",
+      strokeWidth: Number(style.strokeWidth ?? style.stroke) || 1,
+      fontSize: Number(style.fontSize) || 10,
+      fontFamily: style.fontFamily || config.plot.fontFamily,
+      lines: [
+        { x1: rootX, y1: y + height / 2, x2: rootX + length, y2: y + height / 2 },
+        { x1: rootX, y1: y, x2: rootX, y2: y + height },
+        { x1: rootX + length, y1: y, x2: rootX + length, y2: y + height },
+      ],
+      label: { x: rootX + length / 2, y: y + height + 5, text: config.tree.scaleBar?.label || horizontal.scaleBarLabel },
+    };
+    // SVG scale labels use points; Canvas uses pixels. Measure the larger
+    // size for a common envelope without changing either renderer's drawing.
+    Object.assign(scaleBar.label, measureText(scaleBar.label.text, { ...scaleBar, fontSize: scaleBar.fontSize * 4 / 3 }));
+  }
+  let cutLine = null;
+  if (presentation.metric && presentation.policy.showCutLine && horizontal.proportional &&
+      presentation.threshold <= presentation.height && presentation.height > 0) {
+    const x = rootX + width * (1 - presentation.threshold / presentation.height);
+    const leafYs = tree.nodes.filter((node) => !node.children).map((node) => ys.get(node.uid));
+    cutLine = {
+      x1: x, x2: x, y1: Math.min(...leafYs), y2: Math.max(...leafYs),
+      colour: branch.colour, width: 1,
+      label: { x, y: Math.min(...leafYs) - 8, text: String(Number(presentation.threshold.toPrecision(6))), fontSize: support.fontSize, fontFamily: support.fontFamily },
+    };
+    Object.assign(cutLine.label, measureText(cutLine.label.text, cutLine.label));
+  }
+  return positionTreeLayout({
+    background: config.figureStyle?.background || "white", foreground: config.figureStyle?.foreground || "black",
+    cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
+    rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX, style: branch },
+    ys, previousYs,
+  }, ys);
+}
+
+function positionTreeLayout(layout, ys) {
+  const line = (mark) => ({ ...mark, y1: ys.get(mark.nodeUid), y2: ys.get(mark.nodeUid) });
+  const frame = {
+    ...layout,
+    rootBranch: line(layout.rootBranch),
+    branches: layout.branches.map(line),
+    stems: layout.stems.map((stem) => ({
+      ...stem,
+      y1: Math.min(...stem.children.map((uid) => ys.get(uid))),
+      y2: Math.max(...stem.children.map((uid) => ys.get(uid))),
+    })),
+    nodes: layout.nodes.map((node) => ({ ...node, y: ys.get(node.uid) })),
+    guides: layout.guides.map(line),
+    supports: layout.supports.map((label) => ({ ...label, y: ys.get(label.uid) - 4 })),
+    annotations: layout.annotations.map((label) => ({ ...label, y: ys.get(label.uid) + 6 })),
+  };
+  const points = [];
+  const includeLine = (mark, width = mark.style?.width || 1) => {
+    const half = width / 2;
+    const extendX = mark.x1 === mark.x2 || mark.lineCap === "square" ? half : 0;
+    const extendY = mark.y1 === mark.y2 || mark.lineCap === "square" ? half : 0;
+    points.push([Math.min(mark.x1, mark.x2) - extendX, Math.min(mark.y1, mark.y2) - extendY],
+      [Math.max(mark.x1, mark.x2) + extendX, Math.max(mark.y1, mark.y2) + extendY]);
+  };
+  for (const mark of [frame.rootBranch, ...frame.branches, ...frame.stems]) includeLine(mark);
+  for (const mark of frame.guides) includeLine(mark, frame.guide.width);
+  for (const node of frame.nodes) {
+    const radius = node.radius + frame.branch.width / 2;
+    points.push([node.x - radius, node.y - radius], [node.x + radius, node.y + radius]);
+  }
+  for (const label of frame.annotations) points.push([label.x - (label.overhang || 0), label.y], [label.x + label.width, label.y + label.height]);
+  for (const label of frame.supports) points.push([label.x - label.width, label.y - label.height], [label.x + (label.overhang || 0), label.y]);
+  if (frame.cutLine) {
+    includeLine(frame.cutLine, frame.cutLine.width);
+    const label = frame.cutLine.label;
+    points.push([label.x - label.width / 2, label.y - label.height], [label.x + label.width / 2, label.y]);
+  }
+  if (frame.scaleBar) {
+    for (const mark of frame.scaleBar.lines) includeLine(mark, frame.scaleBar.strokeWidth);
+    const label = frame.scaleBar.label;
+    points.push([label.x - label.width / 2, label.y], [label.x + label.width / 2, label.y + label.height]);
+  }
+  frame.bounds = {
+    minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
+    minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)),
+  };
+  return frame;
+}
+
+/** Interpolate node identities, then rebuild stems so swapped branches fold. */
+function interpolateTreeLayout(layout, progress = 1) {
+  if (!layout?.previousYs || progress >= 1) return layout;
+  const ys = new Map();
+  for (const [uid, target] of layout.ys) {
+    const from = layout.previousYs.get(uid) ?? target;
+    ys.set(uid, from + (target - from) * progress);
+  }
+  return positionTreeLayout(layout, ys);
+}
+
+function hitTestTreeNode(layout, point) {
+  for (const node of layout?.nodes || []) {
+    if (Math.hypot(point.x - node.x, point.y - node.y) <= node.hitRadius) {
+      return { action: "tree-node", nodeUid: node.uid };
+    }
+  }
+  return null;
+}
+
+function getGenePolygonCoordinates(gene, { scaleX, shape }) {
+  const scaledStart = scaleX(gene.start);
+  const scaledEnd = scaleX(gene.end);
+  const geneLength = scaledEnd - scaledStart;
+  const bottom = shape.tipHeight * 2 + shape.bodyHeight;
+  const midpoint = bottom / 2;
+  const third = shape.tipHeight + shape.bodyHeight;
+  let points;
+
+  if (gene.strand === 1) {
+    const shaft = scaledEnd - shape.tipLength;
+    points = [
+      scaledStart,
+      shape.tipHeight,
+      shaft,
+      shape.tipHeight,
+      shaft,
+      0,
+      scaledEnd,
+      midpoint,
+      shaft,
+      bottom,
+      shaft,
+      third,
+      scaledStart,
+      third,
+    ];
+    if (geneLength < shape.tipLength) {
+      [2, 4, 8, 10].forEach((index) => (points[index] = scaledStart));
+    }
+  } else {
+    const shaft = scaledStart + shape.tipLength;
+    points = [
+      scaledEnd,
+      shape.tipHeight,
+      shaft,
+      shape.tipHeight,
+      shaft,
+      0,
+      scaledStart,
+      midpoint,
+      shaft,
+      bottom,
+      shaft,
+      third,
+      scaledEnd,
+      third,
+    ];
+    if (geneLength < shape.tipLength) {
+      [2, 4, 8, 10].forEach((index) => (points[index] = scaledEnd));
+    }
+  }
+
+  return points;
+}
+
+function getGeneLabelLayout(gene, { scaleX, shape, label }) {
+  const scaledLength = scaleX(gene.end) - scaleX(gene.start);
+  const x = scaleX(gene.start) + scaledLength * label.start;
+  let y;
+
+  if (label.position === "middle") {
+    y = shape.tipHeight + shape.bodyHeight / 2;
+  } else if (label.position === "bottom") {
+    y = 2 * shape.tipHeight + shape.bodyHeight + label.spacing;
+  } else {
+    y = -label.spacing;
+  }
+
+  return {
+    x,
+    y,
+    rotation: ["start", "middle"].includes(label.anchor)
+      ? -label.rotation
+      : label.rotation,
+  };
+}
+
+function getGeneLabelTransform(gene, options) {
+  const { x, y, rotation } = getGeneLabelLayout(gene, options);
+  return `translate(${x}, ${y}) rotate(${rotation})`;
+}
+
+function getGeneLabelDy(position) {
+  switch (position) {
+    case "top":
+      return "-0.4em";
+    case "middle":
+      return "0.4em";
+    case "bottom":
+      return "0.8em";
+    default:
+      return undefined;
+  }
+}
+
+const DEFAULT_CELL_WIDTH = 100;
+const DEFAULT_CELL_HEIGHT = 50;
+
+function cellKey(x, y) {
+  return `${x},${y}`;
+}
+
+function validBounds(bounds) {
+  return (
+    bounds &&
+    Number.isFinite(bounds.minX) &&
+    Number.isFinite(bounds.maxX) &&
+    Number.isFinite(bounds.minY) &&
+    Number.isFinite(bounds.maxY)
+  );
+}
+
+function intersects(one, two) {
+  return (
+    one.minX <= two.maxX &&
+    one.maxX >= two.minX &&
+    one.minY <= two.maxY &&
+    one.maxY >= two.minY
+  );
+}
+
+function cellsForBounds(bounds, { cellWidth, cellHeight }) {
+  if (!validBounds(bounds)) return [];
+  const cells = [];
+  const minColumn = Math.floor(bounds.minX / cellWidth);
+  const maxColumn = Math.floor(bounds.maxX / cellWidth);
+  const minRow = Math.floor(bounds.minY / cellHeight);
+  const maxRow = Math.floor(bounds.maxY / cellHeight);
+  for (let column = minColumn; column <= maxColumn; column += 1) {
+    for (let row = minRow; row <= maxRow; row += 1) cells.push(cellKey(column, row));
+  }
+  return cells;
+}
+
+/**
+ * Index world-space rectangular extents in a uniform grid. The index stores
+ * IDs only; callers retain ownership of the scene records and draw order.
+ */
+function createSpatialIndex(
+  records,
+  { cellWidth = DEFAULT_CELL_WIDTH, cellHeight = DEFAULT_CELL_HEIGHT } = {}
+) {
+  const cells = new Map();
+  const boundsById = new Map();
+  const orderById = new Map();
+  let order = 0;
+  for (const [id, bounds] of records) {
+    // Retain painter order even for currently invisible records. A scene
+    // patch may reveal their bounds later (e.g. a newly adjacent link).
+    orderById.set(id, order);
+    order += 1;
+    if (!validBounds(bounds)) continue;
+    boundsById.set(id, bounds);
+    for (const key of cellsForBounds(bounds, { cellWidth, cellHeight })) {
+      if (!cells.has(key)) cells.set(key, new Set());
+      cells.get(key).add(id);
+    }
+  }
+  return { cells, boundsById, orderById, cellWidth, cellHeight };
+}
+
+/**
+ * Return a copy of an index with a small set of existing records moved or
+ * removed. Scene patches use this to retain spatial lookup for untouched
+ * records instead of rebuilding an index for the entire chart.
+ */
+function patchSpatialIndex(index, entries) {
+  if (!index || !entries?.length) return index;
+  const cells = new Map(index.cells);
+  const boundsById = new Map(index.boundsById);
+  const changedCells = new Set();
+  const mutableCell = (key) => {
+    if (!changedCells.has(key) || !cells.has(key)) {
+      cells.set(key, new Set(cells.get(key)));
+      changedCells.add(key);
+    }
+    return cells.get(key);
+  };
+
+  for (const [id, bounds] of entries) {
+    const oldBounds = boundsById.get(id);
+    for (const key of cellsForBounds(oldBounds, index)) {
+      const cell = mutableCell(key);
+      cell.delete(id);
+      if (cell.size === 0) cells.delete(key);
+    }
+    if (!validBounds(bounds)) {
+      boundsById.delete(id);
+      continue;
+    }
+    boundsById.set(id, bounds);
+    for (const key of cellsForBounds(bounds, index)) {
+      const cell = mutableCell(key);
+      cell.add(id);
+    }
+  }
+  return { ...index, cells, boundsById };
+}
+
+/** Return candidate IDs whose exact bounds intersect a world-space viewport. */
+function queryViewport(index, viewport) {
+  if (!validBounds(viewport)) return new Set();
+  const matches = new Set();
+  const minColumn = Math.floor(viewport.minX / index.cellWidth);
+  const maxColumn = Math.floor(viewport.maxX / index.cellWidth);
+  const minRow = Math.floor(viewport.minY / index.cellHeight);
+  const maxRow = Math.floor(viewport.maxY / index.cellHeight);
+  // At overview scales, checking each record is cheaper than visiting empty grid cells.
+  if ((maxColumn - minColumn + 1) * (maxRow - minRow + 1) > index.boundsById.size) {
+    for (const [id, bounds] of index.boundsById) if (intersects(bounds, viewport)) matches.add(id);
+    return matches;
+  }
+  for (let column = minColumn; column <= maxColumn; column += 1) {
+    for (let row = minRow; row <= maxRow; row += 1) {
+      for (const id of index.cells.get(cellKey(column, row)) || []) {
+        if (intersects(index.boundsById.get(id), viewport)) matches.add(id);
+      }
+    }
+  }
+  return matches;
+}
+
+/**
+ * Return viewport candidates in the order they were added to the index. This
+ * preserves deterministic painter order while allowing a renderer to visit
+ * only visible records.
+ */
+function queryViewportOrdered(index, viewport) {
+  return [...queryViewport(index, viewport)].sort(
+    (left, right) => index.orderById.get(left) - index.orderById.get(right)
+  );
+}
+
+function pointCandidates(index, point) {
+  return [...queryViewport(index, {
+    minX: point.x,
+    maxX: point.x,
+    minY: point.y,
+    maxY: point.y,
+  })].filter((id) => {
+    const bounds = index.boundsById.get(id);
+    return (
+      point.x >= bounds.minX &&
+      point.x <= bounds.maxX &&
+      point.y >= bounds.minY &&
+      point.y <= bounds.maxY
+    );
+  });
+}
+
+/** Return point candidates in the order they were added to the index. */
+function queryPointOrdered(index, point) {
+  return pointCandidates(index, point).sort(
+    (left, right) => index.orderById.get(left) - index.orderById.get(right)
+  );
+}
+
+function validateGroupPanel(panel, clusterIds, tree, fail) {
+  if (!Array.isArray(panel.groups) || !panel.groups.length) fail("group panels require a non-empty groups array.");
+  for (const key of ["markerWidth", "laneGap"]) {
+    if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
+  }
+  const ids = new Set(), nodes = new Set(tree?.nodes.map((node) => node.uid));
+  for (const group of panel.groups) {
+    if (!group || typeof group.uid !== "string" || !group.uid.trim() || ids.has(group.uid)) fail("groups require unique, non-empty uid strings.");
+    ids.add(group.uid);
+    if (group.label !== undefined && typeof group.label !== "string") fail("group label must be text.");
+    if (group.colour !== undefined && (typeof group.colour !== "string" || !color(group.colour))) fail("group colour must be a CSS colour.");
+    if ((group.nodeUid !== undefined) === (group.clusterIds !== undefined)) fail("each group requires either nodeUid or clusterIds.");
+    if (group.nodeUid !== undefined) {
+      if (!nodes.has(group.nodeUid)) fail(`unknown tree node '${group.nodeUid}'.`);
+    } else if (!Array.isArray(group.clusterIds) || !group.clusterIds.length ||
+        new Set(group.clusterIds).size !== group.clusterIds.length || group.clusterIds.some((uid) => !clusterIds.has(uid))) {
+      fail("group clusterIds must contain unique, existing cluster IDs.");
+    }
+  }
+}
+
+/** Resolve membership and allocate lanes once; placement remains independent of tree geometry. */
+function layoutGroupPanel(source, clusters, { fontFamily, fontSize, cellHeight, rowOffset, theme, tree, measureBounds }) {
+  const nodes = new Map(tree?.nodes.map((node) => [node.uid, node]));
+  const descendants = new Map();
+  const collect = (uid) => {
+    if (!descendants.has(uid)) {
+      const node = nodes.get(uid);
+      descendants.set(uid, node?.children?.length ? node.children.flatMap(collect) : node ? [node.cluster] : []);
+    }
+    return descendants.get(uid);
+  };
+  const markerWidth = source.markerWidth ?? 3, laneGap = source.laneGap ?? 12;
+  const lanes = [];
+  const markerGroups = source.groups.map((group) => {
+    const clusterIds = group.clusterIds ?? collect(group.nodeUid);
+    let laneIndex = lanes.findIndex((lane) => clusterIds.every((uid) => !lane.members.has(uid)));
+    if (laneIndex < 0) { laneIndex = lanes.length; lanes.push({ members: new Set(), width: 0 }); }
+    const lane = lanes[laneIndex], label = group.label ?? group.uid;
+    const labelBounds = measureBounds(label);
+    for (const uid of clusterIds) lane.members.add(uid);
+    lane.width = Math.max(lane.width, markerWidth + (label ? 6 + labelBounds.maxX - labelBounds.minX : 0));
+    return { uid: group.uid, label, clusterIds: new Set(clusterIds), laneIndex, labelBounds,
+      colour: group.colour ?? source.colour ?? "#267c9e" };
+  });
+  let width = 0;
+  for (const lane of lanes) { lane.x = width; width += lane.width + laneGap; }
+  width -= laneGap;
+  for (const group of markerGroups) group.x = lanes[group.laneIndex].x;
+  const title = source.title ?? source.uid;
+  const header = title ? [{ text: title, x: 0, y: 0, anchor: "start", weight: 700, kind: "title",
+    bounds: measureBounds(title, { weight: 700 }) }] : [];
+  return { uid: source.uid, definition: source, title, width, cellHeight, rowOffset, fontSize, fontFamily,
+    markerWidth, markerGroups, headingHeight: 0, titleDescent: Math.max(0, header[0]?.bounds.maxY ?? 0),
+    rows: [...clusters.keys()].map((uid) => ({ uid, cells: [] })), header, footer: [], key: [],
+    textColour: theme?.foreground ?? "#333333", extentWidth: Math.max(width, header[0]?.bounds.maxX ?? 0) };
+}
+
+/** Split non-contiguous memberships using the current row order, including drag previews. */
+function groupPanelMarks(panel, rows) {
+  const sorted = [...rows].sort((a, b) => a.y - b.y);
+  const rects = [], texts = [];
+  for (const group of panel.markerGroups) {
+    let start = -1;
+    const segment = (end) => {
+      const top = sorted[start].y - panel.cellHeight / 2, bottom = sorted[end].y + panel.cellHeight / 2;
+      const uid = `${group.uid}:${sorted[start].uid}`;
+      rects.push({ uid, x: group.x, y: top, width: panel.markerWidth, height: bottom - top,
+        fill: group.colour, keyIndex: rects.length });
+      if (group.label) texts.push({ uid, text: group.label, x: group.x + panel.markerWidth + 6 - group.labelBounds.minX,
+        y: (top + bottom - group.labelBounds.minY - group.labelBounds.maxY) / 2,
+        anchor: "start", bounds: group.labelBounds });
+    };
+    for (let i = 0; i <= sorted.length; i++) {
+      const member = i < sorted.length && group.clusterIds.has(sorted[i].uid);
+      if (member && start < 0) start = i;
+      if (!member && start >= 0) { segment(i - 1); start = -1; }
+    }
+  }
+  return { rects, texts };
+}
+
+function ascending$1(a, b) {
+  return a == null || b == null ? NaN : a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
+}
+
+function descending(a, b) {
+  return a == null || b == null ? NaN
+    : b < a ? -1
+    : b > a ? 1
+    : b >= a ? 0
+    : NaN;
+}
+
+function bisector(f) {
+  let compare1, compare2, delta;
+
+  // If an accessor is specified, promote it to a comparator. In this case we
+  // can test whether the search value is (self-) comparable. We can’t do this
+  // for a comparator (except for specific, known comparators) because we can’t
+  // tell if the comparator is symmetric, and an asymmetric comparator can’t be
+  // used to test whether a single value is comparable.
+  if (f.length !== 2) {
+    compare1 = ascending$1;
+    compare2 = (d, x) => ascending$1(f(d), x);
+    delta = (d, x) => f(d) - x;
+  } else {
+    compare1 = f === ascending$1 || f === descending ? f : zero$1;
+    compare2 = f;
+    delta = f;
+  }
+
+  function left(a, x, lo = 0, hi = a.length) {
+    if (lo < hi) {
+      if (compare1(x, x) !== 0) return hi;
+      do {
+        const mid = (lo + hi) >>> 1;
+        if (compare2(a[mid], x) < 0) lo = mid + 1;
+        else hi = mid;
+      } while (lo < hi);
+    }
+    return lo;
+  }
+
+  function right(a, x, lo = 0, hi = a.length) {
+    if (lo < hi) {
+      if (compare1(x, x) !== 0) return hi;
+      do {
+        const mid = (lo + hi) >>> 1;
+        if (compare2(a[mid], x) <= 0) lo = mid + 1;
+        else hi = mid;
+      } while (lo < hi);
+    }
+    return lo;
+  }
+
+  function center(a, x, lo = 0, hi = a.length) {
+    const i = left(a, x, lo, hi - 1);
+    return i > lo && delta(a[i - 1], x) > -delta(a[i], x) ? i - 1 : i;
+  }
+
+  return {left, center, right};
+}
+
+function zero$1() {
+  return 0;
+}
+
+function number$1(x) {
+  return x === null ? NaN : +x;
+}
+
+const ascendingBisect = bisector(ascending$1);
+const bisectRight = ascendingBisect.right;
+bisector(number$1).center;
+var bisect = bisectRight;
+
+class InternMap extends Map {
+  constructor(entries, key = keyof) {
+    super();
+    Object.defineProperties(this, {_intern: {value: new Map()}, _key: {value: key}});
+    if (entries != null) for (const [key, value] of entries) this.set(key, value);
+  }
+  get(key) {
+    return super.get(intern_get(this, key));
+  }
+  has(key) {
+    return super.has(intern_get(this, key));
+  }
+  set(key, value) {
+    return super.set(intern_set(this, key), value);
+  }
+  delete(key) {
+    return super.delete(intern_delete(this, key));
+  }
+}
+
+function intern_get({_intern, _key}, value) {
+  const key = _key(value);
+  return _intern.has(key) ? _intern.get(key) : value;
+}
+
+function intern_set({_intern, _key}, value) {
+  const key = _key(value);
+  if (_intern.has(key)) return _intern.get(key);
+  _intern.set(key, value);
+  return value;
+}
+
+function intern_delete({_intern, _key}, value) {
+  const key = _key(value);
+  if (_intern.has(key)) {
+    value = _intern.get(key);
+    _intern.delete(key);
+  }
+  return value;
+}
+
+function keyof(value) {
+  return value !== null && typeof value === "object" ? value.valueOf() : value;
+}
+
+const e10 = Math.sqrt(50),
+    e5 = Math.sqrt(10),
+    e2 = Math.sqrt(2);
+
+function tickSpec(start, stop, count) {
+  const step = (stop - start) / Math.max(0, count),
+      power = Math.floor(Math.log10(step)),
+      error = step / Math.pow(10, power),
+      factor = error >= e10 ? 10 : error >= e5 ? 5 : error >= e2 ? 2 : 1;
+  let i1, i2, inc;
+  if (power < 0) {
+    inc = Math.pow(10, -power) / factor;
+    i1 = Math.round(start * inc);
+    i2 = Math.round(stop * inc);
+    if (i1 / inc < start) ++i1;
+    if (i2 / inc > stop) --i2;
+    inc = -inc;
+  } else {
+    inc = Math.pow(10, power) * factor;
+    i1 = Math.round(start / inc);
+    i2 = Math.round(stop / inc);
+    if (i1 * inc < start) ++i1;
+    if (i2 * inc > stop) --i2;
+  }
+  if (i2 < i1 && 0.5 <= count && count < 2) return tickSpec(start, stop, count * 2);
+  return [i1, i2, inc];
+}
+
+function ticks(start, stop, count) {
+  stop = +stop, start = +start, count = +count;
+  if (!(count > 0)) return [];
+  if (start === stop) return [start];
+  const reverse = stop < start, [i1, i2, inc] = reverse ? tickSpec(stop, start, count) : tickSpec(start, stop, count);
+  if (!(i2 >= i1)) return [];
+  const n = i2 - i1 + 1, ticks = new Array(n);
+  if (reverse) {
+    if (inc < 0) for (let i = 0; i < n; ++i) ticks[i] = (i2 - i) / -inc;
+    else for (let i = 0; i < n; ++i) ticks[i] = (i2 - i) * inc;
+  } else {
+    if (inc < 0) for (let i = 0; i < n; ++i) ticks[i] = (i1 + i) / -inc;
+    else for (let i = 0; i < n; ++i) ticks[i] = (i1 + i) * inc;
+  }
+  return ticks;
+}
+
+function tickIncrement(start, stop, count) {
+  stop = +stop, start = +start, count = +count;
+  return tickSpec(start, stop, count)[2];
+}
+
+function tickStep(start, stop, count) {
+  stop = +stop, start = +start, count = +count;
+  const reverse = stop < start, inc = reverse ? tickIncrement(stop, start, count) : tickIncrement(start, stop, count);
+  return (reverse ? -1 : 1) * (inc < 0 ? 1 / -inc : inc);
+}
+
+function max(values, valueof) {
+  let max;
+  if (valueof === undefined) {
+    for (const value of values) {
+      if (value != null
+          && (max < value || (max === undefined && value >= value))) {
+        max = value;
+      }
+    }
+  } else {
+    let index = -1;
+    for (let value of values) {
+      if ((value = valueof(value, ++index, values)) != null
+          && (max < value || (max === undefined && value >= value))) {
+        max = value;
+      }
+    }
+  }
+  return max;
+}
+
+function min(values, valueof) {
+  let min;
+  if (valueof === undefined) {
+    for (const value of values) {
+      if (value != null
+          && (min > value || (min === undefined && value >= value))) {
+        min = value;
+      }
+    }
+  } else {
+    let index = -1;
+    for (let value of values) {
+      if ((value = valueof(value, ++index, values)) != null
+          && (min > value || (min === undefined && value >= value))) {
+        min = value;
+      }
+    }
+  }
+  return min;
+}
+
+function initRange(domain, range) {
+  switch (arguments.length) {
+    case 0: break;
+    case 1: this.range(domain); break;
+    default: this.range(range).domain(domain); break;
+  }
+  return this;
+}
+
+function initInterpolator(domain, interpolator) {
+  switch (arguments.length) {
+    case 0: break;
+    case 1: {
+      if (typeof domain === "function") this.interpolator(domain);
+      else this.range(domain);
+      break;
+    }
+    default: {
+      this.domain(domain);
+      if (typeof interpolator === "function") this.interpolator(interpolator);
+      else this.range(interpolator);
+      break;
+    }
+  }
+  return this;
+}
+
+const implicit = Symbol("implicit");
+
+function ordinal() {
+  var index = new InternMap(),
+      domain = [],
+      range = [],
+      unknown = implicit;
+
+  function scale(d) {
+    let i = index.get(d);
+    if (i === undefined) {
+      if (unknown !== implicit) return unknown;
+      index.set(d, i = domain.push(d) - 1);
+    }
+    return range[i % range.length];
+  }
+
+  scale.domain = function(_) {
+    if (!arguments.length) return domain.slice();
+    domain = [], index = new InternMap();
+    for (const value of _) {
+      if (index.has(value)) continue;
+      index.set(value, domain.push(value) - 1);
+    }
+    return scale;
+  };
+
+  scale.range = function(_) {
+    return arguments.length ? (range = Array.from(_), scale) : range.slice();
+  };
+
+  scale.unknown = function(_) {
+    return arguments.length ? (unknown = _, scale) : unknown;
+  };
+
+  scale.copy = function() {
+    return ordinal(domain, range).unknown(unknown);
+  };
+
+  initRange.apply(scale, arguments);
+
+  return scale;
+}
+
+function basis(t1, v0, v1, v2, v3) {
+  var t2 = t1 * t1, t3 = t2 * t1;
+  return ((1 - 3 * t1 + 3 * t2 - t3) * v0
+      + (4 - 6 * t2 + 3 * t3) * v1
+      + (1 + 3 * t1 + 3 * t2 - 3 * t3) * v2
+      + t3 * v3) / 6;
+}
+
+function basis$1(values) {
+  var n = values.length - 1;
+  return function(t) {
+    var i = t <= 0 ? (t = 0) : t >= 1 ? (t = 1, n - 1) : Math.floor(t * n),
+        v1 = values[i],
+        v2 = values[i + 1],
+        v0 = i > 0 ? values[i - 1] : 2 * v1 - v2,
+        v3 = i < n - 1 ? values[i + 2] : 2 * v2 - v1;
+    return basis((t - i / n) * n, v0, v1, v2, v3);
+  };
+}
+
+var constant$3 = x => () => x;
+
+function linear$1(a, d) {
+  return function(t) {
+    return a + t * d;
+  };
+}
+
+function exponential(a, b, y) {
+  return a = Math.pow(a, y), b = Math.pow(b, y) - a, y = 1 / y, function(t) {
+    return Math.pow(a + t * b, y);
+  };
+}
+
+function hue(a, b) {
+  var d = b - a;
+  return d ? linear$1(a, d > 180 || d < -180 ? d - 360 * Math.round(d / 360) : d) : constant$3(isNaN(a) ? b : a);
+}
+
+function gamma(y) {
+  return (y = +y) === 1 ? nogamma : function(a, b) {
+    return b - a ? exponential(a, b, y) : constant$3(isNaN(a) ? b : a);
+  };
+}
+
+function nogamma(a, b) {
+  var d = b - a;
+  return d ? linear$1(a, d) : constant$3(isNaN(a) ? b : a);
+}
+
+var interpolateRgb = (function rgbGamma(y) {
+  var color = gamma(y);
+
+  function rgb$1(start, end) {
+    var r = color((start = rgb(start)).r, (end = rgb(end)).r),
+        g = color(start.g, end.g),
+        b = color(start.b, end.b),
+        opacity = nogamma(start.opacity, end.opacity);
+    return function(t) {
+      start.r = r(t);
+      start.g = g(t);
+      start.b = b(t);
+      start.opacity = opacity(t);
+      return start + "";
+    };
+  }
+
+  rgb$1.gamma = rgbGamma;
+
+  return rgb$1;
+})(1);
+
+function rgbSpline(spline) {
+  return function(colors) {
+    var n = colors.length,
+        r = new Array(n),
+        g = new Array(n),
+        b = new Array(n),
+        i, color;
+    for (i = 0; i < n; ++i) {
+      color = rgb(colors[i]);
+      r[i] = color.r || 0;
+      g[i] = color.g || 0;
+      b[i] = color.b || 0;
+    }
+    r = spline(r);
+    g = spline(g);
+    b = spline(b);
+    color.opacity = 1;
+    return function(t) {
+      color.r = r(t);
+      color.g = g(t);
+      color.b = b(t);
+      return color + "";
+    };
+  };
+}
+
+var rgbBasis = rgbSpline(basis$1);
+
+function numberArray(a, b) {
+  if (!b) b = [];
+  var n = a ? Math.min(b.length, a.length) : 0,
+      c = b.slice(),
+      i;
+  return function(t) {
+    for (i = 0; i < n; ++i) c[i] = a[i] * (1 - t) + b[i] * t;
+    return c;
+  };
+}
+
+function isNumberArray(x) {
+  return ArrayBuffer.isView(x) && !(x instanceof DataView);
+}
+
+function genericArray(a, b) {
+  var nb = b ? b.length : 0,
+      na = a ? Math.min(nb, a.length) : 0,
+      x = new Array(na),
+      c = new Array(nb),
+      i;
+
+  for (i = 0; i < na; ++i) x[i] = interpolate$1(a[i], b[i]);
+  for (; i < nb; ++i) c[i] = b[i];
+
+  return function(t) {
+    for (i = 0; i < na; ++i) c[i] = x[i](t);
+    return c;
+  };
+}
+
+function date(a, b) {
+  var d = new Date;
+  return a = +a, b = +b, function(t) {
+    return d.setTime(a * (1 - t) + b * t), d;
+  };
+}
+
+function interpolateNumber(a, b) {
+  return a = +a, b = +b, function(t) {
+    return a * (1 - t) + b * t;
+  };
+}
+
+function object$1(a, b) {
+  var i = {},
+      c = {},
+      k;
+
+  if (a === null || typeof a !== "object") a = {};
+  if (b === null || typeof b !== "object") b = {};
+
+  for (k in b) {
+    if (k in a) {
+      i[k] = interpolate$1(a[k], b[k]);
+    } else {
+      c[k] = b[k];
+    }
+  }
+
+  return function(t) {
+    for (k in i) c[k] = i[k](t);
+    return c;
+  };
+}
+
+var reA = /[-+]?(?:\d+\.?\d*|\.?\d+)(?:[eE][-+]?\d+)?/g,
+    reB = new RegExp(reA.source, "g");
+
+function zero(b) {
+  return function() {
+    return b;
+  };
+}
+
+function one(b) {
+  return function(t) {
+    return b(t) + "";
+  };
+}
+
+function interpolateString(a, b) {
+  var bi = reA.lastIndex = reB.lastIndex = 0, // scan index for next number in b
+      am, // current match in a
+      bm, // current match in b
+      bs, // string preceding current number in b, if any
+      i = -1, // index in s
+      s = [], // string constants and placeholders
+      q = []; // number interpolators
+
+  // Coerce inputs to strings.
+  a = a + "", b = b + "";
+
+  // Interpolate pairs of numbers in a & b.
+  while ((am = reA.exec(a))
+      && (bm = reB.exec(b))) {
+    if ((bs = bm.index) > bi) { // a string precedes the next number in b
+      bs = b.slice(bi, bs);
+      if (s[i]) s[i] += bs; // coalesce with previous string
+      else s[++i] = bs;
+    }
+    if ((am = am[0]) === (bm = bm[0])) { // numbers in a & b match
+      if (s[i]) s[i] += bm; // coalesce with previous string
+      else s[++i] = bm;
+    } else { // interpolate non-matching numbers
+      s[++i] = null;
+      q.push({i: i, x: interpolateNumber(am, bm)});
+    }
+    bi = reB.lastIndex;
+  }
+
+  // Add remains of b.
+  if (bi < b.length) {
+    bs = b.slice(bi);
+    if (s[i]) s[i] += bs; // coalesce with previous string
+    else s[++i] = bs;
+  }
+
+  // Special optimization for only a single match.
+  // Otherwise, interpolate each of the numbers and rejoin the string.
+  return s.length < 2 ? (q[0]
+      ? one(q[0].x)
+      : zero(b))
+      : (b = q.length, function(t) {
+          for (var i = 0, o; i < b; ++i) s[(o = q[i]).i] = o.x(t);
+          return s.join("");
+        });
+}
+
+function interpolate$1(a, b) {
+  var t = typeof b, c;
+  return b == null || t === "boolean" ? constant$3(b)
+      : (t === "number" ? interpolateNumber
+      : t === "string" ? ((c = color(b)) ? (b = c, interpolateRgb) : interpolateString)
+      : b instanceof color ? interpolateRgb
+      : b instanceof Date ? date
+      : isNumberArray(b) ? numberArray
+      : Array.isArray(b) ? genericArray
+      : typeof b.valueOf !== "function" && typeof b.toString !== "function" || isNaN(b) ? object$1
+      : interpolateNumber)(a, b);
+}
+
+function interpolateRound(a, b) {
+  return a = +a, b = +b, function(t) {
+    return Math.round(a * (1 - t) + b * t);
+  };
+}
+
+var degrees = 180 / Math.PI;
+
+var identity$3 = {
+  translateX: 0,
+  translateY: 0,
+  rotate: 0,
+  skewX: 0,
+  scaleX: 1,
+  scaleY: 1
+};
+
+function decompose(a, b, c, d, e, f) {
+  var scaleX, scaleY, skewX;
+  if (scaleX = Math.sqrt(a * a + b * b)) a /= scaleX, b /= scaleX;
+  if (skewX = a * c + b * d) c -= a * skewX, d -= b * skewX;
+  if (scaleY = Math.sqrt(c * c + d * d)) c /= scaleY, d /= scaleY, skewX /= scaleY;
+  if (a * d < b * c) a = -a, b = -b, skewX = -skewX, scaleX = -scaleX;
+  return {
+    translateX: e,
+    translateY: f,
+    rotate: Math.atan2(b, a) * degrees,
+    skewX: Math.atan(skewX) * degrees,
+    scaleX: scaleX,
+    scaleY: scaleY
+  };
+}
+
+var svgNode;
+
+/* eslint-disable no-undef */
+function parseCss(value) {
+  const m = new (typeof DOMMatrix === "function" ? DOMMatrix : WebKitCSSMatrix)(value + "");
+  return m.isIdentity ? identity$3 : decompose(m.a, m.b, m.c, m.d, m.e, m.f);
+}
+
+function parseSvg(value) {
+  if (value == null) return identity$3;
+  if (!svgNode) svgNode = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  svgNode.setAttribute("transform", value);
+  if (!(value = svgNode.transform.baseVal.consolidate())) return identity$3;
+  value = value.matrix;
+  return decompose(value.a, value.b, value.c, value.d, value.e, value.f);
+}
+
+function interpolateTransform(parse, pxComma, pxParen, degParen) {
+
+  function pop(s) {
+    return s.length ? s.pop() + " " : "";
+  }
+
+  function translate(xa, ya, xb, yb, s, q) {
+    if (xa !== xb || ya !== yb) {
+      var i = s.push("translate(", null, pxComma, null, pxParen);
+      q.push({i: i - 4, x: interpolateNumber(xa, xb)}, {i: i - 2, x: interpolateNumber(ya, yb)});
+    } else if (xb || yb) {
+      s.push("translate(" + xb + pxComma + yb + pxParen);
+    }
+  }
+
+  function rotate(a, b, s, q) {
+    if (a !== b) {
+      if (a - b > 180) b += 360; else if (b - a > 180) a += 360; // shortest path
+      q.push({i: s.push(pop(s) + "rotate(", null, degParen) - 2, x: interpolateNumber(a, b)});
+    } else if (b) {
+      s.push(pop(s) + "rotate(" + b + degParen);
+    }
+  }
+
+  function skewX(a, b, s, q) {
+    if (a !== b) {
+      q.push({i: s.push(pop(s) + "skewX(", null, degParen) - 2, x: interpolateNumber(a, b)});
+    } else if (b) {
+      s.push(pop(s) + "skewX(" + b + degParen);
+    }
+  }
+
+  function scale(xa, ya, xb, yb, s, q) {
+    if (xa !== xb || ya !== yb) {
+      var i = s.push(pop(s) + "scale(", null, ",", null, ")");
+      q.push({i: i - 4, x: interpolateNumber(xa, xb)}, {i: i - 2, x: interpolateNumber(ya, yb)});
+    } else if (xb !== 1 || yb !== 1) {
+      s.push(pop(s) + "scale(" + xb + "," + yb + ")");
+    }
+  }
+
+  return function(a, b) {
+    var s = [], // string constants and placeholders
+        q = []; // number interpolators
+    a = parse(a), b = parse(b);
+    translate(a.translateX, a.translateY, b.translateX, b.translateY, s, q);
+    rotate(a.rotate, b.rotate, s, q);
+    skewX(a.skewX, b.skewX, s, q);
+    scale(a.scaleX, a.scaleY, b.scaleX, b.scaleY, s, q);
+    a = b = null; // gc
+    return function(t) {
+      var i = -1, n = q.length, o;
+      while (++i < n) s[(o = q[i]).i] = o.x(t);
+      return s.join("");
+    };
+  };
+}
+
+var interpolateTransformCss = interpolateTransform(parseCss, "px, ", "px)", "deg)");
+var interpolateTransformSvg = interpolateTransform(parseSvg, ", ", ")", ")");
+
+var epsilon2 = 1e-12;
+
+function cosh(x) {
+  return ((x = Math.exp(x)) + 1 / x) / 2;
+}
+
+function sinh(x) {
+  return ((x = Math.exp(x)) - 1 / x) / 2;
+}
+
+function tanh(x) {
+  return ((x = Math.exp(2 * x)) - 1) / (x + 1);
+}
+
+var interpolateZoom = (function zoomRho(rho, rho2, rho4) {
+
+  // p0 = [ux0, uy0, w0]
+  // p1 = [ux1, uy1, w1]
+  function zoom(p0, p1) {
+    var ux0 = p0[0], uy0 = p0[1], w0 = p0[2],
+        ux1 = p1[0], uy1 = p1[1], w1 = p1[2],
+        dx = ux1 - ux0,
+        dy = uy1 - uy0,
+        d2 = dx * dx + dy * dy,
+        i,
+        S;
+
+    // Special case for u0 ≅ u1.
+    if (d2 < epsilon2) {
+      S = Math.log(w1 / w0) / rho;
+      i = function(t) {
+        return [
+          ux0 + t * dx,
+          uy0 + t * dy,
+          w0 * Math.exp(rho * t * S)
+        ];
+      };
+    }
+
+    // General case.
+    else {
+      var d1 = Math.sqrt(d2),
+          b0 = (w1 * w1 - w0 * w0 + rho4 * d2) / (2 * w0 * rho2 * d1),
+          b1 = (w1 * w1 - w0 * w0 - rho4 * d2) / (2 * w1 * rho2 * d1),
+          r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0),
+          r1 = Math.log(Math.sqrt(b1 * b1 + 1) - b1);
+      S = (r1 - r0) / rho;
+      i = function(t) {
+        var s = t * S,
+            coshr0 = cosh(r0),
+            u = w0 / (rho2 * d1) * (coshr0 * tanh(rho * s + r0) - sinh(r0));
+        return [
+          ux0 + u * dx,
+          uy0 + u * dy,
+          w0 * coshr0 / cosh(rho * s + r0)
+        ];
+      };
+    }
+
+    i.duration = S * 1000 * rho / Math.SQRT2;
+
+    return i;
+  }
+
+  zoom.rho = function(_) {
+    var _1 = Math.max(1e-3, +_), _2 = _1 * _1, _4 = _2 * _2;
+    return zoomRho(_1, _2, _4);
+  };
+
+  return zoom;
+})(Math.SQRT2, 2, 4);
+
+function cubehelix(hue) {
+  return (function cubehelixGamma(y) {
+    y = +y;
+
+    function cubehelix(start, end) {
+      var h = hue((start = cubehelix$1(start)).h, (end = cubehelix$1(end)).h),
+          s = nogamma(start.s, end.s),
+          l = nogamma(start.l, end.l),
+          opacity = nogamma(start.opacity, end.opacity);
+      return function(t) {
+        start.h = h(t);
+        start.s = s(t);
+        start.l = l(Math.pow(t, y));
+        start.opacity = opacity(t);
+        return start + "";
+      };
+    }
+
+    cubehelix.gamma = cubehelixGamma;
+
+    return cubehelix;
+  })(1);
+}
+
+cubehelix(hue);
+var cubehelixLong = cubehelix(nogamma);
+
+function quantize(interpolator, n) {
+  var samples = new Array(n);
+  for (var i = 0; i < n; ++i) samples[i] = interpolator(i / (n - 1));
+  return samples;
+}
+
+function constants(x) {
+  return function() {
+    return x;
+  };
+}
+
+function number(x) {
+  return +x;
+}
+
+var unit = [0, 1];
+
+function identity$2(x) {
+  return x;
+}
+
+function normalize(a, b) {
+  return (b -= (a = +a))
+      ? function(x) { return (x - a) / b; }
+      : constants(isNaN(b) ? NaN : 0.5);
+}
+
+function clamper(a, b) {
+  var t;
+  if (a > b) t = a, a = b, b = t;
+  return function(x) { return Math.max(a, Math.min(b, x)); };
+}
+
+// normalize(a, b)(x) takes a domain value x in [a,b] and returns the corresponding parameter t in [0,1].
+// interpolate(a, b)(t) takes a parameter t in [0,1] and returns the corresponding range value x in [a,b].
+function bimap(domain, range, interpolate) {
+  var d0 = domain[0], d1 = domain[1], r0 = range[0], r1 = range[1];
+  if (d1 < d0) d0 = normalize(d1, d0), r0 = interpolate(r1, r0);
+  else d0 = normalize(d0, d1), r0 = interpolate(r0, r1);
+  return function(x) { return r0(d0(x)); };
+}
+
+function polymap(domain, range, interpolate) {
+  var j = Math.min(domain.length, range.length) - 1,
+      d = new Array(j),
+      r = new Array(j),
+      i = -1;
+
+  // Reverse descending domains.
+  if (domain[j] < domain[0]) {
+    domain = domain.slice().reverse();
+    range = range.slice().reverse();
+  }
+
+  while (++i < j) {
+    d[i] = normalize(domain[i], domain[i + 1]);
+    r[i] = interpolate(range[i], range[i + 1]);
+  }
+
+  return function(x) {
+    var i = bisect(domain, x, 1, j) - 1;
+    return r[i](d[i](x));
+  };
+}
+
+function copy$1(source, target) {
+  return target
+      .domain(source.domain())
+      .range(source.range())
+      .interpolate(source.interpolate())
+      .clamp(source.clamp())
+      .unknown(source.unknown());
+}
+
+function transformer$1() {
+  var domain = unit,
+      range = unit,
+      interpolate = interpolate$1,
+      transform,
+      untransform,
+      unknown,
+      clamp = identity$2,
+      piecewise,
+      output,
+      input;
+
+  function rescale() {
+    var n = Math.min(domain.length, range.length);
+    if (clamp !== identity$2) clamp = clamper(domain[0], domain[n - 1]);
+    piecewise = n > 2 ? polymap : bimap;
+    output = input = null;
+    return scale;
+  }
+
+  function scale(x) {
+    return x == null || isNaN(x = +x) ? unknown : (output || (output = piecewise(domain.map(transform), range, interpolate)))(transform(clamp(x)));
+  }
+
+  scale.invert = function(y) {
+    return clamp(untransform((input || (input = piecewise(range, domain.map(transform), interpolateNumber)))(y)));
+  };
+
+  scale.domain = function(_) {
+    return arguments.length ? (domain = Array.from(_, number), rescale()) : domain.slice();
+  };
+
+  scale.range = function(_) {
+    return arguments.length ? (range = Array.from(_), rescale()) : range.slice();
+  };
+
+  scale.rangeRound = function(_) {
+    return range = Array.from(_), interpolate = interpolateRound, rescale();
+  };
+
+  scale.clamp = function(_) {
+    return arguments.length ? (clamp = _ ? true : identity$2, rescale()) : clamp !== identity$2;
+  };
+
+  scale.interpolate = function(_) {
+    return arguments.length ? (interpolate = _, rescale()) : interpolate;
+  };
+
+  scale.unknown = function(_) {
+    return arguments.length ? (unknown = _, scale) : unknown;
+  };
+
+  return function(t, u) {
+    transform = t, untransform = u;
+    return rescale();
+  };
+}
+
+function continuous() {
+  return transformer$1()(identity$2, identity$2);
+}
+
+function formatDecimal(x) {
+  return Math.abs(x = Math.round(x)) >= 1e21
+      ? x.toLocaleString("en").replace(/,/g, "")
+      : x.toString(10);
+}
+
+// Computes the decimal coefficient and exponent of the specified number x with
+// significant digits p, where x is positive and p is in [1, 21] or undefined.
+// For example, formatDecimalParts(1.23) returns ["123", 0].
+function formatDecimalParts(x, p) {
+  if (!isFinite(x) || x === 0) return null; // NaN, ±Infinity, ±0
+  var i = (x = p ? x.toExponential(p - 1) : x.toExponential()).indexOf("e"), coefficient = x.slice(0, i);
+
+  // The string returned by toExponential either has the form \d\.\d+e[-+]\d+
+  // (e.g., 1.2e+3) or the form \de[-+]\d+ (e.g., 1e+3).
+  return [
+    coefficient.length > 1 ? coefficient[0] + coefficient.slice(2) : coefficient,
+    +x.slice(i + 1)
+  ];
+}
+
+function exponent(x) {
+  return x = formatDecimalParts(Math.abs(x)), x ? x[1] : NaN;
+}
+
+function formatGroup(grouping, thousands) {
+  return function(value, width) {
+    var i = value.length,
+        t = [],
+        j = 0,
+        g = grouping[0],
+        length = 0;
+
+    while (i > 0 && g > 0) {
+      if (length + g + 1 > width) g = Math.max(1, width - length);
+      t.push(value.substring(i -= g, i + g));
+      if ((length += g + 1) > width) break;
+      g = grouping[j = (j + 1) % grouping.length];
+    }
+
+    return t.reverse().join(thousands);
+  };
+}
+
+function formatNumerals(numerals) {
+  return function(value) {
+    return value.replace(/[0-9]/g, function(i) {
+      return numerals[+i];
+    });
+  };
+}
+
+// [[fill]align][sign][symbol][0][width][,][.precision][~][type]
+var re = /^(?:(.)?([<>=^]))?([+\-( ])?([$#])?(0)?(\d+)?(,)?(\.\d+)?(~)?([a-z%])?$/i;
+
+function formatSpecifier(specifier) {
+  if (!(match = re.exec(specifier))) throw new Error("invalid format: " + specifier);
+  var match;
+  return new FormatSpecifier({
+    fill: match[1],
+    align: match[2],
+    sign: match[3],
+    symbol: match[4],
+    zero: match[5],
+    width: match[6],
+    comma: match[7],
+    precision: match[8] && match[8].slice(1),
+    trim: match[9],
+    type: match[10]
+  });
+}
+
+formatSpecifier.prototype = FormatSpecifier.prototype; // instanceof
+
+function FormatSpecifier(specifier) {
+  this.fill = specifier.fill === undefined ? " " : specifier.fill + "";
+  this.align = specifier.align === undefined ? ">" : specifier.align + "";
+  this.sign = specifier.sign === undefined ? "-" : specifier.sign + "";
+  this.symbol = specifier.symbol === undefined ? "" : specifier.symbol + "";
+  this.zero = !!specifier.zero;
+  this.width = specifier.width === undefined ? undefined : +specifier.width;
+  this.comma = !!specifier.comma;
+  this.precision = specifier.precision === undefined ? undefined : +specifier.precision;
+  this.trim = !!specifier.trim;
+  this.type = specifier.type === undefined ? "" : specifier.type + "";
+}
+
+FormatSpecifier.prototype.toString = function() {
+  return this.fill
+      + this.align
+      + this.sign
+      + this.symbol
+      + (this.zero ? "0" : "")
+      + (this.width === undefined ? "" : Math.max(1, this.width | 0))
+      + (this.comma ? "," : "")
+      + (this.precision === undefined ? "" : "." + Math.max(0, this.precision | 0))
+      + (this.trim ? "~" : "")
+      + this.type;
+};
+
+// Trims insignificant zeros, e.g., replaces 1.2000k with 1.2k.
+function formatTrim(s) {
+  out: for (var n = s.length, i = 1, i0 = -1, i1; i < n; ++i) {
+    switch (s[i]) {
+      case ".": i0 = i1 = i; break;
+      case "0": if (i0 === 0) i0 = i; i1 = i; break;
+      default: if (!+s[i]) break out; if (i0 > 0) i0 = 0; break;
+    }
+  }
+  return i0 > 0 ? s.slice(0, i0) + s.slice(i1 + 1) : s;
+}
+
+var prefixExponent;
+
+function formatPrefixAuto(x, p) {
+  var d = formatDecimalParts(x, p);
+  if (!d) return prefixExponent = undefined, x.toPrecision(p);
+  var coefficient = d[0],
+      exponent = d[1],
+      i = exponent - (prefixExponent = Math.max(-8, Math.min(8, Math.floor(exponent / 3))) * 3) + 1,
+      n = coefficient.length;
+  return i === n ? coefficient
+      : i > n ? coefficient + new Array(i - n + 1).join("0")
+      : i > 0 ? coefficient.slice(0, i) + "." + coefficient.slice(i)
+      : "0." + new Array(1 - i).join("0") + formatDecimalParts(x, Math.max(0, p + i - 1))[0]; // less than 1y!
+}
+
+function formatRounded(x, p) {
+  var d = formatDecimalParts(x, p);
+  if (!d) return x + "";
+  var coefficient = d[0],
+      exponent = d[1];
+  return exponent < 0 ? "0." + new Array(-exponent).join("0") + coefficient
+      : coefficient.length > exponent + 1 ? coefficient.slice(0, exponent + 1) + "." + coefficient.slice(exponent + 1)
+      : coefficient + new Array(exponent - coefficient.length + 2).join("0");
+}
+
+var formatTypes = {
+  "%": (x, p) => (x * 100).toFixed(p),
+  "b": (x) => Math.round(x).toString(2),
+  "c": (x) => x + "",
+  "d": formatDecimal,
+  "e": (x, p) => x.toExponential(p),
+  "f": (x, p) => x.toFixed(p),
+  "g": (x, p) => x.toPrecision(p),
+  "o": (x) => Math.round(x).toString(8),
+  "p": (x, p) => formatRounded(x * 100, p),
+  "r": formatRounded,
+  "s": formatPrefixAuto,
+  "X": (x) => Math.round(x).toString(16).toUpperCase(),
+  "x": (x) => Math.round(x).toString(16)
+};
+
+function identity$1(x) {
+  return x;
+}
+
+var map = Array.prototype.map,
+    prefixes = ["y","z","a","f","p","n","µ","m","","k","M","G","T","P","E","Z","Y"];
+
+function formatLocale(locale) {
+  var group = locale.grouping === undefined || locale.thousands === undefined ? identity$1 : formatGroup(map.call(locale.grouping, Number), locale.thousands + ""),
+      currencyPrefix = locale.currency === undefined ? "" : locale.currency[0] + "",
+      currencySuffix = locale.currency === undefined ? "" : locale.currency[1] + "",
+      decimal = locale.decimal === undefined ? "." : locale.decimal + "",
+      numerals = locale.numerals === undefined ? identity$1 : formatNumerals(map.call(locale.numerals, String)),
+      percent = locale.percent === undefined ? "%" : locale.percent + "",
+      minus = locale.minus === undefined ? "−" : locale.minus + "",
+      nan = locale.nan === undefined ? "NaN" : locale.nan + "";
+
+  function newFormat(specifier, options) {
+    specifier = formatSpecifier(specifier);
+
+    var fill = specifier.fill,
+        align = specifier.align,
+        sign = specifier.sign,
+        symbol = specifier.symbol,
+        zero = specifier.zero,
+        width = specifier.width,
+        comma = specifier.comma,
+        precision = specifier.precision,
+        trim = specifier.trim,
+        type = specifier.type;
+
+    // The "n" type is an alias for ",g".
+    if (type === "n") comma = true, type = "g";
+
+    // The "" type, and any invalid type, is an alias for ".12~g".
+    else if (!formatTypes[type]) precision === undefined && (precision = 12), trim = true, type = "g";
+
+    // If zero fill is specified, padding goes after sign and before digits.
+    if (zero || (fill === "0" && align === "=")) zero = true, fill = "0", align = "=";
+
+    // Compute the prefix and suffix.
+    // For SI-prefix, the suffix is lazily computed.
+    var prefix = (options && options.prefix !== undefined ? options.prefix : "") + (symbol === "$" ? currencyPrefix : symbol === "#" && /[boxX]/.test(type) ? "0" + type.toLowerCase() : ""),
+        suffix = (symbol === "$" ? currencySuffix : /[%p]/.test(type) ? percent : "") + (options && options.suffix !== undefined ? options.suffix : "");
+
+    // What format function should we use?
+    // Is this an integer type?
+    // Can this type generate exponential notation?
+    var formatType = formatTypes[type],
+        maybeSuffix = /[defgprs%]/.test(type);
+
+    // Set the default precision if not specified,
+    // or clamp the specified precision to the supported range.
+    // For significant precision, it must be in [1, 21].
+    // For fixed precision, it must be in [0, 20].
+    precision = precision === undefined ? 6
+        : /[gprs]/.test(type) ? Math.max(1, Math.min(21, precision))
+        : Math.max(0, Math.min(20, precision));
+
+    function format(value) {
+      var valuePrefix = prefix,
+          valueSuffix = suffix,
+          i, n, c;
+
+      if (type === "c") {
+        valueSuffix = formatType(value) + valueSuffix;
+        value = "";
+      } else {
+        value = +value;
+
+        // Determine the sign. -0 is not less than 0, but 1 / -0 is!
+        var valueNegative = value < 0 || 1 / value < 0;
+
+        // Perform the initial formatting.
+        value = isNaN(value) ? nan : formatType(Math.abs(value), precision);
+
+        // Trim insignificant zeros.
+        if (trim) value = formatTrim(value);
+
+        // If a negative value rounds to zero after formatting, and no explicit positive sign is requested, hide the sign.
+        if (valueNegative && +value === 0 && sign !== "+") valueNegative = false;
+
+        // Compute the prefix and suffix.
+        valuePrefix = (valueNegative ? (sign === "(" ? sign : minus) : sign === "-" || sign === "(" ? "" : sign) + valuePrefix;
+        valueSuffix = (type === "s" && !isNaN(value) && prefixExponent !== undefined ? prefixes[8 + prefixExponent / 3] : "") + valueSuffix + (valueNegative && sign === "(" ? ")" : "");
+
+        // Break the formatted value into the integer “value” part that can be
+        // grouped, and fractional or exponential “suffix” part that is not.
+        if (maybeSuffix) {
+          i = -1, n = value.length;
+          while (++i < n) {
+            if (c = value.charCodeAt(i), 48 > c || c > 57) {
+              valueSuffix = (c === 46 ? decimal + value.slice(i + 1) : value.slice(i)) + valueSuffix;
+              value = value.slice(0, i);
+              break;
+            }
+          }
+        }
+      }
+
+      // If the fill character is not "0", grouping is applied before padding.
+      if (comma && !zero) value = group(value, Infinity);
+
+      // Compute the padding.
+      var length = valuePrefix.length + value.length + valueSuffix.length,
+          padding = length < width ? new Array(width - length + 1).join(fill) : "";
+
+      // If the fill character is "0", grouping is applied after padding.
+      if (comma && zero) value = group(padding + value, padding.length ? width - valueSuffix.length : Infinity), padding = "";
+
+      // Reconstruct the final output based on the desired alignment.
+      switch (align) {
+        case "<": value = valuePrefix + value + valueSuffix + padding; break;
+        case "=": value = valuePrefix + padding + value + valueSuffix; break;
+        case "^": value = padding.slice(0, length = padding.length >> 1) + valuePrefix + value + valueSuffix + padding.slice(length); break;
+        default: value = padding + valuePrefix + value + valueSuffix; break;
+      }
+
+      return numerals(value);
+    }
+
+    format.toString = function() {
+      return specifier + "";
+    };
+
+    return format;
+  }
+
+  function formatPrefix(specifier, value) {
+    var e = Math.max(-8, Math.min(8, Math.floor(exponent(value) / 3))) * 3,
+        k = Math.pow(10, -e),
+        f = newFormat((specifier = formatSpecifier(specifier), specifier.type = "f", specifier), {suffix: prefixes[8 + e / 3]});
+    return function(value) {
+      return f(k * value);
+    };
+  }
+
+  return {
+    format: newFormat,
+    formatPrefix: formatPrefix
+  };
+}
+
+var locale;
+var format;
+var formatPrefix;
+
+defaultLocale({
+  thousands: ",",
+  grouping: [3],
+  currency: ["$", ""]
+});
+
+function defaultLocale(definition) {
+  locale = formatLocale(definition);
+  format = locale.format;
+  formatPrefix = locale.formatPrefix;
+  return locale;
+}
+
+function precisionFixed(step) {
+  return Math.max(0, -exponent(Math.abs(step)));
+}
+
+function precisionPrefix(step, value) {
+  return Math.max(0, Math.max(-8, Math.min(8, Math.floor(exponent(value) / 3))) * 3 - exponent(Math.abs(step)));
+}
+
+function precisionRound(step, max) {
+  step = Math.abs(step), max = Math.abs(max) - step;
+  return Math.max(0, exponent(max) - exponent(step)) + 1;
+}
+
+function tickFormat(start, stop, count, specifier) {
+  var step = tickStep(start, stop, count),
+      precision;
+  specifier = formatSpecifier(specifier == null ? ",f" : specifier);
+  switch (specifier.type) {
+    case "s": {
+      var value = Math.max(Math.abs(start), Math.abs(stop));
+      if (specifier.precision == null && !isNaN(precision = precisionPrefix(step, value))) specifier.precision = precision;
+      return formatPrefix(specifier, value);
+    }
+    case "":
+    case "e":
+    case "g":
+    case "p":
+    case "r": {
+      if (specifier.precision == null && !isNaN(precision = precisionRound(step, Math.max(Math.abs(start), Math.abs(stop))))) specifier.precision = precision - (specifier.type === "e");
+      break;
+    }
+    case "f":
+    case "%": {
+      if (specifier.precision == null && !isNaN(precision = precisionFixed(step))) specifier.precision = precision - (specifier.type === "%") * 2;
+      break;
+    }
+  }
+  return format(specifier);
+}
+
+function linearish(scale) {
+  var domain = scale.domain;
+
+  scale.ticks = function(count) {
+    var d = domain();
+    return ticks(d[0], d[d.length - 1], count == null ? 10 : count);
+  };
+
+  scale.tickFormat = function(count, specifier) {
+    var d = domain();
+    return tickFormat(d[0], d[d.length - 1], count == null ? 10 : count, specifier);
+  };
+
+  scale.nice = function(count) {
+    if (count == null) count = 10;
+
+    var d = domain();
+    var i0 = 0;
+    var i1 = d.length - 1;
+    var start = d[i0];
+    var stop = d[i1];
+    var prestep;
+    var step;
+    var maxIter = 10;
+
+    if (stop < start) {
+      step = start, start = stop, stop = step;
+      step = i0, i0 = i1, i1 = step;
+    }
+
+    while (maxIter-- > 0) {
+      step = tickIncrement(start, stop, count);
+      if (step === prestep) {
+        d[i0] = start;
+        d[i1] = stop;
+        return domain(d);
+      } else if (step > 0) {
+        start = Math.floor(start / step) * step;
+        stop = Math.ceil(stop / step) * step;
+      } else if (step < 0) {
+        start = Math.ceil(start * step) / step;
+        stop = Math.floor(stop * step) / step;
+      } else {
+        break;
+      }
+      prestep = step;
+    }
+
+    return scale;
+  };
+
+  return scale;
+}
+
+function linear() {
+  var scale = continuous();
+
+  scale.copy = function() {
+    return copy$1(scale, linear());
+  };
+
+  initRange.apply(scale, arguments);
+
+  return linearish(scale);
+}
+
+function transformer() {
+  var x0 = 0,
+      x1 = 1,
+      t0,
+      t1,
+      k10,
+      transform,
+      interpolator = identity$2,
+      clamp = false,
+      unknown;
+
+  function scale(x) {
+    return x == null || isNaN(x = +x) ? unknown : interpolator(k10 === 0 ? 0.5 : (x = (transform(x) - t0) * k10, clamp ? Math.max(0, Math.min(1, x)) : x));
+  }
+
+  scale.domain = function(_) {
+    return arguments.length ? ([x0, x1] = _, t0 = transform(x0 = +x0), t1 = transform(x1 = +x1), k10 = t0 === t1 ? 0 : 1 / (t1 - t0), scale) : [x0, x1];
+  };
+
+  scale.clamp = function(_) {
+    return arguments.length ? (clamp = !!_, scale) : clamp;
+  };
+
+  scale.interpolator = function(_) {
+    return arguments.length ? (interpolator = _, scale) : interpolator;
+  };
+
+  function range(interpolate) {
+    return function(_) {
+      var r0, r1;
+      return arguments.length ? ([r0, r1] = _, interpolator = interpolate(r0, r1), scale) : [interpolator(0), interpolator(1)];
+    };
+  }
+
+  scale.range = range(interpolate$1);
+
+  scale.rangeRound = range(interpolateRound);
+
+  scale.unknown = function(_) {
+    return arguments.length ? (unknown = _, scale) : unknown;
+  };
+
+  return function(t) {
+    transform = t, t0 = t(x0), t1 = t(x1), k10 = t0 === t1 ? 0 : 1 / (t1 - t0);
+    return scale;
+  };
+}
+
+function copy(source, target) {
+  return target
+      .domain(source.domain())
+      .interpolator(source.interpolator())
+      .clamp(source.clamp())
+      .unknown(source.unknown());
+}
+
+function sequential$1() {
+  var scale = linearish(transformer()(identity$2));
+
+  scale.copy = function() {
+    return copy(scale, sequential$1());
+  };
+
+  return initInterpolator.apply(scale, arguments);
+}
+
+const sequential = ["#f7fbff", "#08306b"];
+const categorical = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377", "#bbbbbb"];
+const ANNOTATION_DEFAULTS = Object.freeze({ cellWidth: 32, cellHeight: 20, gap: 24,
+  fontSize: 10, headingRotation: -60, missingColour: "#eeeeee",
+  cellGap: 0, cellBorderWidth: 0, cellBorderColour: "#ffffff", width: 120, colour: "#267c9e" });
+const ANNOTATION_PALETTES = {
+  Blue: sequential,
+  "Blue–red": ["#2166ac", "#f7f7f7", "#b2182b"],
+  Viridis: ["#440154", "#21918c", "#fde725"],
+  Qualitative: categorical,
+};
+
+// Validate at the JSON boundary; renderers only consume projected records.
+function validateAnnotationPanels(panels, clusters, { previousPanels = null, tree = null } = {}) {
+  if (panels == null) return;
+  const fail = (message) => { throw new TypeError(`Invalid annotationPanels: ${message}`); };
+  if (!Array.isArray(panels)) fail("expected an array.");
+  const ids = new Set(), previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
+  let clusterIds;
+  for (const panel of panels) {
+    if (!panel || typeof panel !== "object") fail("each panel must be an object.");
+    if (typeof panel.uid !== "string" || !panel.uid.trim() || ids.has(panel.uid)) fail("panels require unique, non-empty uid strings.");
+    ids.add(panel.uid);
+    const before = previous.get(panel.uid);
+    if (before === panel) continue;
+    if (!["heatmap", "bar", "groups"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap, bar or groups.`);
+    if (panel.title != null && typeof panel.title !== "string") fail("title must be text.");
+    for (const key of ["show", "showKey", "showColumnLabels"]) {
+      if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
+    }
+    if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
+    for (const key of ["cellWidth", "cellHeight", "fontSize", "width"]) {
+      if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
+    }
+    if (panel.gap !== undefined && (!Number.isFinite(panel.gap) || panel.gap < 0)) fail("gap must be non-negative.");
+    for (const key of ["cellGap", "cellBorderWidth"]) {
+      if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] < 0)) fail(`${key} must be non-negative.`);
+    }
+    if ((panel.cellGap ?? 0) >= Math.min(panel.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth,
+      panel.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight)) fail("cellGap must be smaller than cellWidth and cellHeight.");
+    if (panel.cellBorderColour !== undefined && (typeof panel.cellBorderColour !== "string" || !color(panel.cellBorderColour))) fail("cellBorderColour must be a CSS colour.");
+    if (panel.colour !== undefined && (typeof panel.colour !== "string" || !color(panel.colour))) fail("colour must be a CSS colour.");
+    if (panel.type === "groups") {
+      clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
+      validateGroupPanel(panel, clusterIds, tree, fail);
+      continue;
+    }
+    if (!Array.isArray(panel.columns) || !panel.columns.length ||
+        panel.columns.some((column) => typeof column !== "string" || !column.trim()) ||
+        new Set(panel.columns).size !== panel.columns.length) fail("columns must be unique, non-empty strings.");
+    if (panel.type === "bar" && panel.columns.length !== 1) fail("bar panels require exactly one column.");
+    if (!panel.values || typeof panel.values !== "object" || Array.isArray(panel.values)) fail("values must map cluster IDs to row arrays.");
+    const scale = panel.scale ?? {};
+    if (!scale || typeof scale !== "object" || Array.isArray(scale)) fail("scale must be an object.");
+    const type = scale.type ?? "continuous";
+    if (panel.type === "bar" && type !== "continuous") fail("bar panels require a continuous scale.");
+    if (!["continuous", "categorical"].includes(type)) fail("scale.type must be continuous or categorical.");
+    if (scale.colours !== undefined && (!Array.isArray(scale.colours) || !scale.colours.length ||
+        scale.colours.some((value) => typeof value !== "string" || !color(value)))) fail("scale.colours must contain valid CSS colours.");
+    if (type === "continuous" && scale.colours?.length < 2) fail("continuous scales need at least two colours.");
+    if (panel.missingColour !== undefined && (typeof panel.missingColour !== "string" || !color(panel.missingColour))) fail("missingColour must be a CSS colour.");
+    if (scale.domain !== undefined) {
+      if (!Array.isArray(scale.domain)) fail("scale.domain must be an array.");
+      if (type === "continuous" && (scale.domain.length !== 2 || !scale.domain.every(Number.isFinite) || scale.domain[0] >= scale.domain[1])) fail("continuous domain must be [min, max] with min < max.");
+      if (panel.type === "bar" && (scale.domain[0] > 0 || scale.domain[1] < 0)) fail("bar domains must include zero.");
+      if (type === "categorical" && (scale.domain.some((value) => typeof value !== "string") || new Set(scale.domain).size !== scale.domain.length)) fail("categorical domain must contain unique strings.");
+    }
+    // Presentation changes leave the matrix valid unless they change its
+    // shape, value type or allowed categories. JSON loading always checks it.
+    const oldScale = before?.scale ?? {};
+    const sameCategories = sameArray(oldScale.domain, scale.domain);
+    const sameValueRules = before?.columns?.length === panel.columns.length &&
+      (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories);
+    if (before?.values === panel.values && sameValueRules) continue;
+    clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
+    const categories = type === "categorical" && scale.domain ? new Set(scale.domain) : null;
+    for (const [uid, values] of Object.entries(panel.values)) {
+      if (!clusterIds.has(uid)) fail(`unknown cluster '${uid}'.`);
+      if (sameValueRules && before.values[uid] === values) continue;
+      if (!Array.isArray(values) || values.length !== panel.columns.length) fail(`row '${uid}' must have one value per column.`);
+      for (const value of values) {
+        if (value === null) continue;
+        if (type === "continuous" ? !Number.isFinite(value) : typeof value !== "string") fail(`invalid ${type} value in row '${uid}'.`);
+        if (categories && !categories.has(value)) fail(`category '${value}' is absent from scale.domain.`);
+      }
+    }
+  }
+}
+
+const numberLabel = (value) => Number(value.toPrecision(3)).toString();
+const text = (value, x, y, extra = {}) => ({ text: String(value), x, y, anchor: "start", ...extra });
+
+function textBounds(value, fontSize, fontFamily, measureText, { weight = 400, rotation = 0, anchor = "start" } = {}) {
+  const metrics = measureText?.(String(value), { fontSize, fontFamily, fontWeight: weight });
+  const width = metrics?.width ?? String(value).length * fontSize * 0.6;
+  const shift = anchor === "end" ? -width : anchor === "middle" ? -width / 2 : 0;
+  const left = -(metrics?.actualBoundingBoxLeft ?? 0) + shift;
+  const right = (metrics?.actualBoundingBoxRight ?? width) + shift;
+  const top = -(metrics?.actualBoundingBoxAscent ?? fontSize * 0.8);
+  const bottom = metrics?.actualBoundingBoxDescent ?? fontSize * 0.2;
+  const angle = rotation * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
+  const points = [[left, top], [right, top], [left, bottom], [right, bottom]]
+    .map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
+  return { minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
+    minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)) };
+}
+
+/** Right edge of cluster decorations, excluding a right legend placed after annotations. */
+function annotationChromeRightEdge(chrome, measureText = null) {
+  let right = -Infinity;
+  const bar = chrome?.scaleBar, identity = chrome?.colourBar, legend = chrome?.legend;
+  if (bar?.visible) {
+    const label = textBounds(bar.label, bar.fontSize * 4 / 3, bar.fontFamily, measureText, { anchor: "middle" });
+    right = Math.max(right, bar.position.x + bar.length + (bar.strokeWidth || 0) / 2,
+      bar.position.x + bar.length / 2 + label.maxX);
+  }
+  if (identity?.visible) {
+    const label = textBounds(identity.label, identity.fontSize * 4 / 3, identity.fontFamily, measureText, { anchor: "middle" });
+    const start = textBounds(identity.startLabel, identity.fontSize * 4 / 3, identity.fontFamily, measureText);
+    right = Math.max(right, identity.position.x + identity.width + 0.5,
+      identity.position.x + identity.width / 2 + label.maxX, identity.position.x + start.maxX);
+  }
+  if (legend?.visible && legend.placement === "bottom") {
+    for (const item of legend.items) {
+      const label = textBounds(item.label, legend.fontSize, legend.fontFamily, measureText);
+      const subtitle = textBounds(item.subtitle || "", legend.subtitleFontSize, legend.fontFamily, measureText);
+      right = Math.max(right, legend.position.x + item.x + item.radius,
+        legend.position.x + item.textX + Math.max(label.maxX, subtitle.maxX));
+    }
+  }
+  return right;
+}
+
+// Values are replaced at data boundaries and shared by presentation edits.
+// Retain only their inferred domain, not a second flattened copy of the matrix.
+const domainCache = new WeakMap();
+function inferredDomain(values, type, isBar) {
+  let cached = domainCache.get(values);
+  if (!cached) { cached = {}; domainCache.set(values, cached); }
+  const key = type === "categorical" ? "categories" : isBar ? "bars" : "numeric";
+  if (cached[key]) return cached[key];
+  const categories = new Set();
+  let min = Infinity, max = -Infinity, count = 0;
+  for (const row of Object.values(values)) for (const value of row) {
+    if (value === null) continue;
+    count++;
+    if (type === "categorical") categories.add(value);
+    else { min = Math.min(min, value); max = Math.max(max, value); }
+  }
+  if (isBar) { min = Math.min(0, min); max = Math.max(0, max); }
+  return cached[key] = type === "categorical" ? [...categories]
+    : !count || isBar && min === max ? [0, 1]
+    : min === max ? [min - 0.5, max + 0.5] : [min, max];
+}
+
+/** Resolve scales identically for layout and the appearance editor. */
+function resolveAnnotationScale(source) {
+  const scale = source.scale ?? {}, type = scale.type ?? "continuous";
+  const domain = scale.domain ?? inferredDomain(source.values, type, source.type === "bar");
+  const colours = scale.colours ?? (type === "continuous" ? sequential : categorical);
+  const colour = type === "categorical"
+    ? ordinal(domain, colours).unknown(source.missingColour ?? "#eeeeee")
+    : linear().domain(colours.map((_, i) => domain[0] + (domain[1] - domain[0]) * i / (colours.length - 1))).range(colours).clamp(true);
+  return { type, domain, colours, colour };
+}
+
+// Draw the fill and a non-overlapping inset border ring using ordinary rects.
+// All backends consume the same primitives, including instanced WebGPU cells.
+function cellRectangles(rect, borderWidth, borderColour) {
+  const result = [rect];
+  const width = Math.min(borderWidth, rect.width / 2, rect.height / 2);
+  if (!width) return result;
+  const { x, y, width: w, height: h } = rect;
+  result.push(
+    { x, y, width: w, height: width, fill: borderColour },
+    { x, y: y + h - width, width: w, height: width, fill: borderColour },
+  );
+  if (h > width * 2) result.push(
+    { x, y: y + width, width, height: h - width * 2, fill: borderColour },
+    { x: x + w - width, y: y + width, width, height: h - width * 2, fill: borderColour },
+  );
+  return result;
+}
+
+function barRectangles(value, position, width, height, fill, missingColour, borderWidth, borderColour) {
+  const zero = position(0);
+  if (value === null) {
+    const markerWidth = Math.min(6, width);
+    return [{ x: Math.max(0, Math.min(width - markerWidth, zero - markerWidth / 2)),
+      y: -height / 2, width: markerWidth, height, fill: missingColour }];
+  }
+  const end = position(value);
+  // The baseline remains visible for zero values and when bars are narrower
+  // than a pixel. It is a rectangle, so all renderers share its geometry.
+  const rects = [{ x: Math.max(0, Math.min(width - Math.min(1, width), zero - 0.5)),
+    y: -height / 2, width: Math.min(1, width), height, fill: "#999999" }];
+  if (end !== zero) rects.push(...cellRectangles({ x: Math.min(zero, end), y: -height / 2,
+    width: Math.abs(end - zero), height, fill }, borderWidth, borderColour));
+  return rects;
+}
+
+const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
+  one.length === two.length && one.every((value, index) => value === two[index]);
+function sameCellStyle(before, after) {
+  return before && sameArray(before.columns, after.columns) &&
+    ["type", "width", "cellWidth", "cellHeight", "cellGap", "cellBorderWidth", "cellBorderColour", "colour", "missingColour"]
+      .every((field) => before[field] === after[field]) &&
+    before.scale?.type === after.scale?.type &&
+    sameArray(before.scale?.colours, after.scale?.colours);
+}
+
+/** Project JSON annotations once, using the same row coordinates as loci. */
+function layoutAnnotationPanels(definitions, clusters, bounds,
+  { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null, theme = null, tree = null } = {}) {
+  if (!definitions?.length || !bounds || !clusters.size) return [];
+  const previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
+  let x = anchorX;
+  return definitions.filter((source) => source.show !== false).map((source) => {
+    const before = previous.get(source.uid);
+    x += source.gap ?? ANNOTATION_DEFAULTS.gap;
+    if (before?.definition === source && before.fontFamily === fontFamily && before.rowOffset === rowOffset) {
+      const panel = before.x === x ? before : { ...before, x };
+      x += panel.width;
+      return panel;
+    }
+    if (source.type === "groups") {
+      const panel = { ...layoutGroupPanel(source, clusters, { fontFamily, rowOffset, theme, tree,
+        fontSize: source.fontSize ?? ANNOTATION_DEFAULTS.fontSize,
+        cellHeight: source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight,
+        measureBounds: (value, options) => textBounds(value, source.fontSize ?? ANNOTATION_DEFAULTS.fontSize, fontFamily, measureText, options),
+      }), x };
+      x += panel.width;
+      return panel;
+    }
+    const isBar = source.type === "bar";
+    const cellWidth = isBar ? source.width ?? ANNOTATION_DEFAULTS.width : source.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth;
+    const cellHeight = source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight;
+    const fontSize = source.fontSize ?? ANNOTATION_DEFAULTS.fontSize, width = cellWidth * source.columns.length;
+    const { type, domain, colour } = resolveAnnotationScale(source);
+    const cellGap = isBar ? 0 : source.cellGap ?? ANNOTATION_DEFAULTS.cellGap;
+    const borderWidth = source.cellBorderWidth ?? ANNOTATION_DEFAULTS.cellBorderWidth;
+    const borderColour = source.cellBorderColour ?? ANNOTATION_DEFAULTS.cellBorderColour;
+    const missingColour = source.missingColour ?? theme?.missing ?? ANNOTATION_DEFAULTS.missingColour;
+    const position = isBar ? linear().domain(domain).range([0, width]).clamp(true) : null;
+    const reuseRows = sameCellStyle(before?.definition, source) && sameArray(before.domain, domain) &&
+      before.missingColour === missingColour;
+    const previousRows = reuseRows && before.definition.values !== source.values
+      ? new Map(before.rows.map((row) => [row.uid, row])) : null;
+    const rows = reuseRows && before.definition.values === source.values ? before.rows : [...clusters.keys()].map((uid) => {
+      if (previousRows?.has(uid) && before.definition.values[uid] === source.values[uid]) return previousRows.get(uid);
+      return { uid, cells: source.columns.map((_, i) => {
+        const value = Object.hasOwn(source.values, uid) ? source.values[uid][i] : null;
+        const rect = { x: i * cellWidth + cellGap / 2, y: -cellHeight / 2 + cellGap / 2,
+          width: cellWidth - cellGap, height: cellHeight - cellGap,
+          fill: value === null ? missingColour : colour(value) };
+        return { ...rect, value, column: source.columns[i], columnIndex: i,
+          rects: isBar ? barRectangles(value, position, width, cellHeight,
+            source.colour ?? ANNOTATION_DEFAULTS.colour, missingColour,
+            borderWidth, borderColour) : cellRectangles(rect, borderWidth, borderColour) };
+      }) };
+    });
+    const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
+    const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation }));
+    for (const item of header) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
+    const headingHeight = Math.max(0, ...header.map((item) => -item.bounds.minY));
+    let titleDescent = 0;
+    if ((source.title ?? source.uid) !== "") {
+      const title = text(source.title ?? source.uid, 0, 0, { weight: 700, kind: "title" });
+      title.bounds = textBounds(title.text, fontSize, fontFamily, measureText, title);
+      titleDescent = Math.max(0, title.bounds.maxY);
+      header.push(title);
+    }
+    const footer = [], key = [];
+    if (source.showKey !== false && isBar) {
+      key.push({ x: 0, y: 0, width, height: 1, fill: theme?.muted ?? "#555555" });
+      const ticks = position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40))));
+      if (!ticks.includes(0)) ticks.push(0);
+      for (const value of ticks.sort((a, b) => a - b)) {
+        const tickX = position(value);
+        key.push({ x: Math.max(0, Math.min(width - Math.min(1, width), tickX - 0.5)), y: 0,
+          width: Math.min(1, width), height: 5, fill: theme?.muted ?? "#555555" });
+        footer.push(text(numberLabel(value), tickX, fontSize + 9,
+          { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
+      }
+    } else if (source.showKey !== false && type === "continuous") {
+      for (let i = 0; i < 32; i++) key.push({ x: i * width / 32, y: 0, width: width / 32 + 0.1, height: 8,
+        fill: colour(domain[0] + (domain[1] - domain[0]) * i / 31) });
+      footer.push(text(numberLabel(domain[0]), 0, 8 + fontSize + 3),
+        text(numberLabel(domain[1]), width, 8 + fontSize + 3, { anchor: "end" }));
+    } else if (source.showKey !== false) domain.forEach((category, i) => {
+      key.push({ x: 0, y: i * (fontSize + 6), width: 10, height: 10, fill: colour(category) });
+      footer.push(text(category, 15, i * (fontSize + 6) + 9));
+    });
+    for (const item of footer) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
+    const panel = { uid: source.uid, definition: source, title: source.title ?? source.uid, x, width, cellHeight, headingHeight, titleDescent, rowOffset, rows, header, footer, key, fontSize, fontFamily, domain, missingColour,
+      textColour: theme?.foreground ?? "#333333" };
+    // Text overhang contributes to figure bounds, not inter-panel spacing.
+    panel.extentWidth = Math.max(width,
+      ...header.map((item) => item.x + item.bounds.maxX),
+      ...footer.map((item) => item.x + item.bounds.maxX));
+    x += panel.width;
+    return panel;
+  });
+}
+
+// Keep the static projection and only the latest preview per scene. Weak keys
+// let retired scenes go; a long drag cannot accumulate preview snapshots.
+const frameCache = new WeakMap();
+const emptyFrames = Object.freeze([]);
+const rowIndexes = new WeakMap();
+
+function annotationBoundsVisible(bounds, viewport) {
+  return !viewport || bounds.minX <= viewport.maxX && bounds.maxX >= viewport.minX &&
+    bounds.minY <= viewport.maxY && bounds.maxY >= viewport.minY;
+}
+
+function rowBoundary(rows, y, upper = false) {
+  let low = 0, high = rows.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (rows[mid].y < y || upper && rows[mid].y === y) low = mid + 1; else high = mid;
+  }
+  return low;
+}
+
+function rowsInRange(panel, minY, maxY) {
+  let sorted = rowIndexes.get(panel);
+  if (!sorted) { sorted = [...panel.rows].sort((a, b) => a.y - b.y); rowIndexes.set(panel, sorted); }
+  return sorted.slice(rowBoundary(sorted, minY - panel.cellHeight / 2),
+    rowBoundary(sorted, maxY + panel.cellHeight / 2, true));
+}
+
+/** Cull shared records, retaining source cells and their contiguous column range. */
+function annotationPanelsInViewport(scene, preview, viewport, { geometry = true, labels = true } = {}) {
+  const panels = annotationPanelsForFrame(scene, preview);
+  if (!viewport) return panels;
+  const visible = [];
+  for (const panel of panels) {
+    const texts = labels ? panel.texts.filter((item) => annotationBoundsVisible({
+      minX: panel.x + item.x + item.bounds.minX, maxX: panel.x + item.x + item.bounds.maxX,
+      minY: item.y + item.bounds.minY, maxY: item.y + item.bounds.maxY }, viewport)) : emptyFrames;
+    const rects = geometry ? panel.rects.filter((rect) => annotationBoundsVisible({
+      minX: panel.x + rect.x, maxX: panel.x + rect.x + rect.width,
+      minY: rect.y, maxY: rect.y + rect.height }, viewport)) : emptyFrames;
+    let rows = emptyFrames;
+    if (geometry && panel.x <= viewport.maxX && panel.x + panel.width >= viewport.minX) {
+      const count = panel.rows[0]?.cells.length || 1, cellWidth = panel.width / count;
+      const firstCell = Math.max(0, Math.floor((viewport.minX - panel.x) / cellWidth));
+      const lastCell = Math.min(count, Math.floor((viewport.maxX - panel.x) / cellWidth) + 1);
+      rows = rowsInRange(panel, viewport.minY, viewport.maxY).map((row) => ({ ...row, firstCell, lastCell }));
+    }
+    if (rows.length || rects.length || texts.length) visible.push({ ...panel, rows, rects, texts });
+  }
+  return visible;
+}
+
+/** Read-only frame records shared by rendering, bounds and hit testing. */
+function annotationPanelsForFrame(scene, preview = null) {
+  if (!scene.annotationPanels?.length) return emptyFrames;
+  let cached = frameCache.get(scene);
+  if (!cached) { cached = {}; frameCache.set(scene, cached); }
+  if (!preview && cached.static) return cached.static;
+  if (preview && cached.preview === preview) return cached.frame;
+  const frames = projectAnnotationFrame(scene, preview);
+  if (!preview) cached.static = frames;
+  else { cached.preview = preview; cached.frame = frames; }
+  return frames;
+}
+
+function projectAnnotationFrame(scene, preview) {
+  const dx = annotationOffsetForPreview(scene, preview);
+  // Shared header and key baselines keep every panel aligned, including when
+  // their labels, font sizes or cell heights differ.
+  const cellHeight = Math.max(...scene.annotationPanels.map((panel) => panel.cellHeight));
+  const headingHeight = Math.max(...scene.annotationPanels.map((panel) => panel.headingHeight));
+  const titleDescent = Math.max(...scene.annotationPanels.map((panel) => panel.titleDescent));
+  const titleOffset = headingHeight > 0 ? headingHeight + 6 + titleDescent : 0;
+  const frames = scene.annotationPanels.map((panel) => {
+    const rows = panel.rows.map((row) => ({ ...row,
+      y: scene.clusters.get(row.uid).y + panel.rowOffset + clusterOffsetForPreview(preview, row.uid) }));
+    let minY = Infinity, maxY = -Infinity;
+    for (const row of rows) { minY = Math.min(minY, row.y); maxY = Math.max(maxY, row.y); }
+    const top = minY - cellHeight / 2 - 10, bottom = maxY + cellHeight / 2 + 20;
+    const groupMarks = panel.markerGroups ? groupPanelMarks(panel, rows) : null;
+    return { ...panel, x: panel.x + dx, rows: groupMarks ? [] : rows,
+      texts: [...(groupMarks?.texts ?? []), ...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
+        ...panel.footer.map((item) => ({ ...item, y: item.y + bottom }))],
+      rects: groupMarks?.rects ?? panel.key.map((item, keyIndex) => ({ ...item, keyIndex, y: item.y + bottom })) };
+  });
+  let minY = Infinity, maxY = -Infinity;
+  for (const frame of frames) {
+    const bounds = annotationPanelBounds(frame);
+    minY = Math.min(minY, bounds.minY); maxY = Math.max(maxY, bounds.maxY);
+  }
+  return frames.map((frame) => ({ ...frame, verticalBounds: { minY, maxY } }));
+}
+
+function annotationFigureBounds(bounds, panels, clusters, frames = null) {
+  if (!bounds || !panels.length) return bounds;
+  const result = { ...bounds };
+  for (const panel of frames || annotationPanelsForFrame({ annotationPanels: panels, clusters })) {
+    const area = annotationPanelBounds(panel);
+    result.maxX = Math.max(result.maxX, panel.x + panel.extentWidth);
+    result.minY = Math.min(result.minY, area.minY);
+    result.maxY = Math.max(result.maxY, area.maxY);
+  }
+  return result;
+}
+
+/** Panel area includes whitespace between rows, headings and the colour key. */
+function annotationPanelBounds(panel) {
+  const bounds = { minX: panel.x, maxX: panel.x + panel.width, minY: Infinity, maxY: -Infinity };
+  if (panel.verticalBounds) return { ...bounds, ...panel.verticalBounds };
+  for (const item of panel.texts) {
+    bounds.minY = Math.min(bounds.minY, item.y + item.bounds.minY);
+    bounds.maxY = Math.max(bounds.maxY, item.y + item.bounds.maxY);
+  }
+  for (const rect of panel.rects) {
+    bounds.minY = Math.min(bounds.minY, rect.y);
+    bounds.maxY = Math.max(bounds.maxY, rect.y + rect.height);
+  }
+  for (const row of panel.rows) {
+    bounds.minY = Math.min(bounds.minY, row.y - panel.cellHeight / 2);
+    bounds.maxY = Math.max(bounds.maxY, row.y + panel.cellHeight / 2);
+  }
+  return bounds;
+}
+
+/** Shared cell hit testing, independent of DOM elements or raster backends. */
+function hitTestAnnotationCell(scene, point, preview = null) {
+  if (!scene?.annotationPanels?.length) return null;
+  const panels = annotationPanelsForFrame(scene, preview);
+  for (let index = panels.length - 1; index >= 0; index--) {
+    const panel = panels[index];
+    if (point.x < panel.x || point.x > panel.x + panel.width) continue;
+    for (const row of rowsInRange(panel, point.y, point.y)) {
+      const cell = row.cells.find((cell) => point.x >= panel.x + cell.x && point.x <= panel.x + cell.x + cell.width &&
+        point.y >= row.y + cell.y && point.y <= row.y + cell.y + cell.height);
+      if (cell) return { panelUid: panel.uid, title: panel.title, clusterUid: row.uid,
+        clusterName: scene.clusters.get(row.uid).source.name || row.uid,
+        column: cell.column, value: cell.value };
+    }
+  }
+  return null;
+}
+
+function worldPolygon(points, x, y) {
+  return points.map((point, index) => point + (index % 2 === 0 ? x : y));
+}
+
+function boundsFromPoints(points) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let index = 0; index < points.length; index += 2) {
+    minX = Math.min(minX, points[index]);
+    maxX = Math.max(maxX, points[index]);
+    minY = Math.min(minY, points[index + 1]);
+    maxY = Math.max(maxY, points[index + 1]);
+  }
+  return { minX, maxX, minY, maxY };
+}
+
+function boundsFromLinkAnchors(anchors) {
+  if (!anchors) return null;
+  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+  return {
+    minX: Math.min(ax1, ax2, bx1, bx2),
+    maxX: Math.max(ax1, ax2, bx1, bx2),
+    minY: Math.min(ay, by),
+    maxY: Math.max(ay, by),
+  };
+}
+
+function boundsFromRegions(regions) {
+  if (!regions.length) return null;
+  return {
+    minX: Math.min(...regions.map((region) => region.x)),
+    maxX: Math.max(...regions.map((region) => region.x + region.width)),
+    minY: Math.min(...regions.map((region) => region.y)),
+    maxY: Math.max(...regions.map((region) => region.y + region.height)),
+  };
+}
+
+function formatKilobases(basePairs) {
+  return `${+(basePairs / 1000).toFixed(1)}kb`;
+}
+
+function legendPositionForBounds(bounds, legend) {
+  if (legend.placement === "bottom") {
+    return {
+      // Lower chrome shares the fixed chart baseline. Unlike a right-side
+      // legend it must not slide horizontally when a locus is dragged.
+      x: 0,
+      y: bounds.maxY + legend.bottomOffset + legend.marginTop,
+    };
+  }
+  return { x: bounds.maxX + legend.marginLeft, y: 0 };
+}
+
+function extendBounds(bounds, minX, maxX, minY, maxY) {
+  return {
+    minX: Math.min(bounds.minX, minX),
+    maxX: Math.max(bounds.maxX, maxX),
+    minY: Math.min(bounds.minY, minY),
+    maxY: Math.max(bounds.maxY, maxY),
+  };
+}
+
+// This deliberately excludes text-width measurement: Canvas supplies exact
+// glyph metrics while fitting, and SVG uses its native bounding box. The scene
+// still records the chrome's structural footprint for renderer-neutral camera
+// and minimap work.
+function figureBoundsForChrome(bounds, chrome) {
+  if (!bounds || !chrome) return bounds;
+  let figureBounds = { ...bounds };
+  const { legend, scaleBar, colourBar } = chrome;
+  if (legend?.visible) {
+    for (const item of legend.items) {
+      const x = legend.position.x + item.x;
+      const y = legend.position.y + item.y;
+      figureBounds = extendBounds(
+        figureBounds,
+        x - item.radius,
+        x + legend.columnWidth,
+        y,
+        y + (legend.hasSubtitles ? legend.entryHeight : legend.fontSize)
+      );
+    }
+  }
+  if (scaleBar?.visible) {
+    figureBounds = extendBounds(
+      figureBounds,
+      scaleBar.position.x,
+      scaleBar.position.x + scaleBar.length,
+      scaleBar.position.y,
+      scaleBar.position.y + scaleBar.height + scaleBar.fontSize + 5
+    );
+  }
+  if (colourBar?.visible) {
+    figureBounds = extendBounds(
+      figureBounds,
+      colourBar.position.x,
+      colourBar.position.x + colourBar.width,
+      colourBar.position.y,
+      colourBar.position.y + colourBar.height + colourBar.fontSize + 5
+    );
+  }
+  return figureBounds;
+}
+
+function buildChrome(bounds, genes, chrome) {
+  if (!bounds || !chrome) return null;
+
+  const visibleGroupIds = new Set();
+  for (const gene of genes.values()) {
+    if (!gene.visible) continue;
+    const groupUid = chrome.legend.groupForGene(gene.source.uid);
+    if (groupUid !== null) visibleGroupIds.add(groupUid);
+  }
+
+  const groups = chrome.legend.groups.filter(
+    (group) => !group.hidden && visibleGroupIds.has(group.uid)
+  );
+  const scaleBarLength = chrome.scaleBar.coordinateFor(chrome.scaleBar.basePair);
+  const scaleBar = {
+    textColour: chrome.scaleBar.textColour,
+    visible: chrome.scaleBar.show,
+    position: {
+      x: chrome.scaleBar.x,
+      y: bounds.maxY + chrome.scaleBar.marginTop,
+    },
+    length: scaleBarLength,
+    basePair: chrome.scaleBar.basePair,
+    height: chrome.scaleBar.height,
+    middle: chrome.scaleBar.height / 2,
+    label: formatKilobases(chrome.scaleBar.basePair),
+    colour: chrome.scaleBar.colour,
+    strokeWidth: chrome.scaleBar.strokeWidth,
+    fontSize: chrome.scaleBar.fontSize,
+    fontFamily: chrome.scaleBar.fontFamily,
+  };
+
+  const identityDomain = chrome.colourBar.domain || [0, 1];
+  const colourBar = {
+    textColour: chrome.colourBar.textColour,
+    visible: chrome.colourBar.show && !chrome.link.groupColour && chrome.link.show,
+    position: {
+      x: chrome.colourBar.x,
+      y: bounds.maxY + chrome.colourBar.marginTop,
+    },
+    width: chrome.colourBar.width,
+    height: chrome.colourBar.height,
+    fontSize: chrome.colourBar.fontSize,
+    fontFamily: chrome.colourBar.fontFamily,
+    startColour: chrome.colourBar.scoreColour(identityDomain[0]),
+    endColour: chrome.colourBar.scoreColour(identityDomain[1]),
+    label: "Identity (%)",
+    startLabel: `${Math.round(identityDomain[0] * 100)}`,
+    endLabel: `${Math.round(identityDomain[1] * 100)}`,
+  };
+
+  // Bottom legends share the lower chart edge with the scale and colour bars.
+  // Stack them rather than letting the first legend entry cover those bars.
+  const bottomOffset = Math.max(
+    scaleBar.visible
+      ? scaleBar.position.y - bounds.maxY + scaleBar.height + scaleBar.fontSize + 8
+      : 0,
+    colourBar.visible
+      ? colourBar.position.y - bounds.maxY + colourBar.height + colourBar.fontSize + 8
+      : 0
+  );
+  const columns = Math.min(
+    groups.length || 1,
+    Math.max(1, Math.floor(Number(chrome.legend.columns) || 1))
+  );
+  const columnWidth = Number(chrome.legend.columnWidth) || 160;
+  const rows = Math.ceil(groups.length / columns);
+  const fontSize = Number(chrome.legend.fontSize) || 14;
+  const subtitleFontSize = Number(chrome.legend.subtitleFontSize) || Math.max(10, Math.round(fontSize * 0.72));
+  const hasSubtitles = groups.some((group) => Boolean(group.subtitle));
+  const entryHeight = hasSubtitles
+    ? Math.max(Number(chrome.legend.entryHeight) || 18, fontSize + subtitleFontSize + 4)
+    : Number(chrome.legend.entryHeight) || 18;
+  const totalHeight = entryHeight * rows;
+  const step = rows > 1 ? totalHeight / (rows - 0.5) : totalHeight;
+  const radius = step / 4;
+  const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
+  const legend = {
+    textColour: chrome.legend.textColour, subtitleColour: chrome.legend.subtitleColour,
+    visible: chrome.legend.show,
+    placement,
+    columns,
+    columnWidth,
+    marginLeft: chrome.legend.marginLeft,
+    marginTop: chrome.legend.marginTop,
+    bottomOffset,
+    position: legendPositionForBounds(bounds, {
+      ...chrome.legend,
+      placement,
+      bottomOffset,
+    }),
+    entryHeight,
+    fontSize,
+    subtitleFontSize,
+    hasSubtitles,
+    fontFamily: chrome.legend.fontFamily,
+    items: groups.map((group, index) => {
+      const column = Math.floor(index / rows);
+      const row = index % rows;
+      return {
+      uid: group.uid,
+      source: group,
+      label: group.label,
+      colour: chrome.legend.colourForGroup(group.uid),
+      x: column * columnWidth,
+      y: row * step,
+      radius,
+      circleY: hasSubtitles ? entryHeight / 2 : radius,
+      textX: radius + 6,
+      textY: hasSubtitles ? entryHeight / 2 - subtitleFontSize * 0.42 : radius + 1,
+      ...(group.subtitle ? { subtitle: group.subtitle, subtitleY: entryHeight / 2 + fontSize * 0.48 } : {}),
+      };
+    }),
+  };
+
+  return { legend, scaleBar, colourBar };
+}
+
+function createLocusLayout(locus, clusterLayout, {
+  scaleX,
+  getLocusState,
+  getGeneState,
+  locusOffset,
+  shape,
+  geneMidpoint,
+  clusterSpacing = 40,
+}) {
+  const state = { ...getLocusState(locus) };
+  const localX = locusOffset(locus.uid);
+  const start = scaleX(state.start);
+  const end = scaleX(state.end);
+  const worldX = clusterLayout.x + localX;
+  const paddingY = Math.max(0, Math.min(10, clusterSpacing / 4));
+  const height = shape.tipHeight * 2 + shape.bodyHeight;
+  return {
+    source: locus,
+    cluster: clusterLayout.source,
+    state,
+    localX,
+    x: worldX,
+    y: clusterLayout.y,
+    start,
+    end,
+    worldStart: worldX + start,
+    worldEnd: worldX + end,
+    bounds: {
+      minX: worldX + start,
+      maxX: worldX + end,
+      minY: clusterLayout.y - paddingY,
+      maxY: clusterLayout.y + height + paddingY,
+    },
+    transform: { x: localX, y: 0 },
+    track: {
+      // The physical extent is unchanged by a flip, but retaining the
+      // endpoint orientation lets renderers animate the bar collapsing
+      // through its midpoint and growing out in the reversed direction.
+      x1: state.flipped ? end : start,
+      x2: state.flipped ? start : end,
+      y: geneMidpoint,
+    },
+    hover: {
+      x: start,
+      y: -paddingY,
+      width: end - start,
+      height: height + paddingY * 2,
+      leftHandleX: start - 8,
+      rightHandleX: end,
+    },
+    trimIndicators: createTrimIndicators({ locus, state, getGeneState, scaleX, shape }),
+    genes: [],
+  };
+}
+
+function extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle) {
+  const { fontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
+  const maxY = Math.max(
+    locus.y + locus.hover.y + locus.hover.height,
+    ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + fontSize + 1)
+  );
+  locus.bounds = { ...locus.bounds, maxY };
+  return locus;
+}
+
+function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, label }) {
+  const display = { ...gene, ...getGeneState(gene) };
+  const visible =
+    display.start >= locusLayout.state.start && display.end <= locusLayout.state.end + 1;
+  const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
+  const polygon = worldPolygon(localPolygon, locusLayout.x, locusLayout.y);
+  return {
+    source: gene,
+    display,
+    locus: locusLayout,
+    visible,
+    localPolygon,
+    polygon,
+    bounds: boundsFromPoints(polygon),
+    label: getGeneLabelLayout(display, { scaleX, shape, label }),
+    labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
+    labelDy: getGeneLabelDy(label.position),
+  };
+}
+
+function createLinkLayout(source, order, {
+  genes,
+  loci,
+  clusters,
+  areClustersAdjacent,
+  scaleX,
+  link,
+  linkVisible = () => true,
+  geneMidpoint,
+}) {
+  const query = genes.get(source.query.uid);
+  const target = genes.get(source.target.uid);
+  let anchors = null;
+  if (query && target) {
+    anchors = getLinkAnchors(source, {
+      geneForUid: (uid) => genes.get(uid)?.display,
+      areClustersAdjacent,
+      scaleX,
+      horizontalOffset: (gene) => {
+        const locus = loci.get(gene.locusUid);
+        return locus ? locus.x : 0;
+      },
+      verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
+      geneMidpoint,
+    });
+  }
+  const allowed = linkVisible(source);
+  return {
+    source,
+    order,
+    // Renderer policy (group membership, best-only reduction, hidden links)
+    // is resolved once by the runtime. Keeping it on the retained record lets
+    // all renderers, including dynamic cluster-drag previews, agree on it.
+    allowed,
+    anchors,
+    bounds: boundsFromLinkAnchors(anchors),
+    path: getLinkPath(anchors, link),
+    labelPosition: anchors ? getLinkLabelPosition(anchors, link.labelPosition) : null,
+    visible:
+      Boolean(anchors) &&
+      allowed &&
+      !source.hidden &&
+      source.identity >= link.threshold &&
+      query?.visible &&
+      target?.visible,
+  };
+}
+
+function createLocusHitRegions(locus) {
+  const { source, worldStart, worldEnd, y, hover } = locus;
+  const move = {
+    type: "rect",
+    action: "move-locus",
+    locusUid: source.uid,
+    x: worldStart,
+    y: y + hover.y,
+    width: worldEnd - worldStart,
+    height: hover.height,
+  };
+  const trimLeft = {
+    type: "rect",
+    action: "trim-locus-left",
+    locusUid: source.uid,
+    x: worldStart + hover.leftHandleX - hover.x,
+    y: y + hover.y,
+    width: hover.x - hover.leftHandleX,
+    height: hover.height,
+  };
+  const trimRight = {
+    type: "rect",
+    action: "trim-locus-right",
+    locusUid: source.uid,
+    x: worldEnd,
+    y: y + hover.y,
+    width: 8,
+    height: hover.height,
+  };
+  return { move, trimLeft, trimRight };
+}
+
+function createGeneHitRegion(gene) {
+  if (!gene.visible) return null;
+  return {
+    type: "polygon",
+    action: "gene",
+    geneUid: gene.source.uid,
+    points: gene.polygon,
+  };
+}
+
+function buildHitRegions(loci, genes) {
+  const locusRegions = new Map();
+  const geneRegions = new Map();
+  const all = [];
+
+  for (const locus of loci.values()) {
+    const regions = createLocusHitRegions(locus);
+    locusRegions.set(locus.source.uid, regions);
+    all.push(regions.move, regions.trimLeft, regions.trimRight);
+  }
+
+  for (const gene of genes.values()) {
+    const region = createGeneHitRegion(gene);
+    if (!region) continue;
+    geneRegions.set(gene.source.uid, region);
+    all.push(region);
+  }
+
+  return { all, loci: locusRegions, genes: geneRegions };
+}
+
+function adjacencyForOrder(order, fallback) {
+  if (!order) return fallback;
+  const positions = new Map(order.map((uid, index) => [uid, index]));
+  return (one, two) => Math.abs(positions.get(one) - positions.get(two)) === 1;
+}
+
+/**
+ * Derive renderer-neutral, world-space geometry from chart data and state.
+ * The returned records contain no DOM selections and can be consumed by SVG,
+ * Canvas, or an SVG export renderer.
+ */
+function buildScene(
+  data,
+  {
+    scaleX,
+    scaleY,
+    clusterPosition = scaleY,
+    clusterOffset,
+    locusOffset,
+    getLocusState,
+    getGeneState,
+    areClustersAdjacent,
+    clusterOrder = null,
+    clusterSpacing,
+    shape,
+    label,
+    link,
+    linkVisible = () => true,
+    clusterLabel = () => "",
+    alignLabels = true,
+    trimIndicatorStyle = {},
+    chrome = null,
+    fontFamily = "sans-serif",
+    measureText = null,
+    annotationsEnabled = false,
+    tree = null,
+    theme = null,
+  }
+) {
+  const clusters = new Map();
+  const loci = new Map();
+  const genes = new Map();
+  const links = new Map();
+  const linksByClusterPair = new Map();
+  const linksByGene = new Map();
+  areClustersAdjacent = adjacencyForOrder(clusterOrder, areClustersAdjacent);
+  const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
+
+  for (const cluster of data.clusters) {
+    const x = clusterOffset(cluster.uid);
+    const y = clusterPosition(cluster.uid);
+    const clusterLayout = { source: cluster, x, y, loci: [] };
+    clusters.set(cluster.uid, clusterLayout);
+
+    for (const locus of cluster.loci) {
+      const locusLayout = createLocusLayout(locus, clusterLayout, {
+        scaleX,
+        getLocusState,
+        getGeneState,
+        locusOffset,
+        shape,
+        geneMidpoint,
+        clusterSpacing,
+      });
+      loci.set(locus.uid, locusLayout);
+      clusterLayout.loci.push(locusLayout);
+
+      for (const gene of locus.genes) {
+        const geneLayout = createGeneLayout(gene, locusLayout, {
+          scaleX,
+          getGeneState,
+          shape,
+          label,
+        });
+        genes.set(gene.uid, geneLayout);
+        locusLayout.genes.push(geneLayout);
+      }
+    }
+  }
+
+  const arrangedTrimIndicators = arrangeTrimIndicators(loci.values(), new Map(), trimIndicatorStyle);
+  for (const locus of loci.values()) {
+    locus.rawTrimIndicators = locus.trimIndicators;
+    locus.trimIndicators = arrangedTrimIndicators.get(locus.source.uid) || [];
+    extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle);
+  }
+  const bounds = sceneBounds(loci, { shape, trimIndicatorStyle });
+  for (const cluster of clusters.values()) {
+    cluster.bounds = boundsForLoci(cluster.loci);
+    cluster.info = clusterInfo(cluster, bounds, { alignLabels, clusterLabel });
+  }
+
+  for (const [order, source] of data.links.entries()) {
+    const linkLayout = createLinkLayout(source, order, {
+      genes,
+      loci,
+      clusters,
+      areClustersAdjacent,
+      scaleX,
+      link,
+      linkVisible,
+      geneMidpoint,
+    });
+    links.set(source.uid, linkLayout);
+    for (const uid of new Set([source.query.uid, source.target.uid])) {
+      if (!linksByGene.has(uid)) linksByGene.set(uid, []);
+      linksByGene.get(uid).push(source);
+    }
+    const query = genes.get(source.query.uid);
+    const target = genes.get(source.target.uid);
+    if (query && target) {
+      const key = clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid);
+      const pairLinks = linksByClusterPair.get(key) || [];
+      pairLinks.push(source.uid);
+      linksByClusterPair.set(key, pairLinks);
+    }
+  }
+
+  const hitRegions = buildHitRegions(loci, genes);
+  const chromeLayout = buildChrome(bounds, genes, chrome);
+  const annotations = projectSceneAnnotations(data.annotationPanels, clusters, bounds, chromeLayout,
+    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, theme, tree });
+  return {
+    clusters,
+    loci,
+    genes,
+    links,
+    linksByClusterPair,
+    linksByGene,
+    bounds,
+    ...annotations,
+    index: {
+      genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
+      loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
+      links: createSpatialIndex([...links].map(([uid, link]) => [uid, link.bounds])),
+      hitLoci: createSpatialIndex(
+        [...hitRegions.loci].map(([uid, regions]) => [
+          uid,
+          boundsFromRegions([regions.move, regions.trimLeft, regions.trimRight]),
+        ])
+      ),
+    },
+    hitRegions,
+    chrome: chromeLayout,
+  };
+}
+
+function translateBounds(bounds, x, y = 0) {
+  if (!bounds) return bounds;
+  return {
+    minX: bounds.minX + x, maxX: bounds.maxX + x,
+    minY: bounds.minY + y, maxY: bounds.maxY + y,
+  };
+}
+
+function boundsForLoci(loci) {
+  const bounds = loci.map((locus) => locus.bounds).filter(Boolean);
+  return bounds.length ? {
+    minX: Math.min(...bounds.map((bounds) => bounds.minX)),
+    maxX: Math.max(...bounds.map((bounds) => bounds.maxX)),
+    minY: Math.min(...bounds.map((bounds) => bounds.minY)),
+    maxY: Math.max(...bounds.map((bounds) => bounds.maxY)),
+  } : null;
+}
+
+function sceneBounds(loci, { shape, trimIndicatorStyle = {} }) {
+  const { fontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
+  let bounds = null;
+  for (const locus of loci.values()) {
+    const maxY = Math.max(
+      locus.y + shape.tipHeight * 2 + shape.bodyHeight,
+      ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + fontSize + 1)
+    );
+    const next = {
+      minX: locus.worldStart, maxX: locus.worldEnd, minY: locus.y, maxY,
+    };
+    bounds = bounds ? extendBounds(bounds, next.minX, next.maxX, next.minY, next.maxY) : next;
+  }
+  return bounds;
+}
+
+function clusterInfo(cluster, bounds, { alignLabels = true, clusterLabel = () => "" }) {
+  const start = cluster.loci.length
+    ? Math.min(...cluster.loci.map((locus) => locus.worldStart)) : cluster.x;
+  return {
+    x: (alignLabels && bounds ? bounds.minX : start) - cluster.x - 10,
+    y: 0,
+    locusText: clusterLabel(cluster.source),
+  };
+}
+
+function updateSpatialIndex(index, changedEntries, entriesForRebuild) {
+  // Dense changes (e.g. a large reorder) are cheaper to rebuild than to patch
+  // cell by cell. Construct the complete entry list only on that path.
+  return changedEntries.length > (index?.boundsById.size || 0) / 4
+    ? createSpatialIndex(entriesForRebuild())
+    : patchSpatialIndex(index, changedEntries);
+}
+
+function repositionChrome(chrome, bounds, previousBounds) {
+  if (!chrome || !bounds) return null;
+  const dy = bounds.maxY - previousBounds.maxY;
+  return {
+    ...chrome,
+    legend: { ...chrome.legend, position: legendPositionForBounds(bounds, chrome.legend) },
+    scaleBar: { ...chrome.scaleBar, position: {
+      ...chrome.scaleBar.position, y: chrome.scaleBar.position.y + dy,
+    } },
+    colourBar: { ...chrome.colourBar, position: {
+      ...chrome.colourBar.position, y: chrome.colourBar.position.y + dy,
+    } },
+  };
+}
+
+const emptyAnnotationPanels = Object.freeze([]);
+
+// Data/configuration builds project cells; geometry-only commits retain them.
+// This is the single placement path for both kinds of scene update.
+function projectSceneAnnotations(definitions, clusters, bounds, chrome, options, previous = null) {
+  const annotationPanelData = options.annotationsEnabled ? definitions : undefined;
+  const visible = annotationPanelData?.some((panel) => panel.show !== false);
+  const annotationChromeRight = visible ? annotationChromeRightEdge(chrome, options.measureText) : -Infinity;
+  const annotationAnchorX = Math.max(bounds?.maxX ?? 0, annotationChromeRight);
+  let annotationPanels = emptyAnnotationPanels;
+  if (visible) {
+    if (previous?.annotationPanelData === annotationPanelData) {
+      const dx = annotationAnchorX - previous.annotationAnchorX;
+      annotationPanels = dx ? previous.annotationPanels.map((panel) => ({ ...panel, x: panel.x + dx })) : previous.annotationPanels;
+    } else {
+      annotationPanels = layoutAnnotationPanels(annotationPanelData, clusters, bounds,
+        { ...options, anchorX: annotationAnchorX, previousPanels: previous?.annotationPanels });
+    }
+    placeLegendAfterAnnotations(chrome, annotationPanels);
+  }
+  return { annotationPanelData, annotationPanels, annotationAnchorX, annotationChromeRight,
+    figureBounds: annotationFigureBounds(figureBoundsForChrome(bounds, chrome), annotationPanels, clusters) };
+}
+
+/** Presentation/data edits to annotations leave synteny and its indexes intact. */
+function patchAnnotationScene(scene, definitions, options) {
+  const chrome = repositionChrome(scene.chrome, scene.bounds, scene.bounds);
+  return { ...scene, chrome,
+    ...projectSceneAnnotations(definitions, scene.clusters, scene.bounds, chrome,
+      { ...options, rowOffset: options.shape.tipHeight + options.shape.bodyHeight / 2 }, scene),
+    changes: { annotationsOnly: true } };
+}
+
+function placeLegendAfterAnnotations(chrome, panels) {
+  if (chrome?.legend.placement === "right" && panels.length) {
+    const right = Math.max(...panels.map((panel) => panel.x + panel.extentWidth));
+    chrome.legend.position = { ...chrome.legend.position, x: right + chrome.legend.marginLeft };
+  }
+}
+
+/**
+ * Commit geometry edits to an existing renderer-neutral scene. IDs and data
+ * membership must be unchanged; use buildScene for data/configuration changes.
+ * Explicit loci cover flips/trims, clusters cover translations/reorders, and
+ * the caller supplies current authoritative state/scales rather than deltas.
+ * Unchanged records are shared. All changed links, bounds, labels, chrome and
+ * hit indexes are finalized once, including for batch edits.
+ */
+function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = {}, options) {
+  if (!scene) return scene;
+  options = { ...options, areClustersAdjacent: adjacencyForOrder(options.clusterOrder, options.areClustersAdjacent) };
+  const {
+    scaleX, shape, label, getGeneState, getLocusState, locusOffset,
+    clusterOffset = (uid) => scene.clusters.get(uid).x,
+    clusterPosition = (uid) => scene.clusters.get(uid).y,
+    trimIndicatorStyle = {},
+  } = options;
+  const requestedLoci = new Set(locusIds);
+  const requestedClusters = new Set(clusterIds);
+  for (const uid of requestedClusters) {
+    for (const locus of scene.clusters.get(uid)?.loci || []) requestedLoci.add(locus.source.uid);
+  }
+  for (const uid of requestedLoci) {
+    const locus = scene.loci.get(uid);
+    if (locus) requestedClusters.add(locus.cluster.uid);
+  }
+  if (!requestedLoci.size) return scene;
+
+  const clusters = new Map(scene.clusters);
+  const loci = new Map(scene.loci);
+  const genes = new Map(scene.genes);
+  const changedLoci = new Set();
+  const changedGenes = new Set();
+  let visibilityChanged = false;
+  const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
+  for (const uid of requestedClusters) {
+    const previous = clusters.get(uid);
+    if (previous) clusters.set(uid, {
+      ...previous, x: clusterOffset(uid), y: clusterPosition(uid), loci: [...previous.loci],
+    });
+  }
+  for (const uid of requestedLoci) {
+    const previous = scene.loci.get(uid);
+    if (!previous) continue;
+    const cluster = clusters.get(previous.cluster.uid);
+    const state = getLocusState(previous.source);
+    const localX = locusOffset(uid);
+    const dx = cluster.x + localX - previous.x, dy = cluster.y - previous.y;
+    const translated = state.start === previous.state.start && state.end === previous.state.end &&
+      state.flipped === previous.state.flipped;
+    const locus = translated ? {
+      ...previous, state: { ...state }, localX, x: previous.x + dx, y: previous.y + dy,
+      worldStart: previous.worldStart + dx, worldEnd: previous.worldEnd + dx,
+      bounds: translateBounds(previous.bounds, dx, dy),
+      transform: { x: localX, y: 0 }, genes: [],
+      trimIndicators: previous.rawTrimIndicators || previous.trimIndicators,
+    } : createLocusLayout(previous.source, cluster, { ...options, geneMidpoint });
+    locus.rawTrimIndicators = locus.trimIndicators;
+    for (const source of locus.source.genes) {
+      const previousGene = scene.genes.get(source.uid);
+      const gene = translated && previousGene ? {
+        ...previousGene, locus,
+        polygon: worldPolygon(previousGene.polygon, dx, dy),
+        bounds: translateBounds(previousGene.bounds, dx, dy),
+      } : createGeneLayout(source, locus, { scaleX, getGeneState, shape, label });
+      if (gene.visible !== previousGene?.visible) visibilityChanged = true;
+      genes.set(source.uid, gene);
+      locus.genes.push(gene);
+      changedGenes.add(source.uid);
+    }
+    loci.set(uid, locus);
+    changedLoci.add(uid);
+  }
+
+  // Moving a trimmed locus can also change a neighbour's indicator placement.
+  // Reflow the small indicator set from its original local rows, retaining all
+  // other locus/gene geometry when only an indicator row changes.
+  const rawIndicators = new Map([...loci].map(([uid, locus]) =>
+    [uid, locus.rawTrimIndicators || locus.trimIndicators]
+  ));
+  const arranged = arrangeTrimIndicators(loci.values(), rawIndicators, trimIndicatorStyle);
+  for (const [uid, previous] of loci) {
+    const indicators = arranged.get(uid) || [];
+    if (!changedLoci.has(uid) && JSON.stringify(indicators) === JSON.stringify(previous.trimIndicators)) continue;
+    const locus = changedLoci.has(uid) ? previous : { ...previous, genes: [] };
+    locus.rawTrimIndicators = rawIndicators.get(uid);
+    locus.trimIndicators = indicators;
+    extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle);
+    if (!changedLoci.has(uid)) {
+      for (const previousGene of previous.genes) {
+        const gene = { ...previousGene, locus };
+        genes.set(gene.source.uid, gene);
+        locus.genes.push(gene);
+      }
+      loci.set(uid, locus);
+      requestedClusters.add(locus.cluster.uid);
+      const cluster = clusters.get(locus.cluster.uid);
+      if (cluster === scene.clusters.get(locus.cluster.uid)) clusters.set(locus.cluster.uid, { ...cluster });
+    }
+    changedLoci.add(uid);
+  }
+  for (const uid of requestedClusters) {
+    const cluster = clusters.get(uid);
+    if (!cluster) continue;
+    cluster.loci = cluster.loci.map((locus) => loci.get(locus.source.uid));
+    cluster.bounds = boundsForLoci(cluster.loci);
+  }
+  const bounds = sceneBounds(loci, options);
+  for (const [uid, cluster] of clusters) {
+    const info = clusterInfo(cluster, bounds, options);
+    if (info.x !== cluster.info.x || info.locusText !== cluster.info.locusText) {
+      clusters.set(uid, { ...cluster, info });
+    }
+  }
+
+  const sources = new Map();
+  for (const uid of changedGenes) {
+    for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
+  }
+  const links = new Map(scene.links);
+  for (const source of sources.values()) {
+    const previous = links.get(source.uid);
+    if (previous) links.set(source.uid, createLinkLayout(source, previous.order, {
+      ...options, genes, loci, clusters, geneMidpoint,
+    }));
+  }
+
+  const locusRegions = new Map(scene.hitRegions.loci);
+  const geneRegions = new Map(scene.hitRegions.genes);
+  for (const uid of changedLoci) locusRegions.set(uid, createLocusHitRegions(loci.get(uid)));
+  for (const uid of changedGenes) {
+    const region = createGeneHitRegion(genes.get(uid));
+    if (region) geneRegions.set(uid, region);
+    else geneRegions.delete(uid);
+  }
+  const hitRegions = {
+    loci: locusRegions, genes: geneRegions,
+    // Match full-build hit order: all locus handles, then visible genes.
+    all: [...locusRegions.values()].flatMap(({ move, trimLeft, trimRight }) => [move, trimLeft, trimRight])
+      .concat([...genes.keys()].map((uid) => geneRegions.get(uid)).filter(Boolean)),
+  };
+  const entries = (records, ids, boundsFor = (record) => record.bounds) =>
+    [...ids].map((uid) => [uid, boundsFor(records.get(uid))]);
+  const hitBounds = (regions) => boundsFromRegions([regions.move, regions.trimLeft, regions.trimRight]);
+  const chrome = visibilityChanged && options.chrome
+    ? buildChrome(bounds, genes, options.chrome)
+    : repositionChrome(scene.chrome, bounds, scene.bounds);
+  const annotations = projectSceneAnnotations(scene.annotationPanelData, clusters, bounds, chrome,
+    { ...options, rowOffset: geneMidpoint }, scene);
+  return {
+    ...scene, clusters, loci, genes, links, bounds, chrome, hitRegions, ...annotations,
+    changes: { loci: changedLoci, genes: changedGenes, links: new Set(sources.keys()), clusters: requestedClusters },
+    index: {
+      genes: updateSpatialIndex(scene.index.genes, entries(genes, changedGenes), () => entries(genes, genes.keys())),
+      loci: updateSpatialIndex(scene.index.loci, entries(loci, changedLoci), () => entries(loci, loci.keys())),
+      links: updateSpatialIndex(scene.index.links, entries(links, sources.keys()), () => entries(links, links.keys())),
+      hitLoci: updateSpatialIndex(scene.index.hitLoci, entries(locusRegions, changedLoci, hitBounds),
+        () => entries(locusRegions, locusRegions.keys(), hitBounds)),
+    },
+  };
+}
+
+const sceneMetrics = new WeakMap();
+const textProperties = ["direction", "fontKerning", "fontStretch", "fontVariantCaps", "letterSpacing", "wordSpacing"];
+
+/** Share native text metrics across Canvas consumers without changing their context. */
+function measureCanvasText(context, scene, text, {
+  font = context.font, align = context.textAlign, baseline = context.textBaseline,
+} = {}) {
+  let cache = sceneMetrics.get(scene);
+  if (!cache) { cache = new Map(); sceneMetrics.set(scene, cache); }
+  text = String(text);
+  const key = JSON.stringify([font, align, baseline, ...textProperties.map((name) => context[name]), text]);
+  if (cache.has(key)) return cache.get(key);
+  context.save();
+  let metrics;
+  try {
+    context.font = font;
+    context.textAlign = align;
+    context.textBaseline = baseline;
+    metrics = context.measureText(text);
+  } finally { context.restore(); }
+  // Preview coordinate labels can change on every drag frame.
+  if (cache.size >= 4096) cache.delete(cache.keys().next().value);
+  cache.set(key, metrics);
+  return metrics;
+}
+
+/** Supply native text metrics to the shared tree layout. */
+function measureTreeLayout(context, tree, scene, config, options = {}) {
+  if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
+  const measure = (text, font) => measureCanvasText(context, scene, text,
+    { font, align: "left", baseline: "alphabetic" });
+  return layoutTree({
+    ...options,
+    tree, scene, config,
+    measureText: (text, style) => {
+      const metrics = measure(text, `${style.fontStyle || "normal"} ${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`);
+      const overhang = Math.max(0, metrics.actualBoundingBoxLeft || 0, (metrics.actualBoundingBoxRight || 0) - metrics.width);
+      return { width: metrics.width + overhang * 2, overhang, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
+    },
+    measureLabel: (cluster, locusText) => Math.max(
+      measure(cluster.source.name || "", `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`).width,
+      measure(locusText, `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`).width
+    ),
+  });
+}
+
+
+/**
+ * Extend structural scene bounds with measured text and tree extents for
+ * figure sizing, camera fitting, and minimaps across renderers.
+ */
+function measureFigureBounds(context, scene, config, tree = null, { preview = null } = {}) {
+  if (!scene?.bounds) return null;
+  let structural = scene.bounds;
+  const chrome = preview?.chrome || scene.chrome;
+  const panels = annotationPanelsForFrame(scene, preview);
+  if (preview) {
+    structural = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+    for (const locus of scene.loci.values()) {
+      const geometry = locusGeometryForPreview(preview, locus);
+      const { x = 0, y = 0 } = geometry.offsets;
+      structural.minX = Math.min(structural.minX, geometry.worldStart ?? locus.worldStart + x);
+      structural.maxX = Math.max(structural.maxX, geometry.worldEnd ?? locus.worldEnd + x);
+      structural.minY = Math.min(structural.minY, locus.bounds.minY + y);
+      structural.maxY = Math.max(structural.maxY, locus.bounds.maxY + y);
+    }
+  }
+  const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome),
+    scene.annotationPanels || [], scene.clusters, panels) : scene.figureBounds || structural) };
+  const include = (x, y) => {
+    bounds.minX = Math.min(bounds.minX, x);
+    bounds.maxX = Math.max(bounds.maxX, x);
+    bounds.minY = Math.min(bounds.minY, y);
+    bounds.maxY = Math.max(bounds.maxY, y);
+  };
+  const includeText = (text, x, y, { fontSize, fontFamily = config.plot.fontFamily,
+    fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
+    if (!text) return;
+    const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    const metrics = measureCanvasText(context, scene, text, { font, align, baseline });
+    const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
+    const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
+    const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
+    const x2 = Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight : left + metrics.width;
+    const y1 = Number.isFinite(metrics.actualBoundingBoxAscent) ? -metrics.actualBoundingBoxAscent : top;
+    const y2 = Number.isFinite(metrics.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : top + fontSize * 1.25;
+    const radians = rotation * Math.PI / 180;
+    const cos = Math.cos(radians), sin = Math.sin(radians);
+    for (const [tx, ty] of [[x1, y1], [x1, y2], [x2, y1], [x2, y2]]) {
+      const px = x + tx * cos - ty * sin, py = y + tx * sin + ty * cos;
+      include(px - border / 2, py - border / 2);
+      include(px + border / 2, py + border / 2);
+    }
+  };
+
+  // Structural scene bounds already enclose loci, gene polygons and ribbons.
+  // Add stroke extent without walking every homology link when labels are off.
+  const halfStroke = Math.max(config.gene.shape.strokeWidth || 0, config.locus.trackBar.stroke || 0,
+    config.link.show ? config.link.strokeWidth || 0 : 0) / 2;
+  include(structural.minX - halfStroke, structural.minY - halfStroke);
+  include(structural.maxX + halfStroke, structural.maxY + halfStroke);
+  for (const cluster of scene.clusters.values()) {
+    const x = cluster.x + cluster.info.x + clusterLabelOffsetForPreview(preview, cluster.source.uid);
+    const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
+    includeText(cluster.source.name, x, y + 8,
+      { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right" });
+    includeText(clusterLabelTextForPreview(preview, cluster.source.uid, cluster.info.locusText), x, y + 12,
+      { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
+  }
+  if (config.gene.label.show) {
+    for (const gene of scene.genes.values()) {
+      if (!geneVisibleForPreview(preview, gene)) continue;
+      const offsets = offsetsForGene(preview, gene);
+      const geometry = geneGeometryForPreview(preview, gene);
+      includeText(gene.source.label || gene.source.name || gene.source.uid,
+        (geometry.labelX ?? gene.locus.x + gene.label.x) + offsets.x, gene.locus.y + gene.label.y + offsets.y,
+        { fontSize: config.gene.label.fontSize, align: config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor, rotation: gene.label.rotation });
+    }
+  }
+  if (config.link.show && config.link.label.show) {
+    for (const link of scene.links.values()) {
+      const geometry = linkGeometryForPreview(scene, link, preview, config);
+      if (!geometry.visible || !link.labelPosition) continue;
+      const anchors = geometry.anchors;
+      const position = preview && anchors ? getLinkLabelPosition(anchors, config.link.label.position) : link.labelPosition;
+      includeText(link.source.label ?? link.source.identity.toFixed(2), position.x, position.y,
+        { fontSize: config.link.label.fontSize, align: "center" });
+    }
+  }
+  if (config.locus.trimIndicators?.show !== false) {
+    const style = resolveTrimIndicatorStyle(config.locus.trimIndicators);
+    for (const locus of scene.loci.values()) {
+      const geometry = locusGeometryForPreview(preview, locus);
+      const { x = 0, y = 0 } = geometry.offsets;
+      for (const indicator of geometry.trimIndicators || locus.trimIndicators || []) {
+        includeText(indicator.text, locus.x + indicator.x + x, locus.y + indicator.y + y,
+          { fontSize: style.fontSize, fontWeight: style.fontWeight, align: indicator.anchor, baseline: "top", border: style.borderWidth });
+      }
+    }
+  }
+  const treeLayout = measureTreeLayout(context, tree, scene, config, { preview, trackAnchor: Boolean(preview) });
+  if (treeLayout) {
+    include(treeLayout.bounds.minX, treeLayout.bounds.minY);
+    include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
+  }
+  for (const panel of panels) {
+    for (const item of panel.texts) includeText(item.text, panel.x + item.x, item.y,
+      { fontSize: panel.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
+        align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
+  }
+  if (chrome?.legend.visible) {
+    const legend = chrome.legend;
+    const subtitleSize = legend.subtitleFontSize || Math.max(10, legend.fontSize * 0.72);
+    for (const item of legend.items) {
+      const x = legend.position.x + item.x, y = legend.position.y + item.y + item.circleY;
+      include(x - item.radius, y - item.radius);
+      include(x + item.radius, y + item.radius);
+      includeText(item.label, legend.position.x + item.textX, legend.position.y + item.y + item.textY,
+        { fontSize: legend.fontSize, fontFamily: legend.fontFamily, baseline: "middle" });
+      includeText(item.subtitle, legend.position.x + item.textX, legend.position.y + item.y + item.subtitleY,
+        { fontSize: subtitleSize, fontFamily: legend.fontFamily, baseline: "middle" });
+    }
+  }
+  if (chrome?.scaleBar.visible) {
+    const bar = chrome.scaleBar;
+    const half = bar.strokeWidth / 2;
+    include(bar.position.x - half, bar.position.y - half);
+    include(bar.position.x + bar.length + half, bar.position.y + bar.height + half);
+    includeText(bar.label, bar.position.x + bar.length / 2, bar.position.y + bar.height + 5,
+      { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
+  }
+  if (chrome?.colourBar.visible) {
+    const bar = chrome.colourBar;
+    include(bar.position.x - 0.5, bar.position.y - 0.5);
+    include(bar.position.x + bar.width + 0.5, bar.position.y + bar.height + 0.5);
+    const font = { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, baseline: "top" };
+    const y = bar.position.y + bar.height + 5;
+    includeText(bar.label, bar.position.x + bar.width / 2, y, { ...font, align: "center" });
+    includeText(bar.startLabel, bar.position.x, y, font);
+    includeText(bar.endLabel, bar.position.x + bar.width, y, { ...font, align: "right" });
+  }
+  return bounds;
+}
+
 /** Prune absent leaves and collapse unary ancestors without changing source records. */
 function visibleTree(tree, clusterIds, aliases = new Map()) {
   if (!tree) return tree;
@@ -301,7 +5410,7 @@ EnterNode.prototype = {
   querySelectorAll: function(selector) { return this._parent.querySelectorAll(selector); }
 };
 
-function constant$3(x) {
+function constant$2(x) {
   return function() {
     return x;
   };
@@ -388,7 +5497,7 @@ function selection_data(value, key) {
       parents = this._parents,
       groups = this._groups;
 
-  if (typeof value !== "function") value = constant$3(value);
+  if (typeof value !== "function") value = constant$2(value);
 
   for (var m = groups.length, update = new Array(m), enter = new Array(m), exit = new Array(m), j = 0; j < m; ++j) {
     var parent = parents[j],
@@ -485,7 +5594,7 @@ function selection_order() {
 }
 
 function selection_sort(compare) {
-  if (!compare) compare = ascending$1;
+  if (!compare) compare = ascending;
 
   function compareNode(a, b) {
     return a && b ? compare(a.__data__, b.__data__) : !a - !b;
@@ -503,7 +5612,7 @@ function selection_sort(compare) {
   return new Selection$1(sortgroups, this._parents).order();
 }
 
-function ascending$1(a, b) {
+function ascending(a, b) {
   return a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
 }
 
@@ -1450,931 +6559,6 @@ function selection_interrupt(name) {
   });
 }
 
-function define(constructor, factory, prototype) {
-  constructor.prototype = factory.prototype = prototype;
-  prototype.constructor = constructor;
-}
-
-function extend(parent, definition) {
-  var prototype = Object.create(parent.prototype);
-  for (var key in definition) prototype[key] = definition[key];
-  return prototype;
-}
-
-function Color() {}
-
-var darker = 0.7;
-var brighter = 1 / darker;
-
-var reI = "\\s*([+-]?\\d+)\\s*",
-    reN = "\\s*([+-]?(?:\\d*\\.)?\\d+(?:[eE][+-]?\\d+)?)\\s*",
-    reP = "\\s*([+-]?(?:\\d*\\.)?\\d+(?:[eE][+-]?\\d+)?)%\\s*",
-    reHex = /^#([0-9a-f]{3,8})$/,
-    reRgbInteger = new RegExp(`^rgb\\(${reI},${reI},${reI}\\)$`),
-    reRgbPercent = new RegExp(`^rgb\\(${reP},${reP},${reP}\\)$`),
-    reRgbaInteger = new RegExp(`^rgba\\(${reI},${reI},${reI},${reN}\\)$`),
-    reRgbaPercent = new RegExp(`^rgba\\(${reP},${reP},${reP},${reN}\\)$`),
-    reHslPercent = new RegExp(`^hsl\\(${reN},${reP},${reP}\\)$`),
-    reHslaPercent = new RegExp(`^hsla\\(${reN},${reP},${reP},${reN}\\)$`);
-
-var named = {
-  aliceblue: 0xf0f8ff,
-  antiquewhite: 0xfaebd7,
-  aqua: 0x00ffff,
-  aquamarine: 0x7fffd4,
-  azure: 0xf0ffff,
-  beige: 0xf5f5dc,
-  bisque: 0xffe4c4,
-  black: 0x000000,
-  blanchedalmond: 0xffebcd,
-  blue: 0x0000ff,
-  blueviolet: 0x8a2be2,
-  brown: 0xa52a2a,
-  burlywood: 0xdeb887,
-  cadetblue: 0x5f9ea0,
-  chartreuse: 0x7fff00,
-  chocolate: 0xd2691e,
-  coral: 0xff7f50,
-  cornflowerblue: 0x6495ed,
-  cornsilk: 0xfff8dc,
-  crimson: 0xdc143c,
-  cyan: 0x00ffff,
-  darkblue: 0x00008b,
-  darkcyan: 0x008b8b,
-  darkgoldenrod: 0xb8860b,
-  darkgray: 0xa9a9a9,
-  darkgreen: 0x006400,
-  darkgrey: 0xa9a9a9,
-  darkkhaki: 0xbdb76b,
-  darkmagenta: 0x8b008b,
-  darkolivegreen: 0x556b2f,
-  darkorange: 0xff8c00,
-  darkorchid: 0x9932cc,
-  darkred: 0x8b0000,
-  darksalmon: 0xe9967a,
-  darkseagreen: 0x8fbc8f,
-  darkslateblue: 0x483d8b,
-  darkslategray: 0x2f4f4f,
-  darkslategrey: 0x2f4f4f,
-  darkturquoise: 0x00ced1,
-  darkviolet: 0x9400d3,
-  deeppink: 0xff1493,
-  deepskyblue: 0x00bfff,
-  dimgray: 0x696969,
-  dimgrey: 0x696969,
-  dodgerblue: 0x1e90ff,
-  firebrick: 0xb22222,
-  floralwhite: 0xfffaf0,
-  forestgreen: 0x228b22,
-  fuchsia: 0xff00ff,
-  gainsboro: 0xdcdcdc,
-  ghostwhite: 0xf8f8ff,
-  gold: 0xffd700,
-  goldenrod: 0xdaa520,
-  gray: 0x808080,
-  green: 0x008000,
-  greenyellow: 0xadff2f,
-  grey: 0x808080,
-  honeydew: 0xf0fff0,
-  hotpink: 0xff69b4,
-  indianred: 0xcd5c5c,
-  indigo: 0x4b0082,
-  ivory: 0xfffff0,
-  khaki: 0xf0e68c,
-  lavender: 0xe6e6fa,
-  lavenderblush: 0xfff0f5,
-  lawngreen: 0x7cfc00,
-  lemonchiffon: 0xfffacd,
-  lightblue: 0xadd8e6,
-  lightcoral: 0xf08080,
-  lightcyan: 0xe0ffff,
-  lightgoldenrodyellow: 0xfafad2,
-  lightgray: 0xd3d3d3,
-  lightgreen: 0x90ee90,
-  lightgrey: 0xd3d3d3,
-  lightpink: 0xffb6c1,
-  lightsalmon: 0xffa07a,
-  lightseagreen: 0x20b2aa,
-  lightskyblue: 0x87cefa,
-  lightslategray: 0x778899,
-  lightslategrey: 0x778899,
-  lightsteelblue: 0xb0c4de,
-  lightyellow: 0xffffe0,
-  lime: 0x00ff00,
-  limegreen: 0x32cd32,
-  linen: 0xfaf0e6,
-  magenta: 0xff00ff,
-  maroon: 0x800000,
-  mediumaquamarine: 0x66cdaa,
-  mediumblue: 0x0000cd,
-  mediumorchid: 0xba55d3,
-  mediumpurple: 0x9370db,
-  mediumseagreen: 0x3cb371,
-  mediumslateblue: 0x7b68ee,
-  mediumspringgreen: 0x00fa9a,
-  mediumturquoise: 0x48d1cc,
-  mediumvioletred: 0xc71585,
-  midnightblue: 0x191970,
-  mintcream: 0xf5fffa,
-  mistyrose: 0xffe4e1,
-  moccasin: 0xffe4b5,
-  navajowhite: 0xffdead,
-  navy: 0x000080,
-  oldlace: 0xfdf5e6,
-  olive: 0x808000,
-  olivedrab: 0x6b8e23,
-  orange: 0xffa500,
-  orangered: 0xff4500,
-  orchid: 0xda70d6,
-  palegoldenrod: 0xeee8aa,
-  palegreen: 0x98fb98,
-  paleturquoise: 0xafeeee,
-  palevioletred: 0xdb7093,
-  papayawhip: 0xffefd5,
-  peachpuff: 0xffdab9,
-  peru: 0xcd853f,
-  pink: 0xffc0cb,
-  plum: 0xdda0dd,
-  powderblue: 0xb0e0e6,
-  purple: 0x800080,
-  rebeccapurple: 0x663399,
-  red: 0xff0000,
-  rosybrown: 0xbc8f8f,
-  royalblue: 0x4169e1,
-  saddlebrown: 0x8b4513,
-  salmon: 0xfa8072,
-  sandybrown: 0xf4a460,
-  seagreen: 0x2e8b57,
-  seashell: 0xfff5ee,
-  sienna: 0xa0522d,
-  silver: 0xc0c0c0,
-  skyblue: 0x87ceeb,
-  slateblue: 0x6a5acd,
-  slategray: 0x708090,
-  slategrey: 0x708090,
-  snow: 0xfffafa,
-  springgreen: 0x00ff7f,
-  steelblue: 0x4682b4,
-  tan: 0xd2b48c,
-  teal: 0x008080,
-  thistle: 0xd8bfd8,
-  tomato: 0xff6347,
-  turquoise: 0x40e0d0,
-  violet: 0xee82ee,
-  wheat: 0xf5deb3,
-  white: 0xffffff,
-  whitesmoke: 0xf5f5f5,
-  yellow: 0xffff00,
-  yellowgreen: 0x9acd32
-};
-
-define(Color, color, {
-  copy(channels) {
-    return Object.assign(new this.constructor, this, channels);
-  },
-  displayable() {
-    return this.rgb().displayable();
-  },
-  hex: color_formatHex, // Deprecated! Use color.formatHex.
-  formatHex: color_formatHex,
-  formatHex8: color_formatHex8,
-  formatHsl: color_formatHsl,
-  formatRgb: color_formatRgb,
-  toString: color_formatRgb
-});
-
-function color_formatHex() {
-  return this.rgb().formatHex();
-}
-
-function color_formatHex8() {
-  return this.rgb().formatHex8();
-}
-
-function color_formatHsl() {
-  return hslConvert(this).formatHsl();
-}
-
-function color_formatRgb() {
-  return this.rgb().formatRgb();
-}
-
-function color(format) {
-  var m, l;
-  format = (format + "").trim().toLowerCase();
-  return (m = reHex.exec(format)) ? (l = m[1].length, m = parseInt(m[1], 16), l === 6 ? rgbn(m) // #ff0000
-      : l === 3 ? new Rgb((m >> 8 & 0xf) | (m >> 4 & 0xf0), (m >> 4 & 0xf) | (m & 0xf0), ((m & 0xf) << 4) | (m & 0xf), 1) // #f00
-      : l === 8 ? rgba$1(m >> 24 & 0xff, m >> 16 & 0xff, m >> 8 & 0xff, (m & 0xff) / 0xff) // #ff000000
-      : l === 4 ? rgba$1((m >> 12 & 0xf) | (m >> 8 & 0xf0), (m >> 8 & 0xf) | (m >> 4 & 0xf0), (m >> 4 & 0xf) | (m & 0xf0), (((m & 0xf) << 4) | (m & 0xf)) / 0xff) // #f000
-      : null) // invalid hex
-      : (m = reRgbInteger.exec(format)) ? new Rgb(m[1], m[2], m[3], 1) // rgb(255, 0, 0)
-      : (m = reRgbPercent.exec(format)) ? new Rgb(m[1] * 255 / 100, m[2] * 255 / 100, m[3] * 255 / 100, 1) // rgb(100%, 0%, 0%)
-      : (m = reRgbaInteger.exec(format)) ? rgba$1(m[1], m[2], m[3], m[4]) // rgba(255, 0, 0, 1)
-      : (m = reRgbaPercent.exec(format)) ? rgba$1(m[1] * 255 / 100, m[2] * 255 / 100, m[3] * 255 / 100, m[4]) // rgb(100%, 0%, 0%, 1)
-      : (m = reHslPercent.exec(format)) ? hsla(m[1], m[2] / 100, m[3] / 100, 1) // hsl(120, 50%, 50%)
-      : (m = reHslaPercent.exec(format)) ? hsla(m[1], m[2] / 100, m[3] / 100, m[4]) // hsla(120, 50%, 50%, 1)
-      : named.hasOwnProperty(format) ? rgbn(named[format]) // eslint-disable-line no-prototype-builtins
-      : format === "transparent" ? new Rgb(NaN, NaN, NaN, 0)
-      : null;
-}
-
-function rgbn(n) {
-  return new Rgb(n >> 16 & 0xff, n >> 8 & 0xff, n & 0xff, 1);
-}
-
-function rgba$1(r, g, b, a) {
-  if (a <= 0) r = g = b = NaN;
-  return new Rgb(r, g, b, a);
-}
-
-function rgbConvert(o) {
-  if (!(o instanceof Color)) o = color(o);
-  if (!o) return new Rgb;
-  o = o.rgb();
-  return new Rgb(o.r, o.g, o.b, o.opacity);
-}
-
-function rgb(r, g, b, opacity) {
-  return arguments.length === 1 ? rgbConvert(r) : new Rgb(r, g, b, opacity == null ? 1 : opacity);
-}
-
-function Rgb(r, g, b, opacity) {
-  this.r = +r;
-  this.g = +g;
-  this.b = +b;
-  this.opacity = +opacity;
-}
-
-define(Rgb, rgb, extend(Color, {
-  brighter(k) {
-    k = k == null ? brighter : Math.pow(brighter, k);
-    return new Rgb(this.r * k, this.g * k, this.b * k, this.opacity);
-  },
-  darker(k) {
-    k = k == null ? darker : Math.pow(darker, k);
-    return new Rgb(this.r * k, this.g * k, this.b * k, this.opacity);
-  },
-  rgb() {
-    return this;
-  },
-  clamp() {
-    return new Rgb(clampi(this.r), clampi(this.g), clampi(this.b), clampa(this.opacity));
-  },
-  displayable() {
-    return (-0.5 <= this.r && this.r < 255.5)
-        && (-0.5 <= this.g && this.g < 255.5)
-        && (-0.5 <= this.b && this.b < 255.5)
-        && (0 <= this.opacity && this.opacity <= 1);
-  },
-  hex: rgb_formatHex, // Deprecated! Use color.formatHex.
-  formatHex: rgb_formatHex,
-  formatHex8: rgb_formatHex8,
-  formatRgb: rgb_formatRgb,
-  toString: rgb_formatRgb
-}));
-
-function rgb_formatHex() {
-  return `#${hex(this.r)}${hex(this.g)}${hex(this.b)}`;
-}
-
-function rgb_formatHex8() {
-  return `#${hex(this.r)}${hex(this.g)}${hex(this.b)}${hex((isNaN(this.opacity) ? 1 : this.opacity) * 255)}`;
-}
-
-function rgb_formatRgb() {
-  const a = clampa(this.opacity);
-  return `${a === 1 ? "rgb(" : "rgba("}${clampi(this.r)}, ${clampi(this.g)}, ${clampi(this.b)}${a === 1 ? ")" : `, ${a})`}`;
-}
-
-function clampa(opacity) {
-  return isNaN(opacity) ? 1 : Math.max(0, Math.min(1, opacity));
-}
-
-function clampi(value) {
-  return Math.max(0, Math.min(255, Math.round(value) || 0));
-}
-
-function hex(value) {
-  value = clampi(value);
-  return (value < 16 ? "0" : "") + value.toString(16);
-}
-
-function hsla(h, s, l, a) {
-  if (a <= 0) h = s = l = NaN;
-  else if (l <= 0 || l >= 1) h = s = NaN;
-  else if (s <= 0) h = NaN;
-  return new Hsl(h, s, l, a);
-}
-
-function hslConvert(o) {
-  if (o instanceof Hsl) return new Hsl(o.h, o.s, o.l, o.opacity);
-  if (!(o instanceof Color)) o = color(o);
-  if (!o) return new Hsl;
-  if (o instanceof Hsl) return o;
-  o = o.rgb();
-  var r = o.r / 255,
-      g = o.g / 255,
-      b = o.b / 255,
-      min = Math.min(r, g, b),
-      max = Math.max(r, g, b),
-      h = NaN,
-      s = max - min,
-      l = (max + min) / 2;
-  if (s) {
-    if (r === max) h = (g - b) / s + (g < b) * 6;
-    else if (g === max) h = (b - r) / s + 2;
-    else h = (r - g) / s + 4;
-    s /= l < 0.5 ? max + min : 2 - max - min;
-    h *= 60;
-  } else {
-    s = l > 0 && l < 1 ? 0 : h;
-  }
-  return new Hsl(h, s, l, o.opacity);
-}
-
-function hsl(h, s, l, opacity) {
-  return arguments.length === 1 ? hslConvert(h) : new Hsl(h, s, l, opacity == null ? 1 : opacity);
-}
-
-function Hsl(h, s, l, opacity) {
-  this.h = +h;
-  this.s = +s;
-  this.l = +l;
-  this.opacity = +opacity;
-}
-
-define(Hsl, hsl, extend(Color, {
-  brighter(k) {
-    k = k == null ? brighter : Math.pow(brighter, k);
-    return new Hsl(this.h, this.s, this.l * k, this.opacity);
-  },
-  darker(k) {
-    k = k == null ? darker : Math.pow(darker, k);
-    return new Hsl(this.h, this.s, this.l * k, this.opacity);
-  },
-  rgb() {
-    var h = this.h % 360 + (this.h < 0) * 360,
-        s = isNaN(h) || isNaN(this.s) ? 0 : this.s,
-        l = this.l,
-        m2 = l + (l < 0.5 ? l : 1 - l) * s,
-        m1 = 2 * l - m2;
-    return new Rgb(
-      hsl2rgb(h >= 240 ? h - 240 : h + 120, m1, m2),
-      hsl2rgb(h, m1, m2),
-      hsl2rgb(h < 120 ? h + 240 : h - 120, m1, m2),
-      this.opacity
-    );
-  },
-  clamp() {
-    return new Hsl(clamph(this.h), clampt(this.s), clampt(this.l), clampa(this.opacity));
-  },
-  displayable() {
-    return (0 <= this.s && this.s <= 1 || isNaN(this.s))
-        && (0 <= this.l && this.l <= 1)
-        && (0 <= this.opacity && this.opacity <= 1);
-  },
-  formatHsl() {
-    const a = clampa(this.opacity);
-    return `${a === 1 ? "hsl(" : "hsla("}${clamph(this.h)}, ${clampt(this.s) * 100}%, ${clampt(this.l) * 100}%${a === 1 ? ")" : `, ${a})`}`;
-  }
-}));
-
-function clamph(value) {
-  value = (value || 0) % 360;
-  return value < 0 ? value + 360 : value;
-}
-
-function clampt(value) {
-  return Math.max(0, Math.min(1, value || 0));
-}
-
-/* From FvD 13.37, CSS Color Module Level 3 */
-function hsl2rgb(h, m1, m2) {
-  return (h < 60 ? m1 + (m2 - m1) * h / 60
-      : h < 180 ? m2
-      : h < 240 ? m1 + (m2 - m1) * (240 - h) / 60
-      : m1) * 255;
-}
-
-const radians = Math.PI / 180;
-const degrees$1 = 180 / Math.PI;
-
-var A = -0.14861,
-    B = +1.78277,
-    C = -0.29227,
-    D = -0.90649,
-    E = +1.97294,
-    ED = E * D,
-    EB = E * B,
-    BC_DA = B * C - D * A;
-
-function cubehelixConvert(o) {
-  if (o instanceof Cubehelix) return new Cubehelix(o.h, o.s, o.l, o.opacity);
-  if (!(o instanceof Rgb)) o = rgbConvert(o);
-  var r = o.r / 255,
-      g = o.g / 255,
-      b = o.b / 255,
-      l = (BC_DA * b + ED * r - EB * g) / (BC_DA + ED - EB),
-      bl = b - l,
-      k = (E * (g - l) - C * bl) / D,
-      s = Math.sqrt(k * k + bl * bl) / (E * l * (1 - l)), // NaN if l=0 or l=1
-      h = s ? Math.atan2(k, bl) * degrees$1 - 120 : NaN;
-  return new Cubehelix(h < 0 ? h + 360 : h, s, l, o.opacity);
-}
-
-function cubehelix$1(h, s, l, opacity) {
-  return arguments.length === 1 ? cubehelixConvert(h) : new Cubehelix(h, s, l, opacity == null ? 1 : opacity);
-}
-
-function Cubehelix(h, s, l, opacity) {
-  this.h = +h;
-  this.s = +s;
-  this.l = +l;
-  this.opacity = +opacity;
-}
-
-define(Cubehelix, cubehelix$1, extend(Color, {
-  brighter(k) {
-    k = k == null ? brighter : Math.pow(brighter, k);
-    return new Cubehelix(this.h, this.s, this.l * k, this.opacity);
-  },
-  darker(k) {
-    k = k == null ? darker : Math.pow(darker, k);
-    return new Cubehelix(this.h, this.s, this.l * k, this.opacity);
-  },
-  rgb() {
-    var h = isNaN(this.h) ? 0 : (this.h + 120) * radians,
-        l = +this.l,
-        a = isNaN(this.s) ? 0 : this.s * l * (1 - l),
-        cosh = Math.cos(h),
-        sinh = Math.sin(h);
-    return new Rgb(
-      255 * (l + a * (A * cosh + B * sinh)),
-      255 * (l + a * (C * cosh + D * sinh)),
-      255 * (l + a * (E * cosh)),
-      this.opacity
-    );
-  }
-}));
-
-function basis(t1, v0, v1, v2, v3) {
-  var t2 = t1 * t1, t3 = t2 * t1;
-  return ((1 - 3 * t1 + 3 * t2 - t3) * v0
-      + (4 - 6 * t2 + 3 * t3) * v1
-      + (1 + 3 * t1 + 3 * t2 - 3 * t3) * v2
-      + t3 * v3) / 6;
-}
-
-function basis$1(values) {
-  var n = values.length - 1;
-  return function(t) {
-    var i = t <= 0 ? (t = 0) : t >= 1 ? (t = 1, n - 1) : Math.floor(t * n),
-        v1 = values[i],
-        v2 = values[i + 1],
-        v0 = i > 0 ? values[i - 1] : 2 * v1 - v2,
-        v3 = i < n - 1 ? values[i + 2] : 2 * v2 - v1;
-    return basis((t - i / n) * n, v0, v1, v2, v3);
-  };
-}
-
-var constant$2 = x => () => x;
-
-function linear$1(a, d) {
-  return function(t) {
-    return a + t * d;
-  };
-}
-
-function exponential(a, b, y) {
-  return a = Math.pow(a, y), b = Math.pow(b, y) - a, y = 1 / y, function(t) {
-    return Math.pow(a + t * b, y);
-  };
-}
-
-function hue(a, b) {
-  var d = b - a;
-  return d ? linear$1(a, d > 180 || d < -180 ? d - 360 * Math.round(d / 360) : d) : constant$2(isNaN(a) ? b : a);
-}
-
-function gamma(y) {
-  return (y = +y) === 1 ? nogamma : function(a, b) {
-    return b - a ? exponential(a, b, y) : constant$2(isNaN(a) ? b : a);
-  };
-}
-
-function nogamma(a, b) {
-  var d = b - a;
-  return d ? linear$1(a, d) : constant$2(isNaN(a) ? b : a);
-}
-
-var interpolateRgb = (function rgbGamma(y) {
-  var color = gamma(y);
-
-  function rgb$1(start, end) {
-    var r = color((start = rgb(start)).r, (end = rgb(end)).r),
-        g = color(start.g, end.g),
-        b = color(start.b, end.b),
-        opacity = nogamma(start.opacity, end.opacity);
-    return function(t) {
-      start.r = r(t);
-      start.g = g(t);
-      start.b = b(t);
-      start.opacity = opacity(t);
-      return start + "";
-    };
-  }
-
-  rgb$1.gamma = rgbGamma;
-
-  return rgb$1;
-})(1);
-
-function rgbSpline(spline) {
-  return function(colors) {
-    var n = colors.length,
-        r = new Array(n),
-        g = new Array(n),
-        b = new Array(n),
-        i, color;
-    for (i = 0; i < n; ++i) {
-      color = rgb(colors[i]);
-      r[i] = color.r || 0;
-      g[i] = color.g || 0;
-      b[i] = color.b || 0;
-    }
-    r = spline(r);
-    g = spline(g);
-    b = spline(b);
-    color.opacity = 1;
-    return function(t) {
-      color.r = r(t);
-      color.g = g(t);
-      color.b = b(t);
-      return color + "";
-    };
-  };
-}
-
-var rgbBasis = rgbSpline(basis$1);
-
-function numberArray(a, b) {
-  if (!b) b = [];
-  var n = a ? Math.min(b.length, a.length) : 0,
-      c = b.slice(),
-      i;
-  return function(t) {
-    for (i = 0; i < n; ++i) c[i] = a[i] * (1 - t) + b[i] * t;
-    return c;
-  };
-}
-
-function isNumberArray(x) {
-  return ArrayBuffer.isView(x) && !(x instanceof DataView);
-}
-
-function genericArray(a, b) {
-  var nb = b ? b.length : 0,
-      na = a ? Math.min(nb, a.length) : 0,
-      x = new Array(na),
-      c = new Array(nb),
-      i;
-
-  for (i = 0; i < na; ++i) x[i] = interpolate$1(a[i], b[i]);
-  for (; i < nb; ++i) c[i] = b[i];
-
-  return function(t) {
-    for (i = 0; i < na; ++i) c[i] = x[i](t);
-    return c;
-  };
-}
-
-function date(a, b) {
-  var d = new Date;
-  return a = +a, b = +b, function(t) {
-    return d.setTime(a * (1 - t) + b * t), d;
-  };
-}
-
-function interpolateNumber$1(a, b) {
-  return a = +a, b = +b, function(t) {
-    return a * (1 - t) + b * t;
-  };
-}
-
-function object$2(a, b) {
-  var i = {},
-      c = {},
-      k;
-
-  if (a === null || typeof a !== "object") a = {};
-  if (b === null || typeof b !== "object") b = {};
-
-  for (k in b) {
-    if (k in a) {
-      i[k] = interpolate$1(a[k], b[k]);
-    } else {
-      c[k] = b[k];
-    }
-  }
-
-  return function(t) {
-    for (k in i) c[k] = i[k](t);
-    return c;
-  };
-}
-
-var reA = /[-+]?(?:\d+\.?\d*|\.?\d+)(?:[eE][-+]?\d+)?/g,
-    reB = new RegExp(reA.source, "g");
-
-function zero$1(b) {
-  return function() {
-    return b;
-  };
-}
-
-function one(b) {
-  return function(t) {
-    return b(t) + "";
-  };
-}
-
-function interpolateString(a, b) {
-  var bi = reA.lastIndex = reB.lastIndex = 0, // scan index for next number in b
-      am, // current match in a
-      bm, // current match in b
-      bs, // string preceding current number in b, if any
-      i = -1, // index in s
-      s = [], // string constants and placeholders
-      q = []; // number interpolators
-
-  // Coerce inputs to strings.
-  a = a + "", b = b + "";
-
-  // Interpolate pairs of numbers in a & b.
-  while ((am = reA.exec(a))
-      && (bm = reB.exec(b))) {
-    if ((bs = bm.index) > bi) { // a string precedes the next number in b
-      bs = b.slice(bi, bs);
-      if (s[i]) s[i] += bs; // coalesce with previous string
-      else s[++i] = bs;
-    }
-    if ((am = am[0]) === (bm = bm[0])) { // numbers in a & b match
-      if (s[i]) s[i] += bm; // coalesce with previous string
-      else s[++i] = bm;
-    } else { // interpolate non-matching numbers
-      s[++i] = null;
-      q.push({i: i, x: interpolateNumber$1(am, bm)});
-    }
-    bi = reB.lastIndex;
-  }
-
-  // Add remains of b.
-  if (bi < b.length) {
-    bs = b.slice(bi);
-    if (s[i]) s[i] += bs; // coalesce with previous string
-    else s[++i] = bs;
-  }
-
-  // Special optimization for only a single match.
-  // Otherwise, interpolate each of the numbers and rejoin the string.
-  return s.length < 2 ? (q[0]
-      ? one(q[0].x)
-      : zero$1(b))
-      : (b = q.length, function(t) {
-          for (var i = 0, o; i < b; ++i) s[(o = q[i]).i] = o.x(t);
-          return s.join("");
-        });
-}
-
-function interpolate$1(a, b) {
-  var t = typeof b, c;
-  return b == null || t === "boolean" ? constant$2(b)
-      : (t === "number" ? interpolateNumber$1
-      : t === "string" ? ((c = color(b)) ? (b = c, interpolateRgb) : interpolateString)
-      : b instanceof color ? interpolateRgb
-      : b instanceof Date ? date
-      : isNumberArray(b) ? numberArray
-      : Array.isArray(b) ? genericArray
-      : typeof b.valueOf !== "function" && typeof b.toString !== "function" || isNaN(b) ? object$2
-      : interpolateNumber$1)(a, b);
-}
-
-function interpolateRound(a, b) {
-  return a = +a, b = +b, function(t) {
-    return Math.round(a * (1 - t) + b * t);
-  };
-}
-
-var degrees = 180 / Math.PI;
-
-var identity$3 = {
-  translateX: 0,
-  translateY: 0,
-  rotate: 0,
-  skewX: 0,
-  scaleX: 1,
-  scaleY: 1
-};
-
-function decompose(a, b, c, d, e, f) {
-  var scaleX, scaleY, skewX;
-  if (scaleX = Math.sqrt(a * a + b * b)) a /= scaleX, b /= scaleX;
-  if (skewX = a * c + b * d) c -= a * skewX, d -= b * skewX;
-  if (scaleY = Math.sqrt(c * c + d * d)) c /= scaleY, d /= scaleY, skewX /= scaleY;
-  if (a * d < b * c) a = -a, b = -b, skewX = -skewX, scaleX = -scaleX;
-  return {
-    translateX: e,
-    translateY: f,
-    rotate: Math.atan2(b, a) * degrees,
-    skewX: Math.atan(skewX) * degrees,
-    scaleX: scaleX,
-    scaleY: scaleY
-  };
-}
-
-var svgNode;
-
-/* eslint-disable no-undef */
-function parseCss(value) {
-  const m = new (typeof DOMMatrix === "function" ? DOMMatrix : WebKitCSSMatrix)(value + "");
-  return m.isIdentity ? identity$3 : decompose(m.a, m.b, m.c, m.d, m.e, m.f);
-}
-
-function parseSvg(value) {
-  if (value == null) return identity$3;
-  if (!svgNode) svgNode = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  svgNode.setAttribute("transform", value);
-  if (!(value = svgNode.transform.baseVal.consolidate())) return identity$3;
-  value = value.matrix;
-  return decompose(value.a, value.b, value.c, value.d, value.e, value.f);
-}
-
-function interpolateTransform(parse, pxComma, pxParen, degParen) {
-
-  function pop(s) {
-    return s.length ? s.pop() + " " : "";
-  }
-
-  function translate(xa, ya, xb, yb, s, q) {
-    if (xa !== xb || ya !== yb) {
-      var i = s.push("translate(", null, pxComma, null, pxParen);
-      q.push({i: i - 4, x: interpolateNumber$1(xa, xb)}, {i: i - 2, x: interpolateNumber$1(ya, yb)});
-    } else if (xb || yb) {
-      s.push("translate(" + xb + pxComma + yb + pxParen);
-    }
-  }
-
-  function rotate(a, b, s, q) {
-    if (a !== b) {
-      if (a - b > 180) b += 360; else if (b - a > 180) a += 360; // shortest path
-      q.push({i: s.push(pop(s) + "rotate(", null, degParen) - 2, x: interpolateNumber$1(a, b)});
-    } else if (b) {
-      s.push(pop(s) + "rotate(" + b + degParen);
-    }
-  }
-
-  function skewX(a, b, s, q) {
-    if (a !== b) {
-      q.push({i: s.push(pop(s) + "skewX(", null, degParen) - 2, x: interpolateNumber$1(a, b)});
-    } else if (b) {
-      s.push(pop(s) + "skewX(" + b + degParen);
-    }
-  }
-
-  function scale(xa, ya, xb, yb, s, q) {
-    if (xa !== xb || ya !== yb) {
-      var i = s.push(pop(s) + "scale(", null, ",", null, ")");
-      q.push({i: i - 4, x: interpolateNumber$1(xa, xb)}, {i: i - 2, x: interpolateNumber$1(ya, yb)});
-    } else if (xb !== 1 || yb !== 1) {
-      s.push(pop(s) + "scale(" + xb + "," + yb + ")");
-    }
-  }
-
-  return function(a, b) {
-    var s = [], // string constants and placeholders
-        q = []; // number interpolators
-    a = parse(a), b = parse(b);
-    translate(a.translateX, a.translateY, b.translateX, b.translateY, s, q);
-    rotate(a.rotate, b.rotate, s, q);
-    skewX(a.skewX, b.skewX, s, q);
-    scale(a.scaleX, a.scaleY, b.scaleX, b.scaleY, s, q);
-    a = b = null; // gc
-    return function(t) {
-      var i = -1, n = q.length, o;
-      while (++i < n) s[(o = q[i]).i] = o.x(t);
-      return s.join("");
-    };
-  };
-}
-
-var interpolateTransformCss = interpolateTransform(parseCss, "px, ", "px)", "deg)");
-var interpolateTransformSvg = interpolateTransform(parseSvg, ", ", ")", ")");
-
-var epsilon2 = 1e-12;
-
-function cosh(x) {
-  return ((x = Math.exp(x)) + 1 / x) / 2;
-}
-
-function sinh(x) {
-  return ((x = Math.exp(x)) - 1 / x) / 2;
-}
-
-function tanh(x) {
-  return ((x = Math.exp(2 * x)) - 1) / (x + 1);
-}
-
-var interpolateZoom = (function zoomRho(rho, rho2, rho4) {
-
-  // p0 = [ux0, uy0, w0]
-  // p1 = [ux1, uy1, w1]
-  function zoom(p0, p1) {
-    var ux0 = p0[0], uy0 = p0[1], w0 = p0[2],
-        ux1 = p1[0], uy1 = p1[1], w1 = p1[2],
-        dx = ux1 - ux0,
-        dy = uy1 - uy0,
-        d2 = dx * dx + dy * dy,
-        i,
-        S;
-
-    // Special case for u0 ≅ u1.
-    if (d2 < epsilon2) {
-      S = Math.log(w1 / w0) / rho;
-      i = function(t) {
-        return [
-          ux0 + t * dx,
-          uy0 + t * dy,
-          w0 * Math.exp(rho * t * S)
-        ];
-      };
-    }
-
-    // General case.
-    else {
-      var d1 = Math.sqrt(d2),
-          b0 = (w1 * w1 - w0 * w0 + rho4 * d2) / (2 * w0 * rho2 * d1),
-          b1 = (w1 * w1 - w0 * w0 - rho4 * d2) / (2 * w1 * rho2 * d1),
-          r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0),
-          r1 = Math.log(Math.sqrt(b1 * b1 + 1) - b1);
-      S = (r1 - r0) / rho;
-      i = function(t) {
-        var s = t * S,
-            coshr0 = cosh(r0),
-            u = w0 / (rho2 * d1) * (coshr0 * tanh(rho * s + r0) - sinh(r0));
-        return [
-          ux0 + u * dx,
-          uy0 + u * dy,
-          w0 * coshr0 / cosh(rho * s + r0)
-        ];
-      };
-    }
-
-    i.duration = S * 1000 * rho / Math.SQRT2;
-
-    return i;
-  }
-
-  zoom.rho = function(_) {
-    var _1 = Math.max(1e-3, +_), _2 = _1 * _1, _4 = _2 * _2;
-    return zoomRho(_1, _2, _4);
-  };
-
-  return zoom;
-})(Math.SQRT2, 2, 4);
-
-function cubehelix(hue) {
-  return (function cubehelixGamma(y) {
-    y = +y;
-
-    function cubehelix(start, end) {
-      var h = hue((start = cubehelix$1(start)).h, (end = cubehelix$1(end)).h),
-          s = nogamma(start.s, end.s),
-          l = nogamma(start.l, end.l),
-          opacity = nogamma(start.opacity, end.opacity);
-      return function(t) {
-        start.h = h(t);
-        start.s = s(t);
-        start.l = l(Math.pow(t, y));
-        start.opacity = opacity(t);
-        return start + "";
-      };
-    }
-
-    cubehelix.gamma = cubehelixGamma;
-
-    return cubehelix;
-  })(1);
-}
-
-cubehelix(hue);
-var cubehelixLong = cubehelix(nogamma);
-
-function quantize(interpolator, n) {
-  var samples = new Array(n);
-  for (var i = 0; i < n; ++i) samples[i] = interpolator(i / (n - 1));
-  return samples;
-}
-
 function tweenRemove(id, name) {
   var tween0, tween1;
   return function() {
@@ -2457,7 +6641,7 @@ function tweenValue(transition, name, value) {
 
 function interpolate(a, b) {
   var c;
-  return (typeof b === "number" ? interpolateNumber$1
+  return (typeof b === "number" ? interpolateNumber
       : b instanceof color ? interpolateRgb
       : (c = color(b)) ? (b = c, interpolateRgb)
       : interpolateString)(a, b);
@@ -3385,12 +7569,12 @@ Transform.prototype = {
   }
 };
 
-var identity$2 = new Transform(1, 0, 0);
+var identity = new Transform(1, 0, 0);
 
 transform.prototype = Transform.prototype;
 
 function transform(node) {
-  while (!node.__zoom) if (!(node = node.parentNode)) return identity$2;
+  while (!node.__zoom) if (!(node = node.parentNode)) return identity;
   return node.__zoom;
 }
 
@@ -3423,7 +7607,7 @@ function defaultExtent() {
 }
 
 function defaultTransform() {
-  return this.__zoom || identity$2;
+  return this.__zoom || identity;
 }
 
 function defaultWheelDelta(event) {
@@ -3526,7 +7710,7 @@ function createZoom() {
       var e = extent.apply(this, arguments),
           t = this.__zoom,
           p0 = p == null ? centroid(e) : typeof p === "function" ? p.apply(this, arguments) : p;
-      return constrain(identity$2.translate(p0[0], p0[1]).scale(t.k).translate(
+      return constrain(identity.translate(p0[0], p0[1]).scale(t.k).translate(
         typeof x === "function" ? -x.apply(this, arguments) : -x,
         typeof y === "function" ? -y.apply(this, arguments) : -y
       ), e, translateExtent);
@@ -4032,1381 +8216,6 @@ function filterLinks(
     .flatMap(({ links: selected }) => selected);
 }
 
-/** Test world bounds after applying a preview translation. */
-function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
-  return !viewport || !bounds || bounds.minX + x <= viewport.maxX && bounds.maxX + x >= viewport.minX &&
-    bounds.minY + y <= viewport.maxY && bounds.maxY + y >= viewport.minY;
-}
-
-function validBounds$1(bounds) {
-  return (
-    bounds &&
-    Number.isFinite(bounds.minX) &&
-    Number.isFinite(bounds.maxX) &&
-    Number.isFinite(bounds.minY) &&
-    Number.isFinite(bounds.maxY) &&
-    bounds.maxX > bounds.minX &&
-    bounds.maxY > bounds.minY
-  );
-}
-
-/** Camera-visible world rectangle, with overscan measured in screen pixels. */
-function worldViewport(camera, { width, height }, overscan = 20) {
-  const margin = overscan / camera.k;
-  return {
-    minX: -camera.x / camera.k - margin,
-    maxX: (width - camera.x) / camera.k + margin,
-    minY: -camera.y / camera.k - margin,
-    maxY: (height - camera.y) / camera.k + margin,
-  };
-}
-
-/**
- * Fit a world-space figure envelope into a viewport.
- *
- * Renderers may obtain the envelope differently (SVG can use getBBox while
- * raster renderers measure text), but camera policy stays shared: cap an
- * ordinary fit, optionally retain a readable scale for oversized figures,
- * and top-align whenever that scale crops the figure.
- */
-function fitCameraForBounds({
-  bounds,
-  viewport,
-  padding = 20,
-  maximumFitScale = 1.2,
-  minimumReadableScale = 0,
-  constrainScale = (scale) => scale,
-} = {}) {
-  if (!validBounds$1(bounds) || !viewport?.width || !viewport?.height) return null;
-
-  const width = bounds.maxX - bounds.minX;
-  const height = bounds.maxY - bounds.minY;
-  const fitScale = Math.min(
-    maximumFitScale,
-    (viewport.width - padding * 2) / width,
-    (viewport.height - padding * 2) / height
-  );
-  const k = constrainScale(Math.max(fitScale, minimumReadableScale));
-  const cropped = k > fitScale;
-  return {
-    x: cropped
-      ? padding - bounds.minX * k
-      : (viewport.width - width * k) / 2 - bounds.minX * k,
-    y: cropped
-      ? padding - bounds.minY * k
-      : (viewport.height - height * k) / 2 - bounds.minY * k,
-    k,
-    fitScale,
-    cropped,
-  };
-}
-
-function clusterPairKey(left, right) {
-  return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
-}
-
-function getLinkAnchors(
-  link,
-  {
-    geneForUid,
-    areClustersAdjacent,
-    scaleX,
-    horizontalOffset,
-    verticalPosition,
-    geneMidpoint,
-  }
-) {
-  const query = geneForUid(link.query.uid);
-  const target = geneForUid(link.target.uid);
-
-  if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
-
-  const getGeneAnchors = (gene) => {
-    const offset = horizontalOffset(gene);
-    const left = scaleX(gene.start) + offset;
-    const right = scaleX(gene.end) + offset;
-    const forward = gene.strand === 1;
-    return [
-      forward ? left : right,
-      forward ? right : left,
-      verticalPosition(gene) + geneMidpoint,
-    ];
-  };
-
-  const [ax1, ax2, ay] = getGeneAnchors(query);
-  const [bx1, bx2, by] = getGeneAnchors(target);
-
-  return ay > by
-    ? [bx1, bx2, by, ax1, ax2, ay]
-    : [ax1, ax2, ay, bx1, bx2, by];
-}
-
-function interpolateLinkOpacity(previous, next, amount, enabled = true) {
-  const isRenderable = (link) => Boolean(enabled && link?.visible && link?.anchors);
-  const from = isRenderable(previous) ? 1 : 0;
-  const to = isRenderable(next) ? 1 : 0;
-  return from + (to - from) * amount;
-}
-
-function interpolateLinkAnchors(previousScene, previous, nextScene, next, amount) {
-  const inQueryOrder = (scene, link) => {
-    if (!link?.anchors) return null;
-    const query = scene?.genes.get(link.source.query.uid);
-    const queryY = query?.locus?.y;
-    if (!Number.isFinite(queryY)) return link.anchors;
-    const anchors = link.anchors;
-    const queryFirst = Math.abs(anchors[2] - queryY) <= Math.abs(anchors[5] - queryY);
-    return queryFirst ? anchors : [anchors[3], anchors[4], anchors[5], anchors[0], anchors[1], anchors[2]];
-  };
-  const from = inQueryOrder(previousScene, previous);
-  const to = inQueryOrder(nextScene, next);
-  if (!from) return to;
-  if (!to) return from;
-  return to.map((value, index) => from[index] + (value - from[index]) * amount);
-}
-
-function getLinkLabelPosition(
-  [ax1, ax2, ay, bx1, bx2, by],
-  position
-) {
-  const aMid = ax1 + (ax2 - ax1) / 2;
-  const bMid = bx1 + (bx2 - bx1) / 2;
-  return {
-    x: aMid + (bMid - aMid) * position,
-    y: ay + (by - ay) * position,
-  };
-}
-
-function linkPathCommands(anchors, { asLine = false, straight = false } = {}) {
-  if (!anchors) return [];
-  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  const aMid = ax1 + (ax2 - ax1) / 2;
-  const bMid = bx1 + (bx2 - bx1) / 2;
-  const middle = ay + (by - ay) / 2;
-  if (asLine) {
-    return straight
-      ? [["M", aMid, ay], ["L", bMid, by]]
-      : [["M", aMid, ay], ["C", aMid, middle, bMid, middle, bMid, by]];
-  }
-  return straight
-    ? [["M", ax1, ay], ["L", ax2, ay], ["L", bx2, by], ["L", bx1, by], ["L", ax1, ay], ["Z"]]
-    : [
-        ["M", ax2, ay],
-        ["C", ax2, middle, bx2, middle, bx2, by],
-        ["L", bx1, by],
-        ["C", bx1, middle, ax1, middle, ax1, ay],
-        ["Z"],
-      ];
-}
-
-/** Trace the same link shape used by SVG onto a Canvas context. */
-function traceLinkPath(context, anchors, style) {
-  for (const [command, ...values] of linkPathCommands(anchors, style)) {
-    if (command === "M") context.moveTo(...values);
-    else if (command === "L") context.lineTo(...values);
-    else if (command === "C") context.bezierCurveTo(...values);
-    else context.closePath();
-  }
-}
-
-/**
- * Sample a link in world coordinates for renderers that submit triangles and
- * line segments directly rather than accepting SVG/Canvas path commands.
- */
-function sampleLinkGeometry(anchors, { asLine = false, straight = false, segments = 10 } = {}) {
-  if (!anchors) return { asLine, upper: [], lower: [], line: [] };
-  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  const middle = ay + (by - ay) / 2;
-  const pointFor = (startX, endX, amount) => straight
-    ? [startX + (endX - startX) * amount, ay + (by - ay) * amount]
-    : [
-        cubic(startX, startX, endX, endX, amount),
-        cubic(ay, middle, middle, by, amount),
-      ];
-  const count = straight ? 1 : Math.max(1, segments);
-  const samples = (startX, endX) => Array.from(
-    { length: count + 1 },
-    (_, index) => pointFor(startX, endX, index / count)
-  );
-  if (asLine) return {
-    asLine,
-    upper: [],
-    lower: [],
-    line: samples((ax1 + ax2) / 2, (bx1 + bx2) / 2),
-  };
-  return { asLine, upper: samples(ax2, bx2), lower: samples(ax1, bx1), line: [] };
-}
-
-function cubic(start, controlA, controlB, end, amount) {
-  const inverse = 1 - amount;
-  return (
-    inverse * inverse * inverse * start +
-    3 * inverse * inverse * amount * controlA +
-    3 * inverse * amount * amount * controlB +
-    amount * amount * amount * end
-  );
-}
-
-function getLinkPath(anchors, style) {
-  return linkPathCommands(anchors, style)
-    .map(([command, ...values]) => `${command}${values.join(",")}`)
-    .join("");
-}
-
-function formatLength(length) {
-  const rounded = Math.round(length);
-  if (rounded >= 1000) {
-    const kilobases = rounded / 1000;
-    return `${Number(kilobases.toFixed(kilobases >= 10 ? 0 : 1))} kb`;
-  }
-  return `${rounded} bp`;
-}
-
-function featureText(count) {
-  return `${count} ${count === 1 ? "feature" : "features"}`;
-}
-
-function boundedNumber(value, fallback, minimum, maximum) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
-}
-
-/**
- * Shared text metrics for layout and renderers. The width estimate only
- * chooses collision lanes; the renderer remains the source of exact glyph
- * placement.
- */
-function resolveTrimIndicatorStyle(style = {}) {
-  const fontSize = boundedNumber(style.fontSize, 10, 6, 48);
-  const fontWeight = boundedNumber(style.fontWeight, 600, 100, 900);
-  return {
-    fontSize,
-    fontWeight,
-    borderWidth: boundedNumber(style.borderWidth, 3, 0, 12),
-    borderOpacity: boundedNumber(style.borderOpacity, 1, 0, 1),
-    lineHeight: Math.ceil(fontSize * 1.2),
-    characterWidth: fontSize * (fontWeight >= 600 ? 0.6 : 0.56),
-  };
-}
-
-function indicatorBounds(locus, indicator, metrics) {
-  const width = indicator.text.length * metrics.characterWidth;
-  const x = locus.x + indicator.x;
-  const left = indicator.anchor === "end" ? x - width : x;
-  return {
-    left: left - 2,
-    right: left + width + 2,
-    top: locus.y + indicator.y - 1,
-    bottom: locus.y + indicator.y + metrics.fontSize + 1,
-  };
-}
-
-function overlaps(one, two) {
-  return (
-    one.left < two.right && one.right > two.left &&
-    one.top < two.bottom && one.bottom > two.top
-  );
-}
-
-/**
- * Assign the smallest non-overlapping vertical lane to every trim label.
- * This keeps both labels on one locus aligned whenever they fit, while also
- * preventing labels from separate loci in the same cluster from colliding.
- */
-function arrangeTrimIndicators(loci, replacements = new Map(), style = {}) {
-  const metrics = resolveTrimIndicatorStyle(style);
-  const arranged = new Map();
-  const placed = [];
-  for (const locus of [...loci].sort((one, two) => one.y - two.y || one.x - two.x)) {
-    const indicators = replacements.get(locus.source.uid) || locus.trimIndicators || [];
-    const positioned = [];
-    for (const indicator of indicators) {
-      const next = { ...indicator };
-      let bounds = indicatorBounds(locus, next, metrics);
-      while (placed.some((candidate) => overlaps(bounds, candidate))) {
-        next.y += metrics.lineHeight;
-        bounds = indicatorBounds(locus, next, metrics);
-      }
-      positioned.push(next);
-      placed.push(bounds);
-    }
-    arranged.set(locus.source.uid, positioned);
-  }
-  return arranged;
-}
-
-/**
- * Describe the hidden flanks of a trimmed locus in its local display space.
- * The resulting records are deliberately renderer-neutral: SVG can use them
- * as text nodes while Canvas and WebGPU's Canvas overlay draw the same labels.
- */
-function createTrimIndicators({ locus, state, getGeneState, scaleX, shape = {} }) {
-  if (!locus || !state) return [];
-  const start = Number(state.start);
-  const end = Number(state.end);
-  const fullStart = Number(locus.start);
-  const fullEnd = Number(locus.end);
-  if (![start, end, fullStart, fullEnd].every(Number.isFinite)) return [];
-
-  const genes = locus.genes || [];
-  const countBefore = (boundary) =>
-    genes.filter((gene) => Number(getGeneState(gene)?.end) <= boundary).length;
-  const countAfter = (boundary) =>
-    genes.filter((gene) => Number(getGeneState(gene)?.start) >= boundary).length;
-  const y = (shape.tipHeight || 0) * 2 + (shape.bodyHeight || 0) + 4;
-  const indicators = [];
-
-  if (start > fullStart) {
-    indicators.push({
-      side: "left",
-      x: scaleX(start) + 3,
-      y,
-      anchor: "start",
-      text: `← ${formatLength(start - fullStart)} · ${featureText(countBefore(start))}`,
-    });
-  }
-  if (end < fullEnd) {
-    indicators.push({
-      side: "right",
-      x: scaleX(end) - 3,
-      y,
-      anchor: "end",
-      text: `${featureText(countAfter(end))} · ${formatLength(fullEnd - end)} →`,
-    });
-  }
-  return indicators;
-}
-
-function minStart(loci, startFor) {
-  let start = Infinity;
-  for (const locus of loci) start = Math.min(start, startFor(locus));
-  return start;
-}
-
-function clusterUidForLocus(locus) {
-  return locus.cluster?.uid ?? locus.cluster?.source?.uid ?? locus.source.clusterUid;
-}
-
-function clusterLabelOffsetsForStarts(
-  scene,
-  startFor,
-  alignLabels,
-  affectedClusters = scene.clusters.values()
-) {
-  const offsets = new Map();
-  if (alignLabels) {
-    const offset = minStart(scene.loci.values(), startFor) -
-      minStart(scene.loci.values(), (locus) => locus.worldStart);
-    for (const cluster of scene.clusters.values()) offsets.set(cluster.source.uid, offset);
-    return offsets;
-  }
-  for (const cluster of affectedClusters) {
-    offsets.set(
-      cluster.source.uid,
-      minStart(cluster.loci, startFor) - minStart(cluster.loci, (locus) => locus.worldStart)
-    );
-  }
-  return offsets;
-}
-
-function chromeForPreview(scene, maxX) {
-  if (!scene.chrome) return null;
-  const dx = scene.annotationPanels?.length ? annotationOffsetForPreview(scene, { contentMaxX: maxX }) : maxX - scene.bounds.maxX;
-  return {
-    ...scene.chrome,
-    legend: {
-      ...scene.chrome.legend,
-      position: {
-        ...scene.chrome.legend.position,
-        x:
-          scene.chrome.legend.placement === "bottom"
-            ? scene.chrome.legend.position.x
-            : scene.chrome.legend.position.x + dx,
-      },
-    },
-  };
-}
-
-/** Keep the annotation group beyond stationary scales while loci move. */
-function annotationOffsetForPreview(scene, preview) {
-  if (!scene.annotationPanels?.length || preview?.contentMaxX === undefined) return 0;
-  let right = -Infinity;
-  for (const locus of scene.loci.values()) right = Math.max(right, locus.worldEnd);
-  const movingRight = scene.bounds.maxX + preview.contentMaxX - right;
-  return Math.max(movingRight, scene.annotationChromeRight ?? -Infinity) -
-    (scene.annotationAnchorX ?? scene.bounds.maxX);
-}
-
-function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClusters) {
-  let contentMaxX = -Infinity;
-  for (const locus of scene.loci.values()) contentMaxX = Math.max(contentMaxX, endFor(locus));
-  return {
-    ...fields,
-    contentMaxX,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, affectedClusters),
-    chrome: chromeForPreview(scene, contentMaxX),
-  };
-}
-
-/**
- * Describe a transient locus translation relative to an already projected
- * scene. This is deliberately a sparse, renderer-neutral patch: it avoids
- * rebuilding the scene while a drag is in progress.
- */
-function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels }) {
-  const locus = scene.loci.get(locusUid);
-  if (!locus) return null;
-  const offsetX = offset - locus.localX;
-  const startFor = (candidate) =>
-    candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart;
-  const endFor = (candidate) =>
-    candidate.source.uid === locusUid ? candidate.worldEnd + offsetX : candidate.worldEnd;
-  return locusPreview(scene, {
-    type: "locus-offset",
-    locusUid,
-    offsetX,
-  }, startFor, endFor, alignLabels, [scene.clusters.get(locus.cluster.uid)]);
-}
-
-/** Describe several transient locus translations without rebuilding the scene. */
-function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
-  const locusOffsets = new Map();
-  const affectedClusters = new Set();
-  for (const [locusUid, offset] of offsets) {
-    const locus = scene.loci.get(locusUid);
-    if (!locus) continue;
-    locusOffsets.set(locusUid, offset - locus.localX);
-    const cluster = scene.clusters.get(locus.cluster.uid);
-    if (cluster) affectedClusters.add(cluster);
-  }
-  if (!locusOffsets.size) return null;
-  const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
-  const startFor = (candidate) => candidate.worldStart + offsetFor(candidate);
-  const endFor = (candidate) => candidate.worldEnd + offsetFor(candidate);
-  return locusPreview(scene, {
-    type: "locus-offsets",
-    locusOffsets,
-  }, startFor, endFor, alignLabels, affectedClusters);
-}
-
-/**
- * Describe a transient trim using the current scene and updated locus-scale
- * offsets. The controller updates scales (but not the scene) before calling
- * this, so sibling loci retain their correct packed positions without a full
- * data-to-scene projection for every pointer event.
- */
-function createLocusTrimPreview(
-  scene,
-  locusUid,
-  state,
-  { localXFor, scaleX, alignLabels, shape, trimIndicatorStyle = {}, clusterLabelText = null }
-) {
-  const locus = scene.loci.get(locusUid);
-  if (!locus) return null;
-
-  const locusOffsets = new Map();
-  for (const candidate of scene.loci.values()) {
-    locusOffsets.set(candidate.source.uid, localXFor(candidate.source.uid) - candidate.localX);
-  }
-  const offsetFor = (candidate) => locusOffsets.get(candidate.source.uid) || 0;
-  const trimmed = {
-    worldStart: locus.x + offsetFor(locus) + scaleX(state.start),
-    worldEnd: locus.x + offsetFor(locus) + scaleX(state.end),
-    track: {
-      ...locus.track,
-      x1: scaleX(state.start),
-      x2: scaleX(state.end),
-    },
-    hover: {
-      ...locus.hover,
-      x: scaleX(state.start),
-      width: scaleX(state.end) - scaleX(state.start),
-      leftHandleX: scaleX(state.start) - 8,
-      rightHandleX: scaleX(state.end),
-    },
-    trimIndicators: createTrimIndicators({
-      locus: locus.source,
-      state,
-      getGeneState: (gene) => scene.genes.get(gene.uid)?.display || gene,
-      scaleX,
-      shape,
-    }),
-  };
-  const locusGeometry = new Map([[locusUid, trimmed]]);
-  const arrangedTrimIndicators = arrangeTrimIndicators(
-    scene.loci.values(),
-    new Map([[locusUid, trimmed.trimIndicators]]),
-    trimIndicatorStyle
-  );
-  trimmed.trimIndicators = arrangedTrimIndicators.get(locusUid) || [];
-  const startFor = (candidate) =>
-    candidate.source.uid === locusUid
-      ? trimmed.worldStart
-      : candidate.worldStart + offsetFor(candidate);
-  const endFor = (candidate) =>
-    candidate.source.uid === locusUid
-      ? trimmed.worldEnd
-      : candidate.worldEnd + offsetFor(candidate);
-  const geneVisibility = new Map();
-  for (const gene of locus.genes) {
-    geneVisibility.set(
-      gene.source.uid,
-      gene.display.start >= state.start && gene.display.end <= state.end + 1
-    );
-  }
-
-  return locusPreview(scene, {
-    type: "locus-trim",
-    locusUid,
-    locusOffsets,
-    loci: locusGeometry,
-    geneVisibility,
-    ...(clusterLabelText === null
-      ? {}
-      : {
-          clusterLabelTexts: new Map([[
-            clusterUidForLocus(locus),
-            clusterLabelText,
-          ]]),
-        }),
-  }, startFor, endFor, alignLabels);
-}
-
-// Preview patches carry layout deltas rather than cloned scenes. These
-// accessors keep SVG, Canvas chrome, and dense WebGPU marks on the same
-// locus, cluster, and link geometry.
-function locusOffsetForPreview(preview, locusUid) {
-  if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
-  return preview?.type === "locus-offset" && preview.locusUid === locusUid
-    ? preview.offsetX
-    : 0;
-}
-
-function clusterLabelOffsetForPreview(preview, clusterUid) {
-  return preview?.clusterLabelOffsets?.get(clusterUid) || 0;
-}
-
-function clusterLabelTextForPreview(preview, clusterUid, fallback) {
-  return preview?.clusterLabelTexts?.get(clusterUid) ?? fallback;
-}
-
-function clusterOffsetForPreview(preview, clusterUid) {
-  return preview?.clusterOffsets?.get(clusterUid) || 0;
-}
-
-function previewOffsetsForLocus(preview, locus) {
-  if (!preview || !locus) return { x: 0, y: 0 };
-  return {
-    x: locusOffsetForPreview(preview, locus.source?.uid),
-    y: clusterOffsetForPreview(preview, locus.cluster?.uid ?? locus.source?.clusterUid),
-  };
-}
-
-function locusGeometryForPreview(preview, locus) {
-  if (preview?.type === "locus-flip") {
-    const axis = preview.axes?.get(locus.source.uid);
-    if (axis !== undefined) {
-      const flip = (x) => x + (axis * 2 - x - x) * preview.progress;
-      const start = flip(locus.worldStart);
-      const end = flip(locus.worldEnd);
-      const hoverStart = flip(locus.x + locus.hover.x);
-      const hoverEnd = flip(locus.x + locus.hover.x + locus.hover.width);
-      const left = Math.min(start, end);
-      const right = Math.max(start, end);
-      return {
-        offsets: previewOffsetsForLocus(preview, locus),
-        worldStart: left,
-        worldEnd: right,
-        track: {
-          ...locus.track,
-          x1: flip(locus.x + locus.track.x1) - locus.x,
-          x2: flip(locus.x + locus.track.x2) - locus.x,
-        },
-        hover: {
-          ...locus.hover,
-          x: Math.min(hoverStart, hoverEnd) - locus.x,
-          width: Math.abs(hoverEnd - hoverStart),
-          leftHandleX: left - locus.x - 8,
-          rightHandleX: right - locus.x,
-        },
-      };
-    }
-  }
-  const trimmed = preview?.loci?.get(locus.source.uid);
-  return {
-    offsets: previewOffsetsForLocus(preview, locus),
-    ...(trimmed || {}),
-  };
-}
-
-function geneVisibleForPreview(preview, gene) {
-  return gene && (preview?.geneVisibility?.get(gene.source.uid) ?? gene.visible);
-}
-
-/** Describe flip frames without re-projecting the chart. */
-function createLocusFlipPreview(
-  scene,
-  locusUid,
-  { progress = 0, clusterLabelText = null } = {}
-) {
-  const locus = scene.loci.get(locusUid);
-  if (!locus) return null;
-  return {
-    type: "locus-flip",
-    locusUid,
-    progress,
-    ...(clusterLabelText === null
-      ? {}
-      : {
-          clusterLabelTexts: new Map([[
-            clusterUidForLocus(locus),
-            clusterLabelText,
-          ]]),
-        }),
-    // The projected bounds reflect the currently displayed locus, including
-    // any committed trim. Source coordinates describe the original record and
-    // must not determine the transient flip axis.
-    axes: new Map([[locusUid, (locus.worldStart + locus.worldEnd) / 2]]),
-  };
-}
-
-/** Describe temporary cluster rows without rebuilding a scene. */
-function createClusterDragPreview(scene, { clusterUid, position, positions, order, rows }) {
-  const clusterOffsets = new Map();
-  const clusterOrder = new Map();
-  for (const [index, uid] of order.entries()) {
-    const cluster = scene.clusters.get(uid);
-    if (!cluster) continue;
-    const y = positions?.get(uid) ?? (uid === clusterUid ? position : rows[index]);
-    clusterOffsets.set(uid, y - cluster.y);
-    clusterOrder.set(uid, index);
-  }
-  return { type: "cluster-drag", clusterUid, clusterOffsets, clusterOrder };
-}
-
-function offsetsForGene(preview, gene) {
-  return previewOffsetsForLocus(preview, gene.locus);
-}
-
-function flipAxisForGene(preview, gene) {
-  return preview?.type === "locus-flip"
-    ? preview.axes?.get(gene?.locus?.source?.uid)
-    : undefined;
-}
-
-function geneGeometryForPreview(preview, gene) {
-  const axis = flipAxisForGene(preview, gene);
-  if (axis === undefined) return {};
-  const progress = preview.progress;
-  const flipScale = 1 - 2 * progress;
-  const flip = (x) => axis + (x - axis) * flipScale;
-  return {
-    flipAxis: axis,
-    flipScale,
-    labelX: flip(gene.locus.x + gene.label.x),
-  };
-}
-
-function linkOffsetsForPreview(scene, link, preview) {
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
-  const offsetForGene = (gene) =>
-    locusOffsetForPreview(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
-  const queryOffset = offsetForGene(query);
-  const targetOffset = offsetForGene(target);
-  // Link anchors are ordered from the upper locus to the lower one, not from
-  // source.query to source.target.
-  return query?.locus?.y <= target?.locus?.y
-    ? { a: queryOffset, b: targetOffset }
-    : { a: targetOffset, b: queryOffset };
-}
-
-function previewLinkAnchors(scene, link, preview) {
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
-  if (!query || !target) return null;
-  const anchorForGene = (gene) => {
-    const offsets = offsetsForGene(preview, gene);
-    // Bounds are calculated when the retained scene is built and equal the
-    // polygon's horizontal extent. Reusing them avoids a vertex scan for each
-    // animated link endpoint on every frame.
-    let minX = gene.bounds?.minX;
-    let maxX = gene.bounds?.maxX;
-    // Retain support for compact third-party scenes that only expose a
-    // polygon. Production scenes always take the cached-bounds path above.
-    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
-      minX = Infinity;
-      maxX = -Infinity;
-      for (let index = 0; index < gene.polygon.length; index += 2) {
-        minX = Math.min(minX, gene.polygon[index]);
-        maxX = Math.max(maxX, gene.polygon[index]);
-      }
-    }
-    minX += offsets.x;
-    maxX += offsets.x;
-    const forward = gene.display.strand === 1;
-    const axis = flipAxisForGene(preview, gene);
-    if (axis === undefined) {
-      return [
-        forward ? minX : maxX,
-        forward ? maxX : minX,
-        gene.locus.y + gene.locus.track.y + offsets.y,
-      ];
-    }
-    const progress = preview.progress;
-    const targetMin = axis * 2 - maxX;
-    const targetMax = axis * 2 - minX;
-    const from = forward ? [minX, maxX] : [maxX, minX];
-    const to = forward ? [targetMax, targetMin] : [targetMin, targetMax];
-    return [
-      from[0] + (to[0] - from[0]) * progress,
-      from[1] + (to[1] - from[1]) * progress,
-      gene.locus.y + gene.locus.track.y + offsets.y,
-    ];
-  };
-  const queryAnchor = anchorForGene(query);
-  const targetAnchor = anchorForGene(target);
-  return queryAnchor[2] <= targetAnchor[2]
-    ? [...queryAnchor, ...targetAnchor]
-    : [...targetAnchor, ...queryAnchor];
-}
-
-function linkGeometryForPreview(scene, link, preview, config) {
-  const visible = linkVisibleForPreview(scene, link, preview, config);
-  if (preview?.type === "cluster-drag" || preview?.type === "locus-flip") {
-    const query = scene.genes.get(link.source.query.uid);
-    const target = scene.genes.get(link.source.target.uid);
-    const affected = preview.type === "cluster-drag" ||
-      query?.locus?.source?.uid === preview.locusUid ||
-      target?.locus?.source?.uid === preview.locusUid;
-    return { visible, anchors: visible && affected ? previewLinkAnchors(scene, link, preview) : link.anchors };
-  }
-  const anchors = link.anchors;
-  if (!preview || !anchors) return { visible, anchors };
-  const { a, b } = linkOffsetsForPreview(scene, link, preview);
-  return { visible, anchors: a || b
-    ? [anchors[0] + a, anchors[1] + a, anchors[2], anchors[3] + b, anchors[4] + b, anchors[5]]
-    : anchors };
-}
-
-function linkVisibleForPreview(scene, link, preview, config) {
-  if (!preview) return link.visible;
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
-  if (!query || !target) return false;
-  if (!geneVisibleForPreview(preview, query) || !geneVisibleForPreview(preview, target)) return false;
-  if (preview?.type === "locus-trim") {
-    return link.allowed && !link.source.hidden && link.source.identity >= config.link.threshold;
-  }
-  if (preview?.type !== "cluster-drag") return link.visible;
-  const queryOrder = preview.clusterOrder.get(query.locus.cluster.uid);
-  const targetOrder = preview.clusterOrder.get(target.locus.cluster.uid);
-  return (
-    queryOrder !== undefined &&
-    targetOrder !== undefined &&
-    Math.abs(queryOrder - targetOrder) === 1 &&
-    link.allowed &&
-    link.source.identity >= config.link.threshold
-  );
-}
-
-
-function recordsForPreview(scene, preview, { includeClusters = false } = {}) {
-  if (!preview) return null;
-  if (preview.type === "cluster-drag" && !includeClusters) {
-    return {
-      // Genes, tracks, and instanced link ribbons all resolve their row
-      // offsets on the GPU, leaving only a compact visible-link index list to
-      // upload while the pointer moves.
-      loci: new Set(),
-      genes: new Set(),
-      links: new Set(),
-      clusterOffsets: true,
-    };
-  }
-  const loci = new Set();
-  if (preview.type === "cluster-drag") {
-    for (const locus of scene.loci.values()) {
-      if (clusterOffsetForPreview(preview, locus.cluster.uid)) loci.add(locus.source.uid);
-    }
-  }
-  if (preview.type === "locus-offset") loci.add(preview.locusUid);
-  if (preview.type === "locus-offsets") {
-    for (const locusUid of preview.locusOffsets.keys()) loci.add(locusUid);
-  }
-  if (preview.type === "locus-flip") loci.add(preview.locusUid);
-  if (preview.type === "locus-trim") {
-    const trimmed = scene.loci.get(preview.locusUid);
-    const clusterUid = trimmed?.cluster.uid;
-    // getLocusScaleValues packs loci independently within each cluster. A
-    // trim can therefore shift every sibling locus even when its individual
-    // offset happens to be zero in a particular preview frame.
-    for (const locus of scene.loci.values()) {
-      if (locus.cluster.uid === clusterUid) loci.add(locus.source.uid);
-    }
-  }
-  const genes = new Set();
-  for (const uid of loci) {
-    for (const gene of scene.loci.get(uid)?.genes || []) genes.add(gene.source.uid);
-  }
-  const links = new Set();
-  if (scene.linksByGene) {
-    for (const uid of genes) {
-      for (const link of scene.linksByGene.get(uid) || []) links.add(link.uid);
-    }
-  } else {
-    for (const link of scene.links.values()) {
-      if (genes.has(link.source.query.uid) || genes.has(link.source.target.uid)) links.add(link.source.uid);
-    }
-  }
-  return { loci, genes, links };
-}
-
-
-function genePolygonForPreview(preview, gene, { includeClusterOffset = true } = {}) {
-  const { x, y } = previewOffsetsForLocus(preview, gene.locus);
-  // Retained GPU vertices and SVG children apply cluster rows at their parent.
-  const bakedY = includeClusterOffset ? y : 0;
-  const axis = preview?.type === "locus-flip"
-    ? preview.axes?.get(gene.locus.source.uid)
-    : undefined;
-  if (!x && !y && axis === undefined) return gene.polygon;
-  const scale = axis === undefined ? 1 : 1 - 2 * preview.progress;
-  return gene.polygon.map((coordinate, index) =>
-    index % 2
-      ? coordinate + bakedY
-      : (axis === undefined ? coordinate : axis + (coordinate - axis) * scale) + x
-  );
-}
-
-/** Visible preview rows and their adjacent cluster pairs, shared by raster backends. */
-function clusterPreviewInViewport(scene, preview, viewport, { includeLinks = true } = {}) {
-  const clusters = [...scene.clusters.values()].filter((cluster) => boundsInViewport(
-    cluster.bounds, viewport, { y: clusterOffsetForPreview(preview, cluster.source.uid) }
-  ));
-  const pairs = new Set();
-  if (includeLinks) {
-    const clusterUidByOrder = new Map([...preview.clusterOrder].map(([uid, order]) => [order, uid]));
-    for (const cluster of clusters) {
-      const order = preview.clusterOrder.get(cluster.source.uid);
-      for (const neighbourOrder of [order - 1, order + 1]) {
-        const neighbour = clusterUidByOrder.get(neighbourOrder);
-        if (neighbour !== undefined) pairs.add(clusterPairKey(cluster.source.uid, neighbour));
-      }
-    }
-  }
-  return { clusters, pairs };
-}
-
-const TREE_COLOURING_DEFAULTS = {
-  mode: "none",
-  cutHeight: "auto",
-  palette: ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"],
-  showCutLine: false,
-};
-const metricsCache = new WeakMap();
-const stylesCache = new WeakMap();
-const fail$2 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
-const object$1 = (value) => value && typeof value === "object" && !Array.isArray(value);
-const own$1 = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
-function fields$1(value, allowed, where) {
-  if (!object$1(value)) fail$2(`${where} must be an object.`);
-  for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$2(`${where}.${key} is unsupported.`);
-}
-function colour(value, where) {
-  if (typeof value !== "string" || !color(value)) fail$2(`${where} must be a valid colour.`);
-}
-function positive(value, where) {
-  if (!Number.isFinite(value) || value <= 0) fail$2(`${where} must be finite and positive.`);
-}
-function validateTreeColouring(policy) {
-  if (policy === undefined) return;
-  fields$1(policy, ["mode", "cutHeight", "palette", "showCutLine"], "colouring");
-  if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$2("colouring.mode must be none or cutHeight.");
-  if (own$1(policy, "cutHeight") && policy.cutHeight !== "auto" && (!Number.isFinite(policy.cutHeight) || policy.cutHeight < 0)) {
-    fail$2('colouring.cutHeight must be "auto" or a finite non-negative number.');
-  }
-  if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$2("colouring.showCutLine must be boolean.");
-  if (own$1(policy, "palette")) {
-    if (!Array.isArray(policy.palette) || !policy.palette.length) fail$2("colouring.palette must be a non-empty colour array.");
-    policy.palette.forEach((entry) => colour(entry, "colouring.palette"));
-  }
-}
-
-/** Biological distances and canonical ID order survive child rotation unchanged. */
-function treeMetrics(tree) {
-  if (metricsCache.has(tree)) return metricsCache.get(tree);
-  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
-  const parents = new Map();
-  const distances = new Map([[tree.root, 0]]);
-  let complete = true;
-  const visit = (uid) => {
-    for (const child of nodes.get(uid).children || []) {
-      const length = nodes.get(child).branchLength;
-      if (!Number.isFinite(length) || length < 0) complete = false;
-      parents.set(child, uid);
-      distances.set(child, distances.get(uid) + (Number.isFinite(length) ? length : 0));
-      visit(child);
-    }
-  };
-  visit(tree.root);
-  const tips = tree.nodes.filter((node) => !node.children);
-  const height = Math.max(0, ...tips.map((node) => distances.get(node.uid)));
-  // Absolute 1e-12 plus relative 1e-9 tolerance, measured in input distance units.
-  const tolerance = 1e-12 + 1e-9 * height;
-  const ultrametric = complete && tips.every((node) => Math.abs(distances.get(node.uid) - height) <= tolerance);
-  const result = {
-    nodes, parents, height, ultrametric,
-    heights: new Map([...distances].map(([uid, distance]) => [uid, Math.max(0, height - distance)])),
-    canonical: [...tree.nodes].sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0),
-  };
-  metricsCache.set(tree, result);
-  return result;
-}
-
-function validateBranch(style, where) {
-  fields$1(style, ["colour", "width"], where);
-  if (own$1(style, "colour")) colour(style.colour, `${where}.colour`);
-  if (own$1(style, "width")) positive(style.width, `${where}.width`);
-}
-
-/** Validate optional data fields and the effective tree/config colouring policy. */
-function validateTreePresentation(tree, config = {}) {
-  validateTreeColouring(config.colouring);
-  if (!tree) return;
-  if (tree.distance !== undefined) {
-    fields$1(tree.distance, ["kind", "label"], "distance");
-    if (tree.distance.kind !== "mergeHeight") fail$2("distance.kind must be mergeHeight.");
-    if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$2("distance.label must be text.");
-  }
-  const presentation = tree.presentation;
-  if (presentation !== undefined) {
-    fields$1(presentation, ["colouring", "subtrees", "nodes"], "presentation");
-    validateTreeColouring(presentation.colouring);
-    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
-    for (const scope of ["subtrees", "nodes"]) {
-      if (presentation[scope] === undefined) continue;
-      if (!object$1(presentation[scope])) fail$2(`presentation.${scope} must be a node-ID dictionary.`);
-      for (const [uid, record] of Object.entries(presentation[scope])) {
-        const node = nodes.get(uid);
-        if (!node) fail$2(`presentation.${scope} refers to unknown node '${uid}'.`);
-        fields$1(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
-        if (scope === "subtrees" && !node.children) fail$2(`subtree '${uid}' must be an internal node.`);
-        if (record.branch !== undefined) {
-          if (scope === "nodes" && uid === tree.root) fail$2("the display root has no incoming edge to style.");
-          validateBranch(record.branch, `${scope}.${uid}.branch`);
-        }
-        if (record.label !== undefined) {
-          if (!node.children) fail$2(`annotation '${uid}' must belong to an internal node.`);
-          const label = record.label;
-          fields$1(label, ["text", "colour", "fontSize", "fontWeight", "fontStyle"], `nodes.${uid}.label`);
-          if (own$1(label, "text") && typeof label.text !== "string") fail$2(`annotation '${uid}' text must be a string.`);
-          if (own$1(label, "colour")) colour(label.colour, `annotation '${uid}' colour`);
-          if (own$1(label, "fontSize")) positive(label.fontSize, `annotation '${uid}' fontSize`);
-          if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$2("annotation fontWeight must be 400 or 700.");
-          if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$2("annotation fontStyle must be normal or italic.");
-        }
-      }
-    }
-  }
-  const policy = { ...TREE_COLOURING_DEFAULTS, ...config.colouring, ...presentation?.colouring };
-  if (policy.mode === "cutHeight") {
-    if (tree.distance?.kind !== "mergeHeight") fail$2("cutHeight colouring requires distance.kind = mergeHeight.");
-    if (!treeMetrics(tree).ultrametric) fail$2("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
-  }
-}
-
-function invalidateTreePresentation(tree) {
-  if (tree) stylesCache.delete(tree);
-}
-
-/** Resolve properties once per presentation/config revision, never per tween. */
-function resolveTreePresentation(tree, config = {}) {
-  const defaults = { ...TREE_COLOURING_DEFAULTS, ...config.colouring };
-  const signature = JSON.stringify([config.branch?.colour, config.branch?.width, config.textColour, defaults]);
-  const cached = stylesCache.get(tree);
-  if (cached && cached.presentation === tree.presentation && cached.signature === signature) return cached.value;
-  validateTreePresentation(tree, config);
-  const metrics = treeMetrics(tree);
-  const policy = { ...defaults, ...tree.presentation?.colouring };
-  const threshold = policy.cutHeight === "auto" ? metrics.height * 0.7 : policy.cutHeight;
-  const groups = new Map();
-  if (policy.mode === "cutHeight" && threshold > 0) {
-    for (const node of metrics.canonical) {
-      if (!node.children || metrics.heights.get(node.uid) >= threshold) continue;
-      const parent = metrics.parents.get(node.uid);
-      if (parent === undefined || metrics.heights.get(parent) >= threshold) {
-        groups.set(node.uid, policy.palette[groups.size % policy.palette.length]);
-      }
-    }
-  }
-  const base = { colour: config.branch?.colour || "#555", width: Number(config.branch?.width) || 1.5 };
-  const branches = new Map();
-  const stems = new Map();
-  const annotations = new Map();
-  const visit = (uid, inherited = {}, groupColour = null) => {
-    const node = metrics.nodes.get(uid);
-    const automatic = groups.get(uid) || groupColour;
-    const subtree = { ...inherited, ...tree.presentation?.subtrees?.[uid]?.branch };
-    const mergeStyle = { ...base, ...(automatic ? { colour: automatic } : {}), ...subtree };
-    if (node.children) stems.set(uid, mergeStyle);
-    const label = tree.presentation?.nodes?.[uid]?.label;
-    if (label?.text) annotations.set(uid, { colour: config.textColour || "#333", fontSize: 10, fontWeight: 400, fontStyle: "normal", ...label });
-    for (const child of node.children || []) {
-      branches.set(child, { ...mergeStyle, ...tree.presentation?.nodes?.[child]?.branch });
-      visit(child, subtree, automatic);
-    }
-  };
-  visit(tree.root);
-  const value = { base, branches, stems, annotations, policy, height: metrics.height, threshold, metric: policy.mode === "cutHeight" };
-  stylesCache.set(tree, { presentation: tree.presentation, signature, value });
-  return value;
-}
-
-const leafXAnchors = new WeakMap();
-
-/** Return whether an order keeps every tree clade contiguous. */
-function isTreeOrderCompatible(tree, order) {
-  if (!tree) return true;
-  const positions = new Map(order.map((uid, index) => [uid, index]));
-  if (positions.size !== order.length) return false;
-  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
-  const span = (uid) => {
-    const node = nodes.get(uid);
-    if (!node) return null;
-    if (!node.children?.length) {
-      const position = positions.get(node.cluster);
-      return position === undefined ? null : { min: position, max: position, count: 1 };
-    }
-    let min = Infinity, max = -Infinity, count = 0;
-    for (const child of node.children) {
-      const range = span(child);
-      if (!range) return null;
-      min = Math.min(min, range.min);
-      max = Math.max(max, range.max);
-      count += range.count;
-    }
-    return max - min + 1 === count ? { min, max, count } : null;
-  };
-  return span(tree.root)?.count === order.length;
-}
-
-/** Keep the tree in its base position until a dragged label reaches a leaf. */
-function treeLeafX(tree, proposedX, dragging = false) {
-  if (!tree || typeof tree !== "object") return proposedX;
-  if (!dragging || !leafXAnchors.has(tree)) leafXAnchors.set(tree, proposedX);
-  return Math.min(proposedX, leafXAnchors.get(tree));
-}
-
-function niceScaleValue(maxDistance) {
-  const target = maxDistance / 4;
-  const power = 10 ** Math.floor(Math.log10(target));
-  const fraction = target / power;
-  const multiplier = fraction >= 5 ? 5 : fraction >= 2 ? 2 : 1;
-  const value = multiplier * power;
-  return { value, label: String(Number(value.toPrecision(2))) };
-}
-
-/** Lay out branch x positions using lengths when every edge has one. */
-function treeHorizontalLayout(tree, leafX, width, useBranchLengths = true) {
-  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
-  const distances = new Map([[tree.root, 0]]);
-  const depths = new Map([[tree.root, 0]]);
-  const visit = (uid) => {
-    const node = nodes.get(uid);
-    for (const childUid of node.children || []) {
-      const child = nodes.get(childUid);
-      distances.set(childUid, distances.get(uid) + (Number(child.branchLength) || 0));
-      depths.set(childUid, depths.get(uid) + 1);
-      visit(childUid);
-    }
-  };
-  visit(tree.root);
-  const maxDepth = Math.max(...depths.values());
-  const maxDistance = Math.max(...tree.nodes
-    .filter((node) => !node.children)
-    .map((node) => distances.get(node.uid) || 0));
-  const completeLengths = tree.nodes
-    .filter((node) => node.uid !== tree.root)
-    .every((node) => Number.isFinite(node.branchLength));
-  const proportional = useBranchLengths && completeLengths && maxDistance > 0;
-  const leftX = leafX - width;
-  const xs = new Map();
-  for (const node of tree.nodes) {
-    const position = proportional
-      ? (distances.get(node.uid) / maxDistance) * width
-      : (depths.get(node.uid) / Math.max(1, maxDepth)) * width;
-    xs.set(node.uid, leftX + position);
-  }
-  if (proportional) {
-    const scale = niceScaleValue(maxDistance);
-    return {
-      xs,
-      maxDepth,
-      maxDistance,
-      proportional,
-      scaleBarLength: (scale.value / maxDistance) * width,
-      scaleBarLabel: scale.label,
-    };
-  }
-  return {
-    xs,
-    maxDepth,
-    maxDistance,
-    proportional,
-    scaleBarLength: width / Math.max(1, maxDepth),
-    scaleBarLabel: "1 branch",
-  };
-}
-
-/** Place the tree as far right as possible without leaf tips reaching labels. */
-function treeLeafAnchorX(tree, labelStarts, width, relative, clearance = 16) {
-  if (!tree || !labelStarts?.size) return 0;
-  let anchor = Infinity;
-  for (const node of tree.nodes) {
-    if (node.children?.length) continue;
-    const labelStart = labelStarts.get(node.cluster);
-    if (!Number.isFinite(labelStart)) continue;
-    anchor = Math.min(anchor, labelStart - clearance + width - relative.get(node.uid));
-  }
-  return Number.isFinite(anchor) ? anchor : 0;
-}
-
-function treeNodeYPositions(tree, scene, leafY = (node, sourceScene) =>
-  sourceScene.clusters.get(node.cluster)?.y ?? 0
-) {
-  if (!tree || !scene) return new Map();
-  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
-  const positions = new Map();
-  const yFor = (uid) => {
-    if (positions.has(uid)) return positions.get(uid);
-    const node = nodes.get(uid);
-    const children = (node.children || []).map(yFor);
-    const y = children.length
-      ? (Math.min(...children) + Math.max(...children)) / 2
-      : leafY(node, scene);
-    positions.set(uid, y);
-    return y;
-  };
-  yFor(tree.root);
-  return positions;
-}
-
-/**
- * Build renderer-neutral tree marks after the adapter has measured labels.
- * scene supplies displayed label positions; targetScene supplies final row
- * positions during a retained-scene animation. Keeping these separate prevents
- * an interpolated scene from applying the tree motion a second time.
- */
-function layoutTree({
-  tree,
-  scene,
-  config,
-  measureLabel,
-  measureText = (text, style) => ({ width: text.length * style.fontSize * 0.6, height: style.fontSize }),
-  preview = null,
-  previousTree = null,
-  previousScene = null,
-  targetScene = scene,
-  dragging = preview?.type === "cluster-drag",
-  trackAnchor = true,
-}) {
-  if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
-  const labelStarts = new Map();
-  for (const cluster of scene.clusters.values()) {
-    const uid = cluster.source.uid;
-    const text = clusterLabelTextForPreview(preview, uid, cluster.info.locusText || "");
-    labelStarts.set(uid, cluster.x + cluster.info.x +
-      clusterLabelOffsetForPreview(preview, uid) - measureLabel(cluster, text));
-  }
-  const width = Number(config.tree.width) || 100;
-  const horizontal = treeHorizontalLayout(tree, width, width, config.tree.useBranchLengths !== false);
-  const leafY = (node, sourceScene) =>
-    (sourceScene.clusters.get(node.cluster)?.y ?? 0) +
-    config.gene.shape.tipHeight + config.gene.shape.bodyHeight / 2 +
-    clusterOffsetForPreview(preview, node.cluster);
-  const ys = treeNodeYPositions(tree, targetScene, leafY);
-  const previousYs = previousTree && previousScene
-    ? treeNodeYPositions(previousTree, previousScene, leafY)
-    : null;
-  const presentation = resolveTreePresentation(tree, config.tree);
-  const branch = presentation.base;
-  const annotations = [...presentation.annotations].map(([uid, style]) => {
-    const font = { ...style, fontFamily: config.plot.fontFamily };
-    return { uid, ...font, ...measureText(style.text, font), x: horizontal.xs.get(uid) + 6, y: ys.get(uid) + 6 };
-  });
-  let proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
-  const rows = [...scene.clusters.values()].map((cluster) => {
-    const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
-    return { top: y + 8 - (config.cluster?.nameFontSize ?? 12), bottom: y + 12 + (config.cluster?.lociFontSize ?? 10), start: labelStarts.get(cluster.source.uid) };
-  }).sort((a, b) => a.top - b.top);
-  for (const label of annotations) {
-    let low = 0, high = rows.length;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (rows[middle].bottom < label.y) low = middle + 1;
-      else high = middle;
-    }
-    for (let index = low; index < rows.length; index++) {
-      const row = rows[index];
-      if (row.top > label.y + label.height) break;
-      if (row.bottom >= label.y) proposedX = Math.min(proposedX, row.start - 16 + width - label.x - label.width);
-    }
-  }
-  const leafX = trackAnchor ? treeLeafX(tree, proposedX, dragging) : proposedX;
-  const xs = new Map([...horizontal.xs].map(([uid, x]) => [uid, x + leafX - width]));
-  for (const label of annotations) label.x += leafX - width;
-  const guide = {
-    colour: config.tree.leafGuide?.colour || "#999",
-    width: Number(config.tree.leafGuide?.width) || 1,
-    dash: String(config.tree.leafGuide?.dash || "4 3").split(/[ ,]+/).map(Number).filter(Number.isFinite),
-  };
-  const support = {
-    fontSize: Number(config.tree.support?.fontSize) || 9,
-    fontFamily: config.plot.fontFamily,
-    colour: branch.colour,
-  };
-  const rootX = xs.get(tree.root);
-  const branches = [];
-  const stems = [];
-  const nodes = [];
-  const guides = [];
-  const supports = [];
-  for (const node of tree.nodes) {
-    const x = xs.get(node.uid);
-    if (node.children?.length) {
-      nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
-      // Stems and horizontal edges are separate marks. Square stem caps fill
-      // the outer corners without extending leaf tips or changing distances.
-      if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children, style: presentation.stems.get(node.uid), lineCap: "square" });
-      for (const child of node.children) {
-        branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child), style: presentation.branches.get(child) });
-      }
-    } else if (config.tree.leafGuide?.show && Number.isFinite(labelStarts.get(node.cluster))) {
-      guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: labelStarts.get(node.cluster) });
-    }
-    if (node.uid !== tree.root && config.tree.support?.show && node.support) {
-      const text = Number(node.support.value).toFixed(config.tree.support.precision ?? 1);
-      supports.push({
-        uid: node.uid,
-        x: x - 4,
-        text, ...measureText(text, support),
-      });
-    }
-  }
-  let scaleBar = null;
-  if (config.tree.scaleBar?.show !== false) {
-    const style = scene.chrome?.scaleBar || config.scaleBar || {};
-    const height = Number(style.height) || 12;
-    const length = horizontal.scaleBarLength;
-    const y = scene.chrome?.scaleBar?.position?.y ??
-      Math.max(...[...scene.clusters.values()].map((cluster) => cluster.y)) +
-        config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight + 20;
-    scaleBar = {
-      colour: style.colour || "black",
-      strokeWidth: Number(style.strokeWidth ?? style.stroke) || 1,
-      fontSize: Number(style.fontSize) || 10,
-      fontFamily: style.fontFamily || config.plot.fontFamily,
-      lines: [
-        { x1: rootX, y1: y + height / 2, x2: rootX + length, y2: y + height / 2 },
-        { x1: rootX, y1: y, x2: rootX, y2: y + height },
-        { x1: rootX + length, y1: y, x2: rootX + length, y2: y + height },
-      ],
-      label: { x: rootX + length / 2, y: y + height + 5, text: config.tree.scaleBar?.label || horizontal.scaleBarLabel },
-    };
-    // SVG scale labels use points; Canvas uses pixels. Measure the larger
-    // size for a common envelope without changing either renderer's drawing.
-    Object.assign(scaleBar.label, measureText(scaleBar.label.text, { ...scaleBar, fontSize: scaleBar.fontSize * 4 / 3 }));
-  }
-  let cutLine = null;
-  if (presentation.metric && presentation.policy.showCutLine && horizontal.proportional &&
-      presentation.threshold <= presentation.height && presentation.height > 0) {
-    const x = rootX + width * (1 - presentation.threshold / presentation.height);
-    const leafYs = tree.nodes.filter((node) => !node.children).map((node) => ys.get(node.uid));
-    cutLine = {
-      x1: x, x2: x, y1: Math.min(...leafYs), y2: Math.max(...leafYs),
-      colour: branch.colour, width: 1,
-      label: { x, y: Math.min(...leafYs) - 8, text: String(Number(presentation.threshold.toPrecision(6))), fontSize: support.fontSize, fontFamily: support.fontFamily },
-    };
-    Object.assign(cutLine.label, measureText(cutLine.label.text, cutLine.label));
-  }
-  return positionTreeLayout({
-    background: config.figureStyle?.background || "white", foreground: config.figureStyle?.foreground || "black",
-    cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
-    rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX, style: branch },
-    ys, previousYs,
-  }, ys);
-}
-
-function positionTreeLayout(layout, ys) {
-  const line = (mark) => ({ ...mark, y1: ys.get(mark.nodeUid), y2: ys.get(mark.nodeUid) });
-  const frame = {
-    ...layout,
-    rootBranch: line(layout.rootBranch),
-    branches: layout.branches.map(line),
-    stems: layout.stems.map((stem) => ({
-      ...stem,
-      y1: Math.min(...stem.children.map((uid) => ys.get(uid))),
-      y2: Math.max(...stem.children.map((uid) => ys.get(uid))),
-    })),
-    nodes: layout.nodes.map((node) => ({ ...node, y: ys.get(node.uid) })),
-    guides: layout.guides.map(line),
-    supports: layout.supports.map((label) => ({ ...label, y: ys.get(label.uid) - 4 })),
-    annotations: layout.annotations.map((label) => ({ ...label, y: ys.get(label.uid) + 6 })),
-  };
-  const points = [];
-  const includeLine = (mark, width = mark.style?.width || 1) => {
-    const half = width / 2;
-    const extendX = mark.x1 === mark.x2 || mark.lineCap === "square" ? half : 0;
-    const extendY = mark.y1 === mark.y2 || mark.lineCap === "square" ? half : 0;
-    points.push([Math.min(mark.x1, mark.x2) - extendX, Math.min(mark.y1, mark.y2) - extendY],
-      [Math.max(mark.x1, mark.x2) + extendX, Math.max(mark.y1, mark.y2) + extendY]);
-  };
-  for (const mark of [frame.rootBranch, ...frame.branches, ...frame.stems]) includeLine(mark);
-  for (const mark of frame.guides) includeLine(mark, frame.guide.width);
-  for (const node of frame.nodes) {
-    const radius = node.radius + frame.branch.width / 2;
-    points.push([node.x - radius, node.y - radius], [node.x + radius, node.y + radius]);
-  }
-  for (const label of frame.annotations) points.push([label.x - (label.overhang || 0), label.y], [label.x + label.width, label.y + label.height]);
-  for (const label of frame.supports) points.push([label.x - label.width, label.y - label.height], [label.x + (label.overhang || 0), label.y]);
-  if (frame.cutLine) {
-    includeLine(frame.cutLine, frame.cutLine.width);
-    const label = frame.cutLine.label;
-    points.push([label.x - label.width / 2, label.y - label.height], [label.x + label.width / 2, label.y]);
-  }
-  if (frame.scaleBar) {
-    for (const mark of frame.scaleBar.lines) includeLine(mark, frame.scaleBar.strokeWidth);
-    const label = frame.scaleBar.label;
-    points.push([label.x - label.width / 2, label.y], [label.x + label.width / 2, label.y + label.height]);
-  }
-  frame.bounds = {
-    minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
-    minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)),
-  };
-  return frame;
-}
-
-/** Interpolate node identities, then rebuild stems so swapped branches fold. */
-function interpolateTreeLayout(layout, progress = 1) {
-  if (!layout?.previousYs || progress >= 1) return layout;
-  const ys = new Map();
-  for (const [uid, target] of layout.ys) {
-    const from = layout.previousYs.get(uid) ?? target;
-    ys.set(uid, from + (target - from) * progress);
-  }
-  return positionTreeLayout(layout, ys);
-}
-
-function hitTestTreeNode(layout, point) {
-  for (const node of layout?.nodes || []) {
-    if (Math.hypot(point.x - node.x, point.y - node.y) <= node.hitRadius) {
-      return { action: "tree-node", nodeUid: node.uid };
-    }
-  }
-  return null;
-}
-
 function removeMissing(records, allowed) {
   for (const uid of records.keys()) if (!allowed.has(uid)) records.delete(uid);
 }
@@ -5904,1439 +8713,6 @@ function createChartIndex(data) {
   for (const group of data.groups || []) groupById.set(group.uid, group);
 
   return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId };
-}
-
-function validateGroupPanel(panel, clusterIds, tree, fail) {
-  if (!Array.isArray(panel.groups) || !panel.groups.length) fail("group panels require a non-empty groups array.");
-  for (const key of ["markerWidth", "laneGap"]) {
-    if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
-  }
-  const ids = new Set(), nodes = new Set(tree?.nodes.map((node) => node.uid));
-  for (const group of panel.groups) {
-    if (!group || typeof group.uid !== "string" || !group.uid.trim() || ids.has(group.uid)) fail("groups require unique, non-empty uid strings.");
-    ids.add(group.uid);
-    if (group.label !== undefined && typeof group.label !== "string") fail("group label must be text.");
-    if (group.colour !== undefined && (typeof group.colour !== "string" || !color(group.colour))) fail("group colour must be a CSS colour.");
-    if ((group.nodeUid !== undefined) === (group.clusterIds !== undefined)) fail("each group requires either nodeUid or clusterIds.");
-    if (group.nodeUid !== undefined) {
-      if (!nodes.has(group.nodeUid)) fail(`unknown tree node '${group.nodeUid}'.`);
-    } else if (!Array.isArray(group.clusterIds) || !group.clusterIds.length ||
-        new Set(group.clusterIds).size !== group.clusterIds.length || group.clusterIds.some((uid) => !clusterIds.has(uid))) {
-      fail("group clusterIds must contain unique, existing cluster IDs.");
-    }
-  }
-}
-
-/** Resolve membership and allocate lanes once; placement remains independent of tree geometry. */
-function layoutGroupPanel(source, clusters, { fontFamily, fontSize, cellHeight, rowOffset, theme, tree, measureBounds }) {
-  const nodes = new Map(tree?.nodes.map((node) => [node.uid, node]));
-  const descendants = new Map();
-  const collect = (uid) => {
-    if (!descendants.has(uid)) {
-      const node = nodes.get(uid);
-      descendants.set(uid, node?.children?.length ? node.children.flatMap(collect) : node ? [node.cluster] : []);
-    }
-    return descendants.get(uid);
-  };
-  const markerWidth = source.markerWidth ?? 3, laneGap = source.laneGap ?? 12;
-  const lanes = [];
-  const markerGroups = source.groups.map((group) => {
-    const clusterIds = group.clusterIds ?? collect(group.nodeUid);
-    let laneIndex = lanes.findIndex((lane) => clusterIds.every((uid) => !lane.members.has(uid)));
-    if (laneIndex < 0) { laneIndex = lanes.length; lanes.push({ members: new Set(), width: 0 }); }
-    const lane = lanes[laneIndex], label = group.label ?? group.uid;
-    const labelBounds = measureBounds(label);
-    for (const uid of clusterIds) lane.members.add(uid);
-    lane.width = Math.max(lane.width, markerWidth + (label ? 6 + labelBounds.maxX - labelBounds.minX : 0));
-    return { uid: group.uid, label, clusterIds: new Set(clusterIds), laneIndex, labelBounds,
-      colour: group.colour ?? source.colour ?? "#267c9e" };
-  });
-  let width = 0;
-  for (const lane of lanes) { lane.x = width; width += lane.width + laneGap; }
-  width -= laneGap;
-  for (const group of markerGroups) group.x = lanes[group.laneIndex].x;
-  const title = source.title ?? source.uid;
-  const header = title ? [{ text: title, x: 0, y: 0, anchor: "start", weight: 700, kind: "title",
-    bounds: measureBounds(title, { weight: 700 }) }] : [];
-  return { uid: source.uid, definition: source, title, width, cellHeight, rowOffset, fontSize, fontFamily,
-    markerWidth, markerGroups, headingHeight: 0, titleDescent: Math.max(0, header[0]?.bounds.maxY ?? 0),
-    rows: [...clusters.keys()].map((uid) => ({ uid, cells: [] })), header, footer: [], key: [],
-    textColour: theme?.foreground ?? "#333333", extentWidth: Math.max(width, header[0]?.bounds.maxX ?? 0) };
-}
-
-/** Split non-contiguous memberships using the current row order, including drag previews. */
-function groupPanelMarks(panel, rows) {
-  const sorted = [...rows].sort((a, b) => a.y - b.y);
-  const rects = [], texts = [];
-  for (const group of panel.markerGroups) {
-    let start = -1;
-    const segment = (end) => {
-      const top = sorted[start].y - panel.cellHeight / 2, bottom = sorted[end].y + panel.cellHeight / 2;
-      const uid = `${group.uid}:${sorted[start].uid}`;
-      rects.push({ uid, x: group.x, y: top, width: panel.markerWidth, height: bottom - top,
-        fill: group.colour, keyIndex: rects.length });
-      if (group.label) texts.push({ uid, text: group.label, x: group.x + panel.markerWidth + 6 - group.labelBounds.minX,
-        y: (top + bottom - group.labelBounds.minY - group.labelBounds.maxY) / 2,
-        anchor: "start", bounds: group.labelBounds });
-    };
-    for (let i = 0; i <= sorted.length; i++) {
-      const member = i < sorted.length && group.clusterIds.has(sorted[i].uid);
-      if (member && start < 0) start = i;
-      if (!member && start >= 0) { segment(i - 1); start = -1; }
-    }
-  }
-  return { rects, texts };
-}
-
-function ascending(a, b) {
-  return a == null || b == null ? NaN : a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
-}
-
-function descending(a, b) {
-  return a == null || b == null ? NaN
-    : b < a ? -1
-    : b > a ? 1
-    : b >= a ? 0
-    : NaN;
-}
-
-function bisector(f) {
-  let compare1, compare2, delta;
-
-  // If an accessor is specified, promote it to a comparator. In this case we
-  // can test whether the search value is (self-) comparable. We can’t do this
-  // for a comparator (except for specific, known comparators) because we can’t
-  // tell if the comparator is symmetric, and an asymmetric comparator can’t be
-  // used to test whether a single value is comparable.
-  if (f.length !== 2) {
-    compare1 = ascending;
-    compare2 = (d, x) => ascending(f(d), x);
-    delta = (d, x) => f(d) - x;
-  } else {
-    compare1 = f === ascending || f === descending ? f : zero;
-    compare2 = f;
-    delta = f;
-  }
-
-  function left(a, x, lo = 0, hi = a.length) {
-    if (lo < hi) {
-      if (compare1(x, x) !== 0) return hi;
-      do {
-        const mid = (lo + hi) >>> 1;
-        if (compare2(a[mid], x) < 0) lo = mid + 1;
-        else hi = mid;
-      } while (lo < hi);
-    }
-    return lo;
-  }
-
-  function right(a, x, lo = 0, hi = a.length) {
-    if (lo < hi) {
-      if (compare1(x, x) !== 0) return hi;
-      do {
-        const mid = (lo + hi) >>> 1;
-        if (compare2(a[mid], x) <= 0) lo = mid + 1;
-        else hi = mid;
-      } while (lo < hi);
-    }
-    return lo;
-  }
-
-  function center(a, x, lo = 0, hi = a.length) {
-    const i = left(a, x, lo, hi - 1);
-    return i > lo && delta(a[i - 1], x) > -delta(a[i], x) ? i - 1 : i;
-  }
-
-  return {left, center, right};
-}
-
-function zero() {
-  return 0;
-}
-
-function number$1(x) {
-  return x === null ? NaN : +x;
-}
-
-const ascendingBisect = bisector(ascending);
-const bisectRight = ascendingBisect.right;
-bisector(number$1).center;
-var bisect = bisectRight;
-
-class InternMap extends Map {
-  constructor(entries, key = keyof) {
-    super();
-    Object.defineProperties(this, {_intern: {value: new Map()}, _key: {value: key}});
-    if (entries != null) for (const [key, value] of entries) this.set(key, value);
-  }
-  get(key) {
-    return super.get(intern_get(this, key));
-  }
-  has(key) {
-    return super.has(intern_get(this, key));
-  }
-  set(key, value) {
-    return super.set(intern_set(this, key), value);
-  }
-  delete(key) {
-    return super.delete(intern_delete(this, key));
-  }
-}
-
-function intern_get({_intern, _key}, value) {
-  const key = _key(value);
-  return _intern.has(key) ? _intern.get(key) : value;
-}
-
-function intern_set({_intern, _key}, value) {
-  const key = _key(value);
-  if (_intern.has(key)) return _intern.get(key);
-  _intern.set(key, value);
-  return value;
-}
-
-function intern_delete({_intern, _key}, value) {
-  const key = _key(value);
-  if (_intern.has(key)) {
-    value = _intern.get(key);
-    _intern.delete(key);
-  }
-  return value;
-}
-
-function keyof(value) {
-  return value !== null && typeof value === "object" ? value.valueOf() : value;
-}
-
-const e10 = Math.sqrt(50),
-    e5 = Math.sqrt(10),
-    e2 = Math.sqrt(2);
-
-function tickSpec(start, stop, count) {
-  const step = (stop - start) / Math.max(0, count),
-      power = Math.floor(Math.log10(step)),
-      error = step / Math.pow(10, power),
-      factor = error >= e10 ? 10 : error >= e5 ? 5 : error >= e2 ? 2 : 1;
-  let i1, i2, inc;
-  if (power < 0) {
-    inc = Math.pow(10, -power) / factor;
-    i1 = Math.round(start * inc);
-    i2 = Math.round(stop * inc);
-    if (i1 / inc < start) ++i1;
-    if (i2 / inc > stop) --i2;
-    inc = -inc;
-  } else {
-    inc = Math.pow(10, power) * factor;
-    i1 = Math.round(start / inc);
-    i2 = Math.round(stop / inc);
-    if (i1 * inc < start) ++i1;
-    if (i2 * inc > stop) --i2;
-  }
-  if (i2 < i1 && 0.5 <= count && count < 2) return tickSpec(start, stop, count * 2);
-  return [i1, i2, inc];
-}
-
-function ticks(start, stop, count) {
-  stop = +stop, start = +start, count = +count;
-  if (!(count > 0)) return [];
-  if (start === stop) return [start];
-  const reverse = stop < start, [i1, i2, inc] = reverse ? tickSpec(stop, start, count) : tickSpec(start, stop, count);
-  if (!(i2 >= i1)) return [];
-  const n = i2 - i1 + 1, ticks = new Array(n);
-  if (reverse) {
-    if (inc < 0) for (let i = 0; i < n; ++i) ticks[i] = (i2 - i) / -inc;
-    else for (let i = 0; i < n; ++i) ticks[i] = (i2 - i) * inc;
-  } else {
-    if (inc < 0) for (let i = 0; i < n; ++i) ticks[i] = (i1 + i) / -inc;
-    else for (let i = 0; i < n; ++i) ticks[i] = (i1 + i) * inc;
-  }
-  return ticks;
-}
-
-function tickIncrement(start, stop, count) {
-  stop = +stop, start = +start, count = +count;
-  return tickSpec(start, stop, count)[2];
-}
-
-function tickStep(start, stop, count) {
-  stop = +stop, start = +start, count = +count;
-  const reverse = stop < start, inc = reverse ? tickIncrement(stop, start, count) : tickIncrement(start, stop, count);
-  return (reverse ? -1 : 1) * (inc < 0 ? 1 / -inc : inc);
-}
-
-function max(values, valueof) {
-  let max;
-  if (valueof === undefined) {
-    for (const value of values) {
-      if (value != null
-          && (max < value || (max === undefined && value >= value))) {
-        max = value;
-      }
-    }
-  } else {
-    let index = -1;
-    for (let value of values) {
-      if ((value = valueof(value, ++index, values)) != null
-          && (max < value || (max === undefined && value >= value))) {
-        max = value;
-      }
-    }
-  }
-  return max;
-}
-
-function min(values, valueof) {
-  let min;
-  if (valueof === undefined) {
-    for (const value of values) {
-      if (value != null
-          && (min > value || (min === undefined && value >= value))) {
-        min = value;
-      }
-    }
-  } else {
-    let index = -1;
-    for (let value of values) {
-      if ((value = valueof(value, ++index, values)) != null
-          && (min > value || (min === undefined && value >= value))) {
-        min = value;
-      }
-    }
-  }
-  return min;
-}
-
-function initRange(domain, range) {
-  switch (arguments.length) {
-    case 0: break;
-    case 1: this.range(domain); break;
-    default: this.range(range).domain(domain); break;
-  }
-  return this;
-}
-
-function initInterpolator(domain, interpolator) {
-  switch (arguments.length) {
-    case 0: break;
-    case 1: {
-      if (typeof domain === "function") this.interpolator(domain);
-      else this.range(domain);
-      break;
-    }
-    default: {
-      this.domain(domain);
-      if (typeof interpolator === "function") this.interpolator(interpolator);
-      else this.range(interpolator);
-      break;
-    }
-  }
-  return this;
-}
-
-const implicit = Symbol("implicit");
-
-function ordinal() {
-  var index = new InternMap(),
-      domain = [],
-      range = [],
-      unknown = implicit;
-
-  function scale(d) {
-    let i = index.get(d);
-    if (i === undefined) {
-      if (unknown !== implicit) return unknown;
-      index.set(d, i = domain.push(d) - 1);
-    }
-    return range[i % range.length];
-  }
-
-  scale.domain = function(_) {
-    if (!arguments.length) return domain.slice();
-    domain = [], index = new InternMap();
-    for (const value of _) {
-      if (index.has(value)) continue;
-      index.set(value, domain.push(value) - 1);
-    }
-    return scale;
-  };
-
-  scale.range = function(_) {
-    return arguments.length ? (range = Array.from(_), scale) : range.slice();
-  };
-
-  scale.unknown = function(_) {
-    return arguments.length ? (unknown = _, scale) : unknown;
-  };
-
-  scale.copy = function() {
-    return ordinal(domain, range).unknown(unknown);
-  };
-
-  initRange.apply(scale, arguments);
-
-  return scale;
-}
-
-function constants(x) {
-  return function() {
-    return x;
-  };
-}
-
-function number(x) {
-  return +x;
-}
-
-var unit = [0, 1];
-
-function identity$1(x) {
-  return x;
-}
-
-function normalize(a, b) {
-  return (b -= (a = +a))
-      ? function(x) { return (x - a) / b; }
-      : constants(isNaN(b) ? NaN : 0.5);
-}
-
-function clamper(a, b) {
-  var t;
-  if (a > b) t = a, a = b, b = t;
-  return function(x) { return Math.max(a, Math.min(b, x)); };
-}
-
-// normalize(a, b)(x) takes a domain value x in [a,b] and returns the corresponding parameter t in [0,1].
-// interpolate(a, b)(t) takes a parameter t in [0,1] and returns the corresponding range value x in [a,b].
-function bimap(domain, range, interpolate) {
-  var d0 = domain[0], d1 = domain[1], r0 = range[0], r1 = range[1];
-  if (d1 < d0) d0 = normalize(d1, d0), r0 = interpolate(r1, r0);
-  else d0 = normalize(d0, d1), r0 = interpolate(r0, r1);
-  return function(x) { return r0(d0(x)); };
-}
-
-function polymap(domain, range, interpolate) {
-  var j = Math.min(domain.length, range.length) - 1,
-      d = new Array(j),
-      r = new Array(j),
-      i = -1;
-
-  // Reverse descending domains.
-  if (domain[j] < domain[0]) {
-    domain = domain.slice().reverse();
-    range = range.slice().reverse();
-  }
-
-  while (++i < j) {
-    d[i] = normalize(domain[i], domain[i + 1]);
-    r[i] = interpolate(range[i], range[i + 1]);
-  }
-
-  return function(x) {
-    var i = bisect(domain, x, 1, j) - 1;
-    return r[i](d[i](x));
-  };
-}
-
-function copy$1(source, target) {
-  return target
-      .domain(source.domain())
-      .range(source.range())
-      .interpolate(source.interpolate())
-      .clamp(source.clamp())
-      .unknown(source.unknown());
-}
-
-function transformer$1() {
-  var domain = unit,
-      range = unit,
-      interpolate = interpolate$1,
-      transform,
-      untransform,
-      unknown,
-      clamp = identity$1,
-      piecewise,
-      output,
-      input;
-
-  function rescale() {
-    var n = Math.min(domain.length, range.length);
-    if (clamp !== identity$1) clamp = clamper(domain[0], domain[n - 1]);
-    piecewise = n > 2 ? polymap : bimap;
-    output = input = null;
-    return scale;
-  }
-
-  function scale(x) {
-    return x == null || isNaN(x = +x) ? unknown : (output || (output = piecewise(domain.map(transform), range, interpolate)))(transform(clamp(x)));
-  }
-
-  scale.invert = function(y) {
-    return clamp(untransform((input || (input = piecewise(range, domain.map(transform), interpolateNumber$1)))(y)));
-  };
-
-  scale.domain = function(_) {
-    return arguments.length ? (domain = Array.from(_, number), rescale()) : domain.slice();
-  };
-
-  scale.range = function(_) {
-    return arguments.length ? (range = Array.from(_), rescale()) : range.slice();
-  };
-
-  scale.rangeRound = function(_) {
-    return range = Array.from(_), interpolate = interpolateRound, rescale();
-  };
-
-  scale.clamp = function(_) {
-    return arguments.length ? (clamp = _ ? true : identity$1, rescale()) : clamp !== identity$1;
-  };
-
-  scale.interpolate = function(_) {
-    return arguments.length ? (interpolate = _, rescale()) : interpolate;
-  };
-
-  scale.unknown = function(_) {
-    return arguments.length ? (unknown = _, scale) : unknown;
-  };
-
-  return function(t, u) {
-    transform = t, untransform = u;
-    return rescale();
-  };
-}
-
-function continuous() {
-  return transformer$1()(identity$1, identity$1);
-}
-
-function formatDecimal(x) {
-  return Math.abs(x = Math.round(x)) >= 1e21
-      ? x.toLocaleString("en").replace(/,/g, "")
-      : x.toString(10);
-}
-
-// Computes the decimal coefficient and exponent of the specified number x with
-// significant digits p, where x is positive and p is in [1, 21] or undefined.
-// For example, formatDecimalParts(1.23) returns ["123", 0].
-function formatDecimalParts(x, p) {
-  if (!isFinite(x) || x === 0) return null; // NaN, ±Infinity, ±0
-  var i = (x = p ? x.toExponential(p - 1) : x.toExponential()).indexOf("e"), coefficient = x.slice(0, i);
-
-  // The string returned by toExponential either has the form \d\.\d+e[-+]\d+
-  // (e.g., 1.2e+3) or the form \de[-+]\d+ (e.g., 1e+3).
-  return [
-    coefficient.length > 1 ? coefficient[0] + coefficient.slice(2) : coefficient,
-    +x.slice(i + 1)
-  ];
-}
-
-function exponent(x) {
-  return x = formatDecimalParts(Math.abs(x)), x ? x[1] : NaN;
-}
-
-function formatGroup(grouping, thousands) {
-  return function(value, width) {
-    var i = value.length,
-        t = [],
-        j = 0,
-        g = grouping[0],
-        length = 0;
-
-    while (i > 0 && g > 0) {
-      if (length + g + 1 > width) g = Math.max(1, width - length);
-      t.push(value.substring(i -= g, i + g));
-      if ((length += g + 1) > width) break;
-      g = grouping[j = (j + 1) % grouping.length];
-    }
-
-    return t.reverse().join(thousands);
-  };
-}
-
-function formatNumerals(numerals) {
-  return function(value) {
-    return value.replace(/[0-9]/g, function(i) {
-      return numerals[+i];
-    });
-  };
-}
-
-// [[fill]align][sign][symbol][0][width][,][.precision][~][type]
-var re = /^(?:(.)?([<>=^]))?([+\-( ])?([$#])?(0)?(\d+)?(,)?(\.\d+)?(~)?([a-z%])?$/i;
-
-function formatSpecifier(specifier) {
-  if (!(match = re.exec(specifier))) throw new Error("invalid format: " + specifier);
-  var match;
-  return new FormatSpecifier({
-    fill: match[1],
-    align: match[2],
-    sign: match[3],
-    symbol: match[4],
-    zero: match[5],
-    width: match[6],
-    comma: match[7],
-    precision: match[8] && match[8].slice(1),
-    trim: match[9],
-    type: match[10]
-  });
-}
-
-formatSpecifier.prototype = FormatSpecifier.prototype; // instanceof
-
-function FormatSpecifier(specifier) {
-  this.fill = specifier.fill === undefined ? " " : specifier.fill + "";
-  this.align = specifier.align === undefined ? ">" : specifier.align + "";
-  this.sign = specifier.sign === undefined ? "-" : specifier.sign + "";
-  this.symbol = specifier.symbol === undefined ? "" : specifier.symbol + "";
-  this.zero = !!specifier.zero;
-  this.width = specifier.width === undefined ? undefined : +specifier.width;
-  this.comma = !!specifier.comma;
-  this.precision = specifier.precision === undefined ? undefined : +specifier.precision;
-  this.trim = !!specifier.trim;
-  this.type = specifier.type === undefined ? "" : specifier.type + "";
-}
-
-FormatSpecifier.prototype.toString = function() {
-  return this.fill
-      + this.align
-      + this.sign
-      + this.symbol
-      + (this.zero ? "0" : "")
-      + (this.width === undefined ? "" : Math.max(1, this.width | 0))
-      + (this.comma ? "," : "")
-      + (this.precision === undefined ? "" : "." + Math.max(0, this.precision | 0))
-      + (this.trim ? "~" : "")
-      + this.type;
-};
-
-// Trims insignificant zeros, e.g., replaces 1.2000k with 1.2k.
-function formatTrim(s) {
-  out: for (var n = s.length, i = 1, i0 = -1, i1; i < n; ++i) {
-    switch (s[i]) {
-      case ".": i0 = i1 = i; break;
-      case "0": if (i0 === 0) i0 = i; i1 = i; break;
-      default: if (!+s[i]) break out; if (i0 > 0) i0 = 0; break;
-    }
-  }
-  return i0 > 0 ? s.slice(0, i0) + s.slice(i1 + 1) : s;
-}
-
-var prefixExponent;
-
-function formatPrefixAuto(x, p) {
-  var d = formatDecimalParts(x, p);
-  if (!d) return prefixExponent = undefined, x.toPrecision(p);
-  var coefficient = d[0],
-      exponent = d[1],
-      i = exponent - (prefixExponent = Math.max(-8, Math.min(8, Math.floor(exponent / 3))) * 3) + 1,
-      n = coefficient.length;
-  return i === n ? coefficient
-      : i > n ? coefficient + new Array(i - n + 1).join("0")
-      : i > 0 ? coefficient.slice(0, i) + "." + coefficient.slice(i)
-      : "0." + new Array(1 - i).join("0") + formatDecimalParts(x, Math.max(0, p + i - 1))[0]; // less than 1y!
-}
-
-function formatRounded(x, p) {
-  var d = formatDecimalParts(x, p);
-  if (!d) return x + "";
-  var coefficient = d[0],
-      exponent = d[1];
-  return exponent < 0 ? "0." + new Array(-exponent).join("0") + coefficient
-      : coefficient.length > exponent + 1 ? coefficient.slice(0, exponent + 1) + "." + coefficient.slice(exponent + 1)
-      : coefficient + new Array(exponent - coefficient.length + 2).join("0");
-}
-
-var formatTypes = {
-  "%": (x, p) => (x * 100).toFixed(p),
-  "b": (x) => Math.round(x).toString(2),
-  "c": (x) => x + "",
-  "d": formatDecimal,
-  "e": (x, p) => x.toExponential(p),
-  "f": (x, p) => x.toFixed(p),
-  "g": (x, p) => x.toPrecision(p),
-  "o": (x) => Math.round(x).toString(8),
-  "p": (x, p) => formatRounded(x * 100, p),
-  "r": formatRounded,
-  "s": formatPrefixAuto,
-  "X": (x) => Math.round(x).toString(16).toUpperCase(),
-  "x": (x) => Math.round(x).toString(16)
-};
-
-function identity(x) {
-  return x;
-}
-
-var map = Array.prototype.map,
-    prefixes = ["y","z","a","f","p","n","µ","m","","k","M","G","T","P","E","Z","Y"];
-
-function formatLocale(locale) {
-  var group = locale.grouping === undefined || locale.thousands === undefined ? identity : formatGroup(map.call(locale.grouping, Number), locale.thousands + ""),
-      currencyPrefix = locale.currency === undefined ? "" : locale.currency[0] + "",
-      currencySuffix = locale.currency === undefined ? "" : locale.currency[1] + "",
-      decimal = locale.decimal === undefined ? "." : locale.decimal + "",
-      numerals = locale.numerals === undefined ? identity : formatNumerals(map.call(locale.numerals, String)),
-      percent = locale.percent === undefined ? "%" : locale.percent + "",
-      minus = locale.minus === undefined ? "−" : locale.minus + "",
-      nan = locale.nan === undefined ? "NaN" : locale.nan + "";
-
-  function newFormat(specifier, options) {
-    specifier = formatSpecifier(specifier);
-
-    var fill = specifier.fill,
-        align = specifier.align,
-        sign = specifier.sign,
-        symbol = specifier.symbol,
-        zero = specifier.zero,
-        width = specifier.width,
-        comma = specifier.comma,
-        precision = specifier.precision,
-        trim = specifier.trim,
-        type = specifier.type;
-
-    // The "n" type is an alias for ",g".
-    if (type === "n") comma = true, type = "g";
-
-    // The "" type, and any invalid type, is an alias for ".12~g".
-    else if (!formatTypes[type]) precision === undefined && (precision = 12), trim = true, type = "g";
-
-    // If zero fill is specified, padding goes after sign and before digits.
-    if (zero || (fill === "0" && align === "=")) zero = true, fill = "0", align = "=";
-
-    // Compute the prefix and suffix.
-    // For SI-prefix, the suffix is lazily computed.
-    var prefix = (options && options.prefix !== undefined ? options.prefix : "") + (symbol === "$" ? currencyPrefix : symbol === "#" && /[boxX]/.test(type) ? "0" + type.toLowerCase() : ""),
-        suffix = (symbol === "$" ? currencySuffix : /[%p]/.test(type) ? percent : "") + (options && options.suffix !== undefined ? options.suffix : "");
-
-    // What format function should we use?
-    // Is this an integer type?
-    // Can this type generate exponential notation?
-    var formatType = formatTypes[type],
-        maybeSuffix = /[defgprs%]/.test(type);
-
-    // Set the default precision if not specified,
-    // or clamp the specified precision to the supported range.
-    // For significant precision, it must be in [1, 21].
-    // For fixed precision, it must be in [0, 20].
-    precision = precision === undefined ? 6
-        : /[gprs]/.test(type) ? Math.max(1, Math.min(21, precision))
-        : Math.max(0, Math.min(20, precision));
-
-    function format(value) {
-      var valuePrefix = prefix,
-          valueSuffix = suffix,
-          i, n, c;
-
-      if (type === "c") {
-        valueSuffix = formatType(value) + valueSuffix;
-        value = "";
-      } else {
-        value = +value;
-
-        // Determine the sign. -0 is not less than 0, but 1 / -0 is!
-        var valueNegative = value < 0 || 1 / value < 0;
-
-        // Perform the initial formatting.
-        value = isNaN(value) ? nan : formatType(Math.abs(value), precision);
-
-        // Trim insignificant zeros.
-        if (trim) value = formatTrim(value);
-
-        // If a negative value rounds to zero after formatting, and no explicit positive sign is requested, hide the sign.
-        if (valueNegative && +value === 0 && sign !== "+") valueNegative = false;
-
-        // Compute the prefix and suffix.
-        valuePrefix = (valueNegative ? (sign === "(" ? sign : minus) : sign === "-" || sign === "(" ? "" : sign) + valuePrefix;
-        valueSuffix = (type === "s" && !isNaN(value) && prefixExponent !== undefined ? prefixes[8 + prefixExponent / 3] : "") + valueSuffix + (valueNegative && sign === "(" ? ")" : "");
-
-        // Break the formatted value into the integer “value” part that can be
-        // grouped, and fractional or exponential “suffix” part that is not.
-        if (maybeSuffix) {
-          i = -1, n = value.length;
-          while (++i < n) {
-            if (c = value.charCodeAt(i), 48 > c || c > 57) {
-              valueSuffix = (c === 46 ? decimal + value.slice(i + 1) : value.slice(i)) + valueSuffix;
-              value = value.slice(0, i);
-              break;
-            }
-          }
-        }
-      }
-
-      // If the fill character is not "0", grouping is applied before padding.
-      if (comma && !zero) value = group(value, Infinity);
-
-      // Compute the padding.
-      var length = valuePrefix.length + value.length + valueSuffix.length,
-          padding = length < width ? new Array(width - length + 1).join(fill) : "";
-
-      // If the fill character is "0", grouping is applied after padding.
-      if (comma && zero) value = group(padding + value, padding.length ? width - valueSuffix.length : Infinity), padding = "";
-
-      // Reconstruct the final output based on the desired alignment.
-      switch (align) {
-        case "<": value = valuePrefix + value + valueSuffix + padding; break;
-        case "=": value = valuePrefix + padding + value + valueSuffix; break;
-        case "^": value = padding.slice(0, length = padding.length >> 1) + valuePrefix + value + valueSuffix + padding.slice(length); break;
-        default: value = padding + valuePrefix + value + valueSuffix; break;
-      }
-
-      return numerals(value);
-    }
-
-    format.toString = function() {
-      return specifier + "";
-    };
-
-    return format;
-  }
-
-  function formatPrefix(specifier, value) {
-    var e = Math.max(-8, Math.min(8, Math.floor(exponent(value) / 3))) * 3,
-        k = Math.pow(10, -e),
-        f = newFormat((specifier = formatSpecifier(specifier), specifier.type = "f", specifier), {suffix: prefixes[8 + e / 3]});
-    return function(value) {
-      return f(k * value);
-    };
-  }
-
-  return {
-    format: newFormat,
-    formatPrefix: formatPrefix
-  };
-}
-
-var locale;
-var format;
-var formatPrefix;
-
-defaultLocale({
-  thousands: ",",
-  grouping: [3],
-  currency: ["$", ""]
-});
-
-function defaultLocale(definition) {
-  locale = formatLocale(definition);
-  format = locale.format;
-  formatPrefix = locale.formatPrefix;
-  return locale;
-}
-
-function precisionFixed(step) {
-  return Math.max(0, -exponent(Math.abs(step)));
-}
-
-function precisionPrefix(step, value) {
-  return Math.max(0, Math.max(-8, Math.min(8, Math.floor(exponent(value) / 3))) * 3 - exponent(Math.abs(step)));
-}
-
-function precisionRound(step, max) {
-  step = Math.abs(step), max = Math.abs(max) - step;
-  return Math.max(0, exponent(max) - exponent(step)) + 1;
-}
-
-function tickFormat(start, stop, count, specifier) {
-  var step = tickStep(start, stop, count),
-      precision;
-  specifier = formatSpecifier(specifier == null ? ",f" : specifier);
-  switch (specifier.type) {
-    case "s": {
-      var value = Math.max(Math.abs(start), Math.abs(stop));
-      if (specifier.precision == null && !isNaN(precision = precisionPrefix(step, value))) specifier.precision = precision;
-      return formatPrefix(specifier, value);
-    }
-    case "":
-    case "e":
-    case "g":
-    case "p":
-    case "r": {
-      if (specifier.precision == null && !isNaN(precision = precisionRound(step, Math.max(Math.abs(start), Math.abs(stop))))) specifier.precision = precision - (specifier.type === "e");
-      break;
-    }
-    case "f":
-    case "%": {
-      if (specifier.precision == null && !isNaN(precision = precisionFixed(step))) specifier.precision = precision - (specifier.type === "%") * 2;
-      break;
-    }
-  }
-  return format(specifier);
-}
-
-function linearish(scale) {
-  var domain = scale.domain;
-
-  scale.ticks = function(count) {
-    var d = domain();
-    return ticks(d[0], d[d.length - 1], count == null ? 10 : count);
-  };
-
-  scale.tickFormat = function(count, specifier) {
-    var d = domain();
-    return tickFormat(d[0], d[d.length - 1], count == null ? 10 : count, specifier);
-  };
-
-  scale.nice = function(count) {
-    if (count == null) count = 10;
-
-    var d = domain();
-    var i0 = 0;
-    var i1 = d.length - 1;
-    var start = d[i0];
-    var stop = d[i1];
-    var prestep;
-    var step;
-    var maxIter = 10;
-
-    if (stop < start) {
-      step = start, start = stop, stop = step;
-      step = i0, i0 = i1, i1 = step;
-    }
-
-    while (maxIter-- > 0) {
-      step = tickIncrement(start, stop, count);
-      if (step === prestep) {
-        d[i0] = start;
-        d[i1] = stop;
-        return domain(d);
-      } else if (step > 0) {
-        start = Math.floor(start / step) * step;
-        stop = Math.ceil(stop / step) * step;
-      } else if (step < 0) {
-        start = Math.ceil(start * step) / step;
-        stop = Math.floor(stop * step) / step;
-      } else {
-        break;
-      }
-      prestep = step;
-    }
-
-    return scale;
-  };
-
-  return scale;
-}
-
-function linear() {
-  var scale = continuous();
-
-  scale.copy = function() {
-    return copy$1(scale, linear());
-  };
-
-  initRange.apply(scale, arguments);
-
-  return linearish(scale);
-}
-
-function transformer() {
-  var x0 = 0,
-      x1 = 1,
-      t0,
-      t1,
-      k10,
-      transform,
-      interpolator = identity$1,
-      clamp = false,
-      unknown;
-
-  function scale(x) {
-    return x == null || isNaN(x = +x) ? unknown : interpolator(k10 === 0 ? 0.5 : (x = (transform(x) - t0) * k10, clamp ? Math.max(0, Math.min(1, x)) : x));
-  }
-
-  scale.domain = function(_) {
-    return arguments.length ? ([x0, x1] = _, t0 = transform(x0 = +x0), t1 = transform(x1 = +x1), k10 = t0 === t1 ? 0 : 1 / (t1 - t0), scale) : [x0, x1];
-  };
-
-  scale.clamp = function(_) {
-    return arguments.length ? (clamp = !!_, scale) : clamp;
-  };
-
-  scale.interpolator = function(_) {
-    return arguments.length ? (interpolator = _, scale) : interpolator;
-  };
-
-  function range(interpolate) {
-    return function(_) {
-      var r0, r1;
-      return arguments.length ? ([r0, r1] = _, interpolator = interpolate(r0, r1), scale) : [interpolator(0), interpolator(1)];
-    };
-  }
-
-  scale.range = range(interpolate$1);
-
-  scale.rangeRound = range(interpolateRound);
-
-  scale.unknown = function(_) {
-    return arguments.length ? (unknown = _, scale) : unknown;
-  };
-
-  return function(t) {
-    transform = t, t0 = t(x0), t1 = t(x1), k10 = t0 === t1 ? 0 : 1 / (t1 - t0);
-    return scale;
-  };
-}
-
-function copy(source, target) {
-  return target
-      .domain(source.domain())
-      .interpolator(source.interpolator())
-      .clamp(source.clamp())
-      .unknown(source.unknown());
-}
-
-function sequential$1() {
-  var scale = linearish(transformer()(identity$1));
-
-  scale.copy = function() {
-    return copy(scale, sequential$1());
-  };
-
-  return initInterpolator.apply(scale, arguments);
-}
-
-const sequential = ["#f7fbff", "#08306b"];
-const categorical = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377", "#bbbbbb"];
-const ANNOTATION_DEFAULTS = Object.freeze({ cellWidth: 32, cellHeight: 20, gap: 24,
-  fontSize: 10, headingRotation: -60, missingColour: "#eeeeee",
-  cellGap: 0, cellBorderWidth: 0, cellBorderColour: "#ffffff", width: 120, colour: "#267c9e" });
-const ANNOTATION_PALETTES = {
-  Blue: sequential,
-  "Blue–red": ["#2166ac", "#f7f7f7", "#b2182b"],
-  Viridis: ["#440154", "#21918c", "#fde725"],
-  Qualitative: categorical,
-};
-
-// Validate at the JSON boundary; renderers only consume projected records.
-function validateAnnotationPanels(panels, clusters, { previousPanels = null, tree = null } = {}) {
-  if (panels == null) return;
-  const fail = (message) => { throw new TypeError(`Invalid annotationPanels: ${message}`); };
-  if (!Array.isArray(panels)) fail("expected an array.");
-  const ids = new Set(), previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
-  let clusterIds;
-  for (const panel of panels) {
-    if (!panel || typeof panel !== "object") fail("each panel must be an object.");
-    if (typeof panel.uid !== "string" || !panel.uid.trim() || ids.has(panel.uid)) fail("panels require unique, non-empty uid strings.");
-    ids.add(panel.uid);
-    const before = previous.get(panel.uid);
-    if (before === panel) continue;
-    if (!["heatmap", "bar", "groups"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap, bar or groups.`);
-    if (panel.title != null && typeof panel.title !== "string") fail("title must be text.");
-    for (const key of ["show", "showKey", "showColumnLabels"]) {
-      if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
-    }
-    if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
-    for (const key of ["cellWidth", "cellHeight", "fontSize", "width"]) {
-      if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
-    }
-    if (panel.gap !== undefined && (!Number.isFinite(panel.gap) || panel.gap < 0)) fail("gap must be non-negative.");
-    for (const key of ["cellGap", "cellBorderWidth"]) {
-      if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] < 0)) fail(`${key} must be non-negative.`);
-    }
-    if ((panel.cellGap ?? 0) >= Math.min(panel.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth,
-      panel.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight)) fail("cellGap must be smaller than cellWidth and cellHeight.");
-    if (panel.cellBorderColour !== undefined && (typeof panel.cellBorderColour !== "string" || !color(panel.cellBorderColour))) fail("cellBorderColour must be a CSS colour.");
-    if (panel.colour !== undefined && (typeof panel.colour !== "string" || !color(panel.colour))) fail("colour must be a CSS colour.");
-    if (panel.type === "groups") {
-      clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
-      validateGroupPanel(panel, clusterIds, tree, fail);
-      continue;
-    }
-    if (!Array.isArray(panel.columns) || !panel.columns.length ||
-        panel.columns.some((column) => typeof column !== "string" || !column.trim()) ||
-        new Set(panel.columns).size !== panel.columns.length) fail("columns must be unique, non-empty strings.");
-    if (panel.type === "bar" && panel.columns.length !== 1) fail("bar panels require exactly one column.");
-    if (!panel.values || typeof panel.values !== "object" || Array.isArray(panel.values)) fail("values must map cluster IDs to row arrays.");
-    const scale = panel.scale ?? {};
-    if (!scale || typeof scale !== "object" || Array.isArray(scale)) fail("scale must be an object.");
-    const type = scale.type ?? "continuous";
-    if (panel.type === "bar" && type !== "continuous") fail("bar panels require a continuous scale.");
-    if (!["continuous", "categorical"].includes(type)) fail("scale.type must be continuous or categorical.");
-    if (scale.colours !== undefined && (!Array.isArray(scale.colours) || !scale.colours.length ||
-        scale.colours.some((value) => typeof value !== "string" || !color(value)))) fail("scale.colours must contain valid CSS colours.");
-    if (type === "continuous" && scale.colours?.length < 2) fail("continuous scales need at least two colours.");
-    if (panel.missingColour !== undefined && (typeof panel.missingColour !== "string" || !color(panel.missingColour))) fail("missingColour must be a CSS colour.");
-    if (scale.domain !== undefined) {
-      if (!Array.isArray(scale.domain)) fail("scale.domain must be an array.");
-      if (type === "continuous" && (scale.domain.length !== 2 || !scale.domain.every(Number.isFinite) || scale.domain[0] >= scale.domain[1])) fail("continuous domain must be [min, max] with min < max.");
-      if (panel.type === "bar" && (scale.domain[0] > 0 || scale.domain[1] < 0)) fail("bar domains must include zero.");
-      if (type === "categorical" && (scale.domain.some((value) => typeof value !== "string") || new Set(scale.domain).size !== scale.domain.length)) fail("categorical domain must contain unique strings.");
-    }
-    // Presentation changes leave the matrix valid unless they change its
-    // shape, value type or allowed categories. JSON loading always checks it.
-    const oldScale = before?.scale ?? {};
-    const sameCategories = sameArray(oldScale.domain, scale.domain);
-    const sameValueRules = before?.columns?.length === panel.columns.length &&
-      (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories);
-    if (before?.values === panel.values && sameValueRules) continue;
-    clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
-    const categories = type === "categorical" && scale.domain ? new Set(scale.domain) : null;
-    for (const [uid, values] of Object.entries(panel.values)) {
-      if (!clusterIds.has(uid)) fail(`unknown cluster '${uid}'.`);
-      if (sameValueRules && before.values[uid] === values) continue;
-      if (!Array.isArray(values) || values.length !== panel.columns.length) fail(`row '${uid}' must have one value per column.`);
-      for (const value of values) {
-        if (value === null) continue;
-        if (type === "continuous" ? !Number.isFinite(value) : typeof value !== "string") fail(`invalid ${type} value in row '${uid}'.`);
-        if (categories && !categories.has(value)) fail(`category '${value}' is absent from scale.domain.`);
-      }
-    }
-  }
-}
-
-const numberLabel = (value) => Number(value.toPrecision(3)).toString();
-const text = (value, x, y, extra = {}) => ({ text: String(value), x, y, anchor: "start", ...extra });
-
-function textBounds(value, fontSize, fontFamily, measureText, { weight = 400, rotation = 0, anchor = "start" } = {}) {
-  const metrics = measureText?.(String(value), { fontSize, fontFamily, fontWeight: weight });
-  const width = metrics?.width ?? String(value).length * fontSize * 0.6;
-  const shift = anchor === "end" ? -width : anchor === "middle" ? -width / 2 : 0;
-  const left = -(metrics?.actualBoundingBoxLeft ?? 0) + shift;
-  const right = (metrics?.actualBoundingBoxRight ?? width) + shift;
-  const top = -(metrics?.actualBoundingBoxAscent ?? fontSize * 0.8);
-  const bottom = metrics?.actualBoundingBoxDescent ?? fontSize * 0.2;
-  const angle = rotation * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
-  const points = [[left, top], [right, top], [left, bottom], [right, bottom]]
-    .map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
-  return { minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
-    minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)) };
-}
-
-/** Right edge of cluster decorations, excluding a right legend placed after annotations. */
-function annotationChromeRightEdge(chrome, measureText = null) {
-  let right = -Infinity;
-  const bar = chrome?.scaleBar, identity = chrome?.colourBar, legend = chrome?.legend;
-  if (bar?.visible) {
-    const label = textBounds(bar.label, bar.fontSize * 4 / 3, bar.fontFamily, measureText, { anchor: "middle" });
-    right = Math.max(right, bar.position.x + bar.length + (bar.strokeWidth || 0) / 2,
-      bar.position.x + bar.length / 2 + label.maxX);
-  }
-  if (identity?.visible) {
-    const label = textBounds(identity.label, identity.fontSize * 4 / 3, identity.fontFamily, measureText, { anchor: "middle" });
-    const start = textBounds(identity.startLabel, identity.fontSize * 4 / 3, identity.fontFamily, measureText);
-    right = Math.max(right, identity.position.x + identity.width + 0.5,
-      identity.position.x + identity.width / 2 + label.maxX, identity.position.x + start.maxX);
-  }
-  if (legend?.visible && legend.placement === "bottom") {
-    for (const item of legend.items) {
-      const label = textBounds(item.label, legend.fontSize, legend.fontFamily, measureText);
-      const subtitle = textBounds(item.subtitle || "", legend.subtitleFontSize, legend.fontFamily, measureText);
-      right = Math.max(right, legend.position.x + item.x + item.radius,
-        legend.position.x + item.textX + Math.max(label.maxX, subtitle.maxX));
-    }
-  }
-  return right;
-}
-
-// Values are replaced at data boundaries and shared by presentation edits.
-// Retain only their inferred domain, not a second flattened copy of the matrix.
-const domainCache = new WeakMap();
-function inferredDomain(values, type, isBar) {
-  let cached = domainCache.get(values);
-  if (!cached) { cached = {}; domainCache.set(values, cached); }
-  const key = type === "categorical" ? "categories" : isBar ? "bars" : "numeric";
-  if (cached[key]) return cached[key];
-  const categories = new Set();
-  let min = Infinity, max = -Infinity, count = 0;
-  for (const row of Object.values(values)) for (const value of row) {
-    if (value === null) continue;
-    count++;
-    if (type === "categorical") categories.add(value);
-    else { min = Math.min(min, value); max = Math.max(max, value); }
-  }
-  if (isBar) { min = Math.min(0, min); max = Math.max(0, max); }
-  return cached[key] = type === "categorical" ? [...categories]
-    : !count || isBar && min === max ? [0, 1]
-    : min === max ? [min - 0.5, max + 0.5] : [min, max];
-}
-
-/** Resolve scales identically for layout and the appearance editor. */
-function resolveAnnotationScale(source) {
-  const scale = source.scale ?? {}, type = scale.type ?? "continuous";
-  const domain = scale.domain ?? inferredDomain(source.values, type, source.type === "bar");
-  const colours = scale.colours ?? (type === "continuous" ? sequential : categorical);
-  const colour = type === "categorical"
-    ? ordinal(domain, colours).unknown(source.missingColour ?? "#eeeeee")
-    : linear().domain(colours.map((_, i) => domain[0] + (domain[1] - domain[0]) * i / (colours.length - 1))).range(colours).clamp(true);
-  return { type, domain, colours, colour };
-}
-
-// Draw the fill and a non-overlapping inset border ring using ordinary rects.
-// All backends consume the same primitives, including instanced WebGPU cells.
-function cellRectangles(rect, borderWidth, borderColour) {
-  const result = [rect];
-  const width = Math.min(borderWidth, rect.width / 2, rect.height / 2);
-  if (!width) return result;
-  const { x, y, width: w, height: h } = rect;
-  result.push(
-    { x, y, width: w, height: width, fill: borderColour },
-    { x, y: y + h - width, width: w, height: width, fill: borderColour },
-  );
-  if (h > width * 2) result.push(
-    { x, y: y + width, width, height: h - width * 2, fill: borderColour },
-    { x: x + w - width, y: y + width, width, height: h - width * 2, fill: borderColour },
-  );
-  return result;
-}
-
-function barRectangles(value, position, width, height, fill, missingColour, borderWidth, borderColour) {
-  const zero = position(0);
-  if (value === null) {
-    const markerWidth = Math.min(6, width);
-    return [{ x: Math.max(0, Math.min(width - markerWidth, zero - markerWidth / 2)),
-      y: -height / 2, width: markerWidth, height, fill: missingColour }];
-  }
-  const end = position(value);
-  // The baseline remains visible for zero values and when bars are narrower
-  // than a pixel. It is a rectangle, so all renderers share its geometry.
-  const rects = [{ x: Math.max(0, Math.min(width - Math.min(1, width), zero - 0.5)),
-    y: -height / 2, width: Math.min(1, width), height, fill: "#999999" }];
-  if (end !== zero) rects.push(...cellRectangles({ x: Math.min(zero, end), y: -height / 2,
-    width: Math.abs(end - zero), height, fill }, borderWidth, borderColour));
-  return rects;
-}
-
-const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
-  one.length === two.length && one.every((value, index) => value === two[index]);
-function sameCellStyle(before, after) {
-  return before && sameArray(before.columns, after.columns) &&
-    ["type", "width", "cellWidth", "cellHeight", "cellGap", "cellBorderWidth", "cellBorderColour", "colour", "missingColour"]
-      .every((field) => before[field] === after[field]) &&
-    before.scale?.type === after.scale?.type &&
-    sameArray(before.scale?.colours, after.scale?.colours);
-}
-
-/** Project JSON annotations once, using the same row coordinates as loci. */
-function layoutAnnotationPanels(definitions, clusters, bounds,
-  { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null, theme = null, tree = null } = {}) {
-  if (!definitions?.length || !bounds || !clusters.size) return [];
-  const previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
-  let x = anchorX;
-  return definitions.filter((source) => source.show !== false).map((source) => {
-    const before = previous.get(source.uid);
-    x += source.gap ?? ANNOTATION_DEFAULTS.gap;
-    if (before?.definition === source && before.fontFamily === fontFamily && before.rowOffset === rowOffset) {
-      const panel = before.x === x ? before : { ...before, x };
-      x += panel.width;
-      return panel;
-    }
-    if (source.type === "groups") {
-      const panel = { ...layoutGroupPanel(source, clusters, { fontFamily, rowOffset, theme, tree,
-        fontSize: source.fontSize ?? ANNOTATION_DEFAULTS.fontSize,
-        cellHeight: source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight,
-        measureBounds: (value, options) => textBounds(value, source.fontSize ?? ANNOTATION_DEFAULTS.fontSize, fontFamily, measureText, options),
-      }), x };
-      x += panel.width;
-      return panel;
-    }
-    const isBar = source.type === "bar";
-    const cellWidth = isBar ? source.width ?? ANNOTATION_DEFAULTS.width : source.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth;
-    const cellHeight = source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight;
-    const fontSize = source.fontSize ?? ANNOTATION_DEFAULTS.fontSize, width = cellWidth * source.columns.length;
-    const { type, domain, colour } = resolveAnnotationScale(source);
-    const cellGap = isBar ? 0 : source.cellGap ?? ANNOTATION_DEFAULTS.cellGap;
-    const borderWidth = source.cellBorderWidth ?? ANNOTATION_DEFAULTS.cellBorderWidth;
-    const borderColour = source.cellBorderColour ?? ANNOTATION_DEFAULTS.cellBorderColour;
-    const missingColour = source.missingColour ?? theme?.missing ?? ANNOTATION_DEFAULTS.missingColour;
-    const position = isBar ? linear().domain(domain).range([0, width]).clamp(true) : null;
-    const reuseRows = sameCellStyle(before?.definition, source) && sameArray(before.domain, domain) &&
-      before.missingColour === missingColour;
-    const previousRows = reuseRows && before.definition.values !== source.values
-      ? new Map(before.rows.map((row) => [row.uid, row])) : null;
-    const rows = reuseRows && before.definition.values === source.values ? before.rows : [...clusters.keys()].map((uid) => {
-      if (previousRows?.has(uid) && before.definition.values[uid] === source.values[uid]) return previousRows.get(uid);
-      return { uid, cells: source.columns.map((_, i) => {
-        const value = Object.hasOwn(source.values, uid) ? source.values[uid][i] : null;
-        const rect = { x: i * cellWidth + cellGap / 2, y: -cellHeight / 2 + cellGap / 2,
-          width: cellWidth - cellGap, height: cellHeight - cellGap,
-          fill: value === null ? missingColour : colour(value) };
-        return { ...rect, value, column: source.columns[i], columnIndex: i,
-          rects: isBar ? barRectangles(value, position, width, cellHeight,
-            source.colour ?? ANNOTATION_DEFAULTS.colour, missingColour,
-            borderWidth, borderColour) : cellRectangles(rect, borderWidth, borderColour) };
-      }) };
-    });
-    const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
-    const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation }));
-    for (const item of header) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
-    const headingHeight = Math.max(0, ...header.map((item) => -item.bounds.minY));
-    let titleDescent = 0;
-    if ((source.title ?? source.uid) !== "") {
-      const title = text(source.title ?? source.uid, 0, 0, { weight: 700, kind: "title" });
-      title.bounds = textBounds(title.text, fontSize, fontFamily, measureText, title);
-      titleDescent = Math.max(0, title.bounds.maxY);
-      header.push(title);
-    }
-    const footer = [], key = [];
-    if (source.showKey !== false && isBar) {
-      key.push({ x: 0, y: 0, width, height: 1, fill: theme?.muted ?? "#555555" });
-      const ticks = position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40))));
-      if (!ticks.includes(0)) ticks.push(0);
-      for (const value of ticks.sort((a, b) => a - b)) {
-        const tickX = position(value);
-        key.push({ x: Math.max(0, Math.min(width - Math.min(1, width), tickX - 0.5)), y: 0,
-          width: Math.min(1, width), height: 5, fill: theme?.muted ?? "#555555" });
-        footer.push(text(numberLabel(value), tickX, fontSize + 9,
-          { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
-      }
-    } else if (source.showKey !== false && type === "continuous") {
-      for (let i = 0; i < 32; i++) key.push({ x: i * width / 32, y: 0, width: width / 32 + 0.1, height: 8,
-        fill: colour(domain[0] + (domain[1] - domain[0]) * i / 31) });
-      footer.push(text(numberLabel(domain[0]), 0, 8 + fontSize + 3),
-        text(numberLabel(domain[1]), width, 8 + fontSize + 3, { anchor: "end" }));
-    } else if (source.showKey !== false) domain.forEach((category, i) => {
-      key.push({ x: 0, y: i * (fontSize + 6), width: 10, height: 10, fill: colour(category) });
-      footer.push(text(category, 15, i * (fontSize + 6) + 9));
-    });
-    for (const item of footer) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
-    const panel = { uid: source.uid, definition: source, title: source.title ?? source.uid, x, width, cellHeight, headingHeight, titleDescent, rowOffset, rows, header, footer, key, fontSize, fontFamily, domain, missingColour,
-      textColour: theme?.foreground ?? "#333333" };
-    // Text overhang contributes to figure bounds, not inter-panel spacing.
-    panel.extentWidth = Math.max(width,
-      ...header.map((item) => item.x + item.bounds.maxX),
-      ...footer.map((item) => item.x + item.bounds.maxX));
-    x += panel.width;
-    return panel;
-  });
-}
-
-// Keep the static projection and only the latest preview per scene. Weak keys
-// let retired scenes go; a long drag cannot accumulate preview snapshots.
-const frameCache = new WeakMap();
-const emptyFrames = Object.freeze([]);
-const rowIndexes = new WeakMap();
-
-function annotationBoundsVisible(bounds, viewport) {
-  return !viewport || bounds.minX <= viewport.maxX && bounds.maxX >= viewport.minX &&
-    bounds.minY <= viewport.maxY && bounds.maxY >= viewport.minY;
-}
-
-function rowBoundary(rows, y, upper = false) {
-  let low = 0, high = rows.length;
-  while (low < high) {
-    const mid = (low + high) >>> 1;
-    if (rows[mid].y < y || upper && rows[mid].y === y) low = mid + 1; else high = mid;
-  }
-  return low;
-}
-
-function rowsInRange(panel, minY, maxY) {
-  let sorted = rowIndexes.get(panel);
-  if (!sorted) { sorted = [...panel.rows].sort((a, b) => a.y - b.y); rowIndexes.set(panel, sorted); }
-  return sorted.slice(rowBoundary(sorted, minY - panel.cellHeight / 2),
-    rowBoundary(sorted, maxY + panel.cellHeight / 2, true));
-}
-
-/** Cull shared records, retaining source cells and their contiguous column range. */
-function annotationPanelsInViewport(scene, preview, viewport, { geometry = true, labels = true } = {}) {
-  const panels = annotationPanelsForFrame(scene, preview);
-  if (!viewport) return panels;
-  const visible = [];
-  for (const panel of panels) {
-    const texts = labels ? panel.texts.filter((item) => annotationBoundsVisible({
-      minX: panel.x + item.x + item.bounds.minX, maxX: panel.x + item.x + item.bounds.maxX,
-      minY: item.y + item.bounds.minY, maxY: item.y + item.bounds.maxY }, viewport)) : emptyFrames;
-    const rects = geometry ? panel.rects.filter((rect) => annotationBoundsVisible({
-      minX: panel.x + rect.x, maxX: panel.x + rect.x + rect.width,
-      minY: rect.y, maxY: rect.y + rect.height }, viewport)) : emptyFrames;
-    let rows = emptyFrames;
-    if (geometry && panel.x <= viewport.maxX && panel.x + panel.width >= viewport.minX) {
-      const count = panel.rows[0]?.cells.length || 1, cellWidth = panel.width / count;
-      const firstCell = Math.max(0, Math.floor((viewport.minX - panel.x) / cellWidth));
-      const lastCell = Math.min(count, Math.floor((viewport.maxX - panel.x) / cellWidth) + 1);
-      rows = rowsInRange(panel, viewport.minY, viewport.maxY).map((row) => ({ ...row, firstCell, lastCell }));
-    }
-    if (rows.length || rects.length || texts.length) visible.push({ ...panel, rows, rects, texts });
-  }
-  return visible;
-}
-
-/** Read-only frame records shared by rendering, bounds and hit testing. */
-function annotationPanelsForFrame(scene, preview = null) {
-  if (!scene.annotationPanels?.length) return emptyFrames;
-  let cached = frameCache.get(scene);
-  if (!cached) { cached = {}; frameCache.set(scene, cached); }
-  if (!preview && cached.static) return cached.static;
-  if (preview && cached.preview === preview) return cached.frame;
-  const frames = projectAnnotationFrame(scene, preview);
-  if (!preview) cached.static = frames;
-  else { cached.preview = preview; cached.frame = frames; }
-  return frames;
-}
-
-function projectAnnotationFrame(scene, preview) {
-  const dx = annotationOffsetForPreview(scene, preview);
-  // Shared header and key baselines keep every panel aligned, including when
-  // their labels, font sizes or cell heights differ.
-  const cellHeight = Math.max(...scene.annotationPanels.map((panel) => panel.cellHeight));
-  const headingHeight = Math.max(...scene.annotationPanels.map((panel) => panel.headingHeight));
-  const titleDescent = Math.max(...scene.annotationPanels.map((panel) => panel.titleDescent));
-  const titleOffset = headingHeight > 0 ? headingHeight + 6 + titleDescent : 0;
-  const frames = scene.annotationPanels.map((panel) => {
-    const rows = panel.rows.map((row) => ({ ...row,
-      y: scene.clusters.get(row.uid).y + panel.rowOffset + clusterOffsetForPreview(preview, row.uid) }));
-    let minY = Infinity, maxY = -Infinity;
-    for (const row of rows) { minY = Math.min(minY, row.y); maxY = Math.max(maxY, row.y); }
-    const top = minY - cellHeight / 2 - 10, bottom = maxY + cellHeight / 2 + 20;
-    const groupMarks = panel.markerGroups ? groupPanelMarks(panel, rows) : null;
-    return { ...panel, x: panel.x + dx, rows: groupMarks ? [] : rows,
-      texts: [...(groupMarks?.texts ?? []), ...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
-        ...panel.footer.map((item) => ({ ...item, y: item.y + bottom }))],
-      rects: groupMarks?.rects ?? panel.key.map((item, keyIndex) => ({ ...item, keyIndex, y: item.y + bottom })) };
-  });
-  let minY = Infinity, maxY = -Infinity;
-  for (const frame of frames) {
-    const bounds = annotationPanelBounds(frame);
-    minY = Math.min(minY, bounds.minY); maxY = Math.max(maxY, bounds.maxY);
-  }
-  return frames.map((frame) => ({ ...frame, verticalBounds: { minY, maxY } }));
-}
-
-function annotationFigureBounds(bounds, panels, clusters, frames = null) {
-  if (!bounds || !panels.length) return bounds;
-  const result = { ...bounds };
-  for (const panel of frames || annotationPanelsForFrame({ annotationPanels: panels, clusters })) {
-    const area = annotationPanelBounds(panel);
-    result.maxX = Math.max(result.maxX, panel.x + panel.extentWidth);
-    result.minY = Math.min(result.minY, area.minY);
-    result.maxY = Math.max(result.maxY, area.maxY);
-  }
-  return result;
-}
-
-/** Panel area includes whitespace between rows, headings and the colour key. */
-function annotationPanelBounds(panel) {
-  const bounds = { minX: panel.x, maxX: panel.x + panel.width, minY: Infinity, maxY: -Infinity };
-  if (panel.verticalBounds) return { ...bounds, ...panel.verticalBounds };
-  for (const item of panel.texts) {
-    bounds.minY = Math.min(bounds.minY, item.y + item.bounds.minY);
-    bounds.maxY = Math.max(bounds.maxY, item.y + item.bounds.maxY);
-  }
-  for (const rect of panel.rects) {
-    bounds.minY = Math.min(bounds.minY, rect.y);
-    bounds.maxY = Math.max(bounds.maxY, rect.y + rect.height);
-  }
-  for (const row of panel.rows) {
-    bounds.minY = Math.min(bounds.minY, row.y - panel.cellHeight / 2);
-    bounds.maxY = Math.max(bounds.maxY, row.y + panel.cellHeight / 2);
-  }
-  return bounds;
-}
-
-/** Shared cell hit testing, independent of DOM elements or raster backends. */
-function hitTestAnnotationCell(scene, point, preview = null) {
-  if (!scene?.annotationPanels?.length) return null;
-  const panels = annotationPanelsForFrame(scene, preview);
-  for (let index = panels.length - 1; index >= 0; index--) {
-    const panel = panels[index];
-    if (point.x < panel.x || point.x > panel.x + panel.width) continue;
-    for (const row of rowsInRange(panel, point.y, point.y)) {
-      const cell = row.cells.find((cell) => point.x >= panel.x + cell.x && point.x <= panel.x + cell.x + cell.width &&
-        point.y >= row.y + cell.y && point.y <= row.y + cell.y + cell.height);
-      if (cell) return { panelUid: panel.uid, title: panel.title, clusterUid: row.uid,
-        clusterName: scene.clusters.get(row.uid).source.name || row.uid,
-        column: cell.column, value: cell.value };
-    }
-  }
-  return null;
 }
 
 // Chart data is JSON-like: it is also the format used for data/project export.
@@ -8190,2328 +9566,6 @@ function applyTheme(element, theme) {
   doc.head.append(style);
 }
 
-const sceneMetrics = new WeakMap();
-const textProperties = ["direction", "fontKerning", "fontStretch", "fontVariantCaps", "letterSpacing", "wordSpacing"];
-
-/** Share native text metrics across Canvas consumers without changing their context. */
-function measureCanvasText(context, scene, text, {
-  font = context.font, align = context.textAlign, baseline = context.textBaseline,
-} = {}) {
-  let cache = sceneMetrics.get(scene);
-  if (!cache) { cache = new Map(); sceneMetrics.set(scene, cache); }
-  text = String(text);
-  const key = JSON.stringify([font, align, baseline, ...textProperties.map((name) => context[name]), text]);
-  if (cache.has(key)) return cache.get(key);
-  context.save();
-  let metrics;
-  try {
-    context.font = font;
-    context.textAlign = align;
-    context.textBaseline = baseline;
-    metrics = context.measureText(text);
-  } finally { context.restore(); }
-  // Preview coordinate labels can change on every drag frame.
-  if (cache.size >= 4096) cache.delete(cache.keys().next().value);
-  cache.set(key, metrics);
-  return metrics;
-}
-
-function linkColours(source, scales, config) {
-  const { asLine, groupColour } = config.link;
-  const colour = source.colour || (groupColour
-    ? scales.colour(scales.group(source.query.uid)) : scales.score(source.identity));
-  let fill = colour;
-  if (!source.colour && groupColour) {
-    const { r, g, b } = color(colour).rgb();
-    // Group fills blend 40% white.
-    fill = rgb(102 + 0.6 * r, 102 + 0.6 * g, 102 + 0.6 * b);
-  }
-  const stroke = asLine ? fill : source.colour || (groupColour ? colour : config.figureStyle?.outline || "black");
-  return { fill, stroke };
-}
-
-const DEFAULT_CELL_WIDTH = 100;
-const DEFAULT_CELL_HEIGHT = 50;
-
-function cellKey(x, y) {
-  return `${x},${y}`;
-}
-
-function validBounds(bounds) {
-  return (
-    bounds &&
-    Number.isFinite(bounds.minX) &&
-    Number.isFinite(bounds.maxX) &&
-    Number.isFinite(bounds.minY) &&
-    Number.isFinite(bounds.maxY)
-  );
-}
-
-function intersects(one, two) {
-  return (
-    one.minX <= two.maxX &&
-    one.maxX >= two.minX &&
-    one.minY <= two.maxY &&
-    one.maxY >= two.minY
-  );
-}
-
-function cellsForBounds(bounds, { cellWidth, cellHeight }) {
-  if (!validBounds(bounds)) return [];
-  const cells = [];
-  const minColumn = Math.floor(bounds.minX / cellWidth);
-  const maxColumn = Math.floor(bounds.maxX / cellWidth);
-  const minRow = Math.floor(bounds.minY / cellHeight);
-  const maxRow = Math.floor(bounds.maxY / cellHeight);
-  for (let column = minColumn; column <= maxColumn; column += 1) {
-    for (let row = minRow; row <= maxRow; row += 1) cells.push(cellKey(column, row));
-  }
-  return cells;
-}
-
-/**
- * Index world-space rectangular extents in a uniform grid. The index stores
- * IDs only; callers retain ownership of the scene records and draw order.
- */
-function createSpatialIndex(
-  records,
-  { cellWidth = DEFAULT_CELL_WIDTH, cellHeight = DEFAULT_CELL_HEIGHT } = {}
-) {
-  const cells = new Map();
-  const boundsById = new Map();
-  const orderById = new Map();
-  let order = 0;
-  for (const [id, bounds] of records) {
-    // Retain painter order even for currently invisible records. A scene
-    // patch may reveal their bounds later (e.g. a newly adjacent link).
-    orderById.set(id, order);
-    order += 1;
-    if (!validBounds(bounds)) continue;
-    boundsById.set(id, bounds);
-    for (const key of cellsForBounds(bounds, { cellWidth, cellHeight })) {
-      if (!cells.has(key)) cells.set(key, new Set());
-      cells.get(key).add(id);
-    }
-  }
-  return { cells, boundsById, orderById, cellWidth, cellHeight };
-}
-
-/**
- * Return a copy of an index with a small set of existing records moved or
- * removed. Scene patches use this to retain spatial lookup for untouched
- * records instead of rebuilding an index for the entire chart.
- */
-function patchSpatialIndex(index, entries) {
-  if (!index || !entries?.length) return index;
-  const cells = new Map(index.cells);
-  const boundsById = new Map(index.boundsById);
-  const changedCells = new Set();
-  const mutableCell = (key) => {
-    if (!changedCells.has(key) || !cells.has(key)) {
-      cells.set(key, new Set(cells.get(key)));
-      changedCells.add(key);
-    }
-    return cells.get(key);
-  };
-
-  for (const [id, bounds] of entries) {
-    const oldBounds = boundsById.get(id);
-    for (const key of cellsForBounds(oldBounds, index)) {
-      const cell = mutableCell(key);
-      cell.delete(id);
-      if (cell.size === 0) cells.delete(key);
-    }
-    if (!validBounds(bounds)) {
-      boundsById.delete(id);
-      continue;
-    }
-    boundsById.set(id, bounds);
-    for (const key of cellsForBounds(bounds, index)) {
-      const cell = mutableCell(key);
-      cell.add(id);
-    }
-  }
-  return { ...index, cells, boundsById };
-}
-
-/** Return candidate IDs whose exact bounds intersect a world-space viewport. */
-function queryViewport(index, viewport) {
-  if (!validBounds(viewport)) return new Set();
-  const matches = new Set();
-  const minColumn = Math.floor(viewport.minX / index.cellWidth);
-  const maxColumn = Math.floor(viewport.maxX / index.cellWidth);
-  const minRow = Math.floor(viewport.minY / index.cellHeight);
-  const maxRow = Math.floor(viewport.maxY / index.cellHeight);
-  // At overview scales, checking each record is cheaper than visiting empty grid cells.
-  if ((maxColumn - minColumn + 1) * (maxRow - minRow + 1) > index.boundsById.size) {
-    for (const [id, bounds] of index.boundsById) if (intersects(bounds, viewport)) matches.add(id);
-    return matches;
-  }
-  for (let column = minColumn; column <= maxColumn; column += 1) {
-    for (let row = minRow; row <= maxRow; row += 1) {
-      for (const id of index.cells.get(cellKey(column, row)) || []) {
-        if (intersects(index.boundsById.get(id), viewport)) matches.add(id);
-      }
-    }
-  }
-  return matches;
-}
-
-/**
- * Return viewport candidates in the order they were added to the index. This
- * preserves deterministic painter order while allowing a renderer to visit
- * only visible records.
- */
-function queryViewportOrdered(index, viewport) {
-  return [...queryViewport(index, viewport)].sort(
-    (left, right) => index.orderById.get(left) - index.orderById.get(right)
-  );
-}
-
-function pointCandidates(index, point) {
-  return [...queryViewport(index, {
-    minX: point.x,
-    maxX: point.x,
-    minY: point.y,
-    maxY: point.y,
-  })].filter((id) => {
-    const bounds = index.boundsById.get(id);
-    return (
-      point.x >= bounds.minX &&
-      point.x <= bounds.maxX &&
-      point.y >= bounds.minY &&
-      point.y <= bounds.maxY
-    );
-  });
-}
-
-/** Return point candidates in the order they were added to the index. */
-function queryPointOrdered(index, point) {
-  return pointCandidates(index, point).sort(
-    (left, right) => index.orderById.get(left) - index.orderById.get(right)
-  );
-}
-
-function containsRect({ x, y, width, height }, point) {
-  return (
-    point.x >= x &&
-    point.x <= x + width &&
-    point.y >= y &&
-    point.y <= y + height
-  );
-}
-
-function pointOnSegment(point, start, end) {
-  const cross =
-    (point.y - start.y) * (end.x - start.x) -
-    (point.x - start.x) * (end.y - start.y);
-  if (Math.abs(cross) > Number.EPSILON) return false;
-  return (
-    point.x >= Math.min(start.x, end.x) &&
-    point.x <= Math.max(start.x, end.x) &&
-    point.y >= Math.min(start.y, end.y) &&
-    point.y <= Math.max(start.y, end.y)
-  );
-}
-
-function containsPolygon({ points }, point) {
-  let inside = false;
-  for (let index = 0, previous = points.length - 2; index < points.length; previous = index, index += 2) {
-    const start = { x: points[previous], y: points[previous + 1] };
-    const end = { x: points[index], y: points[index + 1] };
-    if (pointOnSegment(point, start, end)) return true;
-    const crosses = (start.y > point.y) !== (end.y > point.y);
-    if (crosses && point.x < ((end.x - start.x) * (point.y - start.y)) / (end.y - start.y) + start.x) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function contains(region, point) {
-  if (region.type === "rect") return containsRect(region, point);
-  if (region.type === "polygon") return containsPolygon(region, point);
-  return false;
-}
-
-/**
- * Returns the topmost semantic interaction target at a chart-world point.
- * The spatial indexes limit precise region tests to records whose extents
- * contain the pointer. Reverse painter order gives genes and trim handles
- * precedence over a locus move region.
- */
-function hitTest(scene, point) {
-  if (scene.index?.genes && scene.index?.hitLoci && scene.hitRegions.genes && scene.hitRegions.loci) {
-    for (const uid of queryPointOrdered(scene.index.genes, point).reverse()) {
-      const region = scene.hitRegions.genes.get(uid);
-      if (region && contains(region, point)) return region;
-    }
-    for (const uid of queryPointOrdered(scene.index.hitLoci, point).reverse()) {
-      const regions = scene.hitRegions.loci.get(uid);
-      for (const region of [regions?.trimRight, regions?.trimLeft, regions?.move]) {
-        if (region && contains(region, point)) return region;
-      }
-    }
-    return null;
-  }
-  for (let index = scene.hitRegions.all.length - 1; index >= 0; index -= 1) {
-    const region = scene.hitRegions.all[index];
-    if (contains(region, point)) return region;
-  }
-  return null;
-}
-
-function getGenePolygonCoordinates(gene, { scaleX, shape }) {
-  const scaledStart = scaleX(gene.start);
-  const scaledEnd = scaleX(gene.end);
-  const geneLength = scaledEnd - scaledStart;
-  const bottom = shape.tipHeight * 2 + shape.bodyHeight;
-  const midpoint = bottom / 2;
-  const third = shape.tipHeight + shape.bodyHeight;
-  let points;
-
-  if (gene.strand === 1) {
-    const shaft = scaledEnd - shape.tipLength;
-    points = [
-      scaledStart,
-      shape.tipHeight,
-      shaft,
-      shape.tipHeight,
-      shaft,
-      0,
-      scaledEnd,
-      midpoint,
-      shaft,
-      bottom,
-      shaft,
-      third,
-      scaledStart,
-      third,
-    ];
-    if (geneLength < shape.tipLength) {
-      [2, 4, 8, 10].forEach((index) => (points[index] = scaledStart));
-    }
-  } else {
-    const shaft = scaledStart + shape.tipLength;
-    points = [
-      scaledEnd,
-      shape.tipHeight,
-      shaft,
-      shape.tipHeight,
-      shaft,
-      0,
-      scaledStart,
-      midpoint,
-      shaft,
-      bottom,
-      shaft,
-      third,
-      scaledEnd,
-      third,
-    ];
-    if (geneLength < shape.tipLength) {
-      [2, 4, 8, 10].forEach((index) => (points[index] = scaledEnd));
-    }
-  }
-
-  return points;
-}
-
-function getGeneLabelLayout(gene, { scaleX, shape, label }) {
-  const scaledLength = scaleX(gene.end) - scaleX(gene.start);
-  const x = scaleX(gene.start) + scaledLength * label.start;
-  let y;
-
-  if (label.position === "middle") {
-    y = shape.tipHeight + shape.bodyHeight / 2;
-  } else if (label.position === "bottom") {
-    y = 2 * shape.tipHeight + shape.bodyHeight + label.spacing;
-  } else {
-    y = -label.spacing;
-  }
-
-  return {
-    x,
-    y,
-    rotation: ["start", "middle"].includes(label.anchor)
-      ? -label.rotation
-      : label.rotation,
-  };
-}
-
-function getGeneLabelTransform(gene, options) {
-  const { x, y, rotation } = getGeneLabelLayout(gene, options);
-  return `translate(${x}, ${y}) rotate(${rotation})`;
-}
-
-function getGeneLabelDy(position) {
-  switch (position) {
-    case "top":
-      return "-0.4em";
-    case "middle":
-      return "0.4em";
-    case "bottom":
-      return "0.8em";
-    default:
-      return undefined;
-  }
-}
-
-function worldPolygon(points, x, y) {
-  return points.map((point, index) => point + (index % 2 === 0 ? x : y));
-}
-
-function boundsFromPoints(points) {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (let index = 0; index < points.length; index += 2) {
-    minX = Math.min(minX, points[index]);
-    maxX = Math.max(maxX, points[index]);
-    minY = Math.min(minY, points[index + 1]);
-    maxY = Math.max(maxY, points[index + 1]);
-  }
-  return { minX, maxX, minY, maxY };
-}
-
-function boundsFromLinkAnchors(anchors) {
-  if (!anchors) return null;
-  const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-  return {
-    minX: Math.min(ax1, ax2, bx1, bx2),
-    maxX: Math.max(ax1, ax2, bx1, bx2),
-    minY: Math.min(ay, by),
-    maxY: Math.max(ay, by),
-  };
-}
-
-function boundsFromRegions(regions) {
-  if (!regions.length) return null;
-  return {
-    minX: Math.min(...regions.map((region) => region.x)),
-    maxX: Math.max(...regions.map((region) => region.x + region.width)),
-    minY: Math.min(...regions.map((region) => region.y)),
-    maxY: Math.max(...regions.map((region) => region.y + region.height)),
-  };
-}
-
-function formatKilobases(basePairs) {
-  return `${+(basePairs / 1000).toFixed(1)}kb`;
-}
-
-function legendPositionForBounds(bounds, legend) {
-  if (legend.placement === "bottom") {
-    return {
-      // Lower chrome shares the fixed chart baseline. Unlike a right-side
-      // legend it must not slide horizontally when a locus is dragged.
-      x: 0,
-      y: bounds.maxY + legend.bottomOffset + legend.marginTop,
-    };
-  }
-  return { x: bounds.maxX + legend.marginLeft, y: 0 };
-}
-
-function extendBounds(bounds, minX, maxX, minY, maxY) {
-  return {
-    minX: Math.min(bounds.minX, minX),
-    maxX: Math.max(bounds.maxX, maxX),
-    minY: Math.min(bounds.minY, minY),
-    maxY: Math.max(bounds.maxY, maxY),
-  };
-}
-
-// This deliberately excludes text-width measurement: Canvas supplies exact
-// glyph metrics while fitting, and SVG uses its native bounding box. The scene
-// still records the chrome's structural footprint for renderer-neutral camera
-// and minimap work.
-function figureBoundsForChrome(bounds, chrome) {
-  if (!bounds || !chrome) return bounds;
-  let figureBounds = { ...bounds };
-  const { legend, scaleBar, colourBar } = chrome;
-  if (legend?.visible) {
-    for (const item of legend.items) {
-      const x = legend.position.x + item.x;
-      const y = legend.position.y + item.y;
-      figureBounds = extendBounds(
-        figureBounds,
-        x - item.radius,
-        x + legend.columnWidth,
-        y,
-        y + (legend.hasSubtitles ? legend.entryHeight : legend.fontSize)
-      );
-    }
-  }
-  if (scaleBar?.visible) {
-    figureBounds = extendBounds(
-      figureBounds,
-      scaleBar.position.x,
-      scaleBar.position.x + scaleBar.length,
-      scaleBar.position.y,
-      scaleBar.position.y + scaleBar.height + scaleBar.fontSize + 5
-    );
-  }
-  if (colourBar?.visible) {
-    figureBounds = extendBounds(
-      figureBounds,
-      colourBar.position.x,
-      colourBar.position.x + colourBar.width,
-      colourBar.position.y,
-      colourBar.position.y + colourBar.height + colourBar.fontSize + 5
-    );
-  }
-  return figureBounds;
-}
-
-function buildChrome(bounds, genes, chrome) {
-  if (!bounds || !chrome) return null;
-
-  const visibleGroupIds = new Set();
-  for (const gene of genes.values()) {
-    if (!gene.visible) continue;
-    const groupUid = chrome.legend.groupForGene(gene.source.uid);
-    if (groupUid !== null) visibleGroupIds.add(groupUid);
-  }
-
-  const groups = chrome.legend.groups.filter(
-    (group) => !group.hidden && visibleGroupIds.has(group.uid)
-  );
-  const scaleBarLength = chrome.scaleBar.coordinateFor(chrome.scaleBar.basePair);
-  const scaleBar = {
-    textColour: chrome.scaleBar.textColour,
-    visible: chrome.scaleBar.show,
-    position: {
-      x: chrome.scaleBar.x,
-      y: bounds.maxY + chrome.scaleBar.marginTop,
-    },
-    length: scaleBarLength,
-    basePair: chrome.scaleBar.basePair,
-    height: chrome.scaleBar.height,
-    middle: chrome.scaleBar.height / 2,
-    label: formatKilobases(chrome.scaleBar.basePair),
-    colour: chrome.scaleBar.colour,
-    strokeWidth: chrome.scaleBar.strokeWidth,
-    fontSize: chrome.scaleBar.fontSize,
-    fontFamily: chrome.scaleBar.fontFamily,
-  };
-
-  const identityDomain = chrome.colourBar.domain || [0, 1];
-  const colourBar = {
-    textColour: chrome.colourBar.textColour,
-    visible: chrome.colourBar.show && !chrome.link.groupColour && chrome.link.show,
-    position: {
-      x: chrome.colourBar.x,
-      y: bounds.maxY + chrome.colourBar.marginTop,
-    },
-    width: chrome.colourBar.width,
-    height: chrome.colourBar.height,
-    fontSize: chrome.colourBar.fontSize,
-    fontFamily: chrome.colourBar.fontFamily,
-    startColour: chrome.colourBar.scoreColour(identityDomain[0]),
-    endColour: chrome.colourBar.scoreColour(identityDomain[1]),
-    label: "Identity (%)",
-    startLabel: `${Math.round(identityDomain[0] * 100)}`,
-    endLabel: `${Math.round(identityDomain[1] * 100)}`,
-  };
-
-  // Bottom legends share the lower chart edge with the scale and colour bars.
-  // Stack them rather than letting the first legend entry cover those bars.
-  const bottomOffset = Math.max(
-    scaleBar.visible
-      ? scaleBar.position.y - bounds.maxY + scaleBar.height + scaleBar.fontSize + 8
-      : 0,
-    colourBar.visible
-      ? colourBar.position.y - bounds.maxY + colourBar.height + colourBar.fontSize + 8
-      : 0
-  );
-  const columns = Math.min(
-    groups.length || 1,
-    Math.max(1, Math.floor(Number(chrome.legend.columns) || 1))
-  );
-  const columnWidth = Number(chrome.legend.columnWidth) || 160;
-  const rows = Math.ceil(groups.length / columns);
-  const fontSize = Number(chrome.legend.fontSize) || 14;
-  const subtitleFontSize = Number(chrome.legend.subtitleFontSize) || Math.max(10, Math.round(fontSize * 0.72));
-  const hasSubtitles = groups.some((group) => Boolean(group.subtitle));
-  const entryHeight = hasSubtitles
-    ? Math.max(Number(chrome.legend.entryHeight) || 18, fontSize + subtitleFontSize + 4)
-    : Number(chrome.legend.entryHeight) || 18;
-  const totalHeight = entryHeight * rows;
-  const step = rows > 1 ? totalHeight / (rows - 0.5) : totalHeight;
-  const radius = step / 4;
-  const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
-  const legend = {
-    textColour: chrome.legend.textColour, subtitleColour: chrome.legend.subtitleColour,
-    visible: chrome.legend.show,
-    placement,
-    columns,
-    columnWidth,
-    marginLeft: chrome.legend.marginLeft,
-    marginTop: chrome.legend.marginTop,
-    bottomOffset,
-    position: legendPositionForBounds(bounds, {
-      ...chrome.legend,
-      placement,
-      bottomOffset,
-    }),
-    entryHeight,
-    fontSize,
-    subtitleFontSize,
-    hasSubtitles,
-    fontFamily: chrome.legend.fontFamily,
-    items: groups.map((group, index) => {
-      const column = Math.floor(index / rows);
-      const row = index % rows;
-      return {
-      uid: group.uid,
-      source: group,
-      label: group.label,
-      colour: chrome.legend.colourForGroup(group.uid),
-      x: column * columnWidth,
-      y: row * step,
-      radius,
-      circleY: hasSubtitles ? entryHeight / 2 : radius,
-      textX: radius + 6,
-      textY: hasSubtitles ? entryHeight / 2 - subtitleFontSize * 0.42 : radius + 1,
-      ...(group.subtitle ? { subtitle: group.subtitle, subtitleY: entryHeight / 2 + fontSize * 0.48 } : {}),
-      };
-    }),
-  };
-
-  return { legend, scaleBar, colourBar };
-}
-
-function createLocusLayout(locus, clusterLayout, {
-  scaleX,
-  getLocusState,
-  getGeneState,
-  locusOffset,
-  shape,
-  geneMidpoint,
-  clusterSpacing = 40,
-}) {
-  const state = { ...getLocusState(locus) };
-  const localX = locusOffset(locus.uid);
-  const start = scaleX(state.start);
-  const end = scaleX(state.end);
-  const worldX = clusterLayout.x + localX;
-  const paddingY = Math.max(0, Math.min(10, clusterSpacing / 4));
-  const height = shape.tipHeight * 2 + shape.bodyHeight;
-  return {
-    source: locus,
-    cluster: clusterLayout.source,
-    state,
-    localX,
-    x: worldX,
-    y: clusterLayout.y,
-    start,
-    end,
-    worldStart: worldX + start,
-    worldEnd: worldX + end,
-    bounds: {
-      minX: worldX + start,
-      maxX: worldX + end,
-      minY: clusterLayout.y - paddingY,
-      maxY: clusterLayout.y + height + paddingY,
-    },
-    transform: { x: localX, y: 0 },
-    track: {
-      // The physical extent is unchanged by a flip, but retaining the
-      // endpoint orientation lets renderers animate the bar collapsing
-      // through its midpoint and growing out in the reversed direction.
-      x1: state.flipped ? end : start,
-      x2: state.flipped ? start : end,
-      y: geneMidpoint,
-    },
-    hover: {
-      x: start,
-      y: -paddingY,
-      width: end - start,
-      height: height + paddingY * 2,
-      leftHandleX: start - 8,
-      rightHandleX: end,
-    },
-    trimIndicators: createTrimIndicators({ locus, state, getGeneState, scaleX, shape }),
-    genes: [],
-  };
-}
-
-function extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle) {
-  const { fontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
-  const maxY = Math.max(
-    locus.y + locus.hover.y + locus.hover.height,
-    ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + fontSize + 1)
-  );
-  locus.bounds = { ...locus.bounds, maxY };
-  return locus;
-}
-
-function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, label }) {
-  const display = { ...gene, ...getGeneState(gene) };
-  const visible =
-    display.start >= locusLayout.state.start && display.end <= locusLayout.state.end + 1;
-  const localPolygon = getGenePolygonCoordinates(display, { scaleX, shape });
-  const polygon = worldPolygon(localPolygon, locusLayout.x, locusLayout.y);
-  return {
-    source: gene,
-    display,
-    locus: locusLayout,
-    visible,
-    localPolygon,
-    polygon,
-    bounds: boundsFromPoints(polygon),
-    label: getGeneLabelLayout(display, { scaleX, shape, label }),
-    labelTransform: getGeneLabelTransform(display, { scaleX, shape, label }),
-    labelDy: getGeneLabelDy(label.position),
-  };
-}
-
-function createLinkLayout(source, order, {
-  genes,
-  loci,
-  clusters,
-  areClustersAdjacent,
-  scaleX,
-  link,
-  linkVisible = () => true,
-  geneMidpoint,
-}) {
-  const query = genes.get(source.query.uid);
-  const target = genes.get(source.target.uid);
-  let anchors = null;
-  if (query && target) {
-    anchors = getLinkAnchors(source, {
-      geneForUid: (uid) => genes.get(uid)?.display,
-      areClustersAdjacent,
-      scaleX,
-      horizontalOffset: (gene) => {
-        const locus = loci.get(gene.locusUid);
-        return locus ? locus.x : 0;
-      },
-      verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
-      geneMidpoint,
-    });
-  }
-  const allowed = linkVisible(source);
-  return {
-    source,
-    order,
-    // Renderer policy (group membership, best-only reduction, hidden links)
-    // is resolved once by the runtime. Keeping it on the retained record lets
-    // all renderers, including dynamic cluster-drag previews, agree on it.
-    allowed,
-    anchors,
-    bounds: boundsFromLinkAnchors(anchors),
-    path: getLinkPath(anchors, link),
-    labelPosition: anchors ? getLinkLabelPosition(anchors, link.labelPosition) : null,
-    visible:
-      Boolean(anchors) &&
-      allowed &&
-      !source.hidden &&
-      source.identity >= link.threshold &&
-      query?.visible &&
-      target?.visible,
-  };
-}
-
-function createLocusHitRegions(locus) {
-  const { source, worldStart, worldEnd, y, hover } = locus;
-  const move = {
-    type: "rect",
-    action: "move-locus",
-    locusUid: source.uid,
-    x: worldStart,
-    y: y + hover.y,
-    width: worldEnd - worldStart,
-    height: hover.height,
-  };
-  const trimLeft = {
-    type: "rect",
-    action: "trim-locus-left",
-    locusUid: source.uid,
-    x: worldStart + hover.leftHandleX - hover.x,
-    y: y + hover.y,
-    width: hover.x - hover.leftHandleX,
-    height: hover.height,
-  };
-  const trimRight = {
-    type: "rect",
-    action: "trim-locus-right",
-    locusUid: source.uid,
-    x: worldEnd,
-    y: y + hover.y,
-    width: 8,
-    height: hover.height,
-  };
-  return { move, trimLeft, trimRight };
-}
-
-function createGeneHitRegion(gene) {
-  if (!gene.visible) return null;
-  return {
-    type: "polygon",
-    action: "gene",
-    geneUid: gene.source.uid,
-    points: gene.polygon,
-  };
-}
-
-function buildHitRegions(loci, genes) {
-  const locusRegions = new Map();
-  const geneRegions = new Map();
-  const all = [];
-
-  for (const locus of loci.values()) {
-    const regions = createLocusHitRegions(locus);
-    locusRegions.set(locus.source.uid, regions);
-    all.push(regions.move, regions.trimLeft, regions.trimRight);
-  }
-
-  for (const gene of genes.values()) {
-    const region = createGeneHitRegion(gene);
-    if (!region) continue;
-    geneRegions.set(gene.source.uid, region);
-    all.push(region);
-  }
-
-  return { all, loci: locusRegions, genes: geneRegions };
-}
-
-function adjacencyForOrder(order, fallback) {
-  if (!order) return fallback;
-  const positions = new Map(order.map((uid, index) => [uid, index]));
-  return (one, two) => Math.abs(positions.get(one) - positions.get(two)) === 1;
-}
-
-/**
- * Derive renderer-neutral, world-space geometry from chart data and state.
- * The returned records contain no DOM selections and can be consumed by SVG,
- * Canvas, or an SVG export renderer.
- */
-function buildScene(
-  data,
-  {
-    scaleX,
-    scaleY,
-    clusterPosition = scaleY,
-    clusterOffset,
-    locusOffset,
-    getLocusState,
-    getGeneState,
-    areClustersAdjacent,
-    clusterOrder = null,
-    clusterSpacing,
-    shape,
-    label,
-    link,
-    linkVisible = () => true,
-    clusterLabel = () => "",
-    alignLabels = true,
-    trimIndicatorStyle = {},
-    chrome = null,
-    fontFamily = "sans-serif",
-    measureText = null,
-    annotationsEnabled = false,
-    tree = null,
-    theme = null,
-  }
-) {
-  const clusters = new Map();
-  const loci = new Map();
-  const genes = new Map();
-  const links = new Map();
-  const linksByClusterPair = new Map();
-  const linksByGene = new Map();
-  areClustersAdjacent = adjacencyForOrder(clusterOrder, areClustersAdjacent);
-  const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
-
-  for (const cluster of data.clusters) {
-    const x = clusterOffset(cluster.uid);
-    const y = clusterPosition(cluster.uid);
-    const clusterLayout = { source: cluster, x, y, loci: [] };
-    clusters.set(cluster.uid, clusterLayout);
-
-    for (const locus of cluster.loci) {
-      const locusLayout = createLocusLayout(locus, clusterLayout, {
-        scaleX,
-        getLocusState,
-        getGeneState,
-        locusOffset,
-        shape,
-        geneMidpoint,
-        clusterSpacing,
-      });
-      loci.set(locus.uid, locusLayout);
-      clusterLayout.loci.push(locusLayout);
-
-      for (const gene of locus.genes) {
-        const geneLayout = createGeneLayout(gene, locusLayout, {
-          scaleX,
-          getGeneState,
-          shape,
-          label,
-        });
-        genes.set(gene.uid, geneLayout);
-        locusLayout.genes.push(geneLayout);
-      }
-    }
-  }
-
-  const arrangedTrimIndicators = arrangeTrimIndicators(loci.values(), new Map(), trimIndicatorStyle);
-  for (const locus of loci.values()) {
-    locus.rawTrimIndicators = locus.trimIndicators;
-    locus.trimIndicators = arrangedTrimIndicators.get(locus.source.uid) || [];
-    extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle);
-  }
-  const bounds = sceneBounds(loci, { shape, trimIndicatorStyle });
-  for (const cluster of clusters.values()) {
-    cluster.bounds = boundsForLoci(cluster.loci);
-    cluster.info = clusterInfo(cluster, bounds, { alignLabels, clusterLabel });
-  }
-
-  for (const [order, source] of data.links.entries()) {
-    const linkLayout = createLinkLayout(source, order, {
-      genes,
-      loci,
-      clusters,
-      areClustersAdjacent,
-      scaleX,
-      link,
-      linkVisible,
-      geneMidpoint,
-    });
-    links.set(source.uid, linkLayout);
-    for (const uid of new Set([source.query.uid, source.target.uid])) {
-      if (!linksByGene.has(uid)) linksByGene.set(uid, []);
-      linksByGene.get(uid).push(source);
-    }
-    const query = genes.get(source.query.uid);
-    const target = genes.get(source.target.uid);
-    if (query && target) {
-      const key = clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid);
-      const pairLinks = linksByClusterPair.get(key) || [];
-      pairLinks.push(source.uid);
-      linksByClusterPair.set(key, pairLinks);
-    }
-  }
-
-  const hitRegions = buildHitRegions(loci, genes);
-  const chromeLayout = buildChrome(bounds, genes, chrome);
-  const annotations = projectSceneAnnotations(data.annotationPanels, clusters, bounds, chromeLayout,
-    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, theme, tree });
-  return {
-    clusters,
-    loci,
-    genes,
-    links,
-    linksByClusterPair,
-    linksByGene,
-    bounds,
-    ...annotations,
-    index: {
-      genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
-      loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
-      links: createSpatialIndex([...links].map(([uid, link]) => [uid, link.bounds])),
-      hitLoci: createSpatialIndex(
-        [...hitRegions.loci].map(([uid, regions]) => [
-          uid,
-          boundsFromRegions([regions.move, regions.trimLeft, regions.trimRight]),
-        ])
-      ),
-    },
-    hitRegions,
-    chrome: chromeLayout,
-  };
-}
-
-function translateBounds(bounds, x, y = 0) {
-  if (!bounds) return bounds;
-  return {
-    minX: bounds.minX + x, maxX: bounds.maxX + x,
-    minY: bounds.minY + y, maxY: bounds.maxY + y,
-  };
-}
-
-function boundsForLoci(loci) {
-  const bounds = loci.map((locus) => locus.bounds).filter(Boolean);
-  return bounds.length ? {
-    minX: Math.min(...bounds.map((bounds) => bounds.minX)),
-    maxX: Math.max(...bounds.map((bounds) => bounds.maxX)),
-    minY: Math.min(...bounds.map((bounds) => bounds.minY)),
-    maxY: Math.max(...bounds.map((bounds) => bounds.maxY)),
-  } : null;
-}
-
-function sceneBounds(loci, { shape, trimIndicatorStyle = {} }) {
-  const { fontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
-  let bounds = null;
-  for (const locus of loci.values()) {
-    const maxY = Math.max(
-      locus.y + shape.tipHeight * 2 + shape.bodyHeight,
-      ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + fontSize + 1)
-    );
-    const next = {
-      minX: locus.worldStart, maxX: locus.worldEnd, minY: locus.y, maxY,
-    };
-    bounds = bounds ? extendBounds(bounds, next.minX, next.maxX, next.minY, next.maxY) : next;
-  }
-  return bounds;
-}
-
-function clusterInfo(cluster, bounds, { alignLabels = true, clusterLabel = () => "" }) {
-  const start = cluster.loci.length
-    ? Math.min(...cluster.loci.map((locus) => locus.worldStart)) : cluster.x;
-  return {
-    x: (alignLabels && bounds ? bounds.minX : start) - cluster.x - 10,
-    y: 0,
-    locusText: clusterLabel(cluster.source),
-  };
-}
-
-function updateSpatialIndex(index, changedEntries, entriesForRebuild) {
-  // Dense changes (e.g. a large reorder) are cheaper to rebuild than to patch
-  // cell by cell. Construct the complete entry list only on that path.
-  return changedEntries.length > (index?.boundsById.size || 0) / 4
-    ? createSpatialIndex(entriesForRebuild())
-    : patchSpatialIndex(index, changedEntries);
-}
-
-function repositionChrome(chrome, bounds, previousBounds) {
-  if (!chrome || !bounds) return null;
-  const dy = bounds.maxY - previousBounds.maxY;
-  return {
-    ...chrome,
-    legend: { ...chrome.legend, position: legendPositionForBounds(bounds, chrome.legend) },
-    scaleBar: { ...chrome.scaleBar, position: {
-      ...chrome.scaleBar.position, y: chrome.scaleBar.position.y + dy,
-    } },
-    colourBar: { ...chrome.colourBar, position: {
-      ...chrome.colourBar.position, y: chrome.colourBar.position.y + dy,
-    } },
-  };
-}
-
-const emptyAnnotationPanels = Object.freeze([]);
-
-// Data/configuration builds project cells; geometry-only commits retain them.
-// This is the single placement path for both kinds of scene update.
-function projectSceneAnnotations(definitions, clusters, bounds, chrome, options, previous = null) {
-  const annotationPanelData = options.annotationsEnabled ? definitions : undefined;
-  const visible = annotationPanelData?.some((panel) => panel.show !== false);
-  const annotationChromeRight = visible ? annotationChromeRightEdge(chrome, options.measureText) : -Infinity;
-  const annotationAnchorX = Math.max(bounds?.maxX ?? 0, annotationChromeRight);
-  let annotationPanels = emptyAnnotationPanels;
-  if (visible) {
-    if (previous?.annotationPanelData === annotationPanelData) {
-      const dx = annotationAnchorX - previous.annotationAnchorX;
-      annotationPanels = dx ? previous.annotationPanels.map((panel) => ({ ...panel, x: panel.x + dx })) : previous.annotationPanels;
-    } else {
-      annotationPanels = layoutAnnotationPanels(annotationPanelData, clusters, bounds,
-        { ...options, anchorX: annotationAnchorX, previousPanels: previous?.annotationPanels });
-    }
-    placeLegendAfterAnnotations(chrome, annotationPanels);
-  }
-  return { annotationPanelData, annotationPanels, annotationAnchorX, annotationChromeRight,
-    figureBounds: annotationFigureBounds(figureBoundsForChrome(bounds, chrome), annotationPanels, clusters) };
-}
-
-/** Presentation/data edits to annotations leave synteny and its indexes intact. */
-function patchAnnotationScene(scene, definitions, options) {
-  const chrome = repositionChrome(scene.chrome, scene.bounds, scene.bounds);
-  return { ...scene, chrome,
-    ...projectSceneAnnotations(definitions, scene.clusters, scene.bounds, chrome,
-      { ...options, rowOffset: options.shape.tipHeight + options.shape.bodyHeight / 2 }, scene),
-    changes: { annotationsOnly: true } };
-}
-
-function placeLegendAfterAnnotations(chrome, panels) {
-  if (chrome?.legend.placement === "right" && panels.length) {
-    const right = Math.max(...panels.map((panel) => panel.x + panel.extentWidth));
-    chrome.legend.position = { ...chrome.legend.position, x: right + chrome.legend.marginLeft };
-  }
-}
-
-/**
- * Commit geometry edits to an existing renderer-neutral scene. IDs and data
- * membership must be unchanged; use buildScene for data/configuration changes.
- * Explicit loci cover flips/trims, clusters cover translations/reorders, and
- * the caller supplies current authoritative state/scales rather than deltas.
- * Unchanged records are shared. All changed links, bounds, labels, chrome and
- * hit indexes are finalized once, including for batch edits.
- */
-function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = {}, options) {
-  if (!scene) return scene;
-  options = { ...options, areClustersAdjacent: adjacencyForOrder(options.clusterOrder, options.areClustersAdjacent) };
-  const {
-    scaleX, shape, label, getGeneState, getLocusState, locusOffset,
-    clusterOffset = (uid) => scene.clusters.get(uid).x,
-    clusterPosition = (uid) => scene.clusters.get(uid).y,
-    trimIndicatorStyle = {},
-  } = options;
-  const requestedLoci = new Set(locusIds);
-  const requestedClusters = new Set(clusterIds);
-  for (const uid of requestedClusters) {
-    for (const locus of scene.clusters.get(uid)?.loci || []) requestedLoci.add(locus.source.uid);
-  }
-  for (const uid of requestedLoci) {
-    const locus = scene.loci.get(uid);
-    if (locus) requestedClusters.add(locus.cluster.uid);
-  }
-  if (!requestedLoci.size) return scene;
-
-  const clusters = new Map(scene.clusters);
-  const loci = new Map(scene.loci);
-  const genes = new Map(scene.genes);
-  const changedLoci = new Set();
-  const changedGenes = new Set();
-  let visibilityChanged = false;
-  const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
-  for (const uid of requestedClusters) {
-    const previous = clusters.get(uid);
-    if (previous) clusters.set(uid, {
-      ...previous, x: clusterOffset(uid), y: clusterPosition(uid), loci: [...previous.loci],
-    });
-  }
-  for (const uid of requestedLoci) {
-    const previous = scene.loci.get(uid);
-    if (!previous) continue;
-    const cluster = clusters.get(previous.cluster.uid);
-    const state = getLocusState(previous.source);
-    const localX = locusOffset(uid);
-    const dx = cluster.x + localX - previous.x, dy = cluster.y - previous.y;
-    const translated = state.start === previous.state.start && state.end === previous.state.end &&
-      state.flipped === previous.state.flipped;
-    const locus = translated ? {
-      ...previous, state: { ...state }, localX, x: previous.x + dx, y: previous.y + dy,
-      worldStart: previous.worldStart + dx, worldEnd: previous.worldEnd + dx,
-      bounds: translateBounds(previous.bounds, dx, dy),
-      transform: { x: localX, y: 0 }, genes: [],
-      trimIndicators: previous.rawTrimIndicators || previous.trimIndicators,
-    } : createLocusLayout(previous.source, cluster, { ...options, geneMidpoint });
-    locus.rawTrimIndicators = locus.trimIndicators;
-    for (const source of locus.source.genes) {
-      const previousGene = scene.genes.get(source.uid);
-      const gene = translated && previousGene ? {
-        ...previousGene, locus,
-        polygon: worldPolygon(previousGene.polygon, dx, dy),
-        bounds: translateBounds(previousGene.bounds, dx, dy),
-      } : createGeneLayout(source, locus, { scaleX, getGeneState, shape, label });
-      if (gene.visible !== previousGene?.visible) visibilityChanged = true;
-      genes.set(source.uid, gene);
-      locus.genes.push(gene);
-      changedGenes.add(source.uid);
-    }
-    loci.set(uid, locus);
-    changedLoci.add(uid);
-  }
-
-  // Moving a trimmed locus can also change a neighbour's indicator placement.
-  // Reflow the small indicator set from its original local rows, retaining all
-  // other locus/gene geometry when only an indicator row changes.
-  const rawIndicators = new Map([...loci].map(([uid, locus]) =>
-    [uid, locus.rawTrimIndicators || locus.trimIndicators]
-  ));
-  const arranged = arrangeTrimIndicators(loci.values(), rawIndicators, trimIndicatorStyle);
-  for (const [uid, previous] of loci) {
-    const indicators = arranged.get(uid) || [];
-    if (!changedLoci.has(uid) && JSON.stringify(indicators) === JSON.stringify(previous.trimIndicators)) continue;
-    const locus = changedLoci.has(uid) ? previous : { ...previous, genes: [] };
-    locus.rawTrimIndicators = rawIndicators.get(uid);
-    locus.trimIndicators = indicators;
-    extendLocusBoundsForTrimIndicators(locus, trimIndicatorStyle);
-    if (!changedLoci.has(uid)) {
-      for (const previousGene of previous.genes) {
-        const gene = { ...previousGene, locus };
-        genes.set(gene.source.uid, gene);
-        locus.genes.push(gene);
-      }
-      loci.set(uid, locus);
-      requestedClusters.add(locus.cluster.uid);
-      const cluster = clusters.get(locus.cluster.uid);
-      if (cluster === scene.clusters.get(locus.cluster.uid)) clusters.set(locus.cluster.uid, { ...cluster });
-    }
-    changedLoci.add(uid);
-  }
-  for (const uid of requestedClusters) {
-    const cluster = clusters.get(uid);
-    if (!cluster) continue;
-    cluster.loci = cluster.loci.map((locus) => loci.get(locus.source.uid));
-    cluster.bounds = boundsForLoci(cluster.loci);
-  }
-  const bounds = sceneBounds(loci, options);
-  for (const [uid, cluster] of clusters) {
-    const info = clusterInfo(cluster, bounds, options);
-    if (info.x !== cluster.info.x || info.locusText !== cluster.info.locusText) {
-      clusters.set(uid, { ...cluster, info });
-    }
-  }
-
-  const sources = new Map();
-  for (const uid of changedGenes) {
-    for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
-  }
-  const links = new Map(scene.links);
-  for (const source of sources.values()) {
-    const previous = links.get(source.uid);
-    if (previous) links.set(source.uid, createLinkLayout(source, previous.order, {
-      ...options, genes, loci, clusters, geneMidpoint,
-    }));
-  }
-
-  const locusRegions = new Map(scene.hitRegions.loci);
-  const geneRegions = new Map(scene.hitRegions.genes);
-  for (const uid of changedLoci) locusRegions.set(uid, createLocusHitRegions(loci.get(uid)));
-  for (const uid of changedGenes) {
-    const region = createGeneHitRegion(genes.get(uid));
-    if (region) geneRegions.set(uid, region);
-    else geneRegions.delete(uid);
-  }
-  const hitRegions = {
-    loci: locusRegions, genes: geneRegions,
-    // Match full-build hit order: all locus handles, then visible genes.
-    all: [...locusRegions.values()].flatMap(({ move, trimLeft, trimRight }) => [move, trimLeft, trimRight])
-      .concat([...genes.keys()].map((uid) => geneRegions.get(uid)).filter(Boolean)),
-  };
-  const entries = (records, ids, boundsFor = (record) => record.bounds) =>
-    [...ids].map((uid) => [uid, boundsFor(records.get(uid))]);
-  const hitBounds = (regions) => boundsFromRegions([regions.move, regions.trimLeft, regions.trimRight]);
-  const chrome = visibilityChanged && options.chrome
-    ? buildChrome(bounds, genes, options.chrome)
-    : repositionChrome(scene.chrome, bounds, scene.bounds);
-  const annotations = projectSceneAnnotations(scene.annotationPanelData, clusters, bounds, chrome,
-    { ...options, rowOffset: geneMidpoint }, scene);
-  return {
-    ...scene, clusters, loci, genes, links, bounds, chrome, hitRegions, ...annotations,
-    changes: { loci: changedLoci, genes: changedGenes, links: new Set(sources.keys()), clusters: requestedClusters },
-    index: {
-      genes: updateSpatialIndex(scene.index.genes, entries(genes, changedGenes), () => entries(genes, genes.keys())),
-      loci: updateSpatialIndex(scene.index.loci, entries(loci, changedLoci), () => entries(loci, loci.keys())),
-      links: updateSpatialIndex(scene.index.links, entries(links, sources.keys()), () => entries(links, links.keys())),
-      hitLoci: updateSpatialIndex(scene.index.hitLoci, entries(locusRegions, changedLoci, hitBounds),
-        () => entries(locusRegions, locusRegions.keys(), hitBounds)),
-    },
-  };
-}
-
-/** Canvas owns text metrics; all tree geometry comes from the shared layout. */
-function layoutCanvasTree(context, tree, scene, config, options = {}) {
-  if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
-  const measure = (text, font) => measureCanvasText(context, scene, text,
-    { font, align: "left", baseline: "alphabetic" });
-  return layoutTree({
-    ...options,
-    tree, scene, config,
-    measureText: (text, style) => {
-      const metrics = measure(text, `${style.fontStyle || "normal"} ${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`);
-      const overhang = Math.max(0, metrics.actualBoundingBoxLeft || 0, (metrics.actualBoundingBoxRight || 0) - metrics.width);
-      return { width: metrics.width + overhang * 2, overhang, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
-    },
-    measureLabel: (cluster, locusText) => Math.max(
-      measure(cluster.source.name || "", `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`).width,
-      measure(locusText, `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`).width
-    ),
-  });
-}
-
-function traceLines(context, lines) {
-  context.beginPath();
-  for (const line of lines) {
-    context.moveTo(line.x1, line.y1);
-    context.lineTo(line.x2, line.y2);
-  }
-  context.stroke();
-}
-
-/** Paint an already positioned tree frame, also used by the WebGPU overlay. */
-function drawCanvasTree(context, layout) {
-  if (!layout) return;
-  context.save();
-  context.strokeStyle = layout.guide.colour;
-  context.lineWidth = layout.guide.width;
-  context.setLineDash(layout.guide.dash);
-  traceLines(context, layout.guides);
-  context.setLineDash([]);
-  if (layout.cutLine) {
-    const cut = layout.cutLine;
-    context.strokeStyle = cut.colour;
-    context.lineWidth = cut.width;
-    context.setLineDash([4, 3]);
-    traceLines(context, [cut]);
-    context.setLineDash([]);
-    context.fillStyle = cut.colour;
-    context.font = `${cut.label.fontSize}px ${cut.label.fontFamily}`;
-    context.textAlign = "center";
-    context.textBaseline = "bottom";
-    context.fillText(cut.label.text, cut.label.x, cut.label.y);
-  }
-  const groups = new Map();
-  for (const mark of [layout.rootBranch, ...layout.stems, ...layout.branches]) {
-    const key = `${mark.style.colour}:${mark.style.width}:${mark.lineCap || "butt"}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(mark);
-  }
-  for (const lines of groups.values()) {
-    context.strokeStyle = lines[0].style.colour;
-    context.lineWidth = lines[0].style.width;
-    context.lineCap = lines[0].lineCap || "butt";
-    traceLines(context, lines);
-  }
-  context.lineCap = "butt";
-  context.strokeStyle = layout.branch.colour;
-  context.lineWidth = layout.branch.width;
-  context.fillStyle = layout.background;
-  for (const node of layout.nodes) {
-    context.beginPath();
-    context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-    context.fill();
-    context.stroke();
-  }
-  context.fillStyle = layout.support.colour;
-  context.textAlign = "right";
-  context.textBaseline = "bottom";
-  context.font = `${layout.support.fontSize}px ${layout.support.fontFamily}`;
-  for (const label of layout.supports) context.fillText(label.text, label.x, label.y);
-  for (const label of layout.annotations) {
-    context.fillStyle = label.colour;
-    context.textAlign = "left";
-    context.textBaseline = "top";
-    context.font = `${label.fontStyle} ${label.fontWeight} ${label.fontSize}px ${label.fontFamily}`;
-    context.fillText(label.text, label.x, label.y);
-  }
-  if (layout.scaleBar) {
-    const bar = layout.scaleBar;
-    context.strokeStyle = bar.colour;
-    context.lineWidth = bar.strokeWidth;
-    traceLines(context, bar.lines);
-    context.fillStyle = layout.foreground;
-    context.font = `${bar.fontSize}px ${bar.fontFamily}`;
-    context.textAlign = "center";
-    context.textBaseline = "top";
-    context.fillText(bar.label.text, bar.label.x, bar.label.y);
-  }
-  context.restore();
-}
-
-/**
- * Choose Canvas backing-store resolution from the view scale.  This affects
- * only raster detail: the CSS canvas size and chart-world coordinates remain
- * unchanged.  Active gestures always favour throughput over sharpness.
- */
-function canvasPixelRatioForCamera({
-  camera,
-  moving = false,
-  devicePixelRatio = globalThis.devicePixelRatio || 1,
-}) {
-  if (moving) return Math.min(devicePixelRatio, 1);
-
-  const zoom = camera?.k ?? 1;
-  if (zoom < 0.35) return Math.min(devicePixelRatio, 0.75);
-  if (zoom < 0.6) return Math.min(devicePixelRatio, 1);
-  if (zoom < 0.85) return Math.min(devicePixelRatio, 1.5);
-  return devicePixelRatio;
-}
-
-function clamp(value, minimum, maximum) {
-  return Math.max(minimum, Math.min(maximum, value));
-}
-
-/** Project the complete chart bounds into a fixed-size screen-space minimap. */
-function createMinimapProjection({ bounds, width, height, padding = 4 }) {
-  if (!bounds || !width || !height) return null;
-  const worldWidth = Math.max(1, bounds.maxX - bounds.minX);
-  const worldHeight = Math.max(1, bounds.maxY - bounds.minY);
-  const availableWidth = Math.max(1, width - padding * 2);
-  const availableHeight = Math.max(1, height - padding * 2);
-  const scale = Math.min(availableWidth / worldWidth, availableHeight / worldHeight);
-  const frame = {
-    x: (width - worldWidth * scale) / 2,
-    y: (height - worldHeight * scale) / 2,
-    width: worldWidth * scale,
-    height: worldHeight * scale,
-  };
-  return {
-    bounds,
-    width,
-    height,
-    scale,
-    frame,
-    x: frame.x - bounds.minX * scale,
-    y: frame.y - bounds.minY * scale,
-  };
-}
-
-/** Return the main viewport rectangle in minimap screen coordinates. */
-function canvasMinimapViewport(projection, camera, viewport) {
-  if (!projection || !camera || !viewport) return null;
-  const minX = -camera.x / camera.k;
-  const maxX = (viewport.width - camera.x) / camera.k;
-  const minY = -camera.y / camera.k;
-  const maxY = (viewport.height - camera.y) / camera.k;
-  const { bounds, scale, x, y, frame } = projection;
-  const left = clamp(x + minX * scale, frame.x, frame.x + frame.width);
-  const right = clamp(x + maxX * scale, frame.x, frame.x + frame.width);
-  const top = clamp(y + minY * scale, frame.y, frame.y + frame.height);
-  const bottom = clamp(y + maxY * scale, frame.y, frame.y + frame.height);
-  return { x: left, y: top, width: right - left, height: bottom - top };
-}
-
-/** Centre the existing camera scale on a point selected in the minimap. */
-function cameraForMinimapPoint(projection, point, viewport, camera) {
-  const worldX = clamp(
-    (point.x - projection.x) / projection.scale,
-    projection.bounds.minX,
-    projection.bounds.maxX
-  );
-  const worldY = clamp(
-    (point.y - projection.y) / projection.scale,
-    projection.bounds.minY,
-    projection.bounds.maxY
-  );
-  return {
-    ...camera,
-    x: viewport.width / 2 - worldX * camera.k,
-    y: viewport.height / 2 - worldY * camera.k,
-  };
-}
-
-/** Composite a cached overview raster with the live main-camera viewport. */
-function renderCanvasMinimap({
-  canvas,
-  baseCanvas = null,
-  projection,
-  camera,
-  viewport,
-  pixelRatio = globalThis.devicePixelRatio || 1,
-}) {
-  if (!projection) return null;
-  const { width, height, frame } = projection;
-  const pixelWidth = Math.round(width * pixelRatio);
-  const pixelHeight = Math.round(height * pixelRatio);
-  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-    canvas.width = pixelWidth;
-    canvas.height = pixelHeight;
-  }
-  const context = canvas.getContext("2d");
-  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  context.clearRect(0, 0, width, height);
-  if (baseCanvas) context.drawImage(baseCanvas, 0, 0, width, height);
-  else {
-    context.fillStyle = "white";
-    context.fillRect(0, 0, width, height);
-  }
-  context.strokeStyle = "rgba(0, 0, 0, 0.55)";
-  context.lineWidth = 1;
-  context.strokeRect(frame.x, frame.y, frame.width, frame.height);
-  const visible = canvasMinimapViewport(projection, camera, viewport);
-  if (visible) {
-    context.fillStyle = "rgba(30, 120, 255, 0.16)";
-    context.fillRect(visible.x, visible.y, visible.width, visible.height);
-    context.strokeStyle = "rgb(30, 120, 255)";
-    context.strokeRect(visible.x, visible.y, visible.width, visible.height);
-  }
-  return { width, height, pixelRatio, viewport: visible };
-}
-
-function canvasWorldPoint(canvas, event, camera) {
-  const bounds = canvas.getBoundingClientRect();
-  return {
-    x: (event.clientX - bounds.left - camera.x) / camera.k,
-    y: (event.clientY - bounds.top - camera.y) / camera.k,
-  };
-}
-
-/**
- * Return the portion of chart-world space covered by a Canvas. A small
- * screen-space margin prevents records from popping at its edge while panning.
- */
-function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
-  return worldViewport(camera, dimensions || canvas.getBoundingClientRect(), overscan);
-}
-
-/**
- * Extend the scene's structural figure bounds with exact Canvas text metrics.
- * Scene layout deliberately records only renderer-neutral chrome extents; the
- * raster adapter owns glyph measurement for initial camera fitting.
- */
-function canvasFigureBounds(context, scene, config, tree = null, { preview = null } = {}) {
-  if (!scene?.bounds) return null;
-  let structural = scene.bounds;
-  const chrome = preview?.chrome || scene.chrome;
-  const panels = annotationPanelsForFrame(scene, preview);
-  if (preview) {
-    structural = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
-    for (const locus of scene.loci.values()) {
-      const geometry = locusGeometryForPreview(preview, locus);
-      const { x = 0, y = 0 } = geometry.offsets;
-      structural.minX = Math.min(structural.minX, geometry.worldStart ?? locus.worldStart + x);
-      structural.maxX = Math.max(structural.maxX, geometry.worldEnd ?? locus.worldEnd + x);
-      structural.minY = Math.min(structural.minY, locus.bounds.minY + y);
-      structural.maxY = Math.max(structural.maxY, locus.bounds.maxY + y);
-    }
-  }
-  const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome),
-    scene.annotationPanels || [], scene.clusters, panels) : scene.figureBounds || structural) };
-  const include = (x, y) => {
-    bounds.minX = Math.min(bounds.minX, x);
-    bounds.maxX = Math.max(bounds.maxX, x);
-    bounds.minY = Math.min(bounds.minY, y);
-    bounds.maxY = Math.max(bounds.maxY, y);
-  };
-  const includeText = (text, x, y, { fontSize, fontFamily = config.plot.fontFamily,
-    fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
-    if (!text) return;
-    const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-    const metrics = measureCanvasText(context, scene, text, { font, align, baseline });
-    const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
-    const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
-    const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
-    const x2 = Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight : left + metrics.width;
-    const y1 = Number.isFinite(metrics.actualBoundingBoxAscent) ? -metrics.actualBoundingBoxAscent : top;
-    const y2 = Number.isFinite(metrics.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : top + fontSize * 1.25;
-    const radians = rotation * Math.PI / 180;
-    const cos = Math.cos(radians), sin = Math.sin(radians);
-    for (const [tx, ty] of [[x1, y1], [x1, y2], [x2, y1], [x2, y2]]) {
-      const px = x + tx * cos - ty * sin, py = y + tx * sin + ty * cos;
-      include(px - border / 2, py - border / 2);
-      include(px + border / 2, py + border / 2);
-    }
-  };
-
-  // Structural scene bounds already enclose loci, gene polygons and ribbons.
-  // Add stroke extent without walking every homology link when labels are off.
-  const halfStroke = Math.max(config.gene.shape.strokeWidth || 0, config.locus.trackBar.stroke || 0,
-    config.link.show ? config.link.strokeWidth || 0 : 0) / 2;
-  include(structural.minX - halfStroke, structural.minY - halfStroke);
-  include(structural.maxX + halfStroke, structural.maxY + halfStroke);
-  for (const cluster of scene.clusters.values()) {
-    const x = cluster.x + cluster.info.x + clusterLabelOffsetForPreview(preview, cluster.source.uid);
-    const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
-    includeText(cluster.source.name, x, y + 8,
-      { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right" });
-    includeText(clusterLabelTextForPreview(preview, cluster.source.uid, cluster.info.locusText), x, y + 12,
-      { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
-  }
-  if (config.gene.label.show) {
-    for (const gene of scene.genes.values()) {
-      if (!geneVisibleForPreview(preview, gene)) continue;
-      const offsets = offsetsForGene(preview, gene);
-      const geometry = geneGeometryForPreview(preview, gene);
-      includeText(gene.source.label || gene.source.name || gene.source.uid,
-        (geometry.labelX ?? gene.locus.x + gene.label.x) + offsets.x, gene.locus.y + gene.label.y + offsets.y,
-        { fontSize: config.gene.label.fontSize, align: config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor, rotation: gene.label.rotation });
-    }
-  }
-  if (config.link.show && config.link.label.show) {
-    for (const link of scene.links.values()) {
-      const geometry = linkGeometryForPreview(scene, link, preview, config);
-      if (!geometry.visible || !link.labelPosition) continue;
-      const anchors = geometry.anchors;
-      const position = preview && anchors ? getLinkLabelPosition(anchors, config.link.label.position) : link.labelPosition;
-      includeText(link.source.label ?? link.source.identity.toFixed(2), position.x, position.y,
-        { fontSize: config.link.label.fontSize, align: "center" });
-    }
-  }
-  if (config.locus.trimIndicators?.show !== false) {
-    const style = resolveTrimIndicatorStyle(config.locus.trimIndicators);
-    for (const locus of scene.loci.values()) {
-      const geometry = locusGeometryForPreview(preview, locus);
-      const { x = 0, y = 0 } = geometry.offsets;
-      for (const indicator of geometry.trimIndicators || locus.trimIndicators || []) {
-        includeText(indicator.text, locus.x + indicator.x + x, locus.y + indicator.y + y,
-          { fontSize: style.fontSize, fontWeight: style.fontWeight, align: indicator.anchor, baseline: "top", border: style.borderWidth });
-      }
-    }
-  }
-  const treeLayout = layoutCanvasTree(context, tree, scene, config, { preview, trackAnchor: Boolean(preview) });
-  if (treeLayout) {
-    include(treeLayout.bounds.minX, treeLayout.bounds.minY);
-    include(treeLayout.bounds.maxX, treeLayout.bounds.maxY);
-  }
-  for (const panel of panels) {
-    for (const item of panel.texts) includeText(item.text, panel.x + item.x, item.y,
-      { fontSize: panel.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
-        align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
-  }
-  if (chrome?.legend.visible) {
-    const legend = chrome.legend;
-    const subtitleSize = legend.subtitleFontSize || Math.max(10, legend.fontSize * 0.72);
-    for (const item of legend.items) {
-      const x = legend.position.x + item.x, y = legend.position.y + item.y + item.circleY;
-      include(x - item.radius, y - item.radius);
-      include(x + item.radius, y + item.radius);
-      includeText(item.label, legend.position.x + item.textX, legend.position.y + item.y + item.textY,
-        { fontSize: legend.fontSize, fontFamily: legend.fontFamily, baseline: "middle" });
-      includeText(item.subtitle, legend.position.x + item.textX, legend.position.y + item.y + item.subtitleY,
-        { fontSize: subtitleSize, fontFamily: legend.fontFamily, baseline: "middle" });
-    }
-  }
-  if (chrome?.scaleBar.visible) {
-    const bar = chrome.scaleBar;
-    const half = bar.strokeWidth / 2;
-    include(bar.position.x - half, bar.position.y - half);
-    include(bar.position.x + bar.length + half, bar.position.y + bar.height + half);
-    includeText(bar.label, bar.position.x + bar.length / 2, bar.position.y + bar.height + 5,
-      { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
-  }
-  if (chrome?.colourBar.visible) {
-    const bar = chrome.colourBar;
-    include(bar.position.x - 0.5, bar.position.y - 0.5);
-    include(bar.position.x + bar.width + 0.5, bar.position.y + bar.height + 0.5);
-    const font = { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, baseline: "top" };
-    const y = bar.position.y + bar.height + 5;
-    includeText(bar.label, bar.position.x + bar.width / 2, y, { ...font, align: "center" });
-    includeText(bar.startLabel, bar.position.x, y, font);
-    includeText(bar.endLabel, bar.position.x + bar.width, y, { ...font, align: "right" });
-  }
-  return bounds;
-}
-
-function clusterLabelHit(context, scene, point, config) {
-  for (const cluster of [...scene.clusters.values()].reverse()) {
-    const anchorX = cluster.x + cluster.info.x;
-    const nameFont = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
-    const locusFont = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
-    const nameWidth = measureCanvasText(context, scene, cluster.source.name || "", { font: nameFont, align: "left", baseline: "alphabetic" }).width;
-    const locusWidth = measureCanvasText(context, scene, cluster.info.locusText, { font: locusFont, align: "left", baseline: "alphabetic" }).width;
-    const width = Math.max(nameWidth, locusWidth);
-    if (
-      point.x >= anchorX - width &&
-      point.x <= anchorX &&
-      point.y >= cluster.y - config.cluster.nameFontSize &&
-      point.y <= cluster.y + config.cluster.lociFontSize + 12
-    ) {
-      return { action: "move-cluster", clusterUid: cluster.source.uid };
-    }
-  }
-  return null;
-}
-
-function chromeHit(context, scene, point) {
-  const chrome = scene.chrome;
-  if (!chrome) return null;
-
-  const { legend, scaleBar } = chrome;
-  if (legend.visible) {
-    context.save();
-    context.font = `${legend.fontSize}px ${legend.fontFamily}`;
-    const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
-    for (const item of [...legend.items].reverse()) {
-      const x = legend.position.x + item.x;
-      const y = legend.position.y + item.y;
-      const circleX = x;
-      const circleY = y + item.circleY;
-      if (Math.hypot(point.x - circleX, point.y - circleY) <= item.radius) {
-        context.restore();
-        return { action: "legend-colour", group: item.source };
-      }
-      const textX = x + item.textX;
-      const labelWidth = measureCanvasText(context, scene, item.label).width;
-      context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
-      const subtitleWidth = item.subtitle ? measureCanvasText(context, scene, item.subtitle).width : 0;
-      context.font = `${legend.fontSize}px ${legend.fontFamily}`;
-      const textWidth = Math.max(labelWidth, subtitleWidth);
-      if (
-        point.x >= textX &&
-        point.x <= textX + textWidth &&
-        point.y >= y + item.textY - legend.fontSize / 2 &&
-        point.y <= y + (item.subtitleY ?? item.textY) + subtitleFontSize / 2
-      ) {
-        context.restore();
-        return { action: "legend-text", group: item.source };
-      }
-    }
-    context.restore();
-  }
-
-  if (scaleBar.visible) {
-    const x = scaleBar.position.x + scaleBar.length / 2;
-    const y = scaleBar.position.y + scaleBar.height + 5;
-    context.save();
-    context.font = `${scaleBar.fontSize}px ${scaleBar.fontFamily}`;
-    const width = measureCanvasText(context, scene, scaleBar.label).width;
-    context.restore();
-    if (
-      point.x >= x - width / 2 &&
-      point.x <= x + width / 2 &&
-      point.y >= y &&
-      point.y <= y + scaleBar.fontSize
-    ) {
-      return { action: "scale-bar" };
-    }
-  }
-
-  return null;
-}
-
-function hitTestCanvas({ canvas, scene, camera, config, event, tree = null, treeDragging = false }) {
-  const point = canvasWorldPoint(canvas, event, camera);
-  const context = canvas.getContext("2d");
-  return hitTest(scene, point) || treeNodeHit(context, scene, point, config, tree, treeDragging) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
-}
-
-function treeNodeHit(context, scene, point, config, tree, dragging = false) {
-  return hitTestTreeNode(layoutCanvasTree(context, tree, scene, config, { dragging }), point);
-}
-
-function drawTree(context, tree, scene, config, preview, motion) {
-  const layout = layoutCanvasTree(context, tree, scene, config, {
-    preview,
-    previousTree: motion.previousTree,
-    previousScene: motion.previousScene,
-    targetScene: motion.targetScene || scene,
-    trackAnchor: motion.trackAnchor,
-  });
-  drawCanvasTree(context, interpolateTreeLayout(layout, motion.progress));
-}
-
-function polygon(context, points) {
-  context.beginPath();
-  context.moveTo(points[0], points[1]);
-  for (let index = 2; index < points.length; index += 2) {
-    context.lineTo(points[index], points[index + 1]);
-  }
-  context.closePath();
-}
-
-function drawLinkLabel(context, link, config, anchors) {
-  if (!config.link.label.show || !link.labelPosition) return;
-  const labelPosition = getLinkLabelPosition(anchors, config.link.label.position);
-  context.fillStyle = "white";
-  context.font = `${config.link.label.fontSize}px ${config.plot.fontFamily}`;
-  context.textAlign = "center";
-  context.textBaseline = "alphabetic";
-  context.fillText(link.source.label ?? link.source.identity.toFixed(2), labelPosition.x, labelPosition.y);
-}
-
-function drawLink(context, link, config, scales, { visible, anchors }, showLabel) {
-  if (!visible || !anchors) return;
-  context.save();
-  context.globalAlpha *= link.opacity ?? 1;
-  const { fill, stroke } = linkColours(link.source, scales, config);
-  context.beginPath();
-  traceLinkPath(context, anchors, config.link);
-  if (!config.link.asLine) {
-    context.fillStyle = fill;
-    context.fill();
-  }
-  context.strokeStyle = stroke;
-  context.lineWidth = config.link.strokeWidth;
-  context.stroke();
-
-  if (showLabel) drawLinkLabel(context, link, config, anchors);
-  context.restore();
-}
-
-function drawLinkHighlight(context, config, { visible, anchors }) {
-  if (!visible || !anchors) return;
-  context.beginPath();
-  traceLinkPath(context, anchors, config.link);
-  if (!config.link.asLine) {
-    context.fillStyle = "rgba(22, 119, 255, 0.18)";
-    context.fill();
-  }
-  context.strokeStyle = "#1677ff";
-  context.lineWidth = Math.max(2, config.link.strokeWidth + 1);
-  context.stroke();
-}
-
-function drawClusterInfo(
-  context,
-  cluster,
-  config,
-  { x: offsetX = 0, y: offsetY = 0, locusText = cluster.info.locusText, selected = false } = {}
-) {
-  const { x, y } = cluster;
-  const anchorX = x + cluster.info.x + offsetX;
-  context.fillStyle = selected ? "#1677ff" : config.figureStyle?.foreground || "black";
-  context.textAlign = "end";
-  context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
-  context.textBaseline = "alphabetic";
-  context.fillText(cluster.source.name, anchorX, y + offsetY + 8);
-  context.font = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
-  context.textBaseline = "top";
-  context.fillText(locusText, anchorX, y + offsetY + 12);
-}
-
-function drawGene(
-  context,
-  gene,
-  config,
-  scales,
-  { x: offsetX = 0, y: offsetY = 0 } = {},
-  visible = gene.visible,
-  geometry = {},
-  showLabel = true
-) {
-  if (!visible) return;
-  context.save();
-  context.translate(offsetX, offsetY);
-  if (geometry.flipAxis !== undefined) {
-    // A flip preview is a uniform affine transform about the locus axis:
-    // x' = axis + (x - axis) * (1 - 2p). Applying it to the context avoids
-    // allocating a reflected polygon for every gene on every animation frame.
-    context.save();
-    context.translate(geometry.flipAxis, 0);
-    context.scale(geometry.flipScale, 1);
-    context.translate(-geometry.flipAxis, 0);
-    polygon(context, gene.polygon);
-  } else {
-    polygon(context, gene.polygon);
-  }
-  const group = scales.group(gene.source.uid);
-  context.fillStyle = gene.source.colour || scales.colour(group);
-  context.strokeStyle = config.gene.shape.stroke;
-  context.lineWidth = config.gene.shape.strokeWidth;
-  context.fill();
-  context.stroke();
-  if (geometry.flipAxis !== undefined) context.restore();
-
-  if (showLabel) drawGeneLabel(context, gene, config, geometry);
-  context.restore();
-}
-
-function drawGeneLabel(context, gene, config, geometry = {}, { x: offsetX = 0, y: offsetY = 0 } = {}) {
-  if (!config.gene.label.show) return;
-  const { x, y, rotation } = gene.label;
-  const labelX = (geometry.labelX ?? gene.locus.x + x) + offsetX;
-  context.save();
-  context.translate(labelX, gene.locus.y + y + offsetY);
-  context.rotate((rotation * Math.PI) / 180);
-  context.fillStyle = config.figureStyle?.foreground || "black";
-  context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
-  context.textAlign = config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor;
-  context.textBaseline = "alphabetic";
-  context.fillText(gene.source.label || gene.source.name || gene.source.uid, 0, 0);
-  context.restore();
-}
-
-function drawGeneHighlight(context, gene, camera, geometry = {}, { x: offsetX = 0, y: offsetY = 0 } = {}) {
-  context.save();
-  context.translate(offsetX, offsetY);
-  if (geometry.flipAxis !== undefined) {
-    context.translate(geometry.flipAxis, 0);
-    context.scale(geometry.flipScale, 1);
-    context.translate(-geometry.flipAxis, 0);
-  }
-  polygon(context, gene.polygon);
-  context.fillStyle = "rgba(22, 119, 255, 0.18)";
-  context.fill();
-  // Keep the editor-selection ring readable at every zoom level.
-  context.strokeStyle = "#1677ff";
-  context.lineWidth = 2.5 / camera.k;
-  context.stroke();
-  context.restore();
-}
-
-function drawLocusHighlight(context, locus, camera, geometry = {}) {
-  const hover = geometry.hover || locus.hover;
-  const offsets = geometry.offsets || {};
-  const x = locus.x + hover.x + (offsets.x || 0);
-  const y = locus.y + hover.y + (offsets.y || 0);
-  context.save();
-  context.fillStyle = "rgba(22, 119, 255, 0.12)";
-  context.fillRect(x, y, hover.width, hover.height);
-  context.strokeStyle = "#1677ff";
-  context.lineWidth = 2 / camera.k;
-  context.strokeRect(x, y, hover.width, hover.height);
-  context.restore();
-}
-
-function drawLocusHover(context, scene, locusUid, geometry = {}, foreground = "black") {
-  if (!locusUid) return;
-  const locus = scene.loci.get(locusUid);
-  if (!locus) return;
-
-  geometry ||= {};
-  const hover = geometry.hover || locus.hover;
-  const offsets = geometry.offsets || {};
-  const x = locus.x + hover.x + (offsets.x || 0);
-  const y = locus.y + hover.y + (offsets.y || 0);
-  context.fillStyle = "rgba(0, 0, 0, 0.4)";
-  context.fillRect(x, y, hover.width, hover.height);
-  context.fillStyle = foreground;
-  context.fillRect(locus.x + hover.leftHandleX + (offsets?.x || 0), y, 8, hover.height);
-  context.fillRect(locus.x + hover.rightHandleX + (offsets?.x || 0), y, 8, hover.height);
-}
-
-function drawLocusTrack(context, locus, viewport, config, geometry = {}) {
-  const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
-  const track = geometry.track || locus.track;
-  // Compact test scenes and third-party scene consumers may only provide the
-  // physical locus extent. Production scenes retain oriented track endpoints.
-  const worldStart =
-    track.x1 === undefined ? geometry.worldStart ?? locus.worldStart + offsetX : locus.x + track.x1 + offsetX;
-  const worldEnd =
-    track.x2 === undefined ? geometry.worldEnd ?? locus.worldEnd + offsetX : locus.x + track.x2 + offsetX;
-  const start = viewport ? Math.max(Math.min(worldStart, worldEnd), viewport.minX) : worldStart;
-  const end = viewport ? Math.min(Math.max(worldStart, worldEnd), viewport.maxX) : worldEnd;
-  if (end < start) return;
-  context.beginPath();
-  context.moveTo(start, locus.y + track.y + offsetY);
-  context.lineTo(end, locus.y + track.y + offsetY);
-  context.strokeStyle = config.locus.trackBar.colour;
-  context.lineWidth = config.locus.trackBar.stroke;
-  context.stroke();
-}
-
-function drawLocusTrimIndicators(context, locus, config, geometry = {}) {
-  if (config.locus.trimIndicators?.show === false) return;
-  const { fontSize, fontWeight, borderWidth, borderOpacity } = resolveTrimIndicatorStyle(
-    config.locus.trimIndicators
-  );
-  const indicators = geometry.trimIndicators || locus.trimIndicators || [];
-  if (!indicators.length) return;
-  const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
-  context.save();
-  context.fillStyle = "#536b88";
-  context.strokeStyle = `rgba(255, 255, 255, ${borderOpacity})`;
-  context.lineWidth = borderWidth;
-  context.lineJoin = "round";
-  context.font = `${fontWeight} ${fontSize}px ${config.plot.fontFamily}`;
-  context.textBaseline = "top";
-  for (const indicator of indicators) {
-    context.textAlign = indicator.anchor;
-    context.strokeText(indicator.text, locus.x + indicator.x + offsetX, locus.y + indicator.y + offsetY);
-    context.fillText(indicator.text, locus.x + indicator.x + offsetX, locus.y + indicator.y + offsetY);
-  }
-  context.restore();
-}
-
-function recordsForClusterPreview(
-  scene,
-  preview,
-  viewport,
-  { includeLinks = true, includeGenes = true } = {}
-) {
-  const { clusters, pairs } = clusterPreviewInViewport(scene, preview, viewport, { includeLinks });
-
-  const loci = [];
-  const genes = [];
-  for (const cluster of clusters) {
-    for (const locus of cluster.loci) {
-      const offsets = previewOffsetsForLocus(preview, locus);
-      if (!boundsInViewport(locus.bounds, viewport, offsets)) continue;
-      loci.push(locus);
-      if (!includeGenes) continue;
-      const locusGenes =
-        locus.genes ||
-        [...scene.genes.values()].filter((gene) => gene.locus.source?.uid === locus.source.uid);
-      for (const gene of locusGenes) {
-        if (
-          geneVisibleForPreview(preview, gene) &&
-          boundsInViewport(gene.bounds, viewport, offsetsForGene(preview, gene))
-        ) {
-          genes.push(gene);
-        }
-      }
-    }
-  }
-
-  const linkUids = new Set();
-  for (const pair of pairs) {
-    for (const uid of scene.linksByClusterPair?.get(pair) || []) linkUids.add(uid);
-  }
-  const links = [...linkUids]
-    .map((uid) => scene.links.get(uid))
-    .filter(Boolean)
-    .sort((left, right) => left.order - right.order);
-
-  return { clusters, loci, genes, links };
-}
-
-function drawLegend(context, legend) {
-  if (!legend.visible) return;
-  context.save();
-  context.translate(legend.position.x, legend.position.y);
-  context.font = `${legend.fontSize}px ${legend.fontFamily}`;
-  const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
-  context.textAlign = "start";
-  context.textBaseline = "middle";
-  for (const item of legend.items) {
-    context.beginPath();
-    context.arc(item.x, item.y + item.circleY, item.radius, 0, 2 * Math.PI);
-    context.fillStyle = item.colour;
-    context.fill();
-    context.fillStyle = legend.textColour || "black";
-    context.fillText(item.label, item.x + item.textX, item.y + item.textY);
-    if (item.subtitle) {
-      context.fillStyle = legend.subtitleColour || "#566273";
-      context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
-      context.fillText(item.subtitle, item.x + item.textX, item.y + item.subtitleY);
-      context.font = `${legend.fontSize}px ${legend.fontFamily}`;
-    }
-  }
-  context.restore();
-}
-
-function drawScaleBar(context, scaleBar) {
-  if (!scaleBar.visible) return;
-  const { x, y } = scaleBar.position;
-  context.save();
-  context.translate(x, y);
-  context.strokeStyle = scaleBar.colour;
-  context.lineWidth = scaleBar.strokeWidth;
-  context.beginPath();
-  context.moveTo(0, scaleBar.middle);
-  context.lineTo(scaleBar.length, scaleBar.middle);
-  context.moveTo(0, 0);
-  context.lineTo(0, scaleBar.height);
-  context.moveTo(scaleBar.length, 0);
-  context.lineTo(scaleBar.length, scaleBar.height);
-  context.stroke();
-  context.fillStyle = scaleBar.textColour || "black";
-  context.font = `${scaleBar.fontSize}px ${scaleBar.fontFamily}`;
-  context.textAlign = "center";
-  context.textBaseline = "top";
-  context.fillText(scaleBar.label, scaleBar.length / 2, scaleBar.height + 5);
-  context.restore();
-}
-
-function drawColourBar(context, colourBar) {
-  if (!colourBar.visible) return;
-  const { x, y } = colourBar.position;
-  context.save();
-  context.translate(x, y);
-  const gradient = context.createLinearGradient(0, 0, colourBar.width, 0);
-  gradient.addColorStop(0, colourBar.startColour);
-  gradient.addColorStop(1, colourBar.endColour);
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, colourBar.width, colourBar.height);
-  context.strokeStyle = colourBar.textColour || "black";
-  context.lineWidth = 1;
-  context.strokeRect(0, 0, colourBar.width, colourBar.height);
-  context.fillStyle = colourBar.textColour || "black";
-  context.font = `${colourBar.fontSize}px ${colourBar.fontFamily}`;
-  context.textBaseline = "top";
-  context.textAlign = "center";
-  context.fillText(colourBar.label, colourBar.width / 2, colourBar.height + 5);
-  context.textAlign = "start";
-  context.fillText(colourBar.startLabel, 0, colourBar.height + 5);
-  context.textAlign = "end";
-  context.fillText(colourBar.endLabel, colourBar.width, colourBar.height + 5);
-  context.restore();
-}
-
-const interpolateNumber = (from, to, amount) => from + (to - from) * amount;
-
-function interpolateFields(from, to, amount, fields = ["x", "y"]) {
-  if (!from || !to || from === to) return to;
-  const result = { ...to };
-  for (const field of fields) result[field] = interpolateNumber(from[field] ?? to[field], to[field], amount);
-  return result;
-}
-
-function interpolateArray(from, to, amount) {
-  if (!from || !to || from.length !== to.length) return to;
-  return to.map((value, index) => interpolateNumber(from[index], value, amount));
-}
-
-function interpolateLocus(from, to, amount) {
-  if (!from) return to;
-  const trackX = (locus, side) =>
-    locus.track[side] ??
-    locus[side === "x1" ? "worldStart" : "worldEnd"] - locus.x;
-  return {
-    ...interpolateFields(from, to, amount, ["x", "y", "worldStart", "worldEnd"]),
-    transform: interpolateFields(from.transform, to.transform, amount),
-    track: {
-      ...to.track,
-      x1: interpolateNumber(trackX(from, "x1"), trackX(to, "x1"), amount),
-      x2: interpolateNumber(trackX(from, "x2"), trackX(to, "x2"), amount),
-      y: interpolateNumber(from.track.y, to.track.y, amount),
-    },
-    hover: interpolateFields(from.hover, to.hover, amount,
-      ["x", "y", "width", "height", "leftHandleX", "rightHandleX"]),
-  };
-}
-
-/**
- * Interpolate compatible scene geometry for Canvas animation. Sources,
- * hit-regions, and semantic state remain those of the target scene; only the
- * pixels in flight are interpolated.
- */
-function interpolateCanvasScene(previous, scene, amount) {
-  if (!previous || amount >= 1) return scene;
-  const loci = new Map();
-  for (const [uid, locus] of scene.loci) {
-    loci.set(uid, interpolateLocus(previous.loci.get(uid), locus, amount));
-  }
-
-  const clusters = new Map();
-  for (const [uid, cluster] of scene.clusters) {
-    const prior = previous.clusters.get(uid);
-    clusters.set(uid, {
-      ...interpolateFields(prior, cluster, amount),
-      info: interpolateFields(prior?.info, cluster.info, amount),
-      loci: cluster.loci.map((locus) => loci.get(locus.source.uid)),
-    });
-  }
-
-  const genes = new Map();
-  for (const [uid, gene] of scene.genes) {
-    const prior = previous.genes.get(uid);
-    genes.set(uid, {
-      ...gene,
-      polygon: interpolateArray(prior?.polygon, gene.polygon, amount),
-      locus: interpolateFields(prior?.locus, gene.locus, amount),
-      label: interpolateFields(prior?.label, gene.label, amount, ["x", "y", "rotation"]),
-    });
-  }
-
-  const links = new Map();
-  for (const [uid, link] of scene.links) {
-    const prior = previous.links.get(uid);
-    const opacity = interpolateLinkOpacity(prior, link, amount);
-    const anchors = interpolateLinkAnchors(previous, prior, scene, link, amount);
-    links.set(uid, {
-      ...link,
-      // Retained scene link anchors are normalized upper-to-lower. During a
-      // row swap that reverses which endpoint is upper, so interpolate in
-      // stable query/target order to keep each end attached to its gene.
-      anchors,
-      labelPosition: interpolateFields(prior?.labelPosition, link.labelPosition, amount),
-      opacity,
-      visible: opacity > 0 && Boolean(prior?.visible || link.visible),
-    });
-  }
-
-  const priorPanels = new Map((previous.annotationPanels || []).map((panel) => [panel.uid, panel]));
-  const annotationPanels = (scene.annotationPanels || []).map((panel) => ({ ...panel,
-    x: interpolateNumber(priorPanels.get(panel.uid)?.x ?? panel.x, panel.x, amount) }));
-  return { ...scene, clusters, loci, genes, links, annotationPanels };
-}
-
-const trimIndicatorPresence = new WeakMap();
-function hasTrimIndicators(loci) {
-  if (!trimIndicatorPresence.has(loci)) {
-    trimIndicatorPresence.set(loci, [...loci.values()].some((locus) => locus.trimIndicators?.length));
-  }
-  return trimIndicatorPresence.get(loci);
-}
-
-const CANVAS_LAYERS = ["links", "linkLabels", "tracks", "trimIndicators", "genes", "geneLabels", "clusterLabels", "tree", "annotations", "annotationLabels", "chrome"];
-
-/** Draw selected layers of a renderer-neutral scene into Canvas 2D. */
-function renderCanvas({
-  canvas,
-  scene,
-  tree = null,
-  previousScene = null,
-  previousTree = null,
-  previousTreeScene = null,
-  treeTargetScene = null,
-  treeProgress = 1,
-  treeTrackAnchor = true,
-  progress = 1,
-  camera,
-  config,
-  scales,
-  hoverLocusUid = null,
-  suppressLocusHover = false,
-  pixelRatio: requestedPixelRatio = globalThis.devicePixelRatio || 1,
-  dimensions = null,
-  fullScene = false,
-  preview = null,
-  clear = true,
-  include = null,
-  omit = null,
-  layers = CANVAS_LAYERS,
-  highlightGeneIds = null,
-  highlightLinkIds = null,
-  highlightLocusIds = null,
-  highlightClusterIds = null,
-}) {
-  config = figureConfig(config);
-  const show = (layer) => layers.includes(layer);
-  const showLinks = show("links"), showGenes = show("genes");
-  const displayScene = interpolateCanvasScene(previousScene, scene, progress);
-  const showTrimIndicators = show("trimIndicators") && config.locus.trimIndicators?.show !== false &&
-    (preview?.type === "locus-trim" || hasTrimIndicators(displayScene.loci));
-  const showLoci = showTrimIndicators || show("tracks");
-  const showGeneLabels = show("geneLabels") && config.gene.label.show;
-  const showLinkLabels = show("linkLabels") && config.link.label.show;
-  const context = canvas.getContext("2d");
-  const bounds = dimensions || canvas.getBoundingClientRect();
-  const width = bounds.width;
-  const height = bounds.height;
-  const pixelRatio = requestedPixelRatio;
-  const pixelWidth = Math.round(width * pixelRatio);
-  const pixelHeight = Math.round(height * pixelRatio);
-  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-    canvas.width = pixelWidth;
-    canvas.height = pixelHeight;
-  }
-
-  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  if (clear) {
-    context.clearRect(0, 0, width, height);
-  }
-  context.save();
-  context.translate(camera.x, camera.y);
-  context.scale(camera.k, camera.k);
-
-  // During an animation, geometry is between the previous and target scenes,
-  // while the index describes only the target scene. Draw the full frame then
-  // so an in-flight record cannot be incorrectly culled.
-  const viewport = previousScene || fullScene
-    ? null
-    : canvasWorldViewport(canvas, camera, 20, dimensions);
-  const clusterPreview = preview?.type === "cluster-drag";
-  const visible = !clusterPreview && viewport && displayScene.index
-    ? {
-        links: (showLinks || showLinkLabels) ? queryViewportOrdered(displayScene.index.links, viewport) : null,
-        loci: showLoci ? queryViewportOrdered(displayScene.index.loci, viewport) : null,
-        genes: (showGenes || showGeneLabels) ? queryViewportOrdered(displayScene.index.genes, viewport) : null,
-      }
-    : null;
-
-  const recordsFor = (records, ids, type, { ignoreOmit = false } = {}) => {
-    const included = include?.[type];
-    const omitted = ignoreOmit ? null : omit?.[type];
-    const recordIds = ids || [...records.keys()];
-    return recordIds
-      .filter((uid) => (!included || included.has(uid)) && !omitted?.has(uid))
-      .map((uid) => records.get(uid))
-      .filter(Boolean);
-  };
-  const previewRecords = clusterPreview
-    ? recordsForClusterPreview(displayScene, preview, viewport, {
-        includeLinks: showLinks || showLinkLabels,
-        includeGenes: showGenes || showGeneLabels,
-      })
-    : null;
-
-  for (const link of (showLinks || showLinkLabels)
-    ? previewRecords?.links || recordsFor(displayScene.links, visible?.links, "links")
-    : []) {
-    const geometry = linkGeometryForPreview(displayScene, link, preview, config);
-    const anchors = geometry.anchors;
-    if (!geometry.visible || !anchors) continue;
-    if (
-      clusterPreview &&
-      (!boundsInViewport({
-        minX: Math.min(anchors[0], anchors[1], anchors[3], anchors[4]),
-        maxX: Math.max(anchors[0], anchors[1], anchors[3], anchors[4]),
-        minY: Math.min(anchors[2], anchors[5]),
-        maxY: Math.max(anchors[2], anchors[5]),
-      }, viewport))
-    ) {
-      continue;
-    }
-    if (showLinks) drawLink(context, link, config, scales, geometry, showLinkLabels);
-    else drawLinkLabel(context, link, config, anchors);
-  }
-  if (show("tree")) drawTree(context, tree, displayScene, config, preview, {
-    trackAnchor: treeTrackAnchor,
-    previousTree,
-    previousScene: previousTreeScene,
-    targetScene: treeTargetScene || scene,
-    progress: treeProgress,
-  });
-  if (highlightLinkIds?.size) {
-    for (const uid of highlightLinkIds) {
-      if (visible?.links && !visible.links.includes(uid)) continue;
-      const link = displayScene.links.get(uid);
-      if (!link) continue;
-      drawLinkHighlight(context, config, linkGeometryForPreview(displayScene, link, preview, config));
-    }
-  }
-  const loci = showLoci
-    ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci")
-    : [];
-  // Labels are the only immediate indication that a very large, initially
-  // cropped figure rendered at all. Do not derive them from culled loci: a
-  // cluster label can be on screen while every locus body is just outside the
-  // viewport. Text is inexpensive and Canvas clips truly offscreen labels.
-  const labelClusters = show("clusterLabels")
-    ? recordsFor(displayScene.clusters, null, "clusters", { ignoreOmit: true })
-    : [];
-  for (const cluster of labelClusters) {
-    drawClusterInfo(context, cluster, config, {
-      selected: highlightClusterIds?.has(cluster.source.uid),
-      x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
-      y: clusterOffsetForPreview(preview, cluster.source.uid),
-      locusText: clusterLabelTextForPreview(
-        preview,
-        cluster.source.uid,
-        cluster.info.locusText
-      ),
-    });
-  }
-  if (show("tracks")) {
-    for (const locus of loci) {
-      drawLocusTrack(
-        context,
-        locus,
-        viewport,
-        config,
-        locusGeometryForPreview(preview, locus)
-      );
-    }
-  }
-  if (showTrimIndicators) {
-    for (const locus of loci) {
-      drawLocusTrimIndicators(
-        context,
-        locus,
-        config,
-        locusGeometryForPreview(preview, locus)
-      );
-    }
-  }
-  if (highlightLocusIds?.size) {
-    for (const uid of highlightLocusIds) {
-      if (visible?.loci && !visible.loci.includes(uid)) continue;
-      const locus = displayScene.loci.get(uid);
-      if (locus) drawLocusHighlight(context, locus, camera, locusGeometryForPreview(preview, locus));
-    }
-  }
-  if (!suppressLocusHover) {
-    const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
-    drawLocusHover(
-      context,
-      displayScene,
-      hoverLocusUid,
-      hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null,
-      config.figureStyle.foreground
-    );
-  }
-  for (const gene of (showGenes || showGeneLabels)
-    ? previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes, "genes")
-    : []) {
-    const offsets = offsetsForGene(preview, gene);
-    const visible = geneVisibleForPreview(preview, gene);
-    const geometry = geneGeometryForPreview(preview, gene);
-    if (showGenes) drawGene(context, gene, config, scales, offsets, visible, geometry, showGeneLabels);
-    else if (visible) drawGeneLabel(context, gene, config, geometry, offsets);
-  }
-  if (highlightGeneIds?.size) {
-    for (const uid of highlightGeneIds) {
-      if (visible?.genes && !visible.genes.includes(uid)) continue;
-      const gene = displayScene.genes.get(uid);
-      if (!gene || !geneVisibleForPreview(preview, gene)) continue;
-      drawGeneHighlight(
-        context,
-        gene,
-        camera,
-        geneGeometryForPreview(preview, gene),
-        offsetsForGene(preview, gene)
-      );
-    }
-  }
-  if (show("annotations") || show("annotationLabels")) drawCanvasAnnotations(context, displayScene, preview, {
-    showGeometry: show("annotations"), showLabels: show("annotationLabels"), viewport,
-  });
-  if (show("chrome") && displayScene.chrome) {
-    const chrome = preview?.chrome || displayScene.chrome;
-    drawLegend(context, chrome.legend);
-    drawScaleBar(context, chrome.scaleBar);
-    drawColourBar(context, chrome.colourBar);
-  }
-  context.restore();
-  return { width, height, pixelRatio };
-}
-
 /** One backdrop shared by all renderers; camera changes only update its transform. */
 function createFigureSurface() {
   let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
@@ -10522,7 +9576,7 @@ function createFigureSurface() {
     if (preview?.type === "cluster-drag") preview = null;
     if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
       context ||= container.ownerDocument.createElement("canvas").getContext("2d");
-      measuredBounds = canvasFigureBounds(context, scene, config, tree, { preview });
+      measuredBounds = measureFigureBounds(context, scene, config, tree, { preview });
       measuredScene = scene;
       measuredConfig = config;
       measuredPreview = preview;
@@ -11183,6 +10237,956 @@ function createInteractionController({
 
     flipLocus,
   };
+}
+
+function linkColours(source, scales, config) {
+  const { asLine, groupColour } = config.link;
+  const colour = source.colour || (groupColour
+    ? scales.colour(scales.group(source.query.uid)) : scales.score(source.identity));
+  let fill = colour;
+  if (!source.colour && groupColour) {
+    const { r, g, b } = color(colour).rgb();
+    // Group fills blend 40% white.
+    fill = rgb(102 + 0.6 * r, 102 + 0.6 * g, 102 + 0.6 * b);
+  }
+  const stroke = asLine ? fill : source.colour || (groupColour ? colour : config.figureStyle?.outline || "black");
+  return { fill, stroke };
+}
+
+function containsRect({ x, y, width, height }, point) {
+  return (
+    point.x >= x &&
+    point.x <= x + width &&
+    point.y >= y &&
+    point.y <= y + height
+  );
+}
+
+function pointOnSegment(point, start, end) {
+  const cross =
+    (point.y - start.y) * (end.x - start.x) -
+    (point.x - start.x) * (end.y - start.y);
+  if (Math.abs(cross) > Number.EPSILON) return false;
+  return (
+    point.x >= Math.min(start.x, end.x) &&
+    point.x <= Math.max(start.x, end.x) &&
+    point.y >= Math.min(start.y, end.y) &&
+    point.y <= Math.max(start.y, end.y)
+  );
+}
+
+function containsPolygon({ points }, point) {
+  let inside = false;
+  for (let index = 0, previous = points.length - 2; index < points.length; previous = index, index += 2) {
+    const start = { x: points[previous], y: points[previous + 1] };
+    const end = { x: points[index], y: points[index + 1] };
+    if (pointOnSegment(point, start, end)) return true;
+    const crosses = (start.y > point.y) !== (end.y > point.y);
+    if (crosses && point.x < ((end.x - start.x) * (point.y - start.y)) / (end.y - start.y) + start.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function contains(region, point) {
+  if (region.type === "rect") return containsRect(region, point);
+  if (region.type === "polygon") return containsPolygon(region, point);
+  return false;
+}
+
+/**
+ * Returns the topmost semantic interaction target at a chart-world point.
+ * The spatial indexes limit precise region tests to records whose extents
+ * contain the pointer. Reverse painter order gives genes and trim handles
+ * precedence over a locus move region.
+ */
+function hitTest(scene, point) {
+  if (scene.index?.genes && scene.index?.hitLoci && scene.hitRegions.genes && scene.hitRegions.loci) {
+    for (const uid of queryPointOrdered(scene.index.genes, point).reverse()) {
+      const region = scene.hitRegions.genes.get(uid);
+      if (region && contains(region, point)) return region;
+    }
+    for (const uid of queryPointOrdered(scene.index.hitLoci, point).reverse()) {
+      const regions = scene.hitRegions.loci.get(uid);
+      for (const region of [regions?.trimRight, regions?.trimLeft, regions?.move]) {
+        if (region && contains(region, point)) return region;
+      }
+    }
+    return null;
+  }
+  for (let index = scene.hitRegions.all.length - 1; index >= 0; index -= 1) {
+    const region = scene.hitRegions.all[index];
+    if (contains(region, point)) return region;
+  }
+  return null;
+}
+
+function traceLines(context, lines) {
+  context.beginPath();
+  for (const line of lines) {
+    context.moveTo(line.x1, line.y1);
+    context.lineTo(line.x2, line.y2);
+  }
+  context.stroke();
+}
+
+/** Paint an already positioned tree frame, also used by the WebGPU overlay. */
+function drawCanvasTree(context, layout) {
+  if (!layout) return;
+  context.save();
+  context.strokeStyle = layout.guide.colour;
+  context.lineWidth = layout.guide.width;
+  context.setLineDash(layout.guide.dash);
+  traceLines(context, layout.guides);
+  context.setLineDash([]);
+  if (layout.cutLine) {
+    const cut = layout.cutLine;
+    context.strokeStyle = cut.colour;
+    context.lineWidth = cut.width;
+    context.setLineDash([4, 3]);
+    traceLines(context, [cut]);
+    context.setLineDash([]);
+    context.fillStyle = cut.colour;
+    context.font = `${cut.label.fontSize}px ${cut.label.fontFamily}`;
+    context.textAlign = "center";
+    context.textBaseline = "bottom";
+    context.fillText(cut.label.text, cut.label.x, cut.label.y);
+  }
+  const groups = new Map();
+  for (const mark of [layout.rootBranch, ...layout.stems, ...layout.branches]) {
+    const key = `${mark.style.colour}:${mark.style.width}:${mark.lineCap || "butt"}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(mark);
+  }
+  for (const lines of groups.values()) {
+    context.strokeStyle = lines[0].style.colour;
+    context.lineWidth = lines[0].style.width;
+    context.lineCap = lines[0].lineCap || "butt";
+    traceLines(context, lines);
+  }
+  context.lineCap = "butt";
+  context.strokeStyle = layout.branch.colour;
+  context.lineWidth = layout.branch.width;
+  context.fillStyle = layout.background;
+  for (const node of layout.nodes) {
+    context.beginPath();
+    context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  }
+  context.fillStyle = layout.support.colour;
+  context.textAlign = "right";
+  context.textBaseline = "bottom";
+  context.font = `${layout.support.fontSize}px ${layout.support.fontFamily}`;
+  for (const label of layout.supports) context.fillText(label.text, label.x, label.y);
+  for (const label of layout.annotations) {
+    context.fillStyle = label.colour;
+    context.textAlign = "left";
+    context.textBaseline = "top";
+    context.font = `${label.fontStyle} ${label.fontWeight} ${label.fontSize}px ${label.fontFamily}`;
+    context.fillText(label.text, label.x, label.y);
+  }
+  if (layout.scaleBar) {
+    const bar = layout.scaleBar;
+    context.strokeStyle = bar.colour;
+    context.lineWidth = bar.strokeWidth;
+    traceLines(context, bar.lines);
+    context.fillStyle = layout.foreground;
+    context.font = `${bar.fontSize}px ${bar.fontFamily}`;
+    context.textAlign = "center";
+    context.textBaseline = "top";
+    context.fillText(bar.label.text, bar.label.x, bar.label.y);
+  }
+  context.restore();
+}
+
+/**
+ * Choose Canvas backing-store resolution from the view scale.  This affects
+ * only raster detail: the CSS canvas size and chart-world coordinates remain
+ * unchanged.  Active gestures always favour throughput over sharpness.
+ */
+function canvasPixelRatioForCamera({
+  camera,
+  moving = false,
+  devicePixelRatio = globalThis.devicePixelRatio || 1,
+}) {
+  if (moving) return Math.min(devicePixelRatio, 1);
+
+  const zoom = camera?.k ?? 1;
+  if (zoom < 0.35) return Math.min(devicePixelRatio, 0.75);
+  if (zoom < 0.6) return Math.min(devicePixelRatio, 1);
+  if (zoom < 0.85) return Math.min(devicePixelRatio, 1.5);
+  return devicePixelRatio;
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+/** Project the complete chart bounds into a fixed-size screen-space minimap. */
+function createMinimapProjection({ bounds, width, height, padding = 4 }) {
+  if (!bounds || !width || !height) return null;
+  const worldWidth = Math.max(1, bounds.maxX - bounds.minX);
+  const worldHeight = Math.max(1, bounds.maxY - bounds.minY);
+  const availableWidth = Math.max(1, width - padding * 2);
+  const availableHeight = Math.max(1, height - padding * 2);
+  const scale = Math.min(availableWidth / worldWidth, availableHeight / worldHeight);
+  const frame = {
+    x: (width - worldWidth * scale) / 2,
+    y: (height - worldHeight * scale) / 2,
+    width: worldWidth * scale,
+    height: worldHeight * scale,
+  };
+  return {
+    bounds,
+    width,
+    height,
+    scale,
+    frame,
+    x: frame.x - bounds.minX * scale,
+    y: frame.y - bounds.minY * scale,
+  };
+}
+
+/** Return the main viewport rectangle in minimap screen coordinates. */
+function canvasMinimapViewport(projection, camera, viewport) {
+  if (!projection || !camera || !viewport) return null;
+  const minX = -camera.x / camera.k;
+  const maxX = (viewport.width - camera.x) / camera.k;
+  const minY = -camera.y / camera.k;
+  const maxY = (viewport.height - camera.y) / camera.k;
+  const { bounds, scale, x, y, frame } = projection;
+  const left = clamp(x + minX * scale, frame.x, frame.x + frame.width);
+  const right = clamp(x + maxX * scale, frame.x, frame.x + frame.width);
+  const top = clamp(y + minY * scale, frame.y, frame.y + frame.height);
+  const bottom = clamp(y + maxY * scale, frame.y, frame.y + frame.height);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/** Centre the existing camera scale on a point selected in the minimap. */
+function cameraForMinimapPoint(projection, point, viewport, camera) {
+  const worldX = clamp(
+    (point.x - projection.x) / projection.scale,
+    projection.bounds.minX,
+    projection.bounds.maxX
+  );
+  const worldY = clamp(
+    (point.y - projection.y) / projection.scale,
+    projection.bounds.minY,
+    projection.bounds.maxY
+  );
+  return {
+    ...camera,
+    x: viewport.width / 2 - worldX * camera.k,
+    y: viewport.height / 2 - worldY * camera.k,
+  };
+}
+
+/** Composite a cached overview raster with the live main-camera viewport. */
+function renderCanvasMinimap({
+  canvas,
+  baseCanvas = null,
+  projection,
+  camera,
+  viewport,
+  pixelRatio = globalThis.devicePixelRatio || 1,
+}) {
+  if (!projection) return null;
+  const { width, height, frame } = projection;
+  const pixelWidth = Math.round(width * pixelRatio);
+  const pixelHeight = Math.round(height * pixelRatio);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+  const context = canvas.getContext("2d");
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  if (baseCanvas) context.drawImage(baseCanvas, 0, 0, width, height);
+  else {
+    context.fillStyle = "white";
+    context.fillRect(0, 0, width, height);
+  }
+  context.strokeStyle = "rgba(0, 0, 0, 0.55)";
+  context.lineWidth = 1;
+  context.strokeRect(frame.x, frame.y, frame.width, frame.height);
+  const visible = canvasMinimapViewport(projection, camera, viewport);
+  if (visible) {
+    context.fillStyle = "rgba(30, 120, 255, 0.16)";
+    context.fillRect(visible.x, visible.y, visible.width, visible.height);
+    context.strokeStyle = "rgb(30, 120, 255)";
+    context.strokeRect(visible.x, visible.y, visible.width, visible.height);
+  }
+  return { width, height, pixelRatio, viewport: visible };
+}
+
+
+/**
+ * Return the portion of chart-world space covered by a Canvas. A small
+ * screen-space margin prevents records from popping at its edge while panning.
+ */
+function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
+  return worldViewport(camera, dimensions || canvas.getBoundingClientRect(), overscan);
+}
+
+
+function clusterLabelHit(context, scene, point, config) {
+  for (const cluster of [...scene.clusters.values()].reverse()) {
+    const anchorX = cluster.x + cluster.info.x;
+    const nameFont = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
+    const locusFont = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
+    const nameWidth = measureCanvasText(context, scene, cluster.source.name || "", { font: nameFont, align: "left", baseline: "alphabetic" }).width;
+    const locusWidth = measureCanvasText(context, scene, cluster.info.locusText, { font: locusFont, align: "left", baseline: "alphabetic" }).width;
+    const width = Math.max(nameWidth, locusWidth);
+    if (
+      point.x >= anchorX - width &&
+      point.x <= anchorX &&
+      point.y >= cluster.y - config.cluster.nameFontSize &&
+      point.y <= cluster.y + config.cluster.lociFontSize + 12
+    ) {
+      return { action: "move-cluster", clusterUid: cluster.source.uid };
+    }
+  }
+  return null;
+}
+
+function chromeHit(context, scene, point) {
+  const chrome = scene.chrome;
+  if (!chrome) return null;
+
+  const { legend, scaleBar } = chrome;
+  if (legend.visible) {
+    context.save();
+    context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+    const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
+    for (const item of [...legend.items].reverse()) {
+      const x = legend.position.x + item.x;
+      const y = legend.position.y + item.y;
+      const circleX = x;
+      const circleY = y + item.circleY;
+      if (Math.hypot(point.x - circleX, point.y - circleY) <= item.radius) {
+        context.restore();
+        return { action: "legend-colour", group: item.source };
+      }
+      const textX = x + item.textX;
+      const labelWidth = measureCanvasText(context, scene, item.label).width;
+      context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
+      const subtitleWidth = item.subtitle ? measureCanvasText(context, scene, item.subtitle).width : 0;
+      context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+      const textWidth = Math.max(labelWidth, subtitleWidth);
+      if (
+        point.x >= textX &&
+        point.x <= textX + textWidth &&
+        point.y >= y + item.textY - legend.fontSize / 2 &&
+        point.y <= y + (item.subtitleY ?? item.textY) + subtitleFontSize / 2
+      ) {
+        context.restore();
+        return { action: "legend-text", group: item.source };
+      }
+    }
+    context.restore();
+  }
+
+  if (scaleBar.visible) {
+    const x = scaleBar.position.x + scaleBar.length / 2;
+    const y = scaleBar.position.y + scaleBar.height + 5;
+    context.save();
+    context.font = `${scaleBar.fontSize}px ${scaleBar.fontFamily}`;
+    const width = measureCanvasText(context, scene, scaleBar.label).width;
+    context.restore();
+    if (
+      point.x >= x - width / 2 &&
+      point.x <= x + width / 2 &&
+      point.y >= y &&
+      point.y <= y + scaleBar.fontSize
+    ) {
+      return { action: "scale-bar" };
+    }
+  }
+
+  return null;
+}
+
+function hitTestCanvas({ canvas, scene, camera, config, event, tree = null, treeDragging = false }) {
+  const point = worldPoint(canvas, event, camera);
+  const context = canvas.getContext("2d");
+  return hitTest(scene, point) || treeNodeHit(context, scene, point, config, tree, treeDragging) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
+}
+
+function treeNodeHit(context, scene, point, config, tree, dragging = false) {
+  return hitTestTreeNode(measureTreeLayout(context, tree, scene, config, { dragging }), point);
+}
+
+function drawTree(context, tree, scene, config, preview, motion) {
+  const layout = measureTreeLayout(context, tree, scene, config, {
+    preview,
+    previousTree: motion.previousTree,
+    previousScene: motion.previousScene,
+    targetScene: motion.targetScene || scene,
+    trackAnchor: motion.trackAnchor,
+  });
+  drawCanvasTree(context, interpolateTreeLayout(layout, motion.progress));
+}
+
+function polygon(context, points) {
+  context.beginPath();
+  context.moveTo(points[0], points[1]);
+  for (let index = 2; index < points.length; index += 2) {
+    context.lineTo(points[index], points[index + 1]);
+  }
+  context.closePath();
+}
+
+function drawLinkLabel(context, link, config, anchors) {
+  if (!config.link.label.show || !link.labelPosition) return;
+  const labelPosition = getLinkLabelPosition(anchors, config.link.label.position);
+  context.fillStyle = "white";
+  context.font = `${config.link.label.fontSize}px ${config.plot.fontFamily}`;
+  context.textAlign = "center";
+  context.textBaseline = "alphabetic";
+  context.fillText(link.source.label ?? link.source.identity.toFixed(2), labelPosition.x, labelPosition.y);
+}
+
+function drawLink(context, link, config, scales, { visible, anchors }, showLabel) {
+  if (!visible || !anchors) return;
+  context.save();
+  context.globalAlpha *= link.opacity ?? 1;
+  const { fill, stroke } = linkColours(link.source, scales, config);
+  context.beginPath();
+  traceLinkPath(context, anchors, config.link);
+  if (!config.link.asLine) {
+    context.fillStyle = fill;
+    context.fill();
+  }
+  context.strokeStyle = stroke;
+  context.lineWidth = config.link.strokeWidth;
+  context.stroke();
+
+  if (showLabel) drawLinkLabel(context, link, config, anchors);
+  context.restore();
+}
+
+function drawLinkHighlight(context, config, { visible, anchors }) {
+  if (!visible || !anchors) return;
+  context.beginPath();
+  traceLinkPath(context, anchors, config.link);
+  if (!config.link.asLine) {
+    context.fillStyle = "rgba(22, 119, 255, 0.18)";
+    context.fill();
+  }
+  context.strokeStyle = "#1677ff";
+  context.lineWidth = Math.max(2, config.link.strokeWidth + 1);
+  context.stroke();
+}
+
+function drawClusterInfo(
+  context,
+  cluster,
+  config,
+  { x: offsetX = 0, y: offsetY = 0, locusText = cluster.info.locusText, selected = false } = {}
+) {
+  const { x, y } = cluster;
+  const anchorX = x + cluster.info.x + offsetX;
+  context.fillStyle = selected ? "#1677ff" : config.figureStyle?.foreground || "black";
+  context.textAlign = "end";
+  context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
+  context.textBaseline = "alphabetic";
+  context.fillText(cluster.source.name, anchorX, y + offsetY + 8);
+  context.font = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
+  context.textBaseline = "top";
+  context.fillText(locusText, anchorX, y + offsetY + 12);
+}
+
+function drawGene(
+  context,
+  gene,
+  config,
+  scales,
+  { x: offsetX = 0, y: offsetY = 0 } = {},
+  visible = gene.visible,
+  geometry = {},
+  showLabel = true
+) {
+  if (!visible) return;
+  context.save();
+  context.translate(offsetX, offsetY);
+  if (geometry.flipAxis !== undefined) {
+    // A flip preview is a uniform affine transform about the locus axis:
+    // x' = axis + (x - axis) * (1 - 2p). Applying it to the context avoids
+    // allocating a reflected polygon for every gene on every animation frame.
+    context.save();
+    context.translate(geometry.flipAxis, 0);
+    context.scale(geometry.flipScale, 1);
+    context.translate(-geometry.flipAxis, 0);
+    polygon(context, gene.polygon);
+  } else {
+    polygon(context, gene.polygon);
+  }
+  const group = scales.group(gene.source.uid);
+  context.fillStyle = gene.source.colour || scales.colour(group);
+  context.strokeStyle = config.gene.shape.stroke;
+  context.lineWidth = config.gene.shape.strokeWidth;
+  context.fill();
+  context.stroke();
+  if (geometry.flipAxis !== undefined) context.restore();
+
+  if (showLabel) drawGeneLabel(context, gene, config, geometry);
+  context.restore();
+}
+
+function drawGeneLabel(context, gene, config, geometry = {}, { x: offsetX = 0, y: offsetY = 0 } = {}) {
+  if (!config.gene.label.show) return;
+  const { x, y, rotation } = gene.label;
+  const labelX = (geometry.labelX ?? gene.locus.x + x) + offsetX;
+  context.save();
+  context.translate(labelX, gene.locus.y + y + offsetY);
+  context.rotate((rotation * Math.PI) / 180);
+  context.fillStyle = config.figureStyle?.foreground || "black";
+  context.font = `${config.gene.label.fontSize}px ${config.plot.fontFamily}`;
+  context.textAlign = config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor;
+  context.textBaseline = "alphabetic";
+  context.fillText(gene.source.label || gene.source.name || gene.source.uid, 0, 0);
+  context.restore();
+}
+
+function drawGeneHighlight(context, gene, camera, geometry = {}, { x: offsetX = 0, y: offsetY = 0 } = {}) {
+  context.save();
+  context.translate(offsetX, offsetY);
+  if (geometry.flipAxis !== undefined) {
+    context.translate(geometry.flipAxis, 0);
+    context.scale(geometry.flipScale, 1);
+    context.translate(-geometry.flipAxis, 0);
+  }
+  polygon(context, gene.polygon);
+  context.fillStyle = "rgba(22, 119, 255, 0.18)";
+  context.fill();
+  // Keep the editor-selection ring readable at every zoom level.
+  context.strokeStyle = "#1677ff";
+  context.lineWidth = 2.5 / camera.k;
+  context.stroke();
+  context.restore();
+}
+
+function drawLocusHighlight(context, locus, camera, geometry = {}) {
+  const hover = geometry.hover || locus.hover;
+  const offsets = geometry.offsets || {};
+  const x = locus.x + hover.x + (offsets.x || 0);
+  const y = locus.y + hover.y + (offsets.y || 0);
+  context.save();
+  context.fillStyle = "rgba(22, 119, 255, 0.12)";
+  context.fillRect(x, y, hover.width, hover.height);
+  context.strokeStyle = "#1677ff";
+  context.lineWidth = 2 / camera.k;
+  context.strokeRect(x, y, hover.width, hover.height);
+  context.restore();
+}
+
+function drawLocusHover(context, scene, locusUid, geometry = {}, foreground = "black") {
+  if (!locusUid) return;
+  const locus = scene.loci.get(locusUid);
+  if (!locus) return;
+
+  geometry ||= {};
+  const hover = geometry.hover || locus.hover;
+  const offsets = geometry.offsets || {};
+  const x = locus.x + hover.x + (offsets.x || 0);
+  const y = locus.y + hover.y + (offsets.y || 0);
+  context.fillStyle = "rgba(0, 0, 0, 0.4)";
+  context.fillRect(x, y, hover.width, hover.height);
+  context.fillStyle = foreground;
+  context.fillRect(locus.x + hover.leftHandleX + (offsets?.x || 0), y, 8, hover.height);
+  context.fillRect(locus.x + hover.rightHandleX + (offsets?.x || 0), y, 8, hover.height);
+}
+
+function drawLocusTrack(context, locus, viewport, config, geometry = {}) {
+  const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
+  const track = geometry.track || locus.track;
+  // Compact test scenes and third-party scene consumers may only provide the
+  // physical locus extent. Production scenes retain oriented track endpoints.
+  const worldStart =
+    track.x1 === undefined ? geometry.worldStart ?? locus.worldStart + offsetX : locus.x + track.x1 + offsetX;
+  const worldEnd =
+    track.x2 === undefined ? geometry.worldEnd ?? locus.worldEnd + offsetX : locus.x + track.x2 + offsetX;
+  const start = viewport ? Math.max(Math.min(worldStart, worldEnd), viewport.minX) : worldStart;
+  const end = viewport ? Math.min(Math.max(worldStart, worldEnd), viewport.maxX) : worldEnd;
+  if (end < start) return;
+  context.beginPath();
+  context.moveTo(start, locus.y + track.y + offsetY);
+  context.lineTo(end, locus.y + track.y + offsetY);
+  context.strokeStyle = config.locus.trackBar.colour;
+  context.lineWidth = config.locus.trackBar.stroke;
+  context.stroke();
+}
+
+function drawLocusTrimIndicators(context, locus, config, geometry = {}) {
+  if (config.locus.trimIndicators?.show === false) return;
+  const { fontSize, fontWeight, borderWidth, borderOpacity } = resolveTrimIndicatorStyle(
+    config.locus.trimIndicators
+  );
+  const indicators = geometry.trimIndicators || locus.trimIndicators || [];
+  if (!indicators.length) return;
+  const { x: offsetX = 0, y: offsetY = 0 } = geometry.offsets || geometry;
+  context.save();
+  context.fillStyle = "#536b88";
+  context.strokeStyle = `rgba(255, 255, 255, ${borderOpacity})`;
+  context.lineWidth = borderWidth;
+  context.lineJoin = "round";
+  context.font = `${fontWeight} ${fontSize}px ${config.plot.fontFamily}`;
+  context.textBaseline = "top";
+  for (const indicator of indicators) {
+    context.textAlign = indicator.anchor;
+    context.strokeText(indicator.text, locus.x + indicator.x + offsetX, locus.y + indicator.y + offsetY);
+    context.fillText(indicator.text, locus.x + indicator.x + offsetX, locus.y + indicator.y + offsetY);
+  }
+  context.restore();
+}
+
+function recordsForClusterPreview(
+  scene,
+  preview,
+  viewport,
+  { includeLinks = true, includeGenes = true } = {}
+) {
+  const { clusters, pairs } = clusterPreviewInViewport(scene, preview, viewport, { includeLinks });
+
+  const loci = [];
+  const genes = [];
+  for (const cluster of clusters) {
+    for (const locus of cluster.loci) {
+      const offsets = previewOffsetsForLocus(preview, locus);
+      if (!boundsInViewport(locus.bounds, viewport, offsets)) continue;
+      loci.push(locus);
+      if (!includeGenes) continue;
+      const locusGenes =
+        locus.genes ||
+        [...scene.genes.values()].filter((gene) => gene.locus.source?.uid === locus.source.uid);
+      for (const gene of locusGenes) {
+        if (
+          geneVisibleForPreview(preview, gene) &&
+          boundsInViewport(gene.bounds, viewport, offsetsForGene(preview, gene))
+        ) {
+          genes.push(gene);
+        }
+      }
+    }
+  }
+
+  const linkUids = new Set();
+  for (const pair of pairs) {
+    for (const uid of scene.linksByClusterPair?.get(pair) || []) linkUids.add(uid);
+  }
+  const links = [...linkUids]
+    .map((uid) => scene.links.get(uid))
+    .filter(Boolean)
+    .sort((left, right) => left.order - right.order);
+
+  return { clusters, loci, genes, links };
+}
+
+function drawLegend(context, legend) {
+  if (!legend.visible) return;
+  context.save();
+  context.translate(legend.position.x, legend.position.y);
+  context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+  const subtitleFontSize = legend.subtitleFontSize || Math.max(10, Math.round(legend.fontSize * 0.72));
+  context.textAlign = "start";
+  context.textBaseline = "middle";
+  for (const item of legend.items) {
+    context.beginPath();
+    context.arc(item.x, item.y + item.circleY, item.radius, 0, 2 * Math.PI);
+    context.fillStyle = item.colour;
+    context.fill();
+    context.fillStyle = legend.textColour || "black";
+    context.fillText(item.label, item.x + item.textX, item.y + item.textY);
+    if (item.subtitle) {
+      context.fillStyle = legend.subtitleColour || "#566273";
+      context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
+      context.fillText(item.subtitle, item.x + item.textX, item.y + item.subtitleY);
+      context.font = `${legend.fontSize}px ${legend.fontFamily}`;
+    }
+  }
+  context.restore();
+}
+
+function drawScaleBar(context, scaleBar) {
+  if (!scaleBar.visible) return;
+  const { x, y } = scaleBar.position;
+  context.save();
+  context.translate(x, y);
+  context.strokeStyle = scaleBar.colour;
+  context.lineWidth = scaleBar.strokeWidth;
+  context.beginPath();
+  context.moveTo(0, scaleBar.middle);
+  context.lineTo(scaleBar.length, scaleBar.middle);
+  context.moveTo(0, 0);
+  context.lineTo(0, scaleBar.height);
+  context.moveTo(scaleBar.length, 0);
+  context.lineTo(scaleBar.length, scaleBar.height);
+  context.stroke();
+  context.fillStyle = scaleBar.textColour || "black";
+  context.font = `${scaleBar.fontSize}px ${scaleBar.fontFamily}`;
+  context.textAlign = "center";
+  context.textBaseline = "top";
+  context.fillText(scaleBar.label, scaleBar.length / 2, scaleBar.height + 5);
+  context.restore();
+}
+
+function drawColourBar(context, colourBar) {
+  if (!colourBar.visible) return;
+  const { x, y } = colourBar.position;
+  context.save();
+  context.translate(x, y);
+  const gradient = context.createLinearGradient(0, 0, colourBar.width, 0);
+  gradient.addColorStop(0, colourBar.startColour);
+  gradient.addColorStop(1, colourBar.endColour);
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, colourBar.width, colourBar.height);
+  context.strokeStyle = colourBar.textColour || "black";
+  context.lineWidth = 1;
+  context.strokeRect(0, 0, colourBar.width, colourBar.height);
+  context.fillStyle = colourBar.textColour || "black";
+  context.font = `${colourBar.fontSize}px ${colourBar.fontFamily}`;
+  context.textBaseline = "top";
+  context.textAlign = "center";
+  context.fillText(colourBar.label, colourBar.width / 2, colourBar.height + 5);
+  context.textAlign = "start";
+  context.fillText(colourBar.startLabel, 0, colourBar.height + 5);
+  context.textAlign = "end";
+  context.fillText(colourBar.endLabel, colourBar.width, colourBar.height + 5);
+  context.restore();
+}
+
+
+const trimIndicatorPresence = new WeakMap();
+function hasTrimIndicators(loci) {
+  if (!trimIndicatorPresence.has(loci)) {
+    trimIndicatorPresence.set(loci, [...loci.values()].some((locus) => locus.trimIndicators?.length));
+  }
+  return trimIndicatorPresence.get(loci);
+}
+
+const CANVAS_LAYERS = ["links", "linkLabels", "tracks", "trimIndicators", "genes", "geneLabels", "clusterLabels", "tree", "annotations", "annotationLabels", "chrome"];
+
+/** Draw selected layers of a renderer-neutral scene into Canvas 2D. */
+function renderCanvas({
+  canvas,
+  scene,
+  tree = null,
+  previousScene = null,
+  previousTree = null,
+  previousTreeScene = null,
+  treeTargetScene = null,
+  treeProgress = 1,
+  treeTrackAnchor = true,
+  progress = 1,
+  camera,
+  config,
+  scales,
+  hoverLocusUid = null,
+  suppressLocusHover = false,
+  pixelRatio: requestedPixelRatio = globalThis.devicePixelRatio || 1,
+  dimensions = null,
+  fullScene = false,
+  preview = null,
+  clear = true,
+  include = null,
+  omit = null,
+  layers = CANVAS_LAYERS,
+  highlightGeneIds = null,
+  highlightLinkIds = null,
+  highlightLocusIds = null,
+  highlightClusterIds = null,
+}) {
+  config = figureConfig(config);
+  const show = (layer) => layers.includes(layer);
+  const showLinks = show("links"), showGenes = show("genes");
+  const displayScene = interpolateScene(previousScene, scene, progress);
+  const showTrimIndicators = show("trimIndicators") && config.locus.trimIndicators?.show !== false &&
+    (preview?.type === "locus-trim" || hasTrimIndicators(displayScene.loci));
+  const showLoci = showTrimIndicators || show("tracks");
+  const showGeneLabels = show("geneLabels") && config.gene.label.show;
+  const showLinkLabels = show("linkLabels") && config.link.label.show;
+  const context = canvas.getContext("2d");
+  const bounds = dimensions || canvas.getBoundingClientRect();
+  const width = bounds.width;
+  const height = bounds.height;
+  const pixelRatio = requestedPixelRatio;
+  const pixelWidth = Math.round(width * pixelRatio);
+  const pixelHeight = Math.round(height * pixelRatio);
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  if (clear) {
+    context.clearRect(0, 0, width, height);
+  }
+  context.save();
+  context.translate(camera.x, camera.y);
+  context.scale(camera.k, camera.k);
+
+  // During an animation, geometry is between the previous and target scenes,
+  // while the index describes only the target scene. Draw the full frame then
+  // so an in-flight record cannot be incorrectly culled.
+  const viewport = previousScene || fullScene
+    ? null
+    : canvasWorldViewport(canvas, camera, 20, dimensions);
+  const clusterPreview = preview?.type === "cluster-drag";
+  const visible = !clusterPreview && viewport && displayScene.index
+    ? {
+        links: (showLinks || showLinkLabels) ? queryViewportOrdered(displayScene.index.links, viewport) : null,
+        loci: showLoci ? queryViewportOrdered(displayScene.index.loci, viewport) : null,
+        genes: (showGenes || showGeneLabels) ? queryViewportOrdered(displayScene.index.genes, viewport) : null,
+      }
+    : null;
+
+  const recordsFor = (records, ids, type, { ignoreOmit = false } = {}) => {
+    const included = include?.[type];
+    const omitted = ignoreOmit ? null : omit?.[type];
+    const recordIds = ids || [...records.keys()];
+    return recordIds
+      .filter((uid) => (!included || included.has(uid)) && !omitted?.has(uid))
+      .map((uid) => records.get(uid))
+      .filter(Boolean);
+  };
+  const previewRecords = clusterPreview
+    ? recordsForClusterPreview(displayScene, preview, viewport, {
+        includeLinks: showLinks || showLinkLabels,
+        includeGenes: showGenes || showGeneLabels,
+      })
+    : null;
+
+  for (const link of (showLinks || showLinkLabels)
+    ? previewRecords?.links || recordsFor(displayScene.links, visible?.links, "links")
+    : []) {
+    const geometry = linkGeometryForPreview(displayScene, link, preview, config);
+    const anchors = geometry.anchors;
+    if (!geometry.visible || !anchors) continue;
+    if (
+      clusterPreview &&
+      (!boundsInViewport({
+        minX: Math.min(anchors[0], anchors[1], anchors[3], anchors[4]),
+        maxX: Math.max(anchors[0], anchors[1], anchors[3], anchors[4]),
+        minY: Math.min(anchors[2], anchors[5]),
+        maxY: Math.max(anchors[2], anchors[5]),
+      }, viewport))
+    ) {
+      continue;
+    }
+    if (showLinks) drawLink(context, link, config, scales, geometry, showLinkLabels);
+    else drawLinkLabel(context, link, config, anchors);
+  }
+  if (show("tree")) drawTree(context, tree, displayScene, config, preview, {
+    trackAnchor: treeTrackAnchor,
+    previousTree,
+    previousScene: previousTreeScene,
+    targetScene: treeTargetScene || scene,
+    progress: treeProgress,
+  });
+  if (highlightLinkIds?.size) {
+    for (const uid of highlightLinkIds) {
+      if (visible?.links && !visible.links.includes(uid)) continue;
+      const link = displayScene.links.get(uid);
+      if (!link) continue;
+      drawLinkHighlight(context, config, linkGeometryForPreview(displayScene, link, preview, config));
+    }
+  }
+  const loci = showLoci
+    ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci")
+    : [];
+  // Labels are the only immediate indication that a very large, initially
+  // cropped figure rendered at all. Do not derive them from culled loci: a
+  // cluster label can be on screen while every locus body is just outside the
+  // viewport. Text is inexpensive and Canvas clips truly offscreen labels.
+  const labelClusters = show("clusterLabels")
+    ? recordsFor(displayScene.clusters, null, "clusters", { ignoreOmit: true })
+    : [];
+  for (const cluster of labelClusters) {
+    drawClusterInfo(context, cluster, config, {
+      selected: highlightClusterIds?.has(cluster.source.uid),
+      x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
+      y: clusterOffsetForPreview(preview, cluster.source.uid),
+      locusText: clusterLabelTextForPreview(
+        preview,
+        cluster.source.uid,
+        cluster.info.locusText
+      ),
+    });
+  }
+  if (show("tracks")) {
+    for (const locus of loci) {
+      drawLocusTrack(
+        context,
+        locus,
+        viewport,
+        config,
+        locusGeometryForPreview(preview, locus)
+      );
+    }
+  }
+  if (showTrimIndicators) {
+    for (const locus of loci) {
+      drawLocusTrimIndicators(
+        context,
+        locus,
+        config,
+        locusGeometryForPreview(preview, locus)
+      );
+    }
+  }
+  if (highlightLocusIds?.size) {
+    for (const uid of highlightLocusIds) {
+      if (visible?.loci && !visible.loci.includes(uid)) continue;
+      const locus = displayScene.loci.get(uid);
+      if (locus) drawLocusHighlight(context, locus, camera, locusGeometryForPreview(preview, locus));
+    }
+  }
+  if (!suppressLocusHover) {
+    const hoveredLocus = hoverLocusUid ? displayScene.loci.get(hoverLocusUid) : null;
+    drawLocusHover(
+      context,
+      displayScene,
+      hoverLocusUid,
+      hoveredLocus ? locusGeometryForPreview(preview, hoveredLocus) : null,
+      config.figureStyle.foreground
+    );
+  }
+  for (const gene of (showGenes || showGeneLabels)
+    ? previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes, "genes")
+    : []) {
+    const offsets = offsetsForGene(preview, gene);
+    const visible = geneVisibleForPreview(preview, gene);
+    const geometry = geneGeometryForPreview(preview, gene);
+    if (showGenes) drawGene(context, gene, config, scales, offsets, visible, geometry, showGeneLabels);
+    else if (visible) drawGeneLabel(context, gene, config, geometry, offsets);
+  }
+  if (highlightGeneIds?.size) {
+    for (const uid of highlightGeneIds) {
+      if (visible?.genes && !visible.genes.includes(uid)) continue;
+      const gene = displayScene.genes.get(uid);
+      if (!gene || !geneVisibleForPreview(preview, gene)) continue;
+      drawGeneHighlight(
+        context,
+        gene,
+        camera,
+        geneGeometryForPreview(preview, gene),
+        offsetsForGene(preview, gene)
+      );
+    }
+  }
+  if (show("annotations") || show("annotationLabels")) drawCanvasAnnotations(context, displayScene, preview, {
+    showGeometry: show("annotations"), showLabels: show("annotationLabels"), viewport,
+  });
+  if (show("chrome") && displayScene.chrome) {
+    const chrome = preview?.chrome || displayScene.chrome;
+    drawLegend(context, chrome.legend);
+    drawScaleBar(context, chrome.scaleBar);
+    drawColourBar(context, chrome.colourBar);
+  }
+  context.restore();
+  return { width, height, pixelRatio };
 }
 
 function positionLines(selection, lines) {
@@ -12465,7 +12469,7 @@ function syncCameraZoom({ surface, zoom, camera }) {
   if (current.x === camera.x && current.y === camera.y && current.k === camera.k) return;
   surface.call(
     zoom.transform,
-    identity$2.translate(camera.x, camera.y).scale(camera.k)
+    identity.translate(camera.x, camera.y).scale(camera.k)
   );
 }
 
@@ -15970,7 +15974,7 @@ function clusterMap() {
   const rasterInteraction = createRasterInteraction({
     targetForEvent,
     worldPoint: (surface, event) =>
-      canvasWorldPoint(surface, event, getCamera(chartState)),
+      worldPoint(surface, event, getCamera(chartState)),
     locusForTarget,
     setHoverLocus: (locusUid) => {
       if (canvasHoverLocusUid === locusUid) return false;
@@ -16058,7 +16062,7 @@ function clusterMap() {
       constrainScale: constrainZoom,
     });
     if (!camera) return false;
-    const transform = identity$2.translate(camera.x, camera.y).scale(camera.k);
+    const transform = identity.translate(camera.x, camera.y).scale(camera.k);
     if (useRaster && canvasZoom) select(node).call(canvasZoom.transform, transform);
     else if (zoom) select(node).call(zoom.transform, transform);
     else setCamera(chartState, camera);
@@ -16110,7 +16114,7 @@ function clusterMap() {
     if (!minimapCanvas || !runtime.config.plot.minimap?.show) return;
     if (plotData.tree && runtime.config.tree.show) {
       minimapMeasurement ||= minimapCanvas.ownerDocument.createElement("canvas").getContext("2d");
-      scene = { ...scene, figureBounds: canvasFigureBounds(minimapMeasurement, scene, runtime.config, plotData.tree) };
+      scene = { ...scene, figureBounds: measureFigureBounds(minimapMeasurement, scene, runtime.config, plotData.tree) };
     }
     minimapScene = scene;
     rasterMinimap.scheduleBase({ scene, minimap: minimapCanvas, options: runtime.config.plot.minimap,
@@ -16156,7 +16160,7 @@ function clusterMap() {
     }
     if (treeAnimation) treeAnimation.targetScene = scene;
     webgpuAnimation = { cancel: animate(duration, (progress) => {
-      const displayScene = interpolateCanvasScene(previousScene, scene, progress);
+      const displayScene = interpolateScene(previousScene, scene, progress);
       if (treeAnimation) treeAnimation.progress = progress;
       webgpuBackend.setScene(displayScene);
       paintWebGpu(displayScene);
@@ -16180,7 +16184,7 @@ function clusterMap() {
       // keeps the next wheel/pan gesture continuous with minimap navigation.
       select(mainCanvas).call(
         canvasZoom.transform,
-        identity$2.translate(camera.x, camera.y).scale(camera.k)
+        identity.translate(camera.x, camera.y).scale(camera.k)
       );
       paintMinimap();
     },
@@ -16416,7 +16420,7 @@ function clusterMap() {
     });
     if (!camera) return;
 
-    svg.call(zoom.transform, identity$2.translate(camera.x, camera.y).scale(camera.k));
+    svg.call(zoom.transform, identity.translate(camera.x, camera.y).scale(camera.k));
     hasInitialView = true;
   }
 
@@ -16430,7 +16434,7 @@ function clusterMap() {
     const measurementCanvas = isWebGpuRenderer(runtime.config.plot.renderer)
       ? document.createElement("canvas")
       : canvas;
-    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, plotData.tree);
+    const bounds = measureFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, plotData.tree);
     if (!bounds) return;
 
     const camera = fitCameraForBounds({
@@ -16446,7 +16450,7 @@ function clusterMap() {
     if (canvasZoom) {
       select(canvas).call(
         canvasZoom.transform,
-        identity$2.translate(camera.x, camera.y).scale(camera.k)
+        identity.translate(camera.x, camera.y).scale(camera.k)
       );
     } else {
       setCamera(chartState, camera);

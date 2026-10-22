@@ -1,16 +1,16 @@
+import { measureFigureBounds } from "../src/scene/measure.mjs";
+import { interpolateScene } from "../src/scene/preview.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 test("canvas renderer draws world-space scene geometry through the camera", async () => {
   const {
 	    cameraForMinimapPoint,
-    canvasFigureBounds,
     canvasMinimapViewport,
     canvasPixelRatioForCamera,
     canvasWorldViewport,
     createMinimapProjection,
     hitTestCanvas,
-    interpolateCanvasScene,
     renderCanvas,
   } = await import("../src/renderers/canvas.js");
   const minimap = createMinimapProjection({
@@ -203,7 +203,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     },
   };
   scene.bounds = { minX: 0, maxX: 20, minY: 10, maxY: 30 };
-  assert.deepEqual(canvasFigureBounds(context, scene, config), {
+  assert.deepEqual(measureFigureBounds(context, scene, config), {
     minX: -85,
     maxX: 1028, // Include the distant gene label even outside the viewport.
     minY: 0,
@@ -436,7 +436,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     loci: new Map([["locus", previousLocus]]),
     genes: new Map([["gene", { ...scene.genes.get("gene"), polygon: [0, 5, 5, 5, 5, 10, 0, 10] }]]),
   };
-  const midway = interpolateCanvasScene(previous, scene, 0.5);
+  const midway = interpolateScene(previous, scene, 0.5);
   assert.equal(midway.clusters.get("cluster").x, 2.5);
   assert.equal(midway.loci.get("locus").worldStart, 2.5);
   assert.deepEqual(midway.genes.get("gene").polygon, [2.5, 10, 7.5, 10, 7.5, 15, 2.5, 15]);
@@ -449,7 +449,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     ...scene,
     loci: new Map([["locus", { ...cluster.loci[0], track: { x1: 10, x2: 0, y: 11 } }]]),
   };
-  const collapsedTrack = interpolateCanvasScene(trackBefore, trackAfter, 0.5);
+  const collapsedTrack = interpolateScene(trackBefore, trackAfter, 0.5);
   assert.deepEqual(collapsedTrack.loci.get("locus").track, { x1: 5, x2: 5, y: 11 });
 });
 

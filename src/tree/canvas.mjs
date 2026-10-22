@@ -1,26 +1,3 @@
-import { measureCanvasText } from "../renderers/text.mjs";
-import { layoutTree } from "./layout.mjs";
-
-/** Canvas owns text metrics; all tree geometry comes from the shared layout. */
-export function layoutCanvasTree(context, tree, scene, config, options = {}) {
-  if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
-  const measure = (text, font) => measureCanvasText(context, scene, text,
-    { font, align: "left", baseline: "alphabetic" });
-  return layoutTree({
-    ...options,
-    tree, scene, config,
-    measureText: (text, style) => {
-      const metrics = measure(text, `${style.fontStyle || "normal"} ${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`);
-      const overhang = Math.max(0, metrics.actualBoundingBoxLeft || 0, (metrics.actualBoundingBoxRight || 0) - metrics.width);
-      return { width: metrics.width + overhang * 2, overhang, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
-    },
-    measureLabel: (cluster, locusText) => Math.max(
-      measure(cluster.source.name || "", `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`).width,
-      measure(locusText, `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`).width
-    ),
-  });
-}
-
 function traceLines(context, lines) {
   context.beginPath();
   for (const line of lines) {
