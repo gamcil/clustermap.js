@@ -1,4 +1,4 @@
-import { createTemplate } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { bindOptionButtons } from "../../shared/optionButtons.js";
 
@@ -22,9 +22,7 @@ class Tabs extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, css);
     this.#list = root.querySelector("[role=tablist]"); this.#content = root.querySelector("[part=panels]");
     this.#buttonTemplate = this.#list.querySelector("template"); this.#panelTemplate = this.#content.querySelector("template");
     bindOptionButtons(this.#list, (button) => {

@@ -1,4 +1,4 @@
-import { createTemplate } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent } from "../../../uiControls.mjs";
 import { TREE_COLOURING_DEFAULTS, resolveTreePresentation, validateTreePresentation } from "../../../treePresentation.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { controlStyles } from "../../shared/controls.mjs";
@@ -20,9 +20,7 @@ class TreeAppearance extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, controlStyles + css);
     this.#height = root.querySelector("[data-height]"); this.#slider = root.querySelector('[type="range"]');
     root.querySelector("[data-enabled]").onchange = (event) => this.#change({ mode: event.target.checked ? "cutHeight" : "none" });
     this.#height.onchange = () => { if (this.#height.reportValidity()) this.#change({ cutHeight: Number(this.#height.value) }); };

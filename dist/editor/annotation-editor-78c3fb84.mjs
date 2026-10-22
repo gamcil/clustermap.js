@@ -1,4 +1,4 @@
-import { a as controlStyles, e as updateSelectOptions, c as createTemplate, d as colourHex, g as defineSearchField, f as createActionRunner } from './search-field-3225a92b.mjs';
+import { a as controlStyles, m as mountComponent, e as updateSelectOptions, c as createTemplate, d as colourHex, g as defineSearchField, f as createActionRunner } from './search-field-1d7e270f.mjs';
 
 /** Shared fixed-height row window for scrollable data editors. */
 const DATA_ROW_HEIGHT = 34;
@@ -164,9 +164,7 @@ class EditableField extends HTMLElementBase$a {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$a;
-    root.append(style, template$a(this.ownerDocument));
+    const root = mountComponent(this, template$a, css$a);
     this.#text = root.querySelector("span");
     this.#button = root.querySelector("button");
     this.#input = root.querySelector("input");
@@ -291,9 +289,7 @@ class CategoryEditor extends HTMLElementBase$9 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$9;
-    root.append(style, template$9(this.ownerDocument));
+    const root = mountComponent(this, template$9, controlStyles + css$9);
     this.#details = root.querySelector("details"); this.#items = root.querySelector("[data-items]");
     this.#template = this.#items.querySelector("template"); this.#form = root.querySelector("form");
     this.#name = this.#form.querySelector('[type="text"]'); this.#colour = this.#form.querySelector('[type="color"]');
@@ -414,9 +410,7 @@ class AnnotationToolbar extends HTMLElementBase$8 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$8;
-    root.append(style, template$8(this.ownerDocument));
+    const root = mountComponent(this, template$8, controlStyles + css$8);
     this.#select = root.querySelector("select");
     this.#buttons = Object.fromEntries([...root.querySelectorAll("button")].map((button) => [button.dataset.action, button]));
     this.#select.onchange = () => this.#emit("panel-change", { value: this.#select.value });
@@ -633,9 +627,7 @@ class AnnotationDataForm extends HTMLElementBase$7 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$7;
-    root.append(style, template$7(this.ownerDocument));
+    const root = mountComponent(this, template$7, controlStyles + css$7);
     this.#form = root.querySelector("form");
     this.#field("type").onchange = () => { this.#sync(); this.#example(); };
     this.#form.onsubmit = (event) => { event.preventDefault(); this.error = ""; this.#emit("data-submit", this.value); };
@@ -697,9 +689,7 @@ class AnnotationGroupEditor extends HTMLElementBase$6 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$6;
-    root.append(style, template$6(this.ownerDocument));
+    const root = mountComponent(this, template$6, controlStyles + css$6);
     this.#items = root.querySelector("[data-groups]"); this.#template = this.#items.querySelector("template");
     this.#add = root.querySelector("[data-add]");
     this.#add.onclick = () => {
@@ -795,9 +785,7 @@ class SelectionBar extends HTMLElementBase$5 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$5;
-    root.append(style, template$5(this.ownerDocument));
+    const root = mountComponent(this, template$5, controlStyles + css$5);
     this.#summary = root.querySelector("span");
     this.#actions = root.querySelector("div");
     this.#all = root.querySelector("[data-all]");
@@ -840,9 +828,7 @@ class ActionMenu extends HTMLElementBase$4 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$4;
-    root.append(style, template$4(this.ownerDocument));
+    const root = mountComponent(this, template$4, css$4);
     this.#details = root.querySelector("details");
     this.#trigger = root.querySelector("summary");
     this.#details.ontoggle = () => { this.open = this.#details.open; };
@@ -900,9 +886,7 @@ class DataTable extends HTMLElementBase$3 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$3;
-    root.append(style, template$3(this.ownerDocument));
+    const root = mountComponent(this, template$3, css$3);
     this.#viewport = root.querySelector("div");
     this.addEventListener("mousedown", (event) => {
       if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
@@ -973,9 +957,7 @@ class AnnotationValueActions extends HTMLElementBase$2 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$2;
-    root.append(style, template$2(this.ownerDocument));
+    const root = mountComponent(this, template$2, controlStyles + css$2);
     this.#columns = root.querySelector("[data-columns]"); this.#numeric = root.querySelector("input"); this.#categories = root.querySelector("[data-categories]");
     root.querySelector("[data-set]").onclick = () => this.#submit(false);
     root.querySelector("[data-clear]").onclick = () => this.#submit(true);
@@ -1028,9 +1010,7 @@ class AnnotationTable extends HTMLElementBase$1 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = DATA_EDITOR_CSS + css$1;
-    root.append(style, template$1(this.ownerDocument));
+    const root = mountComponent(this, template$1, DATA_EDITOR_CSS + css$1);
     this.#viewport = root.querySelector("clinker-data-table");
     this.#selectionBar = root.querySelector("clinker-selection-bar");
     this.#selectionBar.addEventListener("clear-selection", () => this.clearSelection());

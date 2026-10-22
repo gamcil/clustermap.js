@@ -1,4 +1,4 @@
-import { createTemplate } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { controlStyles } from "../../shared/controls.mjs";
 
@@ -17,9 +17,7 @@ class SelectionBar extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, controlStyles + css);
     this.#summary = root.querySelector("span");
     this.#actions = root.querySelector("div");
     this.#all = root.querySelector("[data-all]");

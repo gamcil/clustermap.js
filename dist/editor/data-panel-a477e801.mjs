@@ -1,5 +1,5 @@
-import { b as defineDataTable, c as defineEditableField, i as installDataEditorStyle, a as installStyle, d as defineActionMenu, R as RowSelection, D as DATA_EDITOR_CSS, e as defineSelectionBar, f as defineAnnotationEditor, g as DATA_ROW_HEIGHT } from './annotation-editor-a9f437d4.mjs';
-import { r as rgb$1, b as color, c as createTemplate, d as colourHex, a as controlStyles, e as updateSelectOptions, f as createActionRunner, u as upgradeProperty, g as defineSearchField } from './search-field-3225a92b.mjs';
+import { b as defineDataTable, c as defineEditableField, i as installDataEditorStyle, a as installStyle, d as defineActionMenu, R as RowSelection, D as DATA_EDITOR_CSS, e as defineSelectionBar, f as defineAnnotationEditor, g as DATA_ROW_HEIGHT } from './annotation-editor-78c3fb84.mjs';
+import { r as rgb$1, b as color, c as createTemplate, d as colourHex, m as mountComponent, a as controlStyles, e as updateSelectOptions, f as createActionRunner, u as upgradeProperty, g as defineSearchField } from './search-field-1d7e270f.mjs';
 import { e as editorThemeStyles, a as applyEditorTheme } from './theme-4b8fbd52.mjs';
 
 /** Shared activation and horizontal keyboard navigation for option buttons. */
@@ -1431,9 +1431,7 @@ class ViewSwitcher extends HTMLElementBase$2 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$2;
-    root.append(style, template$2(this.ownerDocument));
+    const root = mountComponent(this, template$2, css$2);
     this.#group = root.querySelector("div"); this.#template = root.querySelector("template");
     bindOptionButtons(this.#group, (button) => this.#choose(button));
     this.#observer = new this.ownerDocument.defaultView.MutationObserver((records) => {
@@ -1495,9 +1493,7 @@ class RecordActions extends HTMLElementBase$1 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$1;
-    root.append(style, template$1(this.ownerDocument));
+    const root = mountComponent(this, template$1, controlStyles + css$1);
     root.addEventListener("click", (event) => {
       const command = event.target.closest("[data-command]")?.dataset.command;
       if (!command) return;

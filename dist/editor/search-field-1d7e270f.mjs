@@ -424,6 +424,13 @@ function createTemplate(markup) {
   };
 }
 
+function mountComponent(element, template, css) {
+  const root = element.attachShadow({ mode: "open" });
+  const style = element.ownerDocument.createElement("style"); style.textContent = css;
+  root.append(style, template(element.ownerDocument));
+  return root;
+}
+
 const selectOptions = new WeakMap();
 function updateSelectOptions(control, entries) {
   const options = entries.map((entry) => Array.isArray(entry) ? entry : [entry, entry]);
@@ -513,9 +520,7 @@ class SearchField extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, css);
     this.#input = root.querySelector("input"); this.#clear = root.querySelector("button");
     this.#input.oninput = () => this.#sync();
     this.#clear.onclick = () => this.#clearValue();
@@ -552,4 +557,4 @@ function defineSearchField() {
   if (!customElements.get("clinker-search-field")) customElements.define("clinker-search-field", SearchField);
 }
 
-export { controlStyles as a, color as b, createTemplate as c, colourHex as d, updateSelectOptions as e, createActionRunner as f, defineSearchField as g, createControls as h, rgb as r, upgradeProperty as u };
+export { controlStyles as a, color as b, createTemplate as c, colourHex as d, updateSelectOptions as e, createActionRunner as f, defineSearchField as g, createControls as h, mountComponent as m, rgb as r, upgradeProperty as u };

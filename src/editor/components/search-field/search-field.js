@@ -1,4 +1,4 @@
-import { createTemplate } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 
 const [markup, css] = await Promise.all([
@@ -15,9 +15,7 @@ class SearchField extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, css);
     this.#input = root.querySelector("input"); this.#clear = root.querySelector("button");
     this.#input.oninput = () => this.#sync();
     this.#clear.onclick = () => this.#clearValue();

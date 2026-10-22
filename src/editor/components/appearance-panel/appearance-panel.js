@@ -1,4 +1,4 @@
-import { createTemplate, colourHex, createActionRunner, upgradeProperty } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent, colourHex, createActionRunner, upgradeProperty } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { controlStyles } from "../../shared/controls.mjs";
 import { defineSearchField } from "../search-field/search-field.js";
@@ -27,9 +27,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + editorThemeStyles + css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, controlStyles + editorThemeStyles + css);
     this.#tree = root.querySelector("clinker-tree-appearance");
     this.#runEdit = createActionRunner((message) => {
       const status = root.querySelector(".error"); status.textContent = message; status.hidden = !message;

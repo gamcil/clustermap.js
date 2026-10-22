@@ -1,4 +1,4 @@
-import { createTemplate, updateSelectOptions } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent, updateSelectOptions } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { controlStyles } from "../../shared/controls.mjs";
 
@@ -15,9 +15,7 @@ class AnnotationToolbar extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, controlStyles + css);
     this.#select = root.querySelector("select");
     this.#buttons = Object.fromEntries([...root.querySelectorAll("button")].map((button) => [button.dataset.action, button]));
     this.#select.onchange = () => this.#emit("panel-change", { value: this.#select.value });

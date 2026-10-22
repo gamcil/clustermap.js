@@ -1,5 +1,5 @@
-import { b as color, a as controlStyles, c as createTemplate, f as createActionRunner, u as upgradeProperty, d as colourHex, g as defineSearchField } from './search-field-3225a92b.mjs';
-import { e as editorThemeStyles, a as applyEditorTheme, f as figureConfig } from './theme-4b8fbd52.mjs';
+import { b as color, m as mountComponent, a as controlStyles, c as createTemplate, f as createActionRunner, u as upgradeProperty, d as colourHex, g as defineSearchField } from './search-field-1d7e270f.mjs';
+import { a as applyEditorTheme, f as figureConfig, e as editorThemeStyles } from './theme-4b8fbd52.mjs';
 
 const TREE_COLOURING_DEFAULTS = {
   mode: "none",
@@ -179,9 +179,7 @@ class TreeAppearance extends HTMLElementBase$1 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$1;
-    root.append(style, template$1(this.ownerDocument));
+    const root = mountComponent(this, template$1, controlStyles + css$1);
     this.#height = root.querySelector("[data-height]"); this.#slider = root.querySelector('[type="range"]');
     root.querySelector("[data-enabled]").onchange = (event) => this.#change({ mode: event.target.checked ? "cutHeight" : "none" });
     this.#height.onchange = () => { if (this.#height.reportValidity()) this.#change({ cutHeight: Number(this.#height.value) }); };
@@ -259,9 +257,7 @@ class ClinkerAppearancePanelElement extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + editorThemeStyles + css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, controlStyles + editorThemeStyles + css);
     this.#tree = root.querySelector("clinker-tree-appearance");
     this.#runEdit = createActionRunner((message) => {
       const status = root.querySelector(".error"); status.textContent = message; status.hidden = !message;

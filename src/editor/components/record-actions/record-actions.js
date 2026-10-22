@@ -1,4 +1,4 @@
-import { createTemplate, updateSelectOptions } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent, updateSelectOptions } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { controlStyles } from "../../shared/controls.mjs";
 import { defineActionMenu } from "../action-menu/action-menu.js";
@@ -16,9 +16,7 @@ class RecordActions extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, controlStyles + css);
     root.addEventListener("click", (event) => {
       const command = event.target.closest("[data-command]")?.dataset.command;
       if (!command) return;

@@ -1,4 +1,4 @@
-import { createTemplate } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { bindOptionButtons } from "../../shared/optionButtons.js";
 
@@ -18,9 +18,7 @@ class ViewSwitcher extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, css);
     this.#group = root.querySelector("div"); this.#template = root.querySelector("template");
     bindOptionButtons(this.#group, (button) => this.#choose(button));
     this.#observer = new this.ownerDocument.defaultView.MutationObserver((records) => {

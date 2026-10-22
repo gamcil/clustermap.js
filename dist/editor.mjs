@@ -1,10 +1,10 @@
-import { c as createTemplate, a as controlStyles, u as upgradeProperty } from './editor/search-field-3225a92b.mjs';
+import { m as mountComponent, c as createTemplate, a as controlStyles, u as upgradeProperty } from './editor/search-field-1d7e270f.mjs';
 import { e as editorThemeStyles, a as applyEditorTheme } from './editor/theme-4b8fbd52.mjs';
-import { d as defineAppearancePanel } from './editor/appearance-panel-3f50086a.mjs';
-export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-3f50086a.mjs';
-import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-709acbdb.mjs';
-export { C as ClinkerDataPanelElement, d as defineDataPanel } from './editor/data-panel-709acbdb.mjs';
-import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-a9f437d4.mjs';
+import { d as defineAppearancePanel } from './editor/appearance-panel-37902b60.mjs';
+export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-37902b60.mjs';
+import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-a477e801.mjs';
+export { C as ClinkerDataPanelElement, d as defineDataPanel } from './editor/data-panel-a477e801.mjs';
+import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-78c3fb84.mjs';
 
 const [markup$1, css$2] = await Promise.all([
   "<div part=\"tab-list\" role=\"tablist\">\n  <template><button type=\"button\" role=\"tab\"></button></template>\n</div>\n<slot name=\"status\"></slot>\n<div part=\"panels\">\n  <template><div role=\"tabpanel\" tabindex=\"0\"><slot></slot></div></template>\n</div>\n",
@@ -26,9 +26,7 @@ class Tabs extends HTMLElementBase$1 {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$2;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, css$2);
     this.#list = root.querySelector("[role=tablist]"); this.#content = root.querySelector("[part=panels]");
     this.#buttonTemplate = this.#list.querySelector("template"); this.#panelTemplate = this.#content.querySelector("template");
     bindOptionButtons(this.#list, (button) => {

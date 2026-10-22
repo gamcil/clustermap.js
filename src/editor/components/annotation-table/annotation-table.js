@@ -1,6 +1,6 @@
 import { DATA_EDITOR_CSS } from "../../shared/styles.mjs";
 import { RowSelection } from "../../../rowSelection.mjs";
-import { createTemplate } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { defineEditableField } from "../editable-field/editable-field.js";
 import { defineSelectionBar } from "../selection-bar/selection-bar.js";
@@ -30,9 +30,7 @@ class AnnotationTable extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = DATA_EDITOR_CSS + css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, DATA_EDITOR_CSS + css);
     this.#viewport = root.querySelector("clinker-data-table");
     this.#selectionBar = root.querySelector("clinker-selection-bar");
     this.#selectionBar.addEventListener("clear-selection", () => this.clearSelection());

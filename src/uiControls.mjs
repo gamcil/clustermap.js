@@ -20,6 +20,13 @@ export function createTemplate(markup) {
   };
 }
 
+export function mountComponent(element, template, css) {
+  const root = element.attachShadow({ mode: "open" });
+  const style = element.ownerDocument.createElement("style"); style.textContent = css;
+  root.append(style, template(element.ownerDocument));
+  return root;
+}
+
 const selectOptions = new WeakMap();
 export function updateSelectOptions(control, entries) {
   const options = entries.map((entry) => Array.isArray(entry) ? entry : [entry, entry]);

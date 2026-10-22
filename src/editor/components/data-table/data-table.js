@@ -1,4 +1,4 @@
-import { createTemplate } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent } from "../../../uiControls.mjs";
 import { createVirtualRows } from "../../../virtualRows.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 
@@ -19,9 +19,7 @@ class DataTable extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
-    root.append(style, template(this.ownerDocument));
+    const root = mountComponent(this, template, css);
     this.#viewport = root.querySelector("div");
     this.addEventListener("mousedown", (event) => {
       if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
