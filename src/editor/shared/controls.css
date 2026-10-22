@@ -1,5 +1,5 @@
 button, input, select { box-sizing: border-box; font: inherit; color: inherit; }
-button, input:not([type=color]), select {
+button, input:not([type=color]):not([type=checkbox]):not([type=range]), select {
   min-height: var(--cm-control-height, 30px);
   padding: var(--cm-control-padding, 4px 8px);
   border: 1px solid var(--cm-border, #cbd3de);

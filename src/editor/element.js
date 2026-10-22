@@ -62,8 +62,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #rowsCache = null;
   #selectionData = null;
   #filter = "";
-  #appearanceFilter = "";
-  #appearanceAdvanced = new Set();
   #memberGroupId = null;
   #expanded = new Set();
   #draggedGroupId = null;
@@ -217,12 +215,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
       this.#renderData();
     });
-    this.addEventListener("toggle", (event) => {
-      const details = event.target.closest("details[data-appearance-section]");
-      if (!details) return;
-      if (details.open) this.#appearanceAdvanced.add(details.dataset.appearanceSection);
-      else this.#appearanceAdvanced.delete(details.dataset.appearanceSection);
-    }, true);
     this.addEventListener("pointerdown", (event) => {
       if (!event.target.closest("[data-resize]") || !this.hasAttribute("resizable")) return;
       event.preventDefault();
@@ -239,10 +231,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.addEventListener("pointercancel", () => { this.#resizeStart = null; });
     this.addEventListener("input", (event) => {
       if (event.target.matches("[data-filter]")) this.#setDataFilter(event.target.value);
-      if (event.target.matches("[data-appearance-filter]")) {
-        this.#appearanceFilter = event.target.value.trim().toLowerCase();
-        this.#renderAppearance();
-      }
     });
     this.addEventListener("keydown", (event) => {
       if (event.defaultPrevented) return;
@@ -426,7 +414,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { colour: target.value } });
       return;
     }
-    if (target.matches("[data-config]")) this.#setConfig(target);
   }
 
   #apply(operation, control) {
@@ -434,13 +421,12 @@ export class ClinkerEditorElement extends HTMLElementBase {
     return this.#runEdit(() => this.#chart.patch([operation]), control);
   }
 
-  #setConfig(input) {
-    if (!this.#chart?.config) return;
-    const keys = input.dataset.config.split(".");
-    const value = input.type === "checkbox" ? input.checked : input.type === "number" ? Number(input.value) : input.value;
+  #setConfig({ path, value }) {
+    if (!this.#chart?.config) return false;
+    const keys = path.split(".");
     let config = value;
     for (const key of keys.slice().reverse()) config = { [key]: config };
-    this.#runEdit(() => this.#chart.config(config), input);
+    return this.#runEdit(() => this.#chart.config(config));
   }
 
   #disposeRows() {
@@ -934,10 +920,12 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.#appearanceView = createAppearanceControls({ document: this.ownerDocument,
         patch: (ops) => this.#chart.patch(ops), preview: (ops) => this.#chart.previewTreePresentation(ops),
         rotate: (uid) => this.#chart.rotateTreeNode(uid) });
+      this.#appearanceView.node.addEventListener("config-change", (event) => {
+        if (this.#setConfig(event.detail) === false) event.preventDefault();
+      });
       container.append(this.#appearanceView.node);
     }
-    this.#appearanceView.update({ config, tree: this.#chart.data()?.tree, filter: this.#appearanceFilter,
-      expanded: this.#appearanceAdvanced });
+    this.#appearanceView.update({ config, tree: this.#chart.data()?.tree });
   }
 }
 
