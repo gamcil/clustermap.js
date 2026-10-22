@@ -601,9 +601,10 @@ const searchTemplate = createTemplate(`<label class="cm-data-search"><input type
 const panelTemplate = createTemplate(`
   <div class="cm-data-panel">
     <div class="cm-data-tools" hidden></div>
-    <div class="cm-data-meta"><span></span><div class="cm-data-actions" hidden></div><button type="button">Select all visible</button></div>
+    <clinker-selection-bar class="cm-data-meta"><div slot="actions" class="cm-data-actions"></div></clinker-selection-bar>
     <div class="cm-data-table" role="region"></div>
   </div>`);
+const selectionActionsTemplate = createTemplate('<span class="cm-data-selection-actions"></span>');
 const menuTemplate = createTemplate('<details class="cm-data-action-menu"><summary></summary><div class="cm-data-action-menu-body"></div></details>');
 function createDataActionMenu(document, label, content) {
   const node = menuTemplate(document).firstElementChild;
@@ -647,41 +648,33 @@ function createDataPanel(document, { label = "Editable chart data" } = {}) {
   installDataEditorStyle(document);
   const node = panelTemplate(document).firstElementChild;
   const tools = node.querySelector(".cm-data-tools"), meta = node.querySelector(".cm-data-meta");
-  const summary = meta.querySelector("span"), selectVisible = meta.querySelector("button"), actions = meta.querySelector(".cm-data-actions");
+  const actions = meta.querySelector(".cm-data-actions");
   bindDataActionMenus(node);
   node.addEventListener("mousedown", (event) => {
     if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
         !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable], clinker-editable-field')) event.preventDefault();
   });
   const viewport = node.querySelector(".cm-data-table"); viewport.setAttribute("aria-label", label);
-  return { node, tools, meta, summary, selectVisible, actions, viewport,
+  return { node, tools, meta, actions, viewport,
     sync() { tools.hidden = ![...tools.children].some((child) => !child.hidden); } };
 }
 
 /** Keep selection controls independent of the table's row and action rendering. */
 function createSelectionControls(panel, { selection, onChange, checkbox, menuLabel } = {}) {
-  const ui = createControls(panel.node.ownerDocument);
   const menu = menuLabel && createDataActionMenu(panel.node.ownerDocument, menuLabel);
   if (menu) panel.actions.append(menu.node);
-  const actions = menu ? menu.body
-    : ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
-  ui.button(panel.actions, "Clear", () => { selection.clear(); onChange(); }).setAttribute("aria-label", "Clear selection");
+  const actions = menu ? menu.body : selectionActionsTemplate(panel.node.ownerDocument).firstElementChild;
+  if (!menu) panel.actions.append(actions);
+  panel.meta.addEventListener("clear-selection", () => { selection.clear(); onChange(); });
   let visibleIds = [];
-  panel.selectVisible.onclick = () => { selection.setMany(visibleIds); onChange(); };
+  panel.meta.addEventListener("select-all", () => { selection.setMany(visibleIds); onChange(); });
   if (checkbox) checkbox.onchange = () => { selection.setMany(visibleIds, checkbox.checked); onChange(); };
   return { actions,
     update({ ids, summary, noun, selectSuffix = "" }) {
       visibleIds = ids;
       const selectedVisible = ids.reduce((total, id) => total + Number(selection.has(id)), 0);
       const all = ids.length > 0 && selectedVisible === ids.length;
-      panel.summary.textContent = selection.size
-        ? `${selection.size.toLocaleString()} ${noun}${selection.size === 1 ? "" : "s"} selected` : summary;
-      panel.summary.classList.toggle("is-selected", selection.size > 0);
-      panel.summary.title = summary;
-      panel.selectVisible.hidden = !ids.length;
-      panel.selectVisible.disabled = all;
-      panel.selectVisible.textContent = `Select all ${ids.length.toLocaleString()} visible${selectSuffix}`;
-      panel.actions.hidden = !selection.size;
+      panel.meta.state = { count: selection.size, total: ids.length, all, summary, noun, selectSuffix };
       if (checkbox) {
         checkbox.checked = all;
         checkbox.indeterminate = selectedVisible > 0 && !all;
@@ -723,10 +716,6 @@ function installDataEditorStyle(document) {
 .cm-data-error:empty { display:none; }
 .cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
 .cm-data-tools { flex-shrink:0; }
-.cm-data-meta { display:flex; align-items:center; gap:8px; height:32px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
-.cm-data-meta > span:first-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cm-data-meta > span.is-selected { color:var(--cm-foreground,#273444); font-weight:600; }
-.cm-data-meta > button { flex-shrink:0; }
 .cm-data-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .cm-data-selection-actions { display:contents; }
 .cm-data-action-menu { position:relative; }
@@ -790,15 +779,15 @@ class RowSelection extends Set {
   clear() { super.clear(); this.#anchor = null; }
 }
 
-const [markup, css] = await Promise.all([
+const [markup$1, css$1] = await Promise.all([
   "<span part=\"label\"></span>\n<button type=\"button\" part=\"edit-button\">\n  <svg aria-hidden=\"true\" viewBox=\"0 0 24 24\">\n    <path d=\"m4 20 4.1-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.1 16 4 20Z\"></path>\n    <path d=\"m13.8 7.2 3 3\"></path>\n  </svg>\n</button>\n<input type=\"text\" part=\"input\" hidden>\n<select part=\"input\" hidden></select>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  color: inherit;\n  font: inherit;\n}\n:host([hidden]), [hidden] { display: none !important; }\n:host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }\nspan { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }\nspan[data-placeholder] { color: var(--cm-muted, #687586); }\nbutton, input, select { box-sizing: border-box; font: inherit; color: inherit; }\nbutton {\n  display: inline-grid;\n  place-items: center;\n  flex: 0 0 20px;\n  height: 20px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #64748b);\n  cursor: pointer;\n  opacity: var(--cm-edit-affordance-opacity, 0);\n}\n:host(:hover) button, :host(:focus-within) button { opacity: 1; }\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { cursor: default; opacity: .45; }\nsvg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }\ninput, select {\n  width: 100%;\n  min-width: 0;\n  height: 28px;\n  margin-inline: -1px;\n  padding: 2px 7px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  line-height: 20px;\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus, select:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
 ]);
-const template = createTemplate(markup);
-const HTMLElementBase$1 = globalThis.HTMLElement || class {};
+const template$1 = createTemplate(markup$1);
+const HTMLElementBase$2 = globalThis.HTMLElement || class {};
 
 /** A field owns its draft; consumers accept or cancel value-commit events. */
-class EditableField extends HTMLElementBase$1 {
+class EditableField extends HTMLElementBase$2 {
   static observedAttributes = ["label", "placeholder", "type", "min", "max", "step", "required", "disabled"];
   #value = "";
   #revision = 0;
@@ -813,8 +802,8 @@ class EditableField extends HTMLElementBase$1 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
-    root.append(style, template(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$1;
+    root.append(style, template$1(this.ownerDocument));
     this.#text = root.querySelector("span");
     this.#button = root.querySelector("button");
     this.#input = root.querySelector("input");
@@ -913,6 +902,46 @@ class EditableField extends HTMLElementBase$1 {
 
 function defineEditableField() {
   if (!customElements.get("clinker-editable-field")) customElements.define("clinker-editable-field", EditableField);
+}
+
+const [markup, css] = await Promise.all([
+  "<span part=\"summary\"></span>\n<div part=\"actions\" hidden>\n  <slot name=\"actions\"></slot>\n  <button type=\"button\" data-clear aria-label=\"Clear selection\">Clear</button>\n</div>\n<button type=\"button\" data-all hidden>Select all visible</button>\n",
+  ":host {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  height: 32px;\n  min-width: 0;\n  flex-shrink: 0;\n  color: var(--cm-muted, #687586);\n  font: 12px/1.4 system-ui, sans-serif;\n}\n:host([hidden]), [hidden] { display: none !important; }\nspan { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\nspan.is-selected { color: var(--cm-foreground, #273444); font-weight: 600; }\ndiv { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }\nslot { display: contents; }\nbutton {\n  flex-shrink: 0;\n  box-sizing: border-box;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton:hover:not(:disabled) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n",
+]);
+const template = createTemplate(markup);
+const HTMLElementBase$1 = globalThis.HTMLElement || class {};
+
+class SelectionBar extends HTMLElementBase$1 {
+  #summary;
+  #actions;
+  #all;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = css;
+    root.append(style, template(this.ownerDocument));
+    this.#summary = root.querySelector("span");
+    this.#actions = root.querySelector("div");
+    this.#all = root.querySelector("[data-all]");
+    for (const [selector, name] of [["[data-clear]", "clear-selection"], ["[data-all]", "select-all"]]) {
+      root.querySelector(selector).onclick = () => this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }));
+    }
+  }
+
+  set state({ count, total, all, summary, noun, selectSuffix = "" }) {
+    this.#summary.textContent = count ? `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"} selected` : summary;
+    this.#summary.classList.toggle("is-selected", count > 0);
+    this.#summary.title = summary;
+    this.#actions.hidden = !count;
+    this.#all.hidden = !total;
+    this.#all.disabled = all;
+    this.#all.textContent = `Select all ${total.toLocaleString()} visible${selectSuffix}`;
+  }
+}
+
+function defineSelectionBar() {
+  if (!customElements.get("clinker-selection-bar")) customElements.define("clinker-selection-bar", SelectionBar);
 }
 
 var EOL = {},
@@ -1216,7 +1245,7 @@ const emptyTemplate$1 = createTemplate('<p>No annotation panels. Add a panel to 
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField();
+  defineEditableField(); defineSelectionBar();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector(".cm-data-toolbar");
@@ -3462,7 +3491,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    defineEditableField();
+    defineEditableField(); defineSelectionBar();
     this.classList.add("cm-editor", "cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();

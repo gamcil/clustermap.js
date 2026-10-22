@@ -1,5 +1,6 @@
 import { createDataPanel, createSelectionControls, createDataSearch, installDataEditorStyle } from "./dataEditorUi.mjs";
 import { defineEditableField } from "./editor/components/editable-field/editable-field.js";
+import { defineSelectionBar } from "./editor/components/selection-bar/selection-bar.js";
 import { textAsset } from "./editor/shared/textAsset.js";
 import { RowSelection } from "./rowSelection.mjs";
 import { createVirtualRows } from "./virtualRows.mjs";
@@ -44,7 +45,7 @@ const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to at
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 export function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField();
+  defineEditableField(); defineSelectionBar();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector(".cm-data-toolbar");

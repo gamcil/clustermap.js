@@ -958,7 +958,7 @@ test("cluster and locus fields keep their footprint, selection and distinct patc
   await view(page, "genes");
   const row = editor(page).locator(".cm-editor__tree-parent").first();
   await row.getByRole("checkbox").check();
-  const summary = editor(page).locator(".cm-data-meta > span").first();
+  const summary = editor(page).locator('.cm-data-meta [part="summary"]').first();
   const selected = await summary.innerText();
   for (const type of ["clusters", "loci"]) {
     const field = row.locator(`clinker-editable-field[data-type="${type}"]`), input = field.getByRole("textbox");

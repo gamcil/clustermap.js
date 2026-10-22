@@ -1,13 +1,14 @@
-import { createControls, createTemplate, escapeHtml } from "./uiControls.mjs";
+import { createTemplate, escapeHtml } from "./uiControls.mjs";
 import { DATA_ROW_HEIGHT } from "./virtualRows.mjs";
 
 const searchTemplate = createTemplate(`<label class="cm-data-search"><input type="search" aria-label="Filter records"></label>`);
 const panelTemplate = createTemplate(`
   <div class="cm-data-panel">
     <div class="cm-data-tools" hidden></div>
-    <div class="cm-data-meta"><span></span><div class="cm-data-actions" hidden></div><button type="button">Select all visible</button></div>
+    <clinker-selection-bar class="cm-data-meta"><div slot="actions" class="cm-data-actions"></div></clinker-selection-bar>
     <div class="cm-data-table" role="region"></div>
   </div>`);
+const selectionActionsTemplate = createTemplate('<span class="cm-data-selection-actions"></span>');
 const menuTemplate = createTemplate('<details class="cm-data-action-menu"><summary></summary><div class="cm-data-action-menu-body"></div></details>');
 export function createDataActionMenu(document, label, content) {
   const node = menuTemplate(document).firstElementChild;
@@ -51,41 +52,33 @@ export function createDataPanel(document, { label = "Editable chart data" } = {}
   installDataEditorStyle(document);
   const node = panelTemplate(document).firstElementChild;
   const tools = node.querySelector(".cm-data-tools"), meta = node.querySelector(".cm-data-meta");
-  const summary = meta.querySelector("span"), selectVisible = meta.querySelector("button"), actions = meta.querySelector(".cm-data-actions");
+  const actions = meta.querySelector(".cm-data-actions");
   bindDataActionMenus(node);
   node.addEventListener("mousedown", (event) => {
     if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
         !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable], clinker-editable-field')) event.preventDefault();
   });
   const viewport = node.querySelector(".cm-data-table"); viewport.setAttribute("aria-label", label);
-  return { node, tools, meta, summary, selectVisible, actions, viewport,
+  return { node, tools, meta, actions, viewport,
     sync() { tools.hidden = ![...tools.children].some((child) => !child.hidden); } };
 }
 
 /** Keep selection controls independent of the table's row and action rendering. */
 export function createSelectionControls(panel, { selection, onChange, checkbox, menuLabel } = {}) {
-  const ui = createControls(panel.node.ownerDocument);
   const menu = menuLabel && createDataActionMenu(panel.node.ownerDocument, menuLabel);
   if (menu) panel.actions.append(menu.node);
-  const actions = menu ? menu.body
-    : ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
-  ui.button(panel.actions, "Clear", () => { selection.clear(); onChange(); }).setAttribute("aria-label", "Clear selection");
+  const actions = menu ? menu.body : selectionActionsTemplate(panel.node.ownerDocument).firstElementChild;
+  if (!menu) panel.actions.append(actions);
+  panel.meta.addEventListener("clear-selection", () => { selection.clear(); onChange(); });
   let visibleIds = [];
-  panel.selectVisible.onclick = () => { selection.setMany(visibleIds); onChange(); };
+  panel.meta.addEventListener("select-all", () => { selection.setMany(visibleIds); onChange(); });
   if (checkbox) checkbox.onchange = () => { selection.setMany(visibleIds, checkbox.checked); onChange(); };
   return { actions,
     update({ ids, summary, noun, selectSuffix = "" }) {
       visibleIds = ids;
       const selectedVisible = ids.reduce((total, id) => total + Number(selection.has(id)), 0);
       const all = ids.length > 0 && selectedVisible === ids.length;
-      panel.summary.textContent = selection.size
-        ? `${selection.size.toLocaleString()} ${noun}${selection.size === 1 ? "" : "s"} selected` : summary;
-      panel.summary.classList.toggle("is-selected", selection.size > 0);
-      panel.summary.title = summary;
-      panel.selectVisible.hidden = !ids.length;
-      panel.selectVisible.disabled = all;
-      panel.selectVisible.textContent = `Select all ${ids.length.toLocaleString()} visible${selectSuffix}`;
-      panel.actions.hidden = !selection.size;
+      panel.meta.state = { count: selection.size, total: ids.length, all, summary, noun, selectSuffix };
       if (checkbox) {
         checkbox.checked = all;
         checkbox.indeterminate = selectedVisible > 0 && !all;
@@ -127,10 +120,6 @@ export function installDataEditorStyle(document) {
 .cm-data-error:empty { display:none; }
 .cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
 .cm-data-tools { flex-shrink:0; }
-.cm-data-meta { display:flex; align-items:center; gap:8px; height:32px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
-.cm-data-meta > span:first-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cm-data-meta > span.is-selected { color:var(--cm-foreground,#273444); font-weight:600; }
-.cm-data-meta > button { flex-shrink:0; }
 .cm-data-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .cm-data-selection-actions { display:contents; }
 .cm-data-action-menu { position:relative; }

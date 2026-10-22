@@ -9,6 +9,7 @@ import { createDataHeader, createEditorActions } from "./dataTableControls.mjs";
 import { createEditorRow } from "./dataRows.mjs";
 import { createAppearanceControls } from "./appearanceControls.mjs";
 import { defineEditableField } from "./components/editable-field/editable-field.js";
+import { defineSelectionBar } from "./components/selection-bar/selection-bar.js";
 
 const shellTemplate = createTemplate(`
       <div class="cm-editor__resize-handle" data-resize role="separator" aria-label="Resize plot editor" aria-orientation="horizontal"></div>
@@ -110,7 +111,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    defineEditableField();
+    defineEditableField(); defineSelectionBar();
     this.classList.add("cm-editor", "cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();
