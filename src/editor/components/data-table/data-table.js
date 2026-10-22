@@ -23,6 +23,10 @@ class DataTable extends HTMLElementBase {
     const style = this.ownerDocument.createElement("style"); style.textContent = css;
     root.append(style, template(this.ownerDocument));
     this.#viewport = root.querySelector("div");
+    this.addEventListener("mousedown", (event) => {
+      if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
+          !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable], clinker-editable-field')) event.preventDefault();
+    });
   }
 
   connectedCallback() { this.#mount(); }

@@ -1,4 +1,4 @@
-import { installDataEditorStyle } from "./dataEditorUi.mjs";
+import { installDataEditorStyle } from "./editor/shared/styles.mjs";
 import { createAnnotationDataControls } from "./annotationDataControls.mjs";
 import { createAnnotationControls } from "./annotationControls.mjs";
 import { createAnnotationCreateControls } from "./annotationCreateControls.mjs";

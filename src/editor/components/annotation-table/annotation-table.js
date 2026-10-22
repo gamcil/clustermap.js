@@ -1,4 +1,4 @@
-import { createDataPanel, createSelectionControls, DATA_EDITOR_CSS } from "../../../dataEditorUi.mjs";
+import { DATA_EDITOR_CSS } from "../../shared/styles.mjs";
 import { RowSelection } from "../../../rowSelection.mjs";
 import { createTemplate } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
@@ -16,8 +16,7 @@ const template = createTemplate(markup);
 const HTMLElementBase = globalThis.HTMLElement || class {};
 
 class AnnotationTable extends HTMLElementBase {
-  #templates;
-  #layout;
+  #viewport;
   #panel;
   #domain = null;
   #filtered = [];
@@ -26,7 +25,7 @@ class AnnotationTable extends HTMLElementBase {
   #table;
   #selection = new RowSelection();
   #rowIds = new WeakMap();
-  #selectionControls;
+  #selectionBar;
   #batch;
   #draft = { column: "0", value: "" };
 
@@ -34,14 +33,12 @@ class AnnotationTable extends HTMLElementBase {
     super();
     const root = this.attachShadow({ mode: "open" });
     const style = this.ownerDocument.createElement("style"); style.textContent = DATA_EDITOR_CSS + css;
-    this.#templates = template(this.ownerDocument);
-    this.#layout = createDataPanel(this.ownerDocument, { label: "Editable annotation data" });
-    this.#layout.node.classList.add("cm-data-ui");
-    this.#layout.tools.replaceWith(this.#element("tools"));
-    this.#layout.viewport.classList.add("cm-annotation-matrix");
-    this.#selectionControls = createSelectionControls(this.#layout, { selection: this.#selection, menuLabel: "Edit values…", onChange: () => this.#syncSelection() });
-    this.#batch = this.ownerDocument.createElement("clinker-annotation-value-actions");
-    this.#selectionControls.actions.append(this.#batch);
+    root.append(style, template(this.ownerDocument));
+    this.#viewport = root.querySelector("clinker-data-table");
+    this.#selectionBar = root.querySelector("clinker-selection-bar");
+    this.#selectionBar.addEventListener("clear-selection", () => this.clearSelection());
+    this.#selectionBar.addEventListener("select-all", (event) => { this.#selection.setMany(event.detail.ids); this.#syncSelection(); });
+    this.#batch = root.querySelector("clinker-annotation-value-actions");
     this.#batch.addEventListener("draft-change", (event) => { event.stopPropagation(); this.#draft = event.detail; });
     this.#batch.addEventListener("values-commit", (event) => {
       event.stopPropagation();
@@ -57,7 +54,6 @@ class AnnotationTable extends HTMLElementBase {
         event.preventDefault(); event.stopPropagation(); this.clearSelection();
       }
     });
-    root.append(style, this.#layout.node);
   }
 
   set state({ panel, clusters, domain = null, filter = "" }) {
@@ -65,20 +61,20 @@ class AnnotationTable extends HTMLElementBase {
     if (changed) { this.#selection.clear(); this.#draft = { column: "0", value: "" }; }
     this.#panel = panel; this.#domain = domain; this.#filter = filter;
     this.#selection.prune(new Set(clusters.map(({ uid }) => uid)));
-    const scroll = changed || filtered ? 0 : this.#layout.viewport.scrollTop;
+    const scroll = changed || filtered ? 0 : this.#viewport.scrollTop;
     const schema = JSON.stringify([panel.uid, panel.type, panel.columns, domain]);
     if (this.#schema !== schema) { this.#schema = schema; this.#build(); }
     const needle = filter.trim().toLowerCase();
     this.#filtered = clusters.filter(({ uid, name }) => `${name} ${uid}`.toLowerCase().includes(needle));
-    this.#layout.viewport.rows = this.#filtered;
-    this.#layout.viewport.scrollTop = scroll;
+    this.#viewport.rows = this.#filtered;
+    this.#viewport.scrollTop = scroll;
   }
 
   clearSelection() { this.#selection.clear(); this.#syncSelection(); }
   cancelEdit() { for (const field of this.shadowRoot.querySelectorAll("clinker-editable-field")) field.cancelEdit(); }
   disconnectedCallback() { this.cancelEdit(); }
 
-  #element(name) { return this.ownerDocument.importNode(this.#templates.getElementById(name).content, true).firstElementChild; }
+  #element(name) { return this.ownerDocument.importNode(this.shadowRoot.getElementById(name).content, true).firstElementChild; }
   #emit(type, detail) {
     const accepted = this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true, cancelable: true }));
     if (accepted) for (const menu of this.shadowRoot.querySelectorAll("clinker-action-menu")) menu.open = false;
@@ -87,7 +83,7 @@ class AnnotationTable extends HTMLElementBase {
   #columns(columns, values) { return this.#emit("columns-change", { columns, ...(values ? { values } : {}) }); }
 
   #syncSelection() {
-    this.#selectionControls.update({ ids: this.#filtered.map(({ uid }) => uid), summary: `${this.#filtered.length.toLocaleString()} visible clusters`, noun: "cluster" });
+    this.#selectionBar.state = { selection: this.#selection, ids: this.#filtered.map(({ uid }) => uid), summary: `${this.#filtered.length.toLocaleString()} visible clusters`, noun: "cluster" };
     if (!this.#table) return;
     const all = this.#table.querySelector("thead input"), selected = this.#filtered.filter(({ uid }) => this.#selection.has(uid)).length;
     all.checked = this.#filtered.length > 0 && selected === this.#filtered.length; all.indeterminate = selected > 0 && !all.checked;
@@ -98,7 +94,7 @@ class AnnotationTable extends HTMLElementBase {
   }
 
   #build() {
-    const viewport = this.#layout.viewport, panel = this.#panel, extra = panel.type === "heatmap";
+    const viewport = this.#viewport, panel = this.#panel, extra = panel.type === "heatmap";
     this.cancelEdit(); viewport.renderer = null;
     this.#table = this.#element("table"); viewport.replaceChildren(this.#table);
     const head = this.#table.querySelector("tr");

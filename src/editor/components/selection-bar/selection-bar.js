@@ -12,6 +12,7 @@ class SelectionBar extends HTMLElementBase {
   #summary;
   #actions;
   #all;
+  #ids = [];
 
   constructor() {
     super();
@@ -22,11 +23,14 @@ class SelectionBar extends HTMLElementBase {
     this.#actions = root.querySelector("div");
     this.#all = root.querySelector("[data-all]");
     for (const [selector, name] of [["[data-clear]", "clear-selection"], ["[data-all]", "select-all"]]) {
-      root.querySelector(selector).onclick = () => this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }));
+      root.querySelector(selector).onclick = () => this.dispatchEvent(new CustomEvent(name, { detail: { ids: this.#ids }, bubbles: true, composed: true }));
     }
   }
 
-  set state({ count, total, all, summary, noun, selectSuffix = "" }) {
+  set state({ selection, ids, summary, noun, selectSuffix = "" }) {
+    this.#ids = ids;
+    const count = selection.size, total = ids.length;
+    const all = total > 0 && ids.every((id) => selection.has(id));
     this.#summary.textContent = count ? `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"} selected` : summary;
     this.#summary.classList.toggle("is-selected", count > 0);
     this.#summary.title = summary;

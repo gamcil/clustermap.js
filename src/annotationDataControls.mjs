@@ -1,11 +1,10 @@
-import { createDataPanel, installDataEditorStyle } from "./dataEditorUi.mjs";
+import { installDataEditorStyle } from "./editor/shared/styles.mjs";
 import { defineSearchField } from "./editor/components/search-field/search-field.js";
 import { defineCategoryEditor } from "./editor/components/category-editor/category-editor.js";
 import { defineAnnotationToolbar } from "./editor/components/annotation-toolbar/annotation-toolbar.js";
 import { defineAnnotationDataForm } from "./editor/components/annotation-data-form/annotation-data-form.js";
 import { defineAnnotationGroupEditor } from "./editor/components/annotation-group-editor/annotation-group-editor.js";
 import { defineAnnotationTable } from "./editor/components/annotation-table/annotation-table.js";
-import { defineDataTable } from "./editor/components/data-table/data-table.js";
 import { createTemplate, createActionRunner } from "./uiControls.mjs";
 import { parseAnnotationTable, annotationTableText, mapAnnotationValues } from "./annotationData.mjs";
 import { createAnnotationCreateControls } from "./annotationCreateControls.mjs";
@@ -19,12 +18,12 @@ const editorTemplate = createTemplate(`<div class="cm-data-ui cm-annotation-data
 const matrixTemplate = createTemplate('<clinker-annotation-table></clinker-annotation-table>');
 const categoriesTemplate = createTemplate('<clinker-category-editor class="cm-annotation-categories"></clinker-category-editor>');
 const replacementTemplate = createTemplate('<clinker-annotation-data-form mode="replace" hidden></clinker-annotation-data-form>');
-const groupsTemplate = createTemplate('<clinker-annotation-group-editor></clinker-annotation-group-editor>');
+const groupsTemplate = createTemplate('<div class="cm-data-panel cm-annotation-group-list" role="region" aria-label="Editable annotation data" tabindex="-1"><clinker-annotation-group-editor></clinker-annotation-group-editor></div>');
 const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to attach data to cluster rows.</p>');
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 export function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm(); defineAnnotationGroupEditor(); defineDataTable(); defineAnnotationTable();
+  defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm(); defineAnnotationGroupEditor(); defineAnnotationTable();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector("clinker-annotation-toolbar");
@@ -102,7 +101,8 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
   }
 
   function createGroups(parent) {
-    const groups = groupsTemplate(document).firstElementChild; parent.append(groups);
+    const region = groupsTemplate(document).firstElementChild; parent.append(region);
+    const groups = region.firstElementChild;
     groups.addEventListener("value-commit", (event) => {
       if (update({ groups: event.detail.value }) === false) event.preventDefault();
     });
@@ -123,10 +123,8 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
         onCreate: (uid) => { selected = uid; creating = false; render(); } }).node);
       else if (!panel) body.append(emptyTemplate(document));
       else {
-        if (panel.type === "groups") {
-          const layout = createDataPanel(document, { label: "Editable annotation data" }); layout.meta.hidden = true;
-          body.append(layout.node); view = createGroups(layout.viewport);
-        } else {
+        if (panel.type === "groups") view = createGroups(body);
+        else {
           view = createMatrix(body); view.replace = createReplacement(view.matrix);
         }
       }
@@ -170,6 +168,7 @@ function installStyle(document) {
 @layer clinker-editor {
 .cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }
 .cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
+.cm-annotation-group-list { overflow:auto; }
 .cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }
 .cm-annotation-data-editor [data-data-error]:empty { display:none; }
 

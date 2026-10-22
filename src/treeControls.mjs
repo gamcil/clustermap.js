@@ -1,5 +1,5 @@
 import { color } from "d3-color";
-import { installDataEditorStyle } from "./dataEditorUi.mjs";
+import { installDataEditorStyle } from "./editor/shared/styles.mjs";
 import { createControls, createActionRunner } from "./uiControls.mjs";
 import { resolveTreePresentation } from "./treePresentation.mjs";
 import { installTreeControlsStyle } from "./treeControlsStyle.mjs";

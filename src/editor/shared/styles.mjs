@@ -1,58 +1,4 @@
-import { createTemplate } from "./uiControls.mjs";
-import { DATA_ROW_HEIGHT } from "./virtualRows.mjs";
-
-const panelTemplate = createTemplate(`
-  <div class="cm-data-panel">
-    <div class="cm-data-tools" hidden></div>
-    <clinker-selection-bar class="cm-data-meta"><div slot="actions" class="cm-data-actions"></div></clinker-selection-bar>
-    <clinker-data-table class="cm-data-table" role="region"></clinker-data-table>
-  </div>`);
-const selectionActionsTemplate = createTemplate('<span class="cm-data-selection-actions"></span>');
-const menuTemplate = createTemplate('<clinker-action-menu></clinker-action-menu>');
-export function createDataActionMenu(document, label, content) {
-  const node = menuTemplate(document).firstElementChild;
-  node.setAttribute("label", label); if (content) node.append(content);
-  return node;
-}
-/** Shared content layout for every data view, including the standalone editor. */
-export function createDataPanel(document, { label = "Editable chart data" } = {}) {
-  installDataEditorStyle(document);
-  const node = panelTemplate(document).firstElementChild;
-  const tools = node.querySelector(".cm-data-tools"), meta = node.querySelector(".cm-data-meta");
-  const actions = meta.querySelector(".cm-data-actions");
-  node.addEventListener("mousedown", (event) => {
-    if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
-        !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable], clinker-editable-field')) event.preventDefault();
-  });
-  const viewport = node.querySelector(".cm-data-table"); viewport.setAttribute("aria-label", label);
-  return { node, tools, meta, actions, viewport,
-    sync() { tools.hidden = ![...tools.children].some((child) => !child.hidden); } };
-}
-
-/** Keep selection controls independent of the table's row and action rendering. */
-export function createSelectionControls(panel, { selection, onChange, checkbox, menuLabel } = {}) {
-  const menu = menuLabel && createDataActionMenu(panel.node.ownerDocument, menuLabel);
-  if (menu) panel.actions.append(menu);
-  const actions = menu || selectionActionsTemplate(panel.node.ownerDocument).firstElementChild;
-  if (!menu) panel.actions.append(actions);
-  panel.meta.addEventListener("clear-selection", () => { selection.clear(); onChange(); });
-  let visibleIds = [];
-  panel.meta.addEventListener("select-all", () => { selection.setMany(visibleIds); onChange(); });
-  if (checkbox) checkbox.onchange = () => { selection.setMany(visibleIds, checkbox.checked); onChange(); };
-  return { actions,
-    update({ ids, summary, noun, selectSuffix = "" }) {
-      visibleIds = ids;
-      const selectedVisible = ids.reduce((total, id) => total + Number(selection.has(id)), 0);
-      const all = ids.length > 0 && selectedVisible === ids.length;
-      panel.meta.state = { count: selection.size, total: ids.length, all, summary, noun, selectSuffix };
-      if (checkbox) {
-        checkbox.checked = all;
-        checkbox.indeterminate = selectedVisible > 0 && !all;
-        checkbox.disabled = !ids.length;
-      }
-    },
-  };
-}
+import { DATA_ROW_HEIGHT } from "../../virtualRows.mjs";
 
 export const DATA_EDITOR_CSS = `
 @layer clinker-editor {
@@ -78,7 +24,6 @@ export const DATA_EDITOR_CSS = `
 .cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
 .cm-data-tools { flex-shrink:0; }
 .cm-data-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
-.cm-data-selection-actions { display:contents; }
 .cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
 .cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; line-height:20px; }
 .cm-data-row > :is(th,td) { height:${DATA_ROW_HEIGHT}px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }

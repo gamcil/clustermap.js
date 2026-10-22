@@ -1,4 +1,4 @@
-import { createSelectionControls, installDataEditorStyle } from "../../../dataEditorUi.mjs";
+import { installDataEditorStyle } from "../../shared/styles.mjs";
 import { RowSelection } from "../../../rowSelection.mjs";
 import { DATA_ROW_HEIGHT } from "../../../virtualRows.mjs";
 import { createAnnotationDataControls } from "../../../annotationDataControls.mjs";
@@ -42,7 +42,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   #rowKind = null;
   #table = null;
   #actions = null;
-  #selectionControls = null;
+  #selectionBar = null;
   #rowsCache = null;
   #selectionData = null;
   #filter = "";
@@ -140,20 +140,14 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 
   #renderShell() {
     this.replaceChildren(template(this.ownerDocument));
-    const node = this.querySelector("[data-record-editor]");
-    const panel = { node, meta: node.querySelector("clinker-selection-bar"),
-      actions: node.querySelector(".cm-data-actions"), viewport: node.querySelector("clinker-data-table") };
-    this.#table = panel.viewport;
-    node.addEventListener("mousedown", (event) => {
-      if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
-          !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable], clinker-editable-field')) event.preventDefault();
+    this.#table = this.querySelector("clinker-data-table");
+    this.#selectionBar = this.querySelector("clinker-selection-bar");
+    this.#selectionBar.addEventListener("clear-selection", () => this.#clearDataSelection());
+    this.#selectionBar.addEventListener("select-all", (event) => {
+      this.#selected.setMany(event.detail.ids); this.#renderData(); this.#syncHighlight();
     });
-    this.#selectionControls = createSelectionControls(panel, { selection: this.#selected,
-      onChange: () => { this.#renderData(); this.#syncHighlight(); } });
-    this.#selectionControls.actions.dataset.actions = "";
-    this.#actions = this.ownerDocument.createElement("clinker-record-actions");
+    this.#actions = this.querySelector("clinker-record-actions");
     this.#actions.addEventListener("selection-action", (event) => this.#command(event.detail.command, event.detail.value));
-    this.#selectionControls.actions.append(this.#actions);
   }
 
   #bind() {
@@ -602,7 +596,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     if (!data) {
       this.#disposeRows();
       table.header = { columns: [], sort: null }; list.textContent = "Set the chart property to edit a ClusterMap chart.";
-      this.#selectionControls.update({ ids: [], summary: "No chart attached.", noun: this.#kind.slice(0, -1) });
+      this.#selectionBar.state = { selection: this.#selected, ids: [], summary: "No chart attached.", noun: this.#kind.slice(0, -1) };
       this.#actions.state = { kind: this.#kind, count: 0, groups: [], allGroups: [], loci: [], clusters: [] };
       return;
     }
@@ -662,8 +656,8 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     const summaryText = isTree
       ? `${rows.filter((row) => row.type !== "gene").length.toLocaleString()} ${this.#geneView === "groups" ? "group" : "cluster/locus"} rows · ${visibleGenes.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
       : `${rows.length.toLocaleString()} visible ${this.#kind}${memberGroup && this.#kind === "genes" ? " in selected group" : ""}${this.#filter ? " matching search" : ""}.`;
-    this.#selectionControls.update({ ids: this.#selectableIds(rows), summary: summaryText,
-      noun: this.#kind.slice(0, -1), selectSuffix: isTree ? " genes" : "" });
+    this.#selectionBar.state = { selection: this.#selected, ids: this.#selectableIds(rows), summary: summaryText,
+      noun: this.#kind.slice(0, -1), selectSuffix: isTree ? " genes" : "" };
     const parentRemoval = this.#kind === "genes" && this.#geneView === "tree" && this.#chart?.remove;
     this.#actions.state = { kind: this.#kind, count: this.#selected.size, groups: this.#selectedGroups(), allGroups: data.groups,
       loci: parentRemoval ? this.#selectedParents("loci") : [], clusters: parentRemoval ? this.#selectedParents("clusters") : [] };

@@ -1,4 +1,12 @@
-<template id="tools"><slot name="tools"></slot></template>
+<div class="cm-data-panel cm-data-ui">
+  <slot name="tools"></slot>
+  <clinker-selection-bar class="cm-data-meta">
+    <div slot="actions" class="cm-data-actions">
+      <clinker-action-menu label="Edit values…"><clinker-annotation-value-actions></clinker-annotation-value-actions></clinker-action-menu>
+    </div>
+  </clinker-selection-bar>
+  <clinker-data-table class="cm-data-table cm-annotation-matrix" role="region" aria-label="Editable annotation data"></clinker-data-table>
+</div>
 <template id="table">
 <table><thead><tr>
   <th class="cm-data-cell cm-data-cell--select cm-data-head"><input type="checkbox" aria-label="Select all filtered clusters"></th>
