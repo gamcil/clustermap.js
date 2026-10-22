@@ -1,4 +1,4 @@
-import { validateTreePresentation } from "../tree/presentation.mjs";
+import { validateTreePresentation } from "../tree/model.mjs";
 import { validateAnnotationPanels } from "../annotations/model.mjs";
 
 // Chart data is JSON-like: it is also the format used for data/project export.

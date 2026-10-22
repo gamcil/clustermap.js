@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveTreePresentation, validateTreePresentation } from "../src/tree/presentation.mjs";
+import { resolveTreePresentation, validateTreePresentation } from "../src/tree/model.mjs";
 import { createChartRuntime } from "../src/chart/runtime.js";
 
 function example(cutHeight = 3) {

@@ -1,7 +1,7 @@
 import { m as mountComponent, c as createTemplate, a as controlStyles, u as upgradeProperty } from './editor/search-field-8ffb9d31.mjs';
 import { e as editorThemeStyles, a as applyEditorTheme } from './editor/theme-3d7fc189.mjs';
-import { d as defineAppearancePanel } from './editor/appearance-panel-0976de30.mjs';
-export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-0976de30.mjs';
+import { d as defineAppearancePanel } from './editor/appearance-panel-8402fbb3.mjs';
+export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-8402fbb3.mjs';
 import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-80d089d9.mjs';
 export { C as ClinkerDataPanelElement, d as defineDataPanel } from './editor/data-panel-80d089d9.mjs';
 import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-ac8a4410.mjs';

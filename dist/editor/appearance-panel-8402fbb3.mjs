@@ -41,14 +41,17 @@ function treeMetrics(tree) {
   if (metricsCache.has(tree)) return metricsCache.get(tree);
   const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
   const parents = new Map();
-  const distances = new Map([[tree.root, 0]]);
-  let complete = true;
+  const distances = new Map([[tree.root, 0]]), depths = new Map([[tree.root, 0]]);
+  let completeLengths = true, nonNegative = true;
   const visit = (uid) => {
     for (const child of nodes.get(uid).children || []) {
       const length = nodes.get(child).branchLength;
-      if (!Number.isFinite(length) || length < 0) complete = false;
+      const finite = Number.isFinite(length);
+      if (!finite) completeLengths = false;
+      if (length < 0) nonNegative = false;
       parents.set(child, uid);
-      distances.set(child, distances.get(uid) + (Number.isFinite(length) ? length : 0));
+      distances.set(child, distances.get(uid) + (finite ? length : 0));
+      depths.set(child, depths.get(uid) + 1);
       visit(child);
     }
   };
@@ -57,10 +60,9 @@ function treeMetrics(tree) {
   const height = Math.max(0, ...tips.map((node) => distances.get(node.uid)));
   // Absolute 1e-12 plus relative 1e-9 tolerance, measured in input distance units.
   const tolerance = 1e-12 + 1e-9 * height;
-  const ultrametric = complete && tips.every((node) => Math.abs(distances.get(node.uid) - height) <= tolerance);
+  const ultrametric = completeLengths && nonNegative && tips.every((node) => Math.abs(distances.get(node.uid) - height) <= tolerance);
   const result = {
-    nodes, parents, height, ultrametric,
-    heights: new Map([...distances].map(([uid, distance]) => [uid, Math.max(0, height - distance)])),
+    nodes, parents, distances, depths, maxDepth: Math.max(...depths.values()), height, completeLengths, ultrametric,
     canonical: [...tree.nodes].sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0),
   };
   metricsCache.set(tree, result);
@@ -86,7 +88,7 @@ function validateTreePresentation(tree, config = {}) {
   if (presentation !== undefined) {
     fields(presentation, ["colouring", "subtrees", "nodes"], "presentation");
     validateTreeColouring(presentation.colouring);
-    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    const nodes = treeMetrics(tree).nodes;
     for (const scope of ["subtrees", "nodes"]) {
       if (presentation[scope] === undefined) continue;
       if (!object(presentation[scope])) fail(`presentation.${scope} must be a node-ID dictionary.`);
@@ -131,10 +133,11 @@ function resolveTreePresentation(tree, config = {}) {
   const threshold = policy.cutHeight === "auto" ? metrics.height * 0.7 : policy.cutHeight;
   const groups = new Map();
   if (policy.mode === "cutHeight" && threshold > 0) {
+    const heightFor = (uid) => Math.max(0, metrics.height - metrics.distances.get(uid));
     for (const node of metrics.canonical) {
-      if (!node.children || metrics.heights.get(node.uid) >= threshold) continue;
+      if (!node.children || heightFor(node.uid) >= threshold) continue;
       const parent = metrics.parents.get(node.uid);
-      if (parent === undefined || metrics.heights.get(parent) >= threshold) {
+      if (parent === undefined || heightFor(parent) >= threshold) {
         groups.set(node.uid, policy.palette[groups.size % policy.palette.length]);
       }
     }

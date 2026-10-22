@@ -1,4 +1,4 @@
-import { invalidateTreePresentation, validateTreePresentation } from "./presentation.mjs";
+import { invalidateTreePresentation, validateTreePresentation, treeMetrics } from "./model.mjs";
 
 const fail = (message) => { throw new TypeError(`Invalid chart operation: ${message}`); };
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -19,7 +19,7 @@ export function normalizeTreeOperation(tree, operation) {
   if (["node", "subtree"].includes(scope)) {
     if (!Array.isArray(operation.ids) || !operation.ids.length) fail(`${scope} scope requires node IDs.`);
     ids = [...new Set(operation.ids)];
-    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    const nodes = treeMetrics(tree).nodes;
     for (const uid of ids) {
       if (!nodes.has(uid)) fail(`unknown tree node '${uid}'.`);
       if (scope === "subtree" && !nodes.get(uid).children) fail(`subtree '${uid}' is not internal.`);

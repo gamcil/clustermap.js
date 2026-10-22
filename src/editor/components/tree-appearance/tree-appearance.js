@@ -1,5 +1,5 @@
 import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
-import { TREE_COLOURING_DEFAULTS, resolveTreePresentation, validateTreePresentation } from "../../../tree/presentation.mjs";
+import { TREE_COLOURING_DEFAULTS, resolveTreePresentation, validateTreePresentation } from "../../../tree/model.mjs";
 import { textAsset } from "../../../ui/assets.mjs";
 import { controlStyles } from "../../shared/controls.mjs";
 

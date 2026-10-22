@@ -1,3 +1,4 @@
+import { treeMetrics } from "../tree/model.mjs";
 import { color } from "d3-color";
 
 export function validateGroupPanel(panel, clusterIds, tree, fail) {
@@ -5,7 +6,7 @@ export function validateGroupPanel(panel, clusterIds, tree, fail) {
   for (const key of ["markerWidth", "laneGap"]) {
     if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
   }
-  const ids = new Set(), nodes = new Set(tree?.nodes.map((node) => node.uid));
+  const ids = new Set(), nodes = tree ? treeMetrics(tree).nodes : new Map();
   for (const group of panel.groups) {
     if (!group || typeof group.uid !== "string" || !group.uid.trim() || ids.has(group.uid)) fail("groups require unique, non-empty uid strings.");
     ids.add(group.uid);
@@ -23,7 +24,7 @@ export function validateGroupPanel(panel, clusterIds, tree, fail) {
 
 /** Resolve membership and allocate lanes once; placement remains independent of tree geometry. */
 export function layoutGroupPanel(source, clusters, { tree, measureBounds }) {
-  const nodes = new Map(tree?.nodes.map((node) => [node.uid, node]));
+  const nodes = tree ? treeMetrics(tree).nodes : new Map();
   const descendants = new Map();
   const collect = (uid) => {
     if (!descendants.has(uid)) {

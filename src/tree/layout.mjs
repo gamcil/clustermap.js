@@ -1,6 +1,6 @@
 import { clusterLabelOffsetForPreview, clusterLabelTextForPreview, clusterOffsetForPreview } from "../scene/preview.mjs";
 
-import { resolveTreePresentation } from "./presentation.mjs";
+import { resolveTreePresentation, treeMetrics } from "./model.mjs";
 
 const leafXAnchors = new WeakMap();
 
@@ -9,7 +9,7 @@ export function isTreeOrderCompatible(tree, order) {
   if (!tree) return true;
   const positions = new Map(order.map((uid, index) => [uid, index]));
   if (positions.size !== order.length) return false;
-  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const nodes = treeMetrics(tree).nodes;
   const span = (uid) => {
     const node = nodes.get(uid);
     if (!node) return null;
@@ -48,26 +48,7 @@ function niceScaleValue(maxDistance) {
 
 /** Lay out branch x positions using lengths when every edge has one. */
 export function treeHorizontalLayout(tree, leafX, width, useBranchLengths = true) {
-  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
-  const distances = new Map([[tree.root, 0]]);
-  const depths = new Map([[tree.root, 0]]);
-  const visit = (uid) => {
-    const node = nodes.get(uid);
-    for (const childUid of node.children || []) {
-      const child = nodes.get(childUid);
-      distances.set(childUid, distances.get(uid) + (Number(child.branchLength) || 0));
-      depths.set(childUid, depths.get(uid) + 1);
-      visit(childUid);
-    }
-  };
-  visit(tree.root);
-  const maxDepth = Math.max(...depths.values());
-  const maxDistance = Math.max(...tree.nodes
-    .filter((node) => !node.children)
-    .map((node) => distances.get(node.uid) || 0));
-  const completeLengths = tree.nodes
-    .filter((node) => node.uid !== tree.root)
-    .every((node) => Number.isFinite(node.branchLength));
+  const { distances, depths, maxDepth, height: maxDistance, completeLengths } = treeMetrics(tree);
   const proportional = useBranchLengths && completeLengths && maxDistance > 0;
   const leftX = leafX - width;
   const xs = new Map();
@@ -115,7 +96,7 @@ export function treeNodeYPositions(tree, scene, leafY = (node, sourceScene) =>
   sourceScene.clusters.get(node.cluster)?.y ?? 0
 ) {
   if (!tree || !scene) return new Map();
-  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const nodes = treeMetrics(tree).nodes;
   const positions = new Map();
   const yFor = (uid) => {
     if (positions.has(uid)) return positions.get(uid);

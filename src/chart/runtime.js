@@ -3,7 +3,7 @@ import { quantize } from "d3-interpolate";
 import { scaleLinear, scaleOrdinal, scaleSequential } from "d3-scale";
 import { interpolateGreys, interpolateRainbow } from "d3-scale-chromatic";
 import { createDefaultConfig, updateConfig } from "./config.js";
-import { validateTreeColouring, validateTreePresentation } from "../tree/presentation.mjs";
+import { validateTreeColouring, validateTreePresentation } from "../tree/model.mjs";
 import { filterLinks, getGroupScaleValues } from "../links/groups.mjs";
 import {
   anchorGeneGroup,

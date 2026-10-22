@@ -1438,14 +1438,17 @@
     if (metricsCache.has(tree)) return metricsCache.get(tree);
     const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
     const parents = new Map();
-    const distances = new Map([[tree.root, 0]]);
-    let complete = true;
+    const distances = new Map([[tree.root, 0]]), depths = new Map([[tree.root, 0]]);
+    let completeLengths = true, nonNegative = true;
     const visit = (uid) => {
       for (const child of nodes.get(uid).children || []) {
         const length = nodes.get(child).branchLength;
-        if (!Number.isFinite(length) || length < 0) complete = false;
+        const finite = Number.isFinite(length);
+        if (!finite) completeLengths = false;
+        if (length < 0) nonNegative = false;
         parents.set(child, uid);
-        distances.set(child, distances.get(uid) + (Number.isFinite(length) ? length : 0));
+        distances.set(child, distances.get(uid) + (finite ? length : 0));
+        depths.set(child, depths.get(uid) + 1);
         visit(child);
       }
     };
@@ -1454,10 +1457,9 @@
     const height = Math.max(0, ...tips.map((node) => distances.get(node.uid)));
     // Absolute 1e-12 plus relative 1e-9 tolerance, measured in input distance units.
     const tolerance = 1e-12 + 1e-9 * height;
-    const ultrametric = complete && tips.every((node) => Math.abs(distances.get(node.uid) - height) <= tolerance);
+    const ultrametric = completeLengths && nonNegative && tips.every((node) => Math.abs(distances.get(node.uid) - height) <= tolerance);
     const result = {
-      nodes, parents, height, ultrametric,
-      heights: new Map([...distances].map(([uid, distance]) => [uid, Math.max(0, height - distance)])),
+      nodes, parents, distances, depths, maxDepth: Math.max(...depths.values()), height, completeLengths, ultrametric,
       canonical: [...tree.nodes].sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0),
     };
     metricsCache.set(tree, result);
@@ -1483,7 +1485,7 @@
     if (presentation !== undefined) {
       fields$1(presentation, ["colouring", "subtrees", "nodes"], "presentation");
       validateTreeColouring(presentation.colouring);
-      const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+      const nodes = treeMetrics(tree).nodes;
       for (const scope of ["subtrees", "nodes"]) {
         if (presentation[scope] === undefined) continue;
         if (!object$2(presentation[scope])) fail$2(`presentation.${scope} must be a node-ID dictionary.`);
@@ -1532,10 +1534,11 @@
     const threshold = policy.cutHeight === "auto" ? metrics.height * 0.7 : policy.cutHeight;
     const groups = new Map();
     if (policy.mode === "cutHeight" && threshold > 0) {
+      const heightFor = (uid) => Math.max(0, metrics.height - metrics.distances.get(uid));
       for (const node of metrics.canonical) {
-        if (!node.children || metrics.heights.get(node.uid) >= threshold) continue;
+        if (!node.children || heightFor(node.uid) >= threshold) continue;
         const parent = metrics.parents.get(node.uid);
-        if (parent === undefined || metrics.heights.get(parent) >= threshold) {
+        if (parent === undefined || heightFor(parent) >= threshold) {
           groups.set(node.uid, policy.palette[groups.size % policy.palette.length]);
         }
       }
@@ -1570,7 +1573,7 @@
     if (!tree) return true;
     const positions = new Map(order.map((uid, index) => [uid, index]));
     if (positions.size !== order.length) return false;
-    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    const nodes = treeMetrics(tree).nodes;
     const span = (uid) => {
       const node = nodes.get(uid);
       if (!node) return null;
@@ -1609,26 +1612,7 @@
 
   /** Lay out branch x positions using lengths when every edge has one. */
   function treeHorizontalLayout(tree, leafX, width, useBranchLengths = true) {
-    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
-    const distances = new Map([[tree.root, 0]]);
-    const depths = new Map([[tree.root, 0]]);
-    const visit = (uid) => {
-      const node = nodes.get(uid);
-      for (const childUid of node.children || []) {
-        const child = nodes.get(childUid);
-        distances.set(childUid, distances.get(uid) + (Number(child.branchLength) || 0));
-        depths.set(childUid, depths.get(uid) + 1);
-        visit(childUid);
-      }
-    };
-    visit(tree.root);
-    const maxDepth = Math.max(...depths.values());
-    const maxDistance = Math.max(...tree.nodes
-      .filter((node) => !node.children)
-      .map((node) => distances.get(node.uid) || 0));
-    const completeLengths = tree.nodes
-      .filter((node) => node.uid !== tree.root)
-      .every((node) => Number.isFinite(node.branchLength));
+    const { distances, depths, maxDepth, height: maxDistance, completeLengths } = treeMetrics(tree);
     const proportional = useBranchLengths && completeLengths && maxDistance > 0;
     const leftX = leafX - width;
     const xs = new Map();
@@ -1676,7 +1660,7 @@
     sourceScene.clusters.get(node.cluster)?.y ?? 0
   ) {
     if (!tree || !scene) return new Map();
-    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    const nodes = treeMetrics(tree).nodes;
     const positions = new Map();
     const yFor = (uid) => {
       if (positions.has(uid)) return positions.get(uid);
@@ -2115,7 +2099,7 @@
     for (const key of ["markerWidth", "laneGap"]) {
       if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
     }
-    const ids = new Set(), nodes = new Set(tree?.nodes.map((node) => node.uid));
+    const ids = new Set(), nodes = tree ? treeMetrics(tree).nodes : new Map();
     for (const group of panel.groups) {
       if (!group || typeof group.uid !== "string" || !group.uid.trim() || ids.has(group.uid)) fail("groups require unique, non-empty uid strings.");
       ids.add(group.uid);
@@ -2133,7 +2117,7 @@
 
   /** Resolve membership and allocate lanes once; placement remains independent of tree geometry. */
   function layoutGroupPanel(source, clusters, { tree, measureBounds }) {
-    const nodes = new Map(tree?.nodes.map((node) => [node.uid, node]));
+    const nodes = tree ? treeMetrics(tree).nodes : new Map();
     const descendants = new Map();
     const collect = (uid) => {
       if (!descendants.has(uid)) {
@@ -5044,7 +5028,7 @@
   /** Prune absent leaves and collapse unary ancestors without changing source records. */
   function visibleTree(tree, clusterIds, aliases = new Map()) {
     if (!tree) return tree;
-    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    const nodes = treeMetrics(tree).nodes;
     const retained = new Map();
     const visit = (uid) => {
       const node = nodes.get(uid);
@@ -8236,7 +8220,7 @@
   }
 
   function treeClusterOrder(tree) {
-    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    const nodes = treeMetrics(tree).nodes;
     const result = [];
     const visit = (uid) => {
       const node = nodes.get(uid);
@@ -8255,7 +8239,7 @@
       throw new TypeError("Cluster order must keep every tree clade contiguous.");
     }
     const positions = new Map(order.map((uid, index) => [uid, index]));
-    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    const nodes = treeMetrics(tree).nodes;
     const firstPosition = (uid) => {
       const node = nodes.get(uid);
       if (!node.children) return positions.get(node.cluster) ?? Infinity;
@@ -8974,7 +8958,7 @@
     if (["node", "subtree"].includes(scope)) {
       if (!Array.isArray(operation.ids) || !operation.ids.length) fail(`${scope} scope requires node IDs.`);
       ids = [...new Set(operation.ids)];
-      const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+      const nodes = treeMetrics(tree).nodes;
       for (const uid of ids) {
         if (!nodes.has(uid)) fail(`unknown tree node '${uid}'.`);
         if (scope === "subtree" && !nodes.get(uid).children) fail(`subtree '${uid}' is not internal.`);
@@ -9614,7 +9598,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       const row = ui.row(parent, title); row.className = "cm-tree-row";
       return ui.input(row, title, value, type, options);
     };
-    const nodesById = new Map(tree.nodes.map((node) => [node.uid, node]));
+    const nodesById = treeMetrics(tree).nodes;
     const clusterNames = new Map(clusters.map((cluster) => [cluster.uid, cluster.name || cluster.label || cluster.uid]));
     const descriptions = new Map();
     const describe = (uid) => {

@@ -1,7 +1,7 @@
 import { color } from "d3-color";
 import { installDataEditorStyle } from "../editor/shared/styles.mjs";
 import { createControls, createActionRunner } from "../ui/controls.mjs";
-import { resolveTreePresentation } from "./presentation.mjs";
+import { resolveTreePresentation, treeMetrics } from "./model.mjs";
 import { textAsset, installStyle } from "../ui/assets.mjs";
 
 const css = await textAsset(new URL("./controls.css", import.meta.url));
@@ -21,7 +21,7 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
     const row = ui.row(parent, title); row.className = "cm-tree-row";
     return ui.input(row, title, value, type, options);
   };
-  const nodesById = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const nodesById = treeMetrics(tree).nodes;
   const clusterNames = new Map(clusters.map((cluster) => [cluster.uid, cluster.name || cluster.label || cluster.uid]));
   const descriptions = new Map();
   const describe = (uid) => {

@@ -1,3 +1,4 @@
+import { treeMetrics } from "../tree/model.mjs";
 import { isTreeOrderCompatible } from "../tree/layout.mjs";
 import { visibleTree } from "../data/visibility.mjs";
 
@@ -87,7 +88,7 @@ export function createChartState(data, previous = null) {
 }
 
 function treeClusterOrder(tree) {
-  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const nodes = treeMetrics(tree).nodes;
   const result = [];
   const visit = (uid) => {
     const node = nodes.get(uid);
@@ -106,7 +107,7 @@ export function setTreeClusterOrder(tree, order, { partial = false } = {}) {
     throw new TypeError("Cluster order must keep every tree clade contiguous.");
   }
   const positions = new Map(order.map((uid, index) => [uid, index]));
-  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const nodes = treeMetrics(tree).nodes;
   const firstPosition = (uid) => {
     const node = nodes.get(uid);
     if (!node.children) return positions.get(node.cluster) ?? Infinity;

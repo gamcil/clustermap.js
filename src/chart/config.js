@@ -1,4 +1,4 @@
-import { TREE_COLOURING_DEFAULTS } from "../tree/presentation.mjs";
+import { TREE_COLOURING_DEFAULTS } from "../tree/model.mjs";
 
 const defaultConfig = {
   // Optional row-aligned metadata panels. Synteny remains the default view.

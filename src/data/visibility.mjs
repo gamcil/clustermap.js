@@ -1,7 +1,8 @@
+import { treeMetrics } from "../tree/model.mjs";
 /** Prune absent leaves and collapse unary ancestors without changing source records. */
 export function visibleTree(tree, clusterIds, aliases = new Map()) {
   if (!tree) return tree;
-  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const nodes = treeMetrics(tree).nodes;
   const retained = new Map();
   const visit = (uid) => {
     const node = nodes.get(uid);
