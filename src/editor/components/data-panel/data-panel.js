@@ -5,15 +5,12 @@ import { createAnnotationEditor } from "../../annotations.js";
 import { ANNOTATION_PALETTES, resolveAnnotationScale } from "../../../annotations.mjs";
 import { createActionRunner, createTemplate } from "../../../uiControls.mjs";
 import { applyTheme, resolveTheme, figureConfig } from "../../../theme.mjs";
-import { createEditorRow } from "./rows.js";
+import { defineRecordTable } from "../record-table/record-table.js";
 import { DataPanelModel } from "./model.js";
-import { defineEditableField } from "../editable-field/editable-field.js";
 import { defineSelectionBar } from "../selection-bar/selection-bar.js";
-import { defineActionMenu } from "../action-menu/action-menu.js";
 import { defineViewSwitcher } from "../view-switcher/view-switcher.js";
 import { defineSearchField } from "../search-field/search-field.js";
 import { defineRecordActions } from "../record-actions/record-actions.js";
-import { defineDataTable } from "../data-table/data-table.js";
 import { textAsset } from "../../shared/textAsset.js";
 
 const [markup, css] = await Promise.all([
@@ -29,13 +26,13 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   #runEdit = createActionRunner((message) => {
     const status = this.querySelector("[data-editor-error]");
     if (status) { status.textContent = message; status.hidden = !message; }
+    if (this.#table) this.#table.error = message;
   });
   #annotationEditor = null;
   #unsubscribe = null;
   #kind = "groups";
   #geneView = "tree";
   #selected = new RowSelection();
-  #rowKind = null;
   #table = null;
   #actions = null;
   #selectionBar = null;
@@ -43,15 +40,10 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   #filter = "";
   #memberGroupId = null;
   #expanded = new Set();
-  #draggedGroupId = null;
   #sort = {
     genes: { key: "label", direction: 1 },
     links: { key: "source", direction: 1 },
   };
-  #hoverRow = null;
-  #hoveredRow = null;
-  #hoverTimer = null;
-  #hoverFrame = null;
 
   constructor() {
     super();
@@ -59,7 +51,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   connectedCallback() {
-    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField(); defineRecordActions(); defineDataTable();
+    defineSelectionBar(); defineViewSwitcher(); defineSearchField(); defineRecordActions(); defineRecordTable();
     this.classList.add("cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.ownerDocument.getElementById("clinker-data-panel-style")) {
@@ -73,7 +65,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 
   disconnectedCallback() {
     this.#unsubscribe?.(); this.#unsubscribe = null;
-    this.#cancelHover(); this.#disposeRows();
+    this.#table?.reset();
     this.#annotationEditor?.destroy(); this.#annotationEditor = null;
     this.querySelector("[data-annotation-editor]")?.replaceChildren();
     this.querySelector("[data-annotation-toolbar]")?.replaceChildren();
@@ -83,7 +75,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   set chart(value) {
     if (value === this.#chart) return;
     this.#unsubscribe?.(); this.#unsubscribe = null;
-    this.#cancelHover(); this.#chart = value || null;
+    this.#chart = value || null;
     this.#invalidateData({ replace: true });
     this.#subscribe(); this.#syncTheme(); this.#renderData();
   }
@@ -107,7 +99,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   editAnnotations(panelUid) {
     this.#kind = "annotations";
     this.#selected.clear();
-    this.#renderData();
+    this.#renderData(); this.#syncHighlight();
     if (panelUid) this.#annotationEditor?.select(panelUid);
     return this;
   }
@@ -135,14 +127,8 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 
   #renderShell() {
     this.replaceChildren(template(this.ownerDocument));
-    this.#table = this.querySelector("clinker-data-table");
-    this.#table.addEventListener("value-commit", (event) => {
-      if (event.defaultPrevented) return;
-      const { type, id, field } = event.target.dataset;
-      if (!type || !field) return;
-      const value = field === "identity" ? Number(event.detail.value) / 100 : event.detail.value.trim();
-      if (!this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { [field]: value } }, event.target)) event.preventDefault();
-    });
+    this.#table = this.querySelector("clinker-record-table");
+    this.#table.addEventListener("record-action", (event) => this.#recordAction(event));
     this.#selectionBar = this.querySelector("clinker-selection-bar");
     this.#selectionBar.addEventListener("clear-selection", () => this.#clearDataSelection());
     this.#selectionBar.addEventListener("select-all", (event) => {
@@ -153,8 +139,10 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #bind() {
-    this.addEventListener("click", (event) => this.#click(event));
-    this.addEventListener("change", (event) => this.#change(event));
+    this.addEventListener("click", (event) => {
+      const command = event.target.closest("[data-command]")?.dataset.command;
+      if (command) this.#command(command);
+    });
     this.addEventListener("value-change", (event) => {
       if (event.target.matches("[data-kind-picker]")) {
         this.#kind = event.detail.value;
@@ -163,7 +151,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
       } else if (event.target.matches("[data-gene-view]")) this.#geneView = event.detail.value;
       else return;
       this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-      this.#renderData();
+      this.#renderData(); this.#syncHighlight();
     });
     this.addEventListener("input", (event) => {
       if (event.target.matches("[data-filter]")) this.#setDataFilter(event.target.value);
@@ -171,97 +159,28 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.addEventListener("keydown", (event) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape") this.#clearDataSelection();
-      const grip = event.target.closest("[data-reorder]");
-      if (grip && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
-        event.preventDefault();
-        const uid = this.#id(grip.dataset.reorder);
-        const index = this.#data().groups.findIndex((group) => group.uid === uid);
-        this.#moveGroup(uid, index + (event.key === "ArrowUp" ? -1 : 1));
-      }
     });
-    this.addEventListener("dragstart", (event) => {
-      const grip = event.target.closest("[data-reorder]");
-      if (!grip) return;
-      this.#draggedGroupId = this.#id(grip.dataset.reorder);
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", String(this.#draggedGroupId));
-    });
-    this.addEventListener("dragover", (event) => {
-      if (this.#draggedGroupId === null) return;
-      const target = event.target.closest(".cm-editor__row--groups");
-      if (!target || this.#id(target.dataset.id) === this.#draggedGroupId) return;
-      event.preventDefault();
-      this.querySelectorAll(".cm-editor__drop-target").forEach((node) => node.classList.remove("cm-editor__drop-target"));
-      target.classList.add("cm-editor__drop-target");
-    });
-    this.addEventListener("drop", (event) => {
-      const target = event.target.closest(".cm-editor__row--groups");
-      if (this.#draggedGroupId !== null && target) {
-        event.preventDefault();
-        const targetId = this.#id(target.dataset.id);
-        const bounds = target.getBoundingClientRect();
-        this.#placeGroup(this.#draggedGroupId, targetId, event.clientY > bounds.top + bounds.height / 2);
-      }
-      this.#finishGroupDrag();
-    });
-    this.addEventListener("dragend", () => this.#finishGroupDrag());
-    this.addEventListener("pointerover", (event) => {
-      const row = event.target.closest(".cm-editor__row, .cm-editor__tree-row");
-      if (!row || row.contains(event.relatedTarget) || !this.#chart?.highlight) return;
-      this.#queueHover(row);
-    });
-    this.addEventListener("pointerout", (event) => {
-      const row = event.target.closest(".cm-editor__row, .cm-editor__tree-row");
-      if (!row || row.contains(event.relatedTarget)) return;
-      this.#queueHover(null);
-    });
-
   }
 
-  #click(event) {
-    if (event.target.closest("clinker-editable-field")) return;
-    const checkbox = event.target.closest("[data-select], [data-select-row]");
-    if (checkbox) {
-      this.#selectRow(checkbox.dataset.selectRow ?? this.#id(checkbox.dataset.select), checkbox.checked, event.shiftKey);
-      return;
-    }
-    const sort = event.target.closest("[data-sort]");
-    if (sort) {
+  #recordAction(event) {
+    if (event.defaultPrevented) return;
+    const { action, id, key, type, changes, row } = event.detail;
+    if (action === "select") this.#selectRow(id, event.detail.checked, event.detail.range);
+    else if (action === "sort") {
       const current = this.#sort[this.#kind];
-      const key = sort.dataset.sort;
       this.#sort[this.#kind] = { key, direction: current?.key === key ? -current.direction : 1 };
-      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
+      this.#table.scrollTo({ top: 0 }); this.#renderData();
+    } else if (action === "toggle") {
+      if (this.#expanded.has(key)) this.#expanded.delete(key); else this.#expanded.add(key);
       this.#renderData();
-      return;
+    } else if (action === "update") {
+      if (!this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes })) event.preventDefault();
+    } else if (action === "remove") this.#removeRecords(type, [id]);
+    else if (action === "reorder") this.#moveGroup(id, this.#data().groups.findIndex((group) => group.uid === id) + event.detail.direction);
+    else if (action === "place") this.#placeGroup(id, event.detail.targetId, event.detail.after);
+    else if (action === "hover") {
+      if (row) this.#highlightRow(row); else this.#applySelectionHighlight();
     }
-    const treeToggle = event.target.closest("[data-tree-toggle]");
-    if (treeToggle) {
-      const key = treeToggle.dataset.treeToggle;
-      if (this.#expanded.has(key)) this.#expanded.delete(key);
-      else this.#expanded.add(key);
-      this.#renderData();
-      return;
-    }
-    const row = event.target.closest(".cm-editor__row, .cm-editor__tree-row");
-    if (row && !event.target.closest("input, select, button")) {
-      const parent = row.querySelector("[data-select-row]");
-      const id = parent?.dataset.selectRow ?? this.#id(row.dataset.id);
-      this.#selectRow(id, parent ? !parent.checked : !this.#selected.has(id), event.shiftKey);
-      return;
-    }
-    const visibility = event.target.closest("[data-visible]");
-    if (visibility) {
-      const { type, id, hidden } = visibility.dataset;
-      this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { hidden: hidden !== "true" } });
-      return;
-    }
-    const button = event.target.closest("button");
-    if (!button) return;
-    if (button.dataset.removeRecord) {
-      this.#removeRecords(button.dataset.removeRecord, [this.#id(button.dataset.id)]);
-      return;
-    }
-    this.#command(button.dataset.command);
   }
 
   #command(command, value) {
@@ -318,35 +237,9 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     }
   }
 
-  #change(event) {
-    const target = event.target;
-    if (target.matches("[data-select-row]")) {
-      const row = this.#view().byKey.get(target.dataset.selectRow);
-      if (!row || row.selectIds.every((id) => this.#selected.has(id)) === target.checked) return;
-      this.#selectRow(row.key, target.checked, false);
-      return;
-    }
-    if (target.matches("[data-select]")) {
-      const id = this.#id(target.dataset.select);
-      if (this.#selected.has(id) === target.checked) return;
-      this.#selectRow(id, target.checked, false);
-      return;
-    }
-    if (target.matches("[data-colour]")) {
-      const { type, id } = target.dataset;
-      this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { colour: target.value } });
-      return;
-    }
-  }
-
-  #apply(operation, control) {
+  #apply(operation) {
     if (!this.#chart?.patch) return false;
-    return this.#runEdit(() => this.#chart.patch([operation]), control);
-  }
-
-  #disposeRows() {
-    if (this.#table) this.#table.renderer = null;
-    this.#rowKind = null;
+    return this.#runEdit(() => this.#chart.patch([operation]));
   }
 
   #invalidateData({ replace = false } = {}) {
@@ -354,7 +247,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.#data(); this.#model.invalidate();
     this.#annotationEditor?.invalidate({ replace });
     if (replace) {
-      this.#disposeRows();
+      this.#table?.reset();
       this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null;
       this.#initializeExpanded();
     } else if (this.#selected.size) {
@@ -441,7 +334,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     search.setAttribute("placeholder", annotations ? "Find a cluster" : "Search names, labels, loci, or clusters");
     this.querySelector("[data-record-editor]").hidden = annotations;
     if (annotations) {
-      this.#disposeRows();
+      this.#table?.reset();
       for (const selector of ["[data-gene-view]", "[data-member-filter]", '[data-command="new-group"]',
         '[data-command="toggle-tree"]']) this.querySelector(selector).hidden = true;
       if (!this.#annotationEditor) {
@@ -458,12 +351,9 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
       return;
     }
     const data = this.#data();
-    const table = this.#table;
-    const head = this.querySelector("[data-head]");
-    const list = this.querySelector("[data-rows]");
+
     if (!data) {
-      this.#disposeRows();
-      table.header = { columns: [], sort: null }; list.textContent = "Set the chart property to edit a ClusterMap chart.";
+      this.#table.state = { attached: false };
       this.#selectionBar.state = { selection: this.#selected, ids: [], summary: "No chart attached.", noun: this.#kind.slice(0, -1) };
       this.#actions.state = { kind: this.#kind, count: 0, groups: [], allGroups: [], loci: [], clusters: [] };
       return;
@@ -486,34 +376,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
       treeButton.textContent = hasCollapsed ? "Expand visible" : "Collapse all";
       treeButton.title = hasCollapsed ? "Expand all currently visible branches" : "Collapse every tree branch";
     }
-    // Visibility is a compact icon control with an explicit per-row label;
-    // repeating its long text in a 28px heading produces an unreadable merged
-    // “VisibleColour” column on narrow editors.
-    const columns = isTree ? [{ label: "" }, { label: "" }, { label: this.#geneView === "groups" ? "Group / gene" : "Cluster / locus / gene" }, { label: "Group" }, { label: "Colour" }]
-      : this.#kind === "groups" ? [{ label: "" }, { label: "↕" }, { label: "Group" }, { label: "Legend label" }, { label: "Genes" }, { label: "" }, { label: "Colour" }]
-      : this.#kind === "links" ? [{ label: "" }, { label: "Source", sort: "source" }, { label: "Target", sort: "target" }, { label: "Identity", sort: "identity" }, { label: "Endpoint groups", sort: "groups" }, { label: "Link label", sort: "label" }, { label: "" }, { label: "Colour" }]
-        : [{ label: "" }, { label: "Gene", sort: "label" }, { label: "Locus", sort: "locus" }, { label: "Cluster", sort: "cluster" }, { label: "Group", sort: "group" }, { label: "Colour" }];
-    const sort = this.#sort[this.#kind];
-    head.className = `cm-data-head cm-editor__head cm-editor__head--${isTree ? "tree" : this.#kind}`;
-    table.header = { columns, sort };
-    list.className = `cm-editor__rows cm-editor__rows--${isTree ? "tree" : this.#kind}`;
-    if (this.#rowKind !== this.#kind) this.#disposeRows();
-    if (!this.#rowKind) {
-      const kind = this.#kind;
-      this.#rowKind = kind;
-      list.replaceChildren();
-      const components = new WeakMap();
-      const updateRow = (node, row) => components.get(node).update(row, this.#selected);
-      table.renderer = { container: list,
-        key: (row) => `${kind}:${row.type || "row"}:${row.key ?? row.id}`,
-        headerHeight: () => head.offsetHeight,
-        createRow: (row) => {
-          const component = createEditorRow(this.ownerDocument, kind, row.type);
-          components.set(component.node, component); return updateRow(component.node, row);
-        },
-        disposeRow: (node) => components.get(node).destroy(), updateRow };
-    }
-    table.rows = rows;
+    this.#table.state = { kind: this.#kind, geneView: this.#geneView, rows, selection: this.#selected, sort: this.#sort[this.#kind] };
     const summaryText = isTree
       ? `${parentCount.toLocaleString()} ${this.#geneView === "groups" ? "group" : "cluster/locus"} rows · ${ids.length.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
       : `${rows.length.toLocaleString()} visible ${this.#kind}${memberGroup && this.#kind === "genes" ? " in selected group" : ""}${this.#filter ? " matching search" : ""}.`;
@@ -594,11 +457,6 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.#moveGroup(uid, target + Number(after) - Number(from < target));
   }
 
-  #finishGroupDrag() {
-    this.#draggedGroupId = null;
-    this.querySelectorAll(".cm-editor__drop-target").forEach((node) => node.classList.remove("cm-editor__drop-target"));
-  }
-
   #toggleTree() {
     const rows = this.#view().rows;
     if (rows.some((row) => row.type !== "gene" && !row.open)) this.#expandTree(this.#geneView);
@@ -607,56 +465,17 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #syncHighlight() {
-    this.#cancelHover();
+    this.#table?.cancelHover();
     this.#applySelectionHighlight();
   }
 
   #applySelectionHighlight() { this.#chart?.highlight?.(this.#selectionTarget()); }
 
-  #queueHover(row) {
-    this.#hoverRow = row;
-    if (this.#hoverTimer !== null) globalThis.clearTimeout(this.#hoverTimer);
-    this.#hoverTimer = globalThis.setTimeout(() => {
-      this.#hoverTimer = null;
-      if (this.#hoverFrame !== null) return;
-      const requestFrame = globalThis.requestAnimationFrame || ((callback) => globalThis.setTimeout(callback, 0));
-      this.#hoverFrame = requestFrame(() => {
-        this.#hoverFrame = null;
-        const hovered = this.#hoverRow;
-        if (hovered === this.#hoveredRow) return;
-        this.#hoveredRow = hovered;
-        if (hovered?.isConnected) this.#highlightRow(hovered);
-        else this.#applySelectionHighlight();
-      });
-    }, 36);
-  }
-
-  #cancelHover() {
-    if (this.#hoverTimer !== null) globalThis.clearTimeout(this.#hoverTimer);
-    if (this.#hoverFrame !== null) {
-      const cancelFrame = globalThis.cancelAnimationFrame || globalThis.clearTimeout;
-      cancelFrame(this.#hoverFrame);
-    }
-    this.#hoverTimer = null;
-    this.#hoverFrame = null;
-    this.#hoverRow = null;
-    this.#hoveredRow = null;
-  }
-
   #highlightRow(row) {
     if (!this.#chart?.highlight) return;
-    if (row.classList.contains("cm-editor__row--links")) {
-      this.#chart.highlight({ links: [this.#id(row.dataset.id)] });
-      return;
-    }
-    let genes = [];
-    if (row.dataset.selectIds) {
-      try { genes = JSON.parse(row.dataset.selectIds); } catch { genes = []; }
-    } else if (row.classList.contains("cm-editor__row--groups")) {
-      genes = this.#data()?.groups.find((group) => group.uid === this.#id(row.dataset.id))?.genes || [];
-    } else if (row.dataset.id !== undefined) {
-      genes = [this.#id(row.dataset.id)];
-    }
+    if (this.#kind === "links") { this.#chart.highlight({ links: [row.id] }); return; }
+    const genes = row.selectIds || (this.#kind === "groups"
+      ? this.#data()?.groups.find((group) => group.uid === row.id)?.genes || [] : [row.id]);
     this.#chart.highlight({ genes: genes.map((id) => this.#id(id)) });
   }
 

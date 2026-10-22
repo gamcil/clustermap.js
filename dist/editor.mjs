@@ -498,14 +498,14 @@ function applyTheme(element, theme) {
 
 const controlStyles = await ":host([hidden]), [hidden] { display: none !important; }\nform { margin: 0; }\nbutton, input, select, textarea { box-sizing: border-box; font: inherit; color: inherit; }\nbutton, input:not([type=color]):not([type=checkbox]):not([type=range]), select, textarea {\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[type=color] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }\ninput[type=checkbox], button { cursor: pointer; }\ninput::placeholder, textarea::placeholder { color: var(--cm-muted, #687586); }\nbutton:where(:hover:not(:disabled)) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n:is(button, summary):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:is(input, select, textarea):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n";
 
-const [markup$h, css$h] = await Promise.all([
+const [markup$i, css$i] = await Promise.all([
   "<input type=\"search\" part=\"input\">\n<button type=\"button\" part=\"clear\" aria-label=\"Clear search\" title=\"Clear search\" hidden>×</button>\n",
   ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput, button { box-sizing: border-box; color: inherit; font: inherit; }\ninput {\n  width: 100%;\n  min-width: 0;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #687586);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n",
 ]);
-const template$h = createTemplate(markup$h);
-const HTMLElementBase$h = globalThis.HTMLElement || class {};
+const template$i = createTemplate(markup$i);
+const HTMLElementBase$i = globalThis.HTMLElement || class {};
 
-class SearchField extends HTMLElementBase$h {
+class SearchField extends HTMLElementBase$i {
   static observedAttributes = ["label", "placeholder"];
   #input;
   #clear;
@@ -513,8 +513,8 @@ class SearchField extends HTMLElementBase$h {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$h;
-    root.append(style, template$h(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$i;
+    root.append(style, template$i(this.ownerDocument));
     this.#input = root.querySelector("input"); this.#clear = root.querySelector("button");
     this.#input.oninput = () => this.#sync();
     this.#clear.onclick = () => this.#clearValue();
@@ -712,15 +712,15 @@ function resolveTreePresentation(tree, config = {}) {
   return value;
 }
 
-const [markup$g, css$g] = await Promise.all([
+const [markup$h, css$h] = await Promise.all([
   "<fieldset hidden>\n  <legend>Clade colouring</legend>\n  <label><span>Colour clades</span><input type=\"checkbox\" data-enabled aria-label=\"Colour clades\"></label>\n  <div data-options hidden>\n    <label><span>Cut height</span><input type=\"number\" min=\"0\" step=\"any\" data-height aria-label=\"Cut height\"><button type=\"button\" data-auto title=\"Use automatic cut height (70%)\">Auto</button></label>\n    <input type=\"range\" min=\"0\" aria-label=\"Preview cut height\">\n    <label><span>Palette</span><select aria-label=\"Clade palette\"><option value=\"custom\" hidden>Custom</option><option value=\"muted\">Muted</option><option value=\"accessible\">Colorblind friendly</option></select></label>\n    <label><span>Show cut line</span><input type=\"checkbox\" data-line aria-label=\"Show cut line\"></label>\n  </div>\n</fieldset>\n<button type=\"button\" data-reset title=\"Clear manual tree styles and labels; keep automatic clade colouring.\" disabled>Reset all manual styles</button>\n<p role=\"status\" hidden></p>\n",
   ":host { display: block; min-width: 0; color: inherit; font: inherit; }\nfieldset { min-width: 0; margin: 0 0 10px; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }\nlegend { padding: 0 4px; font-weight: 600; }\nlabel { display: flex; align-items: center; gap: 6px; margin: 6px 0; }\nlabel > span { flex: 1; min-width: 0; }\ninput[type=number] { width: 64px; min-width: 0; }\ninput[type=range] { width: 100%; }\nselect { width: 132px; min-width: 0; }\nbutton[aria-pressed=true] { font-weight: 600; }\np { color: var(--cm-danger, #b42318); margin: 6px 0 0; }\n",
 ]);
-const template$g = createTemplate(markup$g);
+const template$h = createTemplate(markup$h);
 const palettes = { muted: TREE_COLOURING_DEFAULTS.palette, accessible: ["#0072b2", "#e69f00", "#009e73", "#cc79a7", "#d55e00", "#56b4e9"] };
-const HTMLElementBase$g = globalThis.HTMLElement || class {};
+const HTMLElementBase$h = globalThis.HTMLElement || class {};
 
-class TreeAppearance extends HTMLElementBase$g {
+class TreeAppearance extends HTMLElementBase$h {
   #state;
   #height;
   #slider;
@@ -730,8 +730,8 @@ class TreeAppearance extends HTMLElementBase$g {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$g;
-    root.append(style, template$g(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$h;
+    root.append(style, template$h(this.ownerDocument));
     this.#height = root.querySelector("[data-height]"); this.#slider = root.querySelector('[type="range"]');
     root.querySelector("[data-enabled]").onchange = (event) => this.#change({ mode: event.target.checked ? "cutHeight" : "none" });
     this.#height.onchange = () => { if (this.#height.reportValidity()) this.#change({ cutHeight: Number(this.#height.value) }); };
@@ -919,14 +919,14 @@ function installDataEditorStyle(document) {
   document.head.append(style);
 }
 
-const [markup$f, css$f] = await Promise.all([
+const [markup$g, css$g] = await Promise.all([
   "<div class=\"toolbar\"><clinker-search-field data-appearance-filter label=\"Find an appearance setting\" placeholder=\"Find a setting\"></clinker-search-field></div>\n<div class=\"settings\">\n  <fieldset>\n    <legend>Plot</legend>\n    <label><span>Interface theme</span><select data-config=\"plot.theme\" aria-label=\"Interface theme\"><option value=\"auto\">auto</option><option value=\"light\">light</option><option value=\"dark\">dark</option></select></label>\n    <label><span>Figure background</span><input type=\"color\" data-config=\"plot.background\" aria-label=\"Figure background\"></label>\n  </fieldset>\n  <fieldset>\n    <legend>Annotations</legend>\n    <label><span>Enable annotation panels</span><input type=\"checkbox\" data-config=\"annotations.enabled\" aria-label=\"Enable annotation panels\"></label>\n  </fieldset>\n  <fieldset>\n    <legend>Legend</legend>\n    <label><span>Show legend</span><input type=\"checkbox\" data-config=\"legend.show\" aria-label=\"Show legend\"></label>\n    <label><span>Position</span><select data-config=\"legend.position\" aria-label=\"Position\"><option value=\"right\">right</option><option value=\"bottom\">bottom</option></select></label>\n    <label><span>Columns</span><input type=\"number\" step=\"any\" data-config=\"legend.columns\" aria-label=\"Columns\"></label>\n    <details data-appearance-section=\"legend\">\n      <summary>Advanced</summary>\n      <label><span>Column width</span><input type=\"number\" step=\"any\" data-config=\"legend.columnWidth\" aria-label=\"Column width\"></label>\n      <label><span>Entry height</span><input type=\"number\" step=\"any\" data-config=\"legend.entryHeight\" aria-label=\"Entry height\"></label>\n      <label><span>Font size</span><input type=\"number\" step=\"any\" data-config=\"legend.fontSize\" aria-label=\"Font size\"></label>\n      <label><span>Subtitle size</span><input type=\"number\" step=\"any\" data-config=\"legend.subtitleFontSize\" aria-label=\"Subtitle size\"></label>\n      <label><span>Left margin</span><input type=\"number\" step=\"any\" data-config=\"legend.marginLeft\" aria-label=\"Left margin\"></label>\n      <label><span>Top margin</span><input type=\"number\" step=\"any\" data-config=\"legend.marginTop\" aria-label=\"Top margin\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Links</legend>\n    <label><span>Show links</span><input type=\"checkbox\" data-config=\"link.show\" aria-label=\"Show links\"></label>\n    <label><span>Draw as lines</span><input type=\"checkbox\" data-config=\"link.asLine\" aria-label=\"Draw as lines\"></label>\n    <label><span>Best match only</span><input type=\"checkbox\" data-config=\"link.bestOnly\" aria-label=\"Best match only\"></label>\n    <label><span>Minimum identity</span><input type=\"number\" step=\"any\" data-config=\"link.threshold\" aria-label=\"Minimum identity\"></label>\n    <details data-appearance-section=\"links\">\n      <summary>Advanced</summary>\n      <label><span>Straight links</span><input type=\"checkbox\" data-config=\"link.straight\" aria-label=\"Straight links\"></label>\n      <label><span>Use group colour</span><input type=\"checkbox\" data-config=\"link.groupColour\" aria-label=\"Use group colour\"></label>\n      <label><span>Stroke width</span><input type=\"number\" step=\"any\" data-config=\"link.strokeWidth\" aria-label=\"Stroke width\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Link labels</legend>\n    <label><span>Show link labels</span><input type=\"checkbox\" data-config=\"link.label.show\" aria-label=\"Show link labels\"></label>\n    <details data-appearance-section=\"link-labels\">\n      <summary>Advanced</summary>\n      <label><span>Label background</span><input type=\"checkbox\" data-config=\"link.label.background\" aria-label=\"Label background\"></label>\n      <label><span>Font size</span><input type=\"number\" step=\"any\" data-config=\"link.label.fontSize\" aria-label=\"Font size\"></label>\n      <label><span>Position</span><input type=\"number\" step=\"any\" data-config=\"link.label.position\" aria-label=\"Position\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Tree</legend>\n    <label><span>Show tree</span><input type=\"checkbox\" data-config=\"tree.show\" aria-label=\"Show tree\"></label>\n    <label><span>Tree width</span><input type=\"number\" step=\"any\" data-config=\"tree.width\" aria-label=\"Tree width\"></label>\n    <label><span>Use branch lengths</span><input type=\"checkbox\" data-config=\"tree.useBranchLengths\" aria-label=\"Use branch lengths\"></label>\n    <label><span>Branch stroke width</span><input type=\"number\" step=\"any\" data-config=\"tree.branch.width\" aria-label=\"Branch stroke width\"></label>\n    <label><span>Branch colour</span><input type=\"color\" data-config=\"tree.branch.colour\" aria-label=\"Branch colour\"></label>\n    <label><span>Show support values</span><input type=\"checkbox\" data-config=\"tree.support.show\" aria-label=\"Show support values\"></label>\n    <label><span>Show tree scale bar</span><input type=\"checkbox\" data-config=\"tree.scaleBar.show\" aria-label=\"Show tree scale bar\"></label>\n    <label><span>Show dashed leaf guides</span><input type=\"checkbox\" data-config=\"tree.leafGuide.show\" aria-label=\"Show dashed leaf guides\"></label>\n    <details data-appearance-section=\"tree\">\n      <summary>Advanced</summary>\n      <label><span>Support font size</span><input type=\"number\" step=\"any\" data-config=\"tree.support.fontSize\" aria-label=\"Support font size\"></label>\n      <label><span>Support precision</span><input type=\"number\" step=\"any\" data-config=\"tree.support.precision\" aria-label=\"Support precision\"></label>\n      <label><span>Leaf guide colour</span><input type=\"color\" data-config=\"tree.leafGuide.colour\" aria-label=\"Leaf guide colour\"></label>\n      <label><span>Leaf guide width</span><input type=\"number\" step=\"any\" data-config=\"tree.leafGuide.width\" aria-label=\"Leaf guide width\"></label>\n      <label><span>Leaf guide dash pattern</span><input type=\"text\" data-config=\"tree.leafGuide.dash\" aria-label=\"Leaf guide dash pattern\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Clusters &amp; loci</legend>\n    <label><span>Align cluster labels</span><input type=\"checkbox\" data-config=\"cluster.alignLabels\" aria-label=\"Align cluster labels\"></label>\n    <label><span>Hide locus coordinates</span><input type=\"checkbox\" data-config=\"cluster.hideLocusCoordinates\" aria-label=\"Hide locus coordinates\"></label>\n    <label><span>Show trim indicators</span><input type=\"checkbox\" data-config=\"locus.trimIndicators.show\" aria-label=\"Show trim indicators\"></label>\n    <label><span>Cluster spacing</span><input type=\"number\" step=\"any\" data-config=\"cluster.spacing\" aria-label=\"Cluster spacing\"></label>\n    <label><span>Locus spacing</span><input type=\"number\" step=\"any\" data-config=\"locus.spacing\" aria-label=\"Locus spacing\"></label>\n    <details data-appearance-section=\"clusters-loci\">\n      <summary>Advanced</summary>\n      <label><span>Cluster name size</span><input type=\"number\" step=\"any\" data-config=\"cluster.nameFontSize\" aria-label=\"Cluster name size\"></label>\n      <label><span>Locus label size</span><input type=\"number\" step=\"any\" data-config=\"cluster.lociFontSize\" aria-label=\"Locus label size\"></label>\n      <label><span>Trim indicator size</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.fontSize\" aria-label=\"Trim indicator size\"></label>\n      <label><span>Trim indicator weight</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.fontWeight\" aria-label=\"Trim indicator weight\"></label>\n      <label><span>Trim indicator border</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.borderWidth\" aria-label=\"Trim indicator border\"></label>\n      <label><span>Trim indicator border opacity</span><input type=\"number\" step=\"any\" data-config=\"locus.trimIndicators.borderOpacity\" aria-label=\"Trim indicator border opacity\"></label>\n      <label><span>Track colour</span><input type=\"color\" data-config=\"locus.trackBar.colour\" aria-label=\"Track colour\"></label>\n      <label><span>Track stroke</span><input type=\"number\" step=\"any\" data-config=\"locus.trackBar.stroke\" aria-label=\"Track stroke\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Genes</legend>\n    <label><span>Show gene labels</span><input type=\"checkbox\" data-config=\"gene.label.show\" aria-label=\"Show gene labels\"></label>\n    <label><span>Label field</span><select data-config=\"gene.label.name\" aria-label=\"Label field\"><option value=\"uid\">uid</option><option value=\"name\">name</option><option value=\"label\">label</option></select></label>\n    <label><span>Label position</span><select data-config=\"gene.label.position\" aria-label=\"Label position\"><option value=\"top\">top</option><option value=\"bottom\">bottom</option></select></label>\n    <details data-appearance-section=\"genes\">\n      <summary>Advanced</summary>\n      <label><span>Label anchor</span><select data-config=\"gene.label.anchor\" aria-label=\"Label anchor\"><option value=\"start\">start</option><option value=\"middle\">middle</option><option value=\"end\">end</option></select></label>\n      <label><span>Label size</span><input type=\"number\" step=\"any\" data-config=\"gene.label.fontSize\" aria-label=\"Label size\"></label>\n      <label><span>Label rotation</span><input type=\"number\" step=\"any\" data-config=\"gene.label.rotation\" aria-label=\"Label rotation\"></label>\n      <label><span>Label spacing</span><input type=\"number\" step=\"any\" data-config=\"gene.label.spacing\" aria-label=\"Label spacing\"></label>\n      <label><span>Label start</span><input type=\"number\" step=\"any\" data-config=\"gene.label.start\" aria-label=\"Label start\"></label>\n      <label><span>Body height</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.bodyHeight\" aria-label=\"Body height\"></label>\n      <label><span>Tip height</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.tipHeight\" aria-label=\"Tip height\"></label>\n      <label><span>Tip length</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.tipLength\" aria-label=\"Tip length\"></label>\n      <label><span>Stroke colour</span><input type=\"color\" data-config=\"gene.shape.stroke\" aria-label=\"Stroke colour\"></label>\n      <label><span>Stroke width</span><input type=\"number\" step=\"any\" data-config=\"gene.shape.strokeWidth\" aria-label=\"Stroke width\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Scale bars</legend>\n    <label><span>Show scale bar</span><input type=\"checkbox\" data-config=\"scaleBar.show\" aria-label=\"Show scale bar\"></label>\n    <label><span>Base pairs</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.basePair\" aria-label=\"Base pairs\"></label>\n    <label><span>Show identity bar</span><input type=\"checkbox\" data-config=\"colourBar.show\" aria-label=\"Show identity bar\"></label>\n    <label><span>Minimum source</span><select data-config=\"colourBar.domain.minMode\" aria-label=\"Minimum source\"><option value=\"fixed\">Custom value</option><option value=\"data\">Lowest identity in data</option></select></label>\n    <label><span>Minimum identity</span><input type=\"number\" step=\"any\" data-config=\"colourBar.domain.min\" aria-label=\"Minimum identity\"></label>\n    <label><span>Maximum source</span><select data-config=\"colourBar.domain.maxMode\" aria-label=\"Maximum source\"><option value=\"fixed\">Custom value</option><option value=\"data\">Highest identity in data</option></select></label>\n    <label><span>Maximum identity</span><input type=\"number\" step=\"any\" data-config=\"colourBar.domain.max\" aria-label=\"Maximum identity\"></label>\n    <details data-appearance-section=\"scale-bars\">\n      <summary>Advanced</summary>\n      <label><span>Height</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.height\" aria-label=\"Height\"></label>\n      <label><span>Font size</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.fontSize\" aria-label=\"Font size\"></label>\n      <label><span>Stroke</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.stroke\" aria-label=\"Stroke\"></label>\n      <label><span>Colour</span><input type=\"color\" data-config=\"scaleBar.colour\" aria-label=\"Colour\"></label>\n      <label><span>Scale margin</span><input type=\"number\" step=\"any\" data-config=\"scaleBar.marginTop\" aria-label=\"Scale margin\"></label>\n      <label><span>Identity width</span><input type=\"number\" step=\"any\" data-config=\"colourBar.width\" aria-label=\"Identity width\"></label>\n      <label><span>Identity height</span><input type=\"number\" step=\"any\" data-config=\"colourBar.height\" aria-label=\"Identity height\"></label>\n      <label><span>Identity font size</span><input type=\"number\" step=\"any\" data-config=\"colourBar.fontSize\" aria-label=\"Identity font size\"></label>\n      <label><span>Identity margin</span><input type=\"number\" step=\"any\" data-config=\"colourBar.marginTop\" aria-label=\"Identity margin\"></label>\n    </details>\n  </fieldset>\n  <fieldset>\n    <legend>Plot &amp; navigation</legend>\n    <label><span>Renderer</span><select data-config=\"plot.renderer\" aria-label=\"Renderer\"><option value=\"svg\">svg</option><option value=\"canvas\">canvas</option><option value=\"webgpu\">webgpu</option></select></label>\n    <label><span>Show minimap</span><input type=\"checkbox\" data-config=\"plot.minimap.show\" aria-label=\"Show minimap\"></label>\n    <label><span>Minimum zoom</span><input type=\"number\" step=\"any\" data-config=\"plot.minZoom\" aria-label=\"Minimum zoom\"></label>\n    <label><span>Maximum zoom</span><input type=\"number\" step=\"any\" data-config=\"plot.maxZoom\" aria-label=\"Maximum zoom\"></label>\n    <details data-appearance-section=\"plot-navigation\">\n      <summary>Advanced</summary>\n      <label><span>Transition (ms)</span><input type=\"number\" step=\"any\" data-config=\"plot.transitionDuration\" aria-label=\"Transition (ms)\"></label>\n      <label><span>Scale factor</span><input type=\"number\" step=\"any\" data-config=\"plot.scaleFactor\" aria-label=\"Scale factor\"></label>\n      <label><span>Scale genes</span><input type=\"checkbox\" data-config=\"plot.scaleGenes\" aria-label=\"Scale genes\"></label>\n      <label><span>Font family</span><input type=\"text\" data-config=\"plot.fontFamily\" aria-label=\"Font family\"></label>\n      <label><span>Minimap links</span><input type=\"checkbox\" data-config=\"plot.minimap.showLinks\" aria-label=\"Minimap links\"></label>\n      <label><span>Minimap width</span><input type=\"number\" step=\"any\" data-config=\"plot.minimap.width\" aria-label=\"Minimap width\"></label>\n      <label><span>Minimap height</span><input type=\"number\" step=\"any\" data-config=\"plot.minimap.height\" aria-label=\"Minimap height\"></label>\n      <label><span>Minimap margin</span><input type=\"number\" step=\"any\" data-config=\"plot.minimap.margin\" aria-label=\"Minimap margin\"></label>\n    </details>\n  </fieldset>\n  <p class=\"empty\" hidden></p>\n  <clinker-tree-appearance hidden></clinker-tree-appearance>\n  <p class=\"error\" role=\"alert\" hidden></p>\n</div>\n",
   ":host { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; color: inherit; font: inherit; }\n.toolbar { display: flex; flex-shrink: 0; }\n.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: 10px 20px; align-content: start; overflow: auto; padding: 4px 0; min-height: 0; }\nfieldset { min-width: 0; margin: 0; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }\nlegend { padding: 0 4px; font-weight: 600; }\nlabel { display: flex; align-items: center; gap: 6px; margin: 6px 0; }\nlabel > span { min-width: 0; flex: 1; }\nselect, input:not([type=checkbox]):not([type=color]) { width: 88px; min-width: 0; }\ndetails { margin-top: 8px; border-top: 1px solid var(--cm-border, #e5e9ef); }\nsummary { padding: 7px 0 1px; color: var(--cm-muted, #687586); cursor: pointer; font-size: 12px; font-weight: 600; }\nsummary:hover { color: var(--cm-accent, #1677ff); }\n.empty { grid-column: 1 / -1; padding: 16px; color: var(--cm-muted, #667386); text-align: center; }\n.error { grid-column: 1 / -1; color: var(--cm-danger, #b42318); margin: 0; }\n",
 ]);
-const template$f = createTemplate(markup$f);
-const HTMLElementBase$f = globalThis.HTMLElement || class {};
+const template$g = createTemplate(markup$g);
+const HTMLElementBase$g = globalThis.HTMLElement || class {};
 
-class ClinkerAppearancePanelElement extends HTMLElementBase$f {
+class ClinkerAppearancePanelElement extends HTMLElementBase$g {
   static observedAttributes = ["hidden"];
   #chart = null;
   #unsubscribe = null;
@@ -941,8 +941,8 @@ class ClinkerAppearancePanelElement extends HTMLElementBase$f {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$f;
-    root.append(style, template$f(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$g;
+    root.append(style, template$g(this.ownerDocument));
     this.#tree = root.querySelector("clinker-tree-appearance");
     this.#runEdit = createActionRunner((message) => {
       const status = root.querySelector(".error"); status.textContent = message; status.hidden = !message;
@@ -1056,15 +1056,15 @@ function bindOptionButtons(group, choose) {
   });
 }
 
-const [markup$e, css$e] = await Promise.all([
+const [markup$f, css$f] = await Promise.all([
   "<div part=\"tab-list\" role=\"tablist\">\n  <template><button type=\"button\" role=\"tab\"></button></template>\n</div>\n<slot name=\"status\"></slot>\n<div part=\"panels\">\n  <template><div role=\"tabpanel\" tabindex=\"0\"><slot></slot></div></template>\n</div>\n",
   ":host { display: flex; flex: 1; flex-direction: column; min-height: 0; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\n[role=tablist] { display: flex; flex-shrink: 0; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--cm-border, #e1e5ea); }\nbutton {\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 0;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton[aria-selected=true] { border-bottom-color: var(--cm-accent, #1677ff); font-weight: 600; }\nbutton:hover:not(:disabled) { background: var(--cm-hover, #e3ecf8); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n[part=panels], [role=tabpanel] { display: flex; flex: 1; flex-direction: column; min-height: 0; }\n[role=tabpanel]:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nslot { display: contents; }\n",
 ]);
-const template$e = createTemplate(markup$e);
-const HTMLElementBase$e = globalThis.HTMLElement || class {};
+const template$f = createTemplate(markup$f);
+const HTMLElementBase$f = globalThis.HTMLElement || class {};
 let nextId = 0;
 
-class Tabs extends HTMLElementBase$e {
+class Tabs extends HTMLElementBase$f {
   static observedAttributes = ["value", "label"];
   #prefix = `clinker-tabs-${++nextId}`;
   #list;
@@ -1077,8 +1077,8 @@ class Tabs extends HTMLElementBase$e {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$e;
-    root.append(style, template$e(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$f;
+    root.append(style, template$f(this.ownerDocument));
     this.#list = root.querySelector("[role=tablist]"); this.#content = root.querySelector("[part=panels]");
     this.#buttonTemplate = this.#list.querySelector("template"); this.#panelTemplate = this.#content.querySelector("template");
     bindOptionButtons(this.#list, (button) => {
@@ -1158,15 +1158,15 @@ class RowSelection extends Set {
   clear() { super.clear(); this.#anchor = null; }
 }
 
-const [markup$d, css$d] = await Promise.all([
+const [markup$e, css$e] = await Promise.all([
   "<span part=\"label\"></span>\n<button type=\"button\" part=\"edit-button\">\n  <svg aria-hidden=\"true\" viewBox=\"0 0 24 24\">\n    <path d=\"m4 20 4.1-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.1 16 4 20Z\"></path>\n    <path d=\"m13.8 7.2 3 3\"></path>\n  </svg>\n</button>\n<input type=\"text\" part=\"input\" hidden>\n<select part=\"input\" hidden></select>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  color: inherit;\n  font: inherit;\n}\n:host([hidden]), [hidden] { display: none !important; }\n:host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }\n:host(:hover) { --cm-edit-icon-width:20px; }\nspan { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }\nspan[data-placeholder] { color: var(--cm-muted, #687586); }\nbutton, input, select { box-sizing: border-box; font: inherit; color: inherit; }\nbutton {\n  display: inline-grid;\n  place-items: center;\n  flex: 0 0 auto;\n  width: var(--cm-edit-icon-width, 0px);\n  min-width: 0;\n  height: 20px;\n  overflow: hidden;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #64748b);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { width:20px; outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { cursor: default; opacity: .45; }\nsvg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }\ninput, select {\n  width: 100%;\n  min-width: 0;\n  height: 28px;\n  margin-inline: -1px;\n  padding: 2px 7px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  line-height: 20px;\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus, select:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
 ]);
-const template$d = createTemplate(markup$d);
-const HTMLElementBase$d = globalThis.HTMLElement || class {};
+const template$e = createTemplate(markup$e);
+const HTMLElementBase$e = globalThis.HTMLElement || class {};
 
 /** A field owns its draft; consumers accept or cancel value-commit events. */
-class EditableField extends HTMLElementBase$d {
+class EditableField extends HTMLElementBase$e {
   static observedAttributes = ["label", "placeholder", "type", "min", "max", "step", "required", "disabled"];
   #value = "";
   #revision = 0;
@@ -1181,8 +1181,8 @@ class EditableField extends HTMLElementBase$d {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$d;
-    root.append(style, template$d(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$e;
+    root.append(style, template$e(this.ownerDocument));
     this.#text = root.querySelector("span");
     this.#button = root.querySelector("button");
     this.#input = root.querySelector("input");
@@ -1283,14 +1283,14 @@ function defineEditableField() {
   if (!customElements.get("clinker-editable-field")) customElements.define("clinker-editable-field", EditableField);
 }
 
-const [markup$c, css$c] = await Promise.all([
+const [markup$d, css$d] = await Promise.all([
   "<details>\n  <summary></summary>\n  <div data-items>\n    <template>\n      <div class=\"category\">\n        <input type=\"color\">\n        <clinker-editable-field required></clinker-editable-field>\n        <button type=\"button\" data-remove>×</button>\n      </div>\n    </template>\n    <form class=\"category\">\n      <input type=\"color\" aria-label=\"New category colour\">\n      <input type=\"text\" aria-label=\"New category name\" placeholder=\"New category\" required>\n      <button type=\"submit\" aria-label=\"Add category\">+</button>\n    </form>\n  </div>\n  <div data-removal hidden>\n    <span></span>\n    <select aria-label=\"Replacement category\"></select>\n    <button type=\"button\" data-confirm>Remove</button>\n    <button type=\"button\" data-cancel>Cancel</button>\n  </div>\n</details>\n",
   ":host { display: block; color: inherit; font: inherit; }\nsummary { cursor: pointer; color: var(--cm-muted, #687586); }\nsummary:hover { color: var(--cm-accent, #1677ff); }\n[data-items] { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 0 2px; }\n.category, [data-removal] { display: flex; align-items: center; gap: 5px; }\n.category:hover { --cm-edit-icon-width:20px; }\nclinker-editable-field, input[type=text] { width: 140px; min-width: 0; }\n[data-removal] { flex-wrap: wrap; margin-top: 6px; padding: 6px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 4px; }\n",
 ]);
-const template$c = createTemplate(markup$c);
-const HTMLElementBase$c = globalThis.HTMLElement || class {};
+const template$d = createTemplate(markup$d);
+const HTMLElementBase$d = globalThis.HTMLElement || class {};
 
-class CategoryEditor extends HTMLElementBase$c {
+class CategoryEditor extends HTMLElementBase$d {
   #value = [];
   #palette = ["#888888"];
   #revision = 0;
@@ -1308,8 +1308,8 @@ class CategoryEditor extends HTMLElementBase$c {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$c;
-    root.append(style, template$c(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$d;
+    root.append(style, template$d(this.ownerDocument));
     this.#details = root.querySelector("details"); this.#items = root.querySelector("[data-items]");
     this.#template = this.#items.querySelector("template"); this.#form = root.querySelector("form");
     this.#name = this.#form.querySelector('[type="text"]'); this.#colour = this.#form.querySelector('[type="color"]');
@@ -1417,22 +1417,22 @@ function defineCategoryEditor() {
   if (!customElements.get("clinker-category-editor")) customElements.define("clinker-category-editor", CategoryEditor);
 }
 
-const [markup$b, css$b] = await Promise.all([
+const [markup$c, css$c] = await Promise.all([
   "<select aria-label=\"Annotation panel\"></select>\n<button type=\"button\" data-action=\"add\">Add panel</button>\n<button type=\"button\" data-action=\"replace\">Replace data…</button>\n<button type=\"button\" data-action=\"show\">Hide</button>\n<button type=\"button\" data-action=\"left\" aria-label=\"Move left\" title=\"Move left\">←</button>\n<button type=\"button\" data-action=\"right\" aria-label=\"Move right\" title=\"Move right\">→</button>\n<button type=\"button\" data-action=\"remove\" aria-label=\"Remove panel\">Remove</button>\n<slot></slot>\n",
   ":host { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-shrink: 0; color: inherit; font: inherit; }\n:host([embedded]), slot { display: contents; }\nselect { max-width: 260px; }\n:host([embedded]) select { max-width: 220px; }\n",
 ]);
-const template$b = createTemplate(markup$b);
-const HTMLElementBase$b = globalThis.HTMLElement || class {};
+const template$c = createTemplate(markup$c);
+const HTMLElementBase$c = globalThis.HTMLElement || class {};
 
-class AnnotationToolbar extends HTMLElementBase$b {
+class AnnotationToolbar extends HTMLElementBase$c {
   #select;
   #buttons;
 
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$b;
-    root.append(style, template$b(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$c;
+    root.append(style, template$c(this.ownerDocument));
     this.#select = root.querySelector("select");
     this.#buttons = Object.fromEntries([...root.querySelectorAll("button")].map((button) => [button.dataset.action, button]));
     this.#select.onchange = () => this.#emit("panel-change", { value: this.#select.value });
@@ -1635,14 +1635,14 @@ var csvFormatRows = csv.formatRows;
 var tsv = dsv("\t");
 var tsvParseRows = tsv.parseRows;
 
-const [markup$a, css$a] = await Promise.all([
+const [markup$b, css$b] = await Promise.all([
   "<form>\n  <div data-create>\n    <label><span>Type</span><select name=\"type\" aria-label=\"Type\"><option value=\"heatmap\">Heatmap</option><option value=\"bar\">Bar chart</option><option value=\"groups\">Group markers</option></select></label>\n    <label><span>Title</span><input name=\"title\" type=\"text\" aria-label=\"Title\"></label>\n    <label data-scale><span>Values</span><select name=\"scale\" aria-label=\"Values\"><option value=\"continuous\">Numeric</option><option value=\"categorical\">Categories</option></select></label>\n    <p data-help></p>\n  </div>\n  <label class=\"data\"><span>Data</span><textarea name=\"data\" aria-label=\"Data\" rows=\"8\" spellcheck=\"false\"></textarea></label>\n  <p data-error role=\"alert\" hidden></p>\n  <div class=\"actions\"><button type=\"submit\">Add panel</button><button type=\"button\" data-cancel hidden>Cancel</button></div>\n</form>\n",
   ":host { display: block; flex-shrink: 0; min-width: 0; color: inherit; font: inherit; }\nlabel { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }\nlabel > span { flex: 1; min-width: 0; }\ninput, select { width: 140px; max-width: 65%; }\n.data { display: block; }\ntextarea { display: block; width: 100%; margin-top: 4px; resize: vertical; }\np { margin: 8px 0; color: var(--cm-muted, #687586); }\n[data-error] { color: var(--cm-danger, #b42318); }\n.actions { display: flex; gap: 8px; }\n",
 ]);
-const template$a = createTemplate(markup$a);
-const HTMLElementBase$a = globalThis.HTMLElement || class {};
+const template$b = createTemplate(markup$b);
+const HTMLElementBase$b = globalThis.HTMLElement || class {};
 
-class AnnotationDataForm extends HTMLElementBase$a {
+class AnnotationDataForm extends HTMLElementBase$b {
   static observedAttributes = ["mode"];
   #form;
   #clusters = [];
@@ -1650,8 +1650,8 @@ class AnnotationDataForm extends HTMLElementBase$a {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$a;
-    root.append(style, template$a(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$b;
+    root.append(style, template$b(this.ownerDocument));
     this.#form = root.querySelector("form");
     this.#field("type").onchange = () => { this.#sync(); this.#example(); };
     this.#form.onsubmit = (event) => { event.preventDefault(); this.error = ""; this.#emit("data-submit", this.value); };
@@ -1696,14 +1696,14 @@ function defineAnnotationDataForm() {
   if (!customElements.get("clinker-annotation-data-form")) customElements.define("clinker-annotation-data-form", AnnotationDataForm);
 }
 
-const [markup$9, css$9] = await Promise.all([
+const [markup$a, css$a] = await Promise.all([
   "<div data-groups>\n  <template>\n    <fieldset>\n      <legend></legend>\n      <div class=\"controls\">\n        <clinker-editable-field label=\"Group label\"></clinker-editable-field>\n        <input type=\"color\" aria-label=\"Group colour\">\n        <select data-mode aria-label=\"Membership\"></select>\n        <button type=\"button\">Remove group</button>\n      </div>\n      <select data-members></select>\n    </fieldset>\n  </template>\n</div>\n<button type=\"button\" data-add>Add group</button>\n",
   ":host { display: block; color: inherit; font: inherit; }\nfieldset { min-width: 0; margin: 0 0 8px; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }\nlegend { padding: 0 4px; font-weight: 600; }\n.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }\nclinker-editable-field { width: 140px; }\nclinker-editable-field:hover { --cm-edit-icon-width: 20px; }\nselect { max-width: 100%; }\n[data-members] { display: block; margin-top: 8px; }\n",
 ]);
-const template$9 = createTemplate(markup$9);
-const HTMLElementBase$9 = globalThis.HTMLElement || class {};
+const template$a = createTemplate(markup$a);
+const HTMLElementBase$a = globalThis.HTMLElement || class {};
 
-class AnnotationGroupEditor extends HTMLElementBase$9 {
+class AnnotationGroupEditor extends HTMLElementBase$a {
   #state = { groups: [], clusters: [], tree: null };
   #revision = 0;
   #rows = new Map();
@@ -1714,8 +1714,8 @@ class AnnotationGroupEditor extends HTMLElementBase$9 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$9;
-    root.append(style, template$9(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$a;
+    root.append(style, template$a(this.ownerDocument));
     this.#items = root.querySelector("[data-groups]"); this.#template = this.#items.querySelector("template");
     this.#add = root.querySelector("[data-add]");
     this.#add.onclick = () => {
@@ -1796,14 +1796,14 @@ function defineAnnotationGroupEditor() {
   if (!customElements.get("clinker-annotation-group-editor")) customElements.define("clinker-annotation-group-editor", AnnotationGroupEditor);
 }
 
-const [markup$8, css$8] = await Promise.all([
+const [markup$9, css$9] = await Promise.all([
   "<span part=\"summary\"></span>\n<div part=\"actions\" hidden>\n  <slot name=\"actions\"></slot>\n  <button type=\"button\" data-clear aria-label=\"Clear selection\">Clear</button>\n</div>\n<button type=\"button\" data-all hidden>Select all visible</button>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  height: 32px;\n  min-width: 0;\n  flex-shrink: 0;\n  color: var(--cm-muted, #687586);\n  font: 12px/1.4 system-ui, sans-serif;\n}\nspan { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\nspan.is-selected { color: var(--cm-foreground, #273444); font-weight: 600; }\ndiv { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }\nslot { display: contents; }\nbutton { flex-shrink: 0; }\n",
 ]);
-const template$8 = createTemplate(markup$8);
-const HTMLElementBase$8 = globalThis.HTMLElement || class {};
+const template$9 = createTemplate(markup$9);
+const HTMLElementBase$9 = globalThis.HTMLElement || class {};
 
-class SelectionBar extends HTMLElementBase$8 {
+class SelectionBar extends HTMLElementBase$9 {
   #summary;
   #actions;
   #all;
@@ -1812,8 +1812,8 @@ class SelectionBar extends HTMLElementBase$8 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$8;
-    root.append(style, template$8(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$9;
+    root.append(style, template$9(this.ownerDocument));
     this.#summary = root.querySelector("span");
     this.#actions = root.querySelector("div");
     this.#all = root.querySelector("[data-all]");
@@ -1840,15 +1840,15 @@ function defineSelectionBar() {
   if (!customElements.get("clinker-selection-bar")) customElements.define("clinker-selection-bar", SelectionBar);
 }
 
-const [markup$7, css$7] = await Promise.all([
+const [markup$8, css$8] = await Promise.all([
   "<details>\n  <summary part=\"trigger\"></summary>\n  <div part=\"panel\"><slot></slot></div>\n</details>\n",
   ":host { display: block; position: relative; color: var(--cm-foreground, #273444); font: inherit; }\n:host([hidden]) { display: none !important; }\nsummary {\n  display: block;\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: 4px 8px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 6px;\n  background: var(--cm-surface, #fff);\n  list-style: none;\n  white-space: nowrap;\n  cursor: pointer;\n}\nsummary::-webkit-details-marker { display: none; }\nsummary:hover, details[open] > summary { background: var(--cm-hover, #e3ecf8); border-color: var(--cm-accent, #78a9ed); }\nsummary:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\ndiv {\n  position: absolute;\n  right: 0;\n  top: calc(100% + 4px);\n  z-index: 10;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  width: max-content;\n  max-width: min(340px, 80vw);\n  max-height: 50vh;\n  overflow: auto;\n  padding: 10px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 8px;\n  background: var(--cm-surface, #fff);\n  box-shadow: 0 4px 16px #0002;\n}\nslot { display: contents; }\n::slotted(button) { text-align: left; }\n::slotted(label) { display: flex; align-items: center; gap: 6px; }\n::slotted(input[type=number]) { width: 112px; }\n",
 ]);
-const template$7 = createTemplate(markup$7);
+const template$8 = createTemplate(markup$8);
 const activeMenus = new WeakMap();
-const HTMLElementBase$7 = globalThis.HTMLElement || class {};
+const HTMLElementBase$8 = globalThis.HTMLElement || class {};
 
-class ActionMenu extends HTMLElementBase$7 {
+class ActionMenu extends HTMLElementBase$8 {
   static observedAttributes = ["label", "open"];
   #details;
   #trigger;
@@ -1857,8 +1857,8 @@ class ActionMenu extends HTMLElementBase$7 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$7;
-    root.append(style, template$7(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$8;
+    root.append(style, template$8(this.ownerDocument));
     this.#details = root.querySelector("details");
     this.#trigger = root.querySelector("summary");
     this.#details.ontoggle = () => { this.open = this.#details.open; };
@@ -1899,14 +1899,14 @@ function defineActionMenu() {
   if (!customElements.get("clinker-action-menu")) customElements.define("clinker-action-menu", ActionMenu);
 }
 
-const [markup$6, css$6] = await Promise.all([
+const [markup$7, css$7] = await Promise.all([
   "<div part=\"viewport\" tabindex=\"-1\"><slot name=\"header\"></slot><slot></slot><p part=\"empty\" hidden>No records match the filter.</p></div>\n<template id=\"heading\"><span class=\"cm-data-cell\"></span></template>\n<template id=\"sort\"><button type=\"button\" class=\"cm-data-cell cm-editor__sort\"><span data-label></span><span aria-hidden=\"true\"></span></button></template>\n",
   ":host { display: flex; flex: 1; min-width: 0; min-height: 120px; color: inherit; font: inherit; }\n:host([hidden]) { display: none !important; }\n[hidden] { display: none !important; }\n[part=viewport] { flex: 1; min-width: 0; min-height: 0; overflow: auto; overflow-anchor: none; outline: none; }\nslot { display: contents; }\n[part=empty] { padding: 16px; color: var(--cm-muted, #667386); text-align: center; }\n",
 ]);
-const template$6 = createTemplate(markup$6);
-const HTMLElementBase$6 = globalThis.HTMLElement || class {};
+const template$7 = createTemplate(markup$7);
+const HTMLElementBase$7 = globalThis.HTMLElement || class {};
 
-class DataTable extends HTMLElementBase$6 {
+class DataTable extends HTMLElementBase$7 {
   #viewport;
   #renderer = null;
   #rows = [];
@@ -1917,8 +1917,8 @@ class DataTable extends HTMLElementBase$6 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$6;
-    root.append(style, template$6(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$7;
+    root.append(style, template$7(this.ownerDocument));
     this.#viewport = root.querySelector("div");
     this.addEventListener("mousedown", (event) => {
       if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
@@ -1977,14 +1977,14 @@ function defineDataTable() {
   if (!customElements.get("clinker-data-table")) customElements.define("clinker-data-table", DataTable);
 }
 
-const [markup$5, css$5] = await Promise.all([
+const [markup$6, css$6] = await Promise.all([
   "<select data-columns aria-label=\"Columns to edit\"></select>\n<input type=\"number\" step=\"any\" placeholder=\"Value\" aria-label=\"Batch value\">\n<select data-categories aria-label=\"Batch value\" hidden></select>\n<button type=\"button\" data-set>Set values</button>\n<button type=\"button\" data-clear>Clear values</button>\n",
   ":host { display: flex; flex-direction: column; gap: 8px; color: inherit; font: inherit; }\nbutton { text-align: left; }\ninput { width: 112px; }\n",
 ]);
-const template$5 = createTemplate(markup$5);
-const HTMLElementBase$5 = globalThis.HTMLElement || class {};
+const template$6 = createTemplate(markup$6);
+const HTMLElementBase$6 = globalThis.HTMLElement || class {};
 
-class AnnotationValueActions extends HTMLElementBase$5 {
+class AnnotationValueActions extends HTMLElementBase$6 {
   #columns;
   #numeric;
   #categories;
@@ -1993,8 +1993,8 @@ class AnnotationValueActions extends HTMLElementBase$5 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$5;
-    root.append(style, template$5(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css$6;
+    root.append(style, template$6(this.ownerDocument));
     this.#columns = root.querySelector("[data-columns]"); this.#numeric = root.querySelector("input"); this.#categories = root.querySelector("[data-categories]");
     root.addEventListener("change", () => this.#draftChanged());
     root.querySelector("[data-set]").onclick = () => this.#submit(false);
@@ -2027,14 +2027,14 @@ function defineAnnotationValueActions() {
   if (!customElements.get("clinker-annotation-value-actions")) customElements.define("clinker-annotation-value-actions", AnnotationValueActions);
 }
 
-const [markup$4, css$4] = await Promise.all([
+const [markup$5, css$5] = await Promise.all([
   "<div class=\"cm-data-panel cm-data-ui\">\n  <slot name=\"tools\"></slot>\n  <clinker-selection-bar class=\"cm-data-meta\">\n    <div slot=\"actions\" class=\"cm-data-actions\">\n      <clinker-action-menu label=\"Edit values…\"><clinker-annotation-value-actions></clinker-annotation-value-actions></clinker-action-menu>\n    </div>\n  </clinker-selection-bar>\n  <clinker-data-table class=\"cm-data-table cm-annotation-matrix\" role=\"region\" aria-label=\"Editable annotation data\"></clinker-data-table>\n</div>\n<template id=\"table\">\n<table><thead><tr>\n  <th class=\"cm-data-cell cm-data-cell--select cm-data-head\"><input type=\"checkbox\" aria-label=\"Select all filtered clusters\"></th>\n  <th class=\"cm-data-cell cm-data-head\">Cluster</th>\n</tr></thead><tbody></tbody></table>\n</template>\n\n<template id=\"column\">\n<th class=\"cm-data-cell cm-data-head\"><div class=\"cm-annotation-column\">\n  <clinker-editable-field required></clinker-editable-field><button type=\"button\" class=\"cm-data-icon-button\">×</button>\n</div></th>\n</template>\n\n<template id=\"add-column\">\n<th class=\"cm-data-cell cm-data-head cm-annotation-add-column\"><form>\n  <button type=\"button\" aria-label=\"Add column\">+</button>\n  <input type=\"text\" aria-label=\"New column name\" placeholder=\"Column name\" hidden><button type=\"submit\" hidden>Add</button>\n</form></th>\n</template>\n\n<template id=\"row\">\n<tr class=\"cm-data-row\">\n  <td class=\"cm-data-cell cm-data-cell--select\"><input type=\"checkbox\"></td><th class=\"cm-data-cell\" scope=\"row\"></th>\n</tr>\n</template>\n\n<template id=\"empty-cell\">\n<td class=\"cm-data-cell\"></td>\n</template>\n\n<template id=\"spacer\">\n<tr class=\"cm-annotation-spacer\" aria-hidden=\"true\"><td></td></tr>\n</template>\n\n<template id=\"cell\">\n  <td class=\"cm-data-cell\"><clinker-editable-field placeholder=\"—\" step=\"any\"></clinker-editable-field></td>\n</template>\n",
   ":host { display:flex; flex:1; min-width:0; min-height:0; color:inherit; font:inherit; }\n:host([hidden]) { display:none!important; }\nslot { display:contents; }\n.cm-annotation-matrix { position:relative; }\n.cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }\n\n.cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,#f3f6fa); }\n.cm-annotation-matrix tr > :first-child { position:sticky; left:0; z-index:1; width:32px; min-width:32px; background:var(--cm-row-background,var(--cm-subtle,#f3f6fa)); }\n.cm-annotation-matrix tr > :nth-child(2) { position:sticky; left:32px; z-index:1; }\n.cm-annotation-matrix tbody th { background:var(--cm-row-background); }\n.cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,#f3f6fa); }\n.cm-annotation-matrix tbody th { cursor:pointer; min-width:200px; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }\n.cm-annotation-matrix :is(input:not([type=checkbox]),clinker-editable-field) { width:140px; }\n.cm-annotation-column { display:flex; align-items:center; }\n.cm-annotation-column button { --cm-icon-size:24px; visibility:hidden; }\n.cm-annotation-column:is(:hover,:focus-within) button { visibility:visible; }\n.cm-annotation-add-column { width:36px; }\n.cm-annotation-add-column form { display:flex; gap:4px; }\n.cm-annotation-spacer > td { height:0; border:0; padding:0; }\n",
 ]);
-const template$4 = createTemplate(markup$4);
-const HTMLElementBase$4 = globalThis.HTMLElement || class {};
+const template$5 = createTemplate(markup$5);
+const HTMLElementBase$5 = globalThis.HTMLElement || class {};
 
-class AnnotationTable extends HTMLElementBase$4 {
+class AnnotationTable extends HTMLElementBase$5 {
   #viewport;
   #panel;
   #domain = null;
@@ -2051,8 +2051,8 @@ class AnnotationTable extends HTMLElementBase$4 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = DATA_EDITOR_CSS + css$4;
-    root.append(style, template$4(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = DATA_EDITOR_CSS + css$5;
+    root.append(style, template$5(this.ownerDocument));
     this.#viewport = root.querySelector("clinker-data-table");
     this.#selectionBar = root.querySelector("clinker-selection-bar");
     this.#selectionBar.addEventListener("clear-selection", () => this.clearSelection());
@@ -2252,18 +2252,18 @@ function createAnnotationForm({ document, getData, patch, onCreate }) {
   return node;
 }
 
-const [markup$3, css$3] = await Promise.all([
+const [markup$4, css$4] = await Promise.all([
   "<template id=\"editor\">\n<div class=\"cm-data-ui cm-annotation-data-editor\" tabindex=\"-1\">\n  <clinker-annotation-toolbar>\n    <clinker-search-field label=\"Filter records\" placeholder=\"Find a cluster\"></clinker-search-field>\n  </clinker-annotation-toolbar>\n  <div class=\"cm-data-error\" data-data-error role=\"alert\"></div><div class=\"cm-annotation-data-body\"></div>\n</div>\n</template>\n\n<template id=\"matrix\">\n<clinker-annotation-table></clinker-annotation-table>\n</template>\n\n<template id=\"categories\">\n<clinker-category-editor slot=\"tools\" class=\"cm-annotation-categories\"></clinker-category-editor>\n</template>\n\n<template id=\"replacement\">\n<clinker-annotation-data-form slot=\"tools\" mode=\"replace\" hidden></clinker-annotation-data-form>\n</template>\n\n<template id=\"groups\">\n<div class=\"cm-data-panel cm-annotation-group-list\" role=\"region\" aria-label=\"Editable annotation data\" tabindex=\"-1\"><clinker-annotation-group-editor></clinker-annotation-group-editor></div>\n</template>\n\n<template id=\"empty\">\n<p>No annotation panels. Add a panel to attach data to cluster rows.</p>\n</template>\n",
   "@layer clinker-editor {\n.cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }\n.cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }\n.cm-annotation-group-list { overflow:auto; }\n.cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }\n.cm-annotation-data-editor [data-data-error]:empty { display:none; }\n\n}\n",
 ]);
-const template$3 = createTemplate(markup$3);
+const template$4 = createTemplate(markup$4);
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 function createAnnotationEditor({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
   defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm(); defineAnnotationGroupEditor(); defineAnnotationTable();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
-  const templates = template$3(document);
+  const templates = template$4(document);
   const element = (name) => document.importNode(templates.getElementById(name).content, true).firstElementChild;
   const node = element("editor"), toolbar = node.querySelector("clinker-annotation-toolbar");
   const body = node.querySelector(".cm-annotation-data-body"), status = node.querySelector("[data-data-error]");
@@ -2392,7 +2392,7 @@ function createAnnotationEditor({ document, getData, getClusters = () => getData
 function installStyle(document) {
   if (document.getElementById("cm-annotation-data-style")) return;
   const style = document.createElement("style"); style.id = "cm-annotation-data-style";
-  style.textContent = css$3;
+  style.textContent = css$4;
   document.head.append(style);
 }
 
@@ -3475,6 +3475,178 @@ function createEditorRow(document, kind, type) {
   }, destroy() { for (const field of fields) field.cancelEdit(); } };
 }
 
+const [markup$3, css$3] = await Promise.all([
+  "<clinker-data-table class=\"cm-data-table\" role=\"region\" aria-label=\"Editable chart data\">\n  <div slot=\"header\" data-head class=\"cm-editor__head\"></div>\n  <div data-rows></div>\n</clinker-data-table>\n",
+  "@layer clinker-editor {\n  clinker-record-table { display:flex; flex:1; min-width:0; min-height:0; color:inherit; font:inherit; }\n  clinker-record-table[hidden] { display:none; }\n  clinker-record-table .cm-editor__head, clinker-record-table .cm-editor__row { display: grid; align-items: center; gap:0; min-width:640px; padding:0; box-sizing: border-box; }\n  clinker-record-table .cm-editor__head { position:sticky; top:0; z-index:2; }\n  clinker-record-table .cm-editor__sort { display: flex; align-items: center; gap: 2px; min-height:24px; border:0; background:transparent; color:inherit; font-size:inherit; font-weight:inherit; text-align:left; }\n  clinker-record-table .cm-editor__sort:hover { border: 0; background: transparent; color: var(--cm-accent,#145da8); }\n  clinker-record-table .cm-editor__sort span[aria-hidden] { color: var(--cm-muted,#7b8a9e); font-size: 12px; }\n  clinker-record-table .cm-editor__row { cursor: pointer; }\n  clinker-record-table .cm-editor__head--groups, clinker-record-table .cm-editor__row--groups { min-width:660px; grid-template-columns: 32px 28px minmax(180px, 1fr) minmax(150px, 300px) 86px 28px 56px; }\n  clinker-record-table .cm-editor__head--genes, clinker-record-table .cm-editor__row--genes { grid-template-columns: 32px minmax(160px, 1.3fr) minmax(100px, .85fr) minmax(110px, 1fr) minmax(100px, .85fr) 56px; }\n  clinker-record-table .cm-editor__head--links, clinker-record-table .cm-editor__row--links { min-width:802px; grid-template-columns: 32px minmax(120px, 1fr) minmax(120px, 1fr) 76px minmax(150px, .95fr) minmax(120px, .8fr) 28px 56px; }\n  clinker-record-table .cm-editor__head--tree, clinker-record-table .cm-editor__tree-row { grid-template-columns:32px 28px minmax(180px, 1fr) minmax(120px, .75fr) 56px; }\n  clinker-record-table .cm-editor__tree-row { display:grid; align-items:center; min-width:640px; gap:0; padding:0; }\n  clinker-record-table .cm-editor__tree-parent > :last-child { grid-column:3 / -1; margin-left:calc(var(--depth, 0) * 18px); }\n  clinker-record-table .cm-editor__tree-gene > clinker-editable-field { padding-left:calc(8px + var(--depth, 0) * 18px); }\n  clinker-record-table .cm-editor__tree-parent { --cm-row-background:var(--cm-subtle,#f3f6fa); font-weight: 550; }\n  clinker-record-table .cm-editor__tree-toggle { --cm-icon-size:24px; font-size:14px; }\n  clinker-record-table .cm-editor__tree-separator { color: var(--cm-muted,#96a4b5); font-size: 12px; }\n  clinker-record-table .cm-editor__tree-combined { display: flex; min-width: 0; align-items: center; gap: 4px; padding-inline:8px; }\n  clinker-record-table .cm-editor__tree-combined > clinker-editable-field { padding-inline:0; }\n  clinker-record-table .cm-editor__tree-combined > [data-type=\"clusters\"] { color:var(--cm-foreground,#324155); font-weight:650; }\n  clinker-record-table .cm-editor__tree-combined > [data-type=\"loci\"] { color:var(--cm-muted,#526178); font-weight:550; }\n  clinker-record-table .cm-editor__tree-count { color: var(--cm-muted,#5f6d7f); font-size: 12px; font-weight: 600; white-space: nowrap; }\n  clinker-record-table .cm-editor__tree-name-with-count { display: flex; align-items: center; gap: 5px; min-width: 0; }\n  clinker-record-table .cm-editor__reorder { --cm-icon-size:24px; cursor:grab; font-size:15px; letter-spacing:-3px; }\n  clinker-record-table .cm-editor__drop-target { box-shadow: inset 0 2px var(--cm-accent,#1677ff); }\n}\n",
+]);
+const template$3 = createTemplate(markup$3);
+const HTMLElementBase$4 = globalThis.HTMLElement || class {};
+
+class RecordTable extends HTMLElementBase$4 {
+  #table;
+  #head;
+  #list;
+  #state;
+  #kind = null;
+  #records = new WeakMap();
+  #dragged = null;
+  #hoverRow = null;
+  #hoveredRow = null;
+  #hoverTimer = null;
+  #hoverFrame = null;
+  error = "";
+
+  constructor() {
+    super();
+    this.addEventListener("click", (event) => this.#click(event));
+    this.addEventListener("change", (event) => {
+      const input = event.target, node = input.closest(".cm-data-row"), row = this.#records.get(node)?.data;
+      if (!row) return;
+      if (input.matches('[type="checkbox"]')) {
+        const checked = row.selectIds ? row.selectIds.every((id) => this.#state.selection.has(id)) : this.#state.selection.has(row.id);
+        if (checked !== input.checked) this.#select(row, input.checked, false);
+      } else if (input.matches("[data-colour]")) this.#emit({ action: "update", type: this.#kind, id: row.id, changes: { colour: input.value } });
+    });
+    this.addEventListener("value-commit", (event) => {
+      if (event.defaultPrevented) return;
+      const { type, id, field } = event.target.dataset;
+      if (!type || !field) return;
+      event.stopPropagation();
+      const value = field === "identity" ? Number(event.detail.value) / 100 : event.detail.value.trim();
+      if (!this.#emit({ action: "update", type, id, changes: { [field]: value } }, event.target)) event.preventDefault();
+    });
+    this.addEventListener("keydown", (event) => {
+      const grip = event.target.closest("[data-reorder]");
+      if (!grip || event.defaultPrevented || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+      event.preventDefault();
+      this.#emit({ action: "reorder", id: this.#records.get(grip.closest(".cm-data-row")).data.id, direction: event.key === "ArrowUp" ? -1 : 1 });
+    });
+    this.addEventListener("dragstart", (event) => {
+      const grip = event.target.closest("[data-reorder]");
+      if (!grip) return;
+      this.#dragged = this.#records.get(grip.closest(".cm-data-row")).data.id;
+      event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(this.#dragged));
+    });
+    this.addEventListener("dragover", (event) => {
+      const target = event.target.closest(".cm-editor__row--groups");
+      if (this.#dragged === null || !target || this.#records.get(target).data.id === this.#dragged) return;
+      event.preventDefault(); this.#clearDropTarget(); target.classList.add("cm-editor__drop-target");
+    });
+    this.addEventListener("drop", (event) => {
+      const target = event.target.closest(".cm-editor__row--groups");
+      if (this.#dragged !== null && target) {
+        event.preventDefault(); const bounds = target.getBoundingClientRect();
+        this.#emit({ action: "place", id: this.#dragged, targetId: this.#records.get(target).data.id, after: event.clientY > bounds.top + bounds.height / 2 });
+      }
+      this.#dragged = null; this.#clearDropTarget();
+    });
+    this.addEventListener("dragend", () => { this.#dragged = null; this.#clearDropTarget(); });
+    for (const type of ["pointerover", "pointerout"]) this.addEventListener(type, (event) => {
+      const row = event.target.closest(".cm-data-row");
+      if (row && !row.contains(event.relatedTarget)) this.#queueHover(type === "pointerover" ? row : null);
+    });
+  }
+
+  connectedCallback() {
+    installDataEditorStyle(this.ownerDocument);
+    this.classList.add("cm-data-ui");
+    if (!this.ownerDocument.getElementById("clinker-record-table-style")) {
+      const style = this.ownerDocument.createElement("style"); style.id = "clinker-record-table-style"; style.textContent = css$3;
+      this.ownerDocument.head.append(style);
+    }
+    if (!this.#table) {
+      this.append(template$3(this.ownerDocument));
+      this.#table = this.querySelector("clinker-data-table"); this.#head = this.querySelector("[data-head]"); this.#list = this.querySelector("[data-rows]");
+    }
+    this.#render();
+  }
+  disconnectedCallback() { this.cancelHover(); this.#dragged = null; this.#clearDropTarget(); }
+  set state(value) { this.#state = value; this.#render(); }
+  reset() { this.cancelHover(); if (this.#table) this.#table.renderer = null; this.#kind = null; this.#dragged = null; this.#clearDropTarget(); }
+  get scrollTop() { return this.#table?.scrollTop || 0; }
+  set scrollTop(value) { if (this.#table) this.#table.scrollTop = value; }
+  get scrollHeight() { return this.#table?.scrollHeight || 0; }
+  get scrollLeft() { return this.#table?.scrollLeft || 0; }
+  set scrollLeft(value) { if (this.#table) this.#table.scrollLeft = value; }
+  get scrollWidth() { return this.#table?.scrollWidth || 0; }
+  scrollTo(...args) { this.#table?.scrollTo(...args); }
+  focus(options) { this.#table?.focus(options); }
+
+  #emit(detail, control) {
+    this.error = "";
+    const accepted = this.dispatchEvent(new CustomEvent("record-action", { detail, bubbles: true, composed: true, cancelable: true }));
+    if (!accepted && control) control.setCustomValidity(this.error);
+    return accepted;
+  }
+  #select(row, checked, range) { this.#emit({ action: "select", id: row.key ?? row.id, checked, range }); }
+  #click(event) {
+    if (event.target.closest("clinker-editable-field")) return;
+    const node = event.target.closest(".cm-data-row"), row = this.#records.get(node)?.data;
+    if (row && event.target.matches('[type="checkbox"]')) { this.#select(row, event.target.checked, event.shiftKey); return; }
+    const sort = event.target.closest("[data-sort]");
+    if (sort) { this.#emit({ action: "sort", key: sort.dataset.sort }); return; }
+    if (!row) return;
+    if (event.target.closest("[data-tree-toggle]")) this.#emit({ action: "toggle", key: row.key });
+    else if (event.target.closest("[data-visible]")) this.#emit({ action: "update", type: this.#kind, id: row.id, changes: { hidden: !row.hidden } });
+    else if (event.target.closest("[data-remove-record]")) {
+      const cluster = row.type === "cluster" || row.type === "cluster-locus";
+      this.#emit({ action: "remove", type: cluster ? "clusters" : "loci", id: row[cluster ? "cluster" : "locus"].uid });
+    } else if (!event.target.closest("input, select, button")) this.#select(row, !node.querySelector('[type="checkbox"]').checked, event.shiftKey);
+  }
+  #render() {
+    if (!this.#table || !this.#state) return;
+    const { kind, geneView, rows, sort, attached = true } = this.#state;
+    if (!attached) {
+      this.reset(); this.#table.header = { columns: [], sort: null };
+      this.#list.textContent = "Set the chart property to edit a ClusterMap chart."; return;
+    }
+    const tree = kind === "genes" && geneView !== "list", layout = tree ? "tree" : kind;
+    const columns = tree ? [{ label: "" }, { label: "" }, { label: geneView === "groups" ? "Group / gene" : "Cluster / locus / gene" }, { label: "Group" }, { label: "Colour" }]
+      : kind === "groups" ? [{ label: "" }, { label: "↕" }, { label: "Group" }, { label: "Legend label" }, { label: "Genes" }, { label: "" }, { label: "Colour" }]
+      : kind === "links" ? [{ label: "" }, { label: "Source", sort: "source" }, { label: "Target", sort: "target" }, { label: "Identity", sort: "identity" }, { label: "Endpoint groups", sort: "groups" }, { label: "Link label", sort: "label" }, { label: "" }, { label: "Colour" }]
+        : [{ label: "" }, { label: "Gene", sort: "label" }, { label: "Locus", sort: "locus" }, { label: "Cluster", sort: "cluster" }, { label: "Group", sort: "group" }, { label: "Colour" }];
+    this.#head.className = `cm-data-head cm-editor__head cm-editor__head--${layout}`;
+    this.#table.header = { columns, sort }; this.#list.className = `cm-editor__rows cm-editor__rows--${layout}`;
+    if (this.#kind !== kind) {
+      this.reset(); this.#kind = kind; this.#list.replaceChildren();
+      const updateRow = (node, data) => { const row = this.#records.get(node); row.data = data; return row.view.update(data, this.#state.selection); };
+      this.#table.renderer = { container: this.#list, key: (row) => `${kind}:${row.type || "row"}:${row.key ?? row.id}`,
+        headerHeight: () => this.#head.offsetHeight,
+        createRow: (data) => { const view = createEditorRow(this.ownerDocument, kind, data.type); this.#records.set(view.node, { view, data }); return updateRow(view.node, data); },
+        updateRow, disposeRow: (node) => this.#records.get(node).view.destroy() };
+    }
+    this.#table.rows = rows;
+  }
+
+  #clearDropTarget() { for (const node of this.querySelectorAll(".cm-editor__drop-target")) node.classList.remove("cm-editor__drop-target"); }
+  #queueHover(row) {
+    this.#hoverRow = row;
+    if (this.#hoverTimer !== null) globalThis.clearTimeout(this.#hoverTimer);
+    this.#hoverTimer = globalThis.setTimeout(() => {
+      this.#hoverTimer = null;
+      if (this.#hoverFrame !== null) return;
+      const frame = globalThis.requestAnimationFrame || ((callback) => globalThis.setTimeout(callback, 0));
+      this.#hoverFrame = frame(() => {
+        this.#hoverFrame = null;
+        const hovered = this.#hoverRow;
+        if (hovered === this.#hoveredRow) return;
+        this.#hoveredRow = hovered;
+        this.#emit({ action: "hover", row: hovered?.isConnected ? this.#records.get(hovered).data : null });
+      });
+    }, 36);
+  }
+  cancelHover() {
+    if (this.#hoverTimer !== null) globalThis.clearTimeout(this.#hoverTimer);
+    if (this.#hoverFrame !== null) (globalThis.cancelAnimationFrame || globalThis.clearTimeout)(this.#hoverFrame);
+    this.#hoverTimer = this.#hoverFrame = this.#hoverRow = this.#hoveredRow = null;
+  }
+}
+
+function defineRecordTable() {
+  defineDataTable(); defineEditableField();
+  if (!customElements.get("clinker-record-table")) customElements.define("clinker-record-table", RecordTable);
+}
+
 const emptyData = { clusters: [], groups: [], links: [] };
 const labelFor = (record, fallback = "") => record?.label || record?.name || fallback;
 
@@ -3764,8 +3936,8 @@ function defineRecordActions() {
 }
 
 const [markup, css] = await Promise.all([
-  "<div class=\"cm-editor__toolbar cm-data-toolbar\">\n  <clinker-view-switcher data-kind-picker label=\"Data type\" value=\"groups\">\n    <option value=\"groups\">Groups</option><option value=\"genes\">Genes</option>\n    <option value=\"links\">Links</option><option value=\"annotations\">Annotations</option>\n  </clinker-view-switcher>\n  <clinker-view-switcher data-gene-view label=\"Gene view\" value=\"tree\" hidden>\n    <option value=\"tree\">By locus</option><option value=\"groups\">By group</option><option value=\"list\">List</option>\n  </clinker-view-switcher>\n  <button type=\"button\" data-command=\"toggle-tree\" hidden>Expand visible</button>\n  <button type=\"button\" data-command=\"new-group\">Create group…</button>\n  <div data-annotation-toolbar class=\"cm-editor__annotation-toolbar\" hidden></div>\n  <clinker-search-field data-filter label=\"Filter records\" placeholder=\"Search names, labels, loci, or clusters\"></clinker-search-field>\n</div>\n<div data-annotation-editor class=\"cm-editor__annotation-editor\" hidden></div>\n<div data-record-editor class=\"cm-data-panel\">\n  <div data-record-tools class=\"cm-data-tools\" hidden>\n    <div class=\"cm-editor__member-filter\" data-member-filter hidden>\n      <span>Group: <strong data-member-label></strong></span>\n      <button type=\"button\" data-command=\"clear-member-filter\" aria-label=\"Clear group member filter\" title=\"Clear group member filter\">×</button>\n    </div>\n  </div>\n  <clinker-selection-bar class=\"cm-data-meta\"><div slot=\"actions\" class=\"cm-data-actions\"><clinker-record-actions></clinker-record-actions></div></clinker-selection-bar>\n  <clinker-data-table class=\"cm-data-table cm-editor__table\" role=\"region\" aria-label=\"Editable chart data\">\n    <div slot=\"header\" data-head class=\"cm-editor__head\"></div>\n    <div data-rows></div>\n  </clinker-data-table>\n</div>\n<div data-editor-error class=\"cm-data-error\" role=\"alert\" hidden></div>\n",
-  "@layer clinker-editor {\n  clinker-data-panel { display:flex; flex:1; min-width:0; min-height:0; flex-direction:column; gap:8px; }\n  clinker-data-panel[hidden] { display:none; }\n  clinker-data-panel .cm-editor__annotation-editor { display:flex; flex:1; min-height:0; }\n  clinker-data-panel .cm-editor__annotation-editor > .cm-annotation-data-editor { flex:1; min-width:0; }\n  clinker-data-panel .cm-editor__member-filter { display: flex; align-items: center; gap: 6px; color: var(--cm-muted,#526178); font-size: 12px; }\n  clinker-data-panel .cm-editor__member-filter button { display: grid; place-items: center; width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,#64748b); font-size: 17px; line-height: 1; }\n  clinker-data-panel .cm-editor__annotation-toolbar { display:contents; }\n  clinker-data-panel .cm-editor__head, clinker-data-panel .cm-editor__row { display: grid; align-items: center; gap:0; min-width:640px; padding:0; box-sizing: border-box; }\n  clinker-data-panel .cm-editor__head { position:sticky; top:0; z-index:2; }\n  clinker-data-panel .cm-editor__sort { display: flex; align-items: center; gap: 2px; min-height:24px; border:0; background:transparent; color:inherit; font-size:inherit; font-weight:inherit; text-align:left; }\n  clinker-data-panel .cm-editor__sort:hover { border: 0; background: transparent; color: var(--cm-accent,#145da8); }\n  clinker-data-panel .cm-editor__sort span[aria-hidden] { color: var(--cm-muted,#7b8a9e); font-size: 12px; }\n  clinker-data-panel .cm-editor__row { cursor: pointer; }\n  clinker-data-panel .cm-editor__head--groups, clinker-data-panel .cm-editor__row--groups { min-width:660px; grid-template-columns: 32px 28px minmax(180px, 1fr) minmax(150px, 300px) 86px 28px 56px; }\n  clinker-data-panel .cm-editor__head--genes, clinker-data-panel .cm-editor__row--genes { grid-template-columns: 32px minmax(160px, 1.3fr) minmax(100px, .85fr) minmax(110px, 1fr) minmax(100px, .85fr) 56px; }\n  clinker-data-panel .cm-editor__head--links, clinker-data-panel .cm-editor__row--links { min-width:802px; grid-template-columns: 32px minmax(120px, 1fr) minmax(120px, 1fr) 76px minmax(150px, .95fr) minmax(120px, .8fr) 28px 56px; }\n  clinker-data-panel .cm-editor__head--tree, clinker-data-panel .cm-editor__tree-row { grid-template-columns:32px 28px minmax(180px, 1fr) minmax(120px, .75fr) 56px; }\n  clinker-data-panel .cm-editor__tree-row { display:grid; align-items:center; min-width:640px; gap:0; padding:0; }\n  clinker-data-panel .cm-editor__tree-parent > :last-child { grid-column:3 / -1; margin-left:calc(var(--depth, 0) * 18px); }\n  clinker-data-panel .cm-editor__tree-gene > clinker-editable-field { padding-left:calc(8px + var(--depth, 0) * 18px); }\n  clinker-data-panel .cm-editor__tree-parent { --cm-row-background:var(--cm-subtle,#f3f6fa); font-weight: 550; }\n  clinker-data-panel .cm-editor__tree-toggle { --cm-icon-size:24px; font-size:14px; }\n  clinker-data-panel .cm-editor__tree-separator { color: var(--cm-muted,#96a4b5); font-size: 12px; }\n  clinker-data-panel .cm-editor__tree-combined { display: flex; min-width: 0; align-items: center; gap: 4px; padding-inline:8px; }\n  clinker-data-panel .cm-editor__tree-combined > clinker-editable-field { padding-inline:0; }\n  clinker-data-panel .cm-editor__tree-combined > [data-type=\"clusters\"] { color:var(--cm-foreground,#324155); font-weight:650; }\n  clinker-data-panel .cm-editor__tree-combined > [data-type=\"loci\"] { color:var(--cm-muted,#526178); font-weight:550; }\n  clinker-data-panel .cm-editor__tree-count { color: var(--cm-muted,#5f6d7f); font-size: 12px; font-weight: 600; white-space: nowrap; }\n  clinker-data-panel .cm-editor__tree-name-with-count { display: flex; align-items: center; gap: 5px; min-width: 0; }\n  clinker-data-panel .cm-editor__reorder { --cm-icon-size:24px; cursor:grab; font-size:15px; letter-spacing:-3px; }\n  clinker-data-panel .cm-editor__drop-target { box-shadow: inset 0 2px var(--cm-accent,#1677ff); }\n}\n",
+  "<div class=\"cm-editor__toolbar cm-data-toolbar\">\n  <clinker-view-switcher data-kind-picker label=\"Data type\" value=\"groups\">\n    <option value=\"groups\">Groups</option><option value=\"genes\">Genes</option>\n    <option value=\"links\">Links</option><option value=\"annotations\">Annotations</option>\n  </clinker-view-switcher>\n  <clinker-view-switcher data-gene-view label=\"Gene view\" value=\"tree\" hidden>\n    <option value=\"tree\">By locus</option><option value=\"groups\">By group</option><option value=\"list\">List</option>\n  </clinker-view-switcher>\n  <button type=\"button\" data-command=\"toggle-tree\" hidden>Expand visible</button>\n  <button type=\"button\" data-command=\"new-group\">Create group…</button>\n  <div data-annotation-toolbar class=\"cm-editor__annotation-toolbar\" hidden></div>\n  <clinker-search-field data-filter label=\"Filter records\" placeholder=\"Search names, labels, loci, or clusters\"></clinker-search-field>\n</div>\n<div data-annotation-editor class=\"cm-editor__annotation-editor\" hidden></div>\n<div data-record-editor class=\"cm-data-panel\">\n  <div data-record-tools class=\"cm-data-tools\" hidden>\n    <div class=\"cm-editor__member-filter\" data-member-filter hidden>\n      <span>Group: <strong data-member-label></strong></span>\n      <button type=\"button\" data-command=\"clear-member-filter\" aria-label=\"Clear group member filter\" title=\"Clear group member filter\">×</button>\n    </div>\n  </div>\n  <clinker-selection-bar class=\"cm-data-meta\"><div slot=\"actions\" class=\"cm-data-actions\"><clinker-record-actions></clinker-record-actions></div></clinker-selection-bar>\n  <clinker-record-table class=\"cm-editor__table\"></clinker-record-table>\n</div>\n<div data-editor-error class=\"cm-data-error\" role=\"alert\" hidden></div>\n",
+  "@layer clinker-editor {\n  clinker-data-panel { display:flex; flex:1; min-width:0; min-height:0; flex-direction:column; gap:8px; }\n  clinker-data-panel[hidden] { display:none; }\n  clinker-data-panel .cm-editor__annotation-editor { display:flex; flex:1; min-height:0; }\n  clinker-data-panel .cm-editor__annotation-editor > .cm-annotation-data-editor { flex:1; min-width:0; }\n  clinker-data-panel .cm-editor__member-filter { display: flex; align-items: center; gap: 6px; color: var(--cm-muted,#526178); font-size: 12px; }\n  clinker-data-panel .cm-editor__member-filter button { display: grid; place-items: center; width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,#64748b); font-size: 17px; line-height: 1; }\n  clinker-data-panel .cm-editor__annotation-toolbar { display:contents; }\n}\n",
 ]);
 const template = createTemplate(markup);
 
@@ -3776,13 +3948,13 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   #runEdit = createActionRunner((message) => {
     const status = this.querySelector("[data-editor-error]");
     if (status) { status.textContent = message; status.hidden = !message; }
+    if (this.#table) this.#table.error = message;
   });
   #annotationEditor = null;
   #unsubscribe = null;
   #kind = "groups";
   #geneView = "tree";
   #selected = new RowSelection();
-  #rowKind = null;
   #table = null;
   #actions = null;
   #selectionBar = null;
@@ -3790,15 +3962,10 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   #filter = "";
   #memberGroupId = null;
   #expanded = new Set();
-  #draggedGroupId = null;
   #sort = {
     genes: { key: "label", direction: 1 },
     links: { key: "source", direction: 1 },
   };
-  #hoverRow = null;
-  #hoveredRow = null;
-  #hoverTimer = null;
-  #hoverFrame = null;
 
   constructor() {
     super();
@@ -3806,7 +3973,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   }
 
   connectedCallback() {
-    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField(); defineRecordActions(); defineDataTable();
+    defineSelectionBar(); defineViewSwitcher(); defineSearchField(); defineRecordActions(); defineRecordTable();
     this.classList.add("cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.ownerDocument.getElementById("clinker-data-panel-style")) {
@@ -3820,7 +3987,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
 
   disconnectedCallback() {
     this.#unsubscribe?.(); this.#unsubscribe = null;
-    this.#cancelHover(); this.#disposeRows();
+    this.#table?.reset();
     this.#annotationEditor?.destroy(); this.#annotationEditor = null;
     this.querySelector("[data-annotation-editor]")?.replaceChildren();
     this.querySelector("[data-annotation-toolbar]")?.replaceChildren();
@@ -3830,7 +3997,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   set chart(value) {
     if (value === this.#chart) return;
     this.#unsubscribe?.(); this.#unsubscribe = null;
-    this.#cancelHover(); this.#chart = value || null;
+    this.#chart = value || null;
     this.#invalidateData({ replace: true });
     this.#subscribe(); this.#syncTheme(); this.#renderData();
   }
@@ -3854,7 +4021,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   editAnnotations(panelUid) {
     this.#kind = "annotations";
     this.#selected.clear();
-    this.#renderData();
+    this.#renderData(); this.#syncHighlight();
     if (panelUid) this.#annotationEditor?.select(panelUid);
     return this;
   }
@@ -3882,14 +4049,8 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
 
   #renderShell() {
     this.replaceChildren(template(this.ownerDocument));
-    this.#table = this.querySelector("clinker-data-table");
-    this.#table.addEventListener("value-commit", (event) => {
-      if (event.defaultPrevented) return;
-      const { type, id, field } = event.target.dataset;
-      if (!type || !field) return;
-      const value = field === "identity" ? Number(event.detail.value) / 100 : event.detail.value.trim();
-      if (!this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { [field]: value } }, event.target)) event.preventDefault();
-    });
+    this.#table = this.querySelector("clinker-record-table");
+    this.#table.addEventListener("record-action", (event) => this.#recordAction(event));
     this.#selectionBar = this.querySelector("clinker-selection-bar");
     this.#selectionBar.addEventListener("clear-selection", () => this.#clearDataSelection());
     this.#selectionBar.addEventListener("select-all", (event) => {
@@ -3900,8 +4061,10 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   }
 
   #bind() {
-    this.addEventListener("click", (event) => this.#click(event));
-    this.addEventListener("change", (event) => this.#change(event));
+    this.addEventListener("click", (event) => {
+      const command = event.target.closest("[data-command]")?.dataset.command;
+      if (command) this.#command(command);
+    });
     this.addEventListener("value-change", (event) => {
       if (event.target.matches("[data-kind-picker]")) {
         this.#kind = event.detail.value;
@@ -3910,7 +4073,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       } else if (event.target.matches("[data-gene-view]")) this.#geneView = event.detail.value;
       else return;
       this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-      this.#renderData();
+      this.#renderData(); this.#syncHighlight();
     });
     this.addEventListener("input", (event) => {
       if (event.target.matches("[data-filter]")) this.#setDataFilter(event.target.value);
@@ -3918,97 +4081,28 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     this.addEventListener("keydown", (event) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape") this.#clearDataSelection();
-      const grip = event.target.closest("[data-reorder]");
-      if (grip && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
-        event.preventDefault();
-        const uid = this.#id(grip.dataset.reorder);
-        const index = this.#data().groups.findIndex((group) => group.uid === uid);
-        this.#moveGroup(uid, index + (event.key === "ArrowUp" ? -1 : 1));
-      }
     });
-    this.addEventListener("dragstart", (event) => {
-      const grip = event.target.closest("[data-reorder]");
-      if (!grip) return;
-      this.#draggedGroupId = this.#id(grip.dataset.reorder);
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", String(this.#draggedGroupId));
-    });
-    this.addEventListener("dragover", (event) => {
-      if (this.#draggedGroupId === null) return;
-      const target = event.target.closest(".cm-editor__row--groups");
-      if (!target || this.#id(target.dataset.id) === this.#draggedGroupId) return;
-      event.preventDefault();
-      this.querySelectorAll(".cm-editor__drop-target").forEach((node) => node.classList.remove("cm-editor__drop-target"));
-      target.classList.add("cm-editor__drop-target");
-    });
-    this.addEventListener("drop", (event) => {
-      const target = event.target.closest(".cm-editor__row--groups");
-      if (this.#draggedGroupId !== null && target) {
-        event.preventDefault();
-        const targetId = this.#id(target.dataset.id);
-        const bounds = target.getBoundingClientRect();
-        this.#placeGroup(this.#draggedGroupId, targetId, event.clientY > bounds.top + bounds.height / 2);
-      }
-      this.#finishGroupDrag();
-    });
-    this.addEventListener("dragend", () => this.#finishGroupDrag());
-    this.addEventListener("pointerover", (event) => {
-      const row = event.target.closest(".cm-editor__row, .cm-editor__tree-row");
-      if (!row || row.contains(event.relatedTarget) || !this.#chart?.highlight) return;
-      this.#queueHover(row);
-    });
-    this.addEventListener("pointerout", (event) => {
-      const row = event.target.closest(".cm-editor__row, .cm-editor__tree-row");
-      if (!row || row.contains(event.relatedTarget)) return;
-      this.#queueHover(null);
-    });
-
   }
 
-  #click(event) {
-    if (event.target.closest("clinker-editable-field")) return;
-    const checkbox = event.target.closest("[data-select], [data-select-row]");
-    if (checkbox) {
-      this.#selectRow(checkbox.dataset.selectRow ?? this.#id(checkbox.dataset.select), checkbox.checked, event.shiftKey);
-      return;
-    }
-    const sort = event.target.closest("[data-sort]");
-    if (sort) {
+  #recordAction(event) {
+    if (event.defaultPrevented) return;
+    const { action, id, key, type, changes, row } = event.detail;
+    if (action === "select") this.#selectRow(id, event.detail.checked, event.detail.range);
+    else if (action === "sort") {
       const current = this.#sort[this.#kind];
-      const key = sort.dataset.sort;
       this.#sort[this.#kind] = { key, direction: current?.key === key ? -current.direction : 1 };
-      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
+      this.#table.scrollTo({ top: 0 }); this.#renderData();
+    } else if (action === "toggle") {
+      if (this.#expanded.has(key)) this.#expanded.delete(key); else this.#expanded.add(key);
       this.#renderData();
-      return;
+    } else if (action === "update") {
+      if (!this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes })) event.preventDefault();
+    } else if (action === "remove") this.#removeRecords(type, [id]);
+    else if (action === "reorder") this.#moveGroup(id, this.#data().groups.findIndex((group) => group.uid === id) + event.detail.direction);
+    else if (action === "place") this.#placeGroup(id, event.detail.targetId, event.detail.after);
+    else if (action === "hover") {
+      if (row) this.#highlightRow(row); else this.#applySelectionHighlight();
     }
-    const treeToggle = event.target.closest("[data-tree-toggle]");
-    if (treeToggle) {
-      const key = treeToggle.dataset.treeToggle;
-      if (this.#expanded.has(key)) this.#expanded.delete(key);
-      else this.#expanded.add(key);
-      this.#renderData();
-      return;
-    }
-    const row = event.target.closest(".cm-editor__row, .cm-editor__tree-row");
-    if (row && !event.target.closest("input, select, button")) {
-      const parent = row.querySelector("[data-select-row]");
-      const id = parent?.dataset.selectRow ?? this.#id(row.dataset.id);
-      this.#selectRow(id, parent ? !parent.checked : !this.#selected.has(id), event.shiftKey);
-      return;
-    }
-    const visibility = event.target.closest("[data-visible]");
-    if (visibility) {
-      const { type, id, hidden } = visibility.dataset;
-      this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { hidden: hidden !== "true" } });
-      return;
-    }
-    const button = event.target.closest("button");
-    if (!button) return;
-    if (button.dataset.removeRecord) {
-      this.#removeRecords(button.dataset.removeRecord, [this.#id(button.dataset.id)]);
-      return;
-    }
-    this.#command(button.dataset.command);
   }
 
   #command(command, value) {
@@ -4065,35 +4159,9 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     }
   }
 
-  #change(event) {
-    const target = event.target;
-    if (target.matches("[data-select-row]")) {
-      const row = this.#view().byKey.get(target.dataset.selectRow);
-      if (!row || row.selectIds.every((id) => this.#selected.has(id)) === target.checked) return;
-      this.#selectRow(row.key, target.checked, false);
-      return;
-    }
-    if (target.matches("[data-select]")) {
-      const id = this.#id(target.dataset.select);
-      if (this.#selected.has(id) === target.checked) return;
-      this.#selectRow(id, target.checked, false);
-      return;
-    }
-    if (target.matches("[data-colour]")) {
-      const { type, id } = target.dataset;
-      this.#apply({ type: `${type}.update`, ids: [this.#id(id)], changes: { colour: target.value } });
-      return;
-    }
-  }
-
-  #apply(operation, control) {
+  #apply(operation) {
     if (!this.#chart?.patch) return false;
-    return this.#runEdit(() => this.#chart.patch([operation]), control);
-  }
-
-  #disposeRows() {
-    if (this.#table) this.#table.renderer = null;
-    this.#rowKind = null;
+    return this.#runEdit(() => this.#chart.patch([operation]));
   }
 
   #invalidateData({ replace = false } = {}) {
@@ -4101,7 +4169,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     this.#data(); this.#model.invalidate();
     this.#annotationEditor?.invalidate({ replace });
     if (replace) {
-      this.#disposeRows();
+      this.#table?.reset();
       this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null;
       this.#initializeExpanded();
     } else if (this.#selected.size) {
@@ -4188,7 +4256,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     search.setAttribute("placeholder", annotations ? "Find a cluster" : "Search names, labels, loci, or clusters");
     this.querySelector("[data-record-editor]").hidden = annotations;
     if (annotations) {
-      this.#disposeRows();
+      this.#table?.reset();
       for (const selector of ["[data-gene-view]", "[data-member-filter]", '[data-command="new-group"]',
         '[data-command="toggle-tree"]']) this.querySelector(selector).hidden = true;
       if (!this.#annotationEditor) {
@@ -4205,12 +4273,9 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       return;
     }
     const data = this.#data();
-    const table = this.#table;
-    const head = this.querySelector("[data-head]");
-    const list = this.querySelector("[data-rows]");
+
     if (!data) {
-      this.#disposeRows();
-      table.header = { columns: [], sort: null }; list.textContent = "Set the chart property to edit a ClusterMap chart.";
+      this.#table.state = { attached: false };
       this.#selectionBar.state = { selection: this.#selected, ids: [], summary: "No chart attached.", noun: this.#kind.slice(0, -1) };
       this.#actions.state = { kind: this.#kind, count: 0, groups: [], allGroups: [], loci: [], clusters: [] };
       return;
@@ -4233,34 +4298,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       treeButton.textContent = hasCollapsed ? "Expand visible" : "Collapse all";
       treeButton.title = hasCollapsed ? "Expand all currently visible branches" : "Collapse every tree branch";
     }
-    // Visibility is a compact icon control with an explicit per-row label;
-    // repeating its long text in a 28px heading produces an unreadable merged
-    // “VisibleColour” column on narrow editors.
-    const columns = isTree ? [{ label: "" }, { label: "" }, { label: this.#geneView === "groups" ? "Group / gene" : "Cluster / locus / gene" }, { label: "Group" }, { label: "Colour" }]
-      : this.#kind === "groups" ? [{ label: "" }, { label: "↕" }, { label: "Group" }, { label: "Legend label" }, { label: "Genes" }, { label: "" }, { label: "Colour" }]
-      : this.#kind === "links" ? [{ label: "" }, { label: "Source", sort: "source" }, { label: "Target", sort: "target" }, { label: "Identity", sort: "identity" }, { label: "Endpoint groups", sort: "groups" }, { label: "Link label", sort: "label" }, { label: "" }, { label: "Colour" }]
-        : [{ label: "" }, { label: "Gene", sort: "label" }, { label: "Locus", sort: "locus" }, { label: "Cluster", sort: "cluster" }, { label: "Group", sort: "group" }, { label: "Colour" }];
-    const sort = this.#sort[this.#kind];
-    head.className = `cm-data-head cm-editor__head cm-editor__head--${isTree ? "tree" : this.#kind}`;
-    table.header = { columns, sort };
-    list.className = `cm-editor__rows cm-editor__rows--${isTree ? "tree" : this.#kind}`;
-    if (this.#rowKind !== this.#kind) this.#disposeRows();
-    if (!this.#rowKind) {
-      const kind = this.#kind;
-      this.#rowKind = kind;
-      list.replaceChildren();
-      const components = new WeakMap();
-      const updateRow = (node, row) => components.get(node).update(row, this.#selected);
-      table.renderer = { container: list,
-        key: (row) => `${kind}:${row.type || "row"}:${row.key ?? row.id}`,
-        headerHeight: () => head.offsetHeight,
-        createRow: (row) => {
-          const component = createEditorRow(this.ownerDocument, kind, row.type);
-          components.set(component.node, component); return updateRow(component.node, row);
-        },
-        disposeRow: (node) => components.get(node).destroy(), updateRow };
-    }
-    table.rows = rows;
+    this.#table.state = { kind: this.#kind, geneView: this.#geneView, rows, selection: this.#selected, sort: this.#sort[this.#kind] };
     const summaryText = isTree
       ? `${parentCount.toLocaleString()} ${this.#geneView === "groups" ? "group" : "cluster/locus"} rows · ${ids.length.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
       : `${rows.length.toLocaleString()} visible ${this.#kind}${memberGroup && this.#kind === "genes" ? " in selected group" : ""}${this.#filter ? " matching search" : ""}.`;
@@ -4341,11 +4379,6 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     this.#moveGroup(uid, target + Number(after) - Number(from < target));
   }
 
-  #finishGroupDrag() {
-    this.#draggedGroupId = null;
-    this.querySelectorAll(".cm-editor__drop-target").forEach((node) => node.classList.remove("cm-editor__drop-target"));
-  }
-
   #toggleTree() {
     const rows = this.#view().rows;
     if (rows.some((row) => row.type !== "gene" && !row.open)) this.#expandTree(this.#geneView);
@@ -4354,56 +4387,17 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   }
 
   #syncHighlight() {
-    this.#cancelHover();
+    this.#table?.cancelHover();
     this.#applySelectionHighlight();
   }
 
   #applySelectionHighlight() { this.#chart?.highlight?.(this.#selectionTarget()); }
 
-  #queueHover(row) {
-    this.#hoverRow = row;
-    if (this.#hoverTimer !== null) globalThis.clearTimeout(this.#hoverTimer);
-    this.#hoverTimer = globalThis.setTimeout(() => {
-      this.#hoverTimer = null;
-      if (this.#hoverFrame !== null) return;
-      const requestFrame = globalThis.requestAnimationFrame || ((callback) => globalThis.setTimeout(callback, 0));
-      this.#hoverFrame = requestFrame(() => {
-        this.#hoverFrame = null;
-        const hovered = this.#hoverRow;
-        if (hovered === this.#hoveredRow) return;
-        this.#hoveredRow = hovered;
-        if (hovered?.isConnected) this.#highlightRow(hovered);
-        else this.#applySelectionHighlight();
-      });
-    }, 36);
-  }
-
-  #cancelHover() {
-    if (this.#hoverTimer !== null) globalThis.clearTimeout(this.#hoverTimer);
-    if (this.#hoverFrame !== null) {
-      const cancelFrame = globalThis.cancelAnimationFrame || globalThis.clearTimeout;
-      cancelFrame(this.#hoverFrame);
-    }
-    this.#hoverTimer = null;
-    this.#hoverFrame = null;
-    this.#hoverRow = null;
-    this.#hoveredRow = null;
-  }
-
   #highlightRow(row) {
     if (!this.#chart?.highlight) return;
-    if (row.classList.contains("cm-editor__row--links")) {
-      this.#chart.highlight({ links: [this.#id(row.dataset.id)] });
-      return;
-    }
-    let genes = [];
-    if (row.dataset.selectIds) {
-      try { genes = JSON.parse(row.dataset.selectIds); } catch { genes = []; }
-    } else if (row.classList.contains("cm-editor__row--groups")) {
-      genes = this.#data()?.groups.find((group) => group.uid === this.#id(row.dataset.id))?.genes || [];
-    } else if (row.dataset.id !== undefined) {
-      genes = [this.#id(row.dataset.id)];
-    }
+    if (this.#kind === "links") { this.#chart.highlight({ links: [row.id] }); return; }
+    const genes = row.selectIds || (this.#kind === "groups"
+      ? this.#data()?.groups.find((group) => group.uid === row.id)?.genes || [] : [row.id]);
     this.#chart.highlight({ genes: genes.map((id) => this.#id(id)) });
   }
 
