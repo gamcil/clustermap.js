@@ -1,0 +1,37 @@
+<template id="table">
+<table><thead><tr>
+  <th class="cm-data-cell cm-data-cell--select cm-data-head"><input type="checkbox" aria-label="Select all filtered clusters"></th>
+  <th class="cm-data-cell cm-data-head">Cluster</th>
+</tr></thead><tbody></tbody></table>
+</template>
+
+<template id="column">
+<th class="cm-data-cell cm-data-head"><div class="cm-annotation-column">
+  <clinker-editable-field required></clinker-editable-field><button type="button" class="cm-data-icon-button">×</button>
+</div></th>
+</template>
+
+<template id="add-column">
+<th class="cm-data-cell cm-data-head cm-annotation-add-column"><form>
+  <button type="button" aria-label="Add column">+</button>
+  <input type="text" aria-label="New column name" placeholder="Column name" hidden><button type="submit" hidden>Add</button>
+</form></th>
+</template>
+
+<template id="row">
+<tr class="cm-data-row">
+  <td class="cm-data-cell cm-data-cell--select"><input type="checkbox"></td><th class="cm-data-cell" scope="row"></th>
+</tr>
+</template>
+
+<template id="empty-cell">
+<td class="cm-data-cell"></td>
+</template>
+
+<template id="spacer">
+<tr class="cm-annotation-spacer" aria-hidden="true"><td></td></tr>
+</template>
+
+<template id="cell">
+  <td class="cm-data-cell"><clinker-editable-field placeholder="—" step="any"></clinker-editable-field></td>
+</template>

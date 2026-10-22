@@ -134,7 +134,7 @@ for (const theme of ["light", "dark"]) {
       const component = rows.first().locator("clinker-editable-field").first();
       const encapsulated = await component.count() > 0;
       if (encapsulated) await component.getByRole("button").click();
-      const field = encapsulated ? component.locator("input") : rows.first().locator(".cm-data-field").first();
+      const field = encapsulated ? component.locator("input:visible, select:visible") : rows.first().locator(".cm-data-field").first();
       if (await field.count()) {
         await field.focus();
         if (!encapsulated) { await field.press("Shift+Tab"); await page.keyboard.press("Tab"); }
@@ -193,9 +193,11 @@ test("inline edits, external edits and merges stay synchronized through history"
 test("annotation inline edits, selection and batch values support undo/redo", async ({ page }) => {
   const uid = await annotation(page), before = await panelData(page, uid);
   const ids = await page.evaluate(() => chart.data().clusters.slice(0, 2).map((cluster) => cluster.uid));
-  const input = matrixRows(page).first().locator('input[type="number"]').first();
+  const field = matrixRows(page).first().locator("clinker-editable-field").first(), input = field.locator("input");
+  await field.getByRole("button").click();
   await input.fill("0.75"); await input.press("Enter");
   expect((await panelData(page, uid)).values[ids[0]][0]).toBe(0.75);
+  await field.getByRole("button").click();
   await input.fill("0.2"); await input.press("Escape");
   await expect(input).toHaveValue("0.75");
   for (let i = 0; i < 2; i++) await matrixRows(page).nth(i).getByRole("checkbox").check();
@@ -209,9 +211,9 @@ test("annotation inline edits, selection and batch values support undo/redo", as
   await editor(page).getByRole("button", { name: "Clear values", exact: true }).click();
   for (const id of ids) expect((await panelData(page, uid)).values[id]).toEqual(before.columns.map(() => null));
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
-  await expect(matrixRows(page).first().locator('input[type="number"]').first()).toHaveValue("2.5");
+  expect(await field.evaluate((field) => field.value)).toBe("2.5");
   await editor(page).getByRole("button", { name: "Redo", exact: true }).click();
-  await expect(matrixRows(page).first().locator('input[type="number"]').first()).toHaveValue("");
+  expect(await field.evaluate((field) => field.value)).toBe("");
 });
 
 test("categories can be added, assigned, renamed and removed with replacement", async ({ page }) => {
@@ -224,7 +226,7 @@ test("categories can be added, assigned, renamed and removed with replacement", 
   await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Edit values…$/ }).click();
   await editor(page).getByRole("combobox", { name: "Batch value", exact: true }).selectOption(String(domain.indexOf("Test category")));
   await editor(page).getByRole("button", { name: "Set values", exact: true }).click();
-  await expect(matrixRows(page).first().getByRole("combobox").first()).toHaveValue(String(domain.indexOf("Test category")));
+  await expect(matrixRows(page).first().locator("clinker-editable-field").first()).toContainText("Test category");
   if (!await editor(page).locator(".cm-annotation-categories").evaluate((node) => node.open)) {
     await editor(page).locator(".cm-annotation-categories summary").click();
   }
@@ -301,7 +303,7 @@ test("annotation rows virtualize, preserve offscreen selection and filter all re
   await editor(page).locator("[data-filter]").fill("Cluster 259");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("Cluster 259");
-  await expect(rows.first().locator('input[type="number"]')).toHaveValue("999");
+  expect(await rows.first().locator("clinker-editable-field").evaluate((field) => field.value)).toBe("999");
   await editor(page).locator("[data-filter]").fill("");
   await expect(rows.first()).toContainText("Cluster 0");
   await expect(rows.first().getByRole("checkbox")).toBeChecked();
@@ -332,7 +334,8 @@ for (const renderer of ["svg", "canvas"]) {
     expect(await page.evaluate(() => chart.state().loci.find(([uid]) => uid === "locus-a")[1].end)).toBe(6500);
 
     await annotation(page);
-    const value = matrixRows(page).first().locator('input[type="number"]').first();
+    const field = matrixRows(page).first().locator("clinker-editable-field").first(), value = field.getByRole("spinbutton");
+    await field.getByRole("button").click();
     await value.fill("0.75"); await value.press("Enter");
     await page.evaluate(() => chart.patch([
       { type: "groups.update", ids: [chart.data().groups[0].uid], changes: { label: "Edited gene family", colour: "#315b9a" } },

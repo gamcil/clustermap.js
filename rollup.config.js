@@ -68,7 +68,7 @@ const editor = {
 const annotationUi = {
   input: "src/annotationOverlay.mjs",
   output: { file: "dist/annotationOverlay.mjs", format: "es" },
-  plugins: [nodeResolve({ browser: true }), stripTrailingWhitespace],
+  plugins: [componentAssets, nodeResolve({ browser: true }), stripTrailingWhitespace],
 };
 
 export default [core, editor, annotationUi];

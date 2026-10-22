@@ -748,6 +748,131 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
   document.head.append(style);
 }
 
+const [markup, css] = await Promise.all([
+  "<span part=\"label\"></span>\n<button type=\"button\" part=\"edit-button\">\n  <svg aria-hidden=\"true\" viewBox=\"0 0 24 24\">\n    <path d=\"m4 20 4.1-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.1 16 4 20Z\"></path>\n    <path d=\"m13.8 7.2 3 3\"></path>\n  </svg>\n</button>\n<input type=\"text\" part=\"input\" hidden>\n<select part=\"input\" hidden></select>\n",
+  ":host {\n  display: flex;\n  align-items: center;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  color: inherit;\n  font: inherit;\n}\n:host([hidden]), [hidden] { display: none !important; }\n:host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }\nspan { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }\nspan[data-placeholder] { color: var(--cm-muted, #687586); }\nbutton, input, select { box-sizing: border-box; font: inherit; color: inherit; }\nbutton {\n  display: inline-grid;\n  place-items: center;\n  flex: 0 0 20px;\n  height: 20px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #64748b);\n  cursor: pointer;\n  opacity: var(--cm-edit-affordance-opacity, 0);\n}\n:host(:hover) button, :host(:focus-within) button { opacity: 1; }\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { cursor: default; opacity: .45; }\nsvg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }\ninput, select {\n  width: 100%;\n  min-width: 0;\n  height: 28px;\n  margin-inline: -1px;\n  padding: 2px 7px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  line-height: 20px;\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus, select:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
+]);
+const template = createTemplate(markup);
+const HTMLElementBase = globalThis.HTMLElement || class {};
+
+/** A field owns its draft; consumers accept or cancel value-commit events. */
+class EditableField extends HTMLElementBase {
+  static observedAttributes = ["label", "placeholder", "type", "min", "max", "step", "required", "disabled"];
+  #value = "";
+  #revision = 0;
+  #editing = false;
+  #text;
+  #button;
+  #input;
+  #select;
+  #options = null;
+  get #control() { return this.#options ? this.#select : this.#input; }
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = css;
+    root.append(style, template(this.ownerDocument));
+    this.#text = root.querySelector("span");
+    this.#button = root.querySelector("button");
+    this.#input = root.querySelector("input");
+    this.#select = root.querySelector("select");
+    this.#text.onclick = () => this.#beginEdit();
+    this.#button.onclick = () => this.#beginEdit();
+    for (const control of [this.#input, this.#select]) {
+      control.onblur = () => { if (this.isConnected) this.#commit(); };
+      control.oninput = () => control.setCustomValidity("");
+      control.onkeydown = (event) => {
+        if (event.isComposing) return;
+        if (event.key === "Escape" || event.key === "Enter") {
+          event.preventDefault(); event.stopPropagation();
+          if (event.key === "Escape") this.#finish();
+          else this.#commit();
+          if (!this.#editing) this.#button.focus({ preventScroll: true });
+        }
+      };
+    }
+    this.#select.onchange = () => this.#commit();
+    this.#render();
+  }
+
+  get value() { return this.#value; }
+  set value(value) {
+    const next = String(value ?? ""); this.#revision++;
+    if (next === this.#value) return;
+    this.#value = next;
+    this.#render();
+  }
+
+  set options(entries) {
+    this.#options = entries;
+    if (entries) updateSelectOptions(this.#select, entries);
+    this.#render();
+  }
+
+  attributeChangedCallback(name) {
+    if (name === "disabled" && this.hasAttribute("disabled")) this.#finish();
+    else this.#render();
+  }
+  disconnectedCallback() { this.#finish(); }
+
+  cancelEdit() { this.#finish(); }
+  setCustomValidity(message) { this.#control.setCustomValidity(message); }
+  reportValidity() { return this.#control.reportValidity(); }
+
+  #render() {
+    const label = this.getAttribute("label") || "Value", placeholder = this.getAttribute("placeholder") || "";
+    const display = this.#options?.find(([value]) => String(value) === this.#value)?.[1] ?? this.#value;
+    this.#text.textContent = display || placeholder; this.#text.title = display || placeholder;
+    this.#text.toggleAttribute("data-placeholder", !this.#value);
+    this.#button.setAttribute("aria-label", `Edit ${label}`); this.#button.title = `Edit ${label}`;
+    this.#select.setAttribute("aria-label", label);
+    this.#input.setAttribute("aria-label", label); this.#input.placeholder = placeholder;
+    const type = this.getAttribute("type") || "text";
+    if (this.#input.type !== type) this.#input.type = type;
+    for (const name of ["min", "max", "step"]) {
+      if (this.hasAttribute(name)) this.#input.setAttribute(name, this.getAttribute(name));
+      else this.#input.removeAttribute(name);
+    }
+    this.#select.required = this.hasAttribute("required");
+    this.#input.required = this.hasAttribute("required");
+    this.#select.disabled = this.#input.disabled = this.#button.disabled = this.hasAttribute("disabled");
+    this.#text.hidden = this.#button.hidden = this.#editing;
+    this.#input.hidden = !this.#editing || Boolean(this.#options);
+    this.#select.hidden = !this.#editing || !this.#options;
+    if (!this.#editing) this.#control.value = this.#value;
+  }
+
+  #beginEdit() {
+    if (this.hasAttribute("disabled")) return;
+    if (this.hasAttribute("compact")) this.style.setProperty("--cm-edit-width", `${this.getBoundingClientRect().width}px`);
+    this.#editing = true;
+    this.#control.value = this.#value; this.#control.setCustomValidity("");
+    this.#render(); this.#control.focus({ preventScroll: true }); this.#control.select?.();
+  }
+
+  #finish() {
+    this.#editing = false; this.#control.setCustomValidity("");
+    this.style.removeProperty("--cm-edit-width"); this.#render();
+  }
+
+  #commit() {
+    if (!this.#editing) return;
+    if (!this.#control.reportValidity()) return;
+    const value = this.#control.value, revision = this.#revision;
+    if (value !== this.#value) {
+      const event = new CustomEvent("value-commit", { detail: { value }, bubbles: true, composed: true, cancelable: true });
+      if (!this.dispatchEvent(event)) { this.#control.reportValidity(); return; }
+      if (revision === this.#revision) this.#value = value;
+    }
+    this.#finish();
+  }
+}
+
+function defineEditableField() {
+  if (!customElements.get("clinker-editable-field")) customElements.define("clinker-editable-field", EditableField);
+}
+
 /** Selection shared by flat rows, tree leaves and annotation matrices. */
 class RowSelection extends Set {
   #anchor = null;
@@ -1049,24 +1174,9 @@ const editorTemplate = createTemplate(`<div class="cm-data-ui cm-annotation-data
   </div>
   <div class="cm-data-error" data-data-error role="alert"></div><div class="cm-annotation-data-body"></div>
 </div>`);
-const tableTemplate = createTemplate(`<table><thead><tr>
-  <th class="cm-data-cell cm-data-cell--select cm-data-head"><input type="checkbox" aria-label="Select all filtered clusters"></th>
-  <th class="cm-data-cell cm-data-head">Cluster</th>
-</tr></thead><tbody></tbody></table>`);
-const columnTemplate = createTemplate(`<th class="cm-data-cell cm-data-head"><div class="cm-annotation-column">
-  <input type="text"><button type="button" class="cm-data-icon-button">×</button>
-</div></th>`);
-const addColumnTemplate = createTemplate(`<th class="cm-data-cell cm-data-head cm-annotation-add-column"><form>
-  <button type="button" aria-label="Add column">+</button>
-  <input type="text" aria-label="New column name" placeholder="Column name" hidden><button type="submit" hidden>Add</button>
-</form></th>`);
-const rowTemplate = createTemplate(`<tr class="cm-data-row">
-  <td class="cm-data-cell cm-data-cell--select"><input type="checkbox"></td><th class="cm-data-cell" scope="row"></th>
-</tr>`);
-const numericCellTemplate = createTemplate('<td class="cm-data-cell"><input type="number" step="any" placeholder="—"></td>');
-const categoryCellTemplate = createTemplate('<td class="cm-data-cell"><select></select></td>');
-const emptyCellTemplate = createTemplate('<td class="cm-data-cell"></td>');
-const spacerTemplate = createTemplate('<tr class="cm-annotation-spacer" aria-hidden="true"><td></td></tr>');
+const matrixTemplate = createTemplate(await "<template id=\"table\">\n<table><thead><tr>\n  <th class=\"cm-data-cell cm-data-cell--select cm-data-head\"><input type=\"checkbox\" aria-label=\"Select all filtered clusters\"></th>\n  <th class=\"cm-data-cell cm-data-head\">Cluster</th>\n</tr></thead><tbody></tbody></table>\n</template>\n\n<template id=\"column\">\n<th class=\"cm-data-cell cm-data-head\"><div class=\"cm-annotation-column\">\n  <clinker-editable-field required></clinker-editable-field><button type=\"button\" class=\"cm-data-icon-button\">×</button>\n</div></th>\n</template>\n\n<template id=\"add-column\">\n<th class=\"cm-data-cell cm-data-head cm-annotation-add-column\"><form>\n  <button type=\"button\" aria-label=\"Add column\">+</button>\n  <input type=\"text\" aria-label=\"New column name\" placeholder=\"Column name\" hidden><button type=\"submit\" hidden>Add</button>\n</form></th>\n</template>\n\n<template id=\"row\">\n<tr class=\"cm-data-row\">\n  <td class=\"cm-data-cell cm-data-cell--select\"><input type=\"checkbox\"></td><th class=\"cm-data-cell\" scope=\"row\"></th>\n</tr>\n</template>\n\n<template id=\"empty-cell\">\n<td class=\"cm-data-cell\"></td>\n</template>\n\n<template id=\"spacer\">\n<tr class=\"cm-annotation-spacer\" aria-hidden=\"true\"><td></td></tr>\n</template>\n\n<template id=\"cell\">\n  <td class=\"cm-data-cell\"><clinker-editable-field placeholder=\"—\" step=\"any\"></clinker-editable-field></td>\n</template>\n");
+const numericInputTemplate = createTemplate('<input type="number" step="any" placeholder="Value">');
+const categoryInputTemplate = createTemplate('<select></select>');
 const batchTemplate = createTemplate(`<div class="cm-data-selection-actions">
   <select aria-label="Columns to edit"></select><span data-value></span>
   <button type="button" data-set>Set values</button><button type="button" data-clear>Clear values</button>
@@ -1091,6 +1201,7 @@ const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to at
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
+  defineEditableField();
   installDataEditorStyle(document); installStyle$1(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector(".cm-data-toolbar");
@@ -1180,8 +1291,10 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
 
   function createMatrix(layout) {
     const panel = current(), categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel), extra = panel.type === "heatmap";
+    const templates = matrixTemplate(document);
+    const element = (name) => document.importNode(templates.getElementById(name).content, true).firstElementChild;
     const tableArea = layout.viewport; tableArea.classList.add("cm-annotation-matrix");
-    const table = tableTemplate(document).firstElementChild, head = table.querySelector("tr"), all = head.querySelector("input");
+    const table = element("table"), head = table.querySelector("tr"), all = head.querySelector("input");
     tableArea.append(table);
     let clusters = [], mounted = [];
     const rowIds = new WeakMap();
@@ -1197,7 +1310,7 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
     selectionControls.actions.append(batch);
     updateSelectOptions(columns, [["all", "All columns"], ...panel.columns.map((name, index) => [String(index), name])]); columns.value = batchColumn;
     columns.onchange = () => { batchColumn = columns.value; };
-    const value = (categorical ? categoryCellTemplate : numericCellTemplate)(document).firstElementChild.firstElementChild;
+    const value = (categorical ? categoryInputTemplate : numericInputTemplate)(document).firstElementChild;
     value.setAttribute("aria-label", "Batch value"); value.placeholder = "Value";
     if (categorical) updateSelectOptions(value, [["", "Missing"], ...resolved.domain.map((name, index) => [String(index), name])]);
     value.value = batchValue; value.onchange = () => { batchValue = value.value; }; batch.querySelector("[data-value]").replaceWith(value);
@@ -1221,11 +1334,12 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
     };
     batch.querySelector("[data-set]").onclick = () => applyValues(false); batch.querySelector("[data-clear]").onclick = () => applyValues(true);
     panel.columns.forEach((column, index) => {
-      const heading = columnTemplate(document).firstElementChild, field = heading.querySelector("input"), remove = heading.querySelector("button");
-      field.value = column; field.setAttribute("aria-label", `Column ${index + 1} name`);
-      bindEditableField(field, { commit: (value, control) => {
-        const columns = [...current().columns]; columns[index] = value; return update({ columns }, true, control);
-      } });
+      const heading = element("column"), field = heading.querySelector("clinker-editable-field"), remove = heading.querySelector("button");
+      field.value = column; field.setAttribute("label", `Column ${index + 1} name`);
+      field.addEventListener("value-commit", (event) => {
+        const columns = [...current().columns]; columns[index] = event.detail.value.trim();
+        if (update({ columns }, true, field) === false) event.preventDefault();
+      });
       if (extra) {
         remove.setAttribute("aria-label", `Remove column ${column}`); remove.disabled = panel.columns.length === 1;
         remove.onclick = () => update({ columns: current().columns.filter((_, i) => i !== index),
@@ -1234,7 +1348,7 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
       head.append(heading);
     });
     if (extra) {
-      const heading = addColumnTemplate(document).firstElementChild, form = heading.querySelector("form");
+      const heading = element("add-column"), form = heading.querySelector("form");
       const [add, save] = form.querySelectorAll("button"), name = form.querySelector("input");
       add.onclick = () => { add.hidden = true; name.hidden = save.hidden = false; name.focus(); };
       form.onsubmit = (event) => {
@@ -1248,39 +1362,42 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
       selection.select(cluster.uid, checked, { range: shift, orderedIds: clusters.map((cluster) => cluster.uid) }); syncSelection();
     };
     const createRow = (cluster) => {
-      const row = rowTemplate(document).firstElementChild, check = row.querySelector("input"), name = row.querySelector("th");
+      const row = element("row"), check = row.querySelector("input"), name = row.querySelector("th");
       rowIds.set(row, cluster.uid); check.onclick = (event) => toggleRow(cluster, check.checked, event.shiftKey);
       name.onclick = (event) => toggleRow(cluster, !selection.has(cluster.uid), event.shiftKey);
       panel.columns.forEach((column, index) => {
-        const cell = (categorical ? categoryCellTemplate : numericCellTemplate)(document).firstElementChild, field = cell.firstElementChild;
-        if (categorical) updateSelectOptions(field, [["missing", "Missing"], ...resolved.domain.map((name, i) => [String(i), name])]);
-        bindEditableField(field, { commit: (value, control) => {
+        const cell = element("cell"), field = cell.firstElementChild;
+        if (categorical) field.options = [["", "Missing"], ...resolved.domain.map((name, i) => [String(i), name])];
+        else field.setAttribute("type", "number");
+        field.addEventListener("value-commit", (event) => {
           const source = current(), values = [...(source.values[cluster.uid] ?? source.columns.map(() => null))];
-          values[index] = categorical ? value === "missing" ? null : resolved.domain[Number(value)] : value === "" ? null : Number(value);
-          return updateRows({ [cluster.uid]: values }, false, control);
-        } });
+          const value = event.detail.value;
+          values[index] = value === "" ? null : categorical ? resolved.domain[Number(value)] : Number(value);
+          if (updateRows({ [cluster.uid]: values }, false, field) === false) event.preventDefault();
+        });
         row.append(cell);
       });
-      if (extra) row.append(emptyCellTemplate(document));
+      if (extra) row.append(element("empty-cell"));
       return updateRow(row, cluster);
     };
     const updateRow = (row, cluster) => {
       const name = row.querySelector("th"), label = cluster.name || cluster.uid;
       name.textContent = label; name.title = cluster.uid; row.querySelector("input").setAttribute("aria-label", `Select ${label}`);
-      [...row.querySelectorAll(".cm-data-field")].forEach((field, index) => {
+      [...row.querySelectorAll("clinker-editable-field")].forEach((field, index) => {
         const value = current().values[cluster.uid]?.[index] ?? null;
-        field.setAttribute("aria-label", `${label}: ${panel.columns[index]}`);
-        updateFieldValue(field, categorical ? value === null ? "missing" : String(resolved.domain.indexOf(value)) : value);
+        field.setAttribute("label", `${label}: ${panel.columns[index]}`);
+        field.value = categorical ? value === null ? "" : String(resolved.domain.indexOf(value)) : value;
       });
       return row;
     };
-    const list = createVirtualRows({ viewport: tableArea, container: table.querySelector("tbody"), key: (cluster) => cluster.uid, createRow, updateRow,
-      createSpacer: () => { const row = spacerTemplate(document).firstElementChild; row.firstElementChild.colSpan = panel.columns.length + 2 + Number(extra); return row; },
+    const cancelFields = (root) => { for (const field of root.querySelectorAll("clinker-editable-field")) field.cancelEdit(); };
+    const list = createVirtualRows({ viewport: tableArea, container: table.querySelector("tbody"), key: (cluster) => cluster.uid, createRow, updateRow, disposeRow: cancelFields,
+      createSpacer: () => { const row = element("spacer"); row.firstElementChild.colSpan = panel.columns.length + 2 + Number(extra); return row; },
       headerHeight: () => head.offsetHeight, onRender: (nodes) => { mounted = nodes; table.setAttribute("aria-rowcount", clusters.length + 1); syncSelection(); } });
     const filterRows = () => {
       const needle = filter.trim().toLowerCase(); clusters = getClusters().filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle)); list.setRows(clusters);
     };
-    return { update: filterRows, filterRows() { tableArea.scrollTop = 0; filterRows(); }, syncSelection, destroy: () => list.destroy() };
+    return { update: filterRows, filterRows() { tableArea.scrollTop = 0; filterRows(); }, syncSelection, destroy() { cancelFields(table); list.destroy(); } };
   }
 
   function createReplacement(layout) {
@@ -1392,7 +1509,7 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
     get filter() { return filter; }, setFilter(value) { filter = value; view?.filterRows?.(); },
     invalidate({ replace = false } = {}) {
       renderedPanel = renderedPanels = renderedClusters = null;
-      if (replace) { selection.clear(); selected = selectionPanel = null; }
+      if (replace) { view?.destroy?.(); view = null; viewKey = null; selection.clear(); selected = selectionPanel = null; }
     },
     destroy() { view?.destroy?.(); toolbar.remove(); },
     update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters)) render(); } };
@@ -1425,9 +1542,8 @@ function installStyle$1(document) {
 .cm-annotation-matrix tbody th { background:var(--cm-row-background); }
 .cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,#f3f6fa); }
 .cm-annotation-matrix tbody th { cursor:pointer; min-width:200px; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }
-.cm-annotation-matrix :is(input:not([type=checkbox]),select) { width:140px; }
+.cm-annotation-matrix :is(input:not([type=checkbox]),clinker-editable-field) { width:140px; }
 .cm-annotation-column { display:flex; align-items:center; }
-.cm-annotation-column input { font-weight:inherit; }
 .cm-annotation-column button { --cm-icon-size:24px; visibility:hidden; }
 .cm-annotation-column:is(:hover,:focus-within) button { visibility:visible; }
 .cm-annotation-add-column { width:36px; }

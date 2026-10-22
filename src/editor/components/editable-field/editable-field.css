@@ -11,7 +11,7 @@
 :host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }
 span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
 span[data-placeholder] { color: var(--cm-muted, #687586); }
-button, input { box-sizing: border-box; font: inherit; color: inherit; }
+button, input, select { box-sizing: border-box; font: inherit; color: inherit; }
 button {
   display: inline-grid;
   place-items: center;
@@ -30,7 +30,7 @@ button:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #16
 button:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }
 button:disabled { cursor: default; opacity: .45; }
 svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-input {
+input, select {
   width: 100%;
   min-width: 0;
   height: 28px;
@@ -42,4 +42,4 @@ input {
   line-height: 20px;
 }
 input::placeholder { color: var(--cm-muted, #687586); }
-input:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }
+input:focus, select:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }

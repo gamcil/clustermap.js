@@ -1,7 +1,9 @@
 import { createDataPanel, createSelectionControls, createDataSearch, installDataEditorStyle } from "./dataEditorUi.mjs";
+import { defineEditableField } from "./editor/components/editable-field/editable-field.js";
+import { textAsset } from "./editor/shared/textAsset.js";
 import { RowSelection } from "./rowSelection.mjs";
 import { createVirtualRows } from "./virtualRows.mjs";
-import { createTemplate, bindEditableField, updateFieldValue, updateSelectOptions, createActionRunner, colourHex as hex } from "./uiControls.mjs";
+import { createTemplate, updateFieldValue, updateSelectOptions, createActionRunner, colourHex as hex } from "./uiControls.mjs";
 import { parseAnnotationTable, annotationTableText, mapAnnotationValues } from "./annotationData.mjs";
 import { createAnnotationCreateControls } from "./annotationCreateControls.mjs";
 
@@ -15,24 +17,9 @@ const editorTemplate = createTemplate(`<div class="cm-data-ui cm-annotation-data
   </div>
   <div class="cm-data-error" data-data-error role="alert"></div><div class="cm-annotation-data-body"></div>
 </div>`);
-const tableTemplate = createTemplate(`<table><thead><tr>
-  <th class="cm-data-cell cm-data-cell--select cm-data-head"><input type="checkbox" aria-label="Select all filtered clusters"></th>
-  <th class="cm-data-cell cm-data-head">Cluster</th>
-</tr></thead><tbody></tbody></table>`);
-const columnTemplate = createTemplate(`<th class="cm-data-cell cm-data-head"><div class="cm-annotation-column">
-  <input type="text"><button type="button" class="cm-data-icon-button">×</button>
-</div></th>`);
-const addColumnTemplate = createTemplate(`<th class="cm-data-cell cm-data-head cm-annotation-add-column"><form>
-  <button type="button" aria-label="Add column">+</button>
-  <input type="text" aria-label="New column name" placeholder="Column name" hidden><button type="submit" hidden>Add</button>
-</form></th>`);
-const rowTemplate = createTemplate(`<tr class="cm-data-row">
-  <td class="cm-data-cell cm-data-cell--select"><input type="checkbox"></td><th class="cm-data-cell" scope="row"></th>
-</tr>`);
-const numericCellTemplate = createTemplate('<td class="cm-data-cell"><input type="number" step="any" placeholder="—"></td>');
-const categoryCellTemplate = createTemplate('<td class="cm-data-cell"><select></select></td>');
-const emptyCellTemplate = createTemplate('<td class="cm-data-cell"></td>');
-const spacerTemplate = createTemplate('<tr class="cm-annotation-spacer" aria-hidden="true"><td></td></tr>');
+const matrixTemplate = createTemplate(await textAsset(new URL("./editor/components/annotation-table/annotation-table.html", import.meta.url)));
+const numericInputTemplate = createTemplate('<input type="number" step="any" placeholder="Value">');
+const categoryInputTemplate = createTemplate('<select></select>');
 const batchTemplate = createTemplate(`<div class="cm-data-selection-actions">
   <select aria-label="Columns to edit"></select><span data-value></span>
   <button type="button" data-set>Set values</button><button type="button" data-clear>Clear values</button>
@@ -57,6 +44,7 @@ const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to at
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 export function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
+  defineEditableField();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector(".cm-data-toolbar");
@@ -146,8 +134,10 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
 
   function createMatrix(layout) {
     const panel = current(), categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel), extra = panel.type === "heatmap";
+    const templates = matrixTemplate(document);
+    const element = (name) => document.importNode(templates.getElementById(name).content, true).firstElementChild;
     const tableArea = layout.viewport; tableArea.classList.add("cm-annotation-matrix");
-    const table = tableTemplate(document).firstElementChild, head = table.querySelector("tr"), all = head.querySelector("input");
+    const table = element("table"), head = table.querySelector("tr"), all = head.querySelector("input");
     tableArea.append(table);
     let clusters = [], mounted = [];
     const rowIds = new WeakMap();
@@ -163,7 +153,7 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
     selectionControls.actions.append(batch);
     updateSelectOptions(columns, [["all", "All columns"], ...panel.columns.map((name, index) => [String(index), name])]); columns.value = batchColumn;
     columns.onchange = () => { batchColumn = columns.value; };
-    const value = (categorical ? categoryCellTemplate : numericCellTemplate)(document).firstElementChild.firstElementChild;
+    const value = (categorical ? categoryInputTemplate : numericInputTemplate)(document).firstElementChild;
     value.setAttribute("aria-label", "Batch value"); value.placeholder = "Value";
     if (categorical) updateSelectOptions(value, [["", "Missing"], ...resolved.domain.map((name, index) => [String(index), name])]);
     value.value = batchValue; value.onchange = () => { batchValue = value.value; }; batch.querySelector("[data-value]").replaceWith(value);
@@ -187,11 +177,12 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
     };
     batch.querySelector("[data-set]").onclick = () => applyValues(false); batch.querySelector("[data-clear]").onclick = () => applyValues(true);
     panel.columns.forEach((column, index) => {
-      const heading = columnTemplate(document).firstElementChild, field = heading.querySelector("input"), remove = heading.querySelector("button");
-      field.value = column; field.setAttribute("aria-label", `Column ${index + 1} name`);
-      bindEditableField(field, { commit: (value, control) => {
-        const columns = [...current().columns]; columns[index] = value; return update({ columns }, true, control);
-      } });
+      const heading = element("column"), field = heading.querySelector("clinker-editable-field"), remove = heading.querySelector("button");
+      field.value = column; field.setAttribute("label", `Column ${index + 1} name`);
+      field.addEventListener("value-commit", (event) => {
+        const columns = [...current().columns]; columns[index] = event.detail.value.trim();
+        if (update({ columns }, true, field) === false) event.preventDefault();
+      });
       if (extra) {
         remove.setAttribute("aria-label", `Remove column ${column}`); remove.disabled = panel.columns.length === 1;
         remove.onclick = () => update({ columns: current().columns.filter((_, i) => i !== index),
@@ -200,7 +191,7 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
       head.append(heading);
     });
     if (extra) {
-      const heading = addColumnTemplate(document).firstElementChild, form = heading.querySelector("form");
+      const heading = element("add-column"), form = heading.querySelector("form");
       const [add, save] = form.querySelectorAll("button"), name = form.querySelector("input");
       add.onclick = () => { add.hidden = true; name.hidden = save.hidden = false; name.focus(); };
       form.onsubmit = (event) => {
@@ -214,39 +205,42 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
       selection.select(cluster.uid, checked, { range: shift, orderedIds: clusters.map((cluster) => cluster.uid) }); syncSelection();
     };
     const createRow = (cluster) => {
-      const row = rowTemplate(document).firstElementChild, check = row.querySelector("input"), name = row.querySelector("th");
+      const row = element("row"), check = row.querySelector("input"), name = row.querySelector("th");
       rowIds.set(row, cluster.uid); check.onclick = (event) => toggleRow(cluster, check.checked, event.shiftKey);
       name.onclick = (event) => toggleRow(cluster, !selection.has(cluster.uid), event.shiftKey);
       panel.columns.forEach((column, index) => {
-        const cell = (categorical ? categoryCellTemplate : numericCellTemplate)(document).firstElementChild, field = cell.firstElementChild;
-        if (categorical) updateSelectOptions(field, [["missing", "Missing"], ...resolved.domain.map((name, i) => [String(i), name])]);
-        bindEditableField(field, { commit: (value, control) => {
+        const cell = element("cell"), field = cell.firstElementChild;
+        if (categorical) field.options = [["", "Missing"], ...resolved.domain.map((name, i) => [String(i), name])];
+        else field.setAttribute("type", "number");
+        field.addEventListener("value-commit", (event) => {
           const source = current(), values = [...(source.values[cluster.uid] ?? source.columns.map(() => null))];
-          values[index] = categorical ? value === "missing" ? null : resolved.domain[Number(value)] : value === "" ? null : Number(value);
-          return updateRows({ [cluster.uid]: values }, false, control);
-        } });
+          const value = event.detail.value;
+          values[index] = value === "" ? null : categorical ? resolved.domain[Number(value)] : Number(value);
+          if (updateRows({ [cluster.uid]: values }, false, field) === false) event.preventDefault();
+        });
         row.append(cell);
       });
-      if (extra) row.append(emptyCellTemplate(document));
+      if (extra) row.append(element("empty-cell"));
       return updateRow(row, cluster);
     };
     const updateRow = (row, cluster) => {
       const name = row.querySelector("th"), label = cluster.name || cluster.uid;
       name.textContent = label; name.title = cluster.uid; row.querySelector("input").setAttribute("aria-label", `Select ${label}`);
-      [...row.querySelectorAll(".cm-data-field")].forEach((field, index) => {
+      [...row.querySelectorAll("clinker-editable-field")].forEach((field, index) => {
         const value = current().values[cluster.uid]?.[index] ?? null;
-        field.setAttribute("aria-label", `${label}: ${panel.columns[index]}`);
-        updateFieldValue(field, categorical ? value === null ? "missing" : String(resolved.domain.indexOf(value)) : value);
+        field.setAttribute("label", `${label}: ${panel.columns[index]}`);
+        field.value = categorical ? value === null ? "" : String(resolved.domain.indexOf(value)) : value;
       });
       return row;
     };
-    const list = createVirtualRows({ viewport: tableArea, container: table.querySelector("tbody"), key: (cluster) => cluster.uid, createRow, updateRow,
-      createSpacer: () => { const row = spacerTemplate(document).firstElementChild; row.firstElementChild.colSpan = panel.columns.length + 2 + Number(extra); return row; },
+    const cancelFields = (root) => { for (const field of root.querySelectorAll("clinker-editable-field")) field.cancelEdit(); };
+    const list = createVirtualRows({ viewport: tableArea, container: table.querySelector("tbody"), key: (cluster) => cluster.uid, createRow, updateRow, disposeRow: cancelFields,
+      createSpacer: () => { const row = element("spacer"); row.firstElementChild.colSpan = panel.columns.length + 2 + Number(extra); return row; },
       headerHeight: () => head.offsetHeight, onRender: (nodes) => { mounted = nodes; table.setAttribute("aria-rowcount", clusters.length + 1); syncSelection(); } });
     const filterRows = () => {
       const needle = filter.trim().toLowerCase(); clusters = getClusters().filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle)); list.setRows(clusters);
     };
-    return { update: filterRows, filterRows() { tableArea.scrollTop = 0; filterRows(); }, syncSelection, destroy: () => list.destroy() };
+    return { update: filterRows, filterRows() { tableArea.scrollTop = 0; filterRows(); }, syncSelection, destroy() { cancelFields(table); list.destroy(); } };
   }
 
   function createReplacement(layout) {
@@ -358,7 +352,7 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
     get filter() { return filter; }, setFilter(value) { filter = value; view?.filterRows?.(); },
     invalidate({ replace = false } = {}) {
       renderedPanel = renderedPanels = renderedClusters = null;
-      if (replace) { selection.clear(); selected = selectionPanel = null; }
+      if (replace) { view?.destroy?.(); view = null; viewKey = null; selection.clear(); selected = selectionPanel = null; }
     },
     destroy() { view?.destroy?.(); toolbar.remove(); },
     update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters)) render(); } };
@@ -391,9 +385,8 @@ function installStyle(document) {
 .cm-annotation-matrix tbody th { background:var(--cm-row-background); }
 .cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,#f3f6fa); }
 .cm-annotation-matrix tbody th { cursor:pointer; min-width:200px; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }
-.cm-annotation-matrix :is(input:not([type=checkbox]),select) { width:140px; }
+.cm-annotation-matrix :is(input:not([type=checkbox]),clinker-editable-field) { width:140px; }
 .cm-annotation-column { display:flex; align-items:center; }
-.cm-annotation-column input { font-weight:inherit; }
 .cm-annotation-column button { --cm-icon-size:24px; visibility:hidden; }
 .cm-annotation-column:is(:hover,:focus-within) button { visibility:visible; }
 .cm-annotation-add-column { width:36px; }
