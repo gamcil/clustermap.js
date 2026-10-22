@@ -794,6 +794,39 @@ export async function createWebGpuRenderer(canvas) {
   const appendRectangle = (values, rect, x, y, slot = 0) => {
     values.push(x + rect.x, y + rect.y, rect.width, rect.height, ...rgba(rect.fill), slot);
   };
+  const patchAnnotationCells = (panels) => {
+    if (!annotationPanels || panels.length !== annotationPanels.length) return false;
+    const patches = [];
+    for (let i = 0; i < panels.length; i++) {
+      const panel = panels[i], before = annotationPanels[i];
+      if (panel.uid !== before.uid || panel.x !== before.x || panel.rowOffset !== before.rowOffset ||
+          panel.rows.length !== before.rows.length) return false;
+      for (let j = 0; j < panel.rows.length; j++) {
+        const row = panel.rows[j], oldRow = before.rows[j];
+        if (row === oldRow) continue;
+        if (row.uid !== oldRow.uid || row.cells.length !== oldRow.cells.length) return false;
+        const offsets = annotationRows.get(panel.uid).get(row.uid);
+        const slot = geometry.clusterSlots.get(row.uid);
+        const y = scene.clusters.get(row.uid).y + panel.rowOffset - clusterBaseOffsets[slot * 2 + 1];
+        for (let k = 0; k < row.cells.length; k++) {
+          const rects = row.cells[k].rects, oldRects = oldRow.cells[k].rects;
+          if (rects.length !== oldRects.length) return false;
+          if (rects === oldRects || rects.every((rect, n) =>
+            ["x", "y", "width", "height", "fill"].every((key) => rect[key] === oldRects[n][key]))) continue;
+          const offset = offsets[k], last = patches[patches.length - 1];
+          const patch = last && last.offset + last.values.length / 9 === offset
+            ? last : { offset, values: [] };
+          if (patch !== last) patches.push(patch);
+          for (const rect of rects) appendRectangle(patch.values, rect, panel.x, y, slot);
+        }
+      }
+    }
+    // Validate all ranges before writing: a changed rectangle count requires rebuilding offsets.
+    for (const { offset, values } of patches) {
+      device.queue.writeBuffer(annotationBuffer, offset * 9 * 4, new Float32Array(values));
+    }
+    return true;
+  };
   const updateAnnotations = (nextPreview) => {
     if (!scene.annotationPanels?.length) {
       annotationBuffer?.destroy(); annotationKeyBuffer?.destroy();
@@ -809,8 +842,9 @@ export async function createWebGpuRenderer(canvas) {
         const before = annotationPanels[i];
         return panel.uid !== before.uid || panel.rows !== before.rows || panel.x !== before.x || panel.rowOffset !== before.rowOffset;
       }));
+    const patched = cellsChanged && patchAnnotationCells(scene.annotationPanels);
     if (changed) annotationPanels = scene.annotationPanels;
-    if (cellsChanged) {
+    if (cellsChanged && !patched) {
       annotationRows.clear();
       const values = [];
       for (const panel of annotationPanels || []) {
