@@ -289,6 +289,9 @@ test("appearance component synchronizes config and preserves disclosure state th
   await search.press("Escape");
   await expect(legend.locator("details")).toHaveAttribute("open", "");
   await expect(panel.locator('[data-appearance-section="genes"]')).not.toHaveAttribute("open");
+  await legend.locator("summary").press("Enter");
+  await search.fill("minimap"); await search.press("Escape");
+  await expect(legend.locator("details")).not.toHaveAttribute("open");
   await panel.locator('[data-config="colourBar.domain.minMode"]').selectOption("data");
   await expect(panel.locator('[data-config="colourBar.domain.min"]')).toBeDisabled();
   await panel.locator('[data-config="colourBar.domain.minMode"]').selectOption("fixed");

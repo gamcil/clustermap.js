@@ -3279,7 +3279,6 @@ class AppearancePanel extends HTMLElementBase$5 {
   #hasTree = false;
   #filter = "";
   #expanded = new Set();
-  #disclosures = new WeakMap();
   #sections;
 
   constructor() {
@@ -3292,14 +3291,12 @@ class AppearancePanel extends HTMLElementBase$5 {
         search: `${box.querySelector("legend").textContent} ${control.getAttribute("aria-label")} ${control.dataset.config}`.toLowerCase() })) }));
     const search = root.querySelector("clinker-search-field");
     search.addEventListener("input", () => { this.#filter = search.value.trim().toLowerCase(); this.#sync(); });
-    root.addEventListener("toggle", (event) => {
-      const details = event.target;
-      if (!details.matches("details")) return;
-      const requested = this.#disclosures.get(details); this.#disclosures.delete(details);
-      if (requested === details.open || this.#filter) return;
+    root.addEventListener("click", (event) => {
+      const details = event.target.closest("summary")?.parentElement;
+      if (!details || event.defaultPrevented || this.#filter) return;
       const key = details.dataset.appearanceSection;
-      if (details.open) this.#expanded.add(key); else this.#expanded.delete(key);
-    }, true);
+      if (details.open) this.#expanded.delete(key); else this.#expanded.add(key);
+    });
     root.addEventListener("change", (event) => {
       const input = event.target;
       if (!input.matches("[data-config]")) return;
@@ -3329,8 +3326,7 @@ class AppearancePanel extends HTMLElementBase$5 {
       if (!box.hidden) visible++;
       if (details) {
         details.hidden = !fields.some(({ advanced, row }) => advanced && !row.hidden);
-        const open = Boolean(this.#filter) || this.#expanded.has(details.dataset.appearanceSection);
-        if (details.open !== open) { this.#disclosures.set(details, open); details.open = open; }
+        details.open = Boolean(this.#filter) || this.#expanded.has(details.dataset.appearanceSection);
       }
     }
     const empty = this.shadowRoot.querySelector(".empty");
