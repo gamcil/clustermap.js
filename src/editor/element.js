@@ -918,8 +918,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
     if (!config || this.querySelector('[data-panel="appearance"]')?.hidden) return;
     if (!this.#appearanceView) {
       this.#appearanceView = createAppearanceControls({ document: this.ownerDocument,
-        patch: (ops) => this.#chart.patch(ops), preview: (ops) => this.#chart.previewTreePresentation(ops),
-        rotate: (uid) => this.#chart.rotateTreeNode(uid) });
+        patch: (ops) => this.#chart.patch(ops), preview: (ops) => this.#chart.previewTreePresentation(ops) });
       this.#appearanceView.node.addEventListener("config-change", (event) => {
         if (this.#setConfig(event.detail) === false) event.preventDefault();
       });

@@ -151,7 +151,7 @@ export function createHtmlOverlay({
       focusTarget = event.target;
       const options = actions.treeControls();
       menuTree = options.tree;
-      const controls = createTreeControls({ ...options, nodeUid: uid, policy: false,
+      const controls = createTreeControls({ ...options, nodeUid: uid,
         onResize: () => { if (treeMenu) position(event); } });
       show(event, select(controls));
       treeMenu = true;

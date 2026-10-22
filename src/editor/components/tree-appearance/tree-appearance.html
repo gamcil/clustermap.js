@@ -1,0 +1,12 @@
+<fieldset hidden>
+  <legend>Clade colouring</legend>
+  <label><span>Colour clades</span><input type="checkbox" data-enabled aria-label="Colour clades"></label>
+  <div data-options hidden>
+    <label><span>Cut height</span><input type="number" min="0" step="any" data-height aria-label="Cut height"><button type="button" data-auto title="Use automatic cut height (70%)">Auto</button></label>
+    <input type="range" min="0" aria-label="Preview cut height">
+    <label><span>Palette</span><select aria-label="Clade palette"><option value="custom" hidden>Custom</option><option value="muted">Muted</option><option value="accessible">Colorblind friendly</option></select></label>
+    <label><span>Show cut line</span><input type="checkbox" data-line aria-label="Show cut line"></label>
+  </div>
+</fieldset>
+<button type="button" data-reset title="Clear manual tree styles and labels; keep automatic clade colouring." disabled>Reset all manual styles</button>
+<p role="status" hidden></p>

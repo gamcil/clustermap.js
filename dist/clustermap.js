@@ -10796,71 +10796,21 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
     doc.head.append(style);
   }
 
-  /** Policy settings and node popovers share the same compact editing form. */
-  function createTreeControls({ tree, config, patch, preview, rotate, clusters = [], nodeUid = null,
-    policy = true, onResize, document: doc = globalThis.document }) {
+  /** Controls for a single tree node and its subtree. */
+  function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUid = null,
+    onResize, document: doc = globalThis.document }) {
     installDataEditorStyle(doc);
     installTreeControlsStyle(doc);
     const ui = createControls(doc);
     const element = (tag, parent, text, className) => ui.el(tag, text, parent, className);
-    const container = element("div", null, undefined, `cm-data-ui cm-tree-controls${policy ? "" : " cm-tree-controls--popover"}`);
+    const container = element("div", null, undefined, "cm-data-ui cm-tree-controls cm-tree-controls--popover");
     const message = element("p"); message.setAttribute("role", "status");
     const run = createActionRunner((text) => { message.textContent = text; });
     const button = (parent, title, action, className) => ui.button(parent, title, () => run(action), className);
-    const section = (title) => { const field = element("fieldset", container); element("legend", field, title); return field; };
     const input = (parent, title, type, value, options = {}) => {
       const row = ui.row(parent, title); row.className = "cm-tree-row";
       return ui.input(row, title, value, type, undefined, options);
     };
-    const reset = (scope, uid) => patch([{ type: "tree.presentation.reset", scope, ...(uid ? { ids: [uid] } : {}) }]);
-    const resolved = resolveTreePresentation(tree, config);
-
-    let compatible = tree.distance?.kind === "mergeHeight";
-    try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...resolved.policy, mode: "cutHeight" } } }, config); }
-    catch { compatible = false; }
-    if (policy && compatible) {
-      const field = section("Clade colouring");
-      const effective = resolved.policy;
-      const change = (changes) => [{ type: "tree.presentation.update", scope: "tree", changes: { colouring: changes } }];
-      const enabled = input(field, "Colour clades", "checkbox", effective.mode === "cutHeight");
-      enabled.onchange = () => run(() => patch(change({ mode: enabled.checked ? "cutHeight" : "none" })));
-      const options = element("div", field); options.hidden = !enabled.checked;
-      const actual = effective.cutHeight === "auto" ? resolved.height * 0.7 : effective.cutHeight;
-      const number = input(options, "Cut height", "number", actual, { min: "0", step: "any" });
-      number.onchange = () => run(() => patch(change({ cutHeight: Number(number.value) })));
-      const slider = element("input", options); slider.type = "range";
-      Object.assign(slider, { min: "0", max: String(Math.max(resolved.height, actual) || 1), step: String(resolved.height / 1000 || 0.001), value: actual });
-      slider.setAttribute("aria-label", "Preview cut height");
-      let cancelled = false;
-      const cancel = () => { cancelled = true; preview?.(null); slider.value = actual; number.value = actual; };
-      slider.oninput = () => run(() => { cancelled = false; number.value = slider.value; preview?.(change({ cutHeight: Number(slider.value) })); });
-      slider.onchange = () => { if (!cancelled) run(() => patch(change({ cutHeight: Number(slider.value) }))); };
-      slider.onkeydown = (event) => { if (event.key === "Escape") { cancel(); event.preventDefault(); } };
-      slider.onpointercancel = cancel;
-      const auto = button(number.parentElement, "Auto", () => patch(change({ cutHeight: "auto" })));
-      auto.title = "Use automatic cut height (70%)";
-      auto.setAttribute("aria-pressed", String(effective.cutHeight === "auto"));
-      const palettes = [
-        ["Muted", ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"]],
-        ["Colorblind friendly", ["#0072b2", "#e69f00", "#009e73", "#cc79a7", "#d55e00", "#56b4e9"]],
-      ];
-      if (!palettes.some(([, colours]) => JSON.stringify(colours) === JSON.stringify(effective.palette))) palettes.unshift(["Custom", effective.palette]);
-      const paletteRow = element("label", options, undefined, "cm-tree-row"); element("span", paletteRow, "Palette");
-      const select = element("select", paletteRow); select.setAttribute("aria-label", "Clade palette");
-      palettes.forEach(([name, colours], index) => { const option = element("option", select, name); option.value = index; option.selected = JSON.stringify(colours) === JSON.stringify(effective.palette); });
-      select.onchange = () => run(() => patch(change({ palette: palettes[Number(select.value)][1] })));
-      const line = input(options, "Show cut line", "checkbox", effective.showCutLine);
-      line.onchange = () => run(() => patch(change({ showCutLine: line.checked })));
-    }
-
-    if (policy) {
-      const resetAll = button(container, "Reset all manual styles", () => reset("manual"));
-      resetAll.title = "Clear manual tree styles and labels; keep automatic clade colouring.";
-      resetAll.disabled = !Object.keys(tree.presentation?.nodes || {}).length && !Object.keys(tree.presentation?.subtrees || {}).length;
-      container.append(message);
-      return container;
-    }
-
     const nodesById = new Map(tree.nodes.map((node) => [node.uid, node]));
     const clusterNames = new Map(clusters.map((cluster) => [cluster.uid, cluster.name || cluster.label || cluster.uid]));
     const descriptions = new Map();
@@ -11140,7 +11090,7 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
         focusTarget = event.target;
         const options = actions.treeControls();
         menuTree = options.tree;
-        const controls = createTreeControls({ ...options, nodeUid: uid, policy: false,
+        const controls = createTreeControls({ ...options, nodeUid: uid,
           onResize: () => { if (treeMenu) position(event); } });
         show(event, select(controls));
         treeMenu = true;
