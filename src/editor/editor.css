@@ -15,8 +15,7 @@
   clinker-editor .cm-editor__member-filter button { display: grid; place-items: center; width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,#64748b); font-size: 17px; line-height: 1; }
   clinker-editor .cm-editor__danger { border-color: var(--cm-danger,#e4aaa5); color: var(--cm-danger,#b3261e); background: var(--cm-hover,#fffafa); }
   clinker-editor [data-group-position] { width:112px; }
-  clinker-editor .cm-editor__annotation-toolbar, clinker-editor .cm-editor__annotation-toolbar > .cm-data-toolbar { display:contents; }
-  clinker-editor .cm-editor__annotation-toolbar select { max-width:220px; }
+  clinker-editor .cm-editor__annotation-toolbar { display:contents; }
   clinker-editor .cm-editor__head, clinker-editor .cm-editor__row { display: grid; align-items: center; gap:0; min-width:640px; padding:0; box-sizing: border-box; }
   clinker-editor .cm-editor__head { position:sticky; top:0; z-index:2; }
   clinker-editor .cm-editor__sort { display: flex; align-items: center; gap: 2px; min-height:24px; border:0; background:transparent; color:inherit; font-size:inherit; font-weight:inherit; text-align:left; }

@@ -4,6 +4,7 @@ import { defineSelectionBar } from "./editor/components/selection-bar/selection-
 import { defineActionMenu } from "./editor/components/action-menu/action-menu.js";
 import { defineSearchField } from "./editor/components/search-field/search-field.js";
 import { defineCategoryEditor } from "./editor/components/category-editor/category-editor.js";
+import { defineAnnotationToolbar } from "./editor/components/annotation-toolbar/annotation-toolbar.js";
 import { textAsset } from "./editor/shared/textAsset.js";
 import { RowSelection } from "./rowSelection.mjs";
 import { createVirtualRows } from "./virtualRows.mjs";
@@ -12,14 +13,9 @@ import { parseAnnotationTable, annotationTableText, mapAnnotationValues } from "
 import { createAnnotationCreateControls } from "./annotationCreateControls.mjs";
 
 const editorTemplate = createTemplate(`<div class="cm-data-ui cm-annotation-data-editor" tabindex="-1">
-  <div class="cm-data-toolbar">
-    <select aria-label="Annotation panel"></select><button type="button" data-add>Add panel</button>
-    <button type="button" data-replace>Replace data…</button><button type="button" data-show>Hide</button>
-    <button type="button" data-left aria-label="Move left" title="Move left">←</button>
-    <button type="button" data-right aria-label="Move right" title="Move right">→</button>
-    <button type="button" data-remove aria-label="Remove panel">Remove</button>
+  <clinker-annotation-toolbar>
     <clinker-search-field label="Filter records" placeholder="Find a cluster"></clinker-search-field>
-  </div>
+  </clinker-annotation-toolbar>
   <div class="cm-data-error" data-data-error role="alert"></div><div class="cm-annotation-data-body"></div>
 </div>`);
 const matrixTemplate = createTemplate(await textAsset(new URL("./editor/components/annotation-table/annotation-table.html", import.meta.url)));
@@ -43,14 +39,12 @@ const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to at
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 export function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor();
+  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
-  const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector(".cm-data-toolbar");
+  const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector("clinker-annotation-toolbar");
   const body = node.querySelector(".cm-annotation-data-body"), status = node.querySelector("[data-data-error]");
-  const panelSelect = toolbar.querySelector("select");
-  const control = (name) => toolbar.querySelector(`[data-${name}]`);
-  if (embedded) { toolbar.querySelector("clinker-search-field").remove(); toolbar.remove(); }
+  if (embedded) { toolbar.setAttribute("embedded", ""); toolbar.querySelector("clinker-search-field").remove(); toolbar.remove(); }
   let selected = null, applying = false, renderedPanel = null, renderedPanels = null, renderedClusters = null;
   let filter = "", creating = false, view = null, viewKey = null;
   const selection = new RowSelection();
@@ -73,15 +67,20 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
   const categoryScale = (panel, domain, colours) => ({ ...panel.scale, type: "categorical", domain,
     colours: colours.length ? colours : [...ANNOTATION_PALETTES.Qualitative] });
   const clearSelection = () => { selection.clear(); view?.syncSelection?.(); };
-  panelSelect.onchange = () => { selected = panelSelect.value; creating = false; render(); };
-  control("add").onclick = () => { creating = !creating; render(); };
-  control("show").onclick = () => update({ show: current().show === false });
-  control("remove").onclick = () => commit([{ type: "annotationPanels.delete", ids: [selected] }]);
-  for (const [name, direction] of [["left", -1], ["right", 1]]) control(name).onclick = () => {
-    const ids = getPanels().map((panel) => panel.uid), index = ids.indexOf(selected);
-    [ids[index], ids[index + direction]] = [ids[index + direction], ids[index]];
-    commit([{ type: "annotationPanels.reorder", ids }]);
-  };
+  toolbar.addEventListener("panel-change", (event) => { selected = event.detail.value; creating = false; render(); });
+  toolbar.addEventListener("panel-action", (event) => {
+    const { action } = event.detail;
+    if (action === "add") { creating = !creating; render(); }
+    else if (action === "replace") view?.replace?.();
+    else if (action === "show") update({ show: current().show === false });
+    else if (action === "remove") commit([{ type: "annotationPanels.delete", ids: [selected] }]);
+    else if (action === "left" || action === "right") {
+      const ids = getPanels().map((panel) => panel.uid), index = ids.indexOf(selected), next = index + (action === "left" ? -1 : 1);
+      if (index < 0 || next < 0 || next >= ids.length) return;
+      [ids[index], ids[next]] = [ids[next], ids[index]];
+      commit([{ type: "annotationPanels.reorder", ids }]);
+    }
+  });
   const search = !embedded && toolbar.querySelector("clinker-search-field");
   if (search) search.addEventListener("input", () => { filter = search.value; view?.filterRows?.(); });
   node.addEventListener("keydown", (event) => {
@@ -260,14 +259,8 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
     const panels = getPanels();
     if (!panels.some((panel) => panel.uid === selected)) selected = panels[0]?.uid ?? null;
     const panel = current(); renderedPanel = panel; renderedPanels = panels; renderedClusters = getClusters();
-    updateSelectOptions(panelSelect, panels.map((panel) => [panel.uid, panel.title || panel.uid])); panelSelect.value = selected;
-    panelSelect.hidden = !panels.length; control("add").textContent = creating ? "Cancel" : "Add panel";
-    for (const name of ["replace", "show", "left", "right", "remove"]) control(name).hidden = !panel || creating || name === "replace" && panel.type === "groups";
+    toolbar.state = { panels, value: selected, creating };
     if (search) { search.hidden = !panel || creating || panel.type === "groups"; search.value = filter; }
-    if (panel) {
-      control("show").textContent = panel.show === false ? "Show" : "Hide";
-      control("left").disabled = panels.indexOf(panel) === 0; control("right").disabled = panels.indexOf(panel) === panels.length - 1;
-    }
     if (selectionPanel !== panel?.uid) { selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = ""; }
     selection.prune(new Set(getClusters().map((cluster) => cluster.uid)));
     if (batchColumn !== "all" && Number(batchColumn) >= (panel?.columns?.length || 0)) batchColumn = "0";
@@ -285,8 +278,8 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
         const layout = createDataPanel(document, { label: "Editable annotation data" }); body.append(layout.node);
         if (panel.type === "groups") { layout.meta.hidden = true; view = createGroups(layout.viewport); }
         else {
-          control("replace").onclick = createReplacement(layout);
           view = createMatrix(layout);
+          view.replace = createReplacement(layout);
           if (categorical) {
             view.categories = categoriesTemplate(document).firstElementChild; layout.tools.prepend(view.categories);
             view.categories.open = Boolean(categoriesOpen);
@@ -329,7 +322,6 @@ function installStyle(document) {
 .cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }
 .cm-annotation-data-toolbar { flex-wrap:wrap; }
 .cm-annotation-data-toolbar > input { width:140px; }
-.cm-annotation-data-editor .cm-data-toolbar > select { max-width:260px; }
 .cm-annotation-data-toolbar label { display:flex; gap:4px; align-items:center; }
 .cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
 .cm-annotation-data-editor details { flex-shrink:0; }
