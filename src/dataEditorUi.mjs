@@ -1,4 +1,4 @@
-import { createTemplate, escapeHtml } from "./uiControls.mjs";
+import { createTemplate } from "./uiControls.mjs";
 import { DATA_ROW_HEIGHT } from "./virtualRows.mjs";
 
 const searchTemplate = createTemplate(`<label class="cm-data-search"><input type="search" aria-label="Filter records"></label>`);
@@ -9,35 +9,14 @@ const panelTemplate = createTemplate(`
     <div class="cm-data-table" role="region"></div>
   </div>`);
 const selectionActionsTemplate = createTemplate('<span class="cm-data-selection-actions"></span>');
-const menuTemplate = createTemplate('<details class="cm-data-action-menu"><summary></summary><div class="cm-data-action-menu-body"></div></details>');
+const menuTemplate = createTemplate('<clinker-action-menu></clinker-action-menu>');
 export function createDataActionMenu(document, label, content) {
   const node = menuTemplate(document).firstElementChild;
-  node.querySelector("summary").textContent = label;
-  const body = node.querySelector("div"); if (content) body.append(content);
-  return { node, body };
+  node.setAttribute("label", label); if (content) node.append(content);
+  return node;
 }
 export const updateSegmentedControl = (root, attribute, value) => root.querySelectorAll(`[${attribute}]`)
   .forEach((button) => button.setAttribute("aria-pressed", String(button.getAttribute(attribute) === value)));
-
-export const dataActionMenuMarkup = (label, content) =>
-  `<details class="cm-data-action-menu"><summary>${escapeHtml(label)}</summary><div class="cm-data-action-menu-body">${content}</div></details>`;
-
-/** Menu behaviour shared by table actions and the plot selection toolbar. */
-export function bindDataActionMenus(root) {
-  root.addEventListener("toggle", (event) => {
-    if (event.target.matches?.(".cm-data-action-menu[open]")) {
-      for (const menu of root.querySelectorAll(".cm-data-action-menu[open]")) if (menu !== event.target) menu.open = false;
-    }
-  }, true);
-  root.addEventListener("pointerdown", (event) => {
-    for (const menu of root.querySelectorAll(".cm-data-action-menu[open]")) if (!menu.contains(event.target)) menu.open = false;
-  });
-  root.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    const menu = event.target.closest(".cm-data-action-menu[open]");
-    if (menu) { menu.open = false; menu.querySelector("summary").focus(); event.preventDefault(); event.stopPropagation(); }
-  });
-}
 
 /** Shared controls and table primitives for the packaged and inline data editors. */
 export function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
@@ -53,7 +32,6 @@ export function createDataPanel(document, { label = "Editable chart data" } = {}
   const node = panelTemplate(document).firstElementChild;
   const tools = node.querySelector(".cm-data-tools"), meta = node.querySelector(".cm-data-meta");
   const actions = meta.querySelector(".cm-data-actions");
-  bindDataActionMenus(node);
   node.addEventListener("mousedown", (event) => {
     if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
         !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable], clinker-editable-field')) event.preventDefault();
@@ -66,8 +44,8 @@ export function createDataPanel(document, { label = "Editable chart data" } = {}
 /** Keep selection controls independent of the table's row and action rendering. */
 export function createSelectionControls(panel, { selection, onChange, checkbox, menuLabel } = {}) {
   const menu = menuLabel && createDataActionMenu(panel.node.ownerDocument, menuLabel);
-  if (menu) panel.actions.append(menu.node);
-  const actions = menu ? menu.body : selectionActionsTemplate(panel.node.ownerDocument).firstElementChild;
+  if (menu) panel.actions.append(menu);
+  const actions = menu || selectionActionsTemplate(panel.node.ownerDocument).firstElementChild;
   if (!menu) panel.actions.append(actions);
   panel.meta.addEventListener("clear-selection", () => { selection.clear(); onChange(); });
   let visibleIds = [];
@@ -122,14 +100,6 @@ export function installDataEditorStyle(document) {
 .cm-data-tools { flex-shrink:0; }
 .cm-data-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .cm-data-selection-actions { display:contents; }
-.cm-data-action-menu { position:relative; }
-.cm-data-action-menu > summary { display:block; min-height:30px; box-sizing:border-box; padding:4px 8px; border:1px solid var(--cm-border,#cbd3de); border-radius:6px; background:var(--cm-surface,#fff); color:var(--cm-foreground,#273444); list-style:none; white-space:nowrap; }
-.cm-data-action-menu > summary::-webkit-details-marker { display:none; }
-.cm-data-action-menu > summary:hover, .cm-data-action-menu[open] > summary { background:var(--cm-hover,#e3ecf8); border-color:var(--cm-accent,#78a9ed); }
-.cm-data-action-menu-body { position:absolute; right:0; top:calc(100% + 4px); z-index:10; display:flex; flex-direction:column; gap:8px; width:max-content; max-width:min(340px,80vw); max-height:50vh; overflow:auto; padding:10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-surface,#fff); box-shadow:0 4px 16px #0002; color:var(--cm-foreground,#273444); }
-.cm-data-action-menu-body > button { text-align:left; }
-.cm-data-action-menu-body label { display:flex; align-items:center; gap:6px; }
-.cm-data-action-menu-body input[type=number] { width:112px; }
 .cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
 .cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
 .cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; line-height:20px; }

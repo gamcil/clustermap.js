@@ -404,9 +404,6 @@ function hsl2rgb(h, m1, m2) {
       : m1) * 255;
 }
 
-const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;")
-  .replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-
 const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
 
 /** Parse static markup once per document; each mount receives its own nodes. */
@@ -514,13 +511,6 @@ function createActionRunner(report) {
   };
 }
 
-const lastMarkup = new WeakMap();
-/** Preserve focused controls when a header or action bar has not changed. */
-function setMarkup(node, html) {
-  if (lastMarkup.get(node) === html) return;
-  node.innerHTML = html; lastMarkup.set(node, html);
-}
-
 /** Shared fixed-height row window for scrollable data editors. */
 const DATA_ROW_HEIGHT = 34;
 
@@ -605,35 +595,14 @@ const panelTemplate = createTemplate(`
     <div class="cm-data-table" role="region"></div>
   </div>`);
 const selectionActionsTemplate = createTemplate('<span class="cm-data-selection-actions"></span>');
-const menuTemplate = createTemplate('<details class="cm-data-action-menu"><summary></summary><div class="cm-data-action-menu-body"></div></details>');
+const menuTemplate = createTemplate('<clinker-action-menu></clinker-action-menu>');
 function createDataActionMenu(document, label, content) {
   const node = menuTemplate(document).firstElementChild;
-  node.querySelector("summary").textContent = label;
-  const body = node.querySelector("div"); if (content) body.append(content);
-  return { node, body };
+  node.setAttribute("label", label); if (content) node.append(content);
+  return node;
 }
 const updateSegmentedControl = (root, attribute, value) => root.querySelectorAll(`[${attribute}]`)
   .forEach((button) => button.setAttribute("aria-pressed", String(button.getAttribute(attribute) === value)));
-
-const dataActionMenuMarkup = (label, content) =>
-  `<details class="cm-data-action-menu"><summary>${escapeHtml(label)}</summary><div class="cm-data-action-menu-body">${content}</div></details>`;
-
-/** Menu behaviour shared by table actions and the plot selection toolbar. */
-function bindDataActionMenus(root) {
-  root.addEventListener("toggle", (event) => {
-    if (event.target.matches?.(".cm-data-action-menu[open]")) {
-      for (const menu of root.querySelectorAll(".cm-data-action-menu[open]")) if (menu !== event.target) menu.open = false;
-    }
-  }, true);
-  root.addEventListener("pointerdown", (event) => {
-    for (const menu of root.querySelectorAll(".cm-data-action-menu[open]")) if (!menu.contains(event.target)) menu.open = false;
-  });
-  root.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    const menu = event.target.closest(".cm-data-action-menu[open]");
-    if (menu) { menu.open = false; menu.querySelector("summary").focus(); event.preventDefault(); event.stopPropagation(); }
-  });
-}
 
 /** Shared controls and table primitives for the packaged and inline data editors. */
 function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
@@ -649,7 +618,6 @@ function createDataPanel(document, { label = "Editable chart data" } = {}) {
   const node = panelTemplate(document).firstElementChild;
   const tools = node.querySelector(".cm-data-tools"), meta = node.querySelector(".cm-data-meta");
   const actions = meta.querySelector(".cm-data-actions");
-  bindDataActionMenus(node);
   node.addEventListener("mousedown", (event) => {
     if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
         !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable], clinker-editable-field')) event.preventDefault();
@@ -662,8 +630,8 @@ function createDataPanel(document, { label = "Editable chart data" } = {}) {
 /** Keep selection controls independent of the table's row and action rendering. */
 function createSelectionControls(panel, { selection, onChange, checkbox, menuLabel } = {}) {
   const menu = menuLabel && createDataActionMenu(panel.node.ownerDocument, menuLabel);
-  if (menu) panel.actions.append(menu.node);
-  const actions = menu ? menu.body : selectionActionsTemplate(panel.node.ownerDocument).firstElementChild;
+  if (menu) panel.actions.append(menu);
+  const actions = menu || selectionActionsTemplate(panel.node.ownerDocument).firstElementChild;
   if (!menu) panel.actions.append(actions);
   panel.meta.addEventListener("clear-selection", () => { selection.clear(); onChange(); });
   let visibleIds = [];
@@ -718,14 +686,6 @@ function installDataEditorStyle(document) {
 .cm-data-tools { flex-shrink:0; }
 .cm-data-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .cm-data-selection-actions { display:contents; }
-.cm-data-action-menu { position:relative; }
-.cm-data-action-menu > summary { display:block; min-height:30px; box-sizing:border-box; padding:4px 8px; border:1px solid var(--cm-border,#cbd3de); border-radius:6px; background:var(--cm-surface,#fff); color:var(--cm-foreground,#273444); list-style:none; white-space:nowrap; }
-.cm-data-action-menu > summary::-webkit-details-marker { display:none; }
-.cm-data-action-menu > summary:hover, .cm-data-action-menu[open] > summary { background:var(--cm-hover,#e3ecf8); border-color:var(--cm-accent,#78a9ed); }
-.cm-data-action-menu-body { position:absolute; right:0; top:calc(100% + 4px); z-index:10; display:flex; flex-direction:column; gap:8px; width:max-content; max-width:min(340px,80vw); max-height:50vh; overflow:auto; padding:10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-surface,#fff); box-shadow:0 4px 16px #0002; color:var(--cm-foreground,#273444); }
-.cm-data-action-menu-body > button { text-align:left; }
-.cm-data-action-menu-body label { display:flex; align-items:center; gap:6px; }
-.cm-data-action-menu-body input[type=number] { width:112px; }
 .cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
 .cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
 .cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; line-height:20px; }
@@ -779,15 +739,15 @@ class RowSelection extends Set {
   clear() { super.clear(); this.#anchor = null; }
 }
 
-const [markup$1, css$1] = await Promise.all([
+const [markup$2, css$2] = await Promise.all([
   "<span part=\"label\"></span>\n<button type=\"button\" part=\"edit-button\">\n  <svg aria-hidden=\"true\" viewBox=\"0 0 24 24\">\n    <path d=\"m4 20 4.1-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.1 16 4 20Z\"></path>\n    <path d=\"m13.8 7.2 3 3\"></path>\n  </svg>\n</button>\n<input type=\"text\" part=\"input\" hidden>\n<select part=\"input\" hidden></select>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  color: inherit;\n  font: inherit;\n}\n:host([hidden]), [hidden] { display: none !important; }\n:host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }\nspan { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }\nspan[data-placeholder] { color: var(--cm-muted, #687586); }\nbutton, input, select { box-sizing: border-box; font: inherit; color: inherit; }\nbutton {\n  display: inline-grid;\n  place-items: center;\n  flex: 0 0 20px;\n  height: 20px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #64748b);\n  cursor: pointer;\n  opacity: var(--cm-edit-affordance-opacity, 0);\n}\n:host(:hover) button, :host(:focus-within) button { opacity: 1; }\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { cursor: default; opacity: .45; }\nsvg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }\ninput, select {\n  width: 100%;\n  min-width: 0;\n  height: 28px;\n  margin-inline: -1px;\n  padding: 2px 7px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  line-height: 20px;\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus, select:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
 ]);
-const template$1 = createTemplate(markup$1);
-const HTMLElementBase$2 = globalThis.HTMLElement || class {};
+const template$2 = createTemplate(markup$2);
+const HTMLElementBase$3 = globalThis.HTMLElement || class {};
 
 /** A field owns its draft; consumers accept or cancel value-commit events. */
-class EditableField extends HTMLElementBase$2 {
+class EditableField extends HTMLElementBase$3 {
   static observedAttributes = ["label", "placeholder", "type", "min", "max", "step", "required", "disabled"];
   #value = "";
   #revision = 0;
@@ -802,8 +762,8 @@ class EditableField extends HTMLElementBase$2 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$1;
-    root.append(style, template$1(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$2;
+    root.append(style, template$2(this.ownerDocument));
     this.#text = root.querySelector("span");
     this.#button = root.querySelector("button");
     this.#input = root.querySelector("input");
@@ -904,14 +864,14 @@ function defineEditableField() {
   if (!customElements.get("clinker-editable-field")) customElements.define("clinker-editable-field", EditableField);
 }
 
-const [markup, css] = await Promise.all([
+const [markup$1, css$1] = await Promise.all([
   "<span part=\"summary\"></span>\n<div part=\"actions\" hidden>\n  <slot name=\"actions\"></slot>\n  <button type=\"button\" data-clear aria-label=\"Clear selection\">Clear</button>\n</div>\n<button type=\"button\" data-all hidden>Select all visible</button>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  height: 32px;\n  min-width: 0;\n  flex-shrink: 0;\n  color: var(--cm-muted, #687586);\n  font: 12px/1.4 system-ui, sans-serif;\n}\n:host([hidden]), [hidden] { display: none !important; }\nspan { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\nspan.is-selected { color: var(--cm-foreground, #273444); font-weight: 600; }\ndiv { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }\nslot { display: contents; }\nbutton {\n  flex-shrink: 0;\n  box-sizing: border-box;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton:hover:not(:disabled) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n",
 ]);
-const template = createTemplate(markup);
-const HTMLElementBase$1 = globalThis.HTMLElement || class {};
+const template$1 = createTemplate(markup$1);
+const HTMLElementBase$2 = globalThis.HTMLElement || class {};
 
-class SelectionBar extends HTMLElementBase$1 {
+class SelectionBar extends HTMLElementBase$2 {
   #summary;
   #actions;
   #all;
@@ -919,8 +879,8 @@ class SelectionBar extends HTMLElementBase$1 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
-    root.append(style, template(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$1;
+    root.append(style, template$1(this.ownerDocument));
     this.#summary = root.querySelector("span");
     this.#actions = root.querySelector("div");
     this.#all = root.querySelector("[data-all]");
@@ -942,6 +902,65 @@ class SelectionBar extends HTMLElementBase$1 {
 
 function defineSelectionBar() {
   if (!customElements.get("clinker-selection-bar")) customElements.define("clinker-selection-bar", SelectionBar);
+}
+
+const [markup, css] = await Promise.all([
+  "<details>\n  <summary part=\"trigger\"></summary>\n  <div part=\"panel\"><slot></slot></div>\n</details>\n",
+  ":host { display: block; position: relative; color: var(--cm-foreground, #273444); font: inherit; }\n:host([hidden]) { display: none !important; }\nsummary {\n  display: block;\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: 4px 8px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 6px;\n  background: var(--cm-surface, #fff);\n  list-style: none;\n  white-space: nowrap;\n  cursor: pointer;\n}\nsummary::-webkit-details-marker { display: none; }\nsummary:hover, details[open] > summary { background: var(--cm-hover, #e3ecf8); border-color: var(--cm-accent, #78a9ed); }\nsummary:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\ndiv {\n  position: absolute;\n  right: 0;\n  top: calc(100% + 4px);\n  z-index: 10;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  width: max-content;\n  max-width: min(340px, 80vw);\n  max-height: 50vh;\n  overflow: auto;\n  padding: 10px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 8px;\n  background: var(--cm-surface, #fff);\n  box-shadow: 0 4px 16px #0002;\n}\nslot { display: contents; }\n::slotted(button) { text-align: left; }\n::slotted(label) { display: flex; align-items: center; gap: 6px; }\n::slotted(input[type=number]) { width: 112px; }\n",
+]);
+const template = createTemplate(markup);
+const activeMenus = new WeakMap();
+const HTMLElementBase$1 = globalThis.HTMLElement || class {};
+
+class ActionMenu extends HTMLElementBase$1 {
+  static observedAttributes = ["label", "open"];
+  #details;
+  #trigger;
+  #outside = (event) => { if (!event.composedPath().includes(this)) this.open = false; };
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = css;
+    root.append(style, template(this.ownerDocument));
+    this.#details = root.querySelector("details");
+    this.#trigger = root.querySelector("summary");
+    this.#details.ontoggle = () => { this.open = this.#details.open; };
+    this.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || !this.open) return;
+      this.open = false; this.#trigger.focus(); event.preventDefault(); event.stopPropagation();
+    });
+  }
+
+  get open() { return this.#details.open; }
+  set open(value) {
+    this.#details.open = Boolean(value);
+    this.toggleAttribute("open", this.#details.open);
+  }
+  connectedCallback() { this.#syncOpen(); }
+  disconnectedCallback() { this.open = false; this.#release(); }
+
+  attributeChangedCallback(name) {
+    if (name === "label") this.#trigger.textContent = this.getAttribute("label") || "Actions";
+    else { this.#details.open = this.hasAttribute("open"); this.#syncOpen(); }
+  }
+
+  #syncOpen() {
+    if (!this.open || !this.isConnected) { this.#release(); return; }
+    const previous = activeMenus.get(this.ownerDocument);
+    if (previous && previous !== this) previous.open = false;
+    activeMenus.set(this.ownerDocument, this);
+    this.ownerDocument.addEventListener("pointerdown", this.#outside, true);
+  }
+
+  #release() {
+    this.ownerDocument.removeEventListener("pointerdown", this.#outside, true);
+    if (activeMenus.get(this.ownerDocument) === this) activeMenus.delete(this.ownerDocument);
+  }
+}
+
+function defineActionMenu() {
+  if (!customElements.get("clinker-action-menu")) customElements.define("clinker-action-menu", ActionMenu);
 }
 
 var EOL = {},
@@ -1245,7 +1264,7 @@ const emptyTemplate$1 = createTemplate('<p>No annotation panels. Add a panel to 
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField(); defineSelectionBar();
+  defineEditableField(); defineSelectionBar(); defineActionMenu();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector(".cm-data-toolbar");
@@ -1266,7 +1285,7 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
     try { return run(() => {
       patch(operations);
       if (refresh) {
-        for (const menu of node.querySelectorAll(".cm-data-action-menu")) menu.open = false;
+        for (const menu of node.querySelectorAll("clinker-action-menu")) menu.open = false;
         render();
       } else { renderedPanel = current(); renderedPanels = getPanels(); }
     }, control); } finally { applying = false; }
@@ -2822,7 +2841,7 @@ function createDataHeader(document, node) {
 function createEditorActions(document, node) {
   let key;
   const menu = (label, template) => {
-    const component = createDataActionMenu(document, label, template(document)); node.append(component.node); return component.body;
+    const component = createDataActionMenu(document, label, template(document)); node.append(component); return component;
   };
   return ({ kind, count, groups, allGroups, loci, clusters }) => {
     const next = JSON.stringify([count > 0, kind, count > 1, Math.min(groups.length, 2), loci.length > 0, clusters.length > 0]);
@@ -3491,7 +3510,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    defineEditableField(); defineSelectionBar();
+    defineEditableField(); defineSelectionBar(); defineActionMenu();
     this.classList.add("cm-editor", "cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();
@@ -4396,6 +4415,8 @@ function defineClinkerEditor() {
   return customElements.get(tagName);
 }
 
+const toolbarTemplate = createTemplate(await "<strong></strong>\n<button type=\"button\" data-action=\"focus\">Focus</button>\n<button type=\"button\" data-action=\"flip\">Flip</button>\n<button type=\"button\" data-action=\"trim\">Trim</button>\n<clinker-action-menu label=\"Loci…\" data-loci-menu hidden>\n  <button type=\"button\" data-action=\"restore\">Restore full loci</button>\n</clinker-action-menu>\n<clinker-action-menu label=\"More…\" data-more-menu>\n  <button type=\"button\" data-action=\"edit\">Edit data…</button>\n  <button type=\"button\" data-action=\"remove\"></button>\n</clinker-action-menu>\n<button type=\"button\" data-action=\"clear\">Clear</button>\n");
+
 let activeToolbar = null;
 
 /** Mount contextual plot actions without requiring the full data editor. */
@@ -4403,12 +4424,15 @@ function mountPlotSelectionToolbar(chart, container) {
   if (!chart?.selection || !chart?.flipLoci || !chart?.trimLoci || !chart?.restoreLoci) throw new TypeError("A mounted ClusterMap chart is required.");
   if (!(container instanceof Element)) throw new TypeError("A plot container element is required.");
   const document = container.ownerDocument;
-  installDataEditorStyle(document);
+  defineActionMenu(); installDataEditorStyle(document);
   const root = document.createElement("div");
   root.className = "cm-data-ui cm-plot-selection-toolbar";
   root.hidden = true;
-  bindDataActionMenus(root);
-  const button = (action, text) => `<button type="button" data-action="${action}">${text}</button>`;
+  root.append(toolbarTemplate(document));
+  const button = (action) => root.querySelector(`[data-action="${action}"]`);
+  const flip = button("flip"), trim = button("trim"), restore = button("restore");
+  const lociMenu = root.querySelector("[data-loci-menu]"), moreMenu = root.querySelector("[data-more-menu]");
+  let clusterActions;
   const editor = () => [...document.querySelectorAll("clinker-editor")].find((editor) => editor.chart === chart);
   const lociFor = ({ kind, ids }) => kind === "loci" ? ids :
     (chart.visibleData()?.clusters || []).filter((cluster) => ids.includes(cluster.uid)).flatMap((cluster) => cluster.loci.map((locus) => locus.uid));
@@ -4416,11 +4440,16 @@ function mountPlotSelectionToolbar(chart, container) {
     const { kind, ids } = chart.selection(), clusters = kind === "clusters";
     root.hidden = !ids.length;
     const noun = ids.length === 1 ? (clusters ? "cluster" : "locus") : kind;
-    const locusActions = button("flip", clusters ? "Flip each locus" : "Flip") + button("trim", clusters ? "Trim each locus" : "Trim");
-    setMarkup(root, `<strong>${ids.length} ${noun} selected</strong>` + button("focus", "Focus") +
-      (clusters ? dataActionMenuMarkup("Loci…", locusActions + button("restore", "Restore full loci")) : locusActions) +
-      dataActionMenuMarkup("More…", (clusters ? "" : button("restore", "Restore full loci")) +
-        (editor() ? button("edit", "Edit data…") : "") + button("remove", `Remove selected ${kind}`)) + button("clear", "Clear"));
+    root.querySelector("strong").textContent = `${ids.length} ${noun} selected`;
+    flip.textContent = clusters ? "Flip each locus" : "Flip"; trim.textContent = clusters ? "Trim each locus" : "Trim";
+    button("edit").hidden = !editor(); button("remove").textContent = `Remove selected ${kind}`;
+    if (clusterActions !== clusters) {
+      if (clusters) lociMenu.prepend(flip, trim, restore);
+      else { root.insertBefore(flip, lociMenu); root.insertBefore(trim, lociMenu); moreMenu.prepend(restore); }
+      lociMenu.open = moreMenu.open = false;
+      lociMenu.hidden = !clusters; clusterActions = clusters;
+    }
+    if (root.hidden) lociMenu.open = moreMenu.open = false;
   };
   const clear = () => chart.selection({ kind: chart.selection().kind, ids: [] });
   const activate = () => { activeToolbar = root; };
@@ -4437,7 +4466,7 @@ function mountPlotSelectionToolbar(chart, container) {
     else if (action === "remove" && document.defaultView.confirm(`Remove ${selection.ids.length} ${selection.kind} and their contents from the plot? This can be undone.`)) {
       chart.remove({ [selection.kind]: selection.ids });
     }
-    for (const menu of root.querySelectorAll("details[open]")) menu.open = false;
+    for (const menu of root.querySelectorAll("clinker-action-menu[open]")) menu.open = false;
   });
   const onKeyDown = (event) => {
     if (activeToolbar !== root || event.key !== "Escape" || event.defaultPrevented || !chart.selection().ids.length) return;

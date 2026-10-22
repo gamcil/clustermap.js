@@ -1,5 +1,9 @@
-import { bindDataActionMenus, dataActionMenuMarkup, installDataEditorStyle } from "../dataEditorUi.mjs";
-import { setMarkup } from "../uiControls.mjs";
+import { installDataEditorStyle } from "../dataEditorUi.mjs";
+import { createTemplate } from "../uiControls.mjs";
+import { textAsset } from "./shared/textAsset.js";
+import { defineActionMenu } from "./components/action-menu/action-menu.js";
+
+const toolbarTemplate = createTemplate(await textAsset(new URL("./components/plot-selection-toolbar/plot-selection-toolbar.html", import.meta.url)));
 
 let activeToolbar = null;
 
@@ -8,12 +12,15 @@ export function mountPlotSelectionToolbar(chart, container) {
   if (!chart?.selection || !chart?.flipLoci || !chart?.trimLoci || !chart?.restoreLoci) throw new TypeError("A mounted ClusterMap chart is required.");
   if (!(container instanceof Element)) throw new TypeError("A plot container element is required.");
   const document = container.ownerDocument;
-  installDataEditorStyle(document);
+  defineActionMenu(); installDataEditorStyle(document);
   const root = document.createElement("div");
   root.className = "cm-data-ui cm-plot-selection-toolbar";
   root.hidden = true;
-  bindDataActionMenus(root);
-  const button = (action, text) => `<button type="button" data-action="${action}">${text}</button>`;
+  root.append(toolbarTemplate(document));
+  const button = (action) => root.querySelector(`[data-action="${action}"]`);
+  const flip = button("flip"), trim = button("trim"), restore = button("restore");
+  const lociMenu = root.querySelector("[data-loci-menu]"), moreMenu = root.querySelector("[data-more-menu]");
+  let clusterActions;
   const editor = () => [...document.querySelectorAll("clinker-editor")].find((editor) => editor.chart === chart);
   const lociFor = ({ kind, ids }) => kind === "loci" ? ids :
     (chart.visibleData()?.clusters || []).filter((cluster) => ids.includes(cluster.uid)).flatMap((cluster) => cluster.loci.map((locus) => locus.uid));
@@ -21,11 +28,16 @@ export function mountPlotSelectionToolbar(chart, container) {
     const { kind, ids } = chart.selection(), clusters = kind === "clusters";
     root.hidden = !ids.length;
     const noun = ids.length === 1 ? (clusters ? "cluster" : "locus") : kind;
-    const locusActions = button("flip", clusters ? "Flip each locus" : "Flip") + button("trim", clusters ? "Trim each locus" : "Trim");
-    setMarkup(root, `<strong>${ids.length} ${noun} selected</strong>` + button("focus", "Focus") +
-      (clusters ? dataActionMenuMarkup("Loci…", locusActions + button("restore", "Restore full loci")) : locusActions) +
-      dataActionMenuMarkup("More…", (clusters ? "" : button("restore", "Restore full loci")) +
-        (editor() ? button("edit", "Edit data…") : "") + button("remove", `Remove selected ${kind}`)) + button("clear", "Clear"));
+    root.querySelector("strong").textContent = `${ids.length} ${noun} selected`;
+    flip.textContent = clusters ? "Flip each locus" : "Flip"; trim.textContent = clusters ? "Trim each locus" : "Trim";
+    button("edit").hidden = !editor(); button("remove").textContent = `Remove selected ${kind}`;
+    if (clusterActions !== clusters) {
+      if (clusters) lociMenu.prepend(flip, trim, restore);
+      else { root.insertBefore(flip, lociMenu); root.insertBefore(trim, lociMenu); moreMenu.prepend(restore); }
+      lociMenu.open = moreMenu.open = false;
+      lociMenu.hidden = !clusters; clusterActions = clusters;
+    }
+    if (root.hidden) lociMenu.open = moreMenu.open = false;
   };
   const clear = () => chart.selection({ kind: chart.selection().kind, ids: [] });
   const activate = () => { activeToolbar = root; };
@@ -42,7 +54,7 @@ export function mountPlotSelectionToolbar(chart, container) {
     else if (action === "remove" && document.defaultView.confirm(`Remove ${selection.ids.length} ${selection.kind} and their contents from the plot? This can be undone.`)) {
       chart.remove({ [selection.kind]: selection.ids });
     }
-    for (const menu of root.querySelectorAll("details[open]")) menu.open = false;
+    for (const menu of root.querySelectorAll("clinker-action-menu[open]")) menu.open = false;
   });
   const onKeyDown = (event) => {
     if (activeToolbar !== root || event.key !== "Escape" || event.defaultPrevented || !chart.selection().ids.length) return;

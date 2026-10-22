@@ -44,7 +44,7 @@ export function createDataHeader(document, node) {
 export function createEditorActions(document, node) {
   let key;
   const menu = (label, template) => {
-    const component = createDataActionMenu(document, label, template(document)); node.append(component.node); return component.body;
+    const component = createDataActionMenu(document, label, template(document)); node.append(component); return component;
   };
   return ({ kind, count, groups, allGroups, loci, clusters }) => {
     const next = JSON.stringify([count > 0, kind, count > 1, Math.min(groups.length, 2), loci.length > 0, clusters.length > 0]);

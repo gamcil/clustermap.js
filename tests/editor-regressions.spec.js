@@ -176,7 +176,7 @@ test("inline edits, external edits and merges stay synchronized through history"
   const before = await page.evaluate(() => chart.data().groups.map(({ uid, genes }) => ({ uid, genes: [...genes] })));
   await editor(page).locator("[data-select]").nth(0).check();
   await editor(page).locator("[data-select]").nth(1).check();
-  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Merge…$/ }).click();
+  await editor(page).locator(".cm-data-actions clinker-action-menu summary").filter({ hasText: /^Merge…$/ }).click();
   await editor(page).locator("[data-merge-target]").selectOption(before[0].uid);
   await editor(page).getByRole("button", { name: "Merge groups", exact: true }).click();
   await expect(editor(page).locator(".cm-editor__row--groups")).toHaveCount(before.length - 1);
@@ -201,13 +201,13 @@ test("annotation inline edits, selection and batch values support undo/redo", as
   await input.fill("0.2"); await input.press("Escape");
   await expect(input).toHaveValue("0.75");
   for (let i = 0; i < 2; i++) await matrixRows(page).nth(i).getByRole("checkbox").check();
-  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Edit values…$/ }).click();
+  await editor(page).locator(".cm-data-actions clinker-action-menu summary").filter({ hasText: /^Edit values…$/ }).click();
   await editor(page).getByRole("combobox", { name: "Columns to edit" }).selectOption("all");
   await editor(page).getByRole("spinbutton", { name: "Batch value", exact: true }).fill("2.5");
   await editor(page).getByRole("button", { name: "Set values", exact: true }).click();
   for (const id of ids) expect((await panelData(page, uid)).values[id]).toEqual(before.columns.map(() => 2.5));
   await expect(matrixRows(page).first()).toHaveClass(/is-selected/);
-  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Edit values…$/ }).click();
+  await editor(page).locator(".cm-data-actions clinker-action-menu summary").filter({ hasText: /^Edit values…$/ }).click();
   await editor(page).getByRole("button", { name: "Clear values", exact: true }).click();
   for (const id of ids) expect((await panelData(page, uid)).values[id]).toEqual(before.columns.map(() => null));
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
@@ -223,7 +223,7 @@ test("categories can be added, assigned, renamed and removed with replacement", 
   await editor(page).getByRole("button", { name: "Add category", exact: true }).click();
   await matrixRows(page).first().getByRole("checkbox").check();
   const domain = (await panelData(page, uid)).scale.domain;
-  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Edit values…$/ }).click();
+  await editor(page).locator(".cm-data-actions clinker-action-menu summary").filter({ hasText: /^Edit values…$/ }).click();
   await editor(page).getByRole("combobox", { name: "Batch value", exact: true }).selectOption(String(domain.indexOf("Test category")));
   await editor(page).getByRole("button", { name: "Set values", exact: true }).click();
   await expect(matrixRows(page).first().locator("clinker-editable-field").first()).toContainText("Test category");
@@ -293,7 +293,7 @@ test("annotation rows virtualize, preserve offscreen selection and filter all re
   await expect(rows.last()).toContainText("Cluster 259");
   expect(await rows.count()).toBeLessThan(80);
   await rows.last().getByRole("checkbox").check();
-  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Edit values…$/ }).click();
+  await editor(page).locator(".cm-data-actions clinker-action-menu summary").filter({ hasText: /^Edit values…$/ }).click();
   await editor(page).getByRole("spinbutton", { name: "Batch value", exact: true }).fill("999");
   await editor(page).getByRole("button", { name: "Set values", exact: true }).click();
   const data = await panelData(page, "numeric");
@@ -916,7 +916,7 @@ test("editor parent ranges and contextual actions keep the table stationary", as
   await editor(page).locator('[data-gene-view-kind="groups"]').click();
   const groups = editor(page).locator(".cm-editor__tree-parent");
   await groups.last().getByRole("checkbox").click({ modifiers: ["Shift"] });
-  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Remove…$/ }).click();
+  await editor(page).locator(".cm-data-actions clinker-action-menu summary").filter({ hasText: /^Remove…$/ }).click();
   await expect(editor(page).locator('[data-command="remove-loci"]')).toHaveCount(0);
   await expect(editor(page).locator('[data-command="remove-clusters"]')).toHaveCount(0);
   await expect(editor(page).locator('[data-command="delete-groups"]')).toBeVisible();
