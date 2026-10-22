@@ -1,4 +1,4 @@
-import { isTreeOrderCompatible } from "../tree/layout.mjs";
+import { isTreeOrderCompatible } from "../tree/model.mjs";
 
 export function plotSelectionOptions({ shiftKey, ctrlKey, metaKey, altKey }) {
   return { range: Boolean(shiftKey && (ctrlKey || metaKey || altKey)), subtract: Boolean(shiftKey && altKey) };

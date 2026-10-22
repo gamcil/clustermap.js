@@ -4,32 +4,6 @@ import { resolveTreePresentation, treeMetrics } from "./model.mjs";
 
 const leafXAnchors = new WeakMap();
 
-/** Return whether an order keeps every tree clade contiguous. */
-export function isTreeOrderCompatible(tree, order) {
-  if (!tree) return true;
-  const positions = new Map(order.map((uid, index) => [uid, index]));
-  if (positions.size !== order.length) return false;
-  const nodes = treeMetrics(tree).nodes;
-  const span = (uid) => {
-    const node = nodes.get(uid);
-    if (!node) return null;
-    if (!node.children?.length) {
-      const position = positions.get(node.cluster);
-      return position === undefined ? null : { min: position, max: position, count: 1 };
-    }
-    let min = Infinity, max = -Infinity, count = 0;
-    for (const child of node.children) {
-      const range = span(child);
-      if (!range) return null;
-      min = Math.min(min, range.min);
-      max = Math.max(max, range.max);
-      count += range.count;
-    }
-    return max - min + 1 === count ? { min, max, count } : null;
-  };
-  return span(tree.root)?.count === order.length;
-}
-
 /** Keep the tree in its base position until a dragged label reaches a leaf. */
 function treeLeafX(tree, proposedX, dragging = false) {
   if (!tree || typeof tree !== "object") return proposedX;
@@ -58,24 +32,14 @@ export function treeHorizontalLayout(tree, leafX, width, useBranchLengths = true
       : (depths.get(node.uid) / Math.max(1, maxDepth)) * width;
     xs.set(node.uid, leftX + position);
   }
-  if (proportional) {
-    const scale = niceScaleValue(maxDistance);
-    return {
-      xs,
-      maxDepth,
-      maxDistance,
-      proportional,
-      scaleBarLength: (scale.value / maxDistance) * width,
-      scaleBarLabel: scale.label,
-    };
-  }
+  const scale = proportional ? niceScaleValue(maxDistance) : { value: 1, label: "1 branch" };
   return {
     xs,
     maxDepth,
     maxDistance,
     proportional,
-    scaleBarLength: width / Math.max(1, maxDepth),
-    scaleBarLabel: "1 branch",
+    scaleBarLength: proportional ? (scale.value / maxDistance) * width : width / Math.max(1, maxDepth),
+    scaleBarLabel: scale.label,
   };
 }
 

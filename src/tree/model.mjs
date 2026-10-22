@@ -68,6 +68,65 @@ export function treeMetrics(tree) {
   return result;
 }
 
+/** Return whether an order keeps every tree clade contiguous. */
+export function isTreeOrderCompatible(tree, order, { partial = false } = {}) {
+  if (!tree) return true;
+  const positions = new Map(order.map((uid, index) => [uid, index]));
+  if (positions.size !== order.length) return false;
+  const nodes = treeMetrics(tree).nodes;
+  const span = (uid) => {
+    const node = nodes.get(uid);
+    if (!node) return null;
+    if (!node.children?.length) {
+      const position = positions.get(node.cluster);
+      return position === undefined
+        ? partial ? { min: Infinity, max: -Infinity, count: 0 } : null
+        : { min: position, max: position, count: 1 };
+    }
+    let min = Infinity, max = -Infinity, count = 0;
+    for (const child of node.children) {
+      const range = span(child);
+      if (!range) return null;
+      min = Math.min(min, range.min);
+      max = Math.max(max, range.max);
+      count += range.count;
+    }
+    return !count || max - min + 1 === count ? { min, max, count } : null;
+  };
+  return span(tree.root)?.count === order.length;
+}
+
+export function treeClusterOrder(tree) {
+  const nodes = treeMetrics(tree).nodes;
+  const result = [];
+  const visit = (uid) => {
+    const node = nodes.get(uid);
+    if (node.children) node.children.forEach(visit);
+    else result.push(node.cluster);
+  };
+  visit(tree.root);
+  return result;
+}
+
+/** Commit a compatible display order to the tree's ordered child arrays. */
+export function setTreeClusterOrder(tree, order, { partial = false } = {}) {
+  if (!tree) return;
+  if (!order.length || !isTreeOrderCompatible(tree, order, { partial })) {
+    throw new TypeError("Cluster order must keep every tree clade contiguous.");
+  }
+  const positions = new Map(order.map((uid, index) => [uid, index]));
+  const nodes = treeMetrics(tree).nodes;
+  const firstPosition = (uid) => {
+    const node = nodes.get(uid);
+    if (!node.children) return positions.get(node.cluster) ?? Infinity;
+    const first = new Map(node.children.map((child) => [child, firstPosition(child)]));
+    node.children.sort((a, b) => first.get(a) - first.get(b));
+    return first.get(node.children[0]);
+  };
+  firstPosition(tree.root);
+  return treeClusterOrder(tree);
+}
+
 function validateBranch(style, where) {
   fields(style, ["colour", "width"], where);
   if (own(style, "colour")) colour(style.colour, `${where}.colour`);

@@ -1,3 +1,4 @@
+import { setTreeClusterOrder } from "../tree/model.mjs";
 import { createFigureSurface } from "../renderers/figure.mjs";
 import { visibleChartData } from "../data/visibility.mjs";
 import { animate as runAnimation, afterPaint } from "../renderers/animation.mjs";
@@ -21,7 +22,6 @@ import {
   setPreviewLocusOffset,
   setPreviewClusterOrder,
   setPreviewClusterPosition,
-  setTreeClusterOrder,
   previewLocusTrim,
   restoreLocusBounds,
   trimLocusToGeneBounds,

@@ -1,4 +1,5 @@
-import { createChartState, setTreeClusterOrder } from "./state.mjs";
+import { createChartState } from "./state.mjs";
+import { setTreeClusterOrder } from "../tree/model.mjs";
 
 const finiteNumber = (value) => Number.isFinite(value) ? value : null;
 const stateEntries = (value) => Array.isArray(value)

@@ -1,6 +1,4 @@
-import { treeMetrics } from "../tree/model.mjs";
-import { isTreeOrderCompatible } from "../tree/layout.mjs";
-import { visibleTree } from "../data/visibility.mjs";
+import { treeClusterOrder } from "../tree/model.mjs";
 
 function removeMissing(records, allowed) {
   for (const uid of records.keys()) if (!allowed.has(uid)) records.delete(uid);
@@ -85,38 +83,6 @@ export function createChartState(data, previous = null) {
     if (cluster.loci.length && cluster.loci.every((locus) => excludedLoci.has(locus.uid))) excludedClusters.add(cluster.uid);
   }
   return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview, excludedClusters, excludedLoci };
-}
-
-function treeClusterOrder(tree) {
-  const nodes = treeMetrics(tree).nodes;
-  const result = [];
-  const visit = (uid) => {
-    const node = nodes.get(uid);
-    if (node.children) node.children.forEach(visit);
-    else result.push(node.cluster);
-  };
-  visit(tree.root);
-  return result;
-}
-
-/** Commit a compatible display order to the tree's ordered child arrays. */
-export function setTreeClusterOrder(tree, order, { partial = false } = {}) {
-  if (!tree) return;
-  const orderedTree = partial ? visibleTree(tree, new Set(order)) : tree;
-  if (!orderedTree || !isTreeOrderCompatible(orderedTree, order)) {
-    throw new TypeError("Cluster order must keep every tree clade contiguous.");
-  }
-  const positions = new Map(order.map((uid, index) => [uid, index]));
-  const nodes = treeMetrics(tree).nodes;
-  const firstPosition = (uid) => {
-    const node = nodes.get(uid);
-    if (!node.children) return positions.get(node.cluster) ?? Infinity;
-    const first = new Map(node.children.map((child) => [child, firstPosition(child)]));
-    node.children.sort((a, b) => first.get(a) - first.get(b));
-    return first.get(node.children[0]);
-  };
-  firstPosition(tree.root);
-  return treeClusterOrder(tree);
 }
 
 export function isDragging(chartState) {

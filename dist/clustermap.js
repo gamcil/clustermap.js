@@ -4,6 +4,700 @@
   (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ClusterMap = {}));
 })(this, (function (exports) { 'use strict';
 
+  function define(constructor, factory, prototype) {
+    constructor.prototype = factory.prototype = prototype;
+    prototype.constructor = constructor;
+  }
+
+  function extend(parent, definition) {
+    var prototype = Object.create(parent.prototype);
+    for (var key in definition) prototype[key] = definition[key];
+    return prototype;
+  }
+
+  function Color() {}
+
+  var darker = 0.7;
+  var brighter = 1 / darker;
+
+  var reI = "\\s*([+-]?\\d+)\\s*",
+      reN = "\\s*([+-]?(?:\\d*\\.)?\\d+(?:[eE][+-]?\\d+)?)\\s*",
+      reP = "\\s*([+-]?(?:\\d*\\.)?\\d+(?:[eE][+-]?\\d+)?)%\\s*",
+      reHex = /^#([0-9a-f]{3,8})$/,
+      reRgbInteger = new RegExp(`^rgb\\(${reI},${reI},${reI}\\)$`),
+      reRgbPercent = new RegExp(`^rgb\\(${reP},${reP},${reP}\\)$`),
+      reRgbaInteger = new RegExp(`^rgba\\(${reI},${reI},${reI},${reN}\\)$`),
+      reRgbaPercent = new RegExp(`^rgba\\(${reP},${reP},${reP},${reN}\\)$`),
+      reHslPercent = new RegExp(`^hsl\\(${reN},${reP},${reP}\\)$`),
+      reHslaPercent = new RegExp(`^hsla\\(${reN},${reP},${reP},${reN}\\)$`);
+
+  var named = {
+    aliceblue: 0xf0f8ff,
+    antiquewhite: 0xfaebd7,
+    aqua: 0x00ffff,
+    aquamarine: 0x7fffd4,
+    azure: 0xf0ffff,
+    beige: 0xf5f5dc,
+    bisque: 0xffe4c4,
+    black: 0x000000,
+    blanchedalmond: 0xffebcd,
+    blue: 0x0000ff,
+    blueviolet: 0x8a2be2,
+    brown: 0xa52a2a,
+    burlywood: 0xdeb887,
+    cadetblue: 0x5f9ea0,
+    chartreuse: 0x7fff00,
+    chocolate: 0xd2691e,
+    coral: 0xff7f50,
+    cornflowerblue: 0x6495ed,
+    cornsilk: 0xfff8dc,
+    crimson: 0xdc143c,
+    cyan: 0x00ffff,
+    darkblue: 0x00008b,
+    darkcyan: 0x008b8b,
+    darkgoldenrod: 0xb8860b,
+    darkgray: 0xa9a9a9,
+    darkgreen: 0x006400,
+    darkgrey: 0xa9a9a9,
+    darkkhaki: 0xbdb76b,
+    darkmagenta: 0x8b008b,
+    darkolivegreen: 0x556b2f,
+    darkorange: 0xff8c00,
+    darkorchid: 0x9932cc,
+    darkred: 0x8b0000,
+    darksalmon: 0xe9967a,
+    darkseagreen: 0x8fbc8f,
+    darkslateblue: 0x483d8b,
+    darkslategray: 0x2f4f4f,
+    darkslategrey: 0x2f4f4f,
+    darkturquoise: 0x00ced1,
+    darkviolet: 0x9400d3,
+    deeppink: 0xff1493,
+    deepskyblue: 0x00bfff,
+    dimgray: 0x696969,
+    dimgrey: 0x696969,
+    dodgerblue: 0x1e90ff,
+    firebrick: 0xb22222,
+    floralwhite: 0xfffaf0,
+    forestgreen: 0x228b22,
+    fuchsia: 0xff00ff,
+    gainsboro: 0xdcdcdc,
+    ghostwhite: 0xf8f8ff,
+    gold: 0xffd700,
+    goldenrod: 0xdaa520,
+    gray: 0x808080,
+    green: 0x008000,
+    greenyellow: 0xadff2f,
+    grey: 0x808080,
+    honeydew: 0xf0fff0,
+    hotpink: 0xff69b4,
+    indianred: 0xcd5c5c,
+    indigo: 0x4b0082,
+    ivory: 0xfffff0,
+    khaki: 0xf0e68c,
+    lavender: 0xe6e6fa,
+    lavenderblush: 0xfff0f5,
+    lawngreen: 0x7cfc00,
+    lemonchiffon: 0xfffacd,
+    lightblue: 0xadd8e6,
+    lightcoral: 0xf08080,
+    lightcyan: 0xe0ffff,
+    lightgoldenrodyellow: 0xfafad2,
+    lightgray: 0xd3d3d3,
+    lightgreen: 0x90ee90,
+    lightgrey: 0xd3d3d3,
+    lightpink: 0xffb6c1,
+    lightsalmon: 0xffa07a,
+    lightseagreen: 0x20b2aa,
+    lightskyblue: 0x87cefa,
+    lightslategray: 0x778899,
+    lightslategrey: 0x778899,
+    lightsteelblue: 0xb0c4de,
+    lightyellow: 0xffffe0,
+    lime: 0x00ff00,
+    limegreen: 0x32cd32,
+    linen: 0xfaf0e6,
+    magenta: 0xff00ff,
+    maroon: 0x800000,
+    mediumaquamarine: 0x66cdaa,
+    mediumblue: 0x0000cd,
+    mediumorchid: 0xba55d3,
+    mediumpurple: 0x9370db,
+    mediumseagreen: 0x3cb371,
+    mediumslateblue: 0x7b68ee,
+    mediumspringgreen: 0x00fa9a,
+    mediumturquoise: 0x48d1cc,
+    mediumvioletred: 0xc71585,
+    midnightblue: 0x191970,
+    mintcream: 0xf5fffa,
+    mistyrose: 0xffe4e1,
+    moccasin: 0xffe4b5,
+    navajowhite: 0xffdead,
+    navy: 0x000080,
+    oldlace: 0xfdf5e6,
+    olive: 0x808000,
+    olivedrab: 0x6b8e23,
+    orange: 0xffa500,
+    orangered: 0xff4500,
+    orchid: 0xda70d6,
+    palegoldenrod: 0xeee8aa,
+    palegreen: 0x98fb98,
+    paleturquoise: 0xafeeee,
+    palevioletred: 0xdb7093,
+    papayawhip: 0xffefd5,
+    peachpuff: 0xffdab9,
+    peru: 0xcd853f,
+    pink: 0xffc0cb,
+    plum: 0xdda0dd,
+    powderblue: 0xb0e0e6,
+    purple: 0x800080,
+    rebeccapurple: 0x663399,
+    red: 0xff0000,
+    rosybrown: 0xbc8f8f,
+    royalblue: 0x4169e1,
+    saddlebrown: 0x8b4513,
+    salmon: 0xfa8072,
+    sandybrown: 0xf4a460,
+    seagreen: 0x2e8b57,
+    seashell: 0xfff5ee,
+    sienna: 0xa0522d,
+    silver: 0xc0c0c0,
+    skyblue: 0x87ceeb,
+    slateblue: 0x6a5acd,
+    slategray: 0x708090,
+    slategrey: 0x708090,
+    snow: 0xfffafa,
+    springgreen: 0x00ff7f,
+    steelblue: 0x4682b4,
+    tan: 0xd2b48c,
+    teal: 0x008080,
+    thistle: 0xd8bfd8,
+    tomato: 0xff6347,
+    turquoise: 0x40e0d0,
+    violet: 0xee82ee,
+    wheat: 0xf5deb3,
+    white: 0xffffff,
+    whitesmoke: 0xf5f5f5,
+    yellow: 0xffff00,
+    yellowgreen: 0x9acd32
+  };
+
+  define(Color, color, {
+    copy(channels) {
+      return Object.assign(new this.constructor, this, channels);
+    },
+    displayable() {
+      return this.rgb().displayable();
+    },
+    hex: color_formatHex, // Deprecated! Use color.formatHex.
+    formatHex: color_formatHex,
+    formatHex8: color_formatHex8,
+    formatHsl: color_formatHsl,
+    formatRgb: color_formatRgb,
+    toString: color_formatRgb
+  });
+
+  function color_formatHex() {
+    return this.rgb().formatHex();
+  }
+
+  function color_formatHex8() {
+    return this.rgb().formatHex8();
+  }
+
+  function color_formatHsl() {
+    return hslConvert(this).formatHsl();
+  }
+
+  function color_formatRgb() {
+    return this.rgb().formatRgb();
+  }
+
+  function color(format) {
+    var m, l;
+    format = (format + "").trim().toLowerCase();
+    return (m = reHex.exec(format)) ? (l = m[1].length, m = parseInt(m[1], 16), l === 6 ? rgbn(m) // #ff0000
+        : l === 3 ? new Rgb((m >> 8 & 0xf) | (m >> 4 & 0xf0), (m >> 4 & 0xf) | (m & 0xf0), ((m & 0xf) << 4) | (m & 0xf), 1) // #f00
+        : l === 8 ? rgba$1(m >> 24 & 0xff, m >> 16 & 0xff, m >> 8 & 0xff, (m & 0xff) / 0xff) // #ff000000
+        : l === 4 ? rgba$1((m >> 12 & 0xf) | (m >> 8 & 0xf0), (m >> 8 & 0xf) | (m >> 4 & 0xf0), (m >> 4 & 0xf) | (m & 0xf0), (((m & 0xf) << 4) | (m & 0xf)) / 0xff) // #f000
+        : null) // invalid hex
+        : (m = reRgbInteger.exec(format)) ? new Rgb(m[1], m[2], m[3], 1) // rgb(255, 0, 0)
+        : (m = reRgbPercent.exec(format)) ? new Rgb(m[1] * 255 / 100, m[2] * 255 / 100, m[3] * 255 / 100, 1) // rgb(100%, 0%, 0%)
+        : (m = reRgbaInteger.exec(format)) ? rgba$1(m[1], m[2], m[3], m[4]) // rgba(255, 0, 0, 1)
+        : (m = reRgbaPercent.exec(format)) ? rgba$1(m[1] * 255 / 100, m[2] * 255 / 100, m[3] * 255 / 100, m[4]) // rgb(100%, 0%, 0%, 1)
+        : (m = reHslPercent.exec(format)) ? hsla(m[1], m[2] / 100, m[3] / 100, 1) // hsl(120, 50%, 50%)
+        : (m = reHslaPercent.exec(format)) ? hsla(m[1], m[2] / 100, m[3] / 100, m[4]) // hsla(120, 50%, 50%, 1)
+        : named.hasOwnProperty(format) ? rgbn(named[format]) // eslint-disable-line no-prototype-builtins
+        : format === "transparent" ? new Rgb(NaN, NaN, NaN, 0)
+        : null;
+  }
+
+  function rgbn(n) {
+    return new Rgb(n >> 16 & 0xff, n >> 8 & 0xff, n & 0xff, 1);
+  }
+
+  function rgba$1(r, g, b, a) {
+    if (a <= 0) r = g = b = NaN;
+    return new Rgb(r, g, b, a);
+  }
+
+  function rgbConvert(o) {
+    if (!(o instanceof Color)) o = color(o);
+    if (!o) return new Rgb;
+    o = o.rgb();
+    return new Rgb(o.r, o.g, o.b, o.opacity);
+  }
+
+  function rgb(r, g, b, opacity) {
+    return arguments.length === 1 ? rgbConvert(r) : new Rgb(r, g, b, opacity == null ? 1 : opacity);
+  }
+
+  function Rgb(r, g, b, opacity) {
+    this.r = +r;
+    this.g = +g;
+    this.b = +b;
+    this.opacity = +opacity;
+  }
+
+  define(Rgb, rgb, extend(Color, {
+    brighter(k) {
+      k = k == null ? brighter : Math.pow(brighter, k);
+      return new Rgb(this.r * k, this.g * k, this.b * k, this.opacity);
+    },
+    darker(k) {
+      k = k == null ? darker : Math.pow(darker, k);
+      return new Rgb(this.r * k, this.g * k, this.b * k, this.opacity);
+    },
+    rgb() {
+      return this;
+    },
+    clamp() {
+      return new Rgb(clampi(this.r), clampi(this.g), clampi(this.b), clampa(this.opacity));
+    },
+    displayable() {
+      return (-0.5 <= this.r && this.r < 255.5)
+          && (-0.5 <= this.g && this.g < 255.5)
+          && (-0.5 <= this.b && this.b < 255.5)
+          && (0 <= this.opacity && this.opacity <= 1);
+    },
+    hex: rgb_formatHex, // Deprecated! Use color.formatHex.
+    formatHex: rgb_formatHex,
+    formatHex8: rgb_formatHex8,
+    formatRgb: rgb_formatRgb,
+    toString: rgb_formatRgb
+  }));
+
+  function rgb_formatHex() {
+    return `#${hex(this.r)}${hex(this.g)}${hex(this.b)}`;
+  }
+
+  function rgb_formatHex8() {
+    return `#${hex(this.r)}${hex(this.g)}${hex(this.b)}${hex((isNaN(this.opacity) ? 1 : this.opacity) * 255)}`;
+  }
+
+  function rgb_formatRgb() {
+    const a = clampa(this.opacity);
+    return `${a === 1 ? "rgb(" : "rgba("}${clampi(this.r)}, ${clampi(this.g)}, ${clampi(this.b)}${a === 1 ? ")" : `, ${a})`}`;
+  }
+
+  function clampa(opacity) {
+    return isNaN(opacity) ? 1 : Math.max(0, Math.min(1, opacity));
+  }
+
+  function clampi(value) {
+    return Math.max(0, Math.min(255, Math.round(value) || 0));
+  }
+
+  function hex(value) {
+    value = clampi(value);
+    return (value < 16 ? "0" : "") + value.toString(16);
+  }
+
+  function hsla(h, s, l, a) {
+    if (a <= 0) h = s = l = NaN;
+    else if (l <= 0 || l >= 1) h = s = NaN;
+    else if (s <= 0) h = NaN;
+    return new Hsl(h, s, l, a);
+  }
+
+  function hslConvert(o) {
+    if (o instanceof Hsl) return new Hsl(o.h, o.s, o.l, o.opacity);
+    if (!(o instanceof Color)) o = color(o);
+    if (!o) return new Hsl;
+    if (o instanceof Hsl) return o;
+    o = o.rgb();
+    var r = o.r / 255,
+        g = o.g / 255,
+        b = o.b / 255,
+        min = Math.min(r, g, b),
+        max = Math.max(r, g, b),
+        h = NaN,
+        s = max - min,
+        l = (max + min) / 2;
+    if (s) {
+      if (r === max) h = (g - b) / s + (g < b) * 6;
+      else if (g === max) h = (b - r) / s + 2;
+      else h = (r - g) / s + 4;
+      s /= l < 0.5 ? max + min : 2 - max - min;
+      h *= 60;
+    } else {
+      s = l > 0 && l < 1 ? 0 : h;
+    }
+    return new Hsl(h, s, l, o.opacity);
+  }
+
+  function hsl(h, s, l, opacity) {
+    return arguments.length === 1 ? hslConvert(h) : new Hsl(h, s, l, opacity == null ? 1 : opacity);
+  }
+
+  function Hsl(h, s, l, opacity) {
+    this.h = +h;
+    this.s = +s;
+    this.l = +l;
+    this.opacity = +opacity;
+  }
+
+  define(Hsl, hsl, extend(Color, {
+    brighter(k) {
+      k = k == null ? brighter : Math.pow(brighter, k);
+      return new Hsl(this.h, this.s, this.l * k, this.opacity);
+    },
+    darker(k) {
+      k = k == null ? darker : Math.pow(darker, k);
+      return new Hsl(this.h, this.s, this.l * k, this.opacity);
+    },
+    rgb() {
+      var h = this.h % 360 + (this.h < 0) * 360,
+          s = isNaN(h) || isNaN(this.s) ? 0 : this.s,
+          l = this.l,
+          m2 = l + (l < 0.5 ? l : 1 - l) * s,
+          m1 = 2 * l - m2;
+      return new Rgb(
+        hsl2rgb(h >= 240 ? h - 240 : h + 120, m1, m2),
+        hsl2rgb(h, m1, m2),
+        hsl2rgb(h < 120 ? h + 240 : h - 120, m1, m2),
+        this.opacity
+      );
+    },
+    clamp() {
+      return new Hsl(clamph(this.h), clampt(this.s), clampt(this.l), clampa(this.opacity));
+    },
+    displayable() {
+      return (0 <= this.s && this.s <= 1 || isNaN(this.s))
+          && (0 <= this.l && this.l <= 1)
+          && (0 <= this.opacity && this.opacity <= 1);
+    },
+    formatHsl() {
+      const a = clampa(this.opacity);
+      return `${a === 1 ? "hsl(" : "hsla("}${clamph(this.h)}, ${clampt(this.s) * 100}%, ${clampt(this.l) * 100}%${a === 1 ? ")" : `, ${a})`}`;
+    }
+  }));
+
+  function clamph(value) {
+    value = (value || 0) % 360;
+    return value < 0 ? value + 360 : value;
+  }
+
+  function clampt(value) {
+    return Math.max(0, Math.min(1, value || 0));
+  }
+
+  /* From FvD 13.37, CSS Color Module Level 3 */
+  function hsl2rgb(h, m1, m2) {
+    return (h < 60 ? m1 + (m2 - m1) * h / 60
+        : h < 180 ? m2
+        : h < 240 ? m1 + (m2 - m1) * (240 - h) / 60
+        : m1) * 255;
+  }
+
+  const radians = Math.PI / 180;
+  const degrees$1 = 180 / Math.PI;
+
+  var A = -0.14861,
+      B = +1.78277,
+      C = -0.29227,
+      D = -0.90649,
+      E = +1.97294,
+      ED = E * D,
+      EB = E * B,
+      BC_DA = B * C - D * A;
+
+  function cubehelixConvert(o) {
+    if (o instanceof Cubehelix) return new Cubehelix(o.h, o.s, o.l, o.opacity);
+    if (!(o instanceof Rgb)) o = rgbConvert(o);
+    var r = o.r / 255,
+        g = o.g / 255,
+        b = o.b / 255,
+        l = (BC_DA * b + ED * r - EB * g) / (BC_DA + ED - EB),
+        bl = b - l,
+        k = (E * (g - l) - C * bl) / D,
+        s = Math.sqrt(k * k + bl * bl) / (E * l * (1 - l)), // NaN if l=0 or l=1
+        h = s ? Math.atan2(k, bl) * degrees$1 - 120 : NaN;
+    return new Cubehelix(h < 0 ? h + 360 : h, s, l, o.opacity);
+  }
+
+  function cubehelix$1(h, s, l, opacity) {
+    return arguments.length === 1 ? cubehelixConvert(h) : new Cubehelix(h, s, l, opacity == null ? 1 : opacity);
+  }
+
+  function Cubehelix(h, s, l, opacity) {
+    this.h = +h;
+    this.s = +s;
+    this.l = +l;
+    this.opacity = +opacity;
+  }
+
+  define(Cubehelix, cubehelix$1, extend(Color, {
+    brighter(k) {
+      k = k == null ? brighter : Math.pow(brighter, k);
+      return new Cubehelix(this.h, this.s, this.l * k, this.opacity);
+    },
+    darker(k) {
+      k = k == null ? darker : Math.pow(darker, k);
+      return new Cubehelix(this.h, this.s, this.l * k, this.opacity);
+    },
+    rgb() {
+      var h = isNaN(this.h) ? 0 : (this.h + 120) * radians,
+          l = +this.l,
+          a = isNaN(this.s) ? 0 : this.s * l * (1 - l),
+          cosh = Math.cos(h),
+          sinh = Math.sin(h);
+      return new Rgb(
+        255 * (l + a * (A * cosh + B * sinh)),
+        255 * (l + a * (C * cosh + D * sinh)),
+        255 * (l + a * (E * cosh)),
+        this.opacity
+      );
+    }
+  }));
+
+  const TREE_COLOURING_DEFAULTS = {
+    mode: "none",
+    cutHeight: "auto",
+    palette: ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"],
+    showCutLine: false,
+  };
+  const metricsCache = new WeakMap();
+  const stylesCache = new WeakMap();
+  const fail$2 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
+  const object$2 = (value) => value && typeof value === "object" && !Array.isArray(value);
+  const own$1 = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+  function fields$1(value, allowed, where) {
+    if (!object$2(value)) fail$2(`${where} must be an object.`);
+    for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$2(`${where}.${key} is unsupported.`);
+  }
+  function colour(value, where) {
+    if (typeof value !== "string" || !color(value)) fail$2(`${where} must be a valid colour.`);
+  }
+  function positive(value, where) {
+    if (!Number.isFinite(value) || value <= 0) fail$2(`${where} must be finite and positive.`);
+  }
+  function validateTreeColouring(policy) {
+    if (policy === undefined) return;
+    fields$1(policy, ["mode", "cutHeight", "palette", "showCutLine"], "colouring");
+    if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$2("colouring.mode must be none or cutHeight.");
+    if (own$1(policy, "cutHeight") && policy.cutHeight !== "auto" && (!Number.isFinite(policy.cutHeight) || policy.cutHeight < 0)) {
+      fail$2('colouring.cutHeight must be "auto" or a finite non-negative number.');
+    }
+    if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$2("colouring.showCutLine must be boolean.");
+    if (own$1(policy, "palette")) {
+      if (!Array.isArray(policy.palette) || !policy.palette.length) fail$2("colouring.palette must be a non-empty colour array.");
+      policy.palette.forEach((entry) => colour(entry, "colouring.palette"));
+    }
+  }
+
+  /** Biological distances and canonical ID order survive child rotation unchanged. */
+  function treeMetrics(tree) {
+    if (metricsCache.has(tree)) return metricsCache.get(tree);
+    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    const parents = new Map();
+    const distances = new Map([[tree.root, 0]]), depths = new Map([[tree.root, 0]]);
+    let completeLengths = true, nonNegative = true;
+    const visit = (uid) => {
+      for (const child of nodes.get(uid).children || []) {
+        const length = nodes.get(child).branchLength;
+        const finite = Number.isFinite(length);
+        if (!finite) completeLengths = false;
+        if (length < 0) nonNegative = false;
+        parents.set(child, uid);
+        distances.set(child, distances.get(uid) + (finite ? length : 0));
+        depths.set(child, depths.get(uid) + 1);
+        visit(child);
+      }
+    };
+    visit(tree.root);
+    const tips = tree.nodes.filter((node) => !node.children);
+    const height = Math.max(0, ...tips.map((node) => distances.get(node.uid)));
+    // Absolute 1e-12 plus relative 1e-9 tolerance, measured in input distance units.
+    const tolerance = 1e-12 + 1e-9 * height;
+    const ultrametric = completeLengths && nonNegative && tips.every((node) => Math.abs(distances.get(node.uid) - height) <= tolerance);
+    const result = {
+      nodes, parents, distances, depths, maxDepth: Math.max(...depths.values()), height, completeLengths, ultrametric,
+      canonical: [...tree.nodes].sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0),
+    };
+    metricsCache.set(tree, result);
+    return result;
+  }
+
+  /** Return whether an order keeps every tree clade contiguous. */
+  function isTreeOrderCompatible(tree, order, { partial = false } = {}) {
+    if (!tree) return true;
+    const positions = new Map(order.map((uid, index) => [uid, index]));
+    if (positions.size !== order.length) return false;
+    const nodes = treeMetrics(tree).nodes;
+    const span = (uid) => {
+      const node = nodes.get(uid);
+      if (!node) return null;
+      if (!node.children?.length) {
+        const position = positions.get(node.cluster);
+        return position === undefined
+          ? partial ? { min: Infinity, max: -Infinity, count: 0 } : null
+          : { min: position, max: position, count: 1 };
+      }
+      let min = Infinity, max = -Infinity, count = 0;
+      for (const child of node.children) {
+        const range = span(child);
+        if (!range) return null;
+        min = Math.min(min, range.min);
+        max = Math.max(max, range.max);
+        count += range.count;
+      }
+      return !count || max - min + 1 === count ? { min, max, count } : null;
+    };
+    return span(tree.root)?.count === order.length;
+  }
+
+  function treeClusterOrder(tree) {
+    const nodes = treeMetrics(tree).nodes;
+    const result = [];
+    const visit = (uid) => {
+      const node = nodes.get(uid);
+      if (node.children) node.children.forEach(visit);
+      else result.push(node.cluster);
+    };
+    visit(tree.root);
+    return result;
+  }
+
+  /** Commit a compatible display order to the tree's ordered child arrays. */
+  function setTreeClusterOrder(tree, order, { partial = false } = {}) {
+    if (!tree) return;
+    if (!order.length || !isTreeOrderCompatible(tree, order, { partial })) {
+      throw new TypeError("Cluster order must keep every tree clade contiguous.");
+    }
+    const positions = new Map(order.map((uid, index) => [uid, index]));
+    const nodes = treeMetrics(tree).nodes;
+    const firstPosition = (uid) => {
+      const node = nodes.get(uid);
+      if (!node.children) return positions.get(node.cluster) ?? Infinity;
+      const first = new Map(node.children.map((child) => [child, firstPosition(child)]));
+      node.children.sort((a, b) => first.get(a) - first.get(b));
+      return first.get(node.children[0]);
+    };
+    firstPosition(tree.root);
+    return treeClusterOrder(tree);
+  }
+
+  function validateBranch(style, where) {
+    fields$1(style, ["colour", "width"], where);
+    if (own$1(style, "colour")) colour(style.colour, `${where}.colour`);
+    if (own$1(style, "width")) positive(style.width, `${where}.width`);
+  }
+
+  /** Validate optional data fields and the effective tree/config colouring policy. */
+  function validateTreePresentation(tree, config = {}) {
+    validateTreeColouring(config.colouring);
+    if (!tree) return;
+    if (tree.distance !== undefined) {
+      fields$1(tree.distance, ["kind", "label"], "distance");
+      if (tree.distance.kind !== "mergeHeight") fail$2("distance.kind must be mergeHeight.");
+      if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$2("distance.label must be text.");
+    }
+    const presentation = tree.presentation;
+    if (presentation !== undefined) {
+      fields$1(presentation, ["colouring", "subtrees", "nodes"], "presentation");
+      validateTreeColouring(presentation.colouring);
+      const nodes = treeMetrics(tree).nodes;
+      for (const scope of ["subtrees", "nodes"]) {
+        if (presentation[scope] === undefined) continue;
+        if (!object$2(presentation[scope])) fail$2(`presentation.${scope} must be a node-ID dictionary.`);
+        for (const [uid, record] of Object.entries(presentation[scope])) {
+          const node = nodes.get(uid);
+          if (!node) fail$2(`presentation.${scope} refers to unknown node '${uid}'.`);
+          fields$1(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
+          if (scope === "subtrees" && !node.children) fail$2(`subtree '${uid}' must be an internal node.`);
+          if (record.branch !== undefined) {
+            if (scope === "nodes" && uid === tree.root) fail$2("the display root has no incoming edge to style.");
+            validateBranch(record.branch, `${scope}.${uid}.branch`);
+          }
+          if (record.label !== undefined) {
+            if (!node.children) fail$2(`annotation '${uid}' must belong to an internal node.`);
+            const label = record.label;
+            fields$1(label, ["text", "colour", "fontSize", "fontWeight", "fontStyle"], `nodes.${uid}.label`);
+            if (own$1(label, "text") && typeof label.text !== "string") fail$2(`annotation '${uid}' text must be a string.`);
+            if (own$1(label, "colour")) colour(label.colour, `annotation '${uid}' colour`);
+            if (own$1(label, "fontSize")) positive(label.fontSize, `annotation '${uid}' fontSize`);
+            if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$2("annotation fontWeight must be 400 or 700.");
+            if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$2("annotation fontStyle must be normal or italic.");
+          }
+        }
+      }
+    }
+    const policy = { ...TREE_COLOURING_DEFAULTS, ...config.colouring, ...presentation?.colouring };
+    if (policy.mode === "cutHeight") {
+      if (tree.distance?.kind !== "mergeHeight") fail$2("cutHeight colouring requires distance.kind = mergeHeight.");
+      if (!treeMetrics(tree).ultrametric) fail$2("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
+    }
+  }
+
+  function invalidateTreePresentation(tree) {
+    if (tree) stylesCache.delete(tree);
+  }
+
+  /** Resolve properties once per presentation/config revision, never per tween. */
+  function resolveTreePresentation(tree, config = {}) {
+    const defaults = { ...TREE_COLOURING_DEFAULTS, ...config.colouring };
+    const signature = JSON.stringify([config.branch?.colour, config.branch?.width, config.textColour, defaults]);
+    const cached = stylesCache.get(tree);
+    if (cached && cached.presentation === tree.presentation && cached.signature === signature) return cached.value;
+    validateTreePresentation(tree, config);
+    const metrics = treeMetrics(tree);
+    const policy = { ...defaults, ...tree.presentation?.colouring };
+    const threshold = policy.cutHeight === "auto" ? metrics.height * 0.7 : policy.cutHeight;
+    const groups = new Map();
+    if (policy.mode === "cutHeight" && threshold > 0) {
+      const heightFor = (uid) => Math.max(0, metrics.height - metrics.distances.get(uid));
+      for (const node of metrics.canonical) {
+        if (!node.children || heightFor(node.uid) >= threshold) continue;
+        const parent = metrics.parents.get(node.uid);
+        if (parent === undefined || heightFor(parent) >= threshold) {
+          groups.set(node.uid, policy.palette[groups.size % policy.palette.length]);
+        }
+      }
+    }
+    const base = { colour: config.branch?.colour || "#555", width: Number(config.branch?.width) || 1.5 };
+    const branches = new Map();
+    const stems = new Map();
+    const annotations = new Map();
+    const visit = (uid, inherited = {}, groupColour = null) => {
+      const node = metrics.nodes.get(uid);
+      const automatic = groups.get(uid) || groupColour;
+      const subtree = { ...inherited, ...tree.presentation?.subtrees?.[uid]?.branch };
+      const mergeStyle = { ...base, ...(automatic ? { colour: automatic } : {}), ...subtree };
+      if (node.children) stems.set(uid, mergeStyle);
+      const label = tree.presentation?.nodes?.[uid]?.label;
+      if (label?.text) annotations.set(uid, { colour: config.textColour || "#333", fontSize: 10, fontWeight: 400, fontStyle: "normal", ...label });
+      for (const child of node.children || []) {
+        branches.set(child, { ...mergeStyle, ...tree.presentation?.nodes?.[child]?.branch });
+        visit(child, subtree, automatic);
+      }
+    };
+    visit(tree.root);
+    const value = { base, branches, stems, annotations, policy, height: metrics.height, threshold, metric: policy.mode === "cutHeight" };
+    stylesCache.set(tree, { presentation: tree.presentation, signature, value });
+    return value;
+  }
+
   /** Test world bounds after applying a preview translation. */
   function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
     return !viewport || !bounds || bounds.minX + x <= viewport.maxX && bounds.maxX + x >= viewport.minX &&
@@ -931,668 +1625,7 @@
     return { ...scene, clusters, loci, genes, links, annotationPanels };
   }
 
-  function define(constructor, factory, prototype) {
-    constructor.prototype = factory.prototype = prototype;
-    prototype.constructor = constructor;
-  }
-
-  function extend(parent, definition) {
-    var prototype = Object.create(parent.prototype);
-    for (var key in definition) prototype[key] = definition[key];
-    return prototype;
-  }
-
-  function Color() {}
-
-  var darker = 0.7;
-  var brighter = 1 / darker;
-
-  var reI = "\\s*([+-]?\\d+)\\s*",
-      reN = "\\s*([+-]?(?:\\d*\\.)?\\d+(?:[eE][+-]?\\d+)?)\\s*",
-      reP = "\\s*([+-]?(?:\\d*\\.)?\\d+(?:[eE][+-]?\\d+)?)%\\s*",
-      reHex = /^#([0-9a-f]{3,8})$/,
-      reRgbInteger = new RegExp(`^rgb\\(${reI},${reI},${reI}\\)$`),
-      reRgbPercent = new RegExp(`^rgb\\(${reP},${reP},${reP}\\)$`),
-      reRgbaInteger = new RegExp(`^rgba\\(${reI},${reI},${reI},${reN}\\)$`),
-      reRgbaPercent = new RegExp(`^rgba\\(${reP},${reP},${reP},${reN}\\)$`),
-      reHslPercent = new RegExp(`^hsl\\(${reN},${reP},${reP}\\)$`),
-      reHslaPercent = new RegExp(`^hsla\\(${reN},${reP},${reP},${reN}\\)$`);
-
-  var named = {
-    aliceblue: 0xf0f8ff,
-    antiquewhite: 0xfaebd7,
-    aqua: 0x00ffff,
-    aquamarine: 0x7fffd4,
-    azure: 0xf0ffff,
-    beige: 0xf5f5dc,
-    bisque: 0xffe4c4,
-    black: 0x000000,
-    blanchedalmond: 0xffebcd,
-    blue: 0x0000ff,
-    blueviolet: 0x8a2be2,
-    brown: 0xa52a2a,
-    burlywood: 0xdeb887,
-    cadetblue: 0x5f9ea0,
-    chartreuse: 0x7fff00,
-    chocolate: 0xd2691e,
-    coral: 0xff7f50,
-    cornflowerblue: 0x6495ed,
-    cornsilk: 0xfff8dc,
-    crimson: 0xdc143c,
-    cyan: 0x00ffff,
-    darkblue: 0x00008b,
-    darkcyan: 0x008b8b,
-    darkgoldenrod: 0xb8860b,
-    darkgray: 0xa9a9a9,
-    darkgreen: 0x006400,
-    darkgrey: 0xa9a9a9,
-    darkkhaki: 0xbdb76b,
-    darkmagenta: 0x8b008b,
-    darkolivegreen: 0x556b2f,
-    darkorange: 0xff8c00,
-    darkorchid: 0x9932cc,
-    darkred: 0x8b0000,
-    darksalmon: 0xe9967a,
-    darkseagreen: 0x8fbc8f,
-    darkslateblue: 0x483d8b,
-    darkslategray: 0x2f4f4f,
-    darkslategrey: 0x2f4f4f,
-    darkturquoise: 0x00ced1,
-    darkviolet: 0x9400d3,
-    deeppink: 0xff1493,
-    deepskyblue: 0x00bfff,
-    dimgray: 0x696969,
-    dimgrey: 0x696969,
-    dodgerblue: 0x1e90ff,
-    firebrick: 0xb22222,
-    floralwhite: 0xfffaf0,
-    forestgreen: 0x228b22,
-    fuchsia: 0xff00ff,
-    gainsboro: 0xdcdcdc,
-    ghostwhite: 0xf8f8ff,
-    gold: 0xffd700,
-    goldenrod: 0xdaa520,
-    gray: 0x808080,
-    green: 0x008000,
-    greenyellow: 0xadff2f,
-    grey: 0x808080,
-    honeydew: 0xf0fff0,
-    hotpink: 0xff69b4,
-    indianred: 0xcd5c5c,
-    indigo: 0x4b0082,
-    ivory: 0xfffff0,
-    khaki: 0xf0e68c,
-    lavender: 0xe6e6fa,
-    lavenderblush: 0xfff0f5,
-    lawngreen: 0x7cfc00,
-    lemonchiffon: 0xfffacd,
-    lightblue: 0xadd8e6,
-    lightcoral: 0xf08080,
-    lightcyan: 0xe0ffff,
-    lightgoldenrodyellow: 0xfafad2,
-    lightgray: 0xd3d3d3,
-    lightgreen: 0x90ee90,
-    lightgrey: 0xd3d3d3,
-    lightpink: 0xffb6c1,
-    lightsalmon: 0xffa07a,
-    lightseagreen: 0x20b2aa,
-    lightskyblue: 0x87cefa,
-    lightslategray: 0x778899,
-    lightslategrey: 0x778899,
-    lightsteelblue: 0xb0c4de,
-    lightyellow: 0xffffe0,
-    lime: 0x00ff00,
-    limegreen: 0x32cd32,
-    linen: 0xfaf0e6,
-    magenta: 0xff00ff,
-    maroon: 0x800000,
-    mediumaquamarine: 0x66cdaa,
-    mediumblue: 0x0000cd,
-    mediumorchid: 0xba55d3,
-    mediumpurple: 0x9370db,
-    mediumseagreen: 0x3cb371,
-    mediumslateblue: 0x7b68ee,
-    mediumspringgreen: 0x00fa9a,
-    mediumturquoise: 0x48d1cc,
-    mediumvioletred: 0xc71585,
-    midnightblue: 0x191970,
-    mintcream: 0xf5fffa,
-    mistyrose: 0xffe4e1,
-    moccasin: 0xffe4b5,
-    navajowhite: 0xffdead,
-    navy: 0x000080,
-    oldlace: 0xfdf5e6,
-    olive: 0x808000,
-    olivedrab: 0x6b8e23,
-    orange: 0xffa500,
-    orangered: 0xff4500,
-    orchid: 0xda70d6,
-    palegoldenrod: 0xeee8aa,
-    palegreen: 0x98fb98,
-    paleturquoise: 0xafeeee,
-    palevioletred: 0xdb7093,
-    papayawhip: 0xffefd5,
-    peachpuff: 0xffdab9,
-    peru: 0xcd853f,
-    pink: 0xffc0cb,
-    plum: 0xdda0dd,
-    powderblue: 0xb0e0e6,
-    purple: 0x800080,
-    rebeccapurple: 0x663399,
-    red: 0xff0000,
-    rosybrown: 0xbc8f8f,
-    royalblue: 0x4169e1,
-    saddlebrown: 0x8b4513,
-    salmon: 0xfa8072,
-    sandybrown: 0xf4a460,
-    seagreen: 0x2e8b57,
-    seashell: 0xfff5ee,
-    sienna: 0xa0522d,
-    silver: 0xc0c0c0,
-    skyblue: 0x87ceeb,
-    slateblue: 0x6a5acd,
-    slategray: 0x708090,
-    slategrey: 0x708090,
-    snow: 0xfffafa,
-    springgreen: 0x00ff7f,
-    steelblue: 0x4682b4,
-    tan: 0xd2b48c,
-    teal: 0x008080,
-    thistle: 0xd8bfd8,
-    tomato: 0xff6347,
-    turquoise: 0x40e0d0,
-    violet: 0xee82ee,
-    wheat: 0xf5deb3,
-    white: 0xffffff,
-    whitesmoke: 0xf5f5f5,
-    yellow: 0xffff00,
-    yellowgreen: 0x9acd32
-  };
-
-  define(Color, color, {
-    copy(channels) {
-      return Object.assign(new this.constructor, this, channels);
-    },
-    displayable() {
-      return this.rgb().displayable();
-    },
-    hex: color_formatHex, // Deprecated! Use color.formatHex.
-    formatHex: color_formatHex,
-    formatHex8: color_formatHex8,
-    formatHsl: color_formatHsl,
-    formatRgb: color_formatRgb,
-    toString: color_formatRgb
-  });
-
-  function color_formatHex() {
-    return this.rgb().formatHex();
-  }
-
-  function color_formatHex8() {
-    return this.rgb().formatHex8();
-  }
-
-  function color_formatHsl() {
-    return hslConvert(this).formatHsl();
-  }
-
-  function color_formatRgb() {
-    return this.rgb().formatRgb();
-  }
-
-  function color(format) {
-    var m, l;
-    format = (format + "").trim().toLowerCase();
-    return (m = reHex.exec(format)) ? (l = m[1].length, m = parseInt(m[1], 16), l === 6 ? rgbn(m) // #ff0000
-        : l === 3 ? new Rgb((m >> 8 & 0xf) | (m >> 4 & 0xf0), (m >> 4 & 0xf) | (m & 0xf0), ((m & 0xf) << 4) | (m & 0xf), 1) // #f00
-        : l === 8 ? rgba$1(m >> 24 & 0xff, m >> 16 & 0xff, m >> 8 & 0xff, (m & 0xff) / 0xff) // #ff000000
-        : l === 4 ? rgba$1((m >> 12 & 0xf) | (m >> 8 & 0xf0), (m >> 8 & 0xf) | (m >> 4 & 0xf0), (m >> 4 & 0xf) | (m & 0xf0), (((m & 0xf) << 4) | (m & 0xf)) / 0xff) // #f000
-        : null) // invalid hex
-        : (m = reRgbInteger.exec(format)) ? new Rgb(m[1], m[2], m[3], 1) // rgb(255, 0, 0)
-        : (m = reRgbPercent.exec(format)) ? new Rgb(m[1] * 255 / 100, m[2] * 255 / 100, m[3] * 255 / 100, 1) // rgb(100%, 0%, 0%)
-        : (m = reRgbaInteger.exec(format)) ? rgba$1(m[1], m[2], m[3], m[4]) // rgba(255, 0, 0, 1)
-        : (m = reRgbaPercent.exec(format)) ? rgba$1(m[1] * 255 / 100, m[2] * 255 / 100, m[3] * 255 / 100, m[4]) // rgb(100%, 0%, 0%, 1)
-        : (m = reHslPercent.exec(format)) ? hsla(m[1], m[2] / 100, m[3] / 100, 1) // hsl(120, 50%, 50%)
-        : (m = reHslaPercent.exec(format)) ? hsla(m[1], m[2] / 100, m[3] / 100, m[4]) // hsla(120, 50%, 50%, 1)
-        : named.hasOwnProperty(format) ? rgbn(named[format]) // eslint-disable-line no-prototype-builtins
-        : format === "transparent" ? new Rgb(NaN, NaN, NaN, 0)
-        : null;
-  }
-
-  function rgbn(n) {
-    return new Rgb(n >> 16 & 0xff, n >> 8 & 0xff, n & 0xff, 1);
-  }
-
-  function rgba$1(r, g, b, a) {
-    if (a <= 0) r = g = b = NaN;
-    return new Rgb(r, g, b, a);
-  }
-
-  function rgbConvert(o) {
-    if (!(o instanceof Color)) o = color(o);
-    if (!o) return new Rgb;
-    o = o.rgb();
-    return new Rgb(o.r, o.g, o.b, o.opacity);
-  }
-
-  function rgb(r, g, b, opacity) {
-    return arguments.length === 1 ? rgbConvert(r) : new Rgb(r, g, b, opacity == null ? 1 : opacity);
-  }
-
-  function Rgb(r, g, b, opacity) {
-    this.r = +r;
-    this.g = +g;
-    this.b = +b;
-    this.opacity = +opacity;
-  }
-
-  define(Rgb, rgb, extend(Color, {
-    brighter(k) {
-      k = k == null ? brighter : Math.pow(brighter, k);
-      return new Rgb(this.r * k, this.g * k, this.b * k, this.opacity);
-    },
-    darker(k) {
-      k = k == null ? darker : Math.pow(darker, k);
-      return new Rgb(this.r * k, this.g * k, this.b * k, this.opacity);
-    },
-    rgb() {
-      return this;
-    },
-    clamp() {
-      return new Rgb(clampi(this.r), clampi(this.g), clampi(this.b), clampa(this.opacity));
-    },
-    displayable() {
-      return (-0.5 <= this.r && this.r < 255.5)
-          && (-0.5 <= this.g && this.g < 255.5)
-          && (-0.5 <= this.b && this.b < 255.5)
-          && (0 <= this.opacity && this.opacity <= 1);
-    },
-    hex: rgb_formatHex, // Deprecated! Use color.formatHex.
-    formatHex: rgb_formatHex,
-    formatHex8: rgb_formatHex8,
-    formatRgb: rgb_formatRgb,
-    toString: rgb_formatRgb
-  }));
-
-  function rgb_formatHex() {
-    return `#${hex(this.r)}${hex(this.g)}${hex(this.b)}`;
-  }
-
-  function rgb_formatHex8() {
-    return `#${hex(this.r)}${hex(this.g)}${hex(this.b)}${hex((isNaN(this.opacity) ? 1 : this.opacity) * 255)}`;
-  }
-
-  function rgb_formatRgb() {
-    const a = clampa(this.opacity);
-    return `${a === 1 ? "rgb(" : "rgba("}${clampi(this.r)}, ${clampi(this.g)}, ${clampi(this.b)}${a === 1 ? ")" : `, ${a})`}`;
-  }
-
-  function clampa(opacity) {
-    return isNaN(opacity) ? 1 : Math.max(0, Math.min(1, opacity));
-  }
-
-  function clampi(value) {
-    return Math.max(0, Math.min(255, Math.round(value) || 0));
-  }
-
-  function hex(value) {
-    value = clampi(value);
-    return (value < 16 ? "0" : "") + value.toString(16);
-  }
-
-  function hsla(h, s, l, a) {
-    if (a <= 0) h = s = l = NaN;
-    else if (l <= 0 || l >= 1) h = s = NaN;
-    else if (s <= 0) h = NaN;
-    return new Hsl(h, s, l, a);
-  }
-
-  function hslConvert(o) {
-    if (o instanceof Hsl) return new Hsl(o.h, o.s, o.l, o.opacity);
-    if (!(o instanceof Color)) o = color(o);
-    if (!o) return new Hsl;
-    if (o instanceof Hsl) return o;
-    o = o.rgb();
-    var r = o.r / 255,
-        g = o.g / 255,
-        b = o.b / 255,
-        min = Math.min(r, g, b),
-        max = Math.max(r, g, b),
-        h = NaN,
-        s = max - min,
-        l = (max + min) / 2;
-    if (s) {
-      if (r === max) h = (g - b) / s + (g < b) * 6;
-      else if (g === max) h = (b - r) / s + 2;
-      else h = (r - g) / s + 4;
-      s /= l < 0.5 ? max + min : 2 - max - min;
-      h *= 60;
-    } else {
-      s = l > 0 && l < 1 ? 0 : h;
-    }
-    return new Hsl(h, s, l, o.opacity);
-  }
-
-  function hsl(h, s, l, opacity) {
-    return arguments.length === 1 ? hslConvert(h) : new Hsl(h, s, l, opacity == null ? 1 : opacity);
-  }
-
-  function Hsl(h, s, l, opacity) {
-    this.h = +h;
-    this.s = +s;
-    this.l = +l;
-    this.opacity = +opacity;
-  }
-
-  define(Hsl, hsl, extend(Color, {
-    brighter(k) {
-      k = k == null ? brighter : Math.pow(brighter, k);
-      return new Hsl(this.h, this.s, this.l * k, this.opacity);
-    },
-    darker(k) {
-      k = k == null ? darker : Math.pow(darker, k);
-      return new Hsl(this.h, this.s, this.l * k, this.opacity);
-    },
-    rgb() {
-      var h = this.h % 360 + (this.h < 0) * 360,
-          s = isNaN(h) || isNaN(this.s) ? 0 : this.s,
-          l = this.l,
-          m2 = l + (l < 0.5 ? l : 1 - l) * s,
-          m1 = 2 * l - m2;
-      return new Rgb(
-        hsl2rgb(h >= 240 ? h - 240 : h + 120, m1, m2),
-        hsl2rgb(h, m1, m2),
-        hsl2rgb(h < 120 ? h + 240 : h - 120, m1, m2),
-        this.opacity
-      );
-    },
-    clamp() {
-      return new Hsl(clamph(this.h), clampt(this.s), clampt(this.l), clampa(this.opacity));
-    },
-    displayable() {
-      return (0 <= this.s && this.s <= 1 || isNaN(this.s))
-          && (0 <= this.l && this.l <= 1)
-          && (0 <= this.opacity && this.opacity <= 1);
-    },
-    formatHsl() {
-      const a = clampa(this.opacity);
-      return `${a === 1 ? "hsl(" : "hsla("}${clamph(this.h)}, ${clampt(this.s) * 100}%, ${clampt(this.l) * 100}%${a === 1 ? ")" : `, ${a})`}`;
-    }
-  }));
-
-  function clamph(value) {
-    value = (value || 0) % 360;
-    return value < 0 ? value + 360 : value;
-  }
-
-  function clampt(value) {
-    return Math.max(0, Math.min(1, value || 0));
-  }
-
-  /* From FvD 13.37, CSS Color Module Level 3 */
-  function hsl2rgb(h, m1, m2) {
-    return (h < 60 ? m1 + (m2 - m1) * h / 60
-        : h < 180 ? m2
-        : h < 240 ? m1 + (m2 - m1) * (240 - h) / 60
-        : m1) * 255;
-  }
-
-  const radians = Math.PI / 180;
-  const degrees$1 = 180 / Math.PI;
-
-  var A = -0.14861,
-      B = +1.78277,
-      C = -0.29227,
-      D = -0.90649,
-      E = +1.97294,
-      ED = E * D,
-      EB = E * B,
-      BC_DA = B * C - D * A;
-
-  function cubehelixConvert(o) {
-    if (o instanceof Cubehelix) return new Cubehelix(o.h, o.s, o.l, o.opacity);
-    if (!(o instanceof Rgb)) o = rgbConvert(o);
-    var r = o.r / 255,
-        g = o.g / 255,
-        b = o.b / 255,
-        l = (BC_DA * b + ED * r - EB * g) / (BC_DA + ED - EB),
-        bl = b - l,
-        k = (E * (g - l) - C * bl) / D,
-        s = Math.sqrt(k * k + bl * bl) / (E * l * (1 - l)), // NaN if l=0 or l=1
-        h = s ? Math.atan2(k, bl) * degrees$1 - 120 : NaN;
-    return new Cubehelix(h < 0 ? h + 360 : h, s, l, o.opacity);
-  }
-
-  function cubehelix$1(h, s, l, opacity) {
-    return arguments.length === 1 ? cubehelixConvert(h) : new Cubehelix(h, s, l, opacity == null ? 1 : opacity);
-  }
-
-  function Cubehelix(h, s, l, opacity) {
-    this.h = +h;
-    this.s = +s;
-    this.l = +l;
-    this.opacity = +opacity;
-  }
-
-  define(Cubehelix, cubehelix$1, extend(Color, {
-    brighter(k) {
-      k = k == null ? brighter : Math.pow(brighter, k);
-      return new Cubehelix(this.h, this.s, this.l * k, this.opacity);
-    },
-    darker(k) {
-      k = k == null ? darker : Math.pow(darker, k);
-      return new Cubehelix(this.h, this.s, this.l * k, this.opacity);
-    },
-    rgb() {
-      var h = isNaN(this.h) ? 0 : (this.h + 120) * radians,
-          l = +this.l,
-          a = isNaN(this.s) ? 0 : this.s * l * (1 - l),
-          cosh = Math.cos(h),
-          sinh = Math.sin(h);
-      return new Rgb(
-        255 * (l + a * (A * cosh + B * sinh)),
-        255 * (l + a * (C * cosh + D * sinh)),
-        255 * (l + a * (E * cosh)),
-        this.opacity
-      );
-    }
-  }));
-
-  const TREE_COLOURING_DEFAULTS = {
-    mode: "none",
-    cutHeight: "auto",
-    palette: ["#267c9e", "#d7752d", "#5c8f39", "#9963a5", "#c34d61", "#9e8433"],
-    showCutLine: false,
-  };
-  const metricsCache = new WeakMap();
-  const stylesCache = new WeakMap();
-  const fail$2 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
-  const object$2 = (value) => value && typeof value === "object" && !Array.isArray(value);
-  const own$1 = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
-  function fields$1(value, allowed, where) {
-    if (!object$2(value)) fail$2(`${where} must be an object.`);
-    for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$2(`${where}.${key} is unsupported.`);
-  }
-  function colour(value, where) {
-    if (typeof value !== "string" || !color(value)) fail$2(`${where} must be a valid colour.`);
-  }
-  function positive(value, where) {
-    if (!Number.isFinite(value) || value <= 0) fail$2(`${where} must be finite and positive.`);
-  }
-  function validateTreeColouring(policy) {
-    if (policy === undefined) return;
-    fields$1(policy, ["mode", "cutHeight", "palette", "showCutLine"], "colouring");
-    if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$2("colouring.mode must be none or cutHeight.");
-    if (own$1(policy, "cutHeight") && policy.cutHeight !== "auto" && (!Number.isFinite(policy.cutHeight) || policy.cutHeight < 0)) {
-      fail$2('colouring.cutHeight must be "auto" or a finite non-negative number.');
-    }
-    if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$2("colouring.showCutLine must be boolean.");
-    if (own$1(policy, "palette")) {
-      if (!Array.isArray(policy.palette) || !policy.palette.length) fail$2("colouring.palette must be a non-empty colour array.");
-      policy.palette.forEach((entry) => colour(entry, "colouring.palette"));
-    }
-  }
-
-  /** Biological distances and canonical ID order survive child rotation unchanged. */
-  function treeMetrics(tree) {
-    if (metricsCache.has(tree)) return metricsCache.get(tree);
-    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
-    const parents = new Map();
-    const distances = new Map([[tree.root, 0]]), depths = new Map([[tree.root, 0]]);
-    let completeLengths = true, nonNegative = true;
-    const visit = (uid) => {
-      for (const child of nodes.get(uid).children || []) {
-        const length = nodes.get(child).branchLength;
-        const finite = Number.isFinite(length);
-        if (!finite) completeLengths = false;
-        if (length < 0) nonNegative = false;
-        parents.set(child, uid);
-        distances.set(child, distances.get(uid) + (finite ? length : 0));
-        depths.set(child, depths.get(uid) + 1);
-        visit(child);
-      }
-    };
-    visit(tree.root);
-    const tips = tree.nodes.filter((node) => !node.children);
-    const height = Math.max(0, ...tips.map((node) => distances.get(node.uid)));
-    // Absolute 1e-12 plus relative 1e-9 tolerance, measured in input distance units.
-    const tolerance = 1e-12 + 1e-9 * height;
-    const ultrametric = completeLengths && nonNegative && tips.every((node) => Math.abs(distances.get(node.uid) - height) <= tolerance);
-    const result = {
-      nodes, parents, distances, depths, maxDepth: Math.max(...depths.values()), height, completeLengths, ultrametric,
-      canonical: [...tree.nodes].sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0),
-    };
-    metricsCache.set(tree, result);
-    return result;
-  }
-
-  function validateBranch(style, where) {
-    fields$1(style, ["colour", "width"], where);
-    if (own$1(style, "colour")) colour(style.colour, `${where}.colour`);
-    if (own$1(style, "width")) positive(style.width, `${where}.width`);
-  }
-
-  /** Validate optional data fields and the effective tree/config colouring policy. */
-  function validateTreePresentation(tree, config = {}) {
-    validateTreeColouring(config.colouring);
-    if (!tree) return;
-    if (tree.distance !== undefined) {
-      fields$1(tree.distance, ["kind", "label"], "distance");
-      if (tree.distance.kind !== "mergeHeight") fail$2("distance.kind must be mergeHeight.");
-      if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$2("distance.label must be text.");
-    }
-    const presentation = tree.presentation;
-    if (presentation !== undefined) {
-      fields$1(presentation, ["colouring", "subtrees", "nodes"], "presentation");
-      validateTreeColouring(presentation.colouring);
-      const nodes = treeMetrics(tree).nodes;
-      for (const scope of ["subtrees", "nodes"]) {
-        if (presentation[scope] === undefined) continue;
-        if (!object$2(presentation[scope])) fail$2(`presentation.${scope} must be a node-ID dictionary.`);
-        for (const [uid, record] of Object.entries(presentation[scope])) {
-          const node = nodes.get(uid);
-          if (!node) fail$2(`presentation.${scope} refers to unknown node '${uid}'.`);
-          fields$1(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
-          if (scope === "subtrees" && !node.children) fail$2(`subtree '${uid}' must be an internal node.`);
-          if (record.branch !== undefined) {
-            if (scope === "nodes" && uid === tree.root) fail$2("the display root has no incoming edge to style.");
-            validateBranch(record.branch, `${scope}.${uid}.branch`);
-          }
-          if (record.label !== undefined) {
-            if (!node.children) fail$2(`annotation '${uid}' must belong to an internal node.`);
-            const label = record.label;
-            fields$1(label, ["text", "colour", "fontSize", "fontWeight", "fontStyle"], `nodes.${uid}.label`);
-            if (own$1(label, "text") && typeof label.text !== "string") fail$2(`annotation '${uid}' text must be a string.`);
-            if (own$1(label, "colour")) colour(label.colour, `annotation '${uid}' colour`);
-            if (own$1(label, "fontSize")) positive(label.fontSize, `annotation '${uid}' fontSize`);
-            if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$2("annotation fontWeight must be 400 or 700.");
-            if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$2("annotation fontStyle must be normal or italic.");
-          }
-        }
-      }
-    }
-    const policy = { ...TREE_COLOURING_DEFAULTS, ...config.colouring, ...presentation?.colouring };
-    if (policy.mode === "cutHeight") {
-      if (tree.distance?.kind !== "mergeHeight") fail$2("cutHeight colouring requires distance.kind = mergeHeight.");
-      if (!treeMetrics(tree).ultrametric) fail$2("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
-    }
-  }
-
-  function invalidateTreePresentation(tree) {
-    if (tree) stylesCache.delete(tree);
-  }
-
-  /** Resolve properties once per presentation/config revision, never per tween. */
-  function resolveTreePresentation(tree, config = {}) {
-    const defaults = { ...TREE_COLOURING_DEFAULTS, ...config.colouring };
-    const signature = JSON.stringify([config.branch?.colour, config.branch?.width, config.textColour, defaults]);
-    const cached = stylesCache.get(tree);
-    if (cached && cached.presentation === tree.presentation && cached.signature === signature) return cached.value;
-    validateTreePresentation(tree, config);
-    const metrics = treeMetrics(tree);
-    const policy = { ...defaults, ...tree.presentation?.colouring };
-    const threshold = policy.cutHeight === "auto" ? metrics.height * 0.7 : policy.cutHeight;
-    const groups = new Map();
-    if (policy.mode === "cutHeight" && threshold > 0) {
-      const heightFor = (uid) => Math.max(0, metrics.height - metrics.distances.get(uid));
-      for (const node of metrics.canonical) {
-        if (!node.children || heightFor(node.uid) >= threshold) continue;
-        const parent = metrics.parents.get(node.uid);
-        if (parent === undefined || heightFor(parent) >= threshold) {
-          groups.set(node.uid, policy.palette[groups.size % policy.palette.length]);
-        }
-      }
-    }
-    const base = { colour: config.branch?.colour || "#555", width: Number(config.branch?.width) || 1.5 };
-    const branches = new Map();
-    const stems = new Map();
-    const annotations = new Map();
-    const visit = (uid, inherited = {}, groupColour = null) => {
-      const node = metrics.nodes.get(uid);
-      const automatic = groups.get(uid) || groupColour;
-      const subtree = { ...inherited, ...tree.presentation?.subtrees?.[uid]?.branch };
-      const mergeStyle = { ...base, ...(automatic ? { colour: automatic } : {}), ...subtree };
-      if (node.children) stems.set(uid, mergeStyle);
-      const label = tree.presentation?.nodes?.[uid]?.label;
-      if (label?.text) annotations.set(uid, { colour: config.textColour || "#333", fontSize: 10, fontWeight: 400, fontStyle: "normal", ...label });
-      for (const child of node.children || []) {
-        branches.set(child, { ...mergeStyle, ...tree.presentation?.nodes?.[child]?.branch });
-        visit(child, subtree, automatic);
-      }
-    };
-    visit(tree.root);
-    const value = { base, branches, stems, annotations, policy, height: metrics.height, threshold, metric: policy.mode === "cutHeight" };
-    stylesCache.set(tree, { presentation: tree.presentation, signature, value });
-    return value;
-  }
-
   const leafXAnchors = new WeakMap();
-
-  /** Return whether an order keeps every tree clade contiguous. */
-  function isTreeOrderCompatible(tree, order) {
-    if (!tree) return true;
-    const positions = new Map(order.map((uid, index) => [uid, index]));
-    if (positions.size !== order.length) return false;
-    const nodes = treeMetrics(tree).nodes;
-    const span = (uid) => {
-      const node = nodes.get(uid);
-      if (!node) return null;
-      if (!node.children?.length) {
-        const position = positions.get(node.cluster);
-        return position === undefined ? null : { min: position, max: position, count: 1 };
-      }
-      let min = Infinity, max = -Infinity, count = 0;
-      for (const child of node.children) {
-        const range = span(child);
-        if (!range) return null;
-        min = Math.min(min, range.min);
-        max = Math.max(max, range.max);
-        count += range.count;
-      }
-      return max - min + 1 === count ? { min, max, count } : null;
-    };
-    return span(tree.root)?.count === order.length;
-  }
 
   /** Keep the tree in its base position until a dragged label reaches a leaf. */
   function treeLeafX(tree, proposedX, dragging = false) {
@@ -1622,24 +1655,14 @@
         : (depths.get(node.uid) / Math.max(1, maxDepth)) * width;
       xs.set(node.uid, leftX + position);
     }
-    if (proportional) {
-      const scale = niceScaleValue(maxDistance);
-      return {
-        xs,
-        maxDepth,
-        maxDistance,
-        proportional,
-        scaleBarLength: (scale.value / maxDistance) * width,
-        scaleBarLabel: scale.label,
-      };
-    }
+    const scale = proportional ? niceScaleValue(maxDistance) : { value: 1, label: "1 branch" };
     return {
       xs,
       maxDepth,
       maxDistance,
       proportional,
-      scaleBarLength: width / Math.max(1, maxDepth),
-      scaleBarLabel: "1 branch",
+      scaleBarLength: proportional ? (scale.value / maxDistance) * width : width / Math.max(1, maxDepth),
+      scaleBarLabel: scale.label,
     };
   }
 
@@ -8217,38 +8240,6 @@
       if (cluster.loci.length && cluster.loci.every((locus) => excludedLoci.has(locus.uid))) excludedClusters.add(cluster.uid);
     }
     return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview, excludedClusters, excludedLoci };
-  }
-
-  function treeClusterOrder(tree) {
-    const nodes = treeMetrics(tree).nodes;
-    const result = [];
-    const visit = (uid) => {
-      const node = nodes.get(uid);
-      if (node.children) node.children.forEach(visit);
-      else result.push(node.cluster);
-    };
-    visit(tree.root);
-    return result;
-  }
-
-  /** Commit a compatible display order to the tree's ordered child arrays. */
-  function setTreeClusterOrder(tree, order, { partial = false } = {}) {
-    if (!tree) return;
-    const orderedTree = partial ? visibleTree(tree, new Set(order)) : tree;
-    if (!orderedTree || !isTreeOrderCompatible(orderedTree, order)) {
-      throw new TypeError("Cluster order must keep every tree clade contiguous.");
-    }
-    const positions = new Map(order.map((uid, index) => [uid, index]));
-    const nodes = treeMetrics(tree).nodes;
-    const firstPosition = (uid) => {
-      const node = nodes.get(uid);
-      if (!node.children) return positions.get(node.cluster) ?? Infinity;
-      const first = new Map(node.children.map((child) => [child, firstPosition(child)]));
-      node.children.sort((a, b) => first.get(a) - first.get(b));
-      return first.get(node.children[0]);
-    };
-    firstPosition(tree.root);
-    return treeClusterOrder(tree);
   }
 
   function isDragging(chartState) {
