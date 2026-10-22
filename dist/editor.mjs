@@ -1149,10 +1149,11 @@ class RowSelection extends Set {
     this.#anchor = null;
   }
 
-  prune(ids) {
+  prune(ids, anchorIds = ids) {
     const valid = ids instanceof Set ? ids : new Set(ids);
     for (const id of this) if (!valid.has(id)) this.delete(id);
-    if (!valid.has(this.#anchor)) this.#anchor = null;
+    const anchors = anchorIds === ids ? valid : new Set(anchorIds);
+    if (!anchors.has(this.#anchor)) this.#anchor = null;
   }
 
   clear() { super.clear(); this.#anchor = null; }
@@ -3942,6 +3943,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   });
   #annotationEditor = null;
   #unsubscribe = null;
+  #editing = false;
   #kind = "groups";
   #geneView = "tree";
   #selected = new RowSelection();
@@ -3971,8 +3973,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       this.ownerDocument.head.append(style);
     }
     if (!this.#table) this.#renderShell();
-    this.#invalidateData();
-    this.#subscribe(); this.#syncTheme(); this.#renderData();
+    this.#subscribe(); this.#syncTheme(); this.#refreshData();
   }
 
   disconnectedCallback() {
@@ -3985,8 +3986,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     if (value === this.#chart) return;
     this.#unsubscribe?.(); this.#unsubscribe = null;
     this.#chart = value || null;
-    this.#invalidateData({ replace: true });
-    this.#subscribe(); this.#syncTheme(); this.#renderData();
+    this.#subscribe(); this.#syncTheme(); this.#refreshData({ replace: true });
   }
 
   #syncTheme() {
@@ -3998,9 +3998,9 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
     this.#unsubscribe = this.#chart.on("change", (change) => {
       if (["data.apply", "data.replace", "state.replace"].includes(change.type)) {
-        this.#invalidateData({ replace: change.type === "data.replace" });
+        if (this.#editing) return;
         if (change.type === "state.replace") this.#syncTheme();
-        this.#renderData();
+        this.#refreshData({ replace: change.type === "data.replace" });
       } else if (change.type === "config.change" || change.type === "theme.change") this.#syncTheme();
     });
   }
@@ -4106,8 +4106,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       const label = window.prompt("Name for the new homology group");
       if (label?.trim()) {
         const geneIds = command === "new-group-for-selection" ? [...this.#selected] : [];
-        if (geneIds.length) this.#selected.clear();
-        this.#apply({ type: "groups.create", group: { uid: this.#nextGroupUid(), label: label.trim() }, geneIds });
+        this.#apply({ type: "groups.create", group: { uid: this.#nextGroupUid(), label: label.trim() }, geneIds }, geneIds.length > 0);
       }
     } else if (command === "assign") {
       if (value) this.#apply({ type: "groups.assignGenes", groupId: this.#groupId(value), geneIds: [...this.#selected] });
@@ -4121,8 +4120,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       const targetId = this.#groupId(value);
       if (targetId !== undefined) {
         const sourceIds = this.#selectedGroups().map((group) => group.uid);
-        this.#selected.clear();
-        this.#apply({ type: "groups.merge", targetId, sourceIds });
+        this.#apply({ type: "groups.merge", targetId, sourceIds }, true);
       }
     } else if (command === "group-position") {
       this.#moveGroup(this.#selectedGroups()[0]?.uid, value);
@@ -4137,22 +4135,34 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     }
   }
 
-  #apply(operation) {
+  #apply(operation, clearSelection = false) {
     if (!this.#chart?.patch) return false;
-    return this.#runEdit(() => this.#chart.patch([operation]));
+    return this.#edit(() => this.#chart.patch([operation]), clearSelection);
+  }
+
+  #edit(action, clearSelection) {
+    this.#editing = true;
+    const accepted = this.#runEdit(() => { action(); if (clearSelection) this.#selected.clear(); });
+    this.#editing = false;
+    if (accepted) this.#refreshData();
+    return accepted;
+  }
+
+  #refreshData(options) {
+    this.#invalidateData(options);
+    this.#renderData(); this.#syncHighlight();
   }
 
   #invalidateData({ replace = false } = {}) {
     // Patches can mutate data in place; invalidate all derived state together.
-    this.#data(); this.#model.invalidate();
-    if (replace) this.#annotationEditor?.reset();
+    const data = this.#data(); this.#model.invalidate();
+    if (!data?.groups.some((group) => group.uid === this.#memberGroupId)) this.#memberGroupId = null;
     if (replace) {
+      this.#annotationEditor?.reset();
       this.#table?.reset();
       this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null;
       this.#initializeExpanded();
-    } else if (this.#selected.size) {
-      this.#selected.prune(this.#model.recordIds(this.#kind));
-    }
+    } else this.#selected.prune(this.#model.recordIds(this.#kind), this.#view().byKey.keys());
   }
 
   #data() {
@@ -4242,7 +4252,6 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     const geneView = this.querySelector("[data-gene-view]");
     const memberFilter = this.querySelector("[data-member-filter]");
     const memberGroup = data.groups.find((group) => group.uid === this.#memberGroupId);
-    if (!memberGroup) this.#memberGroupId = null;
     const { rows, ids, parentCount } = this.#view();
     memberFilter.hidden = !memberGroup || this.#kind !== "genes";
     this.querySelector("[data-record-tools]").hidden = memberFilter.hidden;
@@ -4286,18 +4295,12 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
 
   #removeRecords(kind, ids) {
     if (!ids.length || !window.confirm(`Remove ${ids.length} ${kind} and all their genes from the plot? This can be undone.`)) return;
-    this.#runEdit(() => {
-      this.#chart.remove({ [kind]: ids });
-      this.#selected.clear();
-      this.#renderData(); this.#syncHighlight();
-    });
+    this.#edit(() => this.#chart.remove({ [kind]: ids }), true);
   }
 
   #deleteSelected(kind = this.#kind, ids = [...this.#selected]) {
     if (!ids.length || !window.confirm(`Delete ${ids.length} selected ${kind}?${kind === "groups" ? " Their genes will remain in the plot." : ""}`)) return;
-    const type = `${kind}.delete`;
-    this.#selected.clear();
-    this.#apply({ type, ids });
+    this.#apply({ type: `${kind}.delete`, ids }, true);
   }
 
   #moveGroup(uid, index) {

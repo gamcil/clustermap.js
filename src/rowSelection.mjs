@@ -16,10 +16,11 @@ export class RowSelection extends Set {
     this.#anchor = null;
   }
 
-  prune(ids) {
+  prune(ids, anchorIds = ids) {
     const valid = ids instanceof Set ? ids : new Set(ids);
     for (const id of this) if (!valid.has(id)) this.delete(id);
-    if (!valid.has(this.#anchor)) this.#anchor = null;
+    const anchors = anchorIds === ids ? valid : new Set(anchorIds);
+    if (!anchors.has(this.#anchor)) this.#anchor = null;
   }
 
   clear() { super.clear(); this.#anchor = null; }
