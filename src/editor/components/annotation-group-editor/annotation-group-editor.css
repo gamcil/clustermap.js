@@ -1,23 +1,8 @@
 :host { display: block; color: inherit; font: inherit; }
-:host([hidden]), [hidden] { display: none !important; }
 fieldset { min-width: 0; margin: 0 0 8px; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }
 legend { padding: 0 4px; font-weight: 600; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 clinker-editable-field { width: 140px; }
 clinker-editable-field:hover { --cm-edit-icon-width: 20px; }
-button, select, input { box-sizing: border-box; color: inherit; font: inherit; }
-button, select {
-  min-height: var(--cm-control-height, 30px);
-  padding: var(--cm-control-padding, 4px 8px);
-  border: 1px solid var(--cm-border, #cbd3de);
-  border-radius: var(--cm-control-radius, 6px);
-  background: var(--cm-surface, #fff);
-}
 select { max-width: 100%; }
 [data-members] { display: block; margin-top: 8px; }
-input[type=color] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }
-button { cursor: pointer; }
-button:hover:not(:disabled) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #e3ecf8); }
-button:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }
-button:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }
-:is(input, select):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }

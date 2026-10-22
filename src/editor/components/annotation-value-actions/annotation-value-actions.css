@@ -1,4 +1,3 @@
 :host { display: flex; flex-direction: column; gap: 8px; color: inherit; font: inherit; }
-:host([hidden]), [hidden] { display: none !important; }
 button { text-align: left; }
 input { width: 112px; }

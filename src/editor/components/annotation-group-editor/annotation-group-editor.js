@@ -1,5 +1,6 @@
 import { createTemplate, colourHex, updateSelectOptions } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
+import { controlStyles } from "../../shared/controlStyles.js";
 import { defineEditableField } from "../editable-field/editable-field.js";
 
 const [markup, css] = await Promise.all([
@@ -20,7 +21,7 @@ class AnnotationGroupEditor extends HTMLElementBase {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
     root.append(style, template(this.ownerDocument));
     this.#items = root.querySelector("[data-groups]"); this.#template = this.#items.querySelector("template");
     this.#add = root.querySelector("[data-add]");

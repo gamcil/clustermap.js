@@ -1,5 +1,6 @@
 import { createTemplate, updateSelectOptions } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
+import { controlStyles } from "../../shared/controlStyles.js";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./annotation-toolbar.html", import.meta.url)),
@@ -15,7 +16,7 @@ class AnnotationToolbar extends HTMLElementBase {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
     root.append(style, template(this.ownerDocument));
     this.#select = root.querySelector("select");
     this.#buttons = Object.fromEntries([...root.querySelectorAll("button")].map((button) => [button.dataset.action, button]));

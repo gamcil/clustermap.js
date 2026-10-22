@@ -1,24 +1,8 @@
 :host { display: block; color: inherit; font: inherit; }
-:host([hidden]), [hidden] { display: none !important; }
 summary { cursor: pointer; color: var(--cm-muted, #687586); }
 summary:hover { color: var(--cm-accent, #1677ff); }
 [data-items] { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 0 2px; }
 .category, [data-removal] { display: flex; align-items: center; gap: 5px; }
 .category:hover { --cm-edit-icon-width:20px; }
-form { margin: 0; }
 clinker-editable-field, input[type=text] { width: 140px; min-width: 0; }
-input, button, select { box-sizing: border-box; font: inherit; color: inherit; }
-input[type=color] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }
-input[type=text], button, select {
-  min-height: var(--cm-control-height, 30px);
-  padding: var(--cm-control-padding, 4px 8px);
-  border: 1px solid var(--cm-border, #cbd3de);
-  border-radius: var(--cm-control-radius, 6px);
-  background: var(--cm-surface, #fff);
-}
-input::placeholder { color: var(--cm-muted, #687586); }
-button { cursor: pointer; }
-button:hover { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #e3ecf8); }
-:where(button, summary):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }
-:where(input, select):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }
 [data-removal] { flex-wrap: wrap; margin-top: 6px; padding: 6px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 4px; }

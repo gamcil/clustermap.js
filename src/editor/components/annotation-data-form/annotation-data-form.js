@@ -1,6 +1,7 @@
 import { csvFormatRows } from "d3-dsv";
 import { createTemplate } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
+import { controlStyles } from "../../shared/controlStyles.js";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./annotation-data-form.html", import.meta.url)),
@@ -17,7 +18,7 @@ class AnnotationDataForm extends HTMLElementBase {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
     root.append(style, template(this.ownerDocument));
     this.#form = root.querySelector("form");
     this.#field("type").onchange = () => { this.#sync(); this.#example(); };

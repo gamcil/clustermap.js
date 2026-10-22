@@ -1,10 +1,10 @@
 import { createTemplate } from "../../../uiControls.mjs";
 import { TREE_COLOURING_DEFAULTS } from "../../../treePresentation.mjs";
 import { textAsset } from "../../shared/textAsset.js";
+import { controlStyles } from "../../shared/controlStyles.js";
 
-const [markup, controls, css] = await Promise.all([
+const [markup, css] = await Promise.all([
   textAsset(new URL("./tree-appearance.html", import.meta.url)),
-  textAsset(new URL("../../shared/controls.css", import.meta.url)),
   textAsset(new URL("./tree-appearance.css", import.meta.url)),
 ]);
 const template = createTemplate(markup);
@@ -21,7 +21,7 @@ class TreeAppearance extends HTMLElementBase {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controls + css;
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
     root.append(style, template(this.ownerDocument));
     this.#height = root.querySelector("[data-height]"); this.#slider = root.querySelector('[type="range"]');
     root.querySelector("[data-enabled]").onchange = (event) => this.#change({ mode: event.target.checked ? "cutHeight" : "none" });

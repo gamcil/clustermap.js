@@ -1,10 +1,10 @@
 import { createTemplate, colourHex } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
+import { controlStyles } from "../../shared/controlStyles.js";
 import { defineSearchField } from "../search-field/search-field.js";
 
-const [markup, controls, css] = await Promise.all([
+const [markup, css] = await Promise.all([
   textAsset(new URL("./appearance-panel.html", import.meta.url)),
-  textAsset(new URL("../../shared/controls.css", import.meta.url)),
   textAsset(new URL("./appearance-panel.css", import.meta.url)),
 ]);
 const template = createTemplate(markup);
@@ -20,7 +20,7 @@ class AppearancePanel extends HTMLElementBase {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controls + css;
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
     root.append(style, template(this.ownerDocument));
     this.#sections = [...root.querySelectorAll("fieldset")].map((box) => ({ box, details: box.querySelector("details"),
       fields: [...box.querySelectorAll("[data-config]")].map((control) => ({ control, row: control.closest("label"), advanced: Boolean(control.closest("details")),

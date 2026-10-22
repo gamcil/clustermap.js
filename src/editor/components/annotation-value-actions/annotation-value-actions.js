@@ -1,9 +1,9 @@
 import { createTemplate, updateSelectOptions } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
+import { controlStyles } from "../../shared/controlStyles.js";
 
-const [markup, controls, css] = await Promise.all([
+const [markup, css] = await Promise.all([
   textAsset(new URL("./annotation-value-actions.html", import.meta.url)),
-  textAsset(new URL("../../shared/controls.css", import.meta.url)),
   textAsset(new URL("./annotation-value-actions.css", import.meta.url)),
 ]);
 const template = createTemplate(markup);
@@ -18,7 +18,7 @@ class AnnotationValueActions extends HTMLElementBase {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = controls + css;
+    const style = this.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
     root.append(style, template(this.ownerDocument));
     this.#columns = root.querySelector("[data-columns]"); this.#numeric = root.querySelector("input"); this.#categories = root.querySelector("[data-categories]");
     root.addEventListener("change", () => this.#draftChanged());
