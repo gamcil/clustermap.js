@@ -281,7 +281,6 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     }
   }
 
-  #id(value) { this.#data(); return this.#model.id(value); }
   #groupId(value) { this.#data(); return this.#model.groupId(value); }
 
   #nextGroupUid() {
@@ -371,7 +370,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     if (this.#kind === "groups") return (this.#data()?.groups || []).filter((group) => this.#selected.has(group.uid));
     if (this.#kind !== "genes" || this.#geneView !== "groups") return [];
     return this.#view().rows.filter((row) => row.type === "gene-group" && row.group?.genes?.length &&
-      row.group.genes.every((id) => this.#selected.has(this.#id(id)))).map((row) => row.group);
+      row.group.genes.every((id) => this.#selected.has(id))).map((row) => row.group);
   }
 
   #selectedParents(kind) {
@@ -410,7 +409,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #viewGroupMembers(groupId) {
-    this.#memberGroupId = this.#id(groupId);
+    this.#memberGroupId = groupId;
     this.#kind = "genes";
     this.#geneView = "list";
     this.#selected.clear();
@@ -456,7 +455,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     if (this.#kind === "links") { this.#chart.highlight({ links: [row.id] }); return; }
     const genes = row.selectIds || (this.#kind === "groups"
       ? this.#data()?.groups.find((group) => group.uid === row.id)?.genes || [] : [row.id]);
-    this.#chart.highlight({ genes: genes.map((id) => this.#id(id)) });
+    this.#chart.highlight({ genes });
   }
 
 }
