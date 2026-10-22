@@ -271,6 +271,86 @@ test("panel creation, visibility, ordering and removal are reflected in history"
   expect(await panelData(page, uid)).toBeUndefined();
 });
 
+test("appearance component synchronizes config and preserves disclosure state through filtering", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await editor(page).getByRole("tab", { name: "Appearance", exact: true }).click();
+  const panel = editor(page).locator("clinker-appearance-panel");
+  await panel.locator('[data-config="legend.show"]').uncheck();
+  expect(await page.evaluate(() => chart.config().legend.show)).toBe(false);
+  await page.evaluate(() => chart.config({ legend: { show: true } }));
+  await expect(panel.locator('[data-config="legend.show"]')).toBeChecked();
+  const legend = panel.locator("fieldset").filter({ has: page.getByText("Legend", { exact: true }) });
+  await legend.locator("summary").click();
+  await expect(legend.locator("details")).toHaveAttribute("open", "");
+  const search = panel.locator("[data-appearance-filter] input");
+  await search.fill("minimap");
+  await expect(panel.locator("fieldset:visible")).toHaveCount(1);
+  await expect(panel.locator('[data-config="plot.minimap.width"]')).toBeVisible();
+  await search.press("Escape");
+  await expect(legend.locator("details")).toHaveAttribute("open", "");
+  await expect(panel.locator('[data-appearance-section="genes"]')).not.toHaveAttribute("open");
+  await panel.locator('[data-config="colourBar.domain.minMode"]').selectOption("data");
+  await expect(panel.locator('[data-config="colourBar.domain.min"]')).toBeDisabled();
+  await panel.locator('[data-config="colourBar.domain.minMode"]').selectOption("fixed");
+  await expect(panel.locator('[data-config="colourBar.domain.min"]')).toBeEnabled();
+});
+
+test("annotation form and group components commit edits and reversible removals", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await annotation(page);
+  await editor(page).getByRole("button", { name: "Add panel", exact: true }).click();
+  const form = editor(page).locator("clinker-annotation-data-form");
+  await form.getByRole("combobox", { name: "Type", exact: true }).selectOption("groups");
+  await form.getByRole("textbox", { name: "Title", exact: true }).fill("Markers");
+  await form.getByRole("textbox", { name: "Data", exact: true }).fill("{");
+  await form.getByRole("button", { name: "Add panel", exact: true }).click();
+  await expect(form.getByRole("alert")).toBeVisible();
+  await form.getByRole("textbox", { name: "Data", exact: true }).fill(JSON.stringify({ groups: [{ uid: "first", label: "First", clusterIds: ["a"] }] }));
+  await form.getByRole("button", { name: "Add panel", exact: true }).click();
+  const uid = await page.evaluate(() => chart.data().annotationPanels.at(-1).uid);
+  const groups = editor(page).locator("clinker-annotation-group-editor");
+  const label = groups.locator("clinker-editable-field").first();
+  await editField(label); await label.locator("input").fill("Edited"); await label.locator("input").press("Enter");
+  await groups.getByRole("listbox", { name: "Clusters in Edited", exact: true }).selectOption(["a", "c"]);
+  expect((await panelData(page, uid)).groups[0]).toMatchObject({ label: "Edited", clusterIds: ["a", "c"] });
+  await groups.getByRole("button", { name: "Add group", exact: true }).click();
+  expect((await panelData(page, uid)).groups).toHaveLength(2);
+  await groups.getByRole("button", { name: "Remove group", exact: true }).first().click();
+  expect((await panelData(page, uid)).groups).toHaveLength(1);
+  await expect(groups.getByRole("button", { name: "Remove group", exact: true })).toBeDisabled();
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  expect((await panelData(page, uid)).groups[0].label).toBe("Edited");
+  const numeric = await annotation(page), before = await panelData(page, numeric);
+  await editor(page).getByRole("button", { name: "Replace data…", exact: true }).click();
+  const replacement = editor(page).locator('clinker-annotation-data-form[mode="replace"]');
+  await replacement.getByRole("textbox").fill("{");
+  await replacement.getByRole("button", { name: "Replace data", exact: true }).click();
+  await expect(replacement.getByRole("alert")).toBeVisible();
+  await replacement.getByRole("textbox").fill(JSON.stringify({ columns: ["Replaced"], values: { a: [3] } }));
+  await replacement.getByRole("button", { name: "Replace data", exact: true }).click();
+  expect((await panelData(page, numeric)).values.a).toEqual([3]);
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await panelData(page, numeric)).toEqual(before);
+});
+
+test("record action component commits batch values and validates identity", async ({ page }) => {
+  await selectionFixture(page, "svg"); await view(page, "links");
+  const rows = editor(page).locator(".cm-editor__row--links");
+  await rows.nth(0).getByRole("checkbox").check(); await rows.nth(1).getByRole("checkbox").check();
+  const actions = editor(page).locator("clinker-record-actions");
+  await actions.locator('clinker-action-menu[label="Edit…"] summary').click();
+  await actions.locator("[data-batch-label]").fill("Batch label");
+  await actions.getByRole("button", { name: "Set label", exact: true }).click();
+  expect(await page.evaluate(() => chart.data().links.map(({ label }) => label))).toEqual(["Batch label", "Batch label"]);
+  const identity = actions.locator("[data-batch-identity]");
+  await identity.fill("101"); await actions.getByRole("button", { name: "Set identity", exact: true }).click();
+  expect(await page.evaluate(() => chart.data().links.map(({ identity }) => identity))).toEqual([1, 0.9]);
+  await identity.fill("75"); await actions.getByRole("button", { name: "Set identity", exact: true }).click();
+  expect(await page.evaluate(() => chart.data().links.map(({ identity }) => identity))).toEqual([0.75, 0.75]);
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await page.evaluate(() => chart.data().links.map(({ identity }) => identity))).toEqual([1, 0.9]);
+});
+
 test("annotation rows virtualize, preserve offscreen selection and filter all records", async ({ page }) => {
   // Exceed the shared 200-row virtualization threshold with a compact synthetic model.
   const ids = await page.evaluate(() => {
