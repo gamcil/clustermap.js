@@ -443,7 +443,9 @@ test("trimming then flipping preserves the selected genes", async ({ page }, tes
     gene_3: "none",
   });
 
-  await locus.dblclick({ position: { x: 20, y: 11 } });
+  const track = await locus.locator("line.trackBar").boundingBox();
+  if (!track) throw new Error("trimmed locus track is not visible");
+  await page.mouse.dblclick(track.x + track.width / 2, track.y);
   await waitForPaint(page);
 
   await expect(locusText).toHaveText("input_locus (reversed):3500-1");
@@ -502,7 +504,7 @@ test("dragging a selected cluster moves its selected cluster block", async ({ pa
     const chart = clusterMap().config({ plot: { transitionDuration: 0 } });
     window.__selectedClusterDragChart = chart;
     d3.select(host).datum(data).call(chart);
-    chart.locusSelection(chart.data().clusters.slice(0, 2).map((cluster) => cluster.loci[0].uid));
+    chart.clusterSelection(chart.data().clusters.slice(0, 2).map((cluster) => cluster.uid));
   });
 
   const before = await page.evaluate(() => window.__selectedClusterDragChart.data().clusters.map((cluster) => cluster.uid));
