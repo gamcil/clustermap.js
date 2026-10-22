@@ -1,9 +1,12 @@
 <template id="editor">
-<div class="cm-data-ui cm-annotation-data-editor" tabindex="-1">
+<div class="cm-annotation-layout">
   <clinker-annotation-toolbar>
     <clinker-search-field label="Filter records" placeholder="Find a cluster"></clinker-search-field>
   </clinker-annotation-toolbar>
-  <div class="cm-data-error" data-data-error role="alert"></div><div class="cm-annotation-data-body"></div>
+  <div class="cm-annotation-content">
+    <div class="cm-data-error" data-data-error role="alert"></div>
+    <div class="cm-annotation-data-body"></div>
+  </div>
 </div>
 </template>
 

@@ -1,5 +1,5 @@
 import { installDataEditorStyle } from "./editor/shared/styles.mjs";
-import { createAnnotationEditor } from "./editor/annotations.js";
+import { defineAnnotationEditor } from "./editor/components/annotation-editor/annotation-editor.js";
 import { createAnnotationControls } from "./annotationControls.mjs";
 import { createAnnotationForm } from "./editor/components/annotation-data-form/create.js";
 import { createAnnotationTooltip } from "./annotationTooltip.mjs";
@@ -95,6 +95,12 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
     if (returnFocus && opener?.isConnected && !opener.hidden && !opener.closest("[hidden]")) opener.focus({ preventScroll: true });
     else if (returnFocus) surfaces[0]?.focus?.({ preventScroll: true });
   };
+  const syncDataEditor = (state) => {
+    const data = getData();
+    Object.assign(state, { panels: data.annotationPanels, panel: data.annotationPanels?.find((panel) => panel.uid === state.editor.value), clusters: data.clusters });
+    state.editor.state = { data, clusters: data.clusters, annotationApi,
+      patch: (operations) => { patch(operations); syncDataEditor(state); } };
+  };
   const beginMenu = (kind, title, button, uid = null) => {
     // Keep the menu anchored when creating a panel moves its opener offscreen.
     const anchor = button.closest("[hidden]") ? menuState?.anchor : button.getBoundingClientRect();
@@ -157,8 +163,10 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
         if (editData?.(uid)) { close(); return; }
         const dataState = beginMenu("data", "Annotation data", edit, uid);
         menu.classList.add("cm-annotation-menu--data");
-        dataState.controls = createAnnotationEditor({ document, getData, patch, annotationApi });
-        dataState.controls.select(uid); menu.append(dataState.controls.node); positionMenu();
+        defineAnnotationEditor();
+        dataState.editor = document.createElement("clinker-annotation-editor");
+        syncDataEditor(dataState);
+        dataState.editor.select(uid); menu.append(dataState.editor); positionMenu();
       } });
     menu.append(state.controls.node);
     const actions = element("div", "cm-annotation-actions", menu);
@@ -302,7 +310,12 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
           fontFamily: next.fontFamily }) : null;
       }
       tooltip?.hide();
-      menuState?.controls?.update();
+      if (menuState?.editor) {
+        const data = getData(), panel = data.annotationPanels?.find((panel) => panel.uid === menuState.editor.value);
+        if (menuState.panels !== data.annotationPanels || menuState.panel !== panel || menuState.clusters !== data.clusters) {
+          syncDataEditor(menuState);
+        }
+      } else menuState?.controls?.update();
       refresh();
     },
     dispose() {

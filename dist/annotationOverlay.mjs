@@ -642,9 +642,9 @@ const [markup$b, css$b] = await Promise.all([
   ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput, button { box-sizing: border-box; color: inherit; font: inherit; }\ninput {\n  width: 100%;\n  min-width: 0;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #687586);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n",
 ]);
 const template$b = createTemplate(markup$b);
-const HTMLElementBase$a = globalThis.HTMLElement || class {};
+const HTMLElementBase$b = globalThis.HTMLElement || class {};
 
-class SearchField extends HTMLElementBase$a {
+class SearchField extends HTMLElementBase$b {
   static observedAttributes = ["label", "placeholder"];
   #input;
   #clear;
@@ -697,10 +697,10 @@ const [markup$a, css$a] = await Promise.all([
   ":host {\n  display: flex;\n  align-items: center;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  color: inherit;\n  font: inherit;\n}\n:host([hidden]), [hidden] { display: none !important; }\n:host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }\n:host(:hover) { --cm-edit-icon-width:20px; }\nspan { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }\nspan[data-placeholder] { color: var(--cm-muted, #687586); }\nbutton, input, select { box-sizing: border-box; font: inherit; color: inherit; }\nbutton {\n  display: inline-grid;\n  place-items: center;\n  flex: 0 0 auto;\n  width: var(--cm-edit-icon-width, 0px);\n  min-width: 0;\n  height: 20px;\n  overflow: hidden;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #64748b);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { width:20px; outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { cursor: default; opacity: .45; }\nsvg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }\ninput, select {\n  width: 100%;\n  min-width: 0;\n  height: 28px;\n  margin-inline: -1px;\n  padding: 2px 7px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  line-height: 20px;\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus, select:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
 ]);
 const template$a = createTemplate(markup$a);
-const HTMLElementBase$9 = globalThis.HTMLElement || class {};
+const HTMLElementBase$a = globalThis.HTMLElement || class {};
 
 /** A field owns its draft; consumers accept or cancel value-commit events. */
-class EditableField extends HTMLElementBase$9 {
+class EditableField extends HTMLElementBase$a {
   static observedAttributes = ["label", "placeholder", "type", "min", "max", "step", "required", "disabled"];
   #value = "";
   #revision = 0;
@@ -822,9 +822,9 @@ const [markup$9, css$9] = await Promise.all([
   ":host { display: block; color: inherit; font: inherit; }\nsummary { cursor: pointer; color: var(--cm-muted, #687586); }\nsummary:hover { color: var(--cm-accent, #1677ff); }\n[data-items] { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 0 2px; }\n.category, [data-removal] { display: flex; align-items: center; gap: 5px; }\n.category:hover { --cm-edit-icon-width:20px; }\nclinker-editable-field, input[type=text] { width: 140px; min-width: 0; }\n[data-removal] { flex-wrap: wrap; margin-top: 6px; padding: 6px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 4px; }\n",
 ]);
 const template$9 = createTemplate(markup$9);
-const HTMLElementBase$8 = globalThis.HTMLElement || class {};
+const HTMLElementBase$9 = globalThis.HTMLElement || class {};
 
-class CategoryEditor extends HTMLElementBase$8 {
+class CategoryEditor extends HTMLElementBase$9 {
   #value = [];
   #palette = ["#888888"];
   #revision = 0;
@@ -956,9 +956,9 @@ const [markup$8, css$8] = await Promise.all([
   ":host { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-shrink: 0; color: inherit; font: inherit; }\n:host([embedded]), slot { display: contents; }\nselect { max-width: 260px; }\n:host([embedded]) select { max-width: 220px; }\n",
 ]);
 const template$8 = createTemplate(markup$8);
-const HTMLElementBase$7 = globalThis.HTMLElement || class {};
+const HTMLElementBase$8 = globalThis.HTMLElement || class {};
 
-class AnnotationToolbar extends HTMLElementBase$7 {
+class AnnotationToolbar extends HTMLElementBase$8 {
   #select;
   #buttons;
 
@@ -1174,9 +1174,9 @@ const [markup$7, css$7] = await Promise.all([
   ":host { display: block; flex-shrink: 0; min-width: 0; color: inherit; font: inherit; }\nlabel { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }\nlabel > span { flex: 1; min-width: 0; }\ninput, select { width: 140px; max-width: 65%; }\n.data { display: block; }\ntextarea { display: block; width: 100%; margin-top: 4px; resize: vertical; }\np { margin: 8px 0; color: var(--cm-muted, #687586); }\n[data-error] { color: var(--cm-danger, #b42318); }\n.actions { display: flex; gap: 8px; }\n",
 ]);
 const template$7 = createTemplate(markup$7);
-const HTMLElementBase$6 = globalThis.HTMLElement || class {};
+const HTMLElementBase$7 = globalThis.HTMLElement || class {};
 
-class AnnotationDataForm extends HTMLElementBase$6 {
+class AnnotationDataForm extends HTMLElementBase$7 {
   static observedAttributes = ["mode"];
   #form;
   #clusters = [];
@@ -1235,9 +1235,9 @@ const [markup$6, css$6] = await Promise.all([
   ":host { display: block; color: inherit; font: inherit; }\nfieldset { min-width: 0; margin: 0 0 8px; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }\nlegend { padding: 0 4px; font-weight: 600; }\n.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }\nclinker-editable-field { width: 140px; }\nclinker-editable-field:hover { --cm-edit-icon-width: 20px; }\nselect { max-width: 100%; }\n[data-members] { display: block; margin-top: 8px; }\n",
 ]);
 const template$6 = createTemplate(markup$6);
-const HTMLElementBase$5 = globalThis.HTMLElement || class {};
+const HTMLElementBase$6 = globalThis.HTMLElement || class {};
 
-class AnnotationGroupEditor extends HTMLElementBase$5 {
+class AnnotationGroupEditor extends HTMLElementBase$6 {
   #state = { groups: [], clusters: [], tree: null };
   #revision = 0;
   #rows = new Map();
@@ -1362,9 +1362,9 @@ const [markup$5, css$5] = await Promise.all([
   ":host {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  height: 32px;\n  min-width: 0;\n  flex-shrink: 0;\n  color: var(--cm-muted, #687586);\n  font: 12px/1.4 system-ui, sans-serif;\n}\nspan { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\nspan.is-selected { color: var(--cm-foreground, #273444); font-weight: 600; }\ndiv { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }\nslot { display: contents; }\nbutton { flex-shrink: 0; }\n",
 ]);
 const template$5 = createTemplate(markup$5);
-const HTMLElementBase$4 = globalThis.HTMLElement || class {};
+const HTMLElementBase$5 = globalThis.HTMLElement || class {};
 
-class SelectionBar extends HTMLElementBase$4 {
+class SelectionBar extends HTMLElementBase$5 {
   #summary;
   #actions;
   #all;
@@ -1407,9 +1407,9 @@ const [markup$4, css$4] = await Promise.all([
 ]);
 const template$4 = createTemplate(markup$4);
 const activeMenus = new WeakMap();
-const HTMLElementBase$3 = globalThis.HTMLElement || class {};
+const HTMLElementBase$4 = globalThis.HTMLElement || class {};
 
-class ActionMenu extends HTMLElementBase$3 {
+class ActionMenu extends HTMLElementBase$4 {
   static observedAttributes = ["label", "open"];
   #details;
   #trigger;
@@ -1465,9 +1465,9 @@ const [markup$3, css$3] = await Promise.all([
   ":host { display: flex; flex: 1; min-width: 0; min-height: 120px; color: inherit; font: inherit; }\n:host([hidden]) { display: none !important; }\n[hidden] { display: none !important; }\n[part=viewport] { flex: 1; min-width: 0; min-height: 0; overflow: auto; overflow-anchor: none; outline: none; }\nslot { display: contents; }\n[part=empty] { padding: 16px; color: var(--cm-muted, #667386); text-align: center; }\n",
 ]);
 const template$3 = createTemplate(markup$3);
-const HTMLElementBase$2 = globalThis.HTMLElement || class {};
+const HTMLElementBase$3 = globalThis.HTMLElement || class {};
 
-class DataTable extends HTMLElementBase$2 {
+class DataTable extends HTMLElementBase$3 {
   #viewport;
   #renderer = null;
   #rows = [];
@@ -1543,9 +1543,9 @@ const [markup$2, css$2] = await Promise.all([
   ":host { display: flex; flex-direction: column; gap: 8px; color: inherit; font: inherit; }\nbutton { text-align: left; }\ninput { width: 112px; }\n",
 ]);
 const template$2 = createTemplate(markup$2);
-const HTMLElementBase$1 = globalThis.HTMLElement || class {};
+const HTMLElementBase$2 = globalThis.HTMLElement || class {};
 
-class AnnotationValueActions extends HTMLElementBase$1 {
+class AnnotationValueActions extends HTMLElementBase$2 {
   #columns;
   #numeric;
   #categories;
@@ -1593,9 +1593,9 @@ const [markup$1, css$1] = await Promise.all([
   ":host { display:flex; flex:1; min-width:0; min-height:0; color:inherit; font:inherit; }\n:host([hidden]) { display:none!important; }\nslot { display:contents; }\n.cm-annotation-matrix { position:relative; }\n.cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }\n\n.cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,#f3f6fa); }\n.cm-annotation-matrix tr > :first-child { position:sticky; left:0; z-index:1; width:32px; min-width:32px; background:var(--cm-row-background,var(--cm-subtle,#f3f6fa)); }\n.cm-annotation-matrix tr > :nth-child(2) { position:sticky; left:32px; z-index:1; }\n.cm-annotation-matrix tbody th { background:var(--cm-row-background); }\n.cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,#f3f6fa); }\n.cm-annotation-matrix tbody th { cursor:pointer; min-width:200px; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }\n.cm-annotation-matrix :is(input:not([type=checkbox]),clinker-editable-field) { width:140px; }\n.cm-annotation-column { display:flex; align-items:center; }\n.cm-annotation-column button { --cm-icon-size:24px; visibility:hidden; }\n.cm-annotation-column:is(:hover,:focus-within) button { visibility:visible; }\n.cm-annotation-add-column { width:36px; }\n.cm-annotation-add-column form { display:flex; gap:4px; }\n.cm-annotation-spacer > td { height:0; border:0; padding:0; }\n",
 ]);
 const template$1 = createTemplate(markup$1);
-const HTMLElementBase = globalThis.HTMLElement || class {};
+const HTMLElementBase$1 = globalThis.HTMLElement || class {};
 
-class AnnotationTable extends HTMLElementBase {
+class AnnotationTable extends HTMLElementBase$1 {
   #viewport;
   #panel;
   #domain = null;
@@ -1814,147 +1814,167 @@ function createAnnotationForm({ document, getData, patch, onCreate }) {
 }
 
 const [markup, css] = await Promise.all([
-  "<template id=\"editor\">\n<div class=\"cm-data-ui cm-annotation-data-editor\" tabindex=\"-1\">\n  <clinker-annotation-toolbar>\n    <clinker-search-field label=\"Filter records\" placeholder=\"Find a cluster\"></clinker-search-field>\n  </clinker-annotation-toolbar>\n  <div class=\"cm-data-error\" data-data-error role=\"alert\"></div><div class=\"cm-annotation-data-body\"></div>\n</div>\n</template>\n\n<template id=\"matrix\">\n<clinker-annotation-table></clinker-annotation-table>\n</template>\n\n<template id=\"categories\">\n<clinker-category-editor slot=\"tools\" class=\"cm-annotation-categories\"></clinker-category-editor>\n</template>\n\n<template id=\"replacement\">\n<clinker-annotation-data-form slot=\"tools\" mode=\"replace\" hidden></clinker-annotation-data-form>\n</template>\n\n<template id=\"groups\">\n<div class=\"cm-data-panel cm-annotation-group-list\" role=\"region\" aria-label=\"Editable annotation data\" tabindex=\"-1\"><clinker-annotation-group-editor></clinker-annotation-group-editor></div>\n</template>\n\n<template id=\"empty\">\n<p>No annotation panels. Add a panel to attach data to cluster rows.</p>\n</template>\n",
-  "@layer clinker-editor {\n.cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }\n.cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }\n.cm-annotation-group-list { overflow:auto; }\n.cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }\n.cm-annotation-data-editor [data-data-error]:empty { display:none; }\n\n}\n",
+  "<template id=\"editor\">\n<div class=\"cm-annotation-layout\">\n  <clinker-annotation-toolbar>\n    <clinker-search-field label=\"Filter records\" placeholder=\"Find a cluster\"></clinker-search-field>\n  </clinker-annotation-toolbar>\n  <div class=\"cm-annotation-content\">\n    <div class=\"cm-data-error\" data-data-error role=\"alert\"></div>\n    <div class=\"cm-annotation-data-body\"></div>\n  </div>\n</div>\n</template>\n\n<template id=\"matrix\">\n<clinker-annotation-table></clinker-annotation-table>\n</template>\n\n<template id=\"categories\">\n<clinker-category-editor slot=\"tools\" class=\"cm-annotation-categories\"></clinker-category-editor>\n</template>\n\n<template id=\"replacement\">\n<clinker-annotation-data-form slot=\"tools\" mode=\"replace\" hidden></clinker-annotation-data-form>\n</template>\n\n<template id=\"groups\">\n<div class=\"cm-data-panel cm-annotation-group-list\" role=\"region\" aria-label=\"Editable annotation data\" tabindex=\"-1\"><clinker-annotation-group-editor></clinker-annotation-group-editor></div>\n</template>\n\n<template id=\"empty\">\n<p>No annotation panels. Add a panel to attach data to cluster rows.</p>\n</template>\n",
+  "@layer clinker-editor {\n.cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }\n.cm-annotation-layout, .cm-annotation-content { display:flex; flex-direction:column; flex:1; gap:8px; min-width:0; min-height:0; }\nclinker-annotation-editor[embedded], clinker-annotation-editor[embedded] > .cm-annotation-layout { display:contents; }\nclinker-annotation-editor[hidden] { display:none; }\nclinker-annotation-editor[embedded] .cm-annotation-layout > clinker-annotation-toolbar { grid-area:tools; min-width:0; }\nclinker-annotation-editor[embedded] .cm-annotation-content { grid-area:content; }\n.cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }\n.cm-annotation-group-list { overflow:auto; }\n.cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }\n.cm-annotation-data-editor [data-data-error]:empty { display:none; }\n\n}\n",
 ]);
 const template = createTemplate(markup);
+const HTMLElementBase = globalThis.HTMLElement || class {};
 
-/** Data editing is optional UI; every change goes through the chart's patch API. */
-function createAnnotationEditor({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm(); defineAnnotationGroupEditor(); defineAnnotationTable();
-  installDataEditorStyle(document); installStyle$1(document);
-  const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
-  const templates = template(document);
-  const element = (name) => document.importNode(templates.getElementById(name).content, true).firstElementChild;
-  const node = element("editor"), toolbar = node.querySelector("clinker-annotation-toolbar");
-  const body = node.querySelector(".cm-annotation-data-body"), status = node.querySelector("[data-data-error]");
-  if (embedded) { toolbar.setAttribute("embedded", ""); toolbar.querySelector("clinker-search-field").remove(); toolbar.remove(); }
-  let selected = null, applying = false, renderedPanel = null, renderedPanels = null, renderedClusters = null;
-  let filter = "", creating = false, view = null, viewKey = null, categories = null, replacement = null;
-  const getPanels = () => getData()?.annotationPanels || [];
-  const current = () => getPanels().find((panel) => panel.uid === selected);
-  const error = (message) => { status.textContent = message; };
-  const run = createActionRunner(error);
-  const commit = (operations) => {
-    applying = true;
-    try { return run(() => {
-      patch(operations);
-      render();
-    }); } finally { applying = false; }
-  };
-  const update = (changes) => commit([{ type: "annotationPanels.update", ids: [selected], changes }]);
-  const categoryScale = (panel, domain, colours) => ({ ...panel.scale, type: "categorical", domain,
-    colours: colours.length ? colours : [...ANNOTATION_PALETTES.Qualitative] });
-  const clearSelection = () => view?.clearSelection?.();
-  toolbar.addEventListener("panel-change", (event) => { selected = event.detail.value; creating = false; render(); });
-  toolbar.addEventListener("panel-action", (event) => {
-    const { action } = event.detail;
-    if (action === "add") { creating = !creating; render(); }
-    else if (action === "replace" && replacement) {
-      replacement.hidden = !replacement.hidden;
-      if (!replacement.hidden) {
-        replacement.value = { data: annotationTableText(current(), getClusters()) }; replacement.error = ""; replacement.focus();
+class AnnotationEditor extends HTMLElementBase {
+  #state = { data: null, clusters: [], patch: () => {} };
+  #templates;
+  #toolbar;
+  #body;
+  #search;
+  #status;
+  #applying = false;
+  #selected = null;
+  #creating = false;
+  #view;
+  #viewKey;
+  #categories;
+  #replacement;
+  #run = createActionRunner((message) => { this.#status.textContent = message; });
+
+  connectedCallback() {
+    installDataEditorStyle(this.ownerDocument);
+    this.classList.add("cm-data-ui", "cm-annotation-data-editor");
+    if (!this.ownerDocument.getElementById("clinker-annotation-editor-style")) {
+      const style = this.ownerDocument.createElement("style"); style.id = "clinker-annotation-editor-style"; style.textContent = css;
+      this.ownerDocument.head.append(style);
+    }
+    if (!this.#body) this.#mount();
+    this.#render();
+  }
+  disconnectedCallback() { this.#cancelEdit(); }
+  set state(value) { this.#state = value; if (this.#body && !this.#applying) this.#render(); }
+  get value() { return this.#selected; }
+  select(uid) { this.#selected = uid; this.#creating = false; if (this.#body) this.#render(); }
+  clearSelection() { this.#view?.clearSelection?.(); }
+  reset() {
+    this.#cancelEdit(); this.#selected = this.#viewKey = null;
+    this.#creating = false;
+    if (this.#search) this.#search.value = "";
+  }
+  get #palette() { return this.#state.annotationApi.ANNOTATION_PALETTES.Qualitative; }
+  #scale(panel) { return this.#state.annotationApi.resolveAnnotationScale(panel); }
+  #panels() { return this.#state.data?.annotationPanels || []; }
+  #current() { return this.#panels().find((panel) => panel.uid === this.#selected); }
+  #element(name) { return this.ownerDocument.importNode(this.#templates.getElementById(name).content, true).firstElementChild; }
+  #cancelEdit() { this.#view?.cancelEdit(); this.#categories?.cancelEdit(); }
+  #commit(operations) {
+    this.#applying = true;
+    try { return this.#run(() => { this.#state.patch(operations); this.#render(); }); }
+    finally { this.#applying = false; }
+  }
+  #update(changes) { return this.#commit([{ type: "annotationPanels.update", ids: [this.#selected], changes }]); }
+  #categoryScale(panel, domain, colours) {
+    return { ...panel.scale, type: "categorical", domain, colours: colours.length ? colours : [...this.#palette] };
+  }
+  #mount() {
+    this.#templates = template(this.ownerDocument);
+    this.append(this.#element("editor"));
+    this.#toolbar = this.querySelector("clinker-annotation-toolbar");
+    this.#body = this.querySelector(".cm-annotation-data-body");
+    this.#status = this.querySelector("[data-data-error]");
+    this.#search = this.querySelector("clinker-search-field");
+    this.#search.addEventListener("input", () => this.#syncView());
+    this.#toolbar.addEventListener("panel-change", (event) => this.select(event.detail.value));
+    this.#toolbar.addEventListener("panel-action", (event) => this.#action(event.detail.action));
+    this.#body.addEventListener("columns-change", (event) => { if (this.#update(event.detail) === false) event.preventDefault(); });
+    this.#body.addEventListener("rows-change", (event) => {
+      const panel = this.#current(), categorical = panel.scale?.type === "categorical", scale = this.#scale(panel);
+      if (this.#commit([
+        ...(categorical && !panel.scale?.domain ? [{ type: "annotationPanels.update", ids: [this.#selected],
+          changes: { scale: this.#categoryScale(panel, scale.domain, scale.domain.map(scale.colour)) } }] : []),
+        { type: "annotationPanels.updateRows", uid: this.#selected, values: event.detail.values },
+      ]) === false) event.preventDefault();
+    });
+    this.#body.addEventListener("value-commit", (event) => {
+      let changes;
+      if (event.target === this.#categories) {
+        const { value, replacements } = event.detail, mapping = new Map(replacements);
+        changes = { scale: this.#categoryScale(this.#current(), value.map(({ name }) => name), value.map(({ colour }) => colour)) };
+        if (mapping.size) changes.values = mapAnnotationValues(this.#current().values, (item) => mapping.has(item) ? mapping.get(item) : item);
+      } else if (event.target === this.#view && this.#current()?.type === "groups") changes = { groups: event.detail.value };
+      else return;
+      if (this.#update(changes) === false) event.preventDefault();
+    });
+    this.#body.addEventListener("data-submit", (event) => { if (event.target === this.#replacement) this.#replace(event.detail.data); });
+    this.#body.addEventListener("data-cancel", (event) => { if (event.target === this.#replacement) this.#replacement.hidden = true; });
+  }
+  #action(action) {
+    if (action === "add") { this.#creating = !this.#creating; this.#render(); }
+    else if (action === "replace" && this.#replacement) {
+      this.#replacement.hidden = !this.#replacement.hidden;
+      if (!this.#replacement.hidden) {
+        this.#replacement.value = { data: annotationTableText(this.#current(), this.#state.clusters) };
+        this.#replacement.error = ""; this.#replacement.focus();
       }
-    } else if (action === "show") update({ show: current().show === false });
-    else if (action === "remove") commit([{ type: "annotationPanels.delete", ids: [selected] }]);
+    } else if (action === "show") this.#update({ show: this.#current().show === false });
+    else if (action === "remove") this.#commit([{ type: "annotationPanels.delete", ids: [this.#selected] }]);
     else if (action === "left" || action === "right") {
-      const ids = getPanels().map((panel) => panel.uid), index = ids.indexOf(selected), next = index + (action === "left" ? -1 : 1);
+      const ids = this.#panels().map((panel) => panel.uid), index = ids.indexOf(this.#selected), next = index + (action === "left" ? -1 : 1);
       if (index < 0 || next < 0 || next >= ids.length) return;
       [ids[index], ids[next]] = [ids[next], ids[index]];
-      commit([{ type: "annotationPanels.reorder", ids }]);
+      this.#commit([{ type: "annotationPanels.reorder", ids }]);
     }
-  });
-  const search = !embedded && toolbar.querySelector("clinker-search-field");
-  if (search) search.addEventListener("input", () => { filter = search.value; syncView(); });
-  const disposeView = () => { view?.cancelEdit(); categories?.cancelEdit(); };
-  body.addEventListener("columns-change", (event) => { if (update(event.detail) === false) event.preventDefault(); });
-  body.addEventListener("rows-change", (event) => {
-    const panel = current(), categorical = panel.scale?.type === "categorical", scale = resolveAnnotationScale(panel);
-    if (commit([
-      ...(categorical && !panel.scale?.domain ? [{ type: "annotationPanels.update", ids: [selected],
-        changes: { scale: categoryScale(panel, scale.domain, scale.domain.map(scale.colour)) } }] : []),
-      { type: "annotationPanels.updateRows", uid: selected, values: event.detail.values },
-    ]) === false) event.preventDefault();
-  });
-  body.addEventListener("value-commit", (event) => {
-    let changes;
-    if (event.target === categories) {
-      const { value, replacements } = event.detail, mapping = new Map(replacements);
-      changes = { scale: categoryScale(current(), value.map(({ name }) => name), value.map(({ colour }) => colour)) };
-      if (mapping.size) changes.values = mapAnnotationValues(current().values, (item) => mapping.has(item) ? mapping.get(item) : item);
-    } else if (event.target === view && current()?.type === "groups") changes = { groups: event.detail.value };
-    else return;
-    if (update(changes) === false) event.preventDefault();
-  });
-  body.addEventListener("data-submit", (event) => {
-    if (event.target !== replacement) return;
+  }
+  #replace(data) {
     try {
-      const source = current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(event.detail.data, categorical);
+      const source = this.#current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(data, categorical);
       if (categorical) {
-        const scale = resolveAnnotationScale(source), domain = new Set(scale.domain);
+        const scale = this.#scale(source), domain = new Set(scale.domain);
         for (const row of Object.values(changes.values)) for (const value of row) if (value !== null) domain.add(value);
-        const names = [...domain]; changes.scale = categoryScale(source, names, names.map((value, i) =>
-          scale.domain.includes(value) ? scale.colour(value) : ANNOTATION_PALETTES.Qualitative[i % ANNOTATION_PALETTES.Qualitative.length]));
+        const names = [...domain]; changes.scale = this.#categoryScale(source, names, names.map((value, i) =>
+          scale.domain.includes(value) ? scale.colour(value) : this.#palette[i % this.#palette.length]));
       }
-      if (update(changes)) replacement.hidden = true;
-    } catch (exception) { replacement.error = exception.message; }
-  });
-  body.addEventListener("data-cancel", (event) => { if (event.target === replacement) replacement.hidden = true; });
-
-  function syncView() {
-    if (!view) return;
-    const panel = current(), clusters = getClusters();
-    view.state = panel.type === "groups" ? { groups: panel.groups, colour: panel.colour, clusters, tree: getData().tree }
-      : { panel, clusters, filter, domain: panel.scale?.type === "categorical" ? resolveAnnotationScale(panel).domain : null };
+      if (this.#update(changes)) this.#replacement.hidden = true;
+    } catch (exception) { this.#replacement.error = exception.message; }
   }
-
-  function render() {
-    const panels = getPanels();
-    if (!panels.some((panel) => panel.uid === selected)) selected = panels[0]?.uid ?? null;
-    const panel = current(); renderedPanel = panel; renderedPanels = panels; renderedClusters = getClusters();
-    toolbar.state = { panels, value: selected, creating };
-    if (search) { search.hidden = !panel || creating || panel.type === "groups"; search.value = filter; }
+  #syncView() {
+    if (!this.#view) return;
+    const panel = this.#current(), clusters = this.#state.clusters;
+    this.#view.state = panel.type === "groups" ? { groups: panel.groups, colour: panel.colour, clusters, tree: this.#state.data.tree }
+      : { panel, clusters, filter: this.#search.value, domain: panel.scale?.type === "categorical" ? this.#scale(panel).domain : null };
+  }
+  #render() {
+    const panels = this.#panels();
+    if (!panels.some((panel) => panel.uid === this.#selected)) this.#selected = panels[0]?.uid ?? null;
+    const panel = this.#current();
+    this.#toolbar.state = { panels, value: this.#selected, creating: this.#creating };
+    this.#search.hidden = !panel || this.#creating || panel.type === "groups";
     const categorical = panel?.scale?.type === "categorical";
-    const key = creating ? "create" : panel ? JSON.stringify([panel.uid, panel.type]) : "empty";
-    if (key !== viewKey) {
-      disposeView(); body.replaceChildren(); view = categories = replacement = null; viewKey = key;
-      if (creating) body.append(createAnnotationForm({ document, getData, patch,
-        onCreate: (uid) => { selected = uid; creating = false; render(); } }));
-      else if (!panel) body.append(element("empty"));
+    const key = this.#creating ? "create" : panel ? JSON.stringify([panel.uid, panel.type]) : "empty";
+    if (key !== this.#viewKey) {
+      this.#cancelEdit(); this.#body.replaceChildren(); this.#view = this.#categories = this.#replacement = null; this.#viewKey = key;
+      if (this.#creating) this.#body.append(createAnnotationForm({ document: this.ownerDocument,
+        getData: () => this.#state.data, patch: (operations) => this.#state.patch(operations), onCreate: (uid) => this.select(uid) }));
+      else if (!panel) this.#body.append(this.#element("empty"));
       else if (panel.type === "groups") {
-        const region = element("groups"); body.append(region); view = region.firstElementChild;
+        const region = this.#element("groups"); this.#body.append(region); this.#view = region.firstElementChild;
       } else {
-        view = element("matrix"); body.append(view);
-        replacement = element("replacement"); view.append(replacement);
+        this.#view = this.#element("matrix"); this.#body.append(this.#view);
+        this.#replacement = this.#element("replacement"); this.#view.append(this.#replacement);
       }
     }
-    syncView();
-    if (view && panel.type !== "groups" && categorical && !categories) {
-      categories = element("categories"); view.prepend(categories);
-      categories.palette = ANNOTATION_PALETTES.Qualitative;
-    } else if (!categorical && categories) {
-      categories.cancelEdit(); categories.remove(); categories = null;
+    this.#syncView();
+    if (this.#view && panel.type !== "groups" && categorical && !this.#categories) {
+      this.#categories = this.#element("categories"); this.#view.prepend(this.#categories);
+      this.#categories.palette = this.#palette;
+    } else if (!categorical && this.#categories) {
+      this.#categories.cancelEdit(); this.#categories.remove(); this.#categories = null;
     }
-    if (categories) {
-      const { domain, colour } = resolveAnnotationScale(panel);
-      categories.value = domain.map((name) => ({ name, colour: colour(name) }));
+    if (this.#categories) {
+      const { domain, colour } = this.#scale(panel);
+      this.#categories.value = domain.map((name) => ({ name, colour: colour(name) }));
     }
   }
-  render();
-  return { node, toolbar, select(uid) { selected = uid; creating = false; render(); }, clearSelection,
-    get filter() { return filter; }, setFilter(value) { filter = value; syncView(); },
-    invalidate({ replace = false } = {}) {
-      renderedPanel = renderedPanels = renderedClusters = null;
-      if (replace) { disposeView(); view = categories = replacement = null; viewKey = null; selected = null; }
-    },
-    destroy() { disposeView(); toolbar.remove(); },
-    update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters)) render(); } };
 }
-function installStyle$1(document) {
-  if (document.getElementById("cm-annotation-data-style")) return;
-  const style = document.createElement("style"); style.id = "cm-annotation-data-style";
-  style.textContent = css;
-  document.head.append(style);
+
+function defineAnnotationEditor() {
+  defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm(); defineAnnotationGroupEditor(); defineAnnotationTable();
+  if (!customElements.get("clinker-annotation-editor")) customElements.define("clinker-annotation-editor", AnnotationEditor);
 }
 
 /** Quick styling stays in the plot; data and membership editing live in the data editor. */
@@ -2214,6 +2234,12 @@ function createAnnotationOverlay({ container, getData, patch, annotationApi, edi
     if (returnFocus && opener?.isConnected && !opener.hidden && !opener.closest("[hidden]")) opener.focus({ preventScroll: true });
     else if (returnFocus) surfaces[0]?.focus?.({ preventScroll: true });
   };
+  const syncDataEditor = (state) => {
+    const data = getData();
+    Object.assign(state, { panels: data.annotationPanels, panel: data.annotationPanels?.find((panel) => panel.uid === state.editor.value), clusters: data.clusters });
+    state.editor.state = { data, clusters: data.clusters, annotationApi,
+      patch: (operations) => { patch(operations); syncDataEditor(state); } };
+  };
   const beginMenu = (kind, title, button, uid = null) => {
     // Keep the menu anchored when creating a panel moves its opener offscreen.
     const anchor = button.closest("[hidden]") ? menuState?.anchor : button.getBoundingClientRect();
@@ -2276,8 +2302,10 @@ function createAnnotationOverlay({ container, getData, patch, annotationApi, edi
         if (editData?.(uid)) { close(); return; }
         const dataState = beginMenu("data", "Annotation data", edit, uid);
         menu.classList.add("cm-annotation-menu--data");
-        dataState.controls = createAnnotationEditor({ document, getData, patch, annotationApi });
-        dataState.controls.select(uid); menu.append(dataState.controls.node); positionMenu();
+        defineAnnotationEditor();
+        dataState.editor = document.createElement("clinker-annotation-editor");
+        syncDataEditor(dataState);
+        dataState.editor.select(uid); menu.append(dataState.editor); positionMenu();
       } });
     menu.append(state.controls.node);
     const actions = element("div", "cm-annotation-actions", menu);
@@ -2421,7 +2449,12 @@ function createAnnotationOverlay({ container, getData, patch, annotationApi, edi
           fontFamily: next.fontFamily }) : null;
       }
       tooltip?.hide();
-      menuState?.controls?.update();
+      if (menuState?.editor) {
+        const data = getData(), panel = data.annotationPanels?.find((panel) => panel.uid === menuState.editor.value);
+        if (menuState.panels !== data.annotationPanels || menuState.panel !== panel || menuState.clusters !== data.clusters) {
+          syncDataEditor(menuState);
+        }
+      } else menuState?.controls?.update();
       refresh();
     },
     dispose() {

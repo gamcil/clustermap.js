@@ -1,9 +1,13 @@
 @layer clinker-editor {
-  clinker-data-panel { display:flex; flex:1; min-width:0; min-height:0; flex-direction:column; gap:8px; }
+  clinker-data-panel { display:grid; flex:1; min-width:0; min-height:0; grid-template-columns:auto minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; grid-template-areas:"views tools" "content content" "error error"; gap:8px; }
   clinker-data-panel[hidden] { display:none; }
-  clinker-data-panel .cm-editor__annotation-editor { display:flex; flex:1; min-height:0; }
-  clinker-data-panel .cm-editor__annotation-editor > .cm-annotation-data-editor { flex:1; min-width:0; }
+  clinker-data-panel > [data-kind-picker] { grid-area:views; align-self:center; }
+  clinker-data-panel > [data-record-toolbar] { grid-area:tools; min-width:0; }
+  clinker-data-panel > [data-record-editor] { grid-area:content; }
+  clinker-data-panel > [data-editor-error] { grid-area:error; }
   clinker-data-panel .cm-editor__member-filter { display: flex; align-items: center; gap: 6px; color: var(--cm-muted,#526178); font-size: 12px; }
   clinker-data-panel .cm-editor__member-filter button { display: grid; place-items: center; width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,#64748b); font-size: 17px; line-height: 1; }
-  clinker-data-panel .cm-editor__annotation-toolbar { display:contents; }
+  @media (max-width:700px) {
+    clinker-data-panel { grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr) auto; grid-template-areas:"views" "tools" "content" "error"; }
+  }
 }

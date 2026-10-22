@@ -1,8 +1,8 @@
 import { installDataEditorStyle } from "../../shared/styles.mjs";
 import { RowSelection } from "../../../rowSelection.mjs";
 import { DATA_ROW_HEIGHT } from "../../../virtualRows.mjs";
-import { createAnnotationEditor } from "../../annotations.js";
 import { ANNOTATION_PALETTES, resolveAnnotationScale } from "../../../annotations.mjs";
+import { defineAnnotationEditor } from "../annotation-editor/annotation-editor.js";
 import { createActionRunner, createTemplate } from "../../../uiControls.mjs";
 import { applyTheme, resolveTheme, figureConfig } from "../../../theme.mjs";
 import { defineRecordTable } from "../record-table/record-table.js";
@@ -51,7 +51,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   connectedCallback() {
-    defineSelectionBar(); defineViewSwitcher(); defineSearchField(); defineRecordActions(); defineRecordTable();
+    defineSelectionBar(); defineViewSwitcher(); defineSearchField(); defineRecordActions(); defineRecordTable(); defineAnnotationEditor();
     this.classList.add("cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.ownerDocument.getElementById("clinker-data-panel-style")) {
@@ -66,9 +66,6 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   disconnectedCallback() {
     this.#unsubscribe?.(); this.#unsubscribe = null;
     this.#table?.reset();
-    this.#annotationEditor?.destroy(); this.#annotationEditor = null;
-    this.querySelector("[data-annotation-editor]")?.replaceChildren();
-    this.querySelector("[data-annotation-toolbar]")?.replaceChildren();
   }
 
   get chart() { return this.#chart; }
@@ -127,6 +124,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 
   #renderShell() {
     this.replaceChildren(template(this.ownerDocument));
+    this.#annotationEditor = this.querySelector("clinker-annotation-editor");
     this.#table = this.querySelector("clinker-record-table");
     this.#table.addEventListener("record-action", (event) => this.#recordAction(event));
     this.#selectionBar = this.querySelector("clinker-selection-bar");
@@ -245,7 +243,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   #invalidateData({ replace = false } = {}) {
     // Patches can mutate data in place; invalidate all derived state together.
     this.#data(); this.#model.invalidate();
-    this.#annotationEditor?.invalidate({ replace });
+    if (replace) this.#annotationEditor?.reset();
     if (replace) {
       this.#table?.reset();
       this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null;
@@ -307,11 +305,8 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #setDataFilter(text) {
-    if (this.#kind === "annotations") this.#annotationEditor?.setFilter(text);
-    else {
-      this.#filter = text.trim().toLowerCase();
-      this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-    }
+    this.#filter = text.trim().toLowerCase();
+    this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
     this.#renderData();
   }
 
@@ -323,31 +318,16 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   #renderData() {
     if (!this.isConnected || !this.#table) return;
     const annotations = this.#kind === "annotations";
-    const annotationHost = this.querySelector("[data-annotation-editor]");
-    if (!annotationHost) return;
     this.querySelector("[data-kind-picker]").value = this.#kind;
     this.querySelector("[data-gene-view]").value = this.#geneView;
-    annotationHost.hidden = !annotations;
-    this.querySelector("[data-annotation-toolbar]").hidden = !annotations;
-    const search = this.querySelector("[data-filter]");
-    search.value = annotations ? this.#annotationEditor?.filter || "" : this.#filter;
-    search.setAttribute("placeholder", annotations ? "Find a cluster" : "Search names, labels, loci, or clusters");
+    this.#annotationEditor.hidden = !annotations;
+    this.querySelector("[data-record-toolbar]").hidden = annotations;
+    this.querySelector("[data-filter]").value = this.#filter;
     this.querySelector("[data-record-editor]").hidden = annotations;
     if (annotations) {
       this.#table?.reset();
-      for (const selector of ["[data-gene-view]", "[data-member-filter]", '[data-command="new-group"]',
-        '[data-command="toggle-tree"]']) this.querySelector(selector).hidden = true;
-      if (!this.#annotationEditor) {
-        this.#annotationEditor = createAnnotationEditor({ document: this.ownerDocument,
-          embedded: true,
-          getData: () => this.#chart?.data?.() || { clusters: [] },
-          getClusters: () => this.#data()?.clusters || [], patch: (operations) => this.#chart.patch(operations),
-          annotationApi: { ANNOTATION_PALETTES, resolveAnnotationScale },
-        });
-        annotationHost.append(this.#annotationEditor.node);
-        this.querySelector("[data-annotation-toolbar]").append(this.#annotationEditor.toolbar);
-      } else this.#annotationEditor.update();
-      search.value = this.#annotationEditor.filter;
+      this.#annotationEditor.state = { data: this.#chart?.data?.() || { clusters: [] }, annotationApi: { ANNOTATION_PALETTES, resolveAnnotationScale }, clusters: this.#data()?.clusters || [],
+        patch: (operations) => this.#chart.patch(operations) };
       return;
     }
     const data = this.#data();

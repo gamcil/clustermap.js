@@ -1,17 +1,16 @@
-<div class="cm-editor__toolbar cm-data-toolbar">
-  <clinker-view-switcher data-kind-picker label="Data type" value="groups">
-    <option value="groups">Groups</option><option value="genes">Genes</option>
-    <option value="links">Links</option><option value="annotations">Annotations</option>
-  </clinker-view-switcher>
+<clinker-view-switcher data-kind-picker label="Data type" value="groups">
+  <option value="groups">Groups</option><option value="genes">Genes</option>
+  <option value="links">Links</option><option value="annotations">Annotations</option>
+</clinker-view-switcher>
+<div data-record-toolbar class="cm-editor__toolbar cm-data-toolbar">
   <clinker-view-switcher data-gene-view label="Gene view" value="tree" hidden>
     <option value="tree">By locus</option><option value="groups">By group</option><option value="list">List</option>
   </clinker-view-switcher>
   <button type="button" data-command="toggle-tree" hidden>Expand visible</button>
   <button type="button" data-command="new-group">Create group…</button>
-  <div data-annotation-toolbar class="cm-editor__annotation-toolbar" hidden></div>
   <clinker-search-field data-filter label="Filter records" placeholder="Search names, labels, loci, or clusters"></clinker-search-field>
 </div>
-<div data-annotation-editor class="cm-editor__annotation-editor" hidden></div>
+<clinker-annotation-editor embedded hidden></clinker-annotation-editor>
 <div data-record-editor class="cm-data-panel">
   <div data-record-tools class="cm-data-tools" hidden>
     <div class="cm-editor__member-filter" data-member-filter hidden>
