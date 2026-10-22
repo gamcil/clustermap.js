@@ -22,7 +22,7 @@ export function validateGroupPanel(panel, clusterIds, tree, fail) {
 }
 
 /** Resolve membership and allocate lanes once; placement remains independent of tree geometry. */
-export function layoutGroupPanel(source, clusters, { fontFamily, fontSize, cellHeight, rowOffset, theme, tree, measureBounds }) {
+export function layoutGroupPanel(source, clusters, { tree, measureBounds }) {
   const nodes = new Map(tree?.nodes.map((node) => [node.uid, node]));
   const descendants = new Map();
   const collect = (uid) => {
@@ -49,13 +49,8 @@ export function layoutGroupPanel(source, clusters, { fontFamily, fontSize, cellH
   for (const lane of lanes) { lane.x = width; width += lane.width + laneGap; }
   width -= laneGap;
   for (const group of markerGroups) group.x = lanes[group.laneIndex].x;
-  const title = source.title ?? source.uid;
-  const header = title ? [{ text: title, x: 0, y: 0, anchor: "start", weight: 700, kind: "title",
-    bounds: measureBounds(title, { weight: 700 }) }] : [];
-  return { uid: source.uid, definition: source, title, width, cellHeight, rowOffset, fontSize, fontFamily,
-    markerWidth, markerGroups, headingHeight: 0, titleDescent: Math.max(0, header[0]?.bounds.maxY ?? 0),
-    rows: [...clusters.keys()].map((uid) => ({ uid, cells: [] })), header, footer: [], key: [],
-    textColour: theme?.foreground ?? "#333333", extentWidth: Math.max(width, header[0]?.bounds.maxX ?? 0) };
+  return { width, markerWidth, markerGroups,
+    rows: [...clusters.keys()].map((uid) => ({ uid, cells: [] })) };
 }
 
 /** Split non-contiguous memberships using the current row order, including drag previews. */

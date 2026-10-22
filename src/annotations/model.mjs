@@ -1,3 +1,4 @@
+import { boundsInViewport } from "../scene/camera.mjs";
 import { validateGroupPanel, layoutGroupPanel, groupPanelMarks } from "./groups.mjs";
 import { color } from "d3-color";
 import { scaleLinear, scaleOrdinal } from "d3-scale";
@@ -215,6 +216,59 @@ function sameCellStyle(before, after) {
     sameArray(before.scale?.colours, after.scale?.colours);
 }
 
+function layoutMatrixPanel(source, clusters, { before, fontSize, cellHeight, theme }) {
+  const isBar = source.type === "bar";
+  const cellWidth = isBar ? source.width ?? ANNOTATION_DEFAULTS.width : source.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth;
+  const width = cellWidth * source.columns.length;
+  const { type, domain, colour } = resolveAnnotationScale(source);
+  const cellGap = isBar ? 0 : source.cellGap ?? ANNOTATION_DEFAULTS.cellGap;
+  const borderWidth = source.cellBorderWidth ?? ANNOTATION_DEFAULTS.cellBorderWidth;
+  const borderColour = source.cellBorderColour ?? ANNOTATION_DEFAULTS.cellBorderColour;
+  const missingColour = source.missingColour ?? theme?.missing ?? ANNOTATION_DEFAULTS.missingColour;
+  const position = isBar ? scaleLinear().domain(domain).range([0, width]).clamp(true) : null;
+  const reuseRows = sameCellStyle(before?.definition, source) && sameArray(before.domain, domain) &&
+    before.missingColour === missingColour;
+  const previousRows = reuseRows && before.definition.values !== source.values
+    ? new Map(before.rows.map((row) => [row.uid, row])) : null;
+  const rows = reuseRows && before.definition.values === source.values ? before.rows : [...clusters.keys()].map((uid) => {
+    if (previousRows?.has(uid) && before.definition.values[uid] === source.values[uid]) return previousRows.get(uid);
+    return { uid, cells: source.columns.map((_, i) => {
+      const value = Object.hasOwn(source.values, uid) ? source.values[uid][i] : null;
+      const rect = { x: i * cellWidth + cellGap / 2, y: -cellHeight / 2 + cellGap / 2,
+        width: cellWidth - cellGap, height: cellHeight - cellGap,
+        fill: value === null ? missingColour : colour(value) };
+      return { ...rect, value, column: source.columns[i], columnIndex: i,
+        rects: isBar ? barRectangles(value, position, width, cellHeight,
+          source.colour ?? ANNOTATION_DEFAULTS.colour, missingColour,
+          borderWidth, borderColour) : cellRectangles(rect, borderWidth, borderColour) };
+    }) };
+  });
+  const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
+  const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation }));
+  const footer = [], key = [];
+  if (source.showKey !== false && isBar) {
+    key.push({ x: 0, y: 0, width, height: 1, fill: theme?.muted ?? "#555555" });
+    const ticks = position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40))));
+    if (!ticks.includes(0)) ticks.push(0);
+    for (const value of ticks.sort((a, b) => a - b)) {
+      const tickX = position(value);
+      key.push({ x: Math.max(0, Math.min(width - Math.min(1, width), tickX - 0.5)), y: 0,
+        width: Math.min(1, width), height: 5, fill: theme?.muted ?? "#555555" });
+      footer.push(text(numberLabel(value), tickX, fontSize + 9,
+        { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
+    }
+  } else if (source.showKey !== false && type === "continuous") {
+    for (let i = 0; i < 32; i++) key.push({ x: i * width / 32, y: 0, width: width / 32 + 0.1, height: 8,
+      fill: colour(domain[0] + (domain[1] - domain[0]) * i / 31) });
+    footer.push(text(numberLabel(domain[0]), 0, 8 + fontSize + 3),
+      text(numberLabel(domain[1]), width, 8 + fontSize + 3, { anchor: "end" }));
+  } else if (source.showKey !== false) domain.forEach((category, i) => {
+    key.push({ x: 0, y: i * (fontSize + 6), width: 10, height: 10, fill: colour(category) });
+    footer.push(text(category, 15, i * (fontSize + 6) + 9));
+  });
+  return { width, rows, header, footer, key, domain, missingColour };
+}
+
 /** Project JSON annotations once, using the same row coordinates as loci. */
 export function layoutAnnotationPanels(definitions, clusters, bounds,
   { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null, theme = null, tree = null } = {}) {
@@ -229,79 +283,28 @@ export function layoutAnnotationPanels(definitions, clusters, bounds,
       x += panel.width;
       return panel;
     }
-    if (source.type === "groups") {
-      const panel = { ...layoutGroupPanel(source, clusters, { fontFamily, rowOffset, theme, tree,
-        fontSize: source.fontSize ?? ANNOTATION_DEFAULTS.fontSize,
-        cellHeight: source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight,
-        measureBounds: (value, options) => textBounds(value, source.fontSize ?? ANNOTATION_DEFAULTS.fontSize, fontFamily, measureText, options),
-      }), x };
-      x += panel.width;
-      return panel;
-    }
-    const isBar = source.type === "bar";
-    const cellWidth = isBar ? source.width ?? ANNOTATION_DEFAULTS.width : source.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth;
+    const fontSize = source.fontSize ?? ANNOTATION_DEFAULTS.fontSize;
     const cellHeight = source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight;
-    const fontSize = source.fontSize ?? ANNOTATION_DEFAULTS.fontSize, width = cellWidth * source.columns.length;
-    const { type, domain, colour } = resolveAnnotationScale(source);
-    const cellGap = isBar ? 0 : source.cellGap ?? ANNOTATION_DEFAULTS.cellGap;
-    const borderWidth = source.cellBorderWidth ?? ANNOTATION_DEFAULTS.cellBorderWidth;
-    const borderColour = source.cellBorderColour ?? ANNOTATION_DEFAULTS.cellBorderColour;
-    const missingColour = source.missingColour ?? theme?.missing ?? ANNOTATION_DEFAULTS.missingColour;
-    const position = isBar ? scaleLinear().domain(domain).range([0, width]).clamp(true) : null;
-    const reuseRows = sameCellStyle(before?.definition, source) && sameArray(before.domain, domain) &&
-      before.missingColour === missingColour;
-    const previousRows = reuseRows && before.definition.values !== source.values
-      ? new Map(before.rows.map((row) => [row.uid, row])) : null;
-    const rows = reuseRows && before.definition.values === source.values ? before.rows : [...clusters.keys()].map((uid) => {
-      if (previousRows?.has(uid) && before.definition.values[uid] === source.values[uid]) return previousRows.get(uid);
-      return { uid, cells: source.columns.map((_, i) => {
-        const value = Object.hasOwn(source.values, uid) ? source.values[uid][i] : null;
-        const rect = { x: i * cellWidth + cellGap / 2, y: -cellHeight / 2 + cellGap / 2,
-          width: cellWidth - cellGap, height: cellHeight - cellGap,
-          fill: value === null ? missingColour : colour(value) };
-        return { ...rect, value, column: source.columns[i], columnIndex: i,
-          rects: isBar ? barRectangles(value, position, width, cellHeight,
-            source.colour ?? ANNOTATION_DEFAULTS.colour, missingColour,
-            borderWidth, borderColour) : cellRectangles(rect, borderWidth, borderColour) };
-      }) };
-    });
-    const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
-    const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation }));
-    for (const item of header) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
+    const measureBounds = (value, options) => textBounds(value, fontSize, fontFamily, measureText, options);
+    const geometry = source.type === "groups"
+      ? layoutGroupPanel(source, clusters, { tree, measureBounds })
+      : layoutMatrixPanel(source, clusters, { before, fontSize, cellHeight, theme });
+    const { header = [], footer = [], key = [] } = geometry;
+    for (const item of [...header, ...footer]) item.bounds = measureBounds(item.text, item);
     const headingHeight = Math.max(0, ...header.map((item) => -item.bounds.minY));
+    const title = source.title ?? source.uid;
     let titleDescent = 0;
-    if ((source.title ?? source.uid) !== "") {
-      const title = text(source.title ?? source.uid, 0, 0, { weight: 700, kind: "title" });
-      title.bounds = textBounds(title.text, fontSize, fontFamily, measureText, title);
-      titleDescent = Math.max(0, title.bounds.maxY);
-      header.push(title);
+    if (title) {
+      const item = text(title, 0, 0, { weight: 700, kind: "title" });
+      item.bounds = measureBounds(title, item);
+      titleDescent = Math.max(0, item.bounds.maxY);
+      header.push(item);
     }
-    const footer = [], key = [];
-    if (source.showKey !== false && isBar) {
-      key.push({ x: 0, y: 0, width, height: 1, fill: theme?.muted ?? "#555555" });
-      const ticks = position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40))));
-      if (!ticks.includes(0)) ticks.push(0);
-      for (const value of ticks.sort((a, b) => a - b)) {
-        const tickX = position(value);
-        key.push({ x: Math.max(0, Math.min(width - Math.min(1, width), tickX - 0.5)), y: 0,
-          width: Math.min(1, width), height: 5, fill: theme?.muted ?? "#555555" });
-        footer.push(text(numberLabel(value), tickX, fontSize + 9,
-          { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
-      }
-    } else if (source.showKey !== false && type === "continuous") {
-      for (let i = 0; i < 32; i++) key.push({ x: i * width / 32, y: 0, width: width / 32 + 0.1, height: 8,
-        fill: colour(domain[0] + (domain[1] - domain[0]) * i / 31) });
-      footer.push(text(numberLabel(domain[0]), 0, 8 + fontSize + 3),
-        text(numberLabel(domain[1]), width, 8 + fontSize + 3, { anchor: "end" }));
-    } else if (source.showKey !== false) domain.forEach((category, i) => {
-      key.push({ x: 0, y: i * (fontSize + 6), width: 10, height: 10, fill: colour(category) });
-      footer.push(text(category, 15, i * (fontSize + 6) + 9));
-    });
-    for (const item of footer) item.bounds = textBounds(item.text, fontSize, fontFamily, measureText, item);
-    const panel = { uid: source.uid, definition: source, title: source.title ?? source.uid, x, width, cellHeight, headingHeight, titleDescent, rowOffset, rows, header, footer, key, fontSize, fontFamily, domain, missingColour,
-      textColour: theme?.foreground ?? "#333333" };
+    const panel = { ...geometry, uid: source.uid, definition: source, title, x, cellHeight, rowOffset,
+      fontSize, fontFamily, textColour: theme?.foreground ?? "#333333", header, footer, key,
+      headingHeight, titleDescent };
     // Text overhang contributes to figure bounds, not inter-panel spacing.
-    panel.extentWidth = Math.max(width,
+    panel.extentWidth = Math.max(panel.width,
       ...header.map((item) => item.x + item.bounds.maxX),
       ...footer.map((item) => item.x + item.bounds.maxX));
     x += panel.width;
@@ -314,11 +317,6 @@ export function layoutAnnotationPanels(definitions, clusters, bounds,
 const frameCache = new WeakMap();
 const emptyFrames = Object.freeze([]);
 const rowIndexes = new WeakMap();
-
-function annotationBoundsVisible(bounds, viewport) {
-  return !viewport || bounds.minX <= viewport.maxX && bounds.maxX >= viewport.minX &&
-    bounds.minY <= viewport.maxY && bounds.maxY >= viewport.minY;
-}
 
 function rowBoundary(rows, y, upper = false) {
   let low = 0, high = rows.length;
@@ -342,10 +340,10 @@ export function annotationPanelsInViewport(scene, preview, viewport, { geometry 
   if (!viewport) return panels;
   const visible = [];
   for (const panel of panels) {
-    const texts = labels ? panel.texts.filter((item) => annotationBoundsVisible({
+    const texts = labels ? panel.texts.filter((item) => boundsInViewport({
       minX: panel.x + item.x + item.bounds.minX, maxX: panel.x + item.x + item.bounds.maxX,
       minY: item.y + item.bounds.minY, maxY: item.y + item.bounds.maxY }, viewport)) : emptyFrames;
-    const rects = geometry ? panel.rects.filter((rect) => annotationBoundsVisible({
+    const rects = geometry ? panel.rects.filter((rect) => boundsInViewport({
       minX: panel.x + rect.x, maxX: panel.x + rect.x + rect.width,
       minY: rect.y, maxY: rect.y + rect.height }, viewport)) : emptyFrames;
     let rows = emptyFrames;
