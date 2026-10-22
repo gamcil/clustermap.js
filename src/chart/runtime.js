@@ -312,6 +312,17 @@ function patchChartScene(previousScene, changes = {}, data) {
   return currentScene;
 }
 
+function updateScene(data, { sourceScene = null, changes = {}, synchronize = true } = {}) {
+  if (sourceScene && changes.annotationsOnly) {
+    currentScene = patchAnnotationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
+    return currentScene;
+  }
+  updateScales(data, { geometryOnly: Boolean(sourceScene) });
+  if (synchronize) synchronizeLocusLayoutStates(data, sourceScene ? changes.loci || [] : null);
+  if (!sourceScene) updateGroups(data.groups);
+  return sourceScene ? patchChartScene(sourceScene, changes, data) : buildChartScene(data);
+}
+
 function getScene() {
   return currentScene;
 }
@@ -424,7 +435,6 @@ return {
   ids,
   locusTextForCluster,
   synchronizeLocusLayoutState,
-  synchronizeLocusLayoutStates,
   setChartIndex,
   setChartState,
   scales,
@@ -433,10 +443,7 @@ return {
   getScene,
   buildScene: buildChartScene,
   patchScene: patchChartScene,
-  patchAnnotations(previousScene, data) {
-    currentScene = patchAnnotationScene(previousScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
-    return currentScene;
-  },
+  updateScene,
   setBeforeGeneAnchorUpdate,
   anchorGene,
 };

@@ -5105,6 +5105,60 @@ function measureFigureBounds(context, scene, config, tree = null, { preview = nu
   return bounds;
 }
 
+/** One backdrop shared by all renderers; camera changes only update its transform. */
+function createFigureSurface() {
+  let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
+
+  function bounds(container, scene, config, tree, preview = null) {
+    if (!container || !scene?.bounds) return null;
+    // Reordering moves rows within the figure without changing its extent.
+    if (preview?.type === "cluster-drag") preview = null;
+    if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
+      context ||= container.ownerDocument.createElement("canvas").getContext("2d");
+      measuredBounds = measureFigureBounds(context, scene, config, tree, { preview });
+      measuredScene = scene;
+      measuredConfig = config;
+      measuredPreview = preview;
+    }
+    return { ...measuredBounds };
+  }
+
+  function update(container, scene, config, tree, camera, preview = null) {
+    const extent = bounds(container.node(), scene, config, tree, preview);
+    if (!extent) return;
+    const padding = 20;
+    const { x, y, k } = camera;
+    const width = extent.maxX - extent.minX + padding * 2;
+    const height = extent.maxY - extent.minY + padding * 2;
+    const left = x + (extent.minX - padding) * k;
+    const top = y + (extent.minY - padding) * k;
+    container.selectAll("div.clusterMapFigureSurface").data([extent]).join(
+      (enter) => enter.insert("div", ":first-child")
+        .attr("class", "clusterMapFigureSurface").attr("aria-hidden", "true")
+        .style("position", "absolute").style("left", "0").style("top", "0")
+        .style("pointer-events", "none").style("transform-origin", "0 0")
+    )
+      .style("width", `${width}px`)
+      .style("height", `${height}px`)
+      .style("background", config.plot.background)
+      .style("transform", `translate(${left}px, ${top}px) scale(${k})`);
+    const label = container.selectAll("div.clusterMapFigureDimensions").data([extent]).join(
+      (enter) => enter.append("div").attr("class", "clusterMapFigureDimensions")
+        .attr("title", "Figure width × height at 100% zoom, including padding. SVG output is resolution independent.")
+        .style("position", "absolute").style("left", "0").style("top", "0")
+        .style("pointer-events", "none")
+    ).style("transform", `translate(${left}px, ${top - 24}px)`);
+    const text = `${Math.round(width).toLocaleString("en-US")} × ${Math.round(height).toLocaleString("en-US")} px`;
+    if (label.text() !== text) label.text(text);
+  }
+
+  function clear() {
+    context = measuredScene = measuredConfig = measuredBounds = measuredPreview = null;
+  }
+
+  return { bounds, update, clear };
+}
+
 /** Prune absent leaves and collapse unary ancestors without changing source records. */
 function visibleTree(tree, clusterIds, aliases = new Map()) {
   if (!tree) return tree;
@@ -9556,60 +9610,6 @@ function applyTheme(element, theme) {
   doc.head.append(style);
 }
 
-/** One backdrop shared by all renderers; camera changes only update its transform. */
-function createFigureSurface() {
-  let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
-
-  function bounds(container, scene, config, tree, preview = null) {
-    if (!container || !scene?.bounds) return null;
-    // Reordering moves rows within the figure without changing its extent.
-    if (preview?.type === "cluster-drag") preview = null;
-    if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
-      context ||= container.ownerDocument.createElement("canvas").getContext("2d");
-      measuredBounds = measureFigureBounds(context, scene, config, tree, { preview });
-      measuredScene = scene;
-      measuredConfig = config;
-      measuredPreview = preview;
-    }
-    return { ...measuredBounds };
-  }
-
-  function update(container, scene, config, tree, camera, preview = null) {
-    const extent = bounds(container.node(), scene, config, tree, preview);
-    if (!extent) return;
-    const padding = 20;
-    const { x, y, k } = camera;
-    const width = extent.maxX - extent.minX + padding * 2;
-    const height = extent.maxY - extent.minY + padding * 2;
-    const left = x + (extent.minX - padding) * k;
-    const top = y + (extent.minY - padding) * k;
-    container.selectAll("div.clusterMapFigureSurface").data([extent]).join(
-      (enter) => enter.insert("div", ":first-child")
-        .attr("class", "clusterMapFigureSurface").attr("aria-hidden", "true")
-        .style("position", "absolute").style("left", "0").style("top", "0")
-        .style("pointer-events", "none").style("transform-origin", "0 0")
-    )
-      .style("width", `${width}px`)
-      .style("height", `${height}px`)
-      .style("background", config.plot.background)
-      .style("transform", `translate(${left}px, ${top}px) scale(${k})`);
-    const label = container.selectAll("div.clusterMapFigureDimensions").data([extent]).join(
-      (enter) => enter.append("div").attr("class", "clusterMapFigureDimensions")
-        .attr("title", "Figure width × height at 100% zoom, including padding. SVG output is resolution independent.")
-        .style("position", "absolute").style("left", "0").style("top", "0")
-        .style("pointer-events", "none")
-    ).style("transform", `translate(${left}px, ${top - 24}px)`);
-    const text = `${Math.round(width).toLocaleString("en-US")} × ${Math.round(height).toLocaleString("en-US")} px`;
-    if (label.text() !== text) label.text(text);
-  }
-
-  function clear() {
-    context = measuredScene = measuredConfig = measuredBounds = measuredPreview = null;
-  }
-
-  return { bounds, update, clear };
-}
-
 /** Shared fixed-height row window for scrollable data editors. */
 const DATA_ROW_HEIGHT = 34;
 
@@ -13147,6 +13147,17 @@ function patchChartScene(previousScene, changes = {}, data) {
   return currentScene;
 }
 
+function updateScene(data, { sourceScene = null, changes = {}, synchronize = true } = {}) {
+  if (sourceScene && changes.annotationsOnly) {
+    currentScene = patchAnnotationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
+    return currentScene;
+  }
+  updateScales(data, { geometryOnly: Boolean(sourceScene) });
+  if (synchronize) synchronizeLocusLayoutStates(data, sourceScene ? changes.loci || [] : null);
+  if (!sourceScene) updateGroups(data.groups);
+  return sourceScene ? patchChartScene(sourceScene, changes, data) : buildChartScene(data);
+}
+
 function getScene() {
   return currentScene;
 }
@@ -13259,7 +13270,6 @@ return {
   ids,
   locusTextForCluster,
   synchronizeLocusLayoutState,
-  synchronizeLocusLayoutStates,
   setChartIndex,
   setChartState,
   scales,
@@ -13268,10 +13278,7 @@ return {
   getScene,
   buildScene: buildChartScene,
   patchScene: patchChartScene,
-  patchAnnotations(previousScene, data) {
-    currentScene = patchAnnotationScene(previousScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
-    return currentScene;
-  },
+  updateScene,
   setBeforeGeneAnchorUpdate,
   anchorGene,
 };
@@ -15254,7 +15261,7 @@ function clusterMap() {
   let clusterCommitFrame = null;
   let sceneCommit = null;
   let rasterCanvas = null, overlayCanvas = null, minimapCanvas = null;
-  let minimapScene = null, minimapMeasurement = null;
+  let minimapScene = null;
   let currentData = null;
   let plotData = null;
   let plotDataDirty = true;
@@ -16066,8 +16073,7 @@ function clusterMap() {
   function scheduleMinimapBase(scene) {
     if (!minimapCanvas || !runtime.config.plot.minimap?.show) return;
     if (plotData.tree && runtime.config.tree.show) {
-      minimapMeasurement ||= minimapCanvas.ownerDocument.createElement("canvas").getContext("2d");
-      scene = { ...scene, figureBounds: measureFigureBounds(minimapMeasurement, scene, runtime.config, plotData.tree) };
+      scene = { ...scene, figureBounds: figureSurface.bounds(container.node(), scene, runtime.renderConfig, plotData.tree) };
     }
     minimapScene = scene;
     rasterMinimap.scheduleBase({ scene, minimap: minimapCanvas, options: runtime.config.plot.minimap,
@@ -16268,15 +16274,7 @@ function clusterMap() {
     applyCamera(svg.select("g.clusterMapViewport"));
 
     const annotationsOnly = Boolean(committedScene?.changes.annotationsOnly);
-    if (!annotationsOnly) {
-      runtime.updateScales(data, { geometryOnly: Boolean(committedScene) });
-      if (synchronize) runtime.synchronizeLocusLayoutStates(data, committedScene ? committedScene.changes.loci || [] : null);
-      if (!committedScene) runtime.updateGroups(data.groups);
-    }
-
-    const scene = annotationsOnly ? runtime.patchAnnotations(committedScene.sourceScene, data) : committedScene
-      ? runtime.patchScene(committedScene.sourceScene, committedScene.changes, data)
-      : runtime.buildScene(data);
+    const scene = runtime.updateScene(data, { ...committedScene, synchronize });
 
     if (useRaster) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
@@ -16352,13 +16350,7 @@ function clusterMap() {
     const { width, height } = canvas.getBoundingClientRect();
     if (!width || !height || !scene.bounds) return;
 
-    // Requesting a 2D context would permanently prevent a WebGPU context on
-    // the visible canvas. Text measurement has no visual side effect, so use
-    // a detached 2D canvas for the WebGPU renderer.
-    const measurementCanvas = isWebGpuRenderer(runtime.config.plot.renderer)
-      ? document.createElement("canvas")
-      : canvas;
-    const bounds = measureFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, plotData.tree);
+    const bounds = figureSurface.bounds(canvas, scene, runtime.renderConfig, plotData.tree);
     if (!bounds) return;
 
     const camera = fitCameraForBounds({
@@ -16697,7 +16689,7 @@ function clusterMap() {
     canvasZoom = null;
     hasInitialView = false;
     canvasHoverLocusUid = null;
-    rasterCanvas = overlayCanvas = minimapCanvas = minimapScene = minimapMeasurement = null;
+    rasterCanvas = overlayCanvas = minimapCanvas = minimapScene = null;
     sceneCommit = null;
     chartIndex = null;
     highlightGeneIds.clear();

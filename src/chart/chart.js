@@ -1,4 +1,4 @@
-import { measureFigureBounds } from "../scene/measure.mjs";
+import { createFigureSurface } from "../renderers/figure.mjs";
 import { visibleChartData } from "../data/visibility.mjs";
 import { animate as runAnimation, afterPaint } from "../renderers/animation.mjs";
 import { select } from "d3-selection";
@@ -36,7 +36,6 @@ import { applyChartOperations } from "../data/operations.mjs";
 import { isTreeOperation, inverseTreeOperation, applyTreeOperation } from "../tree/operations.mjs";
 import { fitCameraForBounds, worldViewport, worldPoint } from "../scene/camera.mjs";
 import { applyTheme, resolveTheme } from "../ui/theme.mjs";
-import { createFigureSurface } from "../renderers/figure.mjs";
 import { createHtmlOverlay } from "../ui/overlay.js";
 import { createInteractionController } from "../interaction/controller.mjs";
 import {
@@ -133,7 +132,7 @@ export default function clusterMap() {
   let clusterCommitFrame = null;
   let sceneCommit = null;
   let rasterCanvas = null, overlayCanvas = null, minimapCanvas = null;
-  let minimapScene = null, minimapMeasurement = null;
+  let minimapScene = null;
   let currentData = null;
   let plotData = null;
   let plotDataDirty = true;
@@ -945,8 +944,7 @@ export default function clusterMap() {
   function scheduleMinimapBase(scene) {
     if (!minimapCanvas || !runtime.config.plot.minimap?.show) return;
     if (plotData.tree && runtime.config.tree.show) {
-      minimapMeasurement ||= minimapCanvas.ownerDocument.createElement("canvas").getContext("2d");
-      scene = { ...scene, figureBounds: measureFigureBounds(minimapMeasurement, scene, runtime.config, plotData.tree) };
+      scene = { ...scene, figureBounds: figureSurface.bounds(container.node(), scene, runtime.renderConfig, plotData.tree) };
     }
     minimapScene = scene;
     rasterMinimap.scheduleBase({ scene, minimap: minimapCanvas, options: runtime.config.plot.minimap,
@@ -1147,15 +1145,7 @@ export default function clusterMap() {
     applyCamera(svg.select("g.clusterMapViewport"));
 
     const annotationsOnly = Boolean(committedScene?.changes.annotationsOnly);
-    if (!annotationsOnly) {
-      runtime.updateScales(data, { geometryOnly: Boolean(committedScene) });
-      if (synchronize) runtime.synchronizeLocusLayoutStates(data, committedScene ? committedScene.changes.loci || [] : null);
-      if (!committedScene) runtime.updateGroups(data.groups);
-    }
-
-    const scene = annotationsOnly ? runtime.patchAnnotations(committedScene.sourceScene, data) : committedScene
-      ? runtime.patchScene(committedScene.sourceScene, committedScene.changes, data)
-      : runtime.buildScene(data);
+    const scene = runtime.updateScene(data, { ...committedScene, synchronize });
 
     if (useRaster) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
@@ -1231,13 +1221,7 @@ export default function clusterMap() {
     const { width, height } = canvas.getBoundingClientRect();
     if (!width || !height || !scene.bounds) return;
 
-    // Requesting a 2D context would permanently prevent a WebGPU context on
-    // the visible canvas. Text measurement has no visual side effect, so use
-    // a detached 2D canvas for the WebGPU renderer.
-    const measurementCanvas = isWebGpuRenderer(runtime.config.plot.renderer)
-      ? document.createElement("canvas")
-      : canvas;
-    const bounds = measureFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, plotData.tree);
+    const bounds = figureSurface.bounds(canvas, scene, runtime.renderConfig, plotData.tree);
     if (!bounds) return;
 
     const camera = fitCameraForBounds({
@@ -1576,7 +1560,7 @@ export default function clusterMap() {
     canvasZoom = null;
     hasInitialView = false;
     canvasHoverLocusUid = null;
-    rasterCanvas = overlayCanvas = minimapCanvas = minimapScene = minimapMeasurement = null;
+    rasterCanvas = overlayCanvas = minimapCanvas = minimapScene = null;
     sceneCommit = null;
     chartIndex = null;
     highlightGeneIds.clear();
