@@ -231,15 +231,16 @@ test("categories can be added, assigned, renamed and removed with replacement", 
   if (!await editor(page).locator(".cm-annotation-categories").evaluate((node) => node.open)) {
     await editor(page).locator(".cm-annotation-categories summary").click();
   }
-  await editor(page).getByRole("textbox", { name: "Rename category Test category", exact: true }).fill("Renamed category");
-  await editor(page).getByRole("textbox", { name: "Rename category Test category", exact: true }).press("Tab");
+  await editField(editor(page).locator('clinker-category-editor clinker-editable-field[label="Rename category Test category"]'));
+  const input = editor(page).getByRole("textbox", { name: "Rename category Test category", exact: true });
+  await input.fill("Renamed category"); await input.press("Enter");
   expect(Object.values((await panelData(page, uid)).values).flat()).toContain("Renamed category");
   if (!await editor(page).locator(".cm-annotation-categories").evaluate((node) => node.open)) {
     await editor(page).locator(".cm-annotation-categories summary").click();
   }
   await editor(page).getByRole("button", { name: "Remove category Renamed category", exact: true }).click();
   await editor(page).getByRole("combobox", { name: "Replacement category", exact: true }).selectOption("0");
-  await editor(page).locator(".cm-annotation-category-remove").getByRole("button", { name: "Remove", exact: true }).click();
+  await editor(page).locator("clinker-category-editor [data-removal]").getByRole("button", { name: "Remove", exact: true }).click();
   expect((await panelData(page, uid)).scale.domain).not.toContain("Renamed category");
   expect(Object.values((await panelData(page, uid)).values).flat()).not.toContain("Renamed category");
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();

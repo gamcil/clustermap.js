@@ -1,0 +1,23 @@
+<details>
+  <summary></summary>
+  <div data-items>
+    <template>
+      <div class="category">
+        <input type="color">
+        <clinker-editable-field required></clinker-editable-field>
+        <button type="button" data-remove>×</button>
+      </div>
+    </template>
+    <form class="category">
+      <input type="color" aria-label="New category colour">
+      <input type="text" aria-label="New category name" placeholder="New category" required>
+      <button type="submit" aria-label="Add category">+</button>
+    </form>
+  </div>
+  <div data-removal hidden>
+    <span></span>
+    <select aria-label="Replacement category"></select>
+    <button type="button" data-confirm>Remove</button>
+    <button type="button" data-cancel>Cancel</button>
+  </div>
+</details>

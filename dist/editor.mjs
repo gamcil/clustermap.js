@@ -721,15 +721,15 @@ class RowSelection extends Set {
   clear() { super.clear(); this.#anchor = null; }
 }
 
-const [markup$5, css$5] = await Promise.all([
+const [markup$6, css$6] = await Promise.all([
   "<span part=\"label\"></span>\n<button type=\"button\" part=\"edit-button\">\n  <svg aria-hidden=\"true\" viewBox=\"0 0 24 24\">\n    <path d=\"m4 20 4.1-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.1 16 4 20Z\"></path>\n    <path d=\"m13.8 7.2 3 3\"></path>\n  </svg>\n</button>\n<input type=\"text\" part=\"input\" hidden>\n<select part=\"input\" hidden></select>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  color: inherit;\n  font: inherit;\n}\n:host([hidden]), [hidden] { display: none !important; }\n:host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }\n:host(:hover) { --cm-edit-icon-width:20px; }\nspan { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }\nspan[data-placeholder] { color: var(--cm-muted, #687586); }\nbutton, input, select { box-sizing: border-box; font: inherit; color: inherit; }\nbutton {\n  display: inline-grid;\n  place-items: center;\n  flex: 0 0 auto;\n  width: var(--cm-edit-icon-width, 0px);\n  min-width: 0;\n  height: 20px;\n  overflow: hidden;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #64748b);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { width:20px; outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { cursor: default; opacity: .45; }\nsvg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }\ninput, select {\n  width: 100%;\n  min-width: 0;\n  height: 28px;\n  margin-inline: -1px;\n  padding: 2px 7px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  line-height: 20px;\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus, select:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
 ]);
-const template$5 = createTemplate(markup$5);
-const HTMLElementBase$6 = globalThis.HTMLElement || class {};
+const template$6 = createTemplate(markup$6);
+const HTMLElementBase$7 = globalThis.HTMLElement || class {};
 
 /** A field owns its draft; consumers accept or cancel value-commit events. */
-class EditableField extends HTMLElementBase$6 {
+class EditableField extends HTMLElementBase$7 {
   static observedAttributes = ["label", "placeholder", "type", "min", "max", "step", "required", "disabled"];
   #value = "";
   #revision = 0;
@@ -744,8 +744,8 @@ class EditableField extends HTMLElementBase$6 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$5;
-    root.append(style, template$5(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$6;
+    root.append(style, template$6(this.ownerDocument));
     this.#text = root.querySelector("span");
     this.#button = root.querySelector("button");
     this.#input = root.querySelector("input");
@@ -846,14 +846,14 @@ function defineEditableField() {
   if (!customElements.get("clinker-editable-field")) customElements.define("clinker-editable-field", EditableField);
 }
 
-const [markup$4, css$4] = await Promise.all([
+const [markup$5, css$5] = await Promise.all([
   "<span part=\"summary\"></span>\n<div part=\"actions\" hidden>\n  <slot name=\"actions\"></slot>\n  <button type=\"button\" data-clear aria-label=\"Clear selection\">Clear</button>\n</div>\n<button type=\"button\" data-all hidden>Select all visible</button>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  height: 32px;\n  min-width: 0;\n  flex-shrink: 0;\n  color: var(--cm-muted, #687586);\n  font: 12px/1.4 system-ui, sans-serif;\n}\n:host([hidden]), [hidden] { display: none !important; }\nspan { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\nspan.is-selected { color: var(--cm-foreground, #273444); font-weight: 600; }\ndiv { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }\nslot { display: contents; }\nbutton {\n  flex-shrink: 0;\n  box-sizing: border-box;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton:hover:not(:disabled) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n",
 ]);
-const template$4 = createTemplate(markup$4);
-const HTMLElementBase$5 = globalThis.HTMLElement || class {};
+const template$5 = createTemplate(markup$5);
+const HTMLElementBase$6 = globalThis.HTMLElement || class {};
 
-class SelectionBar extends HTMLElementBase$5 {
+class SelectionBar extends HTMLElementBase$6 {
   #summary;
   #actions;
   #all;
@@ -861,8 +861,8 @@ class SelectionBar extends HTMLElementBase$5 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$4;
-    root.append(style, template$4(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$5;
+    root.append(style, template$5(this.ownerDocument));
     this.#summary = root.querySelector("span");
     this.#actions = root.querySelector("div");
     this.#all = root.querySelector("[data-all]");
@@ -886,15 +886,15 @@ function defineSelectionBar() {
   if (!customElements.get("clinker-selection-bar")) customElements.define("clinker-selection-bar", SelectionBar);
 }
 
-const [markup$3, css$3] = await Promise.all([
+const [markup$4, css$4] = await Promise.all([
   "<details>\n  <summary part=\"trigger\"></summary>\n  <div part=\"panel\"><slot></slot></div>\n</details>\n",
   ":host { display: block; position: relative; color: var(--cm-foreground, #273444); font: inherit; }\n:host([hidden]) { display: none !important; }\nsummary {\n  display: block;\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: 4px 8px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 6px;\n  background: var(--cm-surface, #fff);\n  list-style: none;\n  white-space: nowrap;\n  cursor: pointer;\n}\nsummary::-webkit-details-marker { display: none; }\nsummary:hover, details[open] > summary { background: var(--cm-hover, #e3ecf8); border-color: var(--cm-accent, #78a9ed); }\nsummary:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\ndiv {\n  position: absolute;\n  right: 0;\n  top: calc(100% + 4px);\n  z-index: 10;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  width: max-content;\n  max-width: min(340px, 80vw);\n  max-height: 50vh;\n  overflow: auto;\n  padding: 10px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 8px;\n  background: var(--cm-surface, #fff);\n  box-shadow: 0 4px 16px #0002;\n}\nslot { display: contents; }\n::slotted(button) { text-align: left; }\n::slotted(label) { display: flex; align-items: center; gap: 6px; }\n::slotted(input[type=number]) { width: 112px; }\n",
 ]);
-const template$3 = createTemplate(markup$3);
+const template$4 = createTemplate(markup$4);
 const activeMenus = new WeakMap();
-const HTMLElementBase$4 = globalThis.HTMLElement || class {};
+const HTMLElementBase$5 = globalThis.HTMLElement || class {};
 
-class ActionMenu extends HTMLElementBase$4 {
+class ActionMenu extends HTMLElementBase$5 {
   static observedAttributes = ["label", "open"];
   #details;
   #trigger;
@@ -903,8 +903,8 @@ class ActionMenu extends HTMLElementBase$4 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$3;
-    root.append(style, template$3(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$4;
+    root.append(style, template$4(this.ownerDocument));
     this.#details = root.querySelector("details");
     this.#trigger = root.querySelector("summary");
     this.#details.ontoggle = () => { this.open = this.#details.open; };
@@ -945,14 +945,14 @@ function defineActionMenu() {
   if (!customElements.get("clinker-action-menu")) customElements.define("clinker-action-menu", ActionMenu);
 }
 
-const [markup$2, css$2] = await Promise.all([
+const [markup$3, css$3] = await Promise.all([
   "<input type=\"search\" part=\"input\">\n<button type=\"button\" part=\"clear\" aria-label=\"Clear search\" title=\"Clear search\" hidden>×</button>\n",
   ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput, button { box-sizing: border-box; color: inherit; font: inherit; }\ninput {\n  width: 100%;\n  min-width: 0;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #687586);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n",
 ]);
-const template$2 = createTemplate(markup$2);
-const HTMLElementBase$3 = globalThis.HTMLElement || class {};
+const template$3 = createTemplate(markup$3);
+const HTMLElementBase$4 = globalThis.HTMLElement || class {};
 
-class SearchField extends HTMLElementBase$3 {
+class SearchField extends HTMLElementBase$4 {
   static observedAttributes = ["label", "placeholder"];
   #input;
   #clear;
@@ -960,8 +960,8 @@ class SearchField extends HTMLElementBase$3 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$2;
-    root.append(style, template$2(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$3;
+    root.append(style, template$3(this.ownerDocument));
     this.#input = root.querySelector("input"); this.#clear = root.querySelector("button");
     this.#input.oninput = () => this.#sync();
     this.#clear.onclick = () => this.#clearValue();
@@ -996,6 +996,138 @@ class SearchField extends HTMLElementBase$3 {
 
 function defineSearchField() {
   if (!customElements.get("clinker-search-field")) customElements.define("clinker-search-field", SearchField);
+}
+
+const [markup$2, css$2] = await Promise.all([
+  "<details>\n  <summary></summary>\n  <div data-items>\n    <template>\n      <div class=\"category\">\n        <input type=\"color\">\n        <clinker-editable-field required></clinker-editable-field>\n        <button type=\"button\" data-remove>×</button>\n      </div>\n    </template>\n    <form class=\"category\">\n      <input type=\"color\" aria-label=\"New category colour\">\n      <input type=\"text\" aria-label=\"New category name\" placeholder=\"New category\" required>\n      <button type=\"submit\" aria-label=\"Add category\">+</button>\n    </form>\n  </div>\n  <div data-removal hidden>\n    <span></span>\n    <select aria-label=\"Replacement category\"></select>\n    <button type=\"button\" data-confirm>Remove</button>\n    <button type=\"button\" data-cancel>Cancel</button>\n  </div>\n</details>\n",
+  ":host { display: block; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\nsummary { cursor: pointer; color: var(--cm-muted, #687586); }\nsummary:hover { color: var(--cm-accent, #1677ff); }\n[data-items] { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 0 2px; }\n.category, [data-removal] { display: flex; align-items: center; gap: 5px; }\n.category:hover { --cm-edit-icon-width:20px; }\nform { margin: 0; }\nclinker-editable-field, input[type=text] { width: 140px; min-width: 0; }\ninput, button, select { box-sizing: border-box; font: inherit; color: inherit; }\ninput[type=color] { width: 30px; height: 22px; padding: 0; border: 0; background: transparent; cursor: pointer; }\ninput[type=text], button, select {\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\nbutton { cursor: pointer; }\nbutton:hover { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #e3ecf8); }\n:where(button, summary):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n:where(input, select):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n[data-removal] { flex-wrap: wrap; margin-top: 6px; padding: 6px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 4px; }\n",
+]);
+const template$2 = createTemplate(markup$2);
+const HTMLElementBase$3 = globalThis.HTMLElement || class {};
+
+class CategoryEditor extends HTMLElementBase$3 {
+  #value = [];
+  #palette = ["#888888"];
+  #revision = 0;
+  #rows = new Map();
+  #details;
+  #items;
+  #template;
+  #form;
+  #name;
+  #colour;
+  #removal;
+  #replacement;
+  #removing = null;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$2;
+    root.append(style, template$2(this.ownerDocument));
+    this.#details = root.querySelector("details"); this.#items = root.querySelector("[data-items]");
+    this.#template = this.#items.querySelector("template"); this.#form = root.querySelector("form");
+    this.#name = this.#form.querySelector('[type="text"]'); this.#colour = this.#form.querySelector('[type="color"]');
+    this.#removal = root.querySelector("[data-removal]"); this.#replacement = this.#removal.querySelector("select");
+    this.#name.oninput = () => this.#name.setCustomValidity("");
+    this.#form.onsubmit = (event) => {
+      event.preventDefault(); const name = this.#name.value.trim();
+      if (this.#validateName(name, this.#name) && this.#propose([...this.#value, { name, colour: this.#colour.value }])) this.#name.value = "";
+    };
+    root.querySelector("[data-cancel]").onclick = () => this.#cancelRemoval();
+    root.querySelector("[data-confirm]").onclick = () => {
+      const replacement = this.#replacement.value === "missing" ? null : this.#value[Number(this.#replacement.value)].name;
+      if (this.#propose(this.#value.filter(({ name }) => name !== this.#removing), [[this.#removing, replacement]])) {
+        this.#removing = null; this.#renderRemoval(); this.#name.focus();
+      }
+    };
+    this.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !event.defaultPrevented && this.#removing !== null) {
+        event.preventDefault(); event.stopPropagation(); this.#cancelRemoval();
+      }
+    });
+    this.#render();
+  }
+
+  get value() { return this.#value; }
+  set value(items) {
+    this.#value = items.map(({ name, colour }) => ({ name, colour }));
+    this.#revision++; this.#render();
+  }
+  set palette(colours) { this.#palette = colours.length ? colours.map((colour) => colourHex(colour)) : ["#888888"]; this.#suggestColour(); }
+  get open() { return this.#details.open; }
+  set open(value) { this.#details.open = Boolean(value); }
+  disconnectedCallback() { this.cancelEdit(); }
+  cancelEdit() { for (const row of this.#rows.values()) row.querySelector("clinker-editable-field").cancelEdit(); }
+
+  #validateName(name, control, previous) {
+    control.setCustomValidity(!name ? "Category names cannot be empty." : name !== previous && this.#value.some((item) => item.name === name) ? "Category names must be unique." : "");
+    return control.reportValidity();
+  }
+
+  #propose(value, replacements = []) {
+    const revision = this.#revision;
+    if (!this.dispatchEvent(new CustomEvent("value-commit", { detail: { value, replacements }, bubbles: true, composed: true, cancelable: true }))) return false;
+    if (this.isConnected && revision === this.#revision) this.value = value;
+    return true;
+  }
+
+  #createRow(name) {
+    const row = this.ownerDocument.importNode(this.#template.content, true).firstElementChild;
+    const colour = row.querySelector("input"), label = row.querySelector("clinker-editable-field"), remove = row.querySelector("button");
+    colour.onchange = () => {
+      if (!this.#propose(this.#value.map((item) => item.name === name ? { ...item, colour: colour.value } : item))) colour.value = colourHex(this.#value.find((item) => item.name === name).colour);
+    };
+    label.addEventListener("value-commit", (event) => {
+      event.stopPropagation(); const next = event.detail.value.trim();
+      if (!this.#validateName(next, label, name) || !this.#propose(this.#value.map((item) => item.name === name ? { ...item, name: next } : item), [[name, next]])) event.preventDefault();
+      else label.value = next;
+    });
+    remove.onclick = () => { this.#removing = name; this.#renderRemoval(); this.#replacement.focus(); };
+    colour.setAttribute("aria-label", `Colour for ${name}`); label.setAttribute("label", `Rename category ${name}`);
+    remove.setAttribute("aria-label", `Remove category ${name}`);
+    return row;
+  }
+
+  #render() {
+    this.shadowRoot.querySelector("summary").textContent = `Categories (${this.#value.length})`;
+    for (const [name, row] of this.#rows) if (!this.#value.some((item) => item.name === name)) {
+      row.querySelector("clinker-editable-field").cancelEdit(); row.remove(); this.#rows.delete(name);
+    }
+    let next = this.#form;
+    for (const item of [...this.#value].reverse()) {
+      let row = this.#rows.get(item.name);
+      if (!row) { row = this.#createRow(item.name); this.#rows.set(item.name, row); }
+      row.querySelector("input").value = colourHex(item.colour); row.querySelector("clinker-editable-field").value = item.name;
+      if (row.nextSibling !== next) this.#items.insertBefore(row, next);
+      next = row;
+    }
+    if (!this.#value.some(({ name }) => name === this.#removing)) this.#removing = null;
+    this.#renderRemoval(); this.#suggestColour();
+  }
+
+  #suggestColour() {
+    const used = new Set(this.#value.map(({ colour }) => colourHex(colour)));
+    this.#colour.value = this.#palette.find((colour) => !used.has(colour)) || this.#palette[this.#value.length % this.#palette.length] || "#888888";
+  }
+
+  #renderRemoval() {
+    this.#removal.hidden = this.#removing === null;
+    if (this.#removing === null) return;
+    this.#removal.querySelector("span").textContent = `Replace “${this.#removing}” with`;
+    updateSelectOptions(this.#replacement, [["missing", "Missing"], ...this.#value.flatMap(({ name }, index) => name === this.#removing ? [] : [[String(index), name]])]);
+    this.#replacement.value = "missing";
+  }
+
+  #cancelRemoval() {
+    const name = this.#removing; this.#removing = null; this.#renderRemoval();
+    this.#rows.get(name)?.querySelector("button").focus();
+  }
+}
+
+function defineCategoryEditor() {
+  defineEditableField();
+  if (!customElements.get("clinker-category-editor")) customElements.define("clinker-category-editor", CategoryEditor);
 }
 
 var EOL = {},
@@ -1280,13 +1412,7 @@ const batchTemplate = createTemplate(`<div class="cm-data-selection-actions">
   <select aria-label="Columns to edit"></select><span data-value></span>
   <button type="button" data-set>Set values</button><button type="button" data-clear>Clear values</button>
 </div>`);
-const categoriesTemplate = createTemplate('<details class="cm-annotation-categories"><summary></summary><div></div></details>');
-const categoryTemplate = createTemplate(`<div class="cm-annotation-category">
-  <input type="color"><input type="text"><button type="button">×</button>
-</div>`);
-const categoryRemovalTemplate = createTemplate(`<div class="cm-annotation-category-remove"><span></span>
-  <select aria-label="Replacement category"></select><button type="button" data-remove>Remove</button><button type="button" data-cancel>Cancel</button>
-</div>`);
+const categoriesTemplate = createTemplate('<clinker-category-editor class="cm-annotation-categories"></clinker-category-editor>');
 const replacementTemplate = createTemplate(`<div class="cm-annotation-replacement" hidden>
   <textarea rows="5" spellcheck="false" aria-label="Replacement annotation data (CSV, TSV or JSON)"></textarea>
   <div class="cm-data-toolbar"><button type="button" data-replace>Replace data</button><button type="button" data-cancel>Cancel</button></div>
@@ -1300,7 +1426,7 @@ const emptyTemplate$1 = createTemplate('<p>No annotation panels. Add a panel to 
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField();
+  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector(".cm-data-toolbar");
@@ -1309,7 +1435,7 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
   const control = (name) => toolbar.querySelector(`[data-${name}]`);
   if (embedded) { toolbar.querySelector("clinker-search-field").remove(); toolbar.remove(); }
   let selected = null, applying = false, renderedPanel = null, renderedPanels = null, renderedClusters = null;
-  let filter = "", deleting = null, creating = false, view = null, viewKey = null;
+  let filter = "", creating = false, view = null, viewKey = null;
   const selection = new RowSelection();
   let selectionPanel = null, batchColumn = "0", batchValue = "";
   const getPanels = () => getData()?.annotationPanels || [];
@@ -1330,7 +1456,7 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
   const categoryScale = (panel, domain, colours) => ({ ...panel.scale, type: "categorical", domain,
     colours: colours.length ? colours : [...ANNOTATION_PALETTES.Qualitative] });
   const clearSelection = () => { selection.clear(); view?.syncSelection?.(); };
-  panelSelect.onchange = () => { selected = panelSelect.value; deleting = null; creating = false; render(); };
+  panelSelect.onchange = () => { selected = panelSelect.value; creating = false; render(); };
   control("add").onclick = () => { creating = !creating; render(); };
   control("show").onclick = () => update({ show: current().show === false });
   control("remove").onclick = () => commit([{ type: "annotationPanels.delete", ids: [selected] }]);
@@ -1345,46 +1471,7 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
     if (event.key === "Escape" && !event.defaultPrevented && selection.size) { event.preventDefault(); clearSelection(); }
   });
 
-  function renderCategories(parent) {
-    const panel = current(), { domain, colour } = resolveAnnotationScale(panel), colours = domain.map(colour);
-    parent.replaceChildren();
-    domain.forEach((name, index) => {
-      const row = categoryTemplate(document).firstElementChild;
-      const swatch = row.querySelector('[type="color"]'), label = row.querySelector('[type="text"]'), remove = row.querySelector("button");
-      swatch.value = colourHex(colour(name)); swatch.setAttribute("aria-label", `Colour for ${name}`);
-      swatch.onchange = () => { const next = [...colours]; next[index] = swatch.value; update({ scale: categoryScale(current(), domain, next) }); };
-      label.value = name; label.setAttribute("aria-label", `Rename category ${name}`);
-      label.onchange = () => {
-        if (!label.value.trim()) { error("Category names cannot be empty."); return; }
-        update({ values: mapAnnotationValues(current().values, (item) => item === name ? label.value : item),
-          scale: categoryScale(current(), domain.map((item) => item === name ? label.value : item), colours) });
-      };
-      remove.setAttribute("aria-label", `Remove category ${name}`); remove.onclick = () => { deleting = name; render(); };
-      parent.append(row);
-      if (deleting === name) {
-        const box = categoryRemovalTemplate(document).firstElementChild, replacement = box.querySelector("select");
-        box.querySelector("span").textContent = `Replace “${name}” with`;
-        updateSelectOptions(replacement, [["missing", "Missing"], ...domain.flatMap((item, i) => item === name ? [] : [[String(i), item]])]);
-        replacement.value = "missing";
-        box.querySelector("[data-remove]").onclick = () => {
-          const value = replacement.value === "missing" ? null : domain[Number(replacement.value)]; deleting = null;
-          update({ values: mapAnnotationValues(current().values, (item) => item === name ? value : item),
-            scale: categoryScale(current(), domain.filter((item) => item !== name), colours.filter((_, i) => i !== index)) });
-        };
-        box.querySelector("[data-cancel]").onclick = () => { deleting = null; render(); }; parent.append(box);
-      }
-    });
-    const row = categoryTemplate(document).firstElementChild;
-    const swatch = row.querySelector('[type="color"]'), name = row.querySelector('[type="text"]'), add = row.querySelector("button");
-    const used = new Set(colours.map((value) => colourHex(value)));
-    swatch.value = colourHex(ANNOTATION_PALETTES.Qualitative.find((value) => !used.has(colourHex(value))) ?? ANNOTATION_PALETTES.Qualitative[domain.length % ANNOTATION_PALETTES.Qualitative.length]);
-    swatch.setAttribute("aria-label", "New category colour"); name.setAttribute("aria-label", "New category name"); name.placeholder = "New category";
-    add.textContent = "+"; add.setAttribute("aria-label", "Add category"); add.onclick = () => {
-      if (!name.value.trim()) { name.focus(); return; }
-      update({ scale: categoryScale(current(), [...domain, name.value.trim()], [...colours, swatch.value]) });
-    };
-    parent.append(row);
-  }
+  const disposeView = () => { view?.categories?.cancelEdit(); view?.destroy?.(); };
 
   function createMatrix(layout) {
     const panel = current(), categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel), extra = panel.type === "heatmap";
@@ -1564,7 +1651,7 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
       control("show").textContent = panel.show === false ? "Show" : "Hide";
       control("left").disabled = panels.indexOf(panel) === 0; control("right").disabled = panels.indexOf(panel) === panels.length - 1;
     }
-    if (selectionPanel !== panel?.uid) { selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = ""; deleting = null; }
+    if (selectionPanel !== panel?.uid) { selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = ""; }
     selection.prune(new Set(getClusters().map((cluster) => cluster.uid)));
     if (batchColumn !== "all" && Number(batchColumn) >= (panel?.columns?.length || 0)) batchColumn = "0";
     const categorical = panel?.scale?.type === "categorical";
@@ -1573,7 +1660,7 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
     if (key !== viewKey) {
       const scroll = viewKey && panel?.uid === view?.uid ? view.layout.viewport.scrollTop : 0;
       const categoriesOpen = panel?.uid === view?.uid && view?.categories?.open;
-      view?.destroy?.(); body.replaceChildren(); view = null; viewKey = key;
+      disposeView(); body.replaceChildren(); view = null; viewKey = key;
       if (creating) body.append(createAnnotationCreateControls({ document, getData, patch, annotationApi,
         onCreate: (uid) => { selected = uid; creating = false; render(); } }).node);
       else if (!panel) body.append(emptyTemplate$1(document));
@@ -1586,29 +1673,35 @@ function createAnnotationDataControls({ document, getData, getClusters = () => g
           if (categorical) {
             view.categories = categoriesTemplate(document).firstElementChild; layout.tools.prepend(view.categories);
             view.categories.open = Boolean(categoriesOpen);
+            view.categories.palette = ANNOTATION_PALETTES.Qualitative;
+            view.categories.addEventListener("value-commit", (event) => {
+              const { value, replacements } = event.detail, mapping = new Map(replacements);
+              const changes = { scale: categoryScale(current(), value.map(({ name }) => name), value.map(({ colour }) => colour)) };
+              if (mapping.size) changes.values = mapAnnotationValues(current().values, (item) => mapping.has(item) ? mapping.get(item) : item);
+              if (update(changes) === false) event.preventDefault();
+            });
           }
         }
         Object.assign(view, { uid: panel.uid, layout }); view.update(); layout.viewport.scrollTop = scroll;
       }
     } else view?.update();
     if (view?.categories) {
-      const key = JSON.stringify([panel.scale, deleting]);
+      const key = JSON.stringify(panel.scale);
       if (key !== view.categoryKey) {
-        view.categories.querySelector("summary").textContent = `Categories (${resolveAnnotationScale(panel).domain.length})`;
-        renderCategories(view.categories.querySelector("div")); view.categoryKey = key;
+        const { domain, colour } = resolveAnnotationScale(panel);
+        view.categories.value = domain.map((name) => ({ name, colour: colour(name) })); view.categoryKey = key;
       }
-      if (deleting !== null) view.categories.open = true;
     }
     view?.layout.sync();
   }
   render();
-  return { node, toolbar, select(uid) { selected = uid; creating = false; deleting = null; render(); }, clearSelection,
+  return { node, toolbar, select(uid) { selected = uid; creating = false; render(); }, clearSelection,
     get filter() { return filter; }, setFilter(value) { filter = value; view?.filterRows?.(); },
     invalidate({ replace = false } = {}) {
       renderedPanel = renderedPanels = renderedClusters = null;
-      if (replace) { view?.destroy?.(); view = null; viewKey = null; selection.clear(); selected = selectionPanel = null; }
+      if (replace) { disposeView(); view = null; viewKey = null; selection.clear(); selected = selectionPanel = null; }
     },
-    destroy() { view?.destroy?.(); toolbar.remove(); },
+    destroy() { disposeView(); toolbar.remove(); },
     update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters)) render(); } };
 }
 function installStyle(document) {
@@ -1624,11 +1717,6 @@ function installStyle(document) {
 .cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
 .cm-annotation-data-editor details { flex-shrink:0; }
 .cm-annotation-data-editor summary { cursor:pointer; color:var(--cm-muted,#687586); }
-.cm-annotation-categories { padding:0; }
-.cm-annotation-categories > div { display:flex; flex-wrap:wrap; gap:6px 16px; padding:8px 0 2px; }
-.cm-annotation-category { display:flex; align-items:center; gap:5px; }
-.cm-annotation-category input[type=text] { min-width:0; width:140px; }
-.cm-annotation-category-remove { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:6px; border:1px solid var(--cm-border,#cbd3de); border-radius:4px; }
 .cm-annotation-matrix { position:relative; }
 .cm-annotation-data-editor .cm-data-actions input[type=number] { width:112px; }
 .cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }

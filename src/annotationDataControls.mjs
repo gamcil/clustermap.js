@@ -3,6 +3,7 @@ import { defineEditableField } from "./editor/components/editable-field/editable
 import { defineSelectionBar } from "./editor/components/selection-bar/selection-bar.js";
 import { defineActionMenu } from "./editor/components/action-menu/action-menu.js";
 import { defineSearchField } from "./editor/components/search-field/search-field.js";
+import { defineCategoryEditor } from "./editor/components/category-editor/category-editor.js";
 import { textAsset } from "./editor/shared/textAsset.js";
 import { RowSelection } from "./rowSelection.mjs";
 import { createVirtualRows } from "./virtualRows.mjs";
@@ -28,13 +29,7 @@ const batchTemplate = createTemplate(`<div class="cm-data-selection-actions">
   <select aria-label="Columns to edit"></select><span data-value></span>
   <button type="button" data-set>Set values</button><button type="button" data-clear>Clear values</button>
 </div>`);
-const categoriesTemplate = createTemplate('<details class="cm-annotation-categories"><summary></summary><div></div></details>');
-const categoryTemplate = createTemplate(`<div class="cm-annotation-category">
-  <input type="color"><input type="text"><button type="button">×</button>
-</div>`);
-const categoryRemovalTemplate = createTemplate(`<div class="cm-annotation-category-remove"><span></span>
-  <select aria-label="Replacement category"></select><button type="button" data-remove>Remove</button><button type="button" data-cancel>Cancel</button>
-</div>`);
+const categoriesTemplate = createTemplate('<clinker-category-editor class="cm-annotation-categories"></clinker-category-editor>');
 const replacementTemplate = createTemplate(`<div class="cm-annotation-replacement" hidden>
   <textarea rows="5" spellcheck="false" aria-label="Replacement annotation data (CSV, TSV or JSON)"></textarea>
   <div class="cm-data-toolbar"><button type="button" data-replace>Replace data</button><button type="button" data-cancel>Cancel</button></div>
@@ -48,7 +43,7 @@ const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to at
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 export function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField();
+  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector(".cm-data-toolbar");
@@ -57,7 +52,7 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
   const control = (name) => toolbar.querySelector(`[data-${name}]`);
   if (embedded) { toolbar.querySelector("clinker-search-field").remove(); toolbar.remove(); }
   let selected = null, applying = false, renderedPanel = null, renderedPanels = null, renderedClusters = null;
-  let filter = "", deleting = null, creating = false, view = null, viewKey = null;
+  let filter = "", creating = false, view = null, viewKey = null;
   const selection = new RowSelection();
   let selectionPanel = null, batchColumn = "0", batchValue = "";
   const getPanels = () => getData()?.annotationPanels || [];
@@ -78,7 +73,7 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
   const categoryScale = (panel, domain, colours) => ({ ...panel.scale, type: "categorical", domain,
     colours: colours.length ? colours : [...ANNOTATION_PALETTES.Qualitative] });
   const clearSelection = () => { selection.clear(); view?.syncSelection?.(); };
-  panelSelect.onchange = () => { selected = panelSelect.value; deleting = null; creating = false; render(); };
+  panelSelect.onchange = () => { selected = panelSelect.value; creating = false; render(); };
   control("add").onclick = () => { creating = !creating; render(); };
   control("show").onclick = () => update({ show: current().show === false });
   control("remove").onclick = () => commit([{ type: "annotationPanels.delete", ids: [selected] }]);
@@ -93,46 +88,7 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
     if (event.key === "Escape" && !event.defaultPrevented && selection.size) { event.preventDefault(); clearSelection(); }
   });
 
-  function renderCategories(parent) {
-    const panel = current(), { domain, colour } = resolveAnnotationScale(panel), colours = domain.map(colour);
-    parent.replaceChildren();
-    domain.forEach((name, index) => {
-      const row = categoryTemplate(document).firstElementChild;
-      const swatch = row.querySelector('[type="color"]'), label = row.querySelector('[type="text"]'), remove = row.querySelector("button");
-      swatch.value = hex(colour(name)); swatch.setAttribute("aria-label", `Colour for ${name}`);
-      swatch.onchange = () => { const next = [...colours]; next[index] = swatch.value; update({ scale: categoryScale(current(), domain, next) }); };
-      label.value = name; label.setAttribute("aria-label", `Rename category ${name}`);
-      label.onchange = () => {
-        if (!label.value.trim()) { error("Category names cannot be empty."); return; }
-        update({ values: mapAnnotationValues(current().values, (item) => item === name ? label.value : item),
-          scale: categoryScale(current(), domain.map((item) => item === name ? label.value : item), colours) });
-      };
-      remove.setAttribute("aria-label", `Remove category ${name}`); remove.onclick = () => { deleting = name; render(); };
-      parent.append(row);
-      if (deleting === name) {
-        const box = categoryRemovalTemplate(document).firstElementChild, replacement = box.querySelector("select");
-        box.querySelector("span").textContent = `Replace “${name}” with`;
-        updateSelectOptions(replacement, [["missing", "Missing"], ...domain.flatMap((item, i) => item === name ? [] : [[String(i), item]])]);
-        replacement.value = "missing";
-        box.querySelector("[data-remove]").onclick = () => {
-          const value = replacement.value === "missing" ? null : domain[Number(replacement.value)]; deleting = null;
-          update({ values: mapAnnotationValues(current().values, (item) => item === name ? value : item),
-            scale: categoryScale(current(), domain.filter((item) => item !== name), colours.filter((_, i) => i !== index)) });
-        };
-        box.querySelector("[data-cancel]").onclick = () => { deleting = null; render(); }; parent.append(box);
-      }
-    });
-    const row = categoryTemplate(document).firstElementChild;
-    const swatch = row.querySelector('[type="color"]'), name = row.querySelector('[type="text"]'), add = row.querySelector("button");
-    const used = new Set(colours.map((value) => hex(value)));
-    swatch.value = hex(ANNOTATION_PALETTES.Qualitative.find((value) => !used.has(hex(value))) ?? ANNOTATION_PALETTES.Qualitative[domain.length % ANNOTATION_PALETTES.Qualitative.length]);
-    swatch.setAttribute("aria-label", "New category colour"); name.setAttribute("aria-label", "New category name"); name.placeholder = "New category";
-    add.textContent = "+"; add.setAttribute("aria-label", "Add category"); add.onclick = () => {
-      if (!name.value.trim()) { name.focus(); return; }
-      update({ scale: categoryScale(current(), [...domain, name.value.trim()], [...colours, swatch.value]) });
-    };
-    parent.append(row);
-  }
+  const disposeView = () => { view?.categories?.cancelEdit(); view?.destroy?.(); };
 
   function createMatrix(layout) {
     const panel = current(), categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel), extra = panel.type === "heatmap";
@@ -312,7 +268,7 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
       control("show").textContent = panel.show === false ? "Show" : "Hide";
       control("left").disabled = panels.indexOf(panel) === 0; control("right").disabled = panels.indexOf(panel) === panels.length - 1;
     }
-    if (selectionPanel !== panel?.uid) { selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = ""; deleting = null; }
+    if (selectionPanel !== panel?.uid) { selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = ""; }
     selection.prune(new Set(getClusters().map((cluster) => cluster.uid)));
     if (batchColumn !== "all" && Number(batchColumn) >= (panel?.columns?.length || 0)) batchColumn = "0";
     const categorical = panel?.scale?.type === "categorical";
@@ -321,7 +277,7 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
     if (key !== viewKey) {
       const scroll = viewKey && panel?.uid === view?.uid ? view.layout.viewport.scrollTop : 0;
       const categoriesOpen = panel?.uid === view?.uid && view?.categories?.open;
-      view?.destroy?.(); body.replaceChildren(); view = null; viewKey = key;
+      disposeView(); body.replaceChildren(); view = null; viewKey = key;
       if (creating) body.append(createAnnotationCreateControls({ document, getData, patch, annotationApi,
         onCreate: (uid) => { selected = uid; creating = false; render(); } }).node);
       else if (!panel) body.append(emptyTemplate(document));
@@ -334,29 +290,35 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
           if (categorical) {
             view.categories = categoriesTemplate(document).firstElementChild; layout.tools.prepend(view.categories);
             view.categories.open = Boolean(categoriesOpen);
+            view.categories.palette = ANNOTATION_PALETTES.Qualitative;
+            view.categories.addEventListener("value-commit", (event) => {
+              const { value, replacements } = event.detail, mapping = new Map(replacements);
+              const changes = { scale: categoryScale(current(), value.map(({ name }) => name), value.map(({ colour }) => colour)) };
+              if (mapping.size) changes.values = mapAnnotationValues(current().values, (item) => mapping.has(item) ? mapping.get(item) : item);
+              if (update(changes) === false) event.preventDefault();
+            });
           }
         }
         Object.assign(view, { uid: panel.uid, layout }); view.update(); layout.viewport.scrollTop = scroll;
       }
     } else view?.update();
     if (view?.categories) {
-      const key = JSON.stringify([panel.scale, deleting]);
+      const key = JSON.stringify(panel.scale);
       if (key !== view.categoryKey) {
-        view.categories.querySelector("summary").textContent = `Categories (${resolveAnnotationScale(panel).domain.length})`;
-        renderCategories(view.categories.querySelector("div")); view.categoryKey = key;
+        const { domain, colour } = resolveAnnotationScale(panel);
+        view.categories.value = domain.map((name) => ({ name, colour: colour(name) })); view.categoryKey = key;
       }
-      if (deleting !== null) view.categories.open = true;
     }
     view?.layout.sync();
   }
   render();
-  return { node, toolbar, select(uid) { selected = uid; creating = false; deleting = null; render(); }, clearSelection,
+  return { node, toolbar, select(uid) { selected = uid; creating = false; render(); }, clearSelection,
     get filter() { return filter; }, setFilter(value) { filter = value; view?.filterRows?.(); },
     invalidate({ replace = false } = {}) {
       renderedPanel = renderedPanels = renderedClusters = null;
-      if (replace) { view?.destroy?.(); view = null; viewKey = null; selection.clear(); selected = selectionPanel = null; }
+      if (replace) { disposeView(); view = null; viewKey = null; selection.clear(); selected = selectionPanel = null; }
     },
-    destroy() { view?.destroy?.(); toolbar.remove(); },
+    destroy() { disposeView(); toolbar.remove(); },
     update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters)) render(); } };
 }
 function installStyle(document) {
@@ -372,11 +334,6 @@ function installStyle(document) {
 .cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
 .cm-annotation-data-editor details { flex-shrink:0; }
 .cm-annotation-data-editor summary { cursor:pointer; color:var(--cm-muted,#687586); }
-.cm-annotation-categories { padding:0; }
-.cm-annotation-categories > div { display:flex; flex-wrap:wrap; gap:6px 16px; padding:8px 0 2px; }
-.cm-annotation-category { display:flex; align-items:center; gap:5px; }
-.cm-annotation-category input[type=text] { min-width:0; width:140px; }
-.cm-annotation-category-remove { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:6px; border:1px solid var(--cm-border,#cbd3de); border-radius:4px; }
 .cm-annotation-matrix { position:relative; }
 .cm-annotation-data-editor .cm-data-actions input[type=number] { width:112px; }
 .cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }
