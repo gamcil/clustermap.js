@@ -6,10 +6,11 @@ import { defineSearchField } from "./editor/components/search-field/search-field
 import { defineCategoryEditor } from "./editor/components/category-editor/category-editor.js";
 import { defineAnnotationToolbar } from "./editor/components/annotation-toolbar/annotation-toolbar.js";
 import { defineAnnotationDataForm } from "./editor/components/annotation-data-form/annotation-data-form.js";
+import { defineAnnotationGroupEditor } from "./editor/components/annotation-group-editor/annotation-group-editor.js";
 import { textAsset } from "./editor/shared/textAsset.js";
 import { RowSelection } from "./rowSelection.mjs";
 import { createVirtualRows } from "./virtualRows.mjs";
-import { createTemplate, updateFieldValue, updateSelectOptions, createActionRunner, colourHex as hex } from "./uiControls.mjs";
+import { createTemplate, updateSelectOptions, createActionRunner } from "./uiControls.mjs";
 import { parseAnnotationTable, annotationTableText, mapAnnotationValues } from "./annotationData.mjs";
 import { createAnnotationCreateControls } from "./annotationCreateControls.mjs";
 
@@ -28,16 +29,12 @@ const batchTemplate = createTemplate(`<div class="cm-data-selection-actions">
 </div>`);
 const categoriesTemplate = createTemplate('<clinker-category-editor class="cm-annotation-categories"></clinker-category-editor>');
 const replacementTemplate = createTemplate('<clinker-annotation-data-form mode="replace" hidden></clinker-annotation-data-form>');
-const groupTemplate = createTemplate(`<fieldset><legend></legend><div class="cm-data-toolbar cm-annotation-data-toolbar">
-  <input type="text" aria-label="Group label"><input type="color" aria-label="Group colour">
-  <button type="button">Remove group</button><select aria-label="Membership"></select>
-</div><select data-members></select></fieldset>`);
-const addGroupTemplate = createTemplate('<button type="button">Add group</button>');
+const groupsTemplate = createTemplate('<clinker-annotation-group-editor></clinker-annotation-group-editor>');
 const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to attach data to cluster rows.</p>');
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 export function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm();
+  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm(); defineAnnotationGroupEditor();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector("clinker-annotation-toolbar");
@@ -85,7 +82,7 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
     if (event.key === "Escape" && !event.defaultPrevented && selection.size) { event.preventDefault(); clearSelection(); }
   });
 
-  const disposeView = () => { view?.categories?.cancelEdit(); view?.destroy?.(); };
+  const disposeView = () => { view?.categories?.cancelEdit(); view?.groups?.cancelEdit(); view?.destroy?.(); };
 
   function createMatrix(layout) {
     const panel = current(), categorical = panel.scale?.type === "categorical", resolved = resolveAnnotationScale(panel), extra = panel.type === "heatmap";
@@ -218,39 +215,11 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
   }
 
   function createGroups(parent) {
-    const groups = new Map(), add = addGroupTemplate(document).firstElementChild; parent.append(add);
-    const editGroup = (uid, changes) => update({ groups: current().groups.map((group) => group.uid === uid ? { ...group, ...changes } : group) });
-    add.onclick = () => {
-      if (!getClusters().length) return;
-      const panel = current(); let serial = 1; while (panel.groups.some((group) => group.uid === `group-${serial}`)) serial++;
-      update({ groups: [...panel.groups, { uid: `group-${serial}`, label: `Group ${serial}`, clusterIds: [getClusters()[0].uid] }] });
-    };
-    return { update() {
-      const panel = current(), tree = getData().tree;
-      for (const [uid, box] of groups) if (!panel.groups.some((group) => group.uid === uid)) { box.remove(); groups.delete(uid); }
-      for (const group of panel.groups) {
-        let box = groups.get(group.uid);
-        if (!box) { box = groupTemplate(document).firstElementChild; groups.set(group.uid, box); }
-        parent.insertBefore(box, add);
-        const label = box.querySelector('[type="text"]'), colour = box.querySelector('[type="color"]');
-        box.querySelector("legend").textContent = group.label || group.uid; updateFieldValue(label, group.label ?? group.uid);
-        colour.value = hex(group.colour ?? panel.colour ?? "#267c9e");
-        label.onchange = () => editGroup(group.uid, { label: label.value }); colour.onchange = () => editGroup(group.uid, { colour: colour.value });
-        const remove = box.querySelector("button"), mode = box.querySelector("select"), members = box.querySelector("[data-members]");
-        remove.disabled = panel.groups.length === 1; remove.onclick = () => update({ groups: current().groups.filter((item) => item.uid !== group.uid) });
-        updateSelectOptions(mode, [["clusters", "Selected clusters"], ...(tree ? [["tree", "Tree clade"]] : [])]); mode.value = group.nodeUid === undefined ? "clusters" : "tree";
-        mode.onchange = () => {
-          const { nodeUid, clusterIds, ...style } = group;
-          if (mode.value !== "tree" && !getClusters().length) return;
-          editGroup(group.uid, mode.value === "tree" ? { ...style, clusterIds: undefined, nodeUid: tree.root } : { ...style, nodeUid: undefined, clusterIds: [getClusters()[0].uid] });
-        };
-        members.multiple = group.nodeUid === undefined; members.size = members.multiple ? Math.min(5, getClusters().length) : 0;
-        members.setAttribute("aria-label", members.multiple ? `Clusters in ${group.label || group.uid}` : "Tree node");
-        updateSelectOptions(members, members.multiple ? getClusters().map((cluster) => [cluster.uid, `${cluster.name || cluster.uid} (${cluster.uid})`]) : tree.nodes.map((node) => [node.uid, node.label || node.uid]));
-        for (const option of members.options) option.selected = members.multiple ? group.clusterIds.some((uid) => String(uid) === option.value) : String(group.nodeUid) === option.value;
-        members.onchange = () => editGroup(group.uid, members.multiple ? { clusterIds: [...members.selectedOptions].map((option) => option.value) } : { nodeUid: members.value });
-      }
-    } };
+    const groups = groupsTemplate(document).firstElementChild; parent.append(groups);
+    groups.addEventListener("value-commit", (event) => {
+      if (update({ groups: event.detail.value }) === false) event.preventDefault();
+    });
+    return { groups, update() { groups.state = { groups: current().groups, colour: current().colour, clusters: getClusters(), tree: getData().tree }; } };
   }
 
   function render() {
@@ -318,9 +287,6 @@ function installStyle(document) {
   style.textContent = `
 @layer clinker-editor {
 .cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }
-.cm-annotation-data-toolbar { flex-wrap:wrap; }
-.cm-annotation-data-toolbar > input { width:140px; }
-.cm-annotation-data-toolbar label { display:flex; gap:4px; align-items:center; }
 .cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
 .cm-annotation-data-editor details { flex-shrink:0; }
 .cm-annotation-data-editor summary { cursor:pointer; color:var(--cm-muted,#687586); }
@@ -341,8 +307,6 @@ function installStyle(document) {
 .cm-annotation-add-column { width:36px; }
 .cm-annotation-add-column form { display:flex; gap:4px; }
 .cm-annotation-spacer > td { height:0; border:0; padding:0; }
-.cm-annotation-data-editor fieldset { flex-shrink:0; border:1px solid var(--cm-border,#cbd3de); border-radius:4px; padding:8px; margin:0 0 8px; }
-.cm-annotation-data-editor fieldset > select { margin-top:6px; max-width:100%; }
 .cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }
 .cm-annotation-data-editor [data-data-error]:empty { display:none; }
 
