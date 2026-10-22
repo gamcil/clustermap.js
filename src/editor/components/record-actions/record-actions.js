@@ -2,8 +2,9 @@ import { createTemplate, updateSelectOptions } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { defineActionMenu } from "../action-menu/action-menu.js";
 
-const [markup, css] = await Promise.all([
+const [markup, controls, css] = await Promise.all([
   textAsset(new URL("./record-actions.html", import.meta.url)),
+  textAsset(new URL("../../shared/controls.css", import.meta.url)),
   textAsset(new URL("./record-actions.css", import.meta.url)),
 ]);
 const template = createTemplate(markup);
@@ -16,7 +17,7 @@ class RecordActions extends HTMLElementBase {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
+    const style = this.ownerDocument.createElement("style"); style.textContent = controls + css;
     root.append(style, template(this.ownerDocument));
     root.addEventListener("click", (event) => {
       const command = event.target.closest("[data-command]")?.dataset.command;

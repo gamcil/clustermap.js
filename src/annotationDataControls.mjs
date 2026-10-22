@@ -7,10 +7,11 @@ import { defineCategoryEditor } from "./editor/components/category-editor/catego
 import { defineAnnotationToolbar } from "./editor/components/annotation-toolbar/annotation-toolbar.js";
 import { defineAnnotationDataForm } from "./editor/components/annotation-data-form/annotation-data-form.js";
 import { defineAnnotationGroupEditor } from "./editor/components/annotation-group-editor/annotation-group-editor.js";
+import { defineAnnotationValueActions } from "./editor/components/annotation-value-actions/annotation-value-actions.js";
 import { textAsset } from "./editor/shared/textAsset.js";
 import { RowSelection } from "./rowSelection.mjs";
 import { createVirtualRows } from "./virtualRows.mjs";
-import { createTemplate, updateSelectOptions, createActionRunner } from "./uiControls.mjs";
+import { createTemplate, createActionRunner } from "./uiControls.mjs";
 import { parseAnnotationTable, annotationTableText, mapAnnotationValues } from "./annotationData.mjs";
 import { createAnnotationCreateControls } from "./annotationCreateControls.mjs";
 
@@ -21,12 +22,7 @@ const editorTemplate = createTemplate(`<div class="cm-data-ui cm-annotation-data
   <div class="cm-data-error" data-data-error role="alert"></div><div class="cm-annotation-data-body"></div>
 </div>`);
 const matrixTemplate = createTemplate(await textAsset(new URL("./editor/components/annotation-table/annotation-table.html", import.meta.url)));
-const numericInputTemplate = createTemplate('<input type="number" step="any" placeholder="Value">');
-const categoryInputTemplate = createTemplate('<select></select>');
-const batchTemplate = createTemplate(`<div class="cm-data-selection-actions">
-  <select aria-label="Columns to edit"></select><span data-value></span>
-  <button type="button" data-set>Set values</button><button type="button" data-clear>Clear values</button>
-</div>`);
+const batchTemplate = createTemplate('<clinker-annotation-value-actions></clinker-annotation-value-actions>');
 const categoriesTemplate = createTemplate('<clinker-category-editor class="cm-annotation-categories"></clinker-category-editor>');
 const replacementTemplate = createTemplate('<clinker-annotation-data-form mode="replace" hidden></clinker-annotation-data-form>');
 const groupsTemplate = createTemplate('<clinker-annotation-group-editor></clinker-annotation-group-editor>');
@@ -34,7 +30,7 @@ const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to at
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 export function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm(); defineAnnotationGroupEditor();
+  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField(); defineCategoryEditor(); defineAnnotationToolbar(); defineAnnotationDataForm(); defineAnnotationGroupEditor(); defineAnnotationValueActions();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector("clinker-annotation-toolbar");
@@ -101,14 +97,10 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
       }
     };
     const selectionControls = createSelectionControls(layout, { selection, checkbox: all, menuLabel: "Edit values…", onChange: syncSelection });
-    const batch = batchTemplate(document).firstElementChild, columns = batch.querySelector("select");
+    const batch = batchTemplate(document).firstElementChild;
     selectionControls.actions.append(batch);
-    updateSelectOptions(columns, [["all", "All columns"], ...panel.columns.map((name, index) => [String(index), name])]); columns.value = batchColumn;
-    columns.onchange = () => { batchColumn = columns.value; };
-    const value = (categorical ? categoryInputTemplate : numericInputTemplate)(document).firstElementChild;
-    value.setAttribute("aria-label", "Batch value"); value.placeholder = "Value";
-    if (categorical) updateSelectOptions(value, [["", "Missing"], ...resolved.domain.map((name, index) => [String(index), name])]);
-    value.value = batchValue; value.onchange = () => { batchValue = value.value; }; batch.querySelector("[data-value]").replaceWith(value);
+    batch.state = { columns: panel.columns, domain: categorical ? resolved.domain : null, draft: { column: batchColumn, value: batchValue } };
+    batch.addEventListener("draft-change", (event) => { batchColumn = event.detail.column; batchValue = event.detail.value; });
     const updateRows = (values, refresh = true, control) => {
       const source = current();
       return commit([
@@ -117,17 +109,15 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
         { type: "annotationPanels.updateRows", uid: selected, values },
       ], refresh, control);
     };
-    const applyValues = (clear) => {
-      if (!clear && !value.checkValidity()) { value.reportValidity(); return; }
+    batch.addEventListener("values-commit", (event) => {
       const source = current(), values = {};
-      const next = clear || value.value === "" ? null : categorical ? resolved.domain[Number(value.value)] : Number(value.value);
+      const { column, value } = event.detail;
       for (const uid of selection) {
         const row = [...(source.values[uid] || source.columns.map(() => null))];
-        source.columns.forEach((_, index) => { if (columns.value === "all" || index === Number(columns.value)) row[index] = next; }); values[uid] = row;
+        source.columns.forEach((_, index) => { if (column === "all" || index === column) row[index] = value; }); values[uid] = row;
       }
-      updateRows(values);
-    };
-    batch.querySelector("[data-set]").onclick = () => applyValues(false); batch.querySelector("[data-clear]").onclick = () => applyValues(true);
+      if (updateRows(values) === false) event.preventDefault();
+    });
     panel.columns.forEach((column, index) => {
       const heading = element("column"), field = heading.querySelector("clinker-editable-field"), remove = heading.querySelector("button");
       field.value = column; field.setAttribute("label", `Column ${index + 1} name`);
@@ -291,7 +281,6 @@ function installStyle(document) {
 .cm-annotation-data-editor details { flex-shrink:0; }
 .cm-annotation-data-editor summary { cursor:pointer; color:var(--cm-muted,#687586); }
 .cm-annotation-matrix { position:relative; }
-.cm-annotation-data-editor .cm-data-actions input[type=number] { width:112px; }
 .cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }
 
 .cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,#f3f6fa); }

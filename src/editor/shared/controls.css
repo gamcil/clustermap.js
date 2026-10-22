@@ -1,0 +1,12 @@
+button, input, select { box-sizing: border-box; font: inherit; color: inherit; }
+button, input:not([type=color]), select {
+  min-height: var(--cm-control-height, 30px);
+  padding: var(--cm-control-padding, 4px 8px);
+  border: 1px solid var(--cm-border, #cbd3de);
+  border-radius: var(--cm-control-radius, 6px);
+  background: var(--cm-surface, #fff);
+}
+button { cursor: pointer; }
+button:hover { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }
+button:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }
+:is(input, select):focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }
