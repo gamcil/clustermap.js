@@ -870,6 +870,8 @@ class CategoryEditor extends HTMLElementBase$8 {
 
   get value() { return this.#value; }
   set value(items) {
+    if (items.length === this.#value.length && items.every(({ name, colour }, index) =>
+      name === this.#value[index].name && colour === this.#value[index].colour)) return;
     this.#value = items.map(({ name, colour }) => ({ name, colour }));
     this.#revision++; this.#render();
   }
@@ -1929,7 +1931,6 @@ function createAnnotationEditor({ document, getData, getClusters = () => getData
     }
     view?.update();
     if (view?.matrix && categorical && !view.categories) {
-      view.categoryKey = null;
       view.categories = element("categories"); view.categories.slot = "tools"; view.matrix.prepend(view.categories);
       view.categories.palette = ANNOTATION_PALETTES.Qualitative;
       view.categories.addEventListener("value-commit", (event) => {
@@ -1942,11 +1943,8 @@ function createAnnotationEditor({ document, getData, getClusters = () => getData
       view.categories.cancelEdit(); view.categories.remove(); view.categories = null;
     }
     if (view?.categories) {
-      const key = JSON.stringify(panel.scale);
-      if (key !== view.categoryKey) {
-        const { domain, colour } = resolveAnnotationScale(panel);
-        view.categories.value = domain.map((name) => ({ name, colour: colour(name) })); view.categoryKey = key;
-      }
+      const { domain, colour } = resolveAnnotationScale(panel);
+      view.categories.value = domain.map((name) => ({ name, colour: colour(name) }));
     }
   }
   render();

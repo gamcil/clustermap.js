@@ -44,7 +44,6 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   #actions = null;
   #selectionBar = null;
   #rowsCache = null;
-  #selectionData = null;
   #filter = "";
   #memberGroupId = null;
   #expanded = new Set();
@@ -73,6 +72,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
       this.ownerDocument.head.append(style);
     }
     if (!this.#table) this.#renderShell();
+    this.#invalidateData();
     this.#subscribe(); this.#syncTheme(); this.#renderData();
   }
 
@@ -360,12 +360,15 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     // Patches can mutate data in place; invalidate all derived state together.
     this.#dataCache = null;
     this.#rowsCache = null;
-    this.#selectionData = null;
     this.#annotationEditor?.invalidate({ replace });
     if (replace) {
       this.#disposeRows();
       this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null;
       this.#initializeExpanded();
+    } else if (this.#selected.size) {
+      const data = this.#data();
+      const records = this.#kind === "genes" ? this.#cache()?.geneById.values() : data?.[this.#kind];
+      this.#selected.prune([...(records || [])].map((record) => record.uid));
     }
   }
 
@@ -645,11 +648,6 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
           components.set(component.node, component); return updateRow(component.node, row);
         },
         disposeRow: (node) => components.get(node).destroy(), updateRow };
-    }
-    if (this.#selectionData !== data) {
-      const cache = this.#cache();
-      const records = this.#kind === "genes" ? cache.geneById.values() : this.#kind === "links" ? data.links : data.groups;
-      this.#selected.prune([...records].map((record) => record.uid)); this.#selectionData = data;
     }
     table.rows = rows;
     const visibleGenes = isTree ? new Set(rows.flatMap((row) => row.selectIds || (row.type === "gene" ? [row.id] : []))).size : rows.length;

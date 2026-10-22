@@ -56,6 +56,8 @@ class CategoryEditor extends HTMLElementBase {
 
   get value() { return this.#value; }
   set value(items) {
+    if (items.length === this.#value.length && items.every(({ name, colour }, index) =>
+      name === this.#value[index].name && colour === this.#value[index].colour)) return;
     this.#value = items.map(({ name, colour }) => ({ name, colour }));
     this.#revision++; this.#render();
   }

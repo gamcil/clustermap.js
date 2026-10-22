@@ -1299,6 +1299,8 @@ class CategoryEditor extends HTMLElementBase$c {
 
   get value() { return this.#value; }
   set value(items) {
+    if (items.length === this.#value.length && items.every(({ name, colour }, index) =>
+      name === this.#value[index].name && colour === this.#value[index].colour)) return;
     this.#value = items.map(({ name, colour }) => ({ name, colour }));
     this.#revision++; this.#render();
   }
@@ -2331,7 +2333,6 @@ function createAnnotationEditor({ document, getData, getClusters = () => getData
     }
     view?.update();
     if (view?.matrix && categorical && !view.categories) {
-      view.categoryKey = null;
       view.categories = element("categories"); view.categories.slot = "tools"; view.matrix.prepend(view.categories);
       view.categories.palette = ANNOTATION_PALETTES.Qualitative;
       view.categories.addEventListener("value-commit", (event) => {
@@ -2344,11 +2345,8 @@ function createAnnotationEditor({ document, getData, getClusters = () => getData
       view.categories.cancelEdit(); view.categories.remove(); view.categories = null;
     }
     if (view?.categories) {
-      const key = JSON.stringify(panel.scale);
-      if (key !== view.categoryKey) {
-        const { domain, colour } = resolveAnnotationScale(panel);
-        view.categories.value = domain.map((name) => ({ name, colour: colour(name) })); view.categoryKey = key;
-      }
+      const { domain, colour } = resolveAnnotationScale(panel);
+      view.categories.value = domain.map((name) => ({ name, colour: colour(name) }));
     }
   }
   render();
@@ -3619,7 +3617,6 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   #actions = null;
   #selectionBar = null;
   #rowsCache = null;
-  #selectionData = null;
   #filter = "";
   #memberGroupId = null;
   #expanded = new Set();
@@ -3648,6 +3645,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       this.ownerDocument.head.append(style);
     }
     if (!this.#table) this.#renderShell();
+    this.#invalidateData();
     this.#subscribe(); this.#syncTheme(); this.#renderData();
   }
 
@@ -3935,12 +3933,15 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     // Patches can mutate data in place; invalidate all derived state together.
     this.#dataCache = null;
     this.#rowsCache = null;
-    this.#selectionData = null;
     this.#annotationEditor?.invalidate({ replace });
     if (replace) {
       this.#disposeRows();
       this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null;
       this.#initializeExpanded();
+    } else if (this.#selected.size) {
+      const data = this.#data();
+      const records = this.#kind === "genes" ? this.#cache()?.geneById.values() : data?.[this.#kind];
+      this.#selected.prune([...(records || [])].map((record) => record.uid));
     }
   }
 
@@ -4220,11 +4221,6 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
           components.set(component.node, component); return updateRow(component.node, row);
         },
         disposeRow: (node) => components.get(node).destroy(), updateRow };
-    }
-    if (this.#selectionData !== data) {
-      const cache = this.#cache();
-      const records = this.#kind === "genes" ? cache.geneById.values() : this.#kind === "links" ? data.links : data.groups;
-      this.#selected.prune([...records].map((record) => record.uid)); this.#selectionData = data;
     }
     table.rows = rows;
     const visibleGenes = isTree ? new Set(rows.flatMap((row) => row.selectIds || (row.type === "gene" ? [row.id] : []))).size : rows.length;
