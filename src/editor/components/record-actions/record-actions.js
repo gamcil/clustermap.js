@@ -26,12 +26,14 @@ class RecordActions extends HTMLElementBase {
       const input = field && this.#field(field);
       if (input && !input.reportValidity()) return;
       if (input && !input.value.trim()) return;
-      this.#emit(command, input?.value);
+      const changes = command === "batch-label" ? { label: input.value.trim() }
+        : command === "batch-identity" ? { identity: input.valueAsNumber / 100 } : null;
+      this.#emit(changes ? "update" : command, changes || input?.value);
     });
     root.addEventListener("change", (event) => {
       const input = event.target;
-      if (input.matches("[data-batch-colour]")) this.#emit("batch-colour", input.value);
-      else if (input.matches("[data-batch-visibility]") && input.value) { this.#emit("batch-visibility", input.value); input.value = ""; }
+      if (input.matches("[data-batch-colour]")) this.#emit("update", { colour: input.value });
+      else if (input.matches("[data-batch-visibility]") && input.value) { this.#emit("update", { hidden: input.value === "hide" }); input.value = ""; }
       else if (input.matches("[data-group-position]") && input.reportValidity()) this.#emit("group-position", Number(input.value) - 1);
     });
     root.addEventListener("keydown", (event) => {

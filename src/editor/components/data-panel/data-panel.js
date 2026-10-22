@@ -203,15 +203,8 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
       this.#apply({ type: "groups.unassignGenes", geneIds: [...this.#selected] });
     } else if (command === "focus") {
       this.#focusSelected();
-    } else if (command === "batch-label") {
-      if (value?.trim()) {
-        this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: { label: value.trim() } });
-      }
-    } else if (command === "batch-identity") {
-      const identity = Number(value);
-      if (Number.isFinite(identity) && identity >= 0 && identity <= 100) {
-        this.#apply({ type: "links.update", ids: [...this.#selected], changes: { identity: identity / 100 } });
-      }
+    } else if (command === "update") {
+      this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: value });
     } else if (command === "merge") {
       const targetId = this.#groupId(value);
       if (targetId !== undefined) {
@@ -219,9 +212,6 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
         this.#selected.clear();
         this.#apply({ type: "groups.merge", targetId, sourceIds });
       }
-    } else if (command === "batch-colour" || command === "batch-visibility") {
-      const changes = command === "batch-colour" ? { colour: value } : { hidden: value === "hide" };
-      this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes });
     } else if (command === "group-position") {
       this.#moveGroup(this.#selectedGroups()[0]?.uid, value);
     } else if (command === "view-members") {

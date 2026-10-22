@@ -3877,12 +3877,14 @@ class RecordActions extends HTMLElementBase$2 {
       const input = field && this.#field(field);
       if (input && !input.reportValidity()) return;
       if (input && !input.value.trim()) return;
-      this.#emit(command, input?.value);
+      const changes = command === "batch-label" ? { label: input.value.trim() }
+        : command === "batch-identity" ? { identity: input.valueAsNumber / 100 } : null;
+      this.#emit(changes ? "update" : command, changes || input?.value);
     });
     root.addEventListener("change", (event) => {
       const input = event.target;
-      if (input.matches("[data-batch-colour]")) this.#emit("batch-colour", input.value);
-      else if (input.matches("[data-batch-visibility]") && input.value) { this.#emit("batch-visibility", input.value); input.value = ""; }
+      if (input.matches("[data-batch-colour]")) this.#emit("update", { colour: input.value });
+      else if (input.matches("[data-batch-visibility]") && input.value) { this.#emit("update", { hidden: input.value === "hide" }); input.value = ""; }
       else if (input.matches("[data-group-position]") && input.reportValidity()) this.#emit("group-position", Number(input.value) - 1);
     });
     root.addEventListener("keydown", (event) => {
@@ -4115,15 +4117,8 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       this.#apply({ type: "groups.unassignGenes", geneIds: [...this.#selected] });
     } else if (command === "focus") {
       this.#focusSelected();
-    } else if (command === "batch-label") {
-      if (value?.trim()) {
-        this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: { label: value.trim() } });
-      }
-    } else if (command === "batch-identity") {
-      const identity = Number(value);
-      if (Number.isFinite(identity) && identity >= 0 && identity <= 100) {
-        this.#apply({ type: "links.update", ids: [...this.#selected], changes: { identity: identity / 100 } });
-      }
+    } else if (command === "update") {
+      this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: value });
     } else if (command === "merge") {
       const targetId = this.#groupId(value);
       if (targetId !== undefined) {
@@ -4131,9 +4126,6 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
         this.#selected.clear();
         this.#apply({ type: "groups.merge", targetId, sourceIds });
       }
-    } else if (command === "batch-colour" || command === "batch-visibility") {
-      const changes = command === "batch-colour" ? { colour: value } : { hidden: value === "hide" };
-      this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes });
     } else if (command === "group-position") {
       this.#moveGroup(this.#selectedGroups()[0]?.uid, value);
     } else if (command === "view-members") {
