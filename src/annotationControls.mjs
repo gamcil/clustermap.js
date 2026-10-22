@@ -96,7 +96,6 @@ export function createAnnotationControls({ getData, patch, document, panelUid, a
     applying = true;
     try { run(() => {
       patch([{ type: "annotationPanels.update", ids: [panel.uid], changes }]);
-      node.querySelector("[data-annotation-error]").textContent = "";
       node.querySelectorAll("input").forEach((input) => input.setCustomValidity(""));
       if (refresh) render();
       else { gradient(); if (field.startsWith("colour:")) { const palette = node.querySelector('[data-annotation-field="palette"]'); if (palette) palette.value = "custom"; } }

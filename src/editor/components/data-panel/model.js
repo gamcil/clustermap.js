@@ -100,7 +100,7 @@ export class DataPanelModel {
 
 function sortRows(rows, sort) {
   if (!sort) return rows;
-  return [...rows].sort((left, right) => {
+  return rows.sort((left, right) => {
     const a = left[sort.key] ?? "";
     const b = right[sort.key] ?? "";
     const comparison = typeof a === "number" && typeof b === "number"

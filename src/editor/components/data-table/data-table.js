@@ -60,12 +60,8 @@ class DataTable extends HTMLElementBase {
   }
   get scrollTop() { return this.#viewport.scrollTop; }
   set scrollTop(value) { this.#viewport.scrollTop = value; }
-  get scrollLeft() { return this.#viewport.scrollLeft; }
-  set scrollLeft(value) { this.#viewport.scrollLeft = value; }
   get scrollHeight() { return this.#viewport.scrollHeight; }
-  get scrollWidth() { return this.#viewport.scrollWidth; }
   scrollTo(...args) { this.#viewport.scrollTo(...args); }
-  focus(options) { this.#viewport.focus(options); }
 
   #mount() {
     if (!this.isConnected || !this.#renderer || this.#view) return;

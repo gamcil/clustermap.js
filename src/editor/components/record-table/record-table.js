@@ -95,11 +95,7 @@ class RecordTable extends HTMLElementBase {
   get scrollTop() { return this.#table?.scrollTop || 0; }
   set scrollTop(value) { if (this.#table) this.#table.scrollTop = value; }
   get scrollHeight() { return this.#table?.scrollHeight || 0; }
-  get scrollLeft() { return this.#table?.scrollLeft || 0; }
-  set scrollLeft(value) { if (this.#table) this.#table.scrollLeft = value; }
-  get scrollWidth() { return this.#table?.scrollWidth || 0; }
   scrollTo(...args) { this.#table?.scrollTo(...args); }
-  focus(options) { this.#table?.focus(options); }
 
   #emit(detail, control) {
     this.error = "";

@@ -1,6 +1,6 @@
-import { d as defineAppearancePanel } from './editor/appearance-panel-e9767cf3.mjs';
-export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-e9767cf3.mjs';
-import './editor/search-field-f3740f51.mjs';
+import { d as defineAppearancePanel } from './editor/appearance-panel-3f50086a.mjs';
+export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-3f50086a.mjs';
+import './editor/search-field-3225a92b.mjs';
 import './editor/theme-4b8fbd52.mjs';
 
 if (globalThis.customElements) defineAppearancePanel();

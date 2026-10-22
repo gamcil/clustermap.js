@@ -471,9 +471,10 @@ function createControls(document) {
 
 /** Report rejected UI edits consistently while leaving validation in the model. */
 function createActionRunner(report) {
-  return (action) => {
+  return (action, control) => {
+    control?.setCustomValidity("");
     try { action(); report(""); return true; }
-    catch (error) { report(error.message); return false; }
+    catch (error) { report(error.message); control?.setCustomValidity(error.message); return false; }
   };
 }
 

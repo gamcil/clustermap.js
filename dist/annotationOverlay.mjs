@@ -1,5 +1,5 @@
-import { i as installDataEditorStyle, h as defineAnnotationDataForm, j as createAnnotationPanel, f as defineAnnotationEditor } from './editor/annotation-editor-ae65b270.mjs';
-import { f as createActionRunner, d as colourHex, h as createControls } from './editor/search-field-f3740f51.mjs';
+import { i as installDataEditorStyle, h as defineAnnotationDataForm, j as createAnnotationPanel, f as defineAnnotationEditor } from './editor/annotation-editor-a9f437d4.mjs';
+import { f as createActionRunner, d as colourHex, h as createControls } from './editor/search-field-3225a92b.mjs';
 
 /** Quick styling stays in the plot; data and membership editing live in the data editor. */
 function createAnnotationControls({ getData, patch, document, panelUid, annotationApi, onEditData }) {
@@ -97,7 +97,6 @@ function createAnnotationControls({ getData, patch, document, panelUid, annotati
     applying = true;
     try { run(() => {
       patch([{ type: "annotationPanels.update", ids: [panel.uid], changes }]);
-      node.querySelector("[data-annotation-error]").textContent = "";
       node.querySelectorAll("input").forEach((input) => input.setCustomValidity(""));
       if (refresh) render();
       else { gradient(); if (field.startsWith("colour:")) { const palette = node.querySelector('[data-annotation-field="palette"]'); if (palette) palette.value = "custom"; } }

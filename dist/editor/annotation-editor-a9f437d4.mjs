@@ -1,4 +1,4 @@
-import { a as controlStyles, e as updateSelectOptions, c as createTemplate, d as colourHex, g as defineSearchField, f as createActionRunner } from './search-field-f3740f51.mjs';
+import { a as controlStyles, e as updateSelectOptions, c as createTemplate, d as colourHex, g as defineSearchField, f as createActionRunner } from './search-field-3225a92b.mjs';
 
 /** Shared fixed-height row window for scrollable data editors. */
 const DATA_ROW_HEIGHT = 34;
@@ -941,12 +941,8 @@ class DataTable extends HTMLElementBase$3 {
   }
   get scrollTop() { return this.#viewport.scrollTop; }
   set scrollTop(value) { this.#viewport.scrollTop = value; }
-  get scrollLeft() { return this.#viewport.scrollLeft; }
-  set scrollLeft(value) { this.#viewport.scrollLeft = value; }
   get scrollHeight() { return this.#viewport.scrollHeight; }
-  get scrollWidth() { return this.#viewport.scrollWidth; }
   scrollTo(...args) { this.#viewport.scrollTo(...args); }
-  focus(options) { this.#viewport.focus(options); }
 
   #mount() {
     if (!this.isConnected || !this.#renderer || this.#view) return;
