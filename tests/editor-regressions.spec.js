@@ -71,7 +71,7 @@ const canvasPoint = (page, selector, fraction = 0.5) => page.evaluate(({ selecto
   try {
     const node = svg.querySelector(selector), box = node.getBBox();
     const world = new DOMPoint(box.x + box.width * fraction, box.y + box.height / 2)
-      .matrixTransform(svg.getCTM().inverse().multiply(node.getCTM()));
+      .matrixTransform(svg.querySelector("g.clusterMapG").getCTM().inverse().multiply(node.getCTM()));
     const camera = chart.state().camera, surface = document.querySelector("#plot canvas.clusterMapCanvas").getBoundingClientRect();
     return { x: surface.x + camera.x + world.x * camera.k, y: surface.y + camera.y + world.y * camera.k };
   } finally { svg.remove(); }
