@@ -406,15 +406,23 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     const data = this.#data();
     const geneCount = data?.clusters?.flatMap((cluster) => cluster.loci).reduce((count, locus) => count + locus.genes.length, 0) || 0;
     if (!geneCount || geneCount > 500) return;
-    data.clusters.forEach((cluster) => {
+    this.#expandTree("tree"); this.#expandTree("groups");
+  }
+
+  #expandTree(view) {
+    const data = this.#data();
+    if (view === "groups") {
+      for (const group of data?.groups || []) this.#expanded.add(`gene-group:${group.uid}`);
+      this.#expanded.add("gene-group:ungrouped");
+      return;
+    }
+    for (const cluster of data?.clusters || []) {
       if (cluster.loci.length === 1) this.#expanded.add(`cluster-locus:${cluster.uid}:${cluster.loci[0].uid}`);
       else {
         this.#expanded.add(`cluster:${cluster.uid}`);
-        cluster.loci.forEach((locus) => this.#expanded.add(`locus:${locus.uid}`));
+        for (const locus of cluster.loci) this.#expanded.add(`locus:${locus.uid}`);
       }
-    });
-    (data.groups || []).forEach((group) => this.#expanded.add(`gene-group:${group.uid}`));
-    this.#expanded.add("gene-group:ungrouped");
+    }
   }
 
   #id(value) {
@@ -711,13 +719,15 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.#renderData();
   }
 
+  #selectionTarget() {
+    if (this.#kind === "links") return { links: [...this.#selected] };
+    const genes = this.#kind === "groups"
+      ? this.#selectedGroups().flatMap((group) => group.genes || []) : [...this.#selected];
+    return { genes };
+  }
+
   #focusSelected() {
-    if (!this.#chart?.focus || !this.#selected.size) return;
-    if (this.#kind === "groups") {
-      const genes = (this.#data()?.groups || []).filter((group) => this.#selected.has(group.uid)).flatMap((group) => group.genes || []);
-      this.#chart.focus({ genes });
-    } else if (this.#kind === "links") this.#chart.focus({ links: [...this.#selected] });
-    else this.#chart.focus({ genes: [...this.#selected] });
+    if (this.#selected.size) this.#chart?.focus?.(this.#selectionTarget());
   }
 
   #placeGroup(uid, targetUid, after) {
@@ -734,21 +744,8 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 
   #toggleTree() {
     const rows = this.#rows();
-    if (rows.some((row) => row.type !== "gene" && !row.open)) {
-      const data = this.#data();
-      if (this.#geneView === "groups") {
-        (data?.groups || []).forEach((group) => this.#expanded.add(`gene-group:${group.uid}`));
-        this.#expanded.add("gene-group:ungrouped");
-      } else {
-        (data?.clusters || []).forEach((cluster) => {
-          if (cluster.loci.length === 1) this.#expanded.add(`cluster-locus:${cluster.uid}:${cluster.loci[0].uid}`);
-          else {
-            this.#expanded.add(`cluster:${cluster.uid}`);
-            cluster.loci.forEach((locus) => this.#expanded.add(`locus:${locus.uid}`));
-          }
-        });
-      }
-    } else this.#expanded.clear();
+    if (rows.some((row) => row.type !== "gene" && !row.open)) this.#expandTree(this.#geneView);
+    else this.#expanded.clear();
     this.#renderData();
   }
 
@@ -757,14 +754,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.#applySelectionHighlight();
   }
 
-  #applySelectionHighlight() {
-    if (!this.#chart?.highlight) return;
-    if (this.#kind === "links") this.#chart.highlight({ links: this.#selected });
-    else if (this.#kind === "groups") {
-      const genes = (this.#data()?.groups || []).filter((group) => this.#selected.has(group.uid)).flatMap((group) => group.genes || []);
-      this.#chart.highlight({ genes });
-    } else this.#chart.highlight({ genes: this.#selected });
-  }
+  #applySelectionHighlight() { this.#chart?.highlight?.(this.#selectionTarget()); }
 
   #queueHover(row) {
     this.#hoverRow = row;
