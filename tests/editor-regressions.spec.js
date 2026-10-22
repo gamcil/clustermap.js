@@ -169,6 +169,7 @@ test("inline edits, external edits and merges stay synchronized through history"
   const before = await page.evaluate(() => chart.data().groups.map(({ uid, genes }) => ({ uid, genes: [...genes] })));
   await editor(page).locator("[data-select]").nth(0).check();
   await editor(page).locator("[data-select]").nth(1).check();
+  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Merge…$/ }).click();
   await editor(page).locator("[data-merge-target]").selectOption(before[0].uid);
   await editor(page).getByRole("button", { name: "Merge groups", exact: true }).click();
   await expect(editor(page).locator(".cm-editor__row--groups")).toHaveCount(before.length - 1);
@@ -191,11 +192,13 @@ test("annotation inline edits, selection and batch values support undo/redo", as
   await input.fill("0.2"); await input.press("Escape");
   await expect(input).toHaveValue("0.75");
   for (let i = 0; i < 2; i++) await matrixRows(page).nth(i).getByRole("checkbox").check();
+  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Edit values…$/ }).click();
   await editor(page).getByRole("combobox", { name: "Columns to edit" }).selectOption("all");
   await editor(page).getByRole("spinbutton", { name: "Batch value", exact: true }).fill("2.5");
   await editor(page).getByRole("button", { name: "Set values", exact: true }).click();
   for (const id of ids) expect((await panelData(page, uid)).values[id]).toEqual(before.columns.map(() => 2.5));
   await expect(matrixRows(page).first()).toHaveClass(/is-selected/);
+  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Edit values…$/ }).click();
   await editor(page).getByRole("button", { name: "Clear values", exact: true }).click();
   for (const id of ids) expect((await panelData(page, uid)).values[id]).toEqual(before.columns.map(() => null));
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
@@ -211,6 +214,7 @@ test("categories can be added, assigned, renamed and removed with replacement", 
   await editor(page).getByRole("button", { name: "Add category", exact: true }).click();
   await matrixRows(page).first().getByRole("checkbox").check();
   const domain = (await panelData(page, uid)).scale.domain;
+  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Edit values…$/ }).click();
   await editor(page).getByRole("combobox", { name: "Batch value", exact: true }).selectOption(String(domain.indexOf("Test category")));
   await editor(page).getByRole("button", { name: "Set values", exact: true }).click();
   await expect(matrixRows(page).first().getByRole("combobox").first()).toHaveValue(String(domain.indexOf("Test category")));
@@ -280,6 +284,7 @@ test("annotation rows virtualize, preserve offscreen selection and filter all re
   await expect(rows.last()).toContainText("Cluster 259");
   expect(await rows.count()).toBeLessThan(80);
   await rows.last().getByRole("checkbox").check();
+  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Edit values…$/ }).click();
   await editor(page).getByRole("spinbutton", { name: "Batch value", exact: true }).fill("999");
   await editor(page).getByRole("button", { name: "Set values", exact: true }).click();
   const data = await panelData(page, "numeric");
@@ -726,4 +731,190 @@ test("camera focus uses the current renderer and becomes inert after destruction
   expect(result.svg).toEqual(result.focusedSvg);
   expect(result.chainable).toBe(true);
   expect(result.after).toEqual(result.focusedSvg);
+});
+
+async function selectionFixture(page, renderer) {
+  await page.evaluate(async (renderer) => {
+    const { ClusterMap } = await import("/dist/clustermap.mjs");
+    const { mountPlotSelectionToolbar } = await import("/dist/editor.mjs");
+    window.disposePlotToolbar?.(); chart.destroy();
+    const data = await (await fetch("/fixtures/heatmap.json")).json();
+    const second = structuredClone(data.clusters[0].loci[0]);
+    second.uid = "locus-a2"; second.name = "sequence_a2"; second.genes[0].uid = "gene-a2";
+    data.clusters[0].loci.push(second);
+    data.config = { ...data.config, updateGroups: false };
+    data.groups = [
+      { uid: "alpha", label: "Alpha", colour: "#267c9e", genes: ["gene-a", "gene-a2"] },
+      { uid: "beta", label: "Beta", colour: "#4477aa", genes: ["gene-b", "gene-c"] },
+      { uid: "gamma", label: "Gamma", colour: "#228833", genes: ["gene-d", "gene-e"] },
+    ];
+    data.links = [
+      { uid: "ab", query: { uid: "gene-a" }, target: { uid: "gene-b" }, identity: 1 },
+      { uid: "cd", query: { uid: "gene-c" }, target: { uid: "gene-d" }, identity: 0.9 },
+    ];
+    window.selectionInput = structuredClone(data);
+    window.chart = ClusterMap().config({ plot: { renderer, transitionDuration: 0, adaptiveResolution: false },
+      cluster: { spacing: 10 }, annotations: { enabled: true } });
+    d3.select("#plot").datum(data).call(chart);
+    document.querySelector("clinker-editor").chart = chart;
+    window.disposePlotToolbar = mountPlotSelectionToolbar(chart, document.querySelector("#plot"));
+  }, renderer);
+  if (renderer === "webgpu") {
+    await expect.poll(() => page.locator("#plot canvas.clusterMapCanvas").getAttribute("data-webgpu"))
+      .toMatch(/^(active|unavailable)$/);
+    if (process.env.CLUSTERMAP_REQUIRE_WEBGPU) await expect(page.locator("#plot canvas.clusterMapCanvas")).toHaveAttribute("data-webgpu", "active");
+  }
+}
+
+const clusterLabel = (uid) => `[id$="cluster_${uid}"] text.clusterText`;
+const locusTrack = (uid) => `[id$="locus_${uid}"] line.trackBar`;
+async function plotPoint(page, renderer, selector) {
+  if (renderer !== "svg") return canvasPoint(page, selector);
+  return page.locator(`#plot ${selector}`).evaluate((node) => {
+    const bounds = node.getBBox(), point = new DOMPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+      .matrixTransform(node.getScreenCTM());
+    return { x: point.x, y: point.y };
+  });
+}
+async function selectAt(page, renderer, selector, modifiers = ["Shift"]) {
+  const point = await plotPoint(page, renderer, selector);
+  const keys = modifiers.map((key) => key === "ControlOrMeta" ? (process.platform === "darwin" ? "Meta" : "Control") : key);
+  for (const key of keys) await page.keyboard.down(key);
+  try { await page.mouse.click(point.x, point.y); }
+  finally { for (const key of keys.toReversed()) await page.keyboard.up(key); }
+}
+const plotToolbar = (page) => page.locator("#plot .cm-plot-selection-toolbar");
+const expectSelection = async (page, kind, ids) => expect.poll(() => page.evaluate(() => chart.selection())).toEqual({ kind, ids });
+
+for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: plot selection toggles, ranges and editor handoff`, async ({ page }) => {
+    await selectionFixture(page, renderer);
+    for (const uid of ["a", "b", "a"]) await selectAt(page, renderer, clusterLabel(uid));
+    await expectSelection(page, "clusters", ["b"]);
+    await selectAt(page, renderer, clusterLabel("b"));
+    await expectSelection(page, "clusters", []);
+    await selectAt(page, renderer, clusterLabel("a"));
+    await selectAt(page, renderer, clusterLabel("d"), ["ControlOrMeta", "Shift"]);
+    await expectSelection(page, "clusters", ["a", "b", "c", "d"]);
+    await selectAt(page, renderer, clusterLabel("b"), ["Alt", "Shift"]);
+    await expectSelection(page, "clusters", ["c", "d"]);
+    await expect(plotToolbar(page)).toContainText("2 clusters selected");
+    await expect(plotToolbar(page).locator("summary").filter({ hasText: /^Loci…$/ })).toBeVisible();
+    await selectAt(page, renderer, locusTrack("locus-a"));
+    await expectSelection(page, "loci", ["locus-a"]);
+    await selectAt(page, renderer, locusTrack("locus-b"), ["ControlOrMeta", "Shift"]);
+    await expectSelection(page, "loci", ["locus-a", "locus-a2", "locus-b"]);
+    await selectAt(page, renderer, locusTrack("locus-a2"));
+    await expectSelection(page, "loci", ["locus-a", "locus-b"]);
+    expect(await page.evaluate(() => chart.canUndo())).toBe(false);
+    await plotToolbar(page).locator("summary").filter({ hasText: /^More…$/ }).click();
+    await plotToolbar(page).getByRole("button", { name: "Edit data…", exact: true }).click();
+    await expect(editor(page).locator('[data-kind="genes"]')).toHaveAttribute("aria-pressed", "true");
+    await expect(editor(page).locator(".cm-data-meta").first()).toContainText("2 genes selected");
+    await expect(editor(page).locator(".cm-editor__tree-gene.is-selected")).toHaveCount(2);
+    await page.keyboard.press("Escape");
+  });
+
+  test(`${renderer}: plot removals retain source data through undo, redo and project reload`, async ({ page }) => {
+    await selectionFixture(page, renderer);
+    await page.evaluate(() => chart.locusSelection(["locus-a"]));
+    await plotToolbar(page).locator("summary").filter({ hasText: /^More…$/ }).click();
+    page.once("dialog", (dialog) => dialog.accept());
+    await plotToolbar(page).getByRole("button", { name: "Remove selected loci", exact: true }).click();
+    expect(await page.evaluate(() => chart.visibleData().clusters[0].loci.map((locus) => locus.uid))).toEqual(["locus-a2"]);
+    expect(await page.evaluate(() => chart.data().clusters[0].loci.length)).toBe(2);
+    await expect(plotToolbar(page)).toBeHidden();
+    await page.evaluate(() => chart.undo());
+    expect(await page.evaluate(() => chart.visibleData().clusters[0].loci.length)).toBe(2);
+    await page.evaluate(() => chart.redo());
+    expect(await page.evaluate(() => chart.visibleData().clusters[0].loci.length)).toBe(1);
+    await page.evaluate(() => { chart.undo(); chart.clusterSelection(["a", "c"]); });
+    await plotToolbar(page).locator("summary").filter({ hasText: /^More…$/ }).click();
+    page.once("dialog", (dialog) => dialog.accept());
+    await plotToolbar(page).getByRole("button", { name: "Remove selected clusters", exact: true }).click();
+    const inspect = () => page.evaluate(() => ({
+      source: chart.data().clusters.map((cluster) => cluster.uid), visible: chart.visibleData().clusters.map((cluster) => cluster.uid),
+      nodes: chart.visibleData().tree.nodes.map((node) => ({ uid: node.uid, length: node.branchLength })),
+      values: chart.visibleData().annotationPanels.find((panel) => panel.uid === "expression").values,
+      links: chart.visibleData().links.length,
+    }));
+    const removed = await inspect();
+    expect(removed.source).toEqual(["a", "b", "c", "d", "e"]);
+    expect(removed.visible).toEqual(["b", "d", "e"]);
+    expect(removed.nodes.some((node) => ["a", "c", "x", "y"].includes(node.uid))).toBe(false);
+    expect(removed.nodes.find((node) => node.uid === "b").length).toBe(7);
+    expect(removed.links).toBe(0);
+    expect(Object.keys(removed.values)).toEqual(["b", "d", "e"]);
+    const exported = await page.evaluate(() => {
+      const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml");
+      return [...svg.querySelectorAll("g.cluster text.clusterText")].map((label) => label.textContent);
+    });
+    expect(exported).toEqual(["Example B", "Example D", "Example E"]);
+    await page.evaluate(() => chart.undo());
+    expect((await inspect()).visible).toEqual(["a", "b", "c", "d", "e"]);
+    await page.evaluate(() => chart.redo());
+    expect(await inspect()).toEqual(removed);
+    const saved = await page.evaluate(() => JSON.parse(JSON.stringify(chart.project())));
+    await page.evaluate(async (saved) => {
+      const { ClusterMap } = await import("/dist/clustermap.mjs");
+      disposePlotToolbar(); chart.destroy();
+      window.chart = ClusterMap();
+      d3.select("#plot").datum(structuredClone(selectionInput)).call(chart);
+      chart.project(saved); document.querySelector("clinker-editor").chart = chart;
+    }, saved);
+    expect(await inspect()).toEqual(removed);
+    expect(await page.evaluate(() => chart.project())).toEqual(saved);
+    expect(await page.evaluate(() => chart.canUndo())).toBe(false);
+    await annotation(page);
+    await expect(matrixRows(page)).toHaveCount(3);
+    await page.evaluate(() => chart.remove({ clusters: chart.visibleData().clusters.map((cluster) => cluster.uid) }));
+    expect(await page.evaluate(() => ({ count: chart.visibleData().clusters.length, tree: chart.visibleData().tree }))).toEqual({ count: 0, tree: null });
+    await page.evaluate(() => chart.undo());
+    expect((await inspect()).visible).toEqual(["b", "d", "e"]);
+  });
+
+  test(`${renderer}: cluster dragging respects explicit selection, tree constraints and stable bounds`, async ({ page }) => {
+    await selectionFixture(page, renderer);
+    await page.evaluate(() => chart.clusterSelection(["a", "b"]));
+    const size = () => page.locator("#plot .clusterMapFigureSurface").evaluate((node) => ({ width: node.style.width, height: node.style.height }));
+    const before = await size(), from = await plotPoint(page, renderer, clusterLabel("a")), to = await plotPoint(page, renderer, clusterLabel("c"));
+    await page.mouse.move(from.x, from.y); await page.mouse.down();
+    await page.mouse.move(from.x, to.y, { steps: 10 });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    expect(await size()).toEqual(before);
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => chart.state().clusterOrder)).toEqual(["c", "d", "a", "b", "e"]);
+    await page.evaluate(() => { chart.undo(); chart.locusSelection(["locus-a", "locus-c"]); });
+    const a = await plotPoint(page, renderer, clusterLabel("a")), b = await plotPoint(page, renderer, clusterLabel("b"));
+    await page.mouse.move(a.x, a.y); await page.mouse.down();
+    await page.mouse.move(a.x, b.y, { steps: 10 }); await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => chart.state().clusterOrder)).toEqual(["b", "a", "c", "d", "e"]);
+  });
+}
+
+test("editor parent ranges and contextual actions keep the table stationary", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await view(page, "genes");
+  await editor(page).getByRole("button", { name: "Collapse all", exact: true }).click();
+  const rows = editor(page).locator(".cm-editor__tree-parent"), before = await rows.first().boundingBox();
+  await rows.first().getByRole("checkbox").check();
+  expect((await rows.first().boundingBox()).y).toBe(before.y);
+  await rows.nth(2).getByRole("checkbox").click({ modifiers: ["Shift"] });
+  expect((await rows.first().boundingBox()).y).toBe(before.y);
+  await expect(editor(page).locator(".cm-data-meta").first()).toContainText("4 genes selected");
+  expect(await page.evaluate(() => window.getSelection().toString())).toBe("");
+  await editor(page).locator('[data-gene-view-kind="groups"]').click();
+  const groups = editor(page).locator(".cm-editor__tree-parent");
+  await groups.last().getByRole("checkbox").click({ modifiers: ["Shift"] });
+  await editor(page).locator(".cm-data-actions summary").filter({ hasText: /^Remove…$/ }).click();
+  await expect(editor(page).locator('[data-command="remove-loci"]')).toHaveCount(0);
+  await expect(editor(page).locator('[data-command="remove-clusters"]')).toHaveCount(0);
+  await expect(editor(page).locator('[data-command="delete-groups"]')).toBeVisible();
+  const geneCount = await page.evaluate(() => chart.data().clusters.flatMap((cluster) => cluster.loci).flatMap((locus) => locus.genes).length);
+  page.once("dialog", (dialog) => dialog.accept());
+  await editor(page).locator('[data-command="delete-groups"]').click();
+  expect(await page.evaluate(() => chart.data().groups.length)).toBeLessThan(3);
+  expect(await page.evaluate(() => chart.data().clusters.flatMap((cluster) => cluster.loci).flatMap((locus) => locus.genes).length)).toBe(geneCount);
+  await page.evaluate(() => chart.undo());
+  expect(await page.evaluate(() => chart.data().groups.length)).toBe(3);
 });
