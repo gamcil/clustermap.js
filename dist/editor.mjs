@@ -3663,12 +3663,20 @@ class DataPanelModel {
       : (this.#data?.[kind] || []).map(({ uid }) => uid);
   }
 
+  selectedParents(kind, selection) {
+    if (!selection.size) return [];
+    const clusters = this.#records().clusters;
+    const parents = kind === "loci" ? clusters.flatMap(({ loci }) => loci) : clusters;
+    return parents.filter(({ ids }) => ids.length && ids.every((id) => selection.has(id))).map(({ record }) => record.uid);
+  }
+
   view(options) {
     const key = JSON.stringify([options.kind, options.geneView, options.filter, options.memberGroupId, options.sort, [...options.expanded]]);
     if (this.#view?.key === key) return this.#view;
-    const rows = this.#computeRows(options);
+    const branches = [], memberGroup = this.#data?.groups.find((group) => group.uid === options.memberGroupId);
+    const rows = this.#computeRows({ ...options, branches, memberGroup });
     const ids = [...new Set(rows.flatMap((row) => row.selectIds || (row.type === "gene" || !row.type ? [row.id] : [])))];
-    return this.#view = { key, rows, ids, byKey: new Map(rows.map((row) => [row.key ?? row.id, row])),
+    return this.#view = { key, rows, ids, branches, memberGroup, hasCollapsed: branches.some((row) => !row.open), byKey: new Map(rows.map((row) => [row.key ?? row.id, row])),
       parentCount: rows.filter((row) => row.type && row.type !== "gene").length };
   }
 
@@ -3678,20 +3686,25 @@ class DataPanelModel {
 
     const groups = new Map((data.groups || []).flatMap((group) => (group.genes || []).map((id) => [id, group])));
     const groupById = new Map((data.groups || []).map((group) => [String(group.uid), group]));
-    const genes = [];
+    const genes = [], clusters = [];
     const geneById = new Map();
     for (const cluster of data.clusters || []) {
+      const loci = [];
       for (const locus of cluster.loci || []) {
+        const ids = [];
         for (const gene of locus.genes || []) {
           geneById.set(gene.uid, gene);
           genes.push({ gene, locus, cluster });
+          ids.push(gene.uid);
         }
+        loci.push({ record: locus, ids });
       }
+      clusters.push({ record: cluster, loci, ids: loci.flatMap(({ ids }) => ids) });
     }
-    return this.#index = { groups, groupById, genes, geneById };
+    return this.#index = { groups, groupById, genes, geneById, clusters };
   }
 
-  #computeRows({ kind, geneView, filter, memberGroupId, sort, expanded }) {
+  #computeRows({ kind, geneView, filter, memberGroupId, memberGroup, sort, expanded, branches }) {
     const data = this.#data;
     if (!data) return [];
     const needle = filter;
@@ -3714,13 +3727,12 @@ class DataPanelModel {
         colour: link.colour,
       })), sort);
     }
-    const memberGroup = data.groups.find((group) => group.uid === memberGroupId);
     memberGroupId = memberGroup?.uid ?? null;
     const memberIds = memberGroup && new Set(memberGroup.genes || []);
     const genes = cache.genes.filter(({ gene, locus, cluster }) =>
       (!memberIds || memberIds.has(gene.uid)) && includes(labelFor(gene, gene.uid), labelFor(locus, locus.uid), labelFor(cluster, cluster.uid), labelFor(groups.get(gene.uid), "Ungrouped")));
-    if (geneView === "tree") return treeRows(data, groups, genes, { needle, memberGroupId, expanded });
-    if (geneView === "groups") return groupTreeRows(data, groups, genes, { needle, expanded });
+    if (geneView === "tree") return treeRows(cache.clusters, groups, genes, { needle, memberGroupId, expanded, branches });
+    if (geneView === "groups") return groupTreeRows(data, groups, genes, { needle, expanded, branches });
     return sortRows(genes.map(({ gene, locus, cluster }) => geneRow(gene, locus, cluster, groups)), sort);
   }
 }
@@ -3741,36 +3753,40 @@ function geneRow(gene, locus, cluster, groups, depth = null) {
   return { ...(depth === null ? {} : { type: "gene", depth }), id: gene.uid, label: labelFor(gene, gene.uid), locus: labelFor(locus, locus.uid), cluster: labelFor(cluster, cluster.uid), group: labelFor(groups.get(gene.uid), "Ungrouped"), colour: gene.colour || groups.get(gene.uid)?.colour };
 }
 
-function treeRows(data, groups, visible, { needle, memberGroupId, expanded }) {
+function treeRows(clusters, groups, visible, { needle, memberGroupId, expanded, branches }) {
   const visibleIds = new Set(visible.map(({ gene }) => gene.uid));
   const rows = [];
-  for (const cluster of data.clusters) {
-    const loci = cluster.loci.map((locus) => ({ locus, genes: locus.genes.filter((gene) => visibleIds.has(gene.uid)) }))
+  for (const { record: cluster, loci: members } of clusters) {
+    const loci = members.map(({ record: locus }) => ({ locus, genes: locus.genes.filter((gene) => visibleIds.has(gene.uid)) }))
       .filter(({ locus, genes }) => genes.length || (!needle && memberGroupId == null && !locus.genes.length));
     if (!loci.length && (cluster.loci.length || needle || memberGroupId != null)) continue;
     if (loci.length === 1) {
       const { locus, genes } = loci[0];
       const key = `cluster-locus:${cluster.uid}:${locus.uid}`;
       const open = Boolean(needle) || expanded.has(key);
-      rows.push({ type: "cluster-locus", key, cluster, locus, label: labelFor(cluster, cluster.uid), locusLabel: labelFor(locus, locus.uid), count: genes.length, selectIds: genes.map((gene) => gene.uid), open });
+      const row = { type: "cluster-locus", key, cluster, locus, label: labelFor(cluster, cluster.uid), locusLabel: labelFor(locus, locus.uid), count: genes.length, selectIds: genes.map((gene) => gene.uid), open };
+      branches.push(row); rows.push(row);
       if (open) rows.push(...genes.map((gene) => geneRow(gene, locus, cluster, groups, 1)));
       continue;
     }
     const key = `cluster:${cluster.uid}`;
     const open = Boolean(needle) || expanded.has(key);
-    rows.push({ type: "cluster", key, cluster, label: labelFor(cluster, cluster.uid), count: loci.reduce((count, item) => count + item.genes.length, 0), selectIds: loci.flatMap(({ genes }) => genes.map((gene) => gene.uid)), open });
-    if (!open) continue;
+    const row = { type: "cluster", key, cluster, label: labelFor(cluster, cluster.uid), count: loci.reduce((count, item) => count + item.genes.length, 0), selectIds: loci.flatMap(({ genes }) => genes.map((gene) => gene.uid)), open };
+    branches.push(row); rows.push(row);
     for (const { locus, genes } of loci) {
       const locusKey = `locus:${locus.uid}`;
       const locusOpen = Boolean(needle) || expanded.has(locusKey);
-      rows.push({ type: "locus", key: locusKey, locus, label: labelFor(locus, locus.uid), count: genes.length, selectIds: genes.map((gene) => gene.uid), open: locusOpen, depth: 1 });
+      const row = { type: "locus", key: locusKey, parentKey: key, cluster, locus, label: labelFor(locus, locus.uid), count: genes.length, selectIds: genes.map((gene) => gene.uid), open: locusOpen, depth: 1 };
+      branches.push(row);
+      if (!open) continue;
+      rows.push(row);
       if (locusOpen) rows.push(...genes.map((gene) => geneRow(gene, locus, cluster, groups, 2)));
     }
   }
   return rows;
 }
 
-function groupTreeRows(data, groups, visible, { needle, expanded }) {
+function groupTreeRows(data, groups, visible, { needle, expanded, branches }) {
   const entries = new Map(visible.map((entry) => [entry.gene.uid, entry]));
   const buckets = [
     ...(data.groups || []).map((group) => ({ group, key: `gene-group:${group.uid}`, label: labelFor(group, group.uid), genes: (group.genes || []).map((id) => entries.get(id)).filter(Boolean) })),
@@ -3780,7 +3796,8 @@ function groupTreeRows(data, groups, visible, { needle, expanded }) {
   for (const bucket of buckets) {
     if (!bucket.genes.length) continue;
     const open = Boolean(needle) || expanded.has(bucket.key);
-    rows.push({ type: "gene-group", group: bucket.group, key: bucket.key, label: bucket.label, count: bucket.genes.length, selectIds: bucket.genes.map(({ gene }) => gene.uid), open });
+    const row = { type: "gene-group", group: bucket.group, key: bucket.key, label: bucket.label, count: bucket.genes.length, selectIds: bucket.genes.map(({ gene }) => gene.uid), open };
+    branches.push(row); rows.push(row);
     if (open) rows.push(...bucket.genes.map(({ gene, locus, cluster }) => geneRow(gene, locus, cluster, groups, 1)));
   }
   return rows;
@@ -4017,15 +4034,11 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     this.#kind = "genes"; this.#geneView = "tree";
     this.#filter = ""; this.#memberGroupId = null;
     const selected = new Set(ids), genes = [];
-    for (const cluster of this.#data()?.clusters || []) {
-      const loci = cluster.loci.filter((locus) => selected.has(kind === "clusters" ? cluster.uid : locus.uid));
-      if (!loci.length) continue;
-      this.#expanded.add(`cluster:${cluster.uid}`);
-      this.#expanded.add(`cluster-locus:${cluster.uid}:${cluster.loci[0]?.uid}`);
-      for (const locus of loci) {
-        this.#expanded.add(`locus:${locus.uid}`);
-        genes.push(...locus.genes.map((gene) => gene.uid));
-      }
+    for (const row of this.#view().branches) {
+      if (!selected.has(row[kind === "clusters" ? "cluster" : "locus"]?.uid)) continue;
+      this.#expanded.add(row.key);
+      if (row.parentKey) this.#expanded.add(row.parentKey);
+      if (row.locus) genes.push(...row.selectIds);
     }
     this.#selected.clear(); this.#selected.setMany(genes);
     this.#renderData(); this.#syncHighlight();
@@ -4096,7 +4109,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   #command(command, value) {
     if (command === "remove-loci" || command === "remove-clusters") {
       const kind = command === "remove-loci" ? "loci" : "clusters";
-      this.#removeRecords(kind, this.#selectedParents(kind));
+      this.#removeRecords(kind, this.#model.selectedParents(kind, this.#selected));
       return;
     }
     if (command === "delete" || command === "delete-groups") {
@@ -4171,26 +4184,13 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   }
 
   #initializeExpanded() {
-    const data = this.#data();
-    const geneCount = data?.clusters?.flatMap((cluster) => cluster.loci).reduce((count, locus) => count + locus.genes.length, 0) || 0;
+    const geneCount = this.#model.recordIds("genes").length;
     if (!geneCount || geneCount > 500) return;
     this.#expandTree("tree"); this.#expandTree("groups");
   }
 
   #expandTree(view) {
-    const data = this.#data();
-    if (view === "groups") {
-      for (const group of data?.groups || []) this.#expanded.add(`gene-group:${group.uid}`);
-      this.#expanded.add("gene-group:ungrouped");
-      return;
-    }
-    for (const cluster of data?.clusters || []) {
-      if (cluster.loci.length === 1) this.#expanded.add(`cluster-locus:${cluster.uid}:${cluster.loci[0].uid}`);
-      else {
-        this.#expanded.add(`cluster:${cluster.uid}`);
-        for (const locus of cluster.loci) this.#expanded.add(`locus:${locus.uid}`);
-      }
-    }
+    for (const row of this.#view({ kind: "genes", geneView: view }).branches) this.#expanded.add(row.key);
   }
 
   #groupId(value) { this.#data(); return this.#model.groupId(value); }
@@ -4209,10 +4209,10 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     this.#renderData(); this.#syncHighlight();
   }
 
-  #view() {
+  #view(options = {}) {
     this.#data();
     return this.#model.view({ kind: this.#kind, geneView: this.#geneView, filter: this.#filter,
-      memberGroupId: this.#memberGroupId, sort: this.#sort[this.#kind], expanded: this.#expanded });
+      memberGroupId: this.#memberGroupId, sort: this.#sort[this.#kind], expanded: this.#expanded, ...options });
   }
 
   #setDataFilter(text) {
@@ -4251,8 +4251,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     }
     const geneView = this.querySelector("[data-gene-view]");
     const memberFilter = this.querySelector("[data-member-filter]");
-    const memberGroup = data.groups.find((group) => group.uid === this.#memberGroupId);
-    const { rows, ids, parentCount } = this.#view();
+    const { rows, ids, parentCount, memberGroup, hasCollapsed } = this.#view();
     memberFilter.hidden = !memberGroup || this.#kind !== "genes";
     this.querySelector("[data-record-tools]").hidden = memberFilter.hidden;
     if (memberGroup) this.querySelector("[data-member-label]").textContent = memberGroup.label || memberGroup.name || memberGroup.uid;
@@ -4262,7 +4261,6 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     const treeButton = this.querySelector('[data-command="toggle-tree"]');
     treeButton.hidden = !isTree || Boolean(this.#filter);
     if (isTree) {
-      const hasCollapsed = rows.some((row) => row.type !== "gene" && !row.open);
       treeButton.textContent = hasCollapsed ? "Expand visible" : "Collapse all";
       treeButton.title = hasCollapsed ? "Expand all currently visible branches" : "Collapse every tree branch";
     }
@@ -4274,7 +4272,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       noun: this.#kind.slice(0, -1), selectSuffix: isTree ? " genes" : "" };
     const parentRemoval = this.#kind === "genes" && this.#geneView === "tree" && this.#chart?.remove;
     this.#actions.state = { kind: this.#kind, count: this.#selected.size, groups: this.#selectedGroups(), allGroups: data.groups,
-      loci: parentRemoval ? this.#selectedParents("loci") : [], clusters: parentRemoval ? this.#selectedParents("clusters") : [] };
+      loci: parentRemoval ? this.#model.selectedParents("loci", this.#selected) : [], clusters: parentRemoval ? this.#model.selectedParents("clusters", this.#selected) : [] };
   }
 
   #selectedGroups() {
@@ -4282,15 +4280,6 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     if (this.#kind !== "genes" || this.#geneView !== "groups") return [];
     return this.#view().rows.filter((row) => row.type === "gene-group" && row.group?.genes?.length &&
       row.group.genes.every((id) => this.#selected.has(id))).map((row) => row.group);
-  }
-
-  #selectedParents(kind) {
-    const clusters = this.#data()?.clusters || [];
-    const records = kind === "loci" ? clusters.flatMap((cluster) => cluster.loci) : clusters;
-    return records.filter((record) => {
-      const genes = kind === "loci" ? record.genes : record.loci.flatMap((locus) => locus.genes);
-      return genes.length && genes.every((gene) => this.#selected.has(gene.uid));
-    }).map((record) => record.uid);
   }
 
   #removeRecords(kind, ids) {
@@ -4342,8 +4331,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   }
 
   #toggleTree() {
-    const rows = this.#view().rows;
-    if (rows.some((row) => row.type !== "gene" && !row.open)) this.#expandTree(this.#geneView);
+    if (this.#view().hasCollapsed) this.#expandTree(this.#geneView);
     else this.#expanded.clear();
     this.#renderData();
   }
