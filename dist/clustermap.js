@@ -8186,7 +8186,7 @@
 [data-clustermap-theme] :is(button,select,input:not([type=color]):not([type=checkbox]),textarea):not(.cm-data-ui *) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }
 [data-clustermap-theme] button:hover:not(.cm-data-ui *) { background:var(--cm-hover)!important; }
 [data-clustermap-theme] button:disabled { opacity:.45; }
-clinker-editor[data-clustermap-theme] { background:var(--cm-surface); color:var(--cm-foreground); border-color:var(--cm-border); }
+:is(clinker-editor,clinker-data-panel)[data-clustermap-theme] { background:var(--cm-surface); color:var(--cm-foreground); border-color:var(--cm-border); }
 [data-clustermap-theme] .cm-annotation-menu :is(p,summary) { color:var(--cm-muted); }
 [data-clustermap-theme] :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { position:relative; z-index:1; background:transparent; color-scheme:light; }
 [data-clustermap-theme] .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border); }
