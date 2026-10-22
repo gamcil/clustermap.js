@@ -1,5 +1,5 @@
 import { createTemplate, mountComponent, updateSelectOptions } from "../../../ui/controls.mjs";
-import { textAsset } from "../../shared/textAsset.js";
+import { textAsset } from "../../../ui/assets.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./editable-field.html", import.meta.url)),

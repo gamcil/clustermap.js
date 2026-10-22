@@ -1,5 +1,5 @@
 import { createTemplate, mountComponent, colourHex, createActionRunner, upgradeProperty } from "../../../ui/controls.mjs";
-import { textAsset } from "../../shared/textAsset.js";
+import { textAsset } from "../../../ui/assets.mjs";
 import { controlStyles } from "../../shared/controls.mjs";
 import { defineSearchField } from "../search-field/search-field.js";
 import { defineTreeAppearance } from "../tree-appearance/tree-appearance.js";

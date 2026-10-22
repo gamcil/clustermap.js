@@ -11,7 +11,7 @@ import { defineSelectionBar } from "../selection-bar/selection-bar.js";
 import { defineViewSwitcher } from "../view-switcher/view-switcher.js";
 import { defineSearchField } from "../search-field/search-field.js";
 import { defineRecordActions } from "../record-actions/record-actions.js";
-import { textAsset } from "../../shared/textAsset.js";
+import { textAsset } from "../../../ui/assets.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./data-panel.html", import.meta.url)),

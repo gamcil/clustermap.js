@@ -1,6 +1,6 @@
 import { csvFormatRows } from "d3-dsv";
 import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
-import { textAsset } from "../../shared/textAsset.js";
+import { textAsset } from "../../../ui/assets.mjs";
 import { controlStyles } from "../../shared/controls.mjs";
 
 const [markup, css] = await Promise.all([

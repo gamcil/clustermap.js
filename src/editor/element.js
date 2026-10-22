@@ -4,7 +4,7 @@ import { controlStyles } from "./shared/controls.mjs";
 import { defineAppearancePanel } from "./components/appearance-panel/appearance-panel.js";
 import { defineTabs } from "./components/tabs/tabs.js";
 import { defineDataPanel } from "./components/data-panel/data-panel.js";
-import { textAsset } from "./shared/textAsset.js";
+import { textAsset } from "../ui/assets.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./element.html", import.meta.url)),

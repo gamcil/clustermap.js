@@ -1,17 +1,19 @@
 import { color } from "d3-color";
-import { installDataEditorStyle } from "../editor/shared/styles.mjs";
+import { installDataEditorStyle, installStyle } from "../editor/shared/styles.mjs";
 import { createControls, createActionRunner } from "../ui/controls.mjs";
 import { resolveTreePresentation } from "./presentation.mjs";
-import { installTreeControlsStyle } from "./controlsStyle.mjs";
+import { textAsset } from "../ui/assets.mjs";
+
+const css = await textAsset(new URL("./controls.css", import.meta.url));
 
 /** Controls for a single tree node and its subtree. */
 export function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUid = null,
   onResize, document: doc = globalThis.document }) {
   installDataEditorStyle(doc);
-  installTreeControlsStyle(doc);
+  installStyle(doc, "clustermap-tree-controls-style", css);
   const ui = createControls(doc);
   const element = (tag, parent, text, className) => ui.el(tag, text, parent, className);
-  const container = element("div", null, undefined, "cm-data-ui cm-tree-controls cm-tree-controls--popover");
+  const container = element("div", null, undefined, "cm-data-ui cm-tree-controls");
   const message = element("p"); message.setAttribute("role", "status");
   const run = createActionRunner((text) => { message.textContent = text; });
   const button = (parent, title, action, className) => ui.button(parent, title, () => run(action), className);

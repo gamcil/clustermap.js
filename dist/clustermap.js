@@ -10689,60 +10689,16 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     };
   }
 
-  // Structural styles and the same neutral controls used by the plot editor.
-  function installTreeControlsStyle(doc) {
-    if (doc.getElementById("clustermap-tree-controls-style")) return;
-    const style = doc.createElement("style");
-    style.id = "clustermap-tree-controls-style";
-    style.textContent = `
-.cm-tree-controls { font:inherit; color:inherit; text-align:left; }
-.cm-tree-controls * { box-sizing:border-box; }
-.cm-tree-controls [hidden] { display:none!important; }
-.cm-tree-controls fieldset { min-width:0; margin:0 0 10px; padding:8px; border:1px solid var(--cm-border,#ddd); border-radius:4px; }
-.cm-tree-controls legend { padding:0 4px; font-weight:600; }
-.cm-tree-controls button[aria-pressed=true] { font-weight:600; }
-.cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:6px; margin:6px 0; }
-.cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }
-.cm-tree-controls input[type=number] { width:64px; min-width:0; }
-.cm-tree-controls input[type=range] { width:100%; }
-.cm-tree-controls select { width:132px; min-width:0; }
-.cm-tree-controls input[type=color] { width:30px; height:24px; padding:0; border:0; background:transparent; cursor:pointer; }
-.cm-tree-controls .cm-tree-heading { font-weight:600; margin-bottom:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cm-tree-controls .cm-tree-branch-row { display:grid; grid-template-columns:minmax(0,1fr) 30px 64px 28px; gap:6px; align-items:center; margin:8px 0; }
-.cm-tree-controls .cm-tree-reset { width:28px; padding:2px; min-height:26px; }
-.cm-tree-controls .cm-tree-wide { display:block; }
-.cm-tree-controls .cm-tree-wide > span { display:block; margin-bottom:4px; }
-.cm-tree-controls .cm-tree-wide input, .cm-tree-controls .cm-tree-wide select { width:100%; }
-.cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
-.cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }
-.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid var(--cm-border,#e5e9ef); margin:10px 0; }
-.cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:10px; }
-.cm-tree-controls [role=status]:empty { display:none; }
-.cm-tree-controls [role=status] { color:var(--cm-danger,#a13c46); margin:6px 0 0; }
-.cm-tree-controls--popover { width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font-size:12px; line-height:1.3; }
-.cm-tree-controls--popover .cm-tree-heading { font-size:12px; margin-bottom:6px; }
-.cm-tree-controls--popover button, .cm-tree-controls--popover input:not([type=checkbox]):not([type=color]) { min-height:24px; padding:2px 5px; border-radius:4px; }
-.cm-tree-controls--popover input[type=number] { width:52px; }
-.cm-tree-controls--popover input[type=color] { width:24px; height:20px; }
-.cm-tree-controls--popover input[type=checkbox] { width:12px; height:12px; margin:0; }
-.cm-tree-controls--popover .cm-tree-branch-row { grid-template-columns:minmax(0,1fr) 24px 52px 22px; gap:5px; margin:5px 0; }
-.cm-tree-controls--popover .cm-tree-reset { width:22px; min-height:22px; padding:0; }
-.cm-tree-controls--popover .cm-tree-row { margin:4px 0; gap:4px; }
-.cm-tree-controls--popover .cm-tree-format { gap:5px; }
-.cm-tree-controls--popover .cm-tree-separator { margin:6px 0; }
-.cm-tree-controls--popover .cm-tree-actions { margin-top:6px; }
-`;
-    doc.head.append(style);
-  }
+  const css = ".cm-tree-controls { --cm-control-height:24px; --cm-control-padding:2px 5px; --cm-control-radius:4px; width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font:inherit; font-size:12px; line-height:1.3; color:inherit; text-align:left; }\n.cm-tree-controls * { box-sizing:border-box; }\n.cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:4px; margin:4px 0; }\n.cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }\n.cm-tree-controls input[type=number] { width:52px; min-width:0; }\n.cm-tree-controls input[type=color] { width:24px; height:20px; }\n.cm-tree-controls input[type=checkbox] { width:12px; height:12px; margin:0; }\n.cm-tree-controls .cm-tree-heading { font-size:12px; font-weight:600; margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.cm-tree-controls .cm-tree-branch-row { display:grid; grid-template-columns:minmax(0,1fr) 24px 52px 22px; gap:5px; align-items:center; margin:5px 0; }\n.cm-tree-controls .cm-tree-reset { width:22px; min-height:22px; padding:0; }\n.cm-tree-controls .cm-tree-wide { display:block; }\n.cm-tree-controls .cm-tree-wide > span { display:block; margin-bottom:4px; }\n.cm-tree-controls .cm-tree-wide input { width:100%; }\n.cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:5px; }\n.cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }\n.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid var(--cm-border,#e5e9ef); margin:6px 0; }\n.cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:6px; }\n.cm-tree-controls [role=status]:empty { display:none; }\n.cm-tree-controls [role=status] { color:var(--cm-danger,#a13c46); margin:6px 0 0; }\n";
 
   /** Controls for a single tree node and its subtree. */
   function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUid = null,
     onResize, document: doc = globalThis.document }) {
     installDataEditorStyle(doc);
-    installTreeControlsStyle(doc);
+    installStyle(doc, "clustermap-tree-controls-style", css);
     const ui = createControls(doc);
     const element = (tag, parent, text, className) => ui.el(tag, text, parent, className);
-    const container = element("div", null, undefined, "cm-data-ui cm-tree-controls cm-tree-controls--popover");
+    const container = element("div", null, undefined, "cm-data-ui cm-tree-controls");
     const message = element("p"); message.setAttribute("role", "status");
     const run = createActionRunner((text) => { message.textContent = text; });
     const button = (parent, title, action, className) => ui.button(parent, title, () => run(action), className);

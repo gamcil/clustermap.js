@@ -1,6 +1,6 @@
 import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
 import { createVirtualRows } from "../../../ui/virtualRows.mjs";
-import { textAsset } from "../../shared/textAsset.js";
+import { textAsset } from "../../../ui/assets.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./data-table.html", import.meta.url)),

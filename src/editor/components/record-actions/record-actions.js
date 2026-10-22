@@ -1,5 +1,5 @@
 import { createTemplate, mountComponent, updateSelectOptions } from "../../../ui/controls.mjs";
-import { textAsset } from "../../shared/textAsset.js";
+import { textAsset } from "../../../ui/assets.mjs";
 import { controlStyles } from "../../shared/controls.mjs";
 import { defineActionMenu } from "../action-menu/action-menu.js";
 

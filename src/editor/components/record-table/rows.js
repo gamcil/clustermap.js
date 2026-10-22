@@ -1,5 +1,5 @@
 import { createTemplate, colourHex } from "../../../ui/controls.mjs";
-import { textAsset } from "../../shared/textAsset.js";
+import { textAsset } from "../../../ui/assets.mjs";
 
 const rowTemplates = createTemplate(await textAsset(new URL("./rows.html", import.meta.url)));
 const definitions = new WeakMap();

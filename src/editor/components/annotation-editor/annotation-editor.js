@@ -7,7 +7,7 @@ import { defineAnnotationGroupEditor } from "../annotation-group-editor/annotati
 import { defineAnnotationTable } from "../annotation-table/annotation-table.js";
 import { createTemplate, createActionRunner } from "../../../ui/controls.mjs";
 import { createAnnotationPanel, parseAnnotationTable, annotationTableText, mapAnnotationValues } from "../../../annotations/data.mjs";
-import { textAsset } from "../../shared/textAsset.js";
+import { textAsset } from "../../../ui/assets.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./annotation-editor.html", import.meta.url)),

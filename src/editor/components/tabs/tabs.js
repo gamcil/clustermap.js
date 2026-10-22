@@ -1,5 +1,5 @@
 import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
-import { textAsset } from "../../shared/textAsset.js";
+import { textAsset } from "../../../ui/assets.mjs";
 import { bindOptionButtons } from "../../shared/optionButtons.js";
 
 const [markup, css] = await Promise.all([

@@ -1,5 +1,5 @@
 import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
-import { textAsset } from "../../shared/textAsset.js";
+import { textAsset } from "../../../ui/assets.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./action-menu.html", import.meta.url)),
