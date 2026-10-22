@@ -256,6 +256,11 @@ function sceneChromeOptions(data) {
   };
 }
 
+function clusterOrderForData(data) {
+  const ids = new Set(data.clusters.map((cluster) => cluster.uid));
+  return getClusterOrder(chartState).filter((uid) => ids.has(uid));
+}
+
 function buildChartScene(data) {
   // Resolve link policy once for all renderers and their previews.
   allowedLinkIds = new Set(filterLinks(data.links, {
@@ -264,7 +269,7 @@ function buildChartScene(data) {
     bestOnly: config.link.bestOnly,
     threshold: config.link.threshold,
   }).map((link) => link.uid));
-  const clusterOrder = getClusterOrder(chartState);
+  const clusterOrder = clusterOrderForData(data);
   currentScene = buildScene(data, {
     ...sceneProjectionOptions({
       tree: data.tree,
@@ -298,7 +303,7 @@ function patchChartScene(previousScene, changes = {}, data) {
   currentScene = patchScene(previousScene, { loci, clusters }, {
     ...sceneProjectionOptions({
       tree: data.tree,
-      clusterOrder: getClusterOrder(chartState),
+      clusterOrder: clusterOrderForData(data),
     }),
     clusterOffset: scales.offset,
     clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
@@ -380,7 +385,7 @@ function updateScales(data, { geometryOnly = false } = {}) {
     rescaleRanges(oldX);
   }
 
-  scales.y.domain(getClusterOrder(chartState));
+  scales.y.domain(clusterOrderForData(data));
   const body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
   scales.y.range(data.clusters.map((cluster, index) => index * (config.cluster.spacing + body)));
 

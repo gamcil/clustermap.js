@@ -38,7 +38,7 @@ export function mountPlotSelectionToolbar(chart, container) {
   container.addEventListener("focusin", activate);
   document.addEventListener("keydown", onKeyDown);
   const unsubscribe = chart.on("change", (change) => {
-    if (change.type === "loci.select") sync();
+    if (change.type === "loci.select" || change.type === "state.replace") sync();
   });
   container.append(root);
   sync();

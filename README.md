@@ -205,6 +205,8 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | --- | --- |
 | `config(options)` / `config()` | Merge settings and redraw / read current settings. |
 | `data(data)` / `data()` | Replace data / read normalized data. Replacement clears history. |
+| `visibleData()` | Read the filtered data currently included in the plot. |
+| `remove({clusters, loci})` | Remove cluster/locus IDs and their contents from the plot, preserving source data. Undoable; removing a cluster's last locus also removes that cluster. |
 | `state(snapshot)` / `state()` | Restore / read JSON-safe layout and camera state. |
 | `project(project)` / `project()` | Restore / export `{format, version, data, config, state}`. Loading clears history; callbacks are omitted from JSON. |
 | `patch(operations)` | Validate and apply an atomic batch of edits as one undo step. |

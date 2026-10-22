@@ -1,3 +1,4 @@
+import { visibleChartData } from "./data/visibility.mjs";
 import { animate as runAnimation, afterPaint } from "./animation.mjs";
 import { select } from "d3-selection";
 import { transition as createTransition } from "d3-transition";
@@ -110,7 +111,7 @@ export default function clusterMap() {
   const figureSurface = createFigureSurface();
   function updateFigureSurface() {
     if (container) figureSurface.update(container, runtime.getScene(), runtime.renderConfig,
-      currentData?.tree, getCamera(chartState), scenePreview);
+      plotData?.tree, getCamera(chartState), scenePreview);
   }
   let annotationOverlay = null;
   let themeMedia = null;
@@ -139,6 +140,12 @@ export default function clusterMap() {
   let rasterCanvas = null, overlayCanvas = null, minimapCanvas = null;
   let minimapScene = null, minimapMeasurement = null;
   let currentData = null;
+  let plotData = null;
+  let plotDataDirty = true;
+  const displayClusterOrder = () => {
+    const ids = new Set(plotData.clusters.map((cluster) => cluster.uid));
+    return getClusterOrder(chartState).filter((uid) => ids.has(uid));
+  };
   let figureMeasurementContext = null;
   let chartIndex = null;
   let highlightGeneIds = new Set();
@@ -205,9 +212,9 @@ export default function clusterMap() {
   };
   const interactionController = createInteractionController({
     clusterRows: () => runtime.scales.y.range(),
-    getClusterOrder: () => getClusterOrder(chartState),
+    getClusterOrder: displayClusterOrder,
     getClusterPosition: (uid) => runtime.getScene().clusters.get(uid).y,
-    getTree: () => currentData?.tree || null,
+    getTree: () => plotData?.tree || null,
     getLocusOffset: (uid) => getLocusOffset(chartState, uid),
     selectedLocusIds: () => [...selectedLocusIds],
     selectedClusterIds: () => new Set(
@@ -234,7 +241,7 @@ export default function clusterMap() {
           clusterUid: uid,
           position,
           positions,
-          order: getClusterOrder(chartState),
+          order: displayClusterOrder(),
           rows: runtime.scales.y.range(),
         });
         scheduleScenePaint();
@@ -245,11 +252,13 @@ export default function clusterMap() {
     commitClusterOrder: () => {
       const sourceScene = runtime.getScene();
       const preview = scenePreview?.type === "cluster-drag" ? scenePreview : null;
-      const order = [...getClusterOrder(chartState)];
+      const order = displayClusterOrder();
       const rows = runtime.scales.y.range();
       if (sourceScene) sceneCommit = { sourceScene, changes: {} };
       commitPreviewClusterOrder(chartState);
-      setTreeClusterOrder(currentData.tree, order);
+      const treeOrder = setTreeClusterOrder(currentData.tree, order, { partial: chartState.excludedClusters.size > 0 });
+      if (treeOrder) chartState.clusterOrder = treeOrder;
+      plotDataDirty = true;
       if (
         preview &&
         sourceScene &&
@@ -326,7 +335,7 @@ export default function clusterMap() {
         // Updating scales is inexpensive and gives the sparse projection the
         // packed x offsets for this temporary locus state. Deliberately avoid
         // rebuilding data, indexes, or the complete scene until release.
-        runtime.updateScales(currentData, { geometryOnly: true });
+        runtime.updateScales(plotData, { geometryOnly: true });
         scenePreview = createLocusTrimPreview(runtime.getScene(), locus.uid, result.state, {
           localXFor: runtime.scales.locus,
           scaleX: runtime.scales.x,
@@ -376,7 +385,7 @@ export default function clusterMap() {
         const duration = runtime.config.plot.transitionDuration;
         const finish = () => {
           runtime.synchronizeLocusLayoutState(locus);
-          const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, currentData);
+          const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, plotData);
           if (useGpu) {
             webgpuBackend.adoptScene(targetScene, sourceScene, {
               scales: runtime.scales, config: runtime.renderConfig,
@@ -438,7 +447,7 @@ export default function clusterMap() {
     cancelCanvasFlip = null;
     if (!pending.targetScene) {
       runtime.synchronizeLocusLayoutState(pending.locus);
-      pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, currentData);
+      pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, plotData);
       commitInteractionState();
     }
     canvasScene = pending.targetScene;
@@ -452,7 +461,7 @@ export default function clusterMap() {
     if (canvasPendingFlip !== pending) return;
     cancelCanvasFlip = null;
     runtime.synchronizeLocusLayoutState(pending.locus);
-    pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, currentData);
+    pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, plotData);
     commitInteractionState();
     canvasBackend.prepareFlip(pending.locus.uid, pending.sourceScene);
     // Restore and repaint the affected canvas region before the browser can
@@ -524,6 +533,7 @@ export default function clusterMap() {
     const prepared = normalizeChartData(data, runtime.config.tree);
     cancelTreePresentationPreview();
     currentData = prepared;
+    plotDataDirty = true;
     chartIndex = createChartIndex(currentData);
     refreshGroups();
     selectedLocusIds = new Set(
@@ -617,6 +627,7 @@ export default function clusterMap() {
     if (!annotationsOnly) stateSnapshots.reset();
     const groupsAutomaticBefore = groupsAreAutomatic();
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
+    plotDataDirty = true;
     const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
     if (restoringAutomatic) {
       currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
@@ -646,6 +657,7 @@ export default function clusterMap() {
   function cancelTreePresentationPreview() {
     if (!treePresentationPreview) return false;
     if (currentData?.tree === treePresentationPreview.tree) applyTreeOperation(currentData.tree, treePresentationPreview.undo);
+    plotDataDirty = true;
     treePresentationPreview = null;
     return true;
   }
@@ -655,6 +667,7 @@ export default function clusterMap() {
     pendingInteractionState = null;
     const before = chartState ? stateSnapshots.serialize(chartState, currentData) : null;
     chartState = chartStateFromSnapshot(currentData, snapshot);
+    plotDataDirty = true;
     runtime.setChartState(chartState);
     hasInitialView = true;
     redraw({ animate: false });
@@ -714,8 +727,8 @@ export default function clusterMap() {
       beginInteractionState();
       treeAnimation = {
         previousTree: {
-          ...currentData.tree,
-          nodes: currentData.tree.nodes.map((entry) => ({
+          ...plotData.tree,
+          nodes: plotData.tree.nodes.map((entry) => ({
             ...entry,
             children: entry.children ? [...entry.children] : undefined,
           })),
@@ -725,6 +738,7 @@ export default function clusterMap() {
       };
       sceneCommit = { sourceScene: runtime.getScene(), changes: {} };
       node.children.reverse();
+      plotDataDirty = true;
       chartState = createChartState(currentData, chartState);
       runtime.setChartState(chartState);
       redraw();
@@ -735,7 +749,7 @@ export default function clusterMap() {
       const anchor = locusForId(locusSelectionAnchorUid);
       if (clusterRange && anchor) {
         const range = lociForClusterRange(
-          getClusterOrder(chartState),
+          displayClusterOrder(),
           chartIndex?.clusterById || new Map(),
           anchor.clusterUid,
           locus.clusterUid
@@ -791,7 +805,7 @@ export default function clusterMap() {
       camera: getCamera(chartState),
       config: runtime.renderConfig,
       event,
-      tree: currentData.tree,
+      tree: plotData.tree,
       treeDragging: isDragging(chartState),
     });
   const locusForTarget = (target) =>
@@ -822,7 +836,7 @@ export default function clusterMap() {
   function sceneFrame(scene) {
     return {
       scene, camera: getCamera(chartState), config: runtime.renderConfig,
-      scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(), tree: currentData.tree,
+      scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(), tree: plotData.tree,
       preview: scenePreview, hoverLocusUid: canvasHoverLocusUid,
       suppressLocusHover: scenePreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
       previousTree: treeAnimation?.previousTree, previousTreeScene: treeAnimation?.previousScene,
@@ -843,7 +857,7 @@ export default function clusterMap() {
     if (!svg || svg.empty()) return;
     updateFigureSurface();
     return svgBackend.paint({ ...sceneFrame(svgBackend.pendingScene || runtime.getScene()),
-      plot: svg.select("g.clusterMapG"), data: currentData, annotationsOnly, previousScene, animate,
+      plot: svg.select("g.clusterMapG"), data: plotData, annotationsOnly, previousScene, animate,
       annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
       transition: animate ? createTransition().duration(runtime.config.plot.transitionDuration) : null,
       ids: runtime.ids, interactions: rendererInteractions });
@@ -929,7 +943,7 @@ export default function clusterMap() {
 
   function renderMinimapBase({ canvas, scene, projection }) {
     const options = runtime.config.plot.minimap;
-    renderCanvas({ canvas, scene, tree: currentData.tree, treeTrackAnchor: false,
+    renderCanvas({ canvas, scene, tree: plotData.tree, treeTrackAnchor: false,
       camera: { x: projection.x, y: projection.y, k: projection.scale },
       config: runtime.renderConfig, scales: runtime.scales, dimensions: projection, fullScene: true,
       layers: CANVAS_LAYERS.filter((layer) => layer !== "geneLabels" && layer !== "chrome" &&
@@ -939,9 +953,9 @@ export default function clusterMap() {
 
   function scheduleMinimapBase(scene) {
     if (!minimapCanvas || !runtime.config.plot.minimap?.show) return;
-    if (currentData.tree && runtime.config.tree.show) {
+    if (plotData.tree && runtime.config.tree.show) {
       minimapMeasurement ||= minimapCanvas.ownerDocument.createElement("canvas").getContext("2d");
-      scene = { ...scene, figureBounds: canvasFigureBounds(minimapMeasurement, scene, runtime.config, currentData.tree) };
+      scene = { ...scene, figureBounds: canvasFigureBounds(minimapMeasurement, scene, runtime.config, plotData.tree) };
     }
     minimapScene = scene;
     rasterMinimap.scheduleBase({ scene, minimap: minimapCanvas, options: runtime.config.plot.minimap,
@@ -1034,7 +1048,14 @@ export default function clusterMap() {
     if (!updatingTreeMenu || !retainedOverlay?.isTreeMenuOpen(currentData.tree)) {
       retainedOverlay?.hide(true);
     }
-    const data = currentData;
+    if (plotDataDirty) {
+      plotData = visibleChartData(currentData, chartState);
+      runtime.setChartIndex(plotData === currentData ? chartIndex : createChartIndex(plotData));
+      plotDataDirty = false;
+    }
+    selectedLocusIds = new Set([...selectedLocusIds].filter((uid) => !chartState.excludedLoci.has(uid) &&
+      !chartState.excludedClusters.has(locusForId(uid)?.clusterUid)));
+    const data = plotData;
 
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
@@ -1115,7 +1136,7 @@ export default function clusterMap() {
         eventNamespace: `.${runtime.ids.root}-tooltip`,
         actions: {
           redraw,
-          treeControls: () => ({ tree: currentData.tree, clusters: currentData.clusters, config: runtime.renderConfig.tree,
+          treeControls: () => ({ tree: plotData.tree, clusters: plotData.clusters, config: runtime.renderConfig.tree,
             patch: (ops) => updateFromTreeMenu(() => my.patch(ops)),
             rotate: (uid) => updateFromTreeMenu(() => rendererInteractions.rotateTreeNode(uid)) }),
           updateGene: (gene, changes) => my.patch([
@@ -1189,7 +1210,7 @@ export default function clusterMap() {
       if (!hasInitialView) fitInitialView(svg, plot);
     }
     updateFigureSurface();
-    if (runtime.config.annotations.enabled && currentData.clusters?.length) {
+    if (runtime.config.annotations.enabled && plotData.clusters?.length) {
       annotationUiContext = {
         surfaces: [useRaster ? canvas.node() : svg.node()],
         getScene: () => runtime.getScene(), getPreview: () => scenePreview,
@@ -1254,7 +1275,7 @@ export default function clusterMap() {
     const measurementCanvas = isWebGpuRenderer(runtime.config.plot.renderer)
       ? document.createElement("canvas")
       : canvas;
-    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, currentData.tree);
+    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, plotData.tree);
     if (!bounds) return;
 
     const camera = fitCameraForBounds({
@@ -1305,6 +1326,23 @@ export default function clusterMap() {
     container.datum(data).call(my);
     emitChange({ type: "data.replace" });
     clearHistory();
+    return my;
+  };
+  my.visibleData = () => plotData;
+  my.remove = function ({ clusters = [], loci = [] } = {}) {
+    if (!container || !chartState || !chartIndex) throw new Error("Cannot remove records before the chart has rendered.");
+    const validate = (ids, records, kind) => {
+      if (!Array.isArray(ids) || ids.some((uid) => !records.has(uid))) throw new TypeError(`Unknown ${kind} IDs.`);
+    };
+    validate(clusters, chartIndex.clusterById, "cluster");
+    validate(loci, chartIndex.locusById, "locus");
+    flushCanvasFlip();
+    cancelTreePresentationPreview();
+    const snapshot = stateSnapshots.serialize(chartState, currentData);
+    snapshot.excludedClusters = [...new Set([...(snapshot.excludedClusters || []), ...clusters])];
+    snapshot.excludedLoci = [...new Set([...(snapshot.excludedLoci || []), ...loci])];
+    if (snapshot.excludedClusters.length !== chartState.excludedClusters.size ||
+        snapshot.excludedLoci.length !== chartState.excludedLoci.size) setState(snapshot);
     return my;
   };
   /** A serializable layout and camera snapshot for project persistence. */
@@ -1378,6 +1416,7 @@ export default function clusterMap() {
       try { applyChartOperations(currentData, chartIndex, operations, runtime.config.tree); }
       catch (error) { redraw({ animate: false }); throw error; }
       treePresentationPreview = { tree, undo };
+      plotDataDirty = true;
     }
     redraw({ animate: false });
     return my;
@@ -1521,11 +1560,11 @@ export default function clusterMap() {
     return () => changeListeners.delete(listener);
   };
   /** Latest computed layout, excluding transient animation and drag geometry. */
-  my.figureBounds = () => figureSurface.bounds(container?.node(), runtime.getScene(), runtime.renderConfig, currentData?.tree);
+  my.figureBounds = () => figureSurface.bounds(container?.node(), runtime.getScene(), runtime.renderConfig, plotData?.tree);
   my.exportSvg = ({ padding = 20 } = {}) => {
     flushCanvasFlip();
     return exportChartSvg({
-      data: currentData,
+      data: plotData,
       scene: runtime.getScene(),
       config: runtime.renderConfig,
       scales: runtime.scales,
@@ -1567,6 +1606,8 @@ export default function clusterMap() {
       .interrupt()
       .remove();
     container = null;
+    plotData = null;
+    plotDataDirty = true;
     figureMeasurementContext = null;
     zoom = null;
     canvasZoom = null;

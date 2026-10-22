@@ -74,6 +74,8 @@ function snapshotFromBaseline(state, data, baseline) {
   }
   return {
     version: 1,
+    ...(state.excludedClusters.size ? { excludedClusters: [...state.excludedClusters] } : {}),
+    ...(state.excludedLoci.size ? { excludedLoci: [...state.excludedLoci] } : {}),
     // Tree child order changes with edits. Keep its leaf order explicit so an
     // undo snapshot can restore it even if it matched source cluster order.
     clusterOrder: !data.tree && state.clusterOrder.length === defaultOrder.length && state.clusterOrder.every((uid, index) => uid === defaultOrder[index])
@@ -131,7 +133,10 @@ export function chartStateFromSnapshot(data, snapshot) {
     locus.uid,
     new Map(locus.genes.map((gene) => [gene.uid, gene])),
   ]));
-  const restored = createChartState(data);
+  const restored = createChartState(data, {
+    excludedClusters: Array.isArray(snapshot.excludedClusters) ? snapshot.excludedClusters : [],
+    excludedLoci: Array.isArray(snapshot.excludedLoci) ? snapshot.excludedLoci : [],
+  });
   const applyOffsets = (entries, allowed, target) => stateEntries(entries).forEach(([uid, value]) => {
     if (allowed.has(uid) && finiteNumber(value) !== null) target.set(uid, value);
   });

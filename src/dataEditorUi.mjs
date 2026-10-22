@@ -18,7 +18,8 @@ export const segmentedControlMarkup = ({ label, items, attribute, value, attribu
 export const updateSegmentedControl = (root, attribute, value) => root.querySelectorAll(`[${attribute}]`)
   .forEach((button) => button.setAttribute("aria-pressed", String(button.getAttribute(attribute) === value)));
 
-export const dataActionGroupMarkup = (content) => `<span class="cm-data-action-group">${content}</span>`;
+export const dataActionMenuMarkup = (label, content) =>
+  `<details class="cm-data-action-menu"><summary>${escapeHtml(label)}</summary><div class="cm-data-action-menu-body">${content}</div></details>`;
 
 /** Shared controls and table primitives for the packaged and inline data editors. */
 export function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
@@ -36,7 +37,23 @@ export function createDataPanel(document, { label = "Editable chart data" } = {}
   const meta = ui.el("div", undefined, node, "cm-data-meta");
   const summary = ui.el("span", undefined, meta);
   const selectVisible = ui.button(meta, "Select all visible", null);
-  const actions = ui.el("div", undefined, node, "cm-data-actions"); actions.hidden = true;
+  const actions = ui.el("div", undefined, meta, "cm-data-actions"); actions.hidden = true;
+  meta.append(selectVisible);
+  actions.addEventListener("toggle", (event) => {
+    if (event.target.open) for (const menu of actions.querySelectorAll("details[open]")) if (menu !== event.target) menu.open = false;
+  }, true);
+  node.addEventListener("pointerdown", (event) => {
+    for (const menu of actions.querySelectorAll("details[open]")) if (!menu.contains(event.target)) menu.open = false;
+  });
+  node.addEventListener("mousedown", (event) => {
+    if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
+        !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable]')) event.preventDefault();
+  });
+  actions.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const menu = event.target.closest("details[open]");
+    if (menu) { menu.open = false; menu.querySelector("summary").focus(); event.preventDefault(); event.stopPropagation(); }
+  });
   const viewport = ui.el("div", undefined, node, "cm-data-table");
   viewport.setAttribute("role", "region"); viewport.setAttribute("aria-label", label);
   return { node, tools, meta, summary, selectVisible, actions, viewport,
@@ -44,11 +61,12 @@ export function createDataPanel(document, { label = "Editable chart data" } = {}
 }
 
 /** Keep selection controls independent of the table's row and action rendering. */
-export function createSelectionControls(panel, { selection, onChange, checkbox } = {}) {
+export function createSelectionControls(panel, { selection, onChange, checkbox, menuLabel } = {}) {
   const ui = createControls(panel.node.ownerDocument);
-  const count = ui.el("strong", undefined, panel.actions);
-  const actions = ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
-  ui.button(panel.actions, "Clear selection", () => { selection.clear(); onChange(); });
+  if (menuLabel) panel.actions.innerHTML = dataActionMenuMarkup(menuLabel, "");
+  const actions = menuLabel ? panel.actions.querySelector(".cm-data-action-menu-body")
+    : ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
+  ui.button(panel.actions, "Clear", () => { selection.clear(); onChange(); }).setAttribute("aria-label", "Clear selection");
   let visibleIds = [];
   panel.selectVisible.onclick = () => { selection.setMany(visibleIds); onChange(); };
   if (checkbox) checkbox.onchange = () => { selection.setMany(visibleIds, checkbox.checked); onChange(); };
@@ -57,12 +75,14 @@ export function createSelectionControls(panel, { selection, onChange, checkbox }
       visibleIds = ids;
       const selectedVisible = ids.reduce((total, id) => total + Number(selection.has(id)), 0);
       const all = ids.length > 0 && selectedVisible === ids.length;
-      panel.summary.textContent = summary;
+      panel.summary.textContent = selection.size
+        ? `${selection.size.toLocaleString()} ${noun}${selection.size === 1 ? "" : "s"} selected` : summary;
+      panel.summary.classList.toggle("is-selected", selection.size > 0);
+      panel.summary.title = summary;
       panel.selectVisible.hidden = !ids.length;
       panel.selectVisible.disabled = all;
       panel.selectVisible.textContent = `Select all ${ids.length.toLocaleString()} visible${selectSuffix}`;
       panel.actions.hidden = !selection.size;
-      count.textContent = `${selection.size.toLocaleString()} ${noun}${selection.size === 1 ? "" : "s"} selected`;
       if (checkbox) {
         checkbox.checked = all;
         checkbox.indeterminate = selectedVisible > 0 && !all;
@@ -108,10 +128,6 @@ export function installDataEditorStyle(document) {
 .cm-data-ui .cm-data-icon-button--edit { --cm-icon-size:20px; display:none; flex:0 0 20px; }
 .cm-data-row:is(:hover,:focus-within,.is-selected) .cm-data-icon-button--edit { display:inline-grid; }
 .cm-data-icon-button--edit svg { width:14px; height:14px; }
-.cm-data-action-group { display:flex; align-items:center; gap:6px; }
-.cm-data-action-group + .cm-data-action-group { border-left:1px solid var(--cm-border,#d5e0ee); padding-left:10px; }
-.cm-data-action-group label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
-.cm-data-action-group input[type=number] { width:112px; }
 .cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
 .cm-data-search { display:flex; flex:1; min-width:140px; }
 .cm-data-search input { width:100%; }
@@ -119,10 +135,20 @@ export function installDataEditorStyle(document) {
 .cm-data-error:empty { display:none; }
 .cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
 .cm-data-tools { flex-shrink:0; }
-.cm-data-meta { display:flex; align-items:center; justify-content:space-between; min-height:30px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
-.cm-data-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; padding:8px 10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-subtle,#f3f6fa); }
-.cm-data-actions strong { padding:4px 7px; border-radius:5px; background:var(--cm-selection,#d6e6fc); color:var(--cm-foreground,#273444); }
+.cm-data-meta { display:flex; align-items:center; gap:8px; height:32px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
+.cm-data-meta > span:first-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-data-meta > span.is-selected { color:var(--cm-foreground,#273444); font-weight:600; }
+.cm-data-meta > button { flex-shrink:0; }
+.cm-data-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .cm-data-selection-actions { display:contents; }
+.cm-data-action-menu { position:relative; }
+.cm-data-action-menu > summary { display:block; min-height:30px; box-sizing:border-box; padding:4px 8px; border:1px solid var(--cm-border,#cbd3de); border-radius:6px; background:var(--cm-surface,#fff); color:var(--cm-foreground,#273444); list-style:none; white-space:nowrap; }
+.cm-data-action-menu > summary::-webkit-details-marker { display:none; }
+.cm-data-action-menu > summary:hover, .cm-data-action-menu[open] > summary { background:var(--cm-hover,#e3ecf8); border-color:var(--cm-accent,#78a9ed); }
+.cm-data-action-menu-body { position:absolute; right:0; top:calc(100% + 4px); z-index:10; display:flex; flex-direction:column; gap:8px; width:max-content; max-width:min(340px,80vw); max-height:50vh; overflow:auto; padding:10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-surface,#fff); box-shadow:0 4px 16px #0002; color:var(--cm-foreground,#273444); }
+.cm-data-action-menu-body > button { text-align:left; }
+.cm-data-action-menu-body label { display:flex; align-items:center; gap:6px; }
+.cm-data-action-menu-body input[type=number] { width:112px; }
 .cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
 .cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
 .cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; line-height:20px; }

@@ -589,7 +589,8 @@ const segmentedControlMarkup = ({ label, items, attribute, value, attributes = {
 const updateSegmentedControl = (root, attribute, value) => root.querySelectorAll(`[${attribute}]`)
   .forEach((button) => button.setAttribute("aria-pressed", String(button.getAttribute(attribute) === value)));
 
-const dataActionGroupMarkup = (content) => `<span class="cm-data-action-group">${content}</span>`;
+const dataActionMenuMarkup = (label, content) =>
+  `<details class="cm-data-action-menu"><summary>${escapeHtml(label)}</summary><div class="cm-data-action-menu-body">${content}</div></details>`;
 
 /** Shared controls and table primitives for the packaged and inline data editors. */
 function createDataSearch(document, { placeholder = "Search names, labels, loci, or clusters", onInput } = {}) {
@@ -607,7 +608,23 @@ function createDataPanel(document, { label = "Editable chart data" } = {}) {
   const meta = ui.el("div", undefined, node, "cm-data-meta");
   const summary = ui.el("span", undefined, meta);
   const selectVisible = ui.button(meta, "Select all visible", null);
-  const actions = ui.el("div", undefined, node, "cm-data-actions"); actions.hidden = true;
+  const actions = ui.el("div", undefined, meta, "cm-data-actions"); actions.hidden = true;
+  meta.append(selectVisible);
+  actions.addEventListener("toggle", (event) => {
+    if (event.target.open) for (const menu of actions.querySelectorAll("details[open]")) if (menu !== event.target) menu.open = false;
+  }, true);
+  node.addEventListener("pointerdown", (event) => {
+    for (const menu of actions.querySelectorAll("details[open]")) if (!menu.contains(event.target)) menu.open = false;
+  });
+  node.addEventListener("mousedown", (event) => {
+    if (event.button === 0 && event.shiftKey && event.target.closest(".cm-data-row") &&
+        !event.target.closest('input:not([type="checkbox"]), textarea, select, [contenteditable]')) event.preventDefault();
+  });
+  actions.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const menu = event.target.closest("details[open]");
+    if (menu) { menu.open = false; menu.querySelector("summary").focus(); event.preventDefault(); event.stopPropagation(); }
+  });
   const viewport = ui.el("div", undefined, node, "cm-data-table");
   viewport.setAttribute("role", "region"); viewport.setAttribute("aria-label", label);
   return { node, tools, meta, summary, selectVisible, actions, viewport,
@@ -615,11 +632,12 @@ function createDataPanel(document, { label = "Editable chart data" } = {}) {
 }
 
 /** Keep selection controls independent of the table's row and action rendering. */
-function createSelectionControls(panel, { selection, onChange, checkbox } = {}) {
+function createSelectionControls(panel, { selection, onChange, checkbox, menuLabel } = {}) {
   const ui = createControls(panel.node.ownerDocument);
-  const count = ui.el("strong", undefined, panel.actions);
-  const actions = ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
-  ui.button(panel.actions, "Clear selection", () => { selection.clear(); onChange(); });
+  if (menuLabel) panel.actions.innerHTML = dataActionMenuMarkup(menuLabel, "");
+  const actions = menuLabel ? panel.actions.querySelector(".cm-data-action-menu-body")
+    : ui.el("span", undefined, panel.actions, "cm-data-selection-actions");
+  ui.button(panel.actions, "Clear", () => { selection.clear(); onChange(); }).setAttribute("aria-label", "Clear selection");
   let visibleIds = [];
   panel.selectVisible.onclick = () => { selection.setMany(visibleIds); onChange(); };
   if (checkbox) checkbox.onchange = () => { selection.setMany(visibleIds, checkbox.checked); onChange(); };
@@ -628,12 +646,14 @@ function createSelectionControls(panel, { selection, onChange, checkbox } = {}) 
       visibleIds = ids;
       const selectedVisible = ids.reduce((total, id) => total + Number(selection.has(id)), 0);
       const all = ids.length > 0 && selectedVisible === ids.length;
-      panel.summary.textContent = summary;
+      panel.summary.textContent = selection.size
+        ? `${selection.size.toLocaleString()} ${noun}${selection.size === 1 ? "" : "s"} selected` : summary;
+      panel.summary.classList.toggle("is-selected", selection.size > 0);
+      panel.summary.title = summary;
       panel.selectVisible.hidden = !ids.length;
       panel.selectVisible.disabled = all;
       panel.selectVisible.textContent = `Select all ${ids.length.toLocaleString()} visible${selectSuffix}`;
       panel.actions.hidden = !selection.size;
-      count.textContent = `${selection.size.toLocaleString()} ${noun}${selection.size === 1 ? "" : "s"} selected`;
       if (checkbox) {
         checkbox.checked = all;
         checkbox.indeterminate = selectedVisible > 0 && !all;
@@ -679,10 +699,6 @@ function installDataEditorStyle(document) {
 .cm-data-ui .cm-data-icon-button--edit { --cm-icon-size:20px; display:none; flex:0 0 20px; }
 .cm-data-row:is(:hover,:focus-within,.is-selected) .cm-data-icon-button--edit { display:inline-grid; }
 .cm-data-icon-button--edit svg { width:14px; height:14px; }
-.cm-data-action-group { display:flex; align-items:center; gap:6px; }
-.cm-data-action-group + .cm-data-action-group { border-left:1px solid var(--cm-border,#d5e0ee); padding-left:10px; }
-.cm-data-action-group label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
-.cm-data-action-group input[type=number] { width:112px; }
 .cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
 .cm-data-search { display:flex; flex:1; min-width:140px; }
 .cm-data-search input { width:100%; }
@@ -690,10 +706,20 @@ function installDataEditorStyle(document) {
 .cm-data-error:empty { display:none; }
 .cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
 .cm-data-tools { flex-shrink:0; }
-.cm-data-meta { display:flex; align-items:center; justify-content:space-between; min-height:30px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
-.cm-data-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; padding:8px 10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-subtle,#f3f6fa); }
-.cm-data-actions strong { padding:4px 7px; border-radius:5px; background:var(--cm-selection,#d6e6fc); color:var(--cm-foreground,#273444); }
+.cm-data-meta { display:flex; align-items:center; gap:8px; height:32px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
+.cm-data-meta > span:first-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-data-meta > span.is-selected { color:var(--cm-foreground,#273444); font-weight:600; }
+.cm-data-meta > button { flex-shrink:0; }
+.cm-data-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .cm-data-selection-actions { display:contents; }
+.cm-data-action-menu { position:relative; }
+.cm-data-action-menu > summary { display:block; min-height:30px; box-sizing:border-box; padding:4px 8px; border:1px solid var(--cm-border,#cbd3de); border-radius:6px; background:var(--cm-surface,#fff); color:var(--cm-foreground,#273444); list-style:none; white-space:nowrap; }
+.cm-data-action-menu > summary::-webkit-details-marker { display:none; }
+.cm-data-action-menu > summary:hover, .cm-data-action-menu[open] > summary { background:var(--cm-hover,#e3ecf8); border-color:var(--cm-accent,#78a9ed); }
+.cm-data-action-menu-body { position:absolute; right:0; top:calc(100% + 4px); z-index:10; display:flex; flex-direction:column; gap:8px; width:max-content; max-width:min(340px,80vw); max-height:50vh; overflow:auto; padding:10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-surface,#fff); box-shadow:0 4px 16px #0002; color:var(--cm-foreground,#273444); }
+.cm-data-action-menu-body > button { text-align:left; }
+.cm-data-action-menu-body label { display:flex; align-items:center; gap:6px; }
+.cm-data-action-menu-body input[type=number] { width:112px; }
 .cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
 .cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
 .cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; line-height:20px; }
@@ -725,12 +751,13 @@ select.cm-data-field:not(:hover):not(:focus) { appearance:none; }
 class RowSelection extends Set {
   #anchor = null;
 
-  select(id, checked, { orderedIds = [], range = false } = {}) {
+  select(id, checked, { orderedIds = [], range = false, idsFor = (id) => [id] } = {}) {
     const start = orderedIds.indexOf(this.#anchor), end = orderedIds.indexOf(id);
     const ids = range && start >= 0 && end >= 0
       ? orderedIds.slice(Math.min(start, end), Math.max(start, end) + 1) : [id];
-    this.setMany(ids, checked);
-    this.#anchor = id;
+    const anchor = range && start >= 0 ? this.#anchor : id;
+    this.setMany(ids.flatMap(idsFor), checked);
+    this.#anchor = anchor;
   }
 
   setMany(ids, checked = true) {
@@ -1010,7 +1037,7 @@ function createAnnotationCreateControls({ document, getData, patch, onCreate, an
 }
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
-function createAnnotationDataControls({ document, getData, patch, annotationApi, embedded = false }) {
+function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
   installDataEditorStyle(document);
   installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
@@ -1088,7 +1115,7 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
     if (categorical && batchValue !== "" && !resolved.domain[Number(batchValue)]) batchValue = "";
     const { viewport: tableArea } = layout;
     const all = input(null, "Select all filtered clusters", false, "checkbox");
-    const selectionControls = createSelectionControls(layout, { selection, checkbox: all, onChange: () => syncSelection() });
+    const selectionControls = createSelectionControls(layout, { selection, checkbox: all, menuLabel: "Edit values…", onChange: () => syncSelection() });
     const batch = selectionControls.actions;
     const columns = select(batch, "Columns to edit", batchColumn,
       [["all", "All columns"], ...panel.columns.map((name, index) => [String(index), name])], (value) => { batchColumn = value; });
@@ -1200,7 +1227,7 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
     disposeView = () => list.destroy();
     filterRows = () => {
       const needle = filter.trim().toLowerCase();
-      clusters = getData().clusters.filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle));
+      clusters = getClusters().filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle));
       tableArea.scrollTop = 0; list.setRows(clusters);
     };
     filterRows();
@@ -1228,7 +1255,7 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
     button(actions, "Cancel", () => { box.hidden = true; layout.sync(); });
     return () => {
       box.hidden = !box.hidden; layout.sync();
-      if (!box.hidden) { data.value = annotationTableText(current(), getData().clusters); data.focus(); }
+      if (!box.hidden) { data.value = annotationTableText(current(), getClusters()); data.focus(); }
     };
   };
   const renderGroups = (parent, panel) => {
@@ -1245,15 +1272,16 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
         [["clusters", "Selected clusters"], ...(tree ? [["tree", "Tree clade"]] : [])], (mode) => {
           const groups = [...current().groups];
           const { nodeUid, clusterIds, ...style } = groups[index];
-          groups[index] = mode === "tree" ? { ...style, nodeUid: tree.root } : { ...style, clusterIds: [getData().clusters[0].uid] };
+          if (mode !== "tree" && !getClusters().length) return;
+          groups[index] = mode === "tree" ? { ...style, nodeUid: tree.root } : { ...style, clusterIds: [getClusters()[0].uid] };
           update({ groups });
         });
       if (group.nodeUid !== undefined) select(box, "Tree node", group.nodeUid,
         tree.nodes.map((node) => [node.uid, node.label || node.uid]), (nodeUid) => editGroup(index, { nodeUid }));
       else {
-        const members = el("select", undefined, box); members.multiple = true; members.size = Math.min(5, getData().clusters.length);
+        const members = el("select", undefined, box); members.multiple = true; members.size = Math.min(5, getClusters().length);
         members.setAttribute("aria-label", `Clusters in ${group.label || group.uid}`);
-        for (const cluster of getData().clusters) {
+        for (const cluster of getClusters()) {
           const option = el("option", `${cluster.name || cluster.uid} (${cluster.uid})`, members);
           option.value = cluster.uid; option.selected = group.clusterIds.includes(cluster.uid);
         }
@@ -1261,8 +1289,9 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
       }
     });
     button(parent, "Add group", () => {
+      if (!getClusters().length) return;
       let serial = 1; while (panel.groups.some((group) => group.uid === `group-${serial}`)) serial++;
-      update({ groups: [...panel.groups, { uid: `group-${serial}`, label: `Group ${serial}`, clusterIds: [getData().clusters[0].uid] }] });
+      update({ groups: [...panel.groups, { uid: `group-${serial}`, label: `Group ${serial}`, clusterIds: [getClusters()[0].uid] }] });
     });
   };
   function render() {
@@ -1274,7 +1303,7 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
     node.replaceChildren();
     toolbar.replaceChildren();
     if (!embedded) node.append(toolbar);
-    const panels = getPanels(); renderedPanels = panels; renderedClusters = getData().clusters;
+    const panels = getPanels(); renderedPanels = panels; renderedClusters = getClusters();
     if (!panels.some((panel) => panel.uid === selected)) selected = panels[0]?.uid ?? null;
     if (panels.length) select(toolbar, "Annotation panel", selected, panels.map((panel) => [panel.uid, panel.title || panel.uid]),
       (uid) => { selected = uid; deleting = null; creating = false; render(); });
@@ -1290,7 +1319,7 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
     if (selectionPanel !== panel?.uid) {
       selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = "";
     }
-    const validRows = new Set(getData().clusters.map((cluster) => cluster.uid));
+    const validRows = new Set(getClusters().map((cluster) => cluster.uid));
     selection.prune(validRows);
     if (batchColumn !== "all" && Number(batchColumn) >= (panel?.columns?.length || 0)) batchColumn = "0";
     if (!panel) { el("p", "No annotation panels. Add a panel to attach data to cluster rows.", body); return; }
@@ -1339,7 +1368,7 @@ function createAnnotationDataControls({ document, getData, patch, annotationApi,
       if (replace) { selection.clear(); selected = selectionPanel = null; }
     },
     destroy() { disposeView(); toolbar.remove(); },
-    update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getData().clusters !== renderedClusters || !node.childElementCount)) render(); } };
+    update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters || !node.childElementCount)) render(); } };
 }
 
 function installStyle(document) {
@@ -3226,12 +3255,12 @@ class ClinkerEditorElement extends HTMLElementBase {
   #subscribe() {
     if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
     this.#unsubscribe = this.#chart.on("change", (change) => {
-      if (change.type === "data.apply" || change.type === "data.replace") {
+      if (change.type === "data.apply" || change.type === "data.replace" || change.type === "state.replace") {
         this.#invalidateData({ replace: change.type === "data.replace" });
       }
-      if (change.type === "data.apply" || change.type === "data.replace") this.#renderData();
+      if (change.type === "data.apply" || change.type === "data.replace" || change.type === "state.replace") this.#renderData();
       else if (change.type === "config.change" || change.type === "theme.change") this.#renderAppearance();
-      if (change.type === "data.replace" || (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.presentation.")))) this.#renderAppearance();
+      if (change.type === "data.replace" || change.type === "state.replace" || (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.presentation.")))) this.#renderAppearance();
       if (change.type === "history.change") this.#renderHistory();
     });
   }
@@ -3332,9 +3361,9 @@ class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #click(event) {
-    const checkbox = event.target.closest("[data-select]");
+    const checkbox = event.target.closest("[data-select], [data-select-row]");
     if (checkbox) {
-      this.#selectRow(this.#id(checkbox.dataset.select), checkbox.checked, event.shiftKey);
+      this.#selectRow(checkbox.dataset.selectRow ?? this.#id(checkbox.dataset.select), checkbox.checked, event.shiftKey);
       this.#renderData(); this.#syncHighlight(); return;
     }
     const edit = event.target.closest("[data-focus-edit]");
@@ -3370,10 +3399,11 @@ class ClinkerEditorElement extends HTMLElementBase {
       this.#renderData();
       return;
     }
-    const row = event.target.closest(".cm-editor__row, .cm-editor__tree-gene");
+    const row = event.target.closest(".cm-editor__row, .cm-editor__tree-row");
     if (row && !event.target.closest("input, select, button")) {
-      const id = this.#id(row.dataset.id);
-      this.#selectRow(id, !this.#selected.has(id), event.shiftKey);
+      const parent = row.querySelector("[data-select-row]");
+      const id = parent?.dataset.selectRow ?? this.#id(row.dataset.id);
+      this.#selectRow(id, parent ? !parent.checked : !this.#selected.has(id), event.shiftKey);
       this.#renderData();
       this.#syncHighlight();
       return;
@@ -3411,9 +3441,19 @@ class ClinkerEditorElement extends HTMLElementBase {
       this.#renderData();
       return;
     }
+    if (button.dataset.removeRecord) {
+      this.#removeRecords(button.dataset.removeRecord, [this.#id(button.dataset.id)]);
+      return;
+    }
     const command = button.dataset.command;
-    if (command === "delete") {
-      this.#deleteSelected();
+    if (command === "remove-loci" || command === "remove-clusters") {
+      const kind = command === "remove-loci" ? "loci" : "clusters";
+      this.#removeRecords(kind, this.#selectedParents(kind));
+      return;
+    }
+    if (command === "delete" || command === "delete-groups") {
+      if (command === "delete-groups") this.#deleteSelected("groups", this.#selectedGroups().map((group) => group.uid));
+      else this.#deleteSelected();
     } else if (command === "new-group" || command === "new-group-for-selection") {
       const label = window.prompt("Name for the new homology group");
       if (label?.trim()) {
@@ -3442,12 +3482,12 @@ class ClinkerEditorElement extends HTMLElementBase {
     } else if (command === "merge") {
       const targetId = this.#groupId(this.querySelector("[data-merge-target]")?.value);
       if (targetId !== undefined) {
-        const sourceIds = [...this.#selected];
+        const sourceIds = this.#selectedGroups().map((group) => group.uid);
         this.#selected.clear();
         this.#apply({ type: "groups.merge", targetId, sourceIds });
       }
     } else if (command === "view-members") {
-      const groupId = [...this.#selected][0];
+      const groupId = this.#selectedGroups()[0]?.uid;
       if (groupId !== undefined) this.#viewGroupMembers(groupId);
     } else if (command === "undo") {
       this.#chart?.undo?.();
@@ -3470,12 +3510,11 @@ class ClinkerEditorElement extends HTMLElementBase {
 
   #change(event) {
     const target = event.target;
-    if (target.matches("[data-select-many]")) {
-      const ids = JSON.parse(target.dataset.selectMany || "[]").map((id) => this.#id(id));
-      this.#selected.setMany(ids, target.checked);
-      this.#renderData();
-      this.#syncHighlight();
-      return;
+    if (target.matches("[data-select-row]")) {
+      const row = this.#rows().find((row) => row.key === target.dataset.selectRow);
+      if (!row || row.selectIds.every((id) => this.#selected.has(id)) === target.checked) return;
+      this.#selectRow(row.key, target.checked, false);
+      this.#renderData(); this.#syncHighlight(); return;
     }
     if (target.matches("[data-select]")) {
       const id = this.#id(target.dataset.select);
@@ -3504,7 +3543,7 @@ class ClinkerEditorElement extends HTMLElementBase {
       target.value = "";
       return;
     }
-    if (target.matches("[data-group-position]") && target.reportValidity()) this.#moveGroup([...this.#selected][0], Number(target.value) - 1);
+    if (target.matches("[data-group-position]") && target.reportValidity()) this.#moveGroup(this.#selectedGroups()[0]?.uid, Number(target.value) - 1);
     if (target.matches("[data-config]")) this.#setConfig(target);
   }
 
@@ -3554,7 +3593,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     }
   }
 
-  #data() { return this.#chart?.data?.() || null; }
+  #data() { return this.#chart?.visibleData?.() || this.#chart?.data?.() || null; }
 
   #cache() {
     const data = this.#data();
@@ -3617,7 +3656,9 @@ class ClinkerEditorElement extends HTMLElementBase {
   #isEditing(kind, id) { return this.#editingKey === this.#editKey(kind, id); }
 
   #selectRow(id, checked, range) {
-    this.#selected.select(id, checked, { range, orderedIds: this.#rows().filter((row) => row.type === "gene" || !row.type).map((row) => row.id) });
+    const rows = new Map(this.#rows().map((row) => [row.key ?? row.id, row]));
+    this.#selected.select(id, checked, { range, orderedIds: [...rows.keys()],
+      idsFor: (key) => rows.get(key).selectIds || [rows.get(key).id] });
   }
 
   #selectableIds(rows = this.#rows()) {
@@ -3682,8 +3723,9 @@ class ClinkerEditorElement extends HTMLElementBase {
     const visibleIds = new Set(visible.map(({ gene }) => gene.uid));
     const rows = [];
     for (const cluster of data.clusters) {
-      const loci = cluster.loci.map((locus) => ({ locus, genes: locus.genes.filter((gene) => visibleIds.has(gene.uid)) })).filter(({ genes }) => genes.length);
-      if (!loci.length) continue;
+      const loci = cluster.loci.map((locus) => ({ locus, genes: locus.genes.filter((gene) => visibleIds.has(gene.uid)) }))
+        .filter(({ locus, genes }) => genes.length || (!needle && !this.#memberGroupId && !locus.genes.length));
+      if (!loci.length && (cluster.loci.length || needle || this.#memberGroupId)) continue;
       if (loci.length === 1) {
         const { locus, genes } = loci[0];
         const key = `cluster-locus:${cluster.uid}:${locus.uid}`;
@@ -3716,14 +3758,14 @@ class ClinkerEditorElement extends HTMLElementBase {
       return [[gene.uid, entry], [String(gene.uid), entry]];
     }));
     const buckets = [
-      ...(data.groups || []).map((group) => ({ key: `gene-group:${group.uid}`, label: labelFor(group, group.uid), genes: (group.genes || []).map((id) => entries.get(id)).filter(Boolean) })),
+      ...(data.groups || []).map((group) => ({ group, key: `gene-group:${group.uid}`, label: labelFor(group, group.uid), genes: (group.genes || []).map((id) => entries.get(id)).filter(Boolean) })),
       { key: "gene-group:ungrouped", label: "Ungrouped", genes: visible.filter(({ gene }) => !groups.has(gene.uid)) },
     ];
     const rows = [];
     for (const bucket of buckets) {
       if (!bucket.genes.length) continue;
       const open = Boolean(needle) || this.#expanded.has(bucket.key);
-      rows.push({ type: "gene-group", key: bucket.key, label: bucket.label, count: bucket.genes.length, selectIds: bucket.genes.map(({ gene }) => gene.uid), open });
+      rows.push({ type: "gene-group", group: bucket.group, key: bucket.key, label: bucket.label, count: bucket.genes.length, selectIds: bucket.genes.map(({ gene }) => gene.uid), open });
       if (open) rows.push(...bucket.genes.map(({ gene, locus, cluster }) => this.#geneRow(gene, locus, cluster, groups, 1)));
     }
     return rows;
@@ -3774,7 +3816,8 @@ class ClinkerEditorElement extends HTMLElementBase {
       if (!this.#annotationEditor) {
         this.#annotationEditor = createAnnotationDataControls({ document: this.ownerDocument,
           embedded: true,
-          getData: () => this.#data() || { clusters: [] }, patch: (operations) => this.#chart.patch(operations),
+          getData: () => this.#chart?.data?.() || { clusters: [] },
+          getClusters: () => this.#data()?.clusters || [], patch: (operations) => this.#chart.patch(operations),
           annotationApi: { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale, validateAnnotationPanels },
         });
         annotationHost.append(this.#annotationEditor.node);
@@ -3817,7 +3860,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     // Visibility is a compact icon control with an explicit per-row label;
     // repeating its long text in a 28px heading produces an unreadable merged
     // “VisibleColour” column on narrow editors.
-    const columns = isTree ? [{ label: "" }, { label: "" }, { label: "Cluster / locus / gene" }, { label: "Group" }, { label: "Colour" }]
+    const columns = isTree ? [{ label: "" }, { label: "" }, { label: this.#geneView === "groups" ? "Group / gene" : "Cluster / locus / gene" }, { label: "Group" }, { label: "Colour" }]
       : this.#kind === "groups" ? [{ label: "" }, { label: "↕" }, { label: "Group" }, { label: "Legend label" }, { label: "Genes" }, { label: "" }, { label: "Colour" }]
       : this.#kind === "links" ? [{ label: "" }, { label: "Source", sort: "source" }, { label: "Target", sort: "target" }, { label: "Identity", sort: "identity" }, { label: "Endpoint groups", sort: "groups" }, { label: "Link label", sort: "label" }, { label: "" }, { label: "Colour" }]
         : [{ label: "" }, { label: "Gene", sort: "label" }, { label: "Locus", sort: "locus" }, { label: "Cluster", sort: "cluster" }, { label: "Group", sort: "group" }, { label: "Colour" }];
@@ -3838,6 +3881,8 @@ class ClinkerEditorElement extends HTMLElementBase {
       const build = (row, html = row.type ? this.#treeRowMarkup(row) : this.#rowMarkup(row)) => {
         const template = this.ownerDocument.createElement("template"); template.innerHTML = html;
         const node = template.content.firstElementChild;
+        const parentCheckbox = node.querySelector("[data-select-row]");
+        if (parentCheckbox) parentCheckbox.indeterminate = parentCheckbox.getAttribute("aria-checked") === "mixed";
         for (const control of node.querySelectorAll("[data-edit]")) bindEditableField(control, {
           commit: () => this.#edit(control), cancel: () => this.#cancelEdit(),
         });
@@ -3860,13 +3905,13 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.#rowView.setRows(rows);
     const visibleGenes = isTree ? new Set(rows.flatMap((row) => row.selectIds || (row.type === "gene" ? [row.id] : []))).size : rows.length;
     const summaryText = isTree
-      ? `${rows.filter((row) => row.type !== "gene").length.toLocaleString()} cluster/locus rows · ${visibleGenes.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
+      ? `${rows.filter((row) => row.type !== "gene").length.toLocaleString()} ${this.#geneView === "groups" ? "group" : "cluster/locus"} rows · ${visibleGenes.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
       : `${rows.length.toLocaleString()} visible ${this.#kind}${memberGroup && this.#kind === "genes" ? " in selected group" : ""}${this.#filter ? " matching search" : ""}.`;
     this.#selectionControls.update({ ids: this.#selectableIds(rows), summary: summaryText,
       noun: this.#kind.slice(0, -1), selectSuffix: isTree ? " genes" : "" });
     setMarkup(actions, this.#selected.size ? this.#actionsMarkup(this.#selected.size) : "");
     const position = actions.querySelector("[data-group-position]");
-    if (position && position !== this.ownerDocument.activeElement) position.value = data.groups.findIndex((group) => this.#selected.has(group.uid)) + 1;
+    if (position && position !== this.ownerDocument.activeElement) position.value = data.groups.findIndex((group) => group.uid === this.#selectedGroups()[0]?.uid) + 1;
   }
 
   #rowMarkup(row) {
@@ -3892,39 +3937,76 @@ class ClinkerEditorElement extends HTMLElementBase {
       className: "cm-editor__tree-toggle", attributes: { "data-tree-toggle": row.key } });
     const selected = row.selectIds?.length && row.selectIds.every((id) => this.#selected.has(id));
     const select = dataCell(dataCheckboxMarkup({ label: `Select ${row.count.toLocaleString()} genes in ${row.label}`, checked: Boolean(selected),
-      attributes: { "data-select-many": JSON.stringify(row.selectIds || []) } }), true);
+      attributes: { "data-select-row": row.key, "aria-checked": !selected && row.selectIds?.some((id) => this.#selected.has(id)) ? "mixed" : String(Boolean(selected)) } }), true);
     const count = `<span class="cm-editor__tree-count">(${row.count.toLocaleString()})</span>`;
     const selectedIds = escapeHtml(JSON.stringify(row.selectIds || []));
+    const remove = (kind, uid) => dataIconButtonMarkup({ label: `Remove ${kind === "loci" ? "locus" : "cluster"} from plot`, icon: "×",
+      attributes: { "data-remove-record": kind, "data-id": uid } });
     if (row.type === "cluster-locus") {
       const clusterEditing = this.#isEditing("cluster:label", row.cluster.uid);
       const locusEditing = this.#isEditing("locus:label", row.locus.uid);
-      return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent">${select}${arrow}<div class="cm-editor__tree-combined ${clusterEditing || locusEditing ? "is-editing" : ""}">${editableField("cluster:label", row.cluster.uid, row.label, "Cluster name", row.label || "cluster", clusterEditing, true, this.#editWidth)}<span class="cm-editor__tree-separator">·</span>${editableField("locus:label", row.locus.uid, row.locusLabel, "Locus name", row.locusLabel || "locus", locusEditing, true, this.#editWidth)}${count}</div></div>`;
+      return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent ${selected ? "is-selected" : ""}">${select}${arrow}<div class="cm-editor__tree-combined ${clusterEditing || locusEditing ? "is-editing" : ""}">${editableField("cluster:label", row.cluster.uid, row.label, "Cluster name", row.label || "cluster", clusterEditing, true, this.#editWidth)}<span class="cm-editor__tree-separator">·</span>${editableField("locus:label", row.locus.uid, row.locusLabel, "Locus name", row.locusLabel || "locus", locusEditing, true, this.#editWidth)}${count}${remove("clusters", row.cluster.uid)}</div></div>`;
     }
-    if (row.type === "gene-group") return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent">${select}${arrow}<span class="cm-data-cell cm-editor__tree-group-label">${escapeHtml(row.label)} ${count}</span></div>`;
+    if (row.type === "gene-group") return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent ${selected ? "is-selected" : ""}">${select}${arrow}<span class="cm-data-cell cm-editor__tree-group-label">${escapeHtml(row.label)} ${count}</span></div>`;
     const type = row.type === "cluster" ? "cluster" : "locus";
     const record = row[type];
-    return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent" style="--depth:${row.depth || 0}">${select}${arrow}<span class="cm-editor__tree-name-with-count">${editableField(`${type}:label`, record.uid, row.label, `${type} name`, row.label || type, this.#isEditing(`${type}:label`, record.uid), true)}${count}</span></div>`;
+    return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent ${selected ? "is-selected" : ""}" style="--depth:${row.depth || 0}">${select}${arrow}<span class="cm-editor__tree-name-with-count">${editableField(`${type}:label`, record.uid, row.label, `${type} name`, row.label || type, this.#isEditing(`${type}:label`, record.uid), true)}${count}${remove(type === "cluster" ? "clusters" : "loci", record.uid)}</span></div>`;
   }
 
   #actionsMarkup(count) {
-    const group = dataActionGroupMarkup;
-    const focus = group(`<button type="button" data-command="focus">Focus in plot</button>`);
-    const remove = (noun) => group(`<button type="button" data-command="delete" class="cm-editor__danger">Delete selected ${noun}</button>`);
+    const menu = dataActionMenuMarkup;
+    const selectedGroups = this.#selectedGroups();
+    const parentRemoval = this.#kind === "genes" && this.#geneView === "tree" && this.#chart?.remove;
+    const loci = parentRemoval ? this.#selectedParents("loci") : [];
+    const clusters = parentRemoval ? this.#selectedParents("clusters") : [];
+    const focus = `<button type="button" data-command="focus">Focus in plot</button>`;
+    const remove = (noun) => menu("Remove…", `<button type="button" data-command="delete" class="cm-editor__danger">Delete selected ${noun}</button>` +
+      (loci.length ? `<button type="button" data-command="remove-loci">Entire loci (${loci.length})</button>` : "") +
+      (clusters.length ? `<button type="button" data-command="remove-clusters">Entire clusters (${clusters.length})</button>` : "") +
+      (this.#kind === "genes" && selectedGroups.length ? `<button type="button" data-command="delete-groups" title="Genes remain in the plot">Delete groups (${selectedGroups.length})</button>` : ""));
     if (this.#kind === "genes") {
       const options = (this.#data()?.groups || []).map((group) => `<option value="${escapeHtml(group.uid)}">${escapeHtml(labelFor(group, group.uid))}</option>`).join("");
-      return focus + group(`<label>Move to <select data-assign-group><option value="">Choose a group…</option>${options}</select></label><button type="button" data-command="assign">Move</button><button type="button" data-command="unassign">Remove from groups</button><button type="button" data-command="new-group-for-selection">New group…</button>`) + remove("genes");
+      return focus + menu("Assign…", `<label>Move to <select data-assign-group><option value="">Choose a group…</option>${options}</select></label><button type="button" data-command="assign">Move</button><button type="button" data-command="unassign">Remove from groups</button><button type="button" data-command="new-group-for-selection">New group…</button>`) + this.#groupActionsMarkup(selectedGroups) + remove("genes");
     }
-    const presentation = count > 1 ? group(`<input data-batch-label placeholder="Set label"><button type="button" data-command="batch-label">Set label</button><label title="Set colour"><span class="cm-editor__sr-only">Set colour</span>${dataColourMarkup({ value: "#888888", label: "Set colour", attributes: { "data-batch-colour": true } })}</label>${this.#kind === "links" ? `<input type="number" data-batch-identity min="0" max="100" step=".1" placeholder="Set identity (%)"><button type="button" data-command="batch-identity">Set identity</button>` : ""}<select data-batch-visibility aria-label="Set visibility"><option value="">Visibility…</option><option value="show">Show</option><option value="hide">Hide</option></select>`) : "";
-    const groupActions = this.#kind !== "groups" ? "" : count > 1
-      ? group(`<select data-merge-target><option value="">Choose group to keep…</option>${(this.#data()?.groups || []).filter((group) => this.#selected.has(group.uid)).map((group) => `<option value="${escapeHtml(group.uid)}">${escapeHtml(labelFor(group, group.uid))}</option>`).join("")}</select><button type="button" data-command="merge">Merge groups</button>`)
-      : group(`<button type="button" data-command="view-members">View member genes</button><label>Position <input type="number" data-group-position required min="1" max="${this.#data()?.groups.length || 1}"></label>`);
-    return focus + presentation + groupActions + remove(this.#kind);
+    const presentation = count > 1 ? menu("Edit…", `<input data-batch-label placeholder="Set label"><button type="button" data-command="batch-label">Set label</button><label title="Set colour"><span class="cm-editor__sr-only">Set colour</span>${dataColourMarkup({ value: "#888888", label: "Set colour", attributes: { "data-batch-colour": true } })}</label>${this.#kind === "links" ? `<input type="number" data-batch-identity min="0" max="100" step=".1" placeholder="Set identity (%)"><button type="button" data-command="batch-identity">Set identity</button>` : ""}<select data-batch-visibility aria-label="Set visibility"><option value="">Visibility…</option><option value="show">Show</option><option value="hide">Hide</option></select>`) : "";
+    return focus + presentation + this.#groupActionsMarkup(selectedGroups) + remove(this.#kind);
   }
 
-  #deleteSelected() {
-    const ids = [...this.#selected];
-    if (!ids.length || !window.confirm(`Delete ${ids.length} selected ${this.#kind}?`)) return;
-    const type = this.#kind === "groups" ? "groups.delete" : `${this.#kind}.delete`;
+  #selectedGroups() {
+    if (this.#kind === "groups") return (this.#data()?.groups || []).filter((group) => this.#selected.has(group.uid));
+    if (this.#kind !== "genes" || this.#geneView !== "groups") return [];
+    return this.#rows().filter((row) => row.type === "gene-group" && row.group?.genes?.length &&
+      row.group.genes.every((id) => this.#selected.has(this.#id(id)))).map((row) => row.group);
+  }
+
+  #groupActionsMarkup(groups) {
+    if (!groups.length) return "";
+    return groups.length > 1
+      ? dataActionMenuMarkup("Merge…", `<select data-merge-target><option value="">Choose group to keep…</option>${groups.map((group) => `<option value="${escapeHtml(group.uid)}">${escapeHtml(labelFor(group, group.uid))}</option>`).join("")}</select><button type="button" data-command="merge">Merge groups</button>`)
+      : dataActionMenuMarkup("Group…", `<button type="button" data-command="view-members">View member genes</button><label>Position <input type="number" data-group-position required min="1" max="${this.#data()?.groups.length || 1}"></label>`);
+  }
+
+  #selectedParents(kind) {
+    const clusters = this.#data()?.clusters || [];
+    const records = kind === "loci" ? clusters.flatMap((cluster) => cluster.loci) : clusters;
+    return records.filter((record) => {
+      const genes = kind === "loci" ? record.genes : record.loci.flatMap((locus) => locus.genes);
+      return genes.length && genes.every((gene) => this.#selected.has(gene.uid));
+    }).map((record) => record.uid);
+  }
+
+  #removeRecords(kind, ids) {
+    if (!ids.length || !window.confirm(`Remove ${ids.length} ${kind} and all their genes from the plot? This can be undone.`)) return;
+    this.#runEdit(() => {
+      this.#chart.remove({ [kind]: ids });
+      this.#selected.clear();
+      this.#renderData(); this.#syncHighlight();
+    });
+  }
+
+  #deleteSelected(kind = this.#kind, ids = [...this.#selected]) {
+    if (!ids.length || !window.confirm(`Delete ${ids.length} selected ${kind}?${kind === "groups" ? " Their genes will remain in the plot." : ""}`)) return;
+    const type = `${kind}.delete`;
     this.#selected.clear();
     this.#apply({ type, ids });
   }
@@ -4123,7 +4205,7 @@ function mountPlotSelectionToolbar(chart, container) {
   container.addEventListener("focusin", activate);
   document.addEventListener("keydown", onKeyDown);
   const unsubscribe = chart.on("change", (change) => {
-    if (change.type === "loci.select") sync();
+    if (change.type === "loci.select" || change.type === "state.replace") sync();
   });
   container.append(root);
   sync();

@@ -1,4 +1,4 @@
-import { createDataPanel, createSelectionControls, dataCell, createDataSearch, installDataEditorStyle, segmentedControlMarkup, updateSegmentedControl, dataCheckboxMarkup, dataColourMarkup, dataIconButtonMarkup, dataActionGroupMarkup } from "../dataEditorUi.mjs";
+import { createDataPanel, createSelectionControls, dataCell, createDataSearch, installDataEditorStyle, segmentedControlMarkup, updateSegmentedControl, dataCheckboxMarkup, dataColourMarkup, dataIconButtonMarkup, dataActionMenuMarkup } from "../dataEditorUi.mjs";
 import { RowSelection } from "../rowSelection.mjs";
 import { createVirtualRows } from "../virtualRows.mjs";
 import { createAnnotationDataControls } from "../annotationDataControls.mjs";
@@ -198,12 +198,12 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #subscribe() {
     if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
     this.#unsubscribe = this.#chart.on("change", (change) => {
-      if (change.type === "data.apply" || change.type === "data.replace") {
+      if (change.type === "data.apply" || change.type === "data.replace" || change.type === "state.replace") {
         this.#invalidateData({ replace: change.type === "data.replace" });
       }
-      if (change.type === "data.apply" || change.type === "data.replace") this.#renderData();
+      if (change.type === "data.apply" || change.type === "data.replace" || change.type === "state.replace") this.#renderData();
       else if (change.type === "config.change" || change.type === "theme.change") this.#renderAppearance();
-      if (change.type === "data.replace" || (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.presentation.")))) this.#renderAppearance();
+      if (change.type === "data.replace" || change.type === "state.replace" || (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.presentation.")))) this.#renderAppearance();
       if (change.type === "history.change") this.#renderHistory();
     });
   }
@@ -304,9 +304,9 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #click(event) {
-    const checkbox = event.target.closest("[data-select]");
+    const checkbox = event.target.closest("[data-select], [data-select-row]");
     if (checkbox) {
-      this.#selectRow(this.#id(checkbox.dataset.select), checkbox.checked, event.shiftKey);
+      this.#selectRow(checkbox.dataset.selectRow ?? this.#id(checkbox.dataset.select), checkbox.checked, event.shiftKey);
       this.#renderData(); this.#syncHighlight(); return;
     }
     const edit = event.target.closest("[data-focus-edit]");
@@ -342,10 +342,11 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.#renderData();
       return;
     }
-    const row = event.target.closest(".cm-editor__row, .cm-editor__tree-gene");
+    const row = event.target.closest(".cm-editor__row, .cm-editor__tree-row");
     if (row && !event.target.closest("input, select, button")) {
-      const id = this.#id(row.dataset.id);
-      this.#selectRow(id, !this.#selected.has(id), event.shiftKey);
+      const parent = row.querySelector("[data-select-row]");
+      const id = parent?.dataset.selectRow ?? this.#id(row.dataset.id);
+      this.#selectRow(id, parent ? !parent.checked : !this.#selected.has(id), event.shiftKey);
       this.#renderData();
       this.#syncHighlight();
       return;
@@ -383,9 +384,19 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.#renderData();
       return;
     }
+    if (button.dataset.removeRecord) {
+      this.#removeRecords(button.dataset.removeRecord, [this.#id(button.dataset.id)]);
+      return;
+    }
     const command = button.dataset.command;
-    if (command === "delete") {
-      this.#deleteSelected();
+    if (command === "remove-loci" || command === "remove-clusters") {
+      const kind = command === "remove-loci" ? "loci" : "clusters";
+      this.#removeRecords(kind, this.#selectedParents(kind));
+      return;
+    }
+    if (command === "delete" || command === "delete-groups") {
+      if (command === "delete-groups") this.#deleteSelected("groups", this.#selectedGroups().map((group) => group.uid));
+      else this.#deleteSelected();
     } else if (command === "new-group" || command === "new-group-for-selection") {
       const label = window.prompt("Name for the new homology group");
       if (label?.trim()) {
@@ -414,12 +425,12 @@ export class ClinkerEditorElement extends HTMLElementBase {
     } else if (command === "merge") {
       const targetId = this.#groupId(this.querySelector("[data-merge-target]")?.value);
       if (targetId !== undefined) {
-        const sourceIds = [...this.#selected];
+        const sourceIds = this.#selectedGroups().map((group) => group.uid);
         this.#selected.clear();
         this.#apply({ type: "groups.merge", targetId, sourceIds });
       }
     } else if (command === "view-members") {
-      const groupId = [...this.#selected][0];
+      const groupId = this.#selectedGroups()[0]?.uid;
       if (groupId !== undefined) this.#viewGroupMembers(groupId);
     } else if (command === "undo") {
       this.#chart?.undo?.();
@@ -442,12 +453,11 @@ export class ClinkerEditorElement extends HTMLElementBase {
 
   #change(event) {
     const target = event.target;
-    if (target.matches("[data-select-many]")) {
-      const ids = JSON.parse(target.dataset.selectMany || "[]").map((id) => this.#id(id));
-      this.#selected.setMany(ids, target.checked);
-      this.#renderData();
-      this.#syncHighlight();
-      return;
+    if (target.matches("[data-select-row]")) {
+      const row = this.#rows().find((row) => row.key === target.dataset.selectRow);
+      if (!row || row.selectIds.every((id) => this.#selected.has(id)) === target.checked) return;
+      this.#selectRow(row.key, target.checked, false);
+      this.#renderData(); this.#syncHighlight(); return;
     }
     if (target.matches("[data-select]")) {
       const id = this.#id(target.dataset.select);
@@ -476,7 +486,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
       target.value = "";
       return;
     }
-    if (target.matches("[data-group-position]") && target.reportValidity()) this.#moveGroup([...this.#selected][0], Number(target.value) - 1);
+    if (target.matches("[data-group-position]") && target.reportValidity()) this.#moveGroup(this.#selectedGroups()[0]?.uid, Number(target.value) - 1);
     if (target.matches("[data-config]")) this.#setConfig(target);
   }
 
@@ -526,7 +536,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
     }
   }
 
-  #data() { return this.#chart?.data?.() || null; }
+  #data() { return this.#chart?.visibleData?.() || this.#chart?.data?.() || null; }
 
   #cache() {
     const data = this.#data();
@@ -589,7 +599,9 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #isEditing(kind, id) { return this.#editingKey === this.#editKey(kind, id); }
 
   #selectRow(id, checked, range) {
-    this.#selected.select(id, checked, { range, orderedIds: this.#rows().filter((row) => row.type === "gene" || !row.type).map((row) => row.id) });
+    const rows = new Map(this.#rows().map((row) => [row.key ?? row.id, row]));
+    this.#selected.select(id, checked, { range, orderedIds: [...rows.keys()],
+      idsFor: (key) => rows.get(key).selectIds || [rows.get(key).id] });
   }
 
   #selectableIds(rows = this.#rows()) {
@@ -654,8 +666,9 @@ export class ClinkerEditorElement extends HTMLElementBase {
     const visibleIds = new Set(visible.map(({ gene }) => gene.uid));
     const rows = [];
     for (const cluster of data.clusters) {
-      const loci = cluster.loci.map((locus) => ({ locus, genes: locus.genes.filter((gene) => visibleIds.has(gene.uid)) })).filter(({ genes }) => genes.length);
-      if (!loci.length) continue;
+      const loci = cluster.loci.map((locus) => ({ locus, genes: locus.genes.filter((gene) => visibleIds.has(gene.uid)) }))
+        .filter(({ locus, genes }) => genes.length || (!needle && !this.#memberGroupId && !locus.genes.length));
+      if (!loci.length && (cluster.loci.length || needle || this.#memberGroupId)) continue;
       if (loci.length === 1) {
         const { locus, genes } = loci[0];
         const key = `cluster-locus:${cluster.uid}:${locus.uid}`;
@@ -688,14 +701,14 @@ export class ClinkerEditorElement extends HTMLElementBase {
       return [[gene.uid, entry], [String(gene.uid), entry]];
     }));
     const buckets = [
-      ...(data.groups || []).map((group) => ({ key: `gene-group:${group.uid}`, label: labelFor(group, group.uid), genes: (group.genes || []).map((id) => entries.get(id)).filter(Boolean) })),
+      ...(data.groups || []).map((group) => ({ group, key: `gene-group:${group.uid}`, label: labelFor(group, group.uid), genes: (group.genes || []).map((id) => entries.get(id)).filter(Boolean) })),
       { key: "gene-group:ungrouped", label: "Ungrouped", genes: visible.filter(({ gene }) => !groups.has(gene.uid)) },
     ];
     const rows = [];
     for (const bucket of buckets) {
       if (!bucket.genes.length) continue;
       const open = Boolean(needle) || this.#expanded.has(bucket.key);
-      rows.push({ type: "gene-group", key: bucket.key, label: bucket.label, count: bucket.genes.length, selectIds: bucket.genes.map(({ gene }) => gene.uid), open });
+      rows.push({ type: "gene-group", group: bucket.group, key: bucket.key, label: bucket.label, count: bucket.genes.length, selectIds: bucket.genes.map(({ gene }) => gene.uid), open });
       if (open) rows.push(...bucket.genes.map(({ gene, locus, cluster }) => this.#geneRow(gene, locus, cluster, groups, 1)));
     }
     return rows;
@@ -746,7 +759,8 @@ export class ClinkerEditorElement extends HTMLElementBase {
       if (!this.#annotationEditor) {
         this.#annotationEditor = createAnnotationDataControls({ document: this.ownerDocument,
           embedded: true,
-          getData: () => this.#data() || { clusters: [] }, patch: (operations) => this.#chart.patch(operations),
+          getData: () => this.#chart?.data?.() || { clusters: [] },
+          getClusters: () => this.#data()?.clusters || [], patch: (operations) => this.#chart.patch(operations),
           annotationApi: { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale, validateAnnotationPanels },
         });
         annotationHost.append(this.#annotationEditor.node);
@@ -789,7 +803,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
     // Visibility is a compact icon control with an explicit per-row label;
     // repeating its long text in a 28px heading produces an unreadable merged
     // “VisibleColour” column on narrow editors.
-    const columns = isTree ? [{ label: "" }, { label: "" }, { label: "Cluster / locus / gene" }, { label: "Group" }, { label: "Colour" }]
+    const columns = isTree ? [{ label: "" }, { label: "" }, { label: this.#geneView === "groups" ? "Group / gene" : "Cluster / locus / gene" }, { label: "Group" }, { label: "Colour" }]
       : this.#kind === "groups" ? [{ label: "" }, { label: "↕" }, { label: "Group" }, { label: "Legend label" }, { label: "Genes" }, { label: "" }, { label: "Colour" }]
       : this.#kind === "links" ? [{ label: "" }, { label: "Source", sort: "source" }, { label: "Target", sort: "target" }, { label: "Identity", sort: "identity" }, { label: "Endpoint groups", sort: "groups" }, { label: "Link label", sort: "label" }, { label: "" }, { label: "Colour" }]
         : [{ label: "" }, { label: "Gene", sort: "label" }, { label: "Locus", sort: "locus" }, { label: "Cluster", sort: "cluster" }, { label: "Group", sort: "group" }, { label: "Colour" }];
@@ -810,6 +824,8 @@ export class ClinkerEditorElement extends HTMLElementBase {
       const build = (row, html = row.type ? this.#treeRowMarkup(row) : this.#rowMarkup(row)) => {
         const template = this.ownerDocument.createElement("template"); template.innerHTML = html;
         const node = template.content.firstElementChild;
+        const parentCheckbox = node.querySelector("[data-select-row]");
+        if (parentCheckbox) parentCheckbox.indeterminate = parentCheckbox.getAttribute("aria-checked") === "mixed";
         for (const control of node.querySelectorAll("[data-edit]")) bindEditableField(control, {
           commit: () => this.#edit(control), cancel: () => this.#cancelEdit(),
         });
@@ -832,13 +848,13 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.#rowView.setRows(rows);
     const visibleGenes = isTree ? new Set(rows.flatMap((row) => row.selectIds || (row.type === "gene" ? [row.id] : []))).size : rows.length;
     const summaryText = isTree
-      ? `${rows.filter((row) => row.type !== "gene").length.toLocaleString()} cluster/locus rows · ${visibleGenes.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
+      ? `${rows.filter((row) => row.type !== "gene").length.toLocaleString()} ${this.#geneView === "groups" ? "group" : "cluster/locus"} rows · ${visibleGenes.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
       : `${rows.length.toLocaleString()} visible ${this.#kind}${memberGroup && this.#kind === "genes" ? " in selected group" : ""}${this.#filter ? " matching search" : ""}.`;
     this.#selectionControls.update({ ids: this.#selectableIds(rows), summary: summaryText,
       noun: this.#kind.slice(0, -1), selectSuffix: isTree ? " genes" : "" });
     setMarkup(actions, this.#selected.size ? this.#actionsMarkup(this.#selected.size) : "");
     const position = actions.querySelector("[data-group-position]");
-    if (position && position !== this.ownerDocument.activeElement) position.value = data.groups.findIndex((group) => this.#selected.has(group.uid)) + 1;
+    if (position && position !== this.ownerDocument.activeElement) position.value = data.groups.findIndex((group) => group.uid === this.#selectedGroups()[0]?.uid) + 1;
   }
 
   #rowMarkup(row) {
@@ -864,39 +880,76 @@ export class ClinkerEditorElement extends HTMLElementBase {
       className: "cm-editor__tree-toggle", attributes: { "data-tree-toggle": row.key } });
     const selected = row.selectIds?.length && row.selectIds.every((id) => this.#selected.has(id));
     const select = dataCell(dataCheckboxMarkup({ label: `Select ${row.count.toLocaleString()} genes in ${row.label}`, checked: Boolean(selected),
-      attributes: { "data-select-many": JSON.stringify(row.selectIds || []) } }), true);
+      attributes: { "data-select-row": row.key, "aria-checked": !selected && row.selectIds?.some((id) => this.#selected.has(id)) ? "mixed" : String(Boolean(selected)) } }), true);
     const count = `<span class="cm-editor__tree-count">(${row.count.toLocaleString()})</span>`;
     const selectedIds = escapeHtml(JSON.stringify(row.selectIds || []));
+    const remove = (kind, uid) => dataIconButtonMarkup({ label: `Remove ${kind === "loci" ? "locus" : "cluster"} from plot`, icon: "×",
+      attributes: { "data-remove-record": kind, "data-id": uid } });
     if (row.type === "cluster-locus") {
       const clusterEditing = this.#isEditing("cluster:label", row.cluster.uid);
       const locusEditing = this.#isEditing("locus:label", row.locus.uid);
-      return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent">${select}${arrow}<div class="cm-editor__tree-combined ${clusterEditing || locusEditing ? "is-editing" : ""}">${editableField("cluster:label", row.cluster.uid, row.label, "Cluster name", row.label || "cluster", clusterEditing, true, this.#editWidth)}<span class="cm-editor__tree-separator">·</span>${editableField("locus:label", row.locus.uid, row.locusLabel, "Locus name", row.locusLabel || "locus", locusEditing, true, this.#editWidth)}${count}</div></div>`;
+      return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent ${selected ? "is-selected" : ""}">${select}${arrow}<div class="cm-editor__tree-combined ${clusterEditing || locusEditing ? "is-editing" : ""}">${editableField("cluster:label", row.cluster.uid, row.label, "Cluster name", row.label || "cluster", clusterEditing, true, this.#editWidth)}<span class="cm-editor__tree-separator">·</span>${editableField("locus:label", row.locus.uid, row.locusLabel, "Locus name", row.locusLabel || "locus", locusEditing, true, this.#editWidth)}${count}${remove("clusters", row.cluster.uid)}</div></div>`;
     }
-    if (row.type === "gene-group") return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent">${select}${arrow}<span class="cm-data-cell cm-editor__tree-group-label">${escapeHtml(row.label)} ${count}</span></div>`;
+    if (row.type === "gene-group") return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent ${selected ? "is-selected" : ""}">${select}${arrow}<span class="cm-data-cell cm-editor__tree-group-label">${escapeHtml(row.label)} ${count}</span></div>`;
     const type = row.type === "cluster" ? "cluster" : "locus";
     const record = row[type];
-    return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent" style="--depth:${row.depth || 0}">${select}${arrow}<span class="cm-editor__tree-name-with-count">${editableField(`${type}:label`, record.uid, row.label, `${type} name`, row.label || type, this.#isEditing(`${type}:label`, record.uid), true)}${count}</span></div>`;
+    return `<div data-select-ids="${selectedIds}" class="cm-data-row cm-editor__tree-row cm-editor__tree-parent ${selected ? "is-selected" : ""}" style="--depth:${row.depth || 0}">${select}${arrow}<span class="cm-editor__tree-name-with-count">${editableField(`${type}:label`, record.uid, row.label, `${type} name`, row.label || type, this.#isEditing(`${type}:label`, record.uid), true)}${count}${remove(type === "cluster" ? "clusters" : "loci", record.uid)}</span></div>`;
   }
 
   #actionsMarkup(count) {
-    const group = dataActionGroupMarkup;
-    const focus = group(`<button type="button" data-command="focus">Focus in plot</button>`);
-    const remove = (noun) => group(`<button type="button" data-command="delete" class="cm-editor__danger">Delete selected ${noun}</button>`);
+    const menu = dataActionMenuMarkup;
+    const selectedGroups = this.#selectedGroups();
+    const parentRemoval = this.#kind === "genes" && this.#geneView === "tree" && this.#chart?.remove;
+    const loci = parentRemoval ? this.#selectedParents("loci") : [];
+    const clusters = parentRemoval ? this.#selectedParents("clusters") : [];
+    const focus = `<button type="button" data-command="focus">Focus in plot</button>`;
+    const remove = (noun) => menu("Remove…", `<button type="button" data-command="delete" class="cm-editor__danger">Delete selected ${noun}</button>` +
+      (loci.length ? `<button type="button" data-command="remove-loci">Entire loci (${loci.length})</button>` : "") +
+      (clusters.length ? `<button type="button" data-command="remove-clusters">Entire clusters (${clusters.length})</button>` : "") +
+      (this.#kind === "genes" && selectedGroups.length ? `<button type="button" data-command="delete-groups" title="Genes remain in the plot">Delete groups (${selectedGroups.length})</button>` : ""));
     if (this.#kind === "genes") {
       const options = (this.#data()?.groups || []).map((group) => `<option value="${escapeHtml(group.uid)}">${escapeHtml(labelFor(group, group.uid))}</option>`).join("");
-      return focus + group(`<label>Move to <select data-assign-group><option value="">Choose a group…</option>${options}</select></label><button type="button" data-command="assign">Move</button><button type="button" data-command="unassign">Remove from groups</button><button type="button" data-command="new-group-for-selection">New group…</button>`) + remove("genes");
+      return focus + menu("Assign…", `<label>Move to <select data-assign-group><option value="">Choose a group…</option>${options}</select></label><button type="button" data-command="assign">Move</button><button type="button" data-command="unassign">Remove from groups</button><button type="button" data-command="new-group-for-selection">New group…</button>`) + this.#groupActionsMarkup(selectedGroups) + remove("genes");
     }
-    const presentation = count > 1 ? group(`<input data-batch-label placeholder="Set label"><button type="button" data-command="batch-label">Set label</button><label title="Set colour"><span class="cm-editor__sr-only">Set colour</span>${dataColourMarkup({ value: "#888888", label: "Set colour", attributes: { "data-batch-colour": true } })}</label>${this.#kind === "links" ? `<input type="number" data-batch-identity min="0" max="100" step=".1" placeholder="Set identity (%)"><button type="button" data-command="batch-identity">Set identity</button>` : ""}<select data-batch-visibility aria-label="Set visibility"><option value="">Visibility…</option><option value="show">Show</option><option value="hide">Hide</option></select>`) : "";
-    const groupActions = this.#kind !== "groups" ? "" : count > 1
-      ? group(`<select data-merge-target><option value="">Choose group to keep…</option>${(this.#data()?.groups || []).filter((group) => this.#selected.has(group.uid)).map((group) => `<option value="${escapeHtml(group.uid)}">${escapeHtml(labelFor(group, group.uid))}</option>`).join("")}</select><button type="button" data-command="merge">Merge groups</button>`)
-      : group(`<button type="button" data-command="view-members">View member genes</button><label>Position <input type="number" data-group-position required min="1" max="${this.#data()?.groups.length || 1}"></label>`);
-    return focus + presentation + groupActions + remove(this.#kind);
+    const presentation = count > 1 ? menu("Edit…", `<input data-batch-label placeholder="Set label"><button type="button" data-command="batch-label">Set label</button><label title="Set colour"><span class="cm-editor__sr-only">Set colour</span>${dataColourMarkup({ value: "#888888", label: "Set colour", attributes: { "data-batch-colour": true } })}</label>${this.#kind === "links" ? `<input type="number" data-batch-identity min="0" max="100" step=".1" placeholder="Set identity (%)"><button type="button" data-command="batch-identity">Set identity</button>` : ""}<select data-batch-visibility aria-label="Set visibility"><option value="">Visibility…</option><option value="show">Show</option><option value="hide">Hide</option></select>`) : "";
+    return focus + presentation + this.#groupActionsMarkup(selectedGroups) + remove(this.#kind);
   }
 
-  #deleteSelected() {
-    const ids = [...this.#selected];
-    if (!ids.length || !window.confirm(`Delete ${ids.length} selected ${this.#kind}?`)) return;
-    const type = this.#kind === "groups" ? "groups.delete" : `${this.#kind}.delete`;
+  #selectedGroups() {
+    if (this.#kind === "groups") return (this.#data()?.groups || []).filter((group) => this.#selected.has(group.uid));
+    if (this.#kind !== "genes" || this.#geneView !== "groups") return [];
+    return this.#rows().filter((row) => row.type === "gene-group" && row.group?.genes?.length &&
+      row.group.genes.every((id) => this.#selected.has(this.#id(id)))).map((row) => row.group);
+  }
+
+  #groupActionsMarkup(groups) {
+    if (!groups.length) return "";
+    return groups.length > 1
+      ? dataActionMenuMarkup("Merge…", `<select data-merge-target><option value="">Choose group to keep…</option>${groups.map((group) => `<option value="${escapeHtml(group.uid)}">${escapeHtml(labelFor(group, group.uid))}</option>`).join("")}</select><button type="button" data-command="merge">Merge groups</button>`)
+      : dataActionMenuMarkup("Group…", `<button type="button" data-command="view-members">View member genes</button><label>Position <input type="number" data-group-position required min="1" max="${this.#data()?.groups.length || 1}"></label>`);
+  }
+
+  #selectedParents(kind) {
+    const clusters = this.#data()?.clusters || [];
+    const records = kind === "loci" ? clusters.flatMap((cluster) => cluster.loci) : clusters;
+    return records.filter((record) => {
+      const genes = kind === "loci" ? record.genes : record.loci.flatMap((locus) => locus.genes);
+      return genes.length && genes.every((gene) => this.#selected.has(gene.uid));
+    }).map((record) => record.uid);
+  }
+
+  #removeRecords(kind, ids) {
+    if (!ids.length || !window.confirm(`Remove ${ids.length} ${kind} and all their genes from the plot? This can be undone.`)) return;
+    this.#runEdit(() => {
+      this.#chart.remove({ [kind]: ids });
+      this.#selected.clear();
+      this.#renderData(); this.#syncHighlight();
+    });
+  }
+
+  #deleteSelected(kind = this.#kind, ids = [...this.#selected]) {
+    if (!ids.length || !window.confirm(`Delete ${ids.length} selected ${kind}?${kind === "groups" ? " Their genes will remain in the plot." : ""}`)) return;
+    const type = `${kind}.delete`;
     this.#selected.clear();
     this.#apply({ type, ids });
   }

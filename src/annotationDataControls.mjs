@@ -6,7 +6,7 @@ import { parseAnnotationTable, annotationTableText, mapAnnotationValues } from "
 import { createAnnotationCreateControls } from "./annotationCreateControls.mjs";
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
-export function createAnnotationDataControls({ document, getData, patch, annotationApi, embedded = false }) {
+export function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
   installDataEditorStyle(document);
   installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
@@ -84,7 +84,7 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
     if (categorical && batchValue !== "" && !resolved.domain[Number(batchValue)]) batchValue = "";
     const { viewport: tableArea } = layout;
     const all = input(null, "Select all filtered clusters", false, "checkbox");
-    const selectionControls = createSelectionControls(layout, { selection, checkbox: all, onChange: () => syncSelection() });
+    const selectionControls = createSelectionControls(layout, { selection, checkbox: all, menuLabel: "Edit values…", onChange: () => syncSelection() });
     const batch = selectionControls.actions;
     const columns = select(batch, "Columns to edit", batchColumn,
       [["all", "All columns"], ...panel.columns.map((name, index) => [String(index), name])], (value) => { batchColumn = value; });
@@ -196,7 +196,7 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
     disposeView = () => list.destroy();
     filterRows = () => {
       const needle = filter.trim().toLowerCase();
-      clusters = getData().clusters.filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle));
+      clusters = getClusters().filter((cluster) => `${cluster.name} ${cluster.uid}`.toLowerCase().includes(needle));
       tableArea.scrollTop = 0; list.setRows(clusters);
     };
     filterRows();
@@ -224,7 +224,7 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
     button(actions, "Cancel", () => { box.hidden = true; layout.sync(); });
     return () => {
       box.hidden = !box.hidden; layout.sync();
-      if (!box.hidden) { data.value = annotationTableText(current(), getData().clusters); data.focus(); }
+      if (!box.hidden) { data.value = annotationTableText(current(), getClusters()); data.focus(); }
     };
   };
   const renderGroups = (parent, panel) => {
@@ -241,15 +241,16 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
         [["clusters", "Selected clusters"], ...(tree ? [["tree", "Tree clade"]] : [])], (mode) => {
           const groups = [...current().groups];
           const { nodeUid, clusterIds, ...style } = groups[index];
-          groups[index] = mode === "tree" ? { ...style, nodeUid: tree.root } : { ...style, clusterIds: [getData().clusters[0].uid] };
+          if (mode !== "tree" && !getClusters().length) return;
+          groups[index] = mode === "tree" ? { ...style, nodeUid: tree.root } : { ...style, clusterIds: [getClusters()[0].uid] };
           update({ groups });
         });
       if (group.nodeUid !== undefined) select(box, "Tree node", group.nodeUid,
         tree.nodes.map((node) => [node.uid, node.label || node.uid]), (nodeUid) => editGroup(index, { nodeUid }));
       else {
-        const members = el("select", undefined, box); members.multiple = true; members.size = Math.min(5, getData().clusters.length);
+        const members = el("select", undefined, box); members.multiple = true; members.size = Math.min(5, getClusters().length);
         members.setAttribute("aria-label", `Clusters in ${group.label || group.uid}`);
-        for (const cluster of getData().clusters) {
+        for (const cluster of getClusters()) {
           const option = el("option", `${cluster.name || cluster.uid} (${cluster.uid})`, members);
           option.value = cluster.uid; option.selected = group.clusterIds.includes(cluster.uid);
         }
@@ -257,8 +258,9 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
       }
     });
     button(parent, "Add group", () => {
+      if (!getClusters().length) return;
       let serial = 1; while (panel.groups.some((group) => group.uid === `group-${serial}`)) serial++;
-      update({ groups: [...panel.groups, { uid: `group-${serial}`, label: `Group ${serial}`, clusterIds: [getData().clusters[0].uid] }] });
+      update({ groups: [...panel.groups, { uid: `group-${serial}`, label: `Group ${serial}`, clusterIds: [getClusters()[0].uid] }] });
     });
   };
   function render() {
@@ -270,7 +272,7 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
     node.replaceChildren();
     toolbar.replaceChildren();
     if (!embedded) node.append(toolbar);
-    const panels = getPanels(); renderedPanels = panels; renderedClusters = getData().clusters;
+    const panels = getPanels(); renderedPanels = panels; renderedClusters = getClusters();
     if (!panels.some((panel) => panel.uid === selected)) selected = panels[0]?.uid ?? null;
     if (panels.length) select(toolbar, "Annotation panel", selected, panels.map((panel) => [panel.uid, panel.title || panel.uid]),
       (uid) => { selected = uid; deleting = null; creating = false; render(); });
@@ -286,7 +288,7 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
     if (selectionPanel !== panel?.uid) {
       selection.clear(); selectionPanel = panel?.uid; batchColumn = "0"; batchValue = "";
     }
-    const validRows = new Set(getData().clusters.map((cluster) => cluster.uid));
+    const validRows = new Set(getClusters().map((cluster) => cluster.uid));
     selection.prune(validRows);
     if (batchColumn !== "all" && Number(batchColumn) >= (panel?.columns?.length || 0)) batchColumn = "0";
     if (!panel) { el("p", "No annotation panels. Add a panel to attach data to cluster rows.", body); return; }
@@ -335,7 +337,7 @@ export function createAnnotationDataControls({ document, getData, patch, annotat
       if (replace) { selection.clear(); selected = selectionPanel = null; }
     },
     destroy() { disposeView(); toolbar.remove(); },
-    update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getData().clusters !== renderedClusters || !node.childElementCount)) render(); } };
+    update() { if (!applying && (current() !== renderedPanel || getPanels() !== renderedPanels || getClusters() !== renderedClusters || !node.childElementCount)) render(); } };
 }
 
 function installStyle(document) {

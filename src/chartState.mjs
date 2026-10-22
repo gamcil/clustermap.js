@@ -1,4 +1,5 @@
 import { isTreeOrderCompatible } from "./treeLayout.mjs";
+import { visibleTree } from "./data/visibility.mjs";
 
 function removeMissing(records, allowed) {
   for (const uid of records.keys()) if (!allowed.has(uid)) records.delete(uid);
@@ -19,6 +20,8 @@ export function createChartState(data, previous = null) {
   };
   const clusterIds = data.clusters.map((cluster) => cluster.uid);
   const clusterIdSet = new Set(clusterIds);
+  const excludedClusters = new Set([...previous?.excludedClusters || []].filter((uid) => clusterIdSet.has(uid)));
+  const excludedLoci = new Set([...previous?.excludedLoci || []]);
   const previousOrder = previous?.clusterOrder || [];
   const previousOrderSet = new Set(previousOrder);
   const clusterOrder = data.tree ? treeClusterOrder(data.tree) : [
@@ -76,7 +79,11 @@ export function createChartState(data, previous = null) {
   removeMissing(preview.locusOffsets, locusIds);
   removeMissing(preview.clusterPositions, clusterIdSet);
   removeMissing(preview.loci, locusIds);
-  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview };
+  for (const uid of excludedLoci) if (!locusIds.has(uid)) excludedLoci.delete(uid);
+  for (const cluster of data.clusters) {
+    if (cluster.loci.length && cluster.loci.every((locus) => excludedLoci.has(locus.uid))) excludedClusters.add(cluster.uid);
+  }
+  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview, excludedClusters, excludedLoci };
 }
 
 function treeClusterOrder(tree) {
@@ -92,21 +99,23 @@ function treeClusterOrder(tree) {
 }
 
 /** Commit a compatible display order to the tree's ordered child arrays. */
-export function setTreeClusterOrder(tree, order) {
+export function setTreeClusterOrder(tree, order, { partial = false } = {}) {
   if (!tree) return;
-  if (!isTreeOrderCompatible(tree, order)) {
+  const orderedTree = partial ? visibleTree(tree, new Set(order)) : tree;
+  if (!orderedTree || !isTreeOrderCompatible(orderedTree, order)) {
     throw new TypeError("Cluster order must keep every tree clade contiguous.");
   }
   const positions = new Map(order.map((uid, index) => [uid, index]));
   const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
   const firstPosition = (uid) => {
     const node = nodes.get(uid);
-    if (!node.children) return positions.get(node.cluster);
+    if (!node.children) return positions.get(node.cluster) ?? Infinity;
     const first = new Map(node.children.map((child) => [child, firstPosition(child)]));
     node.children.sort((a, b) => first.get(a) - first.get(b));
     return first.get(node.children[0]);
   };
   firstPosition(tree.root);
+  return treeClusterOrder(tree);
 }
 
 export function isDragging(chartState) {
@@ -135,7 +144,9 @@ export function setPreviewClusterPosition(chartState, uid, position) {
 
 export function commitPreviewClusterOrder(chartState) {
   if (chartState.preview.clusterOrder) {
-    chartState.clusterOrder = chartState.preview.clusterOrder;
+    const order = chartState.preview.clusterOrder;
+    const included = new Set(order);
+    chartState.clusterOrder = [...order, ...chartState.clusterOrder.filter((uid) => !included.has(uid))];
     chartState.preview.clusterOrder = null;
   }
   chartState.preview.clusterPositions.clear();

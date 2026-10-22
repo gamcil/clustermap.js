@@ -1,3 +1,97 @@
+/** Prune absent leaves and collapse unary ancestors without changing source records. */
+function visibleTree(tree, clusterIds, aliases = new Map()) {
+  if (!tree) return tree;
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const retained = new Map();
+  const visit = (uid) => {
+    const node = nodes.get(uid);
+    if (!node.children) {
+      if (!clusterIds.has(node.cluster)) return null;
+      retained.set(uid, node);
+      return node;
+    }
+    const children = node.children.map(visit).filter(Boolean);
+    if (!children.length) return null;
+    if (children.length === 1) {
+      const child = { ...children[0] };
+      if (uid !== tree.root) {
+        if (Number.isFinite(node.branchLength) && Number.isFinite(child.branchLength)) child.branchLength += node.branchLength;
+        else delete child.branchLength;
+      }
+      aliases.set(uid, child.uid);
+      retained.set(child.uid, child);
+      return child;
+    }
+    const result = { ...node, children: children.map((child) => child.uid) };
+    retained.set(uid, result);
+    return result;
+  };
+  let root = visit(tree.root);
+  if (!root) return null;
+  if (root.uid !== tree.root) {
+    root = { ...root };
+    delete root.branchLength;
+    delete root.support;
+    retained.set(root.uid, root);
+  }
+  const presentation = tree.presentation && { ...tree.presentation };
+  if (presentation) {
+    const styles = new Map(Object.entries(presentation.nodes || {}).filter(([uid]) => retained.has(uid)));
+    const subtrees = new Map();
+    const inherit = (uid) => {
+      const target = aliases.get(uid) ?? uid, branch = presentation.subtrees?.[uid]?.branch;
+      if (branch && retained.has(target)) {
+        subtrees.set(target, { branch: { ...subtrees.get(target)?.branch, ...branch } });
+      }
+      for (const child of nodes.get(uid).children || []) inherit(child);
+    };
+    inherit(tree.root);
+    for (const [uid, style] of subtrees) if (!retained.get(uid).children) {
+      styles.set(uid, { ...styles.get(uid), branch: { ...style.branch, ...styles.get(uid)?.branch } });
+      subtrees.delete(uid);
+    }
+    if (root.uid !== tree.root && styles.has(root.uid)) {
+      const { branch, ...style } = styles.get(root.uid);
+      styles.set(root.uid, style);
+    }
+    if (presentation.nodes || styles.size) presentation.nodes = Object.fromEntries(styles);
+    if (presentation.subtrees) presentation.subtrees = Object.fromEntries(subtrees);
+  }
+  return { ...tree, root: root.uid,
+    nodes: tree.nodes.filter((node) => retained.has(node.uid)).map((node) => retained.get(node.uid)),
+    ...(presentation ? { presentation } : {}) };
+}
+
+/** A display view; source records and saved annotation values remain intact. */
+function visibleChartData(data, state) {
+  if (!state.excludedClusters.size && !state.excludedLoci.size) return data;
+  const clusters = data.clusters.filter((cluster) => !state.excludedClusters.has(cluster.uid)).map((cluster) => {
+    const loci = cluster.loci.filter((locus) => !state.excludedLoci.has(locus.uid));
+    return loci.length === cluster.loci.length ? cluster : { ...cluster, loci };
+  });
+  const clusterIds = new Set(clusters.map((cluster) => cluster.uid));
+  const rowIds = new Set(clusters.map((cluster) => String(cluster.uid)));
+  const geneIds = new Set(clusters.flatMap((cluster) => cluster.loci.flatMap((locus) => locus.genes.map((gene) => gene.uid))));
+  const aliases = new Map();
+  const tree = visibleTree(data.tree, clusterIds, aliases);
+  const nodeIds = new Set(tree?.nodes.map((node) => node.uid));
+  return { ...data, clusters, tree,
+    links: data.links.filter((link) => geneIds.has(link.query.uid) && geneIds.has(link.target.uid)),
+    groups: data.groups?.map((group) => ({ ...group, genes: group.genes?.filter((uid) => geneIds.has(uid)) })),
+    annotationPanels: data.annotationPanels?.map((panel) => panel.type === "groups"
+      ? { ...panel, groups: panel.groups.flatMap((group) => {
+        if (group.nodeUid !== undefined) {
+          const nodeUid = aliases.get(group.nodeUid) ?? group.nodeUid;
+          return nodeIds.has(nodeUid) ? [{ ...group, nodeUid }] : [];
+        }
+        const ids = group.clusterIds.filter((uid) => clusterIds.has(uid));
+        return ids.length ? [{ ...group, clusterIds: ids }] : [];
+      }) }
+      : { ...panel, values: Object.fromEntries(Object.entries(panel.values).filter(([uid]) =>
+        rowIds.has(uid))) }).filter((panel) => panel.type !== "groups" || panel.groups.length),
+  };
+}
+
 /** Cubic-in-out animation; returns a cancellation function. */
 function animate(duration, update, complete) {
   const startedAt = performance.now();
@@ -5332,6 +5426,8 @@ function createChartState(data, previous = null) {
   };
   const clusterIds = data.clusters.map((cluster) => cluster.uid);
   const clusterIdSet = new Set(clusterIds);
+  const excludedClusters = new Set([...previous?.excludedClusters || []].filter((uid) => clusterIdSet.has(uid)));
+  const excludedLoci = new Set([...previous?.excludedLoci || []]);
   const previousOrder = previous?.clusterOrder || [];
   const previousOrderSet = new Set(previousOrder);
   const clusterOrder = data.tree ? treeClusterOrder(data.tree) : [
@@ -5389,7 +5485,11 @@ function createChartState(data, previous = null) {
   removeMissing(preview.locusOffsets, locusIds);
   removeMissing(preview.clusterPositions, clusterIdSet);
   removeMissing(preview.loci, locusIds);
-  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview };
+  for (const uid of excludedLoci) if (!locusIds.has(uid)) excludedLoci.delete(uid);
+  for (const cluster of data.clusters) {
+    if (cluster.loci.length && cluster.loci.every((locus) => excludedLoci.has(locus.uid))) excludedClusters.add(cluster.uid);
+  }
+  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview, excludedClusters, excludedLoci };
 }
 
 function treeClusterOrder(tree) {
@@ -5405,21 +5505,23 @@ function treeClusterOrder(tree) {
 }
 
 /** Commit a compatible display order to the tree's ordered child arrays. */
-function setTreeClusterOrder(tree, order) {
+function setTreeClusterOrder(tree, order, { partial = false } = {}) {
   if (!tree) return;
-  if (!isTreeOrderCompatible(tree, order)) {
+  const orderedTree = partial ? visibleTree(tree, new Set(order)) : tree;
+  if (!orderedTree || !isTreeOrderCompatible(orderedTree, order)) {
     throw new TypeError("Cluster order must keep every tree clade contiguous.");
   }
   const positions = new Map(order.map((uid, index) => [uid, index]));
   const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
   const firstPosition = (uid) => {
     const node = nodes.get(uid);
-    if (!node.children) return positions.get(node.cluster);
+    if (!node.children) return positions.get(node.cluster) ?? Infinity;
     const first = new Map(node.children.map((child) => [child, firstPosition(child)]));
     node.children.sort((a, b) => first.get(a) - first.get(b));
     return first.get(node.children[0]);
   };
   firstPosition(tree.root);
+  return treeClusterOrder(tree);
 }
 
 function isDragging(chartState) {
@@ -5448,7 +5550,9 @@ function setPreviewClusterPosition(chartState, uid, position) {
 
 function commitPreviewClusterOrder(chartState) {
   if (chartState.preview.clusterOrder) {
-    chartState.clusterOrder = chartState.preview.clusterOrder;
+    const order = chartState.preview.clusterOrder;
+    const included = new Set(order);
+    chartState.clusterOrder = [...order, ...chartState.clusterOrder.filter((uid) => !included.has(uid))];
     chartState.preview.clusterOrder = null;
   }
   chartState.preview.clusterPositions.clear();
@@ -10578,10 +10682,6 @@ function installDataEditorStyle(document) {
 .cm-data-ui .cm-data-icon-button--edit { --cm-icon-size:20px; display:none; flex:0 0 20px; }
 .cm-data-row:is(:hover,:focus-within,.is-selected) .cm-data-icon-button--edit { display:inline-grid; }
 .cm-data-icon-button--edit svg { width:14px; height:14px; }
-.cm-data-action-group { display:flex; align-items:center; gap:6px; }
-.cm-data-action-group + .cm-data-action-group { border-left:1px solid var(--cm-border,#d5e0ee); padding-left:10px; }
-.cm-data-action-group label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
-.cm-data-action-group input[type=number] { width:112px; }
 .cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
 .cm-data-search { display:flex; flex:1; min-width:140px; }
 .cm-data-search input { width:100%; }
@@ -10589,10 +10689,20 @@ function installDataEditorStyle(document) {
 .cm-data-error:empty { display:none; }
 .cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
 .cm-data-tools { flex-shrink:0; }
-.cm-data-meta { display:flex; align-items:center; justify-content:space-between; min-height:30px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
-.cm-data-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; padding:8px 10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-subtle,#f3f6fa); }
-.cm-data-actions strong { padding:4px 7px; border-radius:5px; background:var(--cm-selection,#d6e6fc); color:var(--cm-foreground,#273444); }
+.cm-data-meta { display:flex; align-items:center; gap:8px; height:32px; flex-shrink:0; color:var(--cm-muted,#687586); font-size:12px; }
+.cm-data-meta > span:first-child { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cm-data-meta > span.is-selected { color:var(--cm-foreground,#273444); font-weight:600; }
+.cm-data-meta > button { flex-shrink:0; }
+.cm-data-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .cm-data-selection-actions { display:contents; }
+.cm-data-action-menu { position:relative; }
+.cm-data-action-menu > summary { display:block; min-height:30px; box-sizing:border-box; padding:4px 8px; border:1px solid var(--cm-border,#cbd3de); border-radius:6px; background:var(--cm-surface,#fff); color:var(--cm-foreground,#273444); list-style:none; white-space:nowrap; }
+.cm-data-action-menu > summary::-webkit-details-marker { display:none; }
+.cm-data-action-menu > summary:hover, .cm-data-action-menu[open] > summary { background:var(--cm-hover,#e3ecf8); border-color:var(--cm-accent,#78a9ed); }
+.cm-data-action-menu-body { position:absolute; right:0; top:calc(100% + 4px); z-index:10; display:flex; flex-direction:column; gap:8px; width:max-content; max-width:min(340px,80vw); max-height:50vh; overflow:auto; padding:10px; border:1px solid var(--cm-border,#cbd3de); border-radius:8px; background:var(--cm-surface,#fff); box-shadow:0 4px 16px #0002; color:var(--cm-foreground,#273444); }
+.cm-data-action-menu-body > button { text-align:left; }
+.cm-data-action-menu-body label { display:flex; align-items:center; gap:6px; }
+.cm-data-action-menu-body input[type=number] { width:112px; }
 .cm-data-table { flex:1; min-height:120px; overflow:auto; overflow-anchor:none; }
 .cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
 .cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; line-height:20px; }
@@ -13105,6 +13215,11 @@ function sceneChromeOptions(data) {
   };
 }
 
+function clusterOrderForData(data) {
+  const ids = new Set(data.clusters.map((cluster) => cluster.uid));
+  return getClusterOrder(chartState).filter((uid) => ids.has(uid));
+}
+
 function buildChartScene(data) {
   // Resolve link policy once for all renderers and their previews.
   allowedLinkIds = new Set(filterLinks(data.links, {
@@ -13113,7 +13228,7 @@ function buildChartScene(data) {
     bestOnly: config.link.bestOnly,
     threshold: config.link.threshold,
   }).map((link) => link.uid));
-  const clusterOrder = getClusterOrder(chartState);
+  const clusterOrder = clusterOrderForData(data);
   currentScene = buildScene(data, {
     ...sceneProjectionOptions({
       tree: data.tree,
@@ -13147,7 +13262,7 @@ function patchChartScene(previousScene, changes = {}, data) {
   currentScene = patchScene(previousScene, { loci, clusters }, {
     ...sceneProjectionOptions({
       tree: data.tree,
-      clusterOrder: getClusterOrder(chartState),
+      clusterOrder: clusterOrderForData(data),
     }),
     clusterOffset: scales.offset,
     clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
@@ -13229,7 +13344,7 @@ function updateScales(data, { geometryOnly = false } = {}) {
     rescaleRanges(oldX);
   }
 
-  scales.y.domain(getClusterOrder(chartState));
+  scales.y.domain(clusterOrderForData(data));
   const body = config.gene.shape.tipHeight * 2 + config.gene.shape.bodyHeight;
   scales.y.range(data.clusters.map((cluster, index) => index * (config.cluster.spacing + body)));
 
@@ -15130,6 +15245,8 @@ function snapshotFromBaseline(state, data, baseline) {
   }
   return {
     version: 1,
+    ...(state.excludedClusters.size ? { excludedClusters: [...state.excludedClusters] } : {}),
+    ...(state.excludedLoci.size ? { excludedLoci: [...state.excludedLoci] } : {}),
     // Tree child order changes with edits. Keep its leaf order explicit so an
     // undo snapshot can restore it even if it matched source cluster order.
     clusterOrder: !data.tree && state.clusterOrder.length === defaultOrder.length && state.clusterOrder.every((uid, index) => uid === defaultOrder[index])
@@ -15182,7 +15299,10 @@ function chartStateFromSnapshot(data, snapshot) {
     locus.uid,
     new Map(locus.genes.map((gene) => [gene.uid, gene])),
   ]));
-  const restored = createChartState(data);
+  const restored = createChartState(data, {
+    excludedClusters: Array.isArray(snapshot.excludedClusters) ? snapshot.excludedClusters : [],
+    excludedLoci: Array.isArray(snapshot.excludedLoci) ? snapshot.excludedLoci : [],
+  });
   const applyOffsets = (entries, allowed, target) => stateEntries(entries).forEach(([uid, value]) => {
     if (allowed.has(uid) && finiteNumber(value) !== null) target.set(uid, value);
   });
@@ -15265,7 +15385,7 @@ function clusterMap() {
   const figureSurface = createFigureSurface();
   function updateFigureSurface() {
     if (container) figureSurface.update(container, runtime.getScene(), runtime.renderConfig,
-      currentData?.tree, getCamera(chartState), scenePreview);
+      plotData?.tree, getCamera(chartState), scenePreview);
   }
   let annotationOverlay = null;
   let themeMedia = null;
@@ -15294,6 +15414,12 @@ function clusterMap() {
   let rasterCanvas = null, overlayCanvas = null, minimapCanvas = null;
   let minimapScene = null, minimapMeasurement = null;
   let currentData = null;
+  let plotData = null;
+  let plotDataDirty = true;
+  const displayClusterOrder = () => {
+    const ids = new Set(plotData.clusters.map((cluster) => cluster.uid));
+    return getClusterOrder(chartState).filter((uid) => ids.has(uid));
+  };
   let figureMeasurementContext = null;
   let chartIndex = null;
   let highlightGeneIds = new Set();
@@ -15360,9 +15486,9 @@ function clusterMap() {
   };
   const interactionController = createInteractionController({
     clusterRows: () => runtime.scales.y.range(),
-    getClusterOrder: () => getClusterOrder(chartState),
+    getClusterOrder: displayClusterOrder,
     getClusterPosition: (uid) => runtime.getScene().clusters.get(uid).y,
-    getTree: () => currentData?.tree || null,
+    getTree: () => plotData?.tree || null,
     getLocusOffset: (uid) => getLocusOffset(chartState, uid),
     selectedLocusIds: () => [...selectedLocusIds],
     selectedClusterIds: () => new Set(
@@ -15389,7 +15515,7 @@ function clusterMap() {
           clusterUid: uid,
           position,
           positions,
-          order: getClusterOrder(chartState),
+          order: displayClusterOrder(),
           rows: runtime.scales.y.range(),
         });
         scheduleScenePaint();
@@ -15400,11 +15526,13 @@ function clusterMap() {
     commitClusterOrder: () => {
       const sourceScene = runtime.getScene();
       const preview = scenePreview?.type === "cluster-drag" ? scenePreview : null;
-      const order = [...getClusterOrder(chartState)];
+      const order = displayClusterOrder();
       const rows = runtime.scales.y.range();
       if (sourceScene) sceneCommit = { sourceScene, changes: {} };
       commitPreviewClusterOrder(chartState);
-      setTreeClusterOrder(currentData.tree, order);
+      const treeOrder = setTreeClusterOrder(currentData.tree, order, { partial: chartState.excludedClusters.size > 0 });
+      if (treeOrder) chartState.clusterOrder = treeOrder;
+      plotDataDirty = true;
       if (
         preview &&
         sourceScene &&
@@ -15481,7 +15609,7 @@ function clusterMap() {
         // Updating scales is inexpensive and gives the sparse projection the
         // packed x offsets for this temporary locus state. Deliberately avoid
         // rebuilding data, indexes, or the complete scene until release.
-        runtime.updateScales(currentData, { geometryOnly: true });
+        runtime.updateScales(plotData, { geometryOnly: true });
         scenePreview = createLocusTrimPreview(runtime.getScene(), locus.uid, result.state, {
           localXFor: runtime.scales.locus,
           scaleX: runtime.scales.x,
@@ -15531,7 +15659,7 @@ function clusterMap() {
         const duration = runtime.config.plot.transitionDuration;
         const finish = () => {
           runtime.synchronizeLocusLayoutState(locus);
-          const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, currentData);
+          const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, plotData);
           if (useGpu) {
             webgpuBackend.adoptScene(targetScene, sourceScene, {
               scales: runtime.scales, config: runtime.renderConfig,
@@ -15593,7 +15721,7 @@ function clusterMap() {
     cancelCanvasFlip = null;
     if (!pending.targetScene) {
       runtime.synchronizeLocusLayoutState(pending.locus);
-      pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, currentData);
+      pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, plotData);
       commitInteractionState();
     }
     canvasScene = pending.targetScene;
@@ -15607,7 +15735,7 @@ function clusterMap() {
     if (canvasPendingFlip !== pending) return;
     cancelCanvasFlip = null;
     runtime.synchronizeLocusLayoutState(pending.locus);
-    pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, currentData);
+    pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, plotData);
     commitInteractionState();
     canvasBackend.prepareFlip(pending.locus.uid, pending.sourceScene);
     // Restore and repaint the affected canvas region before the browser can
@@ -15679,6 +15807,7 @@ function clusterMap() {
     const prepared = normalizeChartData(data, runtime.config.tree);
     cancelTreePresentationPreview();
     currentData = prepared;
+    plotDataDirty = true;
     chartIndex = createChartIndex(currentData);
     refreshGroups();
     selectedLocusIds = new Set(
@@ -15772,6 +15901,7 @@ function clusterMap() {
     if (!annotationsOnly) stateSnapshots.reset();
     const groupsAutomaticBefore = groupsAreAutomatic();
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
+    plotDataDirty = true;
     const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
     if (restoringAutomatic) {
       currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
@@ -15801,6 +15931,7 @@ function clusterMap() {
   function cancelTreePresentationPreview() {
     if (!treePresentationPreview) return false;
     if (currentData?.tree === treePresentationPreview.tree) applyTreeOperation(currentData.tree, treePresentationPreview.undo);
+    plotDataDirty = true;
     treePresentationPreview = null;
     return true;
   }
@@ -15810,6 +15941,7 @@ function clusterMap() {
     pendingInteractionState = null;
     const before = chartState ? stateSnapshots.serialize(chartState, currentData) : null;
     chartState = chartStateFromSnapshot(currentData, snapshot);
+    plotDataDirty = true;
     runtime.setChartState(chartState);
     hasInitialView = true;
     redraw({ animate: false });
@@ -15869,8 +16001,8 @@ function clusterMap() {
       beginInteractionState();
       treeAnimation = {
         previousTree: {
-          ...currentData.tree,
-          nodes: currentData.tree.nodes.map((entry) => ({
+          ...plotData.tree,
+          nodes: plotData.tree.nodes.map((entry) => ({
             ...entry,
             children: entry.children ? [...entry.children] : undefined,
           })),
@@ -15880,6 +16012,7 @@ function clusterMap() {
       };
       sceneCommit = { sourceScene: runtime.getScene(), changes: {} };
       node.children.reverse();
+      plotDataDirty = true;
       chartState = createChartState(currentData, chartState);
       runtime.setChartState(chartState);
       redraw();
@@ -15890,7 +16023,7 @@ function clusterMap() {
       const anchor = locusForId(locusSelectionAnchorUid);
       if (clusterRange && anchor) {
         const range = lociForClusterRange(
-          getClusterOrder(chartState),
+          displayClusterOrder(),
           chartIndex?.clusterById || new Map(),
           anchor.clusterUid,
           locus.clusterUid
@@ -15946,7 +16079,7 @@ function clusterMap() {
       camera: getCamera(chartState),
       config: runtime.renderConfig,
       event,
-      tree: currentData.tree,
+      tree: plotData.tree,
       treeDragging: isDragging(chartState),
     });
   const locusForTarget = (target) =>
@@ -15977,7 +16110,7 @@ function clusterMap() {
   function sceneFrame(scene) {
     return {
       scene, camera: getCamera(chartState), config: runtime.renderConfig,
-      scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(), tree: currentData.tree,
+      scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(), tree: plotData.tree,
       preview: scenePreview, hoverLocusUid: canvasHoverLocusUid,
       suppressLocusHover: scenePreview?.type === "locus-flip" || Boolean(canvasAnimation?.suppressLocusHover),
       previousTree: treeAnimation?.previousTree, previousTreeScene: treeAnimation?.previousScene,
@@ -15998,7 +16131,7 @@ function clusterMap() {
     if (!svg || svg.empty()) return;
     updateFigureSurface();
     return svgBackend.paint({ ...sceneFrame(svgBackend.pendingScene || runtime.getScene()),
-      plot: svg.select("g.clusterMapG"), data: currentData, annotationsOnly, previousScene, animate,
+      plot: svg.select("g.clusterMapG"), data: plotData, annotationsOnly, previousScene, animate,
       annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
       transition: animate ? transition().duration(runtime.config.plot.transitionDuration) : null,
       ids: runtime.ids, interactions: rendererInteractions });
@@ -16084,7 +16217,7 @@ function clusterMap() {
 
   function renderMinimapBase({ canvas, scene, projection }) {
     const options = runtime.config.plot.minimap;
-    renderCanvas({ canvas, scene, tree: currentData.tree, treeTrackAnchor: false,
+    renderCanvas({ canvas, scene, tree: plotData.tree, treeTrackAnchor: false,
       camera: { x: projection.x, y: projection.y, k: projection.scale },
       config: runtime.renderConfig, scales: runtime.scales, dimensions: projection, fullScene: true,
       layers: CANVAS_LAYERS.filter((layer) => layer !== "geneLabels" && layer !== "chrome" &&
@@ -16094,9 +16227,9 @@ function clusterMap() {
 
   function scheduleMinimapBase(scene) {
     if (!minimapCanvas || !runtime.config.plot.minimap?.show) return;
-    if (currentData.tree && runtime.config.tree.show) {
+    if (plotData.tree && runtime.config.tree.show) {
       minimapMeasurement ||= minimapCanvas.ownerDocument.createElement("canvas").getContext("2d");
-      scene = { ...scene, figureBounds: canvasFigureBounds(minimapMeasurement, scene, runtime.config, currentData.tree) };
+      scene = { ...scene, figureBounds: canvasFigureBounds(minimapMeasurement, scene, runtime.config, plotData.tree) };
     }
     minimapScene = scene;
     rasterMinimap.scheduleBase({ scene, minimap: minimapCanvas, options: runtime.config.plot.minimap,
@@ -16189,7 +16322,14 @@ function clusterMap() {
     if (!updatingTreeMenu || !retainedOverlay?.isTreeMenuOpen(currentData.tree)) {
       retainedOverlay?.hide(true);
     }
-    const data = currentData;
+    if (plotDataDirty) {
+      plotData = visibleChartData(currentData, chartState);
+      runtime.setChartIndex(plotData === currentData ? chartIndex : createChartIndex(plotData));
+      plotDataDirty = false;
+    }
+    selectedLocusIds = new Set([...selectedLocusIds].filter((uid) => !chartState.excludedLoci.has(uid) &&
+      !chartState.excludedClusters.has(locusForId(uid)?.clusterUid)));
+    const data = plotData;
 
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
@@ -16270,7 +16410,7 @@ function clusterMap() {
         eventNamespace: `.${runtime.ids.root}-tooltip`,
         actions: {
           redraw,
-          treeControls: () => ({ tree: currentData.tree, clusters: currentData.clusters, config: runtime.renderConfig.tree,
+          treeControls: () => ({ tree: plotData.tree, clusters: plotData.clusters, config: runtime.renderConfig.tree,
             patch: (ops) => updateFromTreeMenu(() => my.patch(ops)),
             rotate: (uid) => updateFromTreeMenu(() => rendererInteractions.rotateTreeNode(uid)) }),
           updateGene: (gene, changes) => my.patch([
@@ -16344,7 +16484,7 @@ function clusterMap() {
       if (!hasInitialView) fitInitialView(svg, plot);
     }
     updateFigureSurface();
-    if (runtime.config.annotations.enabled && currentData.clusters?.length) {
+    if (runtime.config.annotations.enabled && plotData.clusters?.length) {
       annotationUiContext = {
         surfaces: [useRaster ? canvas.node() : svg.node()],
         getScene: () => runtime.getScene(), getPreview: () => scenePreview,
@@ -16409,7 +16549,7 @@ function clusterMap() {
     const measurementCanvas = isWebGpuRenderer(runtime.config.plot.renderer)
       ? document.createElement("canvas")
       : canvas;
-    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, currentData.tree);
+    const bounds = canvasFigureBounds(measurementCanvas.getContext("2d"), scene, runtime.config, plotData.tree);
     if (!bounds) return;
 
     const camera = fitCameraForBounds({
@@ -16460,6 +16600,23 @@ function clusterMap() {
     container.datum(data).call(my);
     emitChange({ type: "data.replace" });
     clearHistory();
+    return my;
+  };
+  my.visibleData = () => plotData;
+  my.remove = function ({ clusters = [], loci = [] } = {}) {
+    if (!container || !chartState || !chartIndex) throw new Error("Cannot remove records before the chart has rendered.");
+    const validate = (ids, records, kind) => {
+      if (!Array.isArray(ids) || ids.some((uid) => !records.has(uid))) throw new TypeError(`Unknown ${kind} IDs.`);
+    };
+    validate(clusters, chartIndex.clusterById, "cluster");
+    validate(loci, chartIndex.locusById, "locus");
+    flushCanvasFlip();
+    cancelTreePresentationPreview();
+    const snapshot = stateSnapshots.serialize(chartState, currentData);
+    snapshot.excludedClusters = [...new Set([...(snapshot.excludedClusters || []), ...clusters])];
+    snapshot.excludedLoci = [...new Set([...(snapshot.excludedLoci || []), ...loci])];
+    if (snapshot.excludedClusters.length !== chartState.excludedClusters.size ||
+        snapshot.excludedLoci.length !== chartState.excludedLoci.size) setState(snapshot);
     return my;
   };
   /** A serializable layout and camera snapshot for project persistence. */
@@ -16533,6 +16690,7 @@ function clusterMap() {
       try { applyChartOperations(currentData, chartIndex, operations, runtime.config.tree); }
       catch (error) { redraw({ animate: false }); throw error; }
       treePresentationPreview = { tree, undo };
+      plotDataDirty = true;
     }
     redraw({ animate: false });
     return my;
@@ -16676,11 +16834,11 @@ function clusterMap() {
     return () => changeListeners.delete(listener);
   };
   /** Latest computed layout, excluding transient animation and drag geometry. */
-  my.figureBounds = () => figureSurface.bounds(container?.node(), runtime.getScene(), runtime.renderConfig, currentData?.tree);
+  my.figureBounds = () => figureSurface.bounds(container?.node(), runtime.getScene(), runtime.renderConfig, plotData?.tree);
   my.exportSvg = ({ padding = 20 } = {}) => {
     flushCanvasFlip();
     return exportChartSvg({
-      data: currentData,
+      data: plotData,
       scene: runtime.getScene(),
       config: runtime.renderConfig,
       scales: runtime.scales,
@@ -16722,6 +16880,8 @@ function clusterMap() {
       .interrupt()
       .remove();
     container = null;
+    plotData = null;
+    plotDataDirty = true;
     figureMeasurementContext = null;
     zoom = null;
     canvasZoom = null;

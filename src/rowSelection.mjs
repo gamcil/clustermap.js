@@ -2,12 +2,13 @@
 export class RowSelection extends Set {
   #anchor = null;
 
-  select(id, checked, { orderedIds = [], range = false } = {}) {
+  select(id, checked, { orderedIds = [], range = false, idsFor = (id) => [id] } = {}) {
     const start = orderedIds.indexOf(this.#anchor), end = orderedIds.indexOf(id);
     const ids = range && start >= 0 && end >= 0
       ? orderedIds.slice(Math.min(start, end), Math.max(start, end) + 1) : [id];
-    this.setMany(ids, checked);
-    this.#anchor = id;
+    const anchor = range && start >= 0 ? this.#anchor : id;
+    this.setMany(ids.flatMap(idsFor), checked);
+    this.#anchor = anchor;
   }
 
   setMany(ids, checked = true) {
