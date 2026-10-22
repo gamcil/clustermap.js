@@ -1,8 +1,8 @@
 import { installDataEditorStyle } from "../../shared/styles.mjs";
 import { RowSelection } from "../../../rowSelection.mjs";
 import { DATA_ROW_HEIGHT } from "../../../virtualRows.mjs";
-import { createAnnotationDataControls } from "../../../annotationDataControls.mjs";
-import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale, validateAnnotationPanels } from "../../../annotations.mjs";
+import { createAnnotationEditor } from "../../annotations.js";
+import { ANNOTATION_PALETTES, resolveAnnotationScale } from "../../../annotations.mjs";
 import { createActionRunner, createTemplate } from "../../../uiControls.mjs";
 import { applyTheme, resolveTheme, figureConfig } from "../../../theme.mjs";
 import { createEditorRow } from "./rows.js";
@@ -577,11 +577,11 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
       for (const selector of ["[data-gene-view]", "[data-member-filter]", '[data-command="new-group"]',
         '[data-command="toggle-tree"]']) this.querySelector(selector).hidden = true;
       if (!this.#annotationEditor) {
-        this.#annotationEditor = createAnnotationDataControls({ document: this.ownerDocument,
+        this.#annotationEditor = createAnnotationEditor({ document: this.ownerDocument,
           embedded: true,
           getData: () => this.#chart?.data?.() || { clusters: [] },
           getClusters: () => this.#data()?.clusters || [], patch: (operations) => this.#chart.patch(operations),
-          annotationApi: { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale, validateAnnotationPanels },
+          annotationApi: { ANNOTATION_PALETTES, resolveAnnotationScale },
         });
         annotationHost.append(this.#annotationEditor.node);
         this.querySelector("[data-annotation-toolbar]").append(this.#annotationEditor.toolbar);

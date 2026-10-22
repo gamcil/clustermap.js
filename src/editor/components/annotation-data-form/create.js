@@ -1,8 +1,8 @@
-import { createActionRunner } from "./uiControls.mjs";
-import { parseAnnotationTable } from "./annotationData.mjs";
-import { defineAnnotationDataForm } from "./editor/components/annotation-data-form/annotation-data-form.js";
+import { createActionRunner } from "../../../uiControls.mjs";
+import { parseAnnotationTable } from "../../../annotationData.mjs";
+import { defineAnnotationDataForm } from "./annotation-data-form.js";
 
-export function createAnnotationCreateControls({ document, getData, patch, onCreate, annotationApi }) {
+export function createAnnotationForm({ document, getData, patch, onCreate }) {
   defineAnnotationDataForm();
   const node = document.createElement("clinker-annotation-data-form");
   node.clusters = getData().clusters;
@@ -18,10 +18,9 @@ export function createAnnotationCreateControls({ document, getData, patch, onCre
       const panel = { uid: `${type}-${serial}`, type,
         title: title.trim() || (type === "groups" ? "Groups" : type === "bar" ? "Bar chart" : "Heatmap"),
         ...contents, ...(type === "groups" ? {} : { scale: { type: scale } }) };
-      annotationApi.validateAnnotationPanels([panel], getData().clusters, { tree: getData().tree });
       patch([{ type: "annotationPanels.create", panel }]);
       onCreate(panel.uid);
     });
   });
-  return { node };
+  return node;
 }

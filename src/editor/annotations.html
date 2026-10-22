@@ -1,0 +1,28 @@
+<template id="editor">
+<div class="cm-data-ui cm-annotation-data-editor" tabindex="-1">
+  <clinker-annotation-toolbar>
+    <clinker-search-field label="Filter records" placeholder="Find a cluster"></clinker-search-field>
+  </clinker-annotation-toolbar>
+  <div class="cm-data-error" data-data-error role="alert"></div><div class="cm-annotation-data-body"></div>
+</div>
+</template>
+
+<template id="matrix">
+<clinker-annotation-table></clinker-annotation-table>
+</template>
+
+<template id="categories">
+<clinker-category-editor class="cm-annotation-categories"></clinker-category-editor>
+</template>
+
+<template id="replacement">
+<clinker-annotation-data-form mode="replace" hidden></clinker-annotation-data-form>
+</template>
+
+<template id="groups">
+<div class="cm-data-panel cm-annotation-group-list" role="region" aria-label="Editable annotation data" tabindex="-1"><clinker-annotation-group-editor></clinker-annotation-group-editor></div>
+</template>
+
+<template id="empty">
+<p>No annotation panels. Add a panel to attach data to cluster rows.</p>
+</template>

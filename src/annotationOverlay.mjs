@@ -1,7 +1,7 @@
 import { installDataEditorStyle } from "./editor/shared/styles.mjs";
-import { createAnnotationDataControls } from "./annotationDataControls.mjs";
+import { createAnnotationEditor } from "./editor/annotations.js";
 import { createAnnotationControls } from "./annotationControls.mjs";
-import { createAnnotationCreateControls } from "./annotationCreateControls.mjs";
+import { createAnnotationForm } from "./editor/components/annotation-data-form/create.js";
 import { createAnnotationTooltip } from "./annotationTooltip.mjs";
 
 function installStyle(document) {
@@ -157,7 +157,7 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
         if (editData?.(uid)) { close(); return; }
         const dataState = beginMenu("data", "Annotation data", edit, uid);
         menu.classList.add("cm-annotation-menu--data");
-        dataState.controls = createAnnotationDataControls({ document, getData, patch, annotationApi });
+        dataState.controls = createAnnotationEditor({ document, getData, patch, annotationApi });
         dataState.controls.select(uid); menu.append(dataState.controls.node); positionMenu();
       } });
     menu.append(state.controls.node);
@@ -184,10 +184,10 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
   edit.onclick = () => { if (hovered) openPanel(hovered, edit); };
   add.onclick = () => {
     beginMenu("add", "Add annotation panel", add);
-    const form = createAnnotationCreateControls({ document, getData, patch, annotationApi,
+    const form = createAnnotationForm({ document, getData, patch,
       onCreate: (uid) => openPanel(uid, add) });
-    menu.append(form.node); showAddFrame(); positionMenu();
-    form.node.focus({ preventScroll: true });
+    menu.append(form); showAddFrame(); positionMenu();
+    form.focus({ preventScroll: true });
   };
   hiddenButton.onclick = () => {
     beginMenu("hidden", "Hidden annotation panels", hiddenButton);

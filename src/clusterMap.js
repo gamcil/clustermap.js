@@ -27,7 +27,7 @@ import {
 } from "./chartState.mjs";
 import { createChartIndex } from "./data/index.mjs";
 import { normalizeChartData } from "./data/normalize.mjs";
-import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, validateAnnotationPanels, resolveAnnotationScale,
+import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,
   annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell } from "./annotations.mjs";
 import { isAnnotationOperation } from "./annotationOperations.mjs";
 import { updateSvgAnnotationViewport } from "./annotationRenderers.mjs";
@@ -1229,7 +1229,7 @@ export default function clusterMap() {
         annotationUiLoad = import("./annotationOverlay.mjs").then(({ createAnnotationOverlay }) => {
           if (!annotationUiContext) return;
           annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
-            ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, validateAnnotationPanels, resolveAnnotationScale,
+            ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,
             annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell },
             editData: (panelUid) => !container.node().dispatchEvent(new CustomEvent("clustermap:edit-annotation", {
               bubbles: true, cancelable: true, detail: { chart: my, panelUid },

@@ -1,0 +1,8 @@
+@layer clinker-editor {
+.cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }
+.cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
+.cm-annotation-group-list { overflow:auto; }
+.cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }
+.cm-annotation-data-editor [data-data-error]:empty { display:none; }
+
+}

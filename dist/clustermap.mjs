@@ -16476,7 +16476,7 @@ function clusterMap() {
         annotationUiLoad = import('./annotationOverlay.mjs').then(({ createAnnotationOverlay }) => {
           if (!annotationUiContext) return;
           annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
-            ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, validateAnnotationPanels, resolveAnnotationScale,
+            ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,
             annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell },
             editData: (panelUid) => !container.node().dispatchEvent(new CustomEvent("clustermap:edit-annotation", {
               bubbles: true, cancelable: true, detail: { chart: my, panelUid },
