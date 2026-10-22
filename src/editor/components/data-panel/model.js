@@ -7,8 +7,8 @@ export class DataPanelModel {
   #index = null;
   #view = null;
 
-  set data(value) { if (value !== this.#data) { this.#data = value; this.invalidate(); } }
-  invalidate() { this.#index = this.#view = null; }
+  get data() { return this.#data; }
+  set data(value) { this.#data = value; this.#index = this.#view = null; }
   groupId(value) { return this.#records().groupById.get(String(value))?.uid; }
   recordIds(kind) {
     return kind === "genes" ? this.#records().genes.map(({ gene }) => gene.uid)

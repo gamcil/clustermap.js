@@ -169,7 +169,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     } else if (action === "update") {
       if (!this.#apply({ type: `${type}.update`, ids: [id], changes })) event.preventDefault();
     } else if (action === "remove") this.#removeRecords(type, [id]);
-    else if (action === "reorder") this.#moveGroup(id, this.#data().groups.findIndex((group) => group.uid === id) + event.detail.direction);
+    else if (action === "reorder") this.#moveGroup(id, this.#model.data.groups.findIndex((group) => group.uid === id) + event.detail.direction);
     else if (action === "place") this.#placeGroup(id, event.detail.targetId, event.detail.after);
     else if (action === "hover") this.#highlight(row);
   }
@@ -190,7 +190,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
         this.#apply({ type: "groups.create", group: { uid: this.#nextGroupUid(), label: label.trim() }, geneIds }, geneIds.length > 0);
       }
     } else if (command === "assign") {
-      if (value) this.#apply({ type: "groups.assignGenes", groupId: this.#groupId(value), geneIds: [...this.#selected] });
+      if (value) this.#apply({ type: "groups.assignGenes", groupId: this.#model.groupId(value), geneIds: [...this.#selected] });
     } else if (command === "unassign") {
       this.#apply({ type: "groups.unassignGenes", geneIds: [...this.#selected] });
     } else if (command === "focus") {
@@ -198,7 +198,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     } else if (command === "update") {
       this.#apply({ type: `${this.#kind}.update`, ids: [...this.#selected], changes: value });
     } else if (command === "merge") {
-      const targetId = this.#groupId(value);
+      const targetId = this.#model.groupId(value);
       if (targetId !== undefined) {
         const sourceIds = this.#selectedGroups().map((group) => group.uid);
         this.#apply({ type: "groups.merge", targetId, sourceIds }, true);
@@ -229,14 +229,9 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     return accepted;
   }
 
-  #refreshData(options) {
-    this.#invalidateData(options);
-    this.#renderData(); this.#syncHighlight();
-  }
-
-  #invalidateData({ replace = false } = {}) {
-    // Patches can mutate data in place; invalidate all derived state together.
-    const data = this.#data(); this.#model.invalidate();
+  #refreshData({ replace = false } = {}) {
+    const data = this.#chart?.visibleData?.() || this.#chart?.data?.() || null;
+    this.#model.data = data;
     if (!data?.groups.some((group) => group.uid === this.#memberGroupId)) this.#memberGroupId = null;
     if (replace) {
       this.#annotationEditor?.reset();
@@ -244,11 +239,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
       this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null;
       this.#initializeExpanded();
     } else this.#selected.prune(this.#model.recordIds(this.#kind), this.#view().byKey.keys());
-  }
-
-  #data() {
-    const data = this.#chart?.visibleData?.() || this.#chart?.data?.() || null;
-    this.#model.data = data; return data;
+    this.#renderData(); this.#syncHighlight();
   }
 
   #initializeExpanded() {
@@ -261,10 +252,8 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     for (const row of this.#view({ kind: "genes", geneView: view }).branches) this.#expanded.add(row.key);
   }
 
-  #groupId(value) { this.#data(); return this.#model.groupId(value); }
-
   #nextGroupUid() {
-    const used = new Set((this.#data()?.groups || []).map((group) => String(group.uid)));
+    const used = new Set((this.#model.data?.groups || []).map((group) => String(group.uid)));
     let index = used.size + 1;
     while (used.has(`group-${index}`)) index += 1;
     return `group-${index}`;
@@ -278,7 +267,6 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #view(options = {}) {
-    this.#data();
     return this.#model.view({ kind: this.#kind, geneView: this.#geneView, filter: this.#filter,
       memberGroupId: this.#memberGroupId, sort: this.#sort[this.#kind], expanded: this.#expanded, ...options });
   }
@@ -305,11 +293,11 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.querySelector("[data-record-editor]").hidden = annotations;
     if (annotations) {
       this.#table?.reset();
-      this.#annotationEditor.state = { data: this.#chart?.data?.() || { clusters: [] }, annotationApi: { ANNOTATION_PALETTES, resolveAnnotationScale }, clusters: this.#data()?.clusters || [],
+      this.#annotationEditor.state = { data: this.#chart?.data?.() || { clusters: [] }, annotationApi: { ANNOTATION_PALETTES, resolveAnnotationScale }, clusters: this.#model.data?.clusters || [],
         patch: (operations) => this.#chart.patch(operations) };
       return;
     }
-    const data = this.#data();
+    const data = this.#model.data;
 
     if (!data) {
       this.#table.state = { attached: false };
@@ -344,7 +332,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #selectedGroups() {
-    if (this.#kind === "groups") return (this.#data()?.groups || []).filter((group) => this.#selected.has(group.uid));
+    if (this.#kind === "groups") return (this.#model.data?.groups || []).filter((group) => this.#selected.has(group.uid));
     if (this.#kind !== "genes" || this.#geneView !== "groups") return [];
     return this.#view().rows.filter((row) => row.type === "gene-group" && row.group?.genes?.length &&
       row.group.genes.every((id) => this.#selected.has(id))).map((row) => row.group);
@@ -361,7 +349,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #moveGroup(uid, index) {
-    const ids = this.#data().groups.map((group) => group.uid), from = ids.indexOf(uid);
+    const ids = this.#model.data.groups.map((group) => group.uid), from = ids.indexOf(uid);
     if (from < 0 || !Number.isFinite(index)) return;
     const to = Math.max(0, Math.min(ids.length - 1, Math.trunc(index)));
     if (to === from) return;
@@ -381,7 +369,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #placeGroup(uid, targetUid, after) {
-    const ids = this.#data().groups.map((group) => group.uid);
+    const ids = this.#model.data.groups.map((group) => group.uid);
     const from = ids.indexOf(uid), target = ids.indexOf(targetUid);
     if (from < 0 || target < 0 || uid === targetUid) return;
     this.#moveGroup(uid, target + Number(after) - Number(from < target));
