@@ -1,5 +1,5 @@
 import { boundsInViewport } from "./camera.mjs";
-import { clusterPairKey, interpolateLinkAnchors, interpolateLinkOpacity } from "../links/layout.mjs";
+import { clusterPairKey, orderLinkAnchors, interpolateLinkAnchors, interpolateLinkOpacity } from "../links/layout.mjs";
 import { arrangeTrimIndicators, createTrimIndicators } from "../loci/trimIndicators.mjs";
 
 function minStart(loci, startFor) {
@@ -389,11 +389,7 @@ export function previewLinkAnchors(scene, link, preview) {
       gene.locus.y + gene.locus.track.y + offsets.y,
     ];
   };
-  const queryAnchor = anchorForGene(query);
-  const targetAnchor = anchorForGene(target);
-  return queryAnchor[2] <= targetAnchor[2]
-    ? [...queryAnchor, ...targetAnchor]
-    : [...targetAnchor, ...queryAnchor];
+  return orderLinkAnchors(anchorForGene(query), anchorForGene(target));
 }
 
 export function linkGeometryForPreview(scene, link, preview, config) {

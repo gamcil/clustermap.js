@@ -1,26 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-test("link layout anchors reverse genes on their displayed left edge", async () => {
-  const { getLinkAnchors, getLinkLabelPosition } = await import(
-    "../src/links/layout.mjs"
-  );
-  const genes = new Map([
-    ["query", { uid: "query", clusterUid: "top", start: 10, end: 20, strand: 0 }],
-    ["target", { uid: "target", clusterUid: "bottom", start: 30, end: 40, strand: 1 }],
-  ]);
-  const anchors = getLinkAnchors(
-    { query: { uid: "query" }, target: { uid: "target" } },
-    {
-      geneForUid: (uid) => genes.get(uid),
-      areClustersAdjacent: () => true,
-      scaleX: (value) => value,
-      horizontalOffset: () => 5,
-      verticalPosition: (gene) => (gene.clusterUid === "top" ? 10 : 40),
-      geneMidpoint: 2,
-    }
-  );
-
+test("link anchors retain endpoint orientation when ordered by row", async () => {
+  const { orderLinkAnchors, getLinkLabelPosition } = await import("../src/links/layout.mjs");
+  const anchors = orderLinkAnchors([35, 45, 42], [25, 15, 12]);
   assert.deepEqual(anchors, [25, 15, 12, 35, 45, 42]);
   assert.deepEqual(getLinkLabelPosition(anchors, 0.5), { x: 30, y: 27 });
 });

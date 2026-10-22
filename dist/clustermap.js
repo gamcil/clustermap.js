@@ -86,40 +86,9 @@
     return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
   }
 
-  function getLinkAnchors(
-    link,
-    {
-      geneForUid,
-      areClustersAdjacent,
-      scaleX,
-      horizontalOffset,
-      verticalPosition,
-      geneMidpoint,
-    }
-  ) {
-    const query = geneForUid(link.query.uid);
-    const target = geneForUid(link.target.uid);
-
-    if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
-
-    const getGeneAnchors = (gene) => {
-      const offset = horizontalOffset(gene);
-      const left = scaleX(gene.start) + offset;
-      const right = scaleX(gene.end) + offset;
-      const forward = gene.strand === 1;
-      return [
-        forward ? left : right,
-        forward ? right : left,
-        verticalPosition(gene) + geneMidpoint,
-      ];
-    };
-
-    const [ax1, ax2, ay] = getGeneAnchors(query);
-    const [bx1, bx2, by] = getGeneAnchors(target);
-
-    return ay > by
-      ? [bx1, bx2, by, ax1, ax2, ay]
-      : [ax1, ax2, ay, bx1, bx2, by];
+  /** Keep each gene's directional endpoints together, with the upper row first. */
+  function orderLinkAnchors(query, target) {
+    return query[2] > target[2] ? [...target, ...query] : [...query, ...target];
   }
 
   function interpolateLinkOpacity(previous, next, amount, enabled = true) {
@@ -745,11 +714,7 @@
         gene.locus.y + gene.locus.track.y + offsets.y,
       ];
     };
-    const queryAnchor = anchorForGene(query);
-    const targetAnchor = anchorForGene(target);
-    return queryAnchor[2] <= targetAnchor[2]
-      ? [...queryAnchor, ...targetAnchor]
-      : [...targetAnchor, ...queryAnchor];
+    return orderLinkAnchors(anchorForGene(query), anchorForGene(target));
   }
 
   function linkGeometryForPreview(scene, link, preview, config) {
@@ -4344,31 +4309,19 @@
   }
 
   function createLinkLayout(source, order, {
-    genes,
-    loci,
-    clusters,
-    areClustersAdjacent,
-    scaleX,
-    link,
-    linkVisible = () => true,
-    geneMidpoint,
+    genes, areClustersAdjacent, scaleX, link, linkVisible = () => true,
   }) {
     const query = genes.get(source.query.uid);
     const target = genes.get(source.target.uid);
-    let anchors = null;
-    if (query && target) {
-      anchors = getLinkAnchors(source, {
-        geneForUid: (uid) => genes.get(uid)?.display,
-        areClustersAdjacent,
-        scaleX,
-        horizontalOffset: (gene) => {
-          const locus = loci.get(gene.locusUid);
-          return locus ? locus.x : 0;
-        },
-        verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
-        geneMidpoint,
-      });
-    }
+    const anchorForGene = ({ display, locus }) => {
+      const start = scaleX(display.start) + locus.x;
+      const end = scaleX(display.end) + locus.x;
+      return display.strand === 1
+        ? [start, end, locus.y + locus.track.y]
+        : [end, start, locus.y + locus.track.y];
+    };
+    const anchors = query && target && areClustersAdjacent(query.display.clusterUid, target.display.clusterUid)
+      ? orderLinkAnchors(anchorForGene(query), anchorForGene(target)) : null;
     const allowed = linkVisible(source);
     return {
       source,
@@ -4547,14 +4500,7 @@
 
     for (const [order, source] of data.links.entries()) {
       const linkLayout = createLinkLayout(source, order, {
-        genes,
-        loci,
-        clusters,
-        areClustersAdjacent,
-        scaleX,
-        link,
-        linkVisible,
-        geneMidpoint,
+        genes, areClustersAdjacent, scaleX, link, linkVisible,
       });
       links.set(source.uid, linkLayout);
       for (const uid of new Set([source.query.uid, source.target.uid])) {
@@ -4830,7 +4776,7 @@
     for (const source of sources.values()) {
       const previous = links.get(source.uid);
       if (previous) links.set(source.uid, createLinkLayout(source, previous.order, {
-        ...options, genes, loci, clusters, geneMidpoint,
+        ...options, genes,
       }));
     }
 

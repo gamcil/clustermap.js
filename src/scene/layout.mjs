@@ -4,7 +4,7 @@ import {
 } from "../genes/layout.mjs";
 import {
   clusterPairKey,
-  getLinkAnchors,
+  orderLinkAnchors,
   getLinkLabelPosition,
 } from "../links/layout.mjs";
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
@@ -319,31 +319,19 @@ function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, labe
 }
 
 function createLinkLayout(source, order, {
-  genes,
-  loci,
-  clusters,
-  areClustersAdjacent,
-  scaleX,
-  link,
-  linkVisible = () => true,
-  geneMidpoint,
+  genes, areClustersAdjacent, scaleX, link, linkVisible = () => true,
 }) {
   const query = genes.get(source.query.uid);
   const target = genes.get(source.target.uid);
-  let anchors = null;
-  if (query && target) {
-    anchors = getLinkAnchors(source, {
-      geneForUid: (uid) => genes.get(uid)?.display,
-      areClustersAdjacent,
-      scaleX,
-      horizontalOffset: (gene) => {
-        const locus = loci.get(gene.locusUid);
-        return locus ? locus.x : 0;
-      },
-      verticalPosition: (gene) => clusters.get(gene.clusterUid)?.y ?? 0,
-      geneMidpoint,
-    });
-  }
+  const anchorForGene = ({ display, locus }) => {
+    const start = scaleX(display.start) + locus.x;
+    const end = scaleX(display.end) + locus.x;
+    return display.strand === 1
+      ? [start, end, locus.y + locus.track.y]
+      : [end, start, locus.y + locus.track.y];
+  };
+  const anchors = query && target && areClustersAdjacent(query.display.clusterUid, target.display.clusterUid)
+    ? orderLinkAnchors(anchorForGene(query), anchorForGene(target)) : null;
   const allowed = linkVisible(source);
   return {
     source,
@@ -522,14 +510,7 @@ export function buildScene(
 
   for (const [order, source] of data.links.entries()) {
     const linkLayout = createLinkLayout(source, order, {
-      genes,
-      loci,
-      clusters,
-      areClustersAdjacent,
-      scaleX,
-      link,
-      linkVisible,
-      geneMidpoint,
+      genes, areClustersAdjacent, scaleX, link, linkVisible,
     });
     links.set(source.uid, linkLayout);
     for (const uid of new Set([source.query.uid, source.target.uid])) {
@@ -805,7 +786,7 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
   for (const source of sources.values()) {
     const previous = links.get(source.uid);
     if (previous) links.set(source.uid, createLinkLayout(source, previous.order, {
-      ...options, genes, loci, clusters, geneMidpoint,
+      ...options, genes,
     }));
   }
 

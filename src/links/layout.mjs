@@ -2,40 +2,9 @@ export function clusterPairKey(left, right) {
   return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
 }
 
-export function getLinkAnchors(
-  link,
-  {
-    geneForUid,
-    areClustersAdjacent,
-    scaleX,
-    horizontalOffset,
-    verticalPosition,
-    geneMidpoint,
-  }
-) {
-  const query = geneForUid(link.query.uid);
-  const target = geneForUid(link.target.uid);
-
-  if (!areClustersAdjacent(query.clusterUid, target.clusterUid)) return null;
-
-  const getGeneAnchors = (gene) => {
-    const offset = horizontalOffset(gene);
-    const left = scaleX(gene.start) + offset;
-    const right = scaleX(gene.end) + offset;
-    const forward = gene.strand === 1;
-    return [
-      forward ? left : right,
-      forward ? right : left,
-      verticalPosition(gene) + geneMidpoint,
-    ];
-  };
-
-  const [ax1, ax2, ay] = getGeneAnchors(query);
-  const [bx1, bx2, by] = getGeneAnchors(target);
-
-  return ay > by
-    ? [bx1, bx2, by, ax1, ax2, ay]
-    : [ax1, ax2, ay, bx1, bx2, by];
+/** Keep each gene's directional endpoints together, with the upper row first. */
+export function orderLinkAnchors(query, target) {
+  return query[2] > target[2] ? [...target, ...query] : [...query, ...target];
 }
 
 export function interpolateLinkOpacity(previous, next, amount, enabled = true) {
