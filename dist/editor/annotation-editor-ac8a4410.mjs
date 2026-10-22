@@ -1,5 +1,14 @@
 import { a as controlStyles, m as mountComponent, e as updateSelectOptions, c as createTemplate, d as colourHex, g as defineSearchField, f as createActionRunner } from './search-field-8ffb9d31.mjs';
 
+/** Rollup embeds these files; unbundled browser modules load them by URL. */
+
+function installStyle(root, id, css) {
+  if (root.querySelector(`style[id="${id}"]`)) return;
+  const style = (root.ownerDocument || root).createElement("style");
+  style.id = id; style.textContent = css;
+  (root.head || root).append(style);
+}
+
 /** Shared fixed-height row window for scrollable data editors. */
 const DATA_ROW_HEIGHT = 34;
 
@@ -104,13 +113,6 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 .cm-data-cell > input[type=color] { display:block; }
 }
 `;
-
-function installStyle(root, id, css) {
-  if (root.querySelector(`style[id="${id}"]`)) return;
-  const style = (root.ownerDocument || root).createElement("style");
-  style.id = id; style.textContent = css;
-  (root.head || root).append(style);
-}
 
 function installDataEditorStyle(root) { installStyle(root, "cm-data-editor-style", DATA_EDITOR_CSS); }
 

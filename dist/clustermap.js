@@ -5141,8 +5141,6 @@
       container.selectAll("div.clusterMapFigureSurface").data([extent]).join(
         (enter) => enter.insert("div", ":first-child")
           .attr("class", "clusterMapFigureSurface").attr("aria-hidden", "true")
-          .style("position", "absolute").style("left", "0").style("top", "0")
-          .style("pointer-events", "none").style("transform-origin", "0 0")
       )
         .style("width", `${width}px`)
         .style("height", `${height}px`)
@@ -5151,8 +5149,6 @@
       const label = container.selectAll("div.clusterMapFigureDimensions").data([extent]).join(
         (enter) => enter.append("div").attr("class", "clusterMapFigureDimensions")
           .attr("title", "Figure width × height at 100% zoom, including padding. SVG output is resolution independent.")
-          .style("position", "absolute").style("left", "0").style("top", "0")
-          .style("pointer-events", "none")
       ).style("transform", `translate(${left}px, ${top - 24}px)`);
       const text = `${Math.round(width).toLocaleString("en-US")} × ${Math.round(height).toLocaleString("en-US")} px`;
       if (label.text() !== text) label.text(text);
@@ -9563,6 +9559,17 @@
     return { data, operations: applied, inverse, effects: operationEffects(applied) };
   }
 
+  /** Rollup embeds these files; unbundled browser modules load them by URL. */
+
+  function installStyle(root, id, css) {
+    if (root.querySelector(`style[id="${id}"]`)) return;
+    const style = (root.ownerDocument || root).createElement("style");
+    style.id = id; style.textContent = css;
+    (root.head || root).append(style);
+  }
+
+  const css$1 = "[data-clustermap-theme] { color:var(--cm-foreground); background:var(--cm-background); }\n[data-clustermap-theme] :is(.tooltip,.cm-annotation-menu,.cm-annotation-hidden,.annotation-tooltip) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }\n[data-clustermap-theme] :is(button,select,input:not([type=color]):not([type=checkbox]),textarea):not(.cm-data-ui *) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }\n[data-clustermap-theme] button:hover:not(.cm-data-ui *) { background:var(--cm-hover)!important; }\n[data-clustermap-theme] button:disabled { opacity:.45; }\n:is(clinker-editor,clinker-data-panel,clinker-appearance-panel)[data-clustermap-theme] { background:var(--cm-surface); color:var(--cm-foreground); border-color:var(--cm-border); }\n[data-clustermap-theme] .cm-annotation-menu :is(p,summary) { color:var(--cm-muted); }\n[data-clustermap-theme] :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { z-index:1; background:transparent; color-scheme:light; }\n[data-clustermap-theme] .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border); }\n[data-clustermap-theme] .clusterMapFigureDimensions { z-index:2; color:var(--cm-muted); font:12px/20px system-ui,sans-serif; white-space:nowrap; }\n[data-clustermap-theme] canvas.clusterMapMinimap { color-scheme:light; }\n\n[data-clustermap-theme] :is(svg.clusterMap,canvas.clusterMapCanvas) { position:relative; }\n[data-clustermap-theme] :is(canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { display:block; width:100%; height:100%; }\n[data-clustermap-theme] canvas.clusterMapCanvas { outline:none; cursor:grab; }\n[data-clustermap-theme] canvas.clusterMapWebGpuOverlay { position:absolute; inset:0; pointer-events:none; }\n[data-clustermap-theme] canvas.clusterMapMinimap { position:absolute; z-index:2; display:block; box-sizing:border-box; background:white; box-shadow:0 1px 4px rgba(0,0,0,.25); cursor:grab; touch-action:none; }\n[data-clustermap-theme] :is(.clusterMapFigureSurface,.clusterMapFigureDimensions) { position:absolute; left:0; top:0; pointer-events:none; }\n[data-clustermap-theme] .clusterMapFigureSurface { transform-origin:0 0; }\n[data-clustermap-theme] > input.colourPicker { position:absolute; opacity:0; }\n[data-clustermap-theme] > div.tooltip { position:absolute; pointer-events:none; z-index:4; box-sizing:border-box; padding:8px; background:white; border:1px solid #999; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.2); }\n";
+
   const palettes = {
     light: { mode: "light", background: "#ffffff", foreground: "#20252c", muted: "#687586",
       branch: "#555555", guide: "#999999", outline: "#111111", surface: "#ffffff", border: "#cbd3de", missing: "#eeeeee", subtle: "#f3f6fa", hover: "#e3ecf8", selection: "#d6e6fc", accent: "#1677ff", danger: "#b42318" },
@@ -9597,23 +9604,7 @@
     element.dataset.clustermapTheme = theme.mode;
     element.style.colorScheme = theme.mode;
     for (const [key, value] of Object.entries(theme)) if (key !== "mode") element.style.setProperty(`--cm-${key}`, value);
-    const doc = element.ownerDocument;
-    if (doc.getElementById("clustermap-theme-style")) return;
-    const style = doc.createElement("style"); style.id = "clustermap-theme-style";
-    style.textContent = `
-[data-clustermap-theme] { color:var(--cm-foreground); background:var(--cm-background); }
-[data-clustermap-theme] :is(.tooltip,.cm-annotation-menu,.cm-annotation-hidden,.annotation-tooltip) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }
-[data-clustermap-theme] :is(button,select,input:not([type=color]):not([type=checkbox]),textarea):not(.cm-data-ui *) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }
-[data-clustermap-theme] button:hover:not(.cm-data-ui *) { background:var(--cm-hover)!important; }
-[data-clustermap-theme] button:disabled { opacity:.45; }
-:is(clinker-editor,clinker-data-panel,clinker-appearance-panel)[data-clustermap-theme] { background:var(--cm-surface); color:var(--cm-foreground); border-color:var(--cm-border); }
-[data-clustermap-theme] .cm-annotation-menu :is(p,summary) { color:var(--cm-muted); }
-[data-clustermap-theme] :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { position:relative; z-index:1; background:transparent; color-scheme:light; }
-[data-clustermap-theme] .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border); }
-[data-clustermap-theme] .clusterMapFigureDimensions { z-index:2; color:var(--cm-muted); font:12px/20px system-ui,sans-serif; white-space:nowrap; }
-[data-clustermap-theme] canvas.clusterMapMinimap { color-scheme:light; }
-`;
-    doc.head.append(style);
+    installStyle(element.getRootNode(), "clustermap-theme-style", css$1);
   }
 
   /** Shared fixed-height row window for scrollable data editors. */
@@ -9667,13 +9658,6 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 .cm-data-cell > input[type=color] { display:block; }
 }
 `;
-
-  function installStyle(root, id, css) {
-    if (root.querySelector(`style[id="${id}"]`)) return;
-    const style = (root.ownerDocument || root).createElement("style");
-    style.id = id; style.textContent = css;
-    (root.head || root).append(style);
-  }
 
   function installDataEditorStyle(root) { installStyle(root, "cm-data-editor-style", DATA_EDITOR_CSS); }
 
@@ -12479,25 +12463,12 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
           .append("input")
           .attr("id", ids.picker)
           .attr("class", "colourPicker")
-          .attr("type", "color")
-          .style("position", "absolute")
-          .style("opacity", 0);
+          .attr("type", "color");
 
         enter
           .append("div")
           .attr("class", "tooltip")
           .style("opacity", 0)
-          .style("position", "absolute")
-          .style("pointer-events", "none")
-          // Context menus must stay interactive above optional side panels that
-          // share the chart container (such as the demo data editor).
-          .style("z-index", 4)
-          .style("box-sizing", "border-box")
-          .style("padding", "8px")
-          .style("background", "white")
-          .style("border", "1px solid #999")
-          .style("border-radius", "4px")
-          .style("box-shadow", "0 2px 8px rgba(0, 0, 0, 0.2)")
           .style("font-family", fontFamily);
 
         const surface = enter
@@ -14908,13 +14879,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         const surface = enter
           .append("canvas")
           .attr("class", "clusterMapCanvas")
-          .attr("cursor", "grab")
           .attr("tabindex", 0)
-          .attr("aria-label", "Cluster map")
-          .style("display", "block")
-          .style("width", "100%")
-          .style("height", "100%")
-          .style("outline", "none");
+          .attr("aria-label", "Cluster map");
         currentZoom = bindCameraZoom({
           surface,
           zoomExtent,
@@ -14933,9 +14899,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     }
     updateCameraZoom(currentZoom, zoomExtent);
 
-    if ((showWebGpu || showMinimap) && globalThis.getComputedStyle(container.node()).position === "static") {
-      container.style("position", "relative");
-    }
     const webgpuOverlay = container
       .selectAll("canvas.clusterMapWebGpuOverlay")
       .data(showWebGpu ? [data] : [])
@@ -14943,12 +14906,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         enter
           .append("canvas")
           .attr("class", "clusterMapWebGpuOverlay")
-          .style("position", "absolute")
-          .style("inset", "0")
-          .style("display", "block")
-          .style("width", "100%")
-          .style("height", "100%")
-          .style("pointer-events", "none")
       );
     const overview = container
       .selectAll("canvas.clusterMapMinimap")
@@ -14958,14 +14915,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           .append("canvas")
           .attr("class", "clusterMapMinimap")
           .attr("aria-label", "Cluster map overview")
-          .style("position", "absolute")
-          .style("z-index", 2)
-          .style("display", "block")
-          .style("box-sizing", "border-box")
-          .style("background", "white")
-          .style("box-shadow", "0 1px 4px rgba(0, 0, 0, 0.25)")
-          .style("cursor", "grab")
-          .style("touch-action", "none")
       );
     overview
       .style("width", showMinimap ? `${minimap.width}px` : null)
@@ -14973,8 +14922,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       .style("right", showMinimap ? `${minimap.margin}px` : null)
       // The editor is a bottom overlay. Keep navigation independently reachable
       // by anchoring the overview at the chart's top-right corner instead.
-      .style("top", showMinimap ? `${minimap.margin}px` : null)
-      .style("bottom", null);
+      .style("top", showMinimap ? `${minimap.margin}px` : null);
 
     return { canvas, webgpuOverlay, minimap: overview, zoom: currentZoom };
   }

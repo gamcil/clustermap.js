@@ -1,6 +1,6 @@
-import { installDataEditorStyle, installStyle } from "./shared/styles.mjs";
+import { installDataEditorStyle } from "./shared/styles.mjs";
 import { createTemplate } from "../ui/controls.mjs";
-import { textAsset } from "../ui/assets.mjs";
+import { textAsset, installStyle } from "../ui/assets.mjs";
 import { defineActionMenu } from "./components/action-menu/action-menu.js";
 
 const toolbarTemplate = createTemplate(await textAsset(new URL("./components/plot-selection-toolbar/plot-selection-toolbar.html", import.meta.url)));

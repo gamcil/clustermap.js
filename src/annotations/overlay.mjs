@@ -1,6 +1,6 @@
 import { worldPoint } from "../scene/camera.mjs";
-import { textAsset } from "../ui/assets.mjs";
-import { installDataEditorStyle, installStyle } from "../editor/shared/styles.mjs";
+import { textAsset, installStyle } from "../ui/assets.mjs";
+import { installDataEditorStyle } from "../editor/shared/styles.mjs";
 import { defineAnnotationEditor } from "../editor/components/annotation-editor/annotation-editor.js";
 import { createAnnotationControls } from "./controls.mjs";
 import { defineAnnotationDataForm } from "../editor/components/annotation-data-form/annotation-data-form.js";

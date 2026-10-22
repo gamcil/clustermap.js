@@ -30,8 +30,6 @@ export function createFigureSurface() {
     container.selectAll("div.clusterMapFigureSurface").data([extent]).join(
       (enter) => enter.insert("div", ":first-child")
         .attr("class", "clusterMapFigureSurface").attr("aria-hidden", "true")
-        .style("position", "absolute").style("left", "0").style("top", "0")
-        .style("pointer-events", "none").style("transform-origin", "0 0")
     )
       .style("width", `${width}px`)
       .style("height", `${height}px`)
@@ -40,8 +38,6 @@ export function createFigureSurface() {
     const label = container.selectAll("div.clusterMapFigureDimensions").data([extent]).join(
       (enter) => enter.append("div").attr("class", "clusterMapFigureDimensions")
         .attr("title", "Figure width × height at 100% zoom, including padding. SVG output is resolution independent.")
-        .style("position", "absolute").style("left", "0").style("top", "0")
-        .style("pointer-events", "none")
     ).style("transform", `translate(${left}px, ${top - 24}px)`);
     const text = `${Math.round(width).toLocaleString("en-US")} × ${Math.round(height).toLocaleString("en-US")} px`;
     if (label.text() !== text) label.text(text);

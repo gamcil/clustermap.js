@@ -1,6 +1,6 @@
 import { createTemplate } from "../../../ui/controls.mjs";
-import { installDataEditorStyle, installStyle } from "../../shared/styles.mjs";
-import { textAsset } from "../../../ui/assets.mjs";
+import { installDataEditorStyle } from "../../shared/styles.mjs";
+import { textAsset, installStyle } from "../../../ui/assets.mjs";
 import { defineDataTable } from "../data-table/data-table.js";
 import { defineEditableField } from "../editable-field/editable-field.js";
 import { createEditorRow } from "./rows.js";

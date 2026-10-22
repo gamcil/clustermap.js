@@ -30,25 +30,12 @@ export function ensureSvgSurface({
         .append("input")
         .attr("id", ids.picker)
         .attr("class", "colourPicker")
-        .attr("type", "color")
-        .style("position", "absolute")
-        .style("opacity", 0);
+        .attr("type", "color");
 
       enter
         .append("div")
         .attr("class", "tooltip")
         .style("opacity", 0)
-        .style("position", "absolute")
-        .style("pointer-events", "none")
-        // Context menus must stay interactive above optional side panels that
-        // share the chart container (such as the demo data editor).
-        .style("z-index", 4)
-        .style("box-sizing", "border-box")
-        .style("padding", "8px")
-        .style("background", "white")
-        .style("border", "1px solid #999")
-        .style("border-radius", "4px")
-        .style("box-shadow", "0 2px 8px rgba(0, 0, 0, 0.2)")
         .style("font-family", fontFamily);
 
       const surface = enter

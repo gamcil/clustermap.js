@@ -1,4 +1,4 @@
-import { installDataEditorStyle, installStyle } from "../../shared/styles.mjs";
+import { installDataEditorStyle } from "../../shared/styles.mjs";
 import { defineSearchField } from "../search-field/search-field.js";
 import { defineCategoryEditor } from "../category-editor/category-editor.js";
 import { defineAnnotationToolbar } from "../annotation-toolbar/annotation-toolbar.js";
@@ -7,7 +7,7 @@ import { defineAnnotationGroupEditor } from "../annotation-group-editor/annotati
 import { defineAnnotationTable } from "../annotation-table/annotation-table.js";
 import { createTemplate, createActionRunner } from "../../../ui/controls.mjs";
 import { createAnnotationPanel, parseAnnotationTable, annotationTableText, mapAnnotationValues } from "../../../annotations/data.mjs";
-import { textAsset } from "../../../ui/assets.mjs";
+import { textAsset, installStyle } from "../../../ui/assets.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./annotation-editor.html", import.meta.url)),

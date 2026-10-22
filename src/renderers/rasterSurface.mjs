@@ -33,13 +33,8 @@ export function ensureRasterSurface({
       const surface = enter
         .append("canvas")
         .attr("class", "clusterMapCanvas")
-        .attr("cursor", "grab")
         .attr("tabindex", 0)
-        .attr("aria-label", "Cluster map")
-        .style("display", "block")
-        .style("width", "100%")
-        .style("height", "100%")
-        .style("outline", "none");
+        .attr("aria-label", "Cluster map");
       currentZoom = bindCameraZoom({
         surface,
         zoomExtent,
@@ -58,9 +53,6 @@ export function ensureRasterSurface({
   }
   updateCameraZoom(currentZoom, zoomExtent);
 
-  if ((showWebGpu || showMinimap) && globalThis.getComputedStyle(container.node()).position === "static") {
-    container.style("position", "relative");
-  }
   const webgpuOverlay = container
     .selectAll("canvas.clusterMapWebGpuOverlay")
     .data(showWebGpu ? [data] : [])
@@ -68,12 +60,6 @@ export function ensureRasterSurface({
       enter
         .append("canvas")
         .attr("class", "clusterMapWebGpuOverlay")
-        .style("position", "absolute")
-        .style("inset", "0")
-        .style("display", "block")
-        .style("width", "100%")
-        .style("height", "100%")
-        .style("pointer-events", "none")
     );
   const overview = container
     .selectAll("canvas.clusterMapMinimap")
@@ -83,14 +69,6 @@ export function ensureRasterSurface({
         .append("canvas")
         .attr("class", "clusterMapMinimap")
         .attr("aria-label", "Cluster map overview")
-        .style("position", "absolute")
-        .style("z-index", 2)
-        .style("display", "block")
-        .style("box-sizing", "border-box")
-        .style("background", "white")
-        .style("box-shadow", "0 1px 4px rgba(0, 0, 0, 0.25)")
-        .style("cursor", "grab")
-        .style("touch-action", "none")
     );
   overview
     .style("width", showMinimap ? `${minimap.width}px` : null)
@@ -98,8 +76,7 @@ export function ensureRasterSurface({
     .style("right", showMinimap ? `${minimap.margin}px` : null)
     // The editor is a bottom overlay. Keep navigation independently reachable
     // by anchoring the overview at the chart's top-right corner instead.
-    .style("top", showMinimap ? `${minimap.margin}px` : null)
-    .style("bottom", null);
+    .style("top", showMinimap ? `${minimap.margin}px` : null);
 
   return { canvas, webgpuOverlay, minimap: overview, zoom: currentZoom };
 }

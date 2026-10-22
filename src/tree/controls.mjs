@@ -1,8 +1,8 @@
 import { color } from "d3-color";
-import { installDataEditorStyle, installStyle } from "../editor/shared/styles.mjs";
+import { installDataEditorStyle } from "../editor/shared/styles.mjs";
 import { createControls, createActionRunner } from "../ui/controls.mjs";
 import { resolveTreePresentation } from "./presentation.mjs";
-import { textAsset } from "../ui/assets.mjs";
+import { textAsset, installStyle } from "../ui/assets.mjs";
 
 const css = await textAsset(new URL("./controls.css", import.meta.url));
 

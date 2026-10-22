@@ -1,3 +1,4 @@
+import { installStyle } from "../../ui/assets.mjs";
 import { DATA_ROW_HEIGHT } from "../../ui/virtualRows.mjs";
 import { controlStyles } from "./controls.mjs";
 
@@ -28,12 +29,5 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 .cm-data-cell > input[type=color] { display:block; }
 }
 `;
-
-export function installStyle(root, id, css) {
-  if (root.querySelector(`style[id="${id}"]`)) return;
-  const style = (root.ownerDocument || root).createElement("style");
-  style.id = id; style.textContent = css;
-  (root.head || root).append(style);
-}
 
 export function installDataEditorStyle(root) { installStyle(root, "cm-data-editor-style", DATA_EDITOR_CSS); }
