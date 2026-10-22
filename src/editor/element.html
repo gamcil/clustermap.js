@@ -23,13 +23,12 @@
     <button type="button" data-command="toggle-tree" hidden>Expand visible</button>
     <button type="button" data-command="new-group">Create group…</button>
     <div data-annotation-toolbar class="cm-editor__annotation-toolbar" hidden></div>
-    <span data-search-slot></span>
-    <button type="button" data-command="clear-filter" aria-label="Clear filter" title="Clear filter" hidden>×</button>
+    <clinker-search-field data-filter label="Filter records" placeholder="Search names, labels, loci, or clusters"></clinker-search-field>
   </div>
   <div data-annotation-editor class="cm-editor__annotation-editor" hidden></div>
   <div data-record-editor></div>
 </section>
 <section data-panel="appearance" class="cm-editor__panel" hidden>
-  <div class="cm-editor__appearance-toolbar"><label class="cm-editor__search"><span class="cm-editor__sr-only">Find an appearance setting</span><input type="search" data-appearance-filter placeholder="Find a setting"></label><button type="button" data-command="clear-appearance-filter" aria-label="Clear appearance filter" title="Clear appearance filter" hidden>×</button></div>
+  <div class="cm-editor__appearance-toolbar"><clinker-search-field data-appearance-filter label="Find an appearance setting" placeholder="Find a setting"></clinker-search-field></div>
   <div class="cm-editor__appearance" data-appearance></div>
 </section>

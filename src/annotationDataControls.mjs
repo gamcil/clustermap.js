@@ -1,7 +1,8 @@
-import { createDataPanel, createSelectionControls, createDataSearch, installDataEditorStyle } from "./dataEditorUi.mjs";
+import { createDataPanel, createSelectionControls, installDataEditorStyle } from "./dataEditorUi.mjs";
 import { defineEditableField } from "./editor/components/editable-field/editable-field.js";
 import { defineSelectionBar } from "./editor/components/selection-bar/selection-bar.js";
 import { defineActionMenu } from "./editor/components/action-menu/action-menu.js";
+import { defineSearchField } from "./editor/components/search-field/search-field.js";
 import { textAsset } from "./editor/shared/textAsset.js";
 import { RowSelection } from "./rowSelection.mjs";
 import { createVirtualRows } from "./virtualRows.mjs";
@@ -16,6 +17,7 @@ const editorTemplate = createTemplate(`<div class="cm-data-ui cm-annotation-data
     <button type="button" data-left aria-label="Move left" title="Move left">←</button>
     <button type="button" data-right aria-label="Move right" title="Move right">→</button>
     <button type="button" data-remove aria-label="Remove panel">Remove</button>
+    <clinker-search-field label="Filter records" placeholder="Find a cluster"></clinker-search-field>
   </div>
   <div class="cm-data-error" data-data-error role="alert"></div><div class="cm-annotation-data-body"></div>
 </div>`);
@@ -46,14 +48,14 @@ const emptyTemplate = createTemplate('<p>No annotation panels. Add a panel to at
 
 /** Data editing is optional UI; every change goes through the chart's patch API. */
 export function createAnnotationDataControls({ document, getData, getClusters = () => getData().clusters, patch, annotationApi, embedded = false }) {
-  defineEditableField(); defineSelectionBar(); defineActionMenu();
+  defineEditableField(); defineSelectionBar(); defineActionMenu(); defineSearchField();
   installDataEditorStyle(document); installStyle(document);
   const { resolveAnnotationScale, ANNOTATION_PALETTES } = annotationApi;
   const node = editorTemplate(document).firstElementChild, toolbar = node.querySelector(".cm-data-toolbar");
   const body = node.querySelector(".cm-annotation-data-body"), status = node.querySelector("[data-data-error]");
   const panelSelect = toolbar.querySelector("select");
   const control = (name) => toolbar.querySelector(`[data-${name}]`);
-  if (embedded) toolbar.remove();
+  if (embedded) { toolbar.querySelector("clinker-search-field").remove(); toolbar.remove(); }
   let selected = null, applying = false, renderedPanel = null, renderedPanels = null, renderedClusters = null;
   let filter = "", deleting = null, creating = false, view = null, viewKey = null;
   const selection = new RowSelection();
@@ -85,10 +87,8 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
     [ids[index], ids[index + direction]] = [ids[index + direction], ids[index]];
     commit([{ type: "annotationPanels.reorder", ids }]);
   };
-  const search = !embedded && createDataSearch(document, { placeholder: "Find a cluster", onInput: (value) => {
-    filter = value; view?.filterRows?.();
-  } });
-  if (search) toolbar.append(search.node);
+  const search = !embedded && toolbar.querySelector("clinker-search-field");
+  if (search) search.addEventListener("input", () => { filter = search.value; view?.filterRows?.(); });
   node.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !event.defaultPrevented && selection.size) { event.preventDefault(); clearSelection(); }
   });
@@ -307,7 +307,7 @@ export function createAnnotationDataControls({ document, getData, getClusters = 
     updateSelectOptions(panelSelect, panels.map((panel) => [panel.uid, panel.title || panel.uid])); panelSelect.value = selected;
     panelSelect.hidden = !panels.length; control("add").textContent = creating ? "Cancel" : "Add panel";
     for (const name of ["replace", "show", "left", "right", "remove"]) control(name).hidden = !panel || creating || name === "replace" && panel.type === "groups";
-    if (search) { search.node.hidden = !panel || creating || panel.type === "groups"; search.input.value = filter; }
+    if (search) { search.hidden = !panel || creating || panel.type === "groups"; search.value = filter; }
     if (panel) {
       control("show").textContent = panel.show === false ? "Show" : "Hide";
       control("left").disabled = panels.indexOf(panel) === 0; control("right").disabled = panels.indexOf(panel) === panels.length - 1;

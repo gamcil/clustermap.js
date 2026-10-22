@@ -90,7 +90,7 @@ for (const theme of ["light", "dark"]) {
           if (kind === "tree") await editor(page).locator("[data-tree-toggle]").first().click();
         }
       }
-      await editor(page).locator("[data-filter]").focus();
+      await editor(page).locator("[data-filter] input").focus();
       await page.mouse.move(0, 0);
       const panel = editor(page).locator(".cm-data-panel:visible");
       const head = panel.locator(".cm-data-head").first();
@@ -300,11 +300,11 @@ test("annotation rows virtualize, preserve offscreen selection and filter all re
   expect(data.values[ids[0]]).toEqual([999]);
   expect(data.values[ids.at(-1)]).toEqual([999]);
   expect(data.values[ids[1]]).toEqual([1]);
-  await editor(page).locator("[data-filter]").fill("Cluster 259");
+  await editor(page).locator("[data-filter] input").fill("Cluster 259");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("Cluster 259");
   expect(await rows.first().locator("clinker-editable-field").evaluate((field) => field.value)).toBe("999");
-  await editor(page).locator("[data-filter]").fill("");
+  await editor(page).locator("[data-filter] input").fill("");
   await expect(rows.first()).toContainText("Cluster 0");
   await expect(rows.first().getByRole("checkbox")).toBeChecked();
 });
@@ -948,7 +948,7 @@ test("editable components preserve drafts and normalize commits through history"
   await editor(page).getByRole("button", { name: "Redo", exact: true }).click();
   expect(await label()).toBe("Normalized label");
   await field.getByRole("button").click(); await input.fill("Blur commits once");
-  await editor(page).locator("[data-filter]").focus();
+  await editor(page).locator("[data-filter] input").focus();
   expect(await label()).toBe("Blur commits once");
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
   expect(await label()).toBe("Normalized label");

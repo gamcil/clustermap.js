@@ -281,7 +281,7 @@ test("appearance changes are applied through the attached chart", async ({ page 
   await page.locator('clinker-editor [data-config="legend.show"]').uncheck();
   await expect.poll(() => page.evaluate(() => window.__demoChart.config().legend.show)).toBe(false);
   await expect(page.locator('clinker-editor [data-config="gene.shape.stroke"]')).toHaveAttribute("type", "color");
-  await editor.locator('[data-appearance-filter]').fill("minimap");
+  await editor.locator('[data-appearance-filter] input').fill("minimap");
   await expect(editor.locator('[data-appearance] fieldset')).toHaveCount(1);
   await expect(editor.locator('[data-appearance]')).toContainText("Show minimap");
 });
@@ -363,6 +363,6 @@ test("appearance keeps common controls separate from Advanced settings", async (
   await legend.getByText("Advanced", { exact: true }).click();
   await expect(legend.locator("details")).toHaveAttribute("open", "");
 
-  await editor.locator('[data-appearance-filter]').fill("stroke width");
+  await editor.locator('[data-appearance-filter] input').fill("stroke width");
   await expect(editor.locator('[data-appearance] details[open]')).toHaveCount(2);
 });

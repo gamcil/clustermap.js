@@ -1,4 +1,4 @@
-import { createDataPanel, createSelectionControls, createDataSearch, installDataEditorStyle } from "../dataEditorUi.mjs";
+import { createDataPanel, createSelectionControls, installDataEditorStyle } from "../dataEditorUi.mjs";
 import { RowSelection } from "../rowSelection.mjs";
 import { createVirtualRows, DATA_ROW_HEIGHT } from "../virtualRows.mjs";
 import { createAnnotationDataControls } from "../annotationDataControls.mjs";
@@ -12,6 +12,7 @@ import { defineEditableField } from "./components/editable-field/editable-field.
 import { defineSelectionBar } from "./components/selection-bar/selection-bar.js";
 import { defineActionMenu } from "./components/action-menu/action-menu.js";
 import { defineViewSwitcher } from "./components/view-switcher/view-switcher.js";
+import { defineSearchField } from "./components/search-field/search-field.js";
 import { textAsset } from "./shared/textAsset.js";
 
 const shellTemplate = createTemplate(await textAsset(new URL("./element.html", import.meta.url)));
@@ -78,7 +79,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher();
+    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField();
     this.classList.add("cm-editor", "cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();
@@ -180,9 +181,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
     panel.viewport.append(tableTemplate(this.ownerDocument));
     this.#updateHeader = createDataHeader(this.ownerDocument, panel.viewport.querySelector("[data-head]"));
     this.querySelector("[data-record-editor]").replaceWith(panel.node);
-    const search = createDataSearch(this.ownerDocument);
-    search.input.dataset.filter = "";
-    this.querySelector("[data-search-slot]").replaceWith(search.node);
   }
 
   #subscribe() {
@@ -393,16 +391,9 @@ export class ClinkerEditorElement extends HTMLElementBase {
       this.#chart?.redo?.();
     } else if (command === "toggle-tree") {
       this.#toggleTree();
-    } else if (command === "clear-filter") {
-      this.#setDataFilter("");
     } else if (command === "clear-member-filter") {
       this.#memberGroupId = null;
       this.#renderData();
-    } else if (command === "clear-appearance-filter") {
-      this.#appearanceFilter = "";
-      const input = this.querySelector("[data-appearance-filter]");
-      if (input) input.value = "";
-      this.#renderAppearance();
     }
   }
 
@@ -691,7 +682,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.querySelector("[data-annotation-toolbar]").hidden = !annotations;
     const search = this.querySelector("[data-filter]");
     search.value = annotations ? this.#annotationEditor?.filter || "" : this.#filter;
-    search.placeholder = annotations ? "Find a cluster" : "Search names, labels, loci, or clusters";
+    search.setAttribute("placeholder", annotations ? "Find a cluster" : "Search names, labels, loci, or clusters");
     this.querySelector("[data-record-editor]").hidden = annotations;
     if (annotations) {
       this.#disposeRows();
@@ -708,7 +699,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
         this.querySelector("[data-annotation-toolbar]").append(this.#annotationEditor.toolbar);
       } else this.#annotationEditor.update();
       search.value = this.#annotationEditor.filter;
-      this.querySelector('[data-command="clear-filter"]').hidden = !this.#annotationEditor.filter;
       return;
     }
     const data = this.#data();
@@ -731,7 +721,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
     if (memberGroup) this.querySelector("[data-member-label]").textContent = labelFor(memberGroup, memberGroup.uid);
     geneView.hidden = this.#kind !== "genes";
     this.querySelector('[data-command="new-group"]').hidden = this.#kind !== "groups";
-    this.querySelector('[data-command="clear-filter"]').hidden = !this.#filter;
     const isTree = this.#kind === "genes" && this.#geneView !== "list";
     const treeButton = this.querySelector('[data-command="toggle-tree"]');
     treeButton.hidden = !isTree || Boolean(this.#filter);
@@ -948,8 +937,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
     if (!container) return;
     container.hidden = !config;
     if (!config || this.querySelector('[data-panel="appearance"]')?.hidden) return;
-    const clear = this.querySelector('[data-command="clear-appearance-filter"]');
-    if (clear) clear.hidden = !this.#appearanceFilter;
     if (!this.#appearanceView) {
       this.#appearanceView = createAppearanceControls({ document: this.ownerDocument,
         patch: (ops) => this.#chart.patch(ops), preview: (ops) => this.#chart.previewTreePresentation(ops),

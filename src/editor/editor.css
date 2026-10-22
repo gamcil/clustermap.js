@@ -14,10 +14,8 @@
   clinker-editor [data-panel="data"] { gap:8px; }
   clinker-editor .cm-editor__annotation-editor { display:flex; flex:1; min-height:0; }
   clinker-editor .cm-editor__annotation-editor > .cm-annotation-data-editor { flex:1; min-width:0; }
-  clinker-editor .cm-editor__search { display: flex; min-width: 180px; flex: 1; }
-  clinker-editor .cm-editor__search input { width: 100%; }
   clinker-editor .cm-editor__member-filter { display: flex; align-items: center; gap: 6px; color: var(--cm-muted,#526178); font-size: 12px; }
-  clinker-editor .cm-editor__member-filter button, clinker-editor .cm-editor__appearance-toolbar > button { display: grid; place-items: center; width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,#64748b); font-size: 17px; line-height: 1; }
+  clinker-editor .cm-editor__member-filter button { display: grid; place-items: center; width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,#64748b); font-size: 17px; line-height: 1; }
   clinker-editor .cm-editor__danger { border-color: var(--cm-danger,#e4aaa5); color: var(--cm-danger,#b3261e); background: var(--cm-hover,#fffafa); }
   clinker-editor [data-group-position] { width:112px; }
   clinker-editor .cm-editor__annotation-toolbar, clinker-editor .cm-editor__annotation-toolbar > .cm-data-toolbar { display:contents; }
