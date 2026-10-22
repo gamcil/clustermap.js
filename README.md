@@ -192,6 +192,11 @@ The component edits the attached chart through its public API and subscribes to
 `chart.on("change")`. It uses light DOM: load `clinker/editor.css` for layout,
 or style the `.cm-editor` and `.cm-data-*` classes in your application.
 
+For a data-only editor, import `defineDataPanel` from `clinker/editor`, call it,
+and attach the chart to `<clinker-data-panel>` through its `.chart` property.
+It owns navigation, filtering, selection and batch actions; it can be mounted
+without the editor tabs or history buttons.
+
 For the optional in-plot locus batch controls, import
 `mountPlotSelectionToolbar` from `clinker/editor` and call it with the mounted
 chart and a positioned plot container. It returns a cleanup function.

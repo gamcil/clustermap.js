@@ -1,7 +1,7 @@
-import { createTemplate, colourHex } from "../uiControls.mjs";
-import { textAsset } from "./shared/textAsset.js";
+import { createTemplate, colourHex } from "../../../uiControls.mjs";
+import { textAsset } from "../../shared/textAsset.js";
 
-const rowTemplates = createTemplate(await textAsset(new URL("./components/data-table/rows.html", import.meta.url)));
+const rowTemplates = createTemplate(await textAsset(new URL("./rows.html", import.meta.url)));
 const definitions = new WeakMap();
 
 /** Stable rows assembled from HTML templates; fields own their editing behavior. */

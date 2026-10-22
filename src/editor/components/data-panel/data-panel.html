@@ -1,0 +1,28 @@
+<div class="cm-editor__toolbar cm-data-toolbar">
+  <clinker-view-switcher data-kind-picker label="Data type" value="groups">
+    <option value="groups">Groups</option><option value="genes">Genes</option>
+    <option value="links">Links</option><option value="annotations">Annotations</option>
+  </clinker-view-switcher>
+  <clinker-view-switcher data-gene-view label="Gene view" value="tree" hidden>
+    <option value="tree">By locus</option><option value="groups">By group</option><option value="list">List</option>
+  </clinker-view-switcher>
+  <button type="button" data-command="toggle-tree" hidden>Expand visible</button>
+  <button type="button" data-command="new-group">Create group…</button>
+  <div data-annotation-toolbar class="cm-editor__annotation-toolbar" hidden></div>
+  <clinker-search-field data-filter label="Filter records" placeholder="Search names, labels, loci, or clusters"></clinker-search-field>
+</div>
+<div data-annotation-editor class="cm-editor__annotation-editor" hidden></div>
+<div data-record-editor class="cm-data-panel">
+  <div data-record-tools class="cm-data-tools" hidden>
+    <div class="cm-editor__member-filter" data-member-filter hidden>
+      <span>Group: <strong data-member-label></strong></span>
+      <button type="button" data-command="clear-member-filter" aria-label="Clear group member filter" title="Clear group member filter">×</button>
+    </div>
+  </div>
+  <clinker-selection-bar class="cm-data-meta"><div slot="actions" class="cm-data-actions"></div></clinker-selection-bar>
+  <clinker-data-table class="cm-data-table cm-editor__table" role="region" aria-label="Editable chart data">
+    <div slot="header" data-head class="cm-editor__head"></div>
+    <div data-rows></div>
+  </clinker-data-table>
+</div>
+<div data-editor-error class="cm-data-error" role="alert" hidden></div>
