@@ -100,6 +100,7 @@ for (const theme of ["light", "dark"]) {
       const head = panel.locator(".cm-data-head").first();
       const rows = panel.locator(".cm-data-row");
       await expect(head).toBeVisible();
+      await expect(editor(page).locator('[data-command="new-group"]')).toBeVisible({ visible: kind === "groups" });
       const geometry = await panel.evaluate((node) => ({
         header: node.querySelector(".cm-data-head").getBoundingClientRect().height,
         rows: [...node.querySelectorAll(".cm-data-row")].slice(0, 8).map((row) => {
@@ -191,6 +192,115 @@ test("inline edits, external edits and merges stay synchronized through history"
   await page.evaluate(() => chart.patch([{ type: "clusters.update", ids: [chart.data().clusters[0].uid], changes: { name: "External edit" } }]));
   await annotation(page);
   await expect(matrixRows(page).first()).toContainText("External edit");
+});
+
+test("record views retain keyboard ordering, subtitle edits, sorting and visibility controls", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  const groups = editor(page).locator(".cm-editor__row--groups");
+  await expect(groups.first().locator('[data-colour]')).toHaveValue("#267c9e");
+  await groups.first().locator('[data-reorder]').press("ArrowDown");
+  expect(await page.evaluate(() => chart.data().groups.map(({ uid }) => uid))).toEqual(["beta", "alpha", "gamma"]);
+  const subtitle = groups.first().locator('clinker-editable-field[data-field="subtitle"]');
+  await editField(subtitle); await subtitle.getByRole("textbox").fill("Conserved enzyme"); await subtitle.getByRole("textbox").press("Enter");
+  expect(await page.evaluate(() => chart.data().groups[0].subtitle)).toBe("Conserved enzyme");
+  await view(page, "genes"); await editor(page).locator('[data-gene-view] button[value="list"]').click();
+  const genes = editor(page).locator(".cm-editor__row--genes");
+  await genes.first().click();
+  await expect(editor(page).locator(".cm-data-meta").first()).toContainText("1 gene selected");
+  const label = genes.first().locator('clinker-editable-field[data-field="label"]');
+  await editField(label); await label.getByRole("textbox").fill("Renamed gene"); await label.getByRole("textbox").press("Enter");
+  for (const [kind, column, values] of [["genes", "Gene", () => genes.locator('clinker-editable-field[data-field="label"]').evaluateAll((fields) => fields.map((field) => field.value))],
+    ["links", "Source", () => editor(page).locator(".cm-editor__row--links").evaluateAll((rows) => rows.map((row) => row.querySelector('[data-text="source"]').textContent))]]) {
+    await view(page, kind); await editor(page).getByRole("button", { name: new RegExp(`Sort by ${column},`) }).click();
+    const actual = await values();
+    expect(actual).toEqual([...actual].sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: "base" })));
+  }
+  await editor(page).locator(".cm-editor__row--links [data-visible]").first().click();
+  expect(await page.evaluate(() => chart.data().links.some((link) => link.hidden))).toBe(true);
+});
+
+test("row hover coalesces updates and collapsed branches remain selectable", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await page.evaluate(() => {
+    const highlight = chart.highlight; window.hoverCalls = [];
+    chart.highlight = (...args) => { if (args.length) hoverCalls.push(args[0]); return highlight(...args); };
+  });
+  await editor(page).locator(".cm-editor__row--groups").evaluateAll((rows) => {
+    rows[0].dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    rows[1].dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+  });
+  await expect.poll(() => page.evaluate(() => hoverCalls)).toEqual([{ genes: ["gene-b", "gene-c"] }]);
+  await view(page, "genes"); await editor(page).locator(".cm-editor__tree-parent").first().hover();
+  await expect.poll(() => page.evaluate(() => chart.highlight())).toEqual(["gene-a", "gene-a2"]);
+  await editor(page).getByRole("button", { name: "Collapse all", exact: true }).click();
+  await editor(page).getByRole("button", { name: "Select all 6 visible genes", exact: true }).click();
+  await expect(editor(page).locator(".cm-data-meta").first()).toContainText("6 genes selected");
+});
+
+test("group creation, assignment, member navigation and focus retain their workflows", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  page.once("dialog", (dialog) => dialog.accept("New family"));
+  await editor(page).getByRole("button", { name: "Create group…", exact: true }).click();
+  const uid = await page.evaluate(() => chart.data().groups.at(-1).uid);
+  expect(await page.evaluate(() => chart.data().groups.at(-1).label)).toBe("New family");
+  const memberships = () => page.evaluate(() => chart.data().groups.map(({ uid, genes }) => ({ uid, genes: [...genes] })));
+  const before = await memberships();
+  await view(page, "genes"); await editor(page).locator('[data-gene-view] button[value="list"]').click();
+  const row = editor(page).locator(".cm-editor__row--genes").first();
+  const geneUid = await row.locator("clinker-editable-field").getAttribute("data-id");
+  await row.getByRole("checkbox").check();
+  const actions = editor(page).locator("clinker-record-actions");
+  await actions.locator('clinker-action-menu[label="Assign…"] summary').click();
+  await actions.locator("[data-assign-group]").selectOption(uid);
+  await actions.getByRole("button", { name: "Move", exact: true }).click();
+  expect(await page.evaluate((uid) => chart.data().groups.find((group) => group.uid === uid).genes, uid)).toEqual([geneUid]);
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await memberships()).toEqual(before);
+  page.once("dialog", (dialog) => dialog.accept("Selected family"));
+  await actions.locator('clinker-action-menu[label="Assign…"] summary').click();
+  await actions.getByRole("button", { name: "New group…", exact: true }).click();
+  expect(await page.evaluate(() => chart.data().groups.at(-1).genes)).toEqual([geneUid]);
+  await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await memberships()).toEqual(before);
+  await view(page, "groups"); await editor(page).locator(".cm-editor__row--groups").first().getByRole("checkbox").check();
+  await actions.locator('clinker-action-menu[label="Group…"] summary').click();
+  await actions.getByRole("button", { name: "View member genes", exact: true }).click();
+  await expect(editor(page).locator("[data-member-filter]")).toContainText("Alpha");
+  await expect(editor(page).locator(".cm-editor__row--genes")).toHaveCount(2);
+  await editor(page).locator(".cm-editor__row--genes").first().getByRole("checkbox").check();
+  await page.evaluate(() => { const focus = chart.focus; chart.focus = (target) => { window.focusTarget = target; return focus(target); }; });
+  await actions.getByRole("button", { name: "Focus in plot", exact: true }).click();
+  expect(await page.evaluate(() => focusTarget)).toEqual({ genes: [geneUid] });
+});
+
+test("chart history restores deletions, preserves callbacks, stays bounded and exports portable projects", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  const result = await page.evaluate(() => {
+    const data = chart.data(), ids = data.links.map(({ uid }) => uid), callback = () => {};
+    chart.patch([{ type: "links.delete", ids: [ids[0]] }]); chart.undo();
+    const restored = chart.data() === data && chart.data().links.map(({ uid }) => uid).join() === ids.join();
+    chart.config({ gene: { shape: { onClick: callback } } });
+    chart.config({ legend: { show: false } }); chart.undo();
+    const preserved = chart.config().gene.shape.onClick === callback && chart.config().legend.show;
+    const project = JSON.parse(JSON.stringify(chart.project()));
+    chart.clearHistory();
+    for (let value = 1; value <= 105; value++) chart.config({ legend: { marginLeft: value } });
+    for (let index = 0; index < 100; index++) chart.undo();
+    return { restored, preserved, project, value: chart.config().legend.marginLeft, undo: chart.canUndo(), redo: chart.canRedo() };
+  });
+  expect(result.restored && result.preserved).toBe(true);
+  expect(result.project.format).toBe("clinker-project");
+  expect(result.project.config.gene.shape).not.toHaveProperty("onClick");
+  expect([result.value, result.undo, result.redo]).toEqual([5, false, true]);
+});
+
+test("Escape clears plot selection after interacting with its toolbar container", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await page.evaluate(() => {
+    chart.locusSelection(["locus-a"]);
+    document.querySelector("#plot").dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+  });
+  await page.keyboard.press("Escape"); await expectSelection(page, "loci", []);
 });
 
 test("annotation inline edits, selection and batch values support undo/redo", async ({ page }) => {
