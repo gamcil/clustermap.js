@@ -6,29 +6,27 @@
     <button type="button" data-command="redo" disabled>Redo</button>
   </div>
 </header>
-<div class="cm-editor__tabs" role="tablist" aria-label="Plot editor sections">
-  <button type="button" data-tab="data" role="tab" aria-selected="true">Data</button>
-  <button type="button" data-tab="appearance" role="tab" aria-selected="false">Appearance</button>
-</div>
-<div data-editor-error class="cm-data-error" role="alert" hidden></div>
-<section data-panel="data" class="cm-editor__panel">
-  <div class="cm-editor__toolbar cm-data-toolbar">
-    <clinker-view-switcher data-kind-picker label="Data type" value="groups">
-      <option value="groups">Groups</option><option value="genes">Genes</option>
-      <option value="links">Links</option><option value="annotations">Annotations</option>
-    </clinker-view-switcher>
-    <clinker-view-switcher data-gene-view label="Gene view" value="tree" hidden>
-      <option value="tree">By locus</option><option value="groups">By group</option><option value="list">List</option>
-    </clinker-view-switcher>
-    <button type="button" data-command="toggle-tree" hidden>Expand visible</button>
-    <button type="button" data-command="new-group">Create group…</button>
-    <div data-annotation-toolbar class="cm-editor__annotation-toolbar" hidden></div>
-    <clinker-search-field data-filter label="Filter records" placeholder="Search names, labels, loci, or clusters"></clinker-search-field>
-  </div>
-  <div data-annotation-editor class="cm-editor__annotation-editor" hidden></div>
-  <div data-record-editor></div>
-</section>
-<section data-panel="appearance" class="cm-editor__panel" hidden>
-  <div class="cm-editor__appearance-toolbar"><clinker-search-field data-appearance-filter label="Find an appearance setting" placeholder="Find a setting"></clinker-search-field></div>
-  <div class="cm-editor__appearance" data-appearance></div>
-</section>
+<clinker-tabs data-editor-tabs label="Plot editor sections" value="data">
+  <div slot="status" data-editor-error class="cm-data-error" role="alert" hidden></div>
+  <section name="data" label="Data" data-panel="data" class="cm-editor__panel">
+    <div class="cm-editor__toolbar cm-data-toolbar">
+      <clinker-view-switcher data-kind-picker label="Data type" value="groups">
+        <option value="groups">Groups</option><option value="genes">Genes</option>
+        <option value="links">Links</option><option value="annotations">Annotations</option>
+      </clinker-view-switcher>
+      <clinker-view-switcher data-gene-view label="Gene view" value="tree" hidden>
+        <option value="tree">By locus</option><option value="groups">By group</option><option value="list">List</option>
+      </clinker-view-switcher>
+      <button type="button" data-command="toggle-tree" hidden>Expand visible</button>
+      <button type="button" data-command="new-group">Create group…</button>
+      <div data-annotation-toolbar class="cm-editor__annotation-toolbar" hidden></div>
+      <clinker-search-field data-filter label="Filter records" placeholder="Search names, labels, loci, or clusters"></clinker-search-field>
+    </div>
+    <div data-annotation-editor class="cm-editor__annotation-editor" hidden></div>
+    <div data-record-editor></div>
+  </section>
+  <section name="appearance" label="Appearance" data-panel="appearance" class="cm-editor__panel" hidden>
+    <div class="cm-editor__appearance-toolbar"><clinker-search-field data-appearance-filter label="Find an appearance setting" placeholder="Find a setting"></clinker-search-field></div>
+    <div class="cm-editor__appearance" data-appearance></div>
+  </section>
+</clinker-tabs>

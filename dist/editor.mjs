@@ -721,15 +721,15 @@ class RowSelection extends Set {
   clear() { super.clear(); this.#anchor = null; }
 }
 
-const [markup$4, css$4] = await Promise.all([
+const [markup$5, css$5] = await Promise.all([
   "<span part=\"label\"></span>\n<button type=\"button\" part=\"edit-button\">\n  <svg aria-hidden=\"true\" viewBox=\"0 0 24 24\">\n    <path d=\"m4 20 4.1-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.1 16 4 20Z\"></path>\n    <path d=\"m13.8 7.2 3 3\"></path>\n  </svg>\n</button>\n<input type=\"text\" part=\"input\" hidden>\n<select part=\"input\" hidden></select>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  min-width: 0;\n  height: 28px;\n  box-sizing: border-box;\n  color: inherit;\n  font: inherit;\n}\n:host([hidden]), [hidden] { display: none !important; }\n:host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }\n:host(:hover) { --cm-edit-icon-width:20px; }\nspan { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }\nspan[data-placeholder] { color: var(--cm-muted, #687586); }\nbutton, input, select { box-sizing: border-box; font: inherit; color: inherit; }\nbutton {\n  display: inline-grid;\n  place-items: center;\n  flex: 0 0 auto;\n  width: var(--cm-edit-icon-width, 0px);\n  min-width: 0;\n  height: 20px;\n  overflow: hidden;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #64748b);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { width:20px; outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { cursor: default; opacity: .45; }\nsvg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }\ninput, select {\n  width: 100%;\n  min-width: 0;\n  height: 28px;\n  margin-inline: -1px;\n  padding: 2px 7px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  line-height: 20px;\n}\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus, select:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\n",
 ]);
-const template$4 = createTemplate(markup$4);
-const HTMLElementBase$5 = globalThis.HTMLElement || class {};
+const template$5 = createTemplate(markup$5);
+const HTMLElementBase$6 = globalThis.HTMLElement || class {};
 
 /** A field owns its draft; consumers accept or cancel value-commit events. */
-class EditableField extends HTMLElementBase$5 {
+class EditableField extends HTMLElementBase$6 {
   static observedAttributes = ["label", "placeholder", "type", "min", "max", "step", "required", "disabled"];
   #value = "";
   #revision = 0;
@@ -744,8 +744,8 @@ class EditableField extends HTMLElementBase$5 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$4;
-    root.append(style, template$4(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$5;
+    root.append(style, template$5(this.ownerDocument));
     this.#text = root.querySelector("span");
     this.#button = root.querySelector("button");
     this.#input = root.querySelector("input");
@@ -846,14 +846,14 @@ function defineEditableField() {
   if (!customElements.get("clinker-editable-field")) customElements.define("clinker-editable-field", EditableField);
 }
 
-const [markup$3, css$3] = await Promise.all([
+const [markup$4, css$4] = await Promise.all([
   "<span part=\"summary\"></span>\n<div part=\"actions\" hidden>\n  <slot name=\"actions\"></slot>\n  <button type=\"button\" data-clear aria-label=\"Clear selection\">Clear</button>\n</div>\n<button type=\"button\" data-all hidden>Select all visible</button>\n",
   ":host {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  height: 32px;\n  min-width: 0;\n  flex-shrink: 0;\n  color: var(--cm-muted, #687586);\n  font: 12px/1.4 system-ui, sans-serif;\n}\n:host([hidden]), [hidden] { display: none !important; }\nspan { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\nspan.is-selected { color: var(--cm-foreground, #273444); font-weight: 600; }\ndiv { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }\nslot { display: contents; }\nbutton {\n  flex-shrink: 0;\n  box-sizing: border-box;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton:hover:not(:disabled) { border-color: var(--cm-accent, #78a9ed); background: var(--cm-hover, #f4f8ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n",
 ]);
-const template$3 = createTemplate(markup$3);
-const HTMLElementBase$4 = globalThis.HTMLElement || class {};
+const template$4 = createTemplate(markup$4);
+const HTMLElementBase$5 = globalThis.HTMLElement || class {};
 
-class SelectionBar extends HTMLElementBase$4 {
+class SelectionBar extends HTMLElementBase$5 {
   #summary;
   #actions;
   #all;
@@ -861,8 +861,8 @@ class SelectionBar extends HTMLElementBase$4 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$3;
-    root.append(style, template$3(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$4;
+    root.append(style, template$4(this.ownerDocument));
     this.#summary = root.querySelector("span");
     this.#actions = root.querySelector("div");
     this.#all = root.querySelector("[data-all]");
@@ -886,15 +886,15 @@ function defineSelectionBar() {
   if (!customElements.get("clinker-selection-bar")) customElements.define("clinker-selection-bar", SelectionBar);
 }
 
-const [markup$2, css$2] = await Promise.all([
+const [markup$3, css$3] = await Promise.all([
   "<details>\n  <summary part=\"trigger\"></summary>\n  <div part=\"panel\"><slot></slot></div>\n</details>\n",
   ":host { display: block; position: relative; color: var(--cm-foreground, #273444); font: inherit; }\n:host([hidden]) { display: none !important; }\nsummary {\n  display: block;\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: 4px 8px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 6px;\n  background: var(--cm-surface, #fff);\n  list-style: none;\n  white-space: nowrap;\n  cursor: pointer;\n}\nsummary::-webkit-details-marker { display: none; }\nsummary:hover, details[open] > summary { background: var(--cm-hover, #e3ecf8); border-color: var(--cm-accent, #78a9ed); }\nsummary:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\ndiv {\n  position: absolute;\n  right: 0;\n  top: calc(100% + 4px);\n  z-index: 10;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  width: max-content;\n  max-width: min(340px, 80vw);\n  max-height: 50vh;\n  overflow: auto;\n  padding: 10px;\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: 8px;\n  background: var(--cm-surface, #fff);\n  box-shadow: 0 4px 16px #0002;\n}\nslot { display: contents; }\n::slotted(button) { text-align: left; }\n::slotted(label) { display: flex; align-items: center; gap: 6px; }\n::slotted(input[type=number]) { width: 112px; }\n",
 ]);
-const template$2 = createTemplate(markup$2);
+const template$3 = createTemplate(markup$3);
 const activeMenus = new WeakMap();
-const HTMLElementBase$3 = globalThis.HTMLElement || class {};
+const HTMLElementBase$4 = globalThis.HTMLElement || class {};
 
-class ActionMenu extends HTMLElementBase$3 {
+class ActionMenu extends HTMLElementBase$4 {
   static observedAttributes = ["label", "open"];
   #details;
   #trigger;
@@ -903,8 +903,8 @@ class ActionMenu extends HTMLElementBase$3 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$2;
-    root.append(style, template$2(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$3;
+    root.append(style, template$3(this.ownerDocument));
     this.#details = root.querySelector("details");
     this.#trigger = root.querySelector("summary");
     this.#details.ontoggle = () => { this.open = this.#details.open; };
@@ -945,14 +945,14 @@ function defineActionMenu() {
   if (!customElements.get("clinker-action-menu")) customElements.define("clinker-action-menu", ActionMenu);
 }
 
-const [markup$1, css$1] = await Promise.all([
+const [markup$2, css$2] = await Promise.all([
   "<input type=\"search\" part=\"input\">\n<button type=\"button\" part=\"clear\" aria-label=\"Clear search\" title=\"Clear search\" hidden>×</button>\n",
   ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput, button { box-sizing: border-box; color: inherit; font: inherit; }\ninput {\n  width: 100%;\n  min-width: 0;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #687586);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n",
 ]);
-const template$1 = createTemplate(markup$1);
-const HTMLElementBase$2 = globalThis.HTMLElement || class {};
+const template$2 = createTemplate(markup$2);
+const HTMLElementBase$3 = globalThis.HTMLElement || class {};
 
-class SearchField extends HTMLElementBase$2 {
+class SearchField extends HTMLElementBase$3 {
   static observedAttributes = ["label", "placeholder"];
   #input;
   #clear;
@@ -960,8 +960,8 @@ class SearchField extends HTMLElementBase$2 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css$1;
-    root.append(style, template$1(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$2;
+    root.append(style, template$2(this.ownerDocument));
     this.#input = root.querySelector("input"); this.#clear = root.querySelector("button");
     this.#input.oninput = () => this.#sync();
     this.#clear.onclick = () => this.#clearValue();
@@ -3444,14 +3444,28 @@ function createAppearanceControls({ document, patch, preview, rotate }) {
   } };
 }
 
-const [markup, css] = await Promise.all([
-  "<div role=\"group\"></div>\n<template><button type=\"button\"></button></template>\n",
+/** Shared activation and horizontal keyboard navigation for option buttons. */
+function bindOptionButtons(group, choose) {
+  group.addEventListener("click", (event) => choose(event.target.closest("button")));
+  group.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const buttons = [...group.querySelectorAll("button:not(:disabled)")];
+    if (!buttons.length) return;
+    const index = buttons.indexOf(event.target);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+      : (index + (event.key === "ArrowLeft" ? -1 : 1) + buttons.length) % buttons.length;
+    event.preventDefault(); buttons[next].focus(); choose(buttons[next]);
+  });
+}
+
+const [markup$1, css$1] = await Promise.all([
+  "<div role=\"group\">\n  <template><button type=\"button\"></button></template>\n</div>\n",
   ":host { display: block; color: inherit; font: inherit; }\n:host([hidden]) { display: none !important; }\ndiv {\n  display: flex;\n  padding: 3px;\n  border: 1px solid var(--cm-border, #e0e5eb);\n  border-radius: 7px;\n  background: var(--cm-subtle, #f3f6fa);\n}\nbutton {\n  box-sizing: border-box;\n  min-height: 28px;\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  white-space: nowrap;\n  cursor: pointer;\n}\nbutton[aria-pressed=true] { background: var(--cm-surface, #fff); box-shadow: 0 1px 2px #1d2b3d29; font-weight: 600; }\nbutton:hover:not(:disabled) { background: var(--cm-hover, #e3ecf8); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n",
 ]);
-const template = createTemplate(markup);
-const HTMLElementBase$1 = globalThis.HTMLElement || class {};
+const template$1 = createTemplate(markup$1);
+const HTMLElementBase$2 = globalThis.HTMLElement || class {};
 
-class ViewSwitcher extends HTMLElementBase$1 {
+class ViewSwitcher extends HTMLElementBase$2 {
   static observedAttributes = ["value", "label"];
   #group;
   #template;
@@ -3461,19 +3475,10 @@ class ViewSwitcher extends HTMLElementBase$1 {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.textContent = css;
-    root.append(style, template(this.ownerDocument));
+    const style = this.ownerDocument.createElement("style"); style.textContent = css$1;
+    root.append(style, template$1(this.ownerDocument));
     this.#group = root.querySelector("div"); this.#template = root.querySelector("template");
-    this.#group.onclick = (event) => this.#choose(event.target.closest("button"));
-    this.#group.onkeydown = (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-      const buttons = this.#buttons.filter((button) => !button.disabled);
-      if (!buttons.length) return;
-      const index = buttons.indexOf(event.target);
-      const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
-        : (index + (event.key === "ArrowLeft" ? -1 : 1) + buttons.length) % buttons.length;
-      event.preventDefault(); buttons[next].focus(); this.#choose(buttons[next]);
-    };
+    bindOptionButtons(this.#group, (button) => this.#choose(button));
     this.#observer = new this.ownerDocument.defaultView.MutationObserver((records) => {
       if (records.some((record) => record.target !== this || record.type === "childList")) this.#renderOptions();
     });
@@ -3494,7 +3499,7 @@ class ViewSwitcher extends HTMLElementBase$1 {
       button.value = option.value; button.textContent = option.label; button.disabled = option.disabled;
       return button;
     });
-    this.#group.replaceChildren(...this.#buttons);
+    this.#group.replaceChildren(this.#template, ...this.#buttons);
     if (!this.hasAttribute("value")) this.value = this.#buttons.find((button) => !button.disabled)?.value || "";
     this.#sync();
   }
@@ -3520,7 +3525,82 @@ function defineViewSwitcher() {
   if (!customElements.get("clinker-view-switcher")) customElements.define("clinker-view-switcher", ViewSwitcher);
 }
 
-const shellTemplate = createTemplate(await "<div class=\"cm-editor__resize-handle\" data-resize role=\"separator\" aria-label=\"Resize plot editor\" aria-orientation=\"horizontal\"></div>\n<header class=\"cm-editor__header\">\n  <h2 class=\"cm-editor__title\">Plot editor</h2>\n  <div class=\"cm-editor__history\">\n    <button type=\"button\" data-command=\"undo\" disabled>Undo</button>\n    <button type=\"button\" data-command=\"redo\" disabled>Redo</button>\n  </div>\n</header>\n<div class=\"cm-editor__tabs\" role=\"tablist\" aria-label=\"Plot editor sections\">\n  <button type=\"button\" data-tab=\"data\" role=\"tab\" aria-selected=\"true\">Data</button>\n  <button type=\"button\" data-tab=\"appearance\" role=\"tab\" aria-selected=\"false\">Appearance</button>\n</div>\n<div data-editor-error class=\"cm-data-error\" role=\"alert\" hidden></div>\n<section data-panel=\"data\" class=\"cm-editor__panel\">\n  <div class=\"cm-editor__toolbar cm-data-toolbar\">\n    <clinker-view-switcher data-kind-picker label=\"Data type\" value=\"groups\">\n      <option value=\"groups\">Groups</option><option value=\"genes\">Genes</option>\n      <option value=\"links\">Links</option><option value=\"annotations\">Annotations</option>\n    </clinker-view-switcher>\n    <clinker-view-switcher data-gene-view label=\"Gene view\" value=\"tree\" hidden>\n      <option value=\"tree\">By locus</option><option value=\"groups\">By group</option><option value=\"list\">List</option>\n    </clinker-view-switcher>\n    <button type=\"button\" data-command=\"toggle-tree\" hidden>Expand visible</button>\n    <button type=\"button\" data-command=\"new-group\">Create group…</button>\n    <div data-annotation-toolbar class=\"cm-editor__annotation-toolbar\" hidden></div>\n    <clinker-search-field data-filter label=\"Filter records\" placeholder=\"Search names, labels, loci, or clusters\"></clinker-search-field>\n  </div>\n  <div data-annotation-editor class=\"cm-editor__annotation-editor\" hidden></div>\n  <div data-record-editor></div>\n</section>\n<section data-panel=\"appearance\" class=\"cm-editor__panel\" hidden>\n  <div class=\"cm-editor__appearance-toolbar\"><clinker-search-field data-appearance-filter label=\"Find an appearance setting\" placeholder=\"Find a setting\"></clinker-search-field></div>\n  <div class=\"cm-editor__appearance\" data-appearance></div>\n</section>\n");
+const [markup, css] = await Promise.all([
+  "<div part=\"tab-list\" role=\"tablist\">\n  <template><button type=\"button\" role=\"tab\"></button></template>\n</div>\n<slot name=\"status\"></slot>\n<div part=\"panels\">\n  <template><div role=\"tabpanel\" tabindex=\"0\"><slot></slot></div></template>\n</div>\n",
+  ":host { display: flex; flex: 1; flex-direction: column; min-height: 0; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\n[role=tablist] { display: flex; flex-shrink: 0; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--cm-border, #e1e5ea); }\nbutton {\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 0;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton[aria-selected=true] { border-bottom-color: var(--cm-accent, #1677ff); font-weight: 600; }\nbutton:hover:not(:disabled) { background: var(--cm-hover, #e3ecf8); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n[part=panels], [role=tabpanel] { display: flex; flex: 1; flex-direction: column; min-height: 0; }\n[role=tabpanel]:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nslot { display: contents; }\n",
+]);
+const template = createTemplate(markup);
+const HTMLElementBase$1 = globalThis.HTMLElement || class {};
+let nextId = 0;
+
+class Tabs extends HTMLElementBase$1 {
+  static observedAttributes = ["value", "label"];
+  #prefix = `clinker-tabs-${++nextId}`;
+  #list;
+  #content;
+  #buttonTemplate;
+  #panelTemplate;
+  #tabs = [];
+  #observer;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const style = this.ownerDocument.createElement("style"); style.textContent = css;
+    root.append(style, template(this.ownerDocument));
+    this.#list = root.querySelector("[role=tablist]"); this.#content = root.querySelector("[part=panels]");
+    this.#buttonTemplate = this.#list.querySelector("template"); this.#panelTemplate = this.#content.querySelector("template");
+    bindOptionButtons(this.#list, (button) => {
+      if (!button || button.disabled || button.value === this.value) return;
+      this.value = button.value;
+      this.dispatchEvent(new CustomEvent("value-change", { detail: { value: this.value }, bubbles: true, composed: true }));
+    });
+    this.#observer = new this.ownerDocument.defaultView.MutationObserver((records) => {
+      if (records.some((record) => record.type === "childList" ? record.target === this : record.target.parentElement === this)) this.#mountPanels();
+    });
+  }
+
+  get value() { return this.getAttribute("value") || ""; }
+  set value(value) { if (this.value !== String(value)) this.setAttribute("value", String(value)); }
+  attributeChangedCallback() { this.#sync(); }
+  connectedCallback() {
+    this.#mountPanels();
+    this.#observer.observe(this, { childList: true, subtree: true, attributes: true, attributeFilter: ["name", "label", "disabled"] });
+  }
+  disconnectedCallback() { this.#observer.disconnect(); }
+
+  #mountPanels() {
+    this.#tabs = [...this.children].filter((panel) => panel.hasAttribute("name")).map((panel, index) => {
+      const button = this.ownerDocument.importNode(this.#buttonTemplate.content, true).firstElementChild;
+      const wrapper = this.ownerDocument.importNode(this.#panelTemplate.content, true).firstElementChild;
+      const id = `${this.#prefix}-${index}`, name = panel.getAttribute("name");
+      panel.slot = id; wrapper.id = id; wrapper.querySelector("slot").name = id;
+      button.id = `${id}-tab`; button.value = name; button.textContent = panel.getAttribute("label") || name;
+      button.disabled = panel.hasAttribute("disabled"); button.setAttribute("aria-controls", id); wrapper.setAttribute("aria-labelledby", button.id);
+      return { name, panel, button, wrapper };
+    });
+    this.#list.replaceChildren(this.#buttonTemplate, ...this.#tabs.map(({ button }) => button));
+    this.#content.replaceChildren(this.#panelTemplate, ...this.#tabs.map(({ wrapper }) => wrapper));
+    this.#sync();
+  }
+
+  #sync() {
+    this.#list.setAttribute("aria-label", this.getAttribute("label") || "Sections");
+    const active = this.#tabs.find((tab) => tab.name === this.value && !tab.button.disabled) || this.#tabs.find((tab) => !tab.button.disabled);
+    if (active && active.name !== this.value) { this.value = active.name; return; }
+    for (const tab of this.#tabs) {
+      const selected = tab === active;
+      tab.button.setAttribute("aria-selected", String(selected)); tab.button.tabIndex = selected ? 0 : -1;
+      tab.panel.hidden = tab.wrapper.hidden = !selected;
+    }
+  }
+}
+
+function defineTabs() {
+  if (!customElements.get("clinker-tabs")) customElements.define("clinker-tabs", Tabs);
+}
+
+const shellTemplate = createTemplate(await "<div class=\"cm-editor__resize-handle\" data-resize role=\"separator\" aria-label=\"Resize plot editor\" aria-orientation=\"horizontal\"></div>\n<header class=\"cm-editor__header\">\n  <h2 class=\"cm-editor__title\">Plot editor</h2>\n  <div class=\"cm-editor__history\">\n    <button type=\"button\" data-command=\"undo\" disabled>Undo</button>\n    <button type=\"button\" data-command=\"redo\" disabled>Redo</button>\n  </div>\n</header>\n<clinker-tabs data-editor-tabs label=\"Plot editor sections\" value=\"data\">\n  <div slot=\"status\" data-editor-error class=\"cm-data-error\" role=\"alert\" hidden></div>\n  <section name=\"data\" label=\"Data\" data-panel=\"data\" class=\"cm-editor__panel\">\n    <div class=\"cm-editor__toolbar cm-data-toolbar\">\n      <clinker-view-switcher data-kind-picker label=\"Data type\" value=\"groups\">\n        <option value=\"groups\">Groups</option><option value=\"genes\">Genes</option>\n        <option value=\"links\">Links</option><option value=\"annotations\">Annotations</option>\n      </clinker-view-switcher>\n      <clinker-view-switcher data-gene-view label=\"Gene view\" value=\"tree\" hidden>\n        <option value=\"tree\">By locus</option><option value=\"groups\">By group</option><option value=\"list\">List</option>\n      </clinker-view-switcher>\n      <button type=\"button\" data-command=\"toggle-tree\" hidden>Expand visible</button>\n      <button type=\"button\" data-command=\"new-group\">Create group…</button>\n      <div data-annotation-toolbar class=\"cm-editor__annotation-toolbar\" hidden></div>\n      <clinker-search-field data-filter label=\"Filter records\" placeholder=\"Search names, labels, loci, or clusters\"></clinker-search-field>\n    </div>\n    <div data-annotation-editor class=\"cm-editor__annotation-editor\" hidden></div>\n    <div data-record-editor></div>\n  </section>\n  <section name=\"appearance\" label=\"Appearance\" data-panel=\"appearance\" class=\"cm-editor__panel\" hidden>\n    <div class=\"cm-editor__appearance-toolbar\"><clinker-search-field data-appearance-filter label=\"Find an appearance setting\" placeholder=\"Find a setting\"></clinker-search-field></div>\n    <div class=\"cm-editor__appearance\" data-appearance></div>\n  </section>\n</clinker-tabs>\n");
 
 const memberFilterTemplate = createTemplate(`<div class="cm-editor__member-filter" data-member-filter hidden>
   <span>Group: <strong data-member-label></strong></span><button type="button" data-command="clear-member-filter" aria-label="Clear group member filter" title="Clear group member filter">×</button>
@@ -3584,7 +3664,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField();
+    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField(); defineTabs();
     this.classList.add("cm-editor", "cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();
@@ -3626,8 +3706,7 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.hidden = false;
     this.#kind = "annotations";
     this.#selected.clear();
-    this.querySelectorAll("[data-tab]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.tab === "data")));
-    this.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== "data"; });
+    this.querySelector("[data-editor-tabs]")?.setAttribute("value", "data");
     this.#renderData();
     if (panelUid) this.#annotationEditor?.select(panelUid);
     this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true }));
@@ -3651,8 +3730,7 @@ class ClinkerEditorElement extends HTMLElementBase {
       }
     }
     this.#selected.clear(); this.#selected.setMany(genes); this.#rowsCache = null;
-    this.querySelectorAll("[data-tab]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.tab === "data")));
-    this.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== "data"; });
+    this.querySelector("[data-editor-tabs]")?.setAttribute("value", "data");
     this.#renderData(); this.#syncHighlight();
     const first = this.#rows().findIndex((row) => row.selectIds?.some((id) => this.#selected.has(id)));
     this.querySelector(".cm-editor__table").scrollTop = Math.max(0, first) * DATA_ROW_HEIGHT;
@@ -3707,6 +3785,10 @@ class ClinkerEditorElement extends HTMLElementBase {
     this.addEventListener("click", (event) => this.#click(event));
     this.addEventListener("change", (event) => this.#change(event));
     this.addEventListener("value-change", (event) => {
+      if (event.target.matches("[data-editor-tabs]")) {
+        if (event.detail.value === "appearance") this.#renderAppearance(); else this.#renderData();
+        return;
+      }
       if (event.target.matches("[data-kind-picker]")) {
         this.#kind = event.detail.value;
         if (this.#kind !== "genes") this.#memberGroupId = null;
@@ -3835,13 +3917,6 @@ class ClinkerEditorElement extends HTMLElementBase {
     }
     const button = event.target.closest("button");
     if (!button) return;
-    const tab = button.dataset.tab;
-    if (tab) {
-      this.querySelectorAll("[data-tab]").forEach((node) => node.setAttribute("aria-selected", String(node === button)));
-      this.querySelectorAll("[data-panel]").forEach((node) => { node.hidden = node.dataset.panel !== tab; });
-      if (tab === "appearance") this.#renderAppearance(); else this.#renderData();
-      return;
-    }
     if (button.dataset.removeRecord) {
       this.#removeRecords(button.dataset.removeRecord, [this.#id(button.dataset.id)]);
       return;

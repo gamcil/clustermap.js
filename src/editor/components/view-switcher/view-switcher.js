@@ -1,5 +1,6 @@
 import { createTemplate } from "../../../uiControls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
+import { bindOptionButtons } from "../../shared/optionButtons.js";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./view-switcher.html", import.meta.url)),
@@ -21,16 +22,7 @@ class ViewSwitcher extends HTMLElementBase {
     const style = this.ownerDocument.createElement("style"); style.textContent = css;
     root.append(style, template(this.ownerDocument));
     this.#group = root.querySelector("div"); this.#template = root.querySelector("template");
-    this.#group.onclick = (event) => this.#choose(event.target.closest("button"));
-    this.#group.onkeydown = (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-      const buttons = this.#buttons.filter((button) => !button.disabled);
-      if (!buttons.length) return;
-      const index = buttons.indexOf(event.target);
-      const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
-        : (index + (event.key === "ArrowLeft" ? -1 : 1) + buttons.length) % buttons.length;
-      event.preventDefault(); buttons[next].focus(); this.#choose(buttons[next]);
-    };
+    bindOptionButtons(this.#group, (button) => this.#choose(button));
     this.#observer = new this.ownerDocument.defaultView.MutationObserver((records) => {
       if (records.some((record) => record.target !== this || record.type === "childList")) this.#renderOptions();
     });
@@ -51,7 +43,7 @@ class ViewSwitcher extends HTMLElementBase {
       button.value = option.value; button.textContent = option.label; button.disabled = option.disabled;
       return button;
     });
-    this.#group.replaceChildren(...this.#buttons);
+    this.#group.replaceChildren(this.#template, ...this.#buttons);
     if (!this.hasAttribute("value")) this.value = this.#buttons.find((button) => !button.disabled)?.value || "";
     this.#sync();
   }

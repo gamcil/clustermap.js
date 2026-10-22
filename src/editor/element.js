@@ -13,6 +13,7 @@ import { defineSelectionBar } from "./components/selection-bar/selection-bar.js"
 import { defineActionMenu } from "./components/action-menu/action-menu.js";
 import { defineViewSwitcher } from "./components/view-switcher/view-switcher.js";
 import { defineSearchField } from "./components/search-field/search-field.js";
+import { defineTabs } from "./components/tabs/tabs.js";
 import { textAsset } from "./shared/textAsset.js";
 
 const shellTemplate = createTemplate(await textAsset(new URL("./element.html", import.meta.url)));
@@ -79,7 +80,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   constructor() { super(); }
 
   connectedCallback() {
-    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField();
+    defineEditableField(); defineSelectionBar(); defineActionMenu(); defineViewSwitcher(); defineSearchField(); defineTabs();
     this.classList.add("cm-editor", "cm-data-ui");
     installDataEditorStyle(this.ownerDocument);
     if (!this.hasChildNodes()) this.#renderShell();
@@ -121,8 +122,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.hidden = false;
     this.#kind = "annotations";
     this.#selected.clear();
-    this.querySelectorAll("[data-tab]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.tab === "data")));
-    this.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== "data"; });
+    this.querySelector("[data-editor-tabs]")?.setAttribute("value", "data");
     this.#renderData();
     if (panelUid) this.#annotationEditor?.select(panelUid);
     this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true }));
@@ -146,8 +146,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
       }
     }
     this.#selected.clear(); this.#selected.setMany(genes); this.#rowsCache = null;
-    this.querySelectorAll("[data-tab]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.tab === "data")));
-    this.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== "data"; });
+    this.querySelector("[data-editor-tabs]")?.setAttribute("value", "data");
     this.#renderData(); this.#syncHighlight();
     const first = this.#rows().findIndex((row) => row.selectIds?.some((id) => this.#selected.has(id)));
     this.querySelector(".cm-editor__table").scrollTop = Math.max(0, first) * DATA_ROW_HEIGHT;
@@ -202,6 +201,10 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.addEventListener("click", (event) => this.#click(event));
     this.addEventListener("change", (event) => this.#change(event));
     this.addEventListener("value-change", (event) => {
+      if (event.target.matches("[data-editor-tabs]")) {
+        if (event.detail.value === "appearance") this.#renderAppearance(); else this.#renderData();
+        return;
+      }
       if (event.target.matches("[data-kind-picker]")) {
         this.#kind = event.detail.value;
         if (this.#kind !== "genes") this.#memberGroupId = null;
@@ -330,13 +333,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
     }
     const button = event.target.closest("button");
     if (!button) return;
-    const tab = button.dataset.tab;
-    if (tab) {
-      this.querySelectorAll("[data-tab]").forEach((node) => node.setAttribute("aria-selected", String(node === button)));
-      this.querySelectorAll("[data-panel]").forEach((node) => { node.hidden = node.dataset.panel !== tab; });
-      if (tab === "appearance") this.#renderAppearance(); else this.#renderData();
-      return;
-    }
     if (button.dataset.removeRecord) {
       this.#removeRecords(button.dataset.removeRecord, [this.#id(button.dataset.id)]);
       return;

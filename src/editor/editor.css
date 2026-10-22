@@ -7,9 +7,6 @@
   clinker-editor .cm-editor__header { display: flex; align-items: center; gap: 8px; }
   clinker-editor .cm-editor__header { justify-content: space-between; margin-bottom: 8px; }
   clinker-editor .cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }
-  clinker-editor .cm-editor__tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--cm-border,#e1e5ea); }
-  clinker-editor .cm-editor__tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; }
-  clinker-editor .cm-editor__tabs button[aria-selected="true"] { border-bottom-color: var(--cm-accent,#1677ff); font-weight: 600; }
   clinker-editor .cm-editor__panel { display: flex; min-height: 0; flex: 1; flex-direction: column; }
   clinker-editor [data-panel="data"] { gap:8px; }
   clinker-editor .cm-editor__annotation-editor { display:flex; flex:1; min-height:0; }
