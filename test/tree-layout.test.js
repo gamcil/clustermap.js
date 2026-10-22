@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { layoutTree, interpolateTreeLayout, hitTestTreeNode } from "../src/treeLayout.mjs";
+import { layoutTree, interpolateTreeLayout, hitTestTreeNode } from "../src/tree/layout.mjs";
 
 function example() {
   const tree = {

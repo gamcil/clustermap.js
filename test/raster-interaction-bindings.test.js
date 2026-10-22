@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 test("raster interaction bindings adapt stable IDs to source records", async () => {
   const { createRasterInteractionBindings } = await import(
-    "../src/rasterInteractionBindings.mjs"
+    "../src/interaction/rasterBindings.mjs"
   );
   const gene = { uid: "gene-1" };
   const locus = { uid: "locus-1" };

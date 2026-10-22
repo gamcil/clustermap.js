@@ -9,7 +9,7 @@ test("spatial index finds viewport overlaps and point candidates by extent", asy
     queryPointOrdered,
     queryViewport,
     queryViewportOrdered,
-  } = await import("../src/spatialIndex.mjs");
+  } = await import("../src/scene/spatialIndex.mjs");
   const index = createSpatialIndex(
     [
       ["left", { minX: 0, maxX: 10, minY: 0, maxY: 10 }],
@@ -46,7 +46,7 @@ test("spatial index finds viewport overlaps and point candidates by extent", asy
 });
 
 test("broad viewport scans exact bounds while preserving patched painter order", async () => {
-  const { createSpatialIndex, patchSpatialIndex, queryViewport, queryViewportOrdered } = await import("../src/spatialIndex.mjs");
+  const { createSpatialIndex, patchSpatialIndex, queryViewport, queryViewportOrdered } = await import("../src/scene/spatialIndex.mjs");
   const box = (x) => ({ minX: x, maxX: x + 10, minY: -10, maxY: 10 });
   let index = createSpatialIndex([["a", box(-100)], ["b", box(0)], ["c", box(100)], ["outside", box(100000)]]);
   index = patchSpatialIndex(index, [["b", null]]);
@@ -60,7 +60,7 @@ test("broad viewport scans exact bounds while preserving patched painter order",
 });
 
 test("small viewports retain grid lookup and agree with broad scans at boundaries", async () => {
-  const { createSpatialIndex, queryViewport } = await import("../src/spatialIndex.mjs");
+  const { createSpatialIndex, queryViewport } = await import("../src/scene/spatialIndex.mjs");
   const entries = Array.from({ length: 50 }, (_, i) => [i, { minX: i * 20 - 200, maxX: i * 20 - 190, minY: -10, maxY: 10 }]);
   const index = createSpatialIndex(entries, { cellWidth: 10, cellHeight: 10 });
   const cells = index.cells; let lookups = 0;

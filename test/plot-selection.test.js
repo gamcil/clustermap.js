@@ -4,11 +4,11 @@ import { readFile } from "node:fs/promises";
 import { normalizeChartData, validateTree } from "../src/data/normalize.mjs";
 import { createChartIndex } from "../src/data/index.mjs";
 import { visibleChartData, visibleTree } from "../src/data/visibility.mjs";
-import { createChartState, setTreeClusterOrder } from "../src/chartState.mjs";
-import { serializeChartState, chartStateFromSnapshot } from "../src/chartStateSnapshot.mjs";
-import { createChartRuntime } from "../src/chartRuntime.js";
-import { plotSelectionOptions } from "../src/interactionController.mjs";
-import { RowSelection } from "../src/rowSelection.mjs";
+import { createChartState, setTreeClusterOrder } from "../src/chart/state.mjs";
+import { serializeChartState, chartStateFromSnapshot } from "../src/chart/snapshot.mjs";
+import { createChartRuntime } from "../src/chart/runtime.js";
+import { plotSelectionOptions } from "../src/interaction/controller.mjs";
+import { RowSelection } from "../src/ui/selection.mjs";
 
 const fixture = async () => normalizeChartData(JSON.parse(await readFile(new URL("../fixtures/heatmap.json", import.meta.url), "utf8")));
 

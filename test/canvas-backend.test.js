@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCanvasBackend } from "../src/canvasBackend.mjs";
+import { createCanvasBackend } from "../src/renderers/canvasBackend.mjs";
 
 function fixture() {
   const renders = [], images = [], frames = new Map(), canvases = [];

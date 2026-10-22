@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("default configuration is recursively isolated per chart runtime", async () => {
-  const { createDefaultConfig } = await import("../src/config.js");
+  const { createDefaultConfig } = await import("../src/chart/config.js");
   const first = createDefaultConfig();
   const second = createDefaultConfig();
 
@@ -22,7 +22,7 @@ test("default configuration is recursively isolated per chart runtime", async ()
 });
 
 test("figure defaults resolve partial configs without changing explicit colours or source data", async () => {
-  const { figureConfig } = await import("../src/theme.mjs");
+  const { figureConfig } = await import("../src/ui/theme.mjs");
   const config = { plot: { theme: "dark" }, gene: { shape: { stroke: "red", strokeWidth: 2 } } };
   const original = structuredClone(config);
   const resolved = figureConfig(config);

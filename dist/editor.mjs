@@ -1,10 +1,10 @@
-import { m as mountComponent, c as createTemplate, a as controlStyles, u as upgradeProperty } from './editor/search-field-1d7e270f.mjs';
-import { e as editorThemeStyles, a as applyEditorTheme } from './editor/theme-4b8fbd52.mjs';
-import { d as defineAppearancePanel } from './editor/appearance-panel-37902b60.mjs';
-export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-37902b60.mjs';
-import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-a477e801.mjs';
-export { C as ClinkerDataPanelElement, d as defineDataPanel } from './editor/data-panel-a477e801.mjs';
-import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-78c3fb84.mjs';
+import { m as mountComponent, c as createTemplate, a as controlStyles, u as upgradeProperty } from './editor/search-field-8ffb9d31.mjs';
+import { e as editorThemeStyles, a as applyEditorTheme } from './editor/theme-3d7fc189.mjs';
+import { d as defineAppearancePanel } from './editor/appearance-panel-0976de30.mjs';
+export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-0976de30.mjs';
+import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-83ee30cd.mjs';
+export { C as ClinkerDataPanelElement, d as defineDataPanel } from './editor/data-panel-83ee30cd.mjs';
+import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-0619543f.mjs';
 
 const [markup$1, css$2] = await Promise.all([
   "<div part=\"tab-list\" role=\"tablist\">\n  <template><button type=\"button\" role=\"tab\"></button></template>\n</div>\n<slot name=\"status\"></slot>\n<div part=\"panels\">\n  <template><div role=\"tabpanel\" tabindex=\"0\"><slot></slot></div></template>\n</div>\n",

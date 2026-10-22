@@ -6,7 +6,7 @@ test("chart factory exposes only the supported public methods", async () => {
   globalThis.document = { documentElement: {} };
 
   try {
-    const { default: clusterMap } = await import("../src/clusterMap.js");
+    const { default: clusterMap } = await import("../src/chart/chart.js");
     const chart = clusterMap();
 
     assert.equal(typeof chart, "function");

@@ -1,4 +1,4 @@
-import { createTemplate } from "../../../uiControls.mjs";
+import { createTemplate } from "../../../ui/controls.mjs";
 import { installDataEditorStyle, installStyle } from "../../shared/styles.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { defineDataTable } from "../data-table/data-table.js";

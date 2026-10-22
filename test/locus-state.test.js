@@ -13,7 +13,7 @@ const createLocus = () => ({
 });
 
 test("flipping a locus twice restores its gene state", async () => {
-  const { createChartState, flipLocus } = await import("../src/chartState.mjs");
+  const { createChartState, flipLocus } = await import("../src/chart/state.mjs");
   const locus = createLocus();
   const before = structuredClone(locus);
   const state = createChartState({ clusters: [{ loci: [locus] }] });
@@ -26,7 +26,7 @@ test("flipping a locus twice restores its gene state", async () => {
 
 test("synchronizing a trimmed locus updates gene and locus coordinates", async () => {
   const { createChartState, getGeneState, synchronizeLocusState } = await import(
-    "../src/chartState.mjs"
+    "../src/chart/state.mjs"
   );
   const locus = createLocus();
   const state = createChartState({ clusters: [{ loci: [locus] }] });
@@ -49,7 +49,7 @@ test("synchronizing a trimmed locus updates gene and locus coordinates", async (
 
 test("flipping a trimmed locus synchronizes its bounds in display coordinates", async () => {
   const { createChartState, flipLocus, getGeneState, synchronizeLocusState } = await import(
-    "../src/chartState.mjs"
+    "../src/chart/state.mjs"
   );
   const locus = createLocus();
   locus.genes.push({ uid: "c", locusUid: "locus", start: 5500, end: 6500, strand: -1 });
@@ -74,7 +74,7 @@ test("flipping a trimmed locus synchronizes its bounds in display coordinates", 
 
 test("trimming a flipped locus retains the selected display-side genes", async () => {
   const { createChartState, flipLocus, getGeneState, synchronizeLocusState } = await import(
-    "../src/chartState.mjs"
+    "../src/chart/state.mjs"
   );
   const locus = createLocus();
   locus.genes.push({ uid: "c", locusUid: "locus", start: 5500, end: 6500, strand: -1 });
@@ -97,7 +97,7 @@ test("trimming a flipped locus retains the selected display-side genes", async (
 });
 
 test("trimming selects display-side gene boundaries without renderer state", async () => {
-  const { createChartState, trimLocus } = await import("../src/chartState.mjs");
+  const { createChartState, trimLocus } = await import("../src/chart/state.mjs");
   const locus = createLocus();
   locus.genes.push({ uid: "c", locusUid: "locus", start: 5500, end: 6500, strand: -1 });
   const state = createChartState({ clusters: [{ loci: [locus] }] });
@@ -122,7 +122,7 @@ test("trimming selects display-side gene boundaries without renderer state", asy
 });
 
 test("trimming to gene bounds removes both locus flanks", async () => {
-  const { createChartState, trimLocusToGeneBounds } = await import("../src/chartState.mjs");
+  const { createChartState, trimLocusToGeneBounds } = await import("../src/chart/state.mjs");
   const locus = {
     uid: "locus",
     start: 0,
@@ -146,7 +146,7 @@ test("trimming to gene bounds removes both locus flanks", async () => {
 });
 
 test("trimming to gene bounds follows displayed gene order after a flip", async () => {
-  const { createChartState, flipLocus, trimLocusToGeneBounds } = await import("../src/chartState.mjs");
+  const { createChartState, flipLocus, trimLocusToGeneBounds } = await import("../src/chart/state.mjs");
   const locus = {
     uid: "locus",
     start: 0,
@@ -172,7 +172,7 @@ test("restoring locus bounds preserves a flipped orientation", async () => {
     flipLocus,
     restoreLocusBounds,
     trimLocusToGeneBounds,
-  } = await import("../src/chartState.mjs");
+  } = await import("../src/chart/state.mjs");
   const locus = {
     uid: "locus",
     start: 0,
@@ -203,7 +203,7 @@ test("trimming previews bounds without changing committed locus state", async ()
     createChartState,
     getLocusState,
     previewLocusTrim,
-  } = await import("../src/chartState.mjs");
+  } = await import("../src/chart/state.mjs");
   const locus = createLocus();
   const state = createChartState({ clusters: [{ loci: [locus] }] });
 
@@ -221,7 +221,7 @@ test("trimming previews bounds without changing committed locus state", async ()
 });
 
 test("locus labels show trimmed and reversed coordinates", async () => {
-  const { createChartState, formatLocusText } = await import("../src/chartState.mjs");
+  const { createChartState, formatLocusText } = await import("../src/chart/state.mjs");
   const locus = createLocus();
   const state = createChartState({ clusters: [{ loci: [locus] }] });
   state.loci.get(locus.uid).start = 2500;
@@ -237,7 +237,7 @@ test("locus labels show trimmed and reversed coordinates", async () => {
 });
 
 test("locus labels preserve zero-based biological coordinates after a flip", async () => {
-  const { createChartState, formatLocusText } = await import("../src/chartState.mjs");
+  const { createChartState, formatLocusText } = await import("../src/chart/state.mjs");
   const locus = {
     ...createLocus(),
     bio: { start: 0, end: 10000 },

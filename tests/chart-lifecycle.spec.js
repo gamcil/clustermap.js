@@ -4,7 +4,7 @@ test("destroy releases a chart's generated surfaces", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -27,7 +27,7 @@ test("tooltip dismissal stays isolated between chart instances", async ({ page }
   await page.goto("http://127.0.0.1:8080/?test=1");
   const opacities = await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const firstHost = document.querySelector(".chart-host");

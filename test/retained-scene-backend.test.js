@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("retained scene backend paints the latest scene on its configured surface", async () => {
-  const { createRetainedSceneBackend } = await import("../src/retainedSceneBackend.mjs");
+  const { createRetainedSceneBackend } = await import("../src/renderers/retainedBackend.mjs");
 
   for (const surface of ["canvas", "plot"]) {
     const calls = [];

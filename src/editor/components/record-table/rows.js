@@ -1,4 +1,4 @@
-import { createTemplate, colourHex } from "../../../uiControls.mjs";
+import { createTemplate, colourHex } from "../../../ui/controls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 
 const rowTemplates = createTemplate(await textAsset(new URL("./rows.html", import.meta.url)));

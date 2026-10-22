@@ -754,7 +754,7 @@ test("plot label and scale edits update the model, editor, history and export", 
 
 test("shared animation timing, completion, cancellation and deferred preparation", async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { animate, afterPaint } = await import("/src/animation.mjs");
+    const { animate, afterPaint } = await import("/src/renderers/animation.mjs");
     const original = { request: window.requestAnimationFrame, cancel: window.cancelAnimationFrame, now: performance.now };
     const queued = new Map(), values = [];
     let serial = 0, completed = 0, prepared = 0;

@@ -1,4 +1,4 @@
-import { DATA_ROW_HEIGHT } from "../../virtualRows.mjs";
+import { DATA_ROW_HEIGHT } from "../../ui/virtualRows.mjs";
 import { controlStyles } from "./controls.mjs";
 
 export const DATA_EDITOR_CSS = `

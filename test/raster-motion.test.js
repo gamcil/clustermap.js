@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("raster motion restores Canvas detail after a gesture and keeps WebGPU native", async () => {
-  const { createRasterMotion } = await import("../src/rasterMotion.mjs");
+  const { createRasterMotion } = await import("../src/interaction/motion.mjs");
   let renderer = "canvas";
   let paintCount = 0;
   let nextTimer = 0;

@@ -9,7 +9,7 @@ function dataFor(...clusterIds) {
 
 test("chart state persists cluster order across data refreshes", async () => {
   const { commitPreviewClusterOrder, createChartState, getClusterOrder, setPreviewClusterOrder } = await import(
-    "../src/chartState.mjs"
+    "../src/chart/state.mjs"
   );
   let state = createChartState(dataFor("a", "b"));
 
@@ -32,7 +32,7 @@ test("chart state previews a cluster order before committing it", async () => {
     getClusterPosition,
     setPreviewClusterPosition,
     setPreviewClusterOrder,
-  } = await import("../src/chartState.mjs");
+  } = await import("../src/chart/state.mjs");
   const state = createChartState(dataFor("a", "b", "c"));
 
   setPreviewClusterOrder(state, ["b", "c", "a"]);
@@ -54,7 +54,7 @@ test("chart state previews a locus offset before committing it", async () => {
     getCommittedLocusOffset,
     getLocusOffset,
     setPreviewLocusOffset,
-  } = await import("../src/chartState.mjs");
+  } = await import("../src/chart/state.mjs");
   const state = createChartState({
     clusters: [{ uid: "a", loci: [{ uid: "a-locus", start: 0, end: 10, genes: [] }] }],
   });
@@ -75,7 +75,7 @@ test("chart state persists horizontal offsets across data refreshes", async () =
     getLocusOffset,
     setClusterOffset,
     setLocusOffset,
-  } = await import("../src/chartState.mjs");
+  } = await import("../src/chart/state.mjs");
   const data = {
     clusters: [
       {
@@ -99,7 +99,7 @@ test("chart state persists horizontal offsets across data refreshes", async () =
 
 test("chart state persists the camera transform across data refreshes", async () => {
   const { createChartState, getCamera, setCamera } = await import(
-    "../src/chartState.mjs"
+    "../src/chart/state.mjs"
   );
   let state = createChartState(dataFor("a"));
 
@@ -116,11 +116,11 @@ test("chart state snapshots preserve flipped trimmed loci as JSON-safe gene IDs"
     flipLocus,
     getLocusState,
     trimLocus,
-  } = await import("../src/chartState.mjs");
+  } = await import("../src/chart/state.mjs");
   const {
     chartStateFromSnapshot,
     serializeChartState,
-  } = await import("../src/chartStateSnapshot.mjs");
+  } = await import("../src/chart/snapshot.mjs");
   const makeData = () => ({
     clusters: [{
       uid: "cluster-a",
@@ -159,8 +159,8 @@ test("chart state snapshots preserve flipped trimmed loci as JSON-safe gene IDs"
 });
 
 test("chart state snapshots omit default layout records", async () => {
-  const { createChartState } = await import("../src/chartState.mjs");
-  const { serializeChartState } = await import("../src/chartStateSnapshot.mjs");
+  const { createChartState } = await import("../src/chart/state.mjs");
+  const { serializeChartState } = await import("../src/chart/snapshot.mjs");
   const data = {
     clusters: [{
       uid: "cluster-a",
@@ -183,7 +183,7 @@ test("chart state snapshots omit default layout records", async () => {
 
 test("chart state tracks transient drag interactions", async () => {
   const { createChartState, isDragging, setDragging } = await import(
-    "../src/chartState.mjs"
+    "../src/chart/state.mjs"
   );
   const state = createChartState(dataFor("a"));
 
@@ -198,7 +198,7 @@ test("chart state anchors matching genes by moving their clusters", async () => 
     createChartState,
     getClusterOffset,
     getGeneState,
-  } = await import("../src/chartState.mjs");
+  } = await import("../src/chart/state.mjs");
   const anchor = {
     uid: "gene-a",
     clusterUid: "cluster-a",
@@ -250,7 +250,7 @@ test("chart state anchoring flips mismatched loci before finding offsets", async
     createChartState,
     getClusterOffset,
     getGeneState,
-  } = await import("../src/chartState.mjs");
+  } = await import("../src/chart/state.mjs");
   const anchor = {
     uid: "gene-a",
     clusterUid: "cluster-a",

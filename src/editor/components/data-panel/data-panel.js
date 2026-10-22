@@ -1,9 +1,9 @@
 import { DATA_EDITOR_CSS } from "../../shared/styles.mjs";
-import { RowSelection } from "../../../rowSelection.mjs";
-import { DATA_ROW_HEIGHT } from "../../../virtualRows.mjs";
-import { ANNOTATION_PALETTES, resolveAnnotationScale } from "../../../annotations.mjs";
+import { RowSelection } from "../../../ui/selection.mjs";
+import { DATA_ROW_HEIGHT } from "../../../ui/virtualRows.mjs";
+import { ANNOTATION_PALETTES, resolveAnnotationScale } from "../../../annotations/model.mjs";
 import { defineAnnotationEditor } from "../annotation-editor/annotation-editor.js";
-import { createActionRunner, createTemplate, upgradeProperty } from "../../../uiControls.mjs";
+import { createActionRunner, createTemplate, upgradeProperty } from "../../../ui/controls.mjs";
 import { applyEditorTheme, editorThemeStyles } from "../../shared/theme.js";
 import { defineRecordTable } from "../record-table/record-table.js";
 import { DataPanelModel } from "./model.js";

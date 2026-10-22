@@ -1,0 +1,467 @@
+import { isTreeOrderCompatible } from "../tree/layout.mjs";
+import { visibleTree } from "../data/visibility.mjs";
+
+function removeMissing(records, allowed) {
+  for (const uid of records.keys()) if (!allowed.has(uid)) records.delete(uid);
+}
+
+export function createChartState(data, previous = null) {
+  const loci = previous?.loci || new Map();
+  const genes = previous?.genes || new Map();
+  const clusterOffsets = previous?.clusterOffsets || new Map();
+  const locusOffsets = previous?.locusOffsets || new Map();
+  const camera = previous?.camera || { x: 0, y: 0, k: 1 };
+  const dragging = previous?.dragging || false;
+  const preview = previous?.preview || {
+    clusterOrder: null,
+    clusterPositions: new Map(),
+    locusOffsets: new Map(),
+    loci: new Map(),
+  };
+  const clusterIds = data.clusters.map((cluster) => cluster.uid);
+  const clusterIdSet = new Set(clusterIds);
+  const excludedClusters = new Set([...previous?.excludedClusters || []].filter((uid) => clusterIdSet.has(uid)));
+  const excludedLoci = new Set([...previous?.excludedLoci || []]);
+  const previousOrder = previous?.clusterOrder || [];
+  const previousOrderSet = new Set(previousOrder);
+  const clusterOrder = data.tree ? treeClusterOrder(data.tree) : [
+    ...previousOrder.filter((uid) => clusterIdSet.has(uid)),
+    ...clusterIds.filter((uid) => !previousOrderSet.has(uid)),
+  ];
+  if (preview.clusterOrder) {
+    const previewOrderSet = new Set(preview.clusterOrder);
+    preview.clusterOrder = [
+      ...preview.clusterOrder.filter((uid) => clusterIdSet.has(uid)),
+      ...clusterIds.filter((uid) => !previewOrderSet.has(uid)),
+    ];
+  }
+  if (!preview.locusOffsets) preview.locusOffsets = new Map();
+  if (!preview.loci) preview.loci = new Map();
+  if (!preview.clusterPositions) preview.clusterPositions = new Map();
+  const locusIds = new Set();
+  const geneKeys = new Set();
+  for (const cluster of data.clusters) {
+    if (!clusterOffsets.has(cluster.uid)) clusterOffsets.set(cluster.uid, 0);
+    for (const locus of cluster.loci) {
+      locusIds.add(locus.uid);
+      if (!loci.has(locus.uid)) {
+        loci.set(locus.uid, {
+          start: locus.start,
+          end: locus.end,
+          flipped: false,
+          trimLeft: null,
+          trimRight: null,
+        });
+      }
+      for (const gene of locus.genes) {
+        const geneBio = gene.bio || {
+          start: gene.start,
+          end: gene.end,
+          strand: gene.strand,
+        };
+        const locusBio = locus.bio || { start: locus.start, end: locus.end };
+        const key = `${locus.uid}:${gene.uid}`;
+        geneKeys.add(key);
+        if (!genes.has(key)) {
+          genes.set(key, {
+            start: geneBio.start - locusBio.start,
+            end: geneBio.end - locusBio.start,
+            strand: geneBio.strand,
+          });
+        }
+      }
+    }
+  }
+  removeMissing(loci, locusIds);
+  removeMissing(genes, geneKeys);
+  removeMissing(clusterOffsets, clusterIdSet);
+  removeMissing(locusOffsets, locusIds);
+  removeMissing(preview.locusOffsets, locusIds);
+  removeMissing(preview.clusterPositions, clusterIdSet);
+  removeMissing(preview.loci, locusIds);
+  for (const uid of excludedLoci) if (!locusIds.has(uid)) excludedLoci.delete(uid);
+  for (const cluster of data.clusters) {
+    if (cluster.loci.length && cluster.loci.every((locus) => excludedLoci.has(locus.uid))) excludedClusters.add(cluster.uid);
+  }
+  return { loci, genes, clusterOffsets, locusOffsets, clusterOrder, camera, dragging, preview, excludedClusters, excludedLoci };
+}
+
+function treeClusterOrder(tree) {
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const result = [];
+  const visit = (uid) => {
+    const node = nodes.get(uid);
+    if (node.children) node.children.forEach(visit);
+    else result.push(node.cluster);
+  };
+  visit(tree.root);
+  return result;
+}
+
+/** Commit a compatible display order to the tree's ordered child arrays. */
+export function setTreeClusterOrder(tree, order, { partial = false } = {}) {
+  if (!tree) return;
+  const orderedTree = partial ? visibleTree(tree, new Set(order)) : tree;
+  if (!orderedTree || !isTreeOrderCompatible(orderedTree, order)) {
+    throw new TypeError("Cluster order must keep every tree clade contiguous.");
+  }
+  const positions = new Map(order.map((uid, index) => [uid, index]));
+  const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+  const firstPosition = (uid) => {
+    const node = nodes.get(uid);
+    if (!node.children) return positions.get(node.cluster) ?? Infinity;
+    const first = new Map(node.children.map((child) => [child, firstPosition(child)]));
+    node.children.sort((a, b) => first.get(a) - first.get(b));
+    return first.get(node.children[0]);
+  };
+  firstPosition(tree.root);
+  return treeClusterOrder(tree);
+}
+
+export function isDragging(chartState) {
+  return chartState.dragging;
+}
+
+export function setDragging(chartState, dragging) {
+  chartState.dragging = dragging;
+}
+
+export function getClusterOrder(chartState) {
+  return chartState.preview.clusterOrder || chartState.clusterOrder;
+}
+
+export function setPreviewClusterOrder(chartState, order) {
+  chartState.preview.clusterOrder = [...order];
+}
+
+export function getClusterPosition(chartState, uid, fallback) {
+  return chartState.preview.clusterPositions.get(uid) ?? fallback;
+}
+
+export function setPreviewClusterPosition(chartState, uid, position) {
+  chartState.preview.clusterPositions.set(uid, position);
+}
+
+export function commitPreviewClusterOrder(chartState) {
+  if (chartState.preview.clusterOrder) {
+    const order = chartState.preview.clusterOrder;
+    const included = new Set(order);
+    chartState.clusterOrder = [...order, ...chartState.clusterOrder.filter((uid) => !included.has(uid))];
+    chartState.preview.clusterOrder = null;
+  }
+  chartState.preview.clusterPositions.clear();
+  return chartState.clusterOrder;
+}
+
+export function getClusterOffset(chartState, uid) {
+  return chartState.clusterOffsets.get(uid) ?? 0;
+}
+
+export function setClusterOffset(chartState, uid, offset) {
+  chartState.clusterOffsets.set(uid, offset);
+}
+
+export function getLocusOffset(chartState, uid) {
+  return chartState.preview.locusOffsets.get(uid) ?? getCommittedLocusOffset(chartState, uid);
+}
+
+export function getCommittedLocusOffset(chartState, uid) {
+  return chartState.locusOffsets.get(uid) ?? 0;
+}
+
+export function setLocusOffset(chartState, uid, offset) {
+  chartState.locusOffsets.set(uid, offset);
+}
+
+export function setPreviewLocusOffset(chartState, uid, offset) {
+  chartState.preview.locusOffsets.set(uid, offset);
+}
+
+export function commitPreviewLocusOffset(chartState, uid) {
+  const offset = chartState.preview.locusOffsets.get(uid);
+  if (offset !== undefined) {
+    chartState.locusOffsets.set(uid, offset);
+    chartState.preview.locusOffsets.delete(uid);
+  }
+  return getCommittedLocusOffset(chartState, uid);
+}
+
+export function initializeLocusOffsets(chartState, defaults) {
+  for (const [uid, offset] of defaults) {
+    if (!chartState.locusOffsets.has(uid)) chartState.locusOffsets.set(uid, offset);
+  }
+}
+
+export function getCamera(chartState) {
+  return chartState.camera;
+}
+
+export function setCamera(chartState, { x, y, k }) {
+  chartState.camera = { x, y, k };
+}
+
+export function getLocusState(chartState, locus) {
+  return chartState.preview.loci.get(locus.uid) || chartState.loci.get(locus.uid);
+}
+
+export function getGeneState(chartState, gene) {
+  return chartState.genes.get(`${gene.locusUid}:${gene.uid}`);
+}
+
+export function formatLocusText(loci, chartState, hideCoordinates) {
+  return loci
+    .map((locus) => {
+      let start;
+      let end;
+
+      const state = getLocusState(chartState, locus);
+      if (locus.bio) {
+        let startDiff = state.start - locus.start;
+        let endDiff = locus.end - state.end;
+        if (state.flipped) [startDiff, endDiff] = [endDiff, startDiff];
+        start = locus.bio.start + startDiff + 1;
+        end = locus.bio.end - endDiff;
+      } else {
+        start = state.start + 1;
+        end = state.end;
+      }
+
+      if (state.flipped) [start, end] = [end, start];
+
+      const reversed = state.flipped ? " (reversed)" : "";
+      if (hideCoordinates || state.start == null || state.end == null)
+        return `${locus.name}${reversed}`;
+      return `${locus.name}${reversed}:${start.toFixed(0)}-${end.toFixed(0)}`;
+    })
+    .join(", ");
+}
+
+/**
+ * Synchronize derived display coordinates after a trim, flip, or a change to
+ * unscaled-gene mode. This is state work: it deliberately does not depend on
+ * a renderer or a D3 scale.
+ */
+export function synchronizeLocusState(chartState, locus, scaleGenes) {
+  locus.genes.forEach((gene, index, genes) => {
+    const state = getGeneState(chartState, gene);
+    const length = scaleGenes ? state.end - state.start : 1000;
+    state.start = scaleGenes
+      ? state.start
+      : index > 0
+      ? getGeneState(chartState, genes[index - 1]).end
+      : 0;
+    state.end = state.start + length;
+  });
+
+  const state = getLocusState(chartState, locus);
+  const oldStart = state.start;
+  const lastGene = locus.genes[locus.genes.length - 1];
+  state.start = state.trimLeft
+    ? getGeneState(chartState, state.trimLeft).start
+    : 0;
+  state.end = state.trimRight
+    ? getGeneState(chartState, state.trimRight).end
+    : scaleGenes
+    ? locus.end
+    : lastGene.end;
+
+  return { oldStart };
+}
+
+function boundaryIndex(values, target, edge) {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (values[middle] < target) low = middle + 1;
+    else high = middle;
+  }
+  if (edge === "left") return Math.min(low, values.length - 1);
+  if (low === 0) return 0;
+  if (low === values.length) return values.length - 1;
+  return target - values[low - 1] <= values[low] - target ? low - 1 : low;
+}
+
+/**
+ * Apply a trim at the display boundary under a resize handle. The left handle
+ * rounds forward to a gene start; the right handle selects the nearest gene
+ * end, matching the drawn gene geometry.
+ * `coordinateFor` is supplied by the caller, keeping the state transition
+ * independent of D3 scales and any particular renderer.
+ */
+export function trimLocus(chartState, locus, {
+  edge,
+  position,
+  coordinateFor,
+  scaleGenes,
+}) {
+  const state = getLocusState(chartState, locus);
+  const genes = [...locus.genes].sort(
+    (left, right) =>
+      getGeneState(chartState, left).start - getGeneState(chartState, right).start
+  );
+
+  if (edge === "left") {
+    const visible = genes.filter(
+      (gene) => getGeneState(chartState, gene).end <= state.end
+    );
+    const boundaries = [
+      locus.start,
+      ...visible.map((gene) => getGeneState(chartState, gene).start),
+    ];
+    const index = boundaryIndex(boundaries.map(coordinateFor), position, edge);
+    state.start = boundaries[index];
+    state.trimLeft = index === 0 ? null : visible[index - 1];
+    return { state, coordinate: coordinateFor(state.start) };
+  }
+
+  if (edge === "right") {
+    const visible = genes.filter(
+      (gene) => getGeneState(chartState, gene).start >= state.start
+    );
+    const boundaries = [
+      ...visible.map((gene) => getGeneState(chartState, gene).end),
+      scaleGenes ? locus.end : state.end,
+    ];
+    const index = boundaryIndex(boundaries.map(coordinateFor), position, edge);
+    state.end = boundaries[index];
+    state.trimRight = visible[index] || null;
+    return { state, coordinate: coordinateFor(state.end) };
+  }
+
+  throw new Error(`Unknown locus trim edge: ${edge}`);
+}
+
+/** Trim both flanks of a locus to its displayed outermost genes. */
+export function trimLocusToGeneBounds(chartState, locus) {
+  if (!locus.genes.length) return false;
+  const genes = [...locus.genes].sort(
+    (left, right) =>
+      getGeneState(chartState, left).start - getGeneState(chartState, right).start
+  );
+  const first = genes[0];
+  const last = genes.at(-1);
+  const state = chartState.loci.get(locus.uid);
+  const start = getGeneState(chartState, first).start;
+  const end = getGeneState(chartState, last).end;
+  const changed =
+    state.start !== start ||
+    state.end !== end ||
+    state.trimLeft !== first ||
+    state.trimRight !== last;
+  if (!changed) return false;
+  Object.assign(state, { start, end, trimLeft: first, trimRight: last });
+  return true;
+}
+
+/** Restore a locus's full extent without changing its orientation or offset. */
+export function restoreLocusBounds(chartState, locus) {
+  const state = chartState.loci.get(locus.uid);
+  const changed =
+    state.start !== locus.start ||
+    state.end !== locus.end ||
+    state.trimLeft !== null ||
+    state.trimRight !== null;
+  if (!changed) return false;
+  Object.assign(state, {
+    start: locus.start,
+    end: locus.end,
+    trimLeft: null,
+    trimRight: null,
+  });
+  return true;
+}
+
+export function finalizeLocusTrim(chartState, locus) {
+  const state = getLocusState(chartState, locus);
+  if (state.end === locus.end) state.trimRight = null;
+  if (state.start === locus.start) state.trimLeft = null;
+}
+
+export function previewLocusTrim(chartState, locus, options) {
+  if (!chartState.preview.loci.has(locus.uid)) {
+    chartState.preview.loci.set(locus.uid, { ...chartState.loci.get(locus.uid) });
+  }
+  return trimLocus(chartState, locus, options);
+}
+
+export function commitPreviewLocusState(chartState, locus) {
+  const state = chartState.preview.loci.get(locus.uid);
+  if (!state) return getLocusState(chartState, locus);
+  chartState.loci.set(locus.uid, state);
+  chartState.preview.loci.delete(locus.uid);
+  return state;
+}
+
+/**
+ * Align each represented cluster with an anchor gene. Coordinate projection is
+ * injected by the controller, so this state transition remains independent of
+ * D3 and of a particular renderer.
+ */
+export function anchorGeneGroup(chartState, {
+  anchor,
+  genes,
+  locusForGene,
+  coordinateForGene,
+  flipMismatchedLoci = false,
+  onLocusFlipped = () => {},
+}) {
+  const anchorsByCluster = new Map();
+  const anchorState = getGeneState(chartState, anchor);
+
+  for (const gene of genes) {
+    if (
+      flipMismatchedLoci &&
+      getGeneState(chartState, gene).strand !== anchorState.strand
+    ) {
+      const locus = locusForGene(gene);
+      flipLocus(chartState, locus);
+      onLocusFlipped(locus);
+    }
+    const clusterGenes = anchorsByCluster.get(gene.clusterUid) || [];
+    clusterGenes.push(gene);
+    anchorsByCluster.set(gene.clusterUid, clusterGenes);
+  }
+
+  const midpoint = coordinateForGene(anchor);
+  const changes = [];
+  for (const [clusterUid, clusterGenes] of anchorsByCluster) {
+    if (clusterGenes.some((gene) => gene.uid === anchor.uid)) continue;
+    const closest = clusterGenes.reduce((best, gene) =>
+      Math.abs(coordinateForGene(gene) - midpoint) <
+      Math.abs(coordinateForGene(best) - midpoint)
+        ? gene
+        : best
+    );
+    const offset = midpoint - coordinateForGene(closest);
+    setClusterOffset(
+      chartState,
+      clusterUid,
+      getClusterOffset(chartState, clusterUid) + offset
+    );
+    changes.push({ clusterUid, offset, gene: closest });
+  }
+  return changes;
+}
+
+export function flipLocus(chartState, locus) {
+  const state = getLocusState(chartState, locus);
+  state.flipped = !state.flipped;
+  const length = locus.end - locus.start;
+
+  [state.trimLeft, state.trimRight] = [
+    state.trimRight,
+    state.trimLeft,
+  ];
+
+  locus.genes.forEach((gene) => {
+    const geneState = getGeneState(chartState, gene);
+    const start = geneState.start;
+    geneState.start = length - geneState.end;
+    geneState.end = length - start;
+    geneState.strand = geneState.strand === 1 ? -1 : 1;
+  });
+  locus.genes.sort(
+    (a, b) => getGeneState(chartState, a).start - getGeneState(chartState, b).start
+  );
+}

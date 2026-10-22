@@ -1,5 +1,5 @@
 import { installDataEditorStyle, installStyle } from "./shared/styles.mjs";
-import { createTemplate } from "../uiControls.mjs";
+import { createTemplate } from "../ui/controls.mjs";
 import { textAsset } from "./shared/textAsset.js";
 import { defineActionMenu } from "./components/action-menu/action-menu.js";
 

@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 
 test("bottom legends stack below lower chart chrome", async () => {
   const [{ buildScene }, { createLocusOffsetPreview }] = await Promise.all([
-    import("../src/layout.mjs"),
-    import("../src/scenePreview.mjs"),
+    import("../src/scene/layout.mjs"),
+    import("../src/scene/preview.mjs"),
   ]);
   const data = {
     clusters: [{

@@ -12,7 +12,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     hitTestCanvas,
     interpolateCanvasScene,
     renderCanvas,
-  } = await import("../src/canvasRenderer.js");
+  } = await import("../src/renderers/canvas.js");
   const minimap = createMinimapProjection({
     bounds: { minX: 10, maxX: 110, minY: 20, maxY: 70 },
     width: 120,
@@ -59,7 +59,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     1,
     "active interaction takes precedence over the resting zoom policy"
   );
-  const { createSpatialIndex } = await import("../src/spatialIndex.mjs");
+  const { createSpatialIndex } = await import("../src/scene/spatialIndex.mjs");
   const calls = [];
   const context = new Proxy(
     {
@@ -454,9 +454,9 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
 });
 
 test("empty or disabled trim overlays skip locus queries but active trims still draw", async () => {
-  const { renderCanvas } = await import("../src/canvasRenderer.js");
-  const { createDefaultConfig } = await import("../src/config.js");
-  const { createSpatialIndex } = await import("../src/spatialIndex.mjs");
+  const { renderCanvas } = await import("../src/renderers/canvas.js");
+  const { createDefaultConfig } = await import("../src/chart/config.js");
+  const { createSpatialIndex } = await import("../src/scene/spatialIndex.mjs");
   const text = [];
   const context = new Proxy({}, { get: (target, key) => key === "fillText" ? (value) => text.push(value) : () => {} });
   const canvas = { width: 100, height: 100, getContext: () => context };

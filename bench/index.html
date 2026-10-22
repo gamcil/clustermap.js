@@ -21,7 +21,7 @@ onINP((metric) => {
 const params = new URLSearchParams(location.search);
 const legacy = params.get("version") === "v1";
 const renderer = params.get("renderer") || "svg";
-const factory = legacy ? (await import("/baseline/src/clusterMap.js")).default
+const factory = legacy ? (await import("/baseline/src/chart/chart.js")).default
   : (await import("/dist/clustermap.mjs")).ClusterMap;
 const api = legacy ? await import("/baseline/src/api.js") : null;
 const view = views[params.get("view") || "standard"];

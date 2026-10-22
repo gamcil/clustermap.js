@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("raster minimap retains an overview and maps pointer movement to the shared camera", async () => {
-  const { createRasterMinimap } = await import("../src/rasterMinimap.mjs");
+  const { createRasterMinimap } = await import("../src/renderers/minimap.mjs");
   let frame = null;
   const calls = [];
   const context = new Proxy({}, {

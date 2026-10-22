@@ -37,7 +37,7 @@ async function mountRenderer(page, renderer) {
 
   await page.evaluate(async (selectedRenderer) => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");

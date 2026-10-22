@@ -177,7 +177,7 @@ test("a direct locus flip is one undoable state change", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -200,7 +200,7 @@ test("a direct locus drag is one undoable state change", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -494,7 +494,7 @@ test("dragging a selected cluster moves its selected cluster block", async ({ pa
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -738,7 +738,7 @@ test("anchoring from the gene menu flips a mismatched locus before alignment", a
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     data.clusters[0].loci[0].genes[0].strand = 1;
@@ -914,7 +914,7 @@ test("canvas renderer forwards locus double-clicks to the shared controller", as
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -987,7 +987,7 @@ test("WebGPU renderer forwards locus interactions through its Canvas overlay", a
 
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1023,7 +1023,7 @@ test("WebGPU respects line and straight link appearance", async ({ page }, testI
   test.skip(!supported, "WebGPU is unavailable in this browser");
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1068,7 +1068,7 @@ test("WebGPU aligns a matching gene without leaving the retained scene", async (
   expect(anchorBox).not.toBeNull();
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     Object.assign(data.clusters[1].loci[0].genes[0], { start: 2500, end: 3500 });
@@ -1118,7 +1118,7 @@ test("WebGPU previews a locus drag before it is committed", async ({ page }) => 
   expect(trackBox).not.toBeNull();
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1149,7 +1149,7 @@ test("WebGPU commits an animated locus flip", async ({ page }) => {
   expect(trackBox).not.toBeNull();
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1178,7 +1178,7 @@ test("WebGPU previews cluster row movement before it is committed", async ({ pag
   expect(clusterBox).not.toBeNull();
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1222,7 +1222,7 @@ test("WebGPU cluster preview hides links for separated clusters", async ({ page 
 
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1251,7 +1251,7 @@ test("canvas renderer opens the shared gene menu at the pointer", async ({ page 
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1291,7 +1291,7 @@ test("Space-drag pans Canvas even when it starts over a locus", async ({ page })
 
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1332,7 +1332,7 @@ test("Canvas previews a locus drag before its state is committed", async ({ page
 
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1367,7 +1367,7 @@ test("Canvas previews a trimmed locus track before its state is committed", asyn
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1432,7 +1432,7 @@ test("Canvas previews a cluster drag before its order is committed", async ({ pa
 
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
@@ -1467,7 +1467,7 @@ test("canvas renderer animates a locus flip between scene snapshots", async ({ p
   await page.goto("http://127.0.0.1:8080/?test=1");
   await page.evaluate(async () => {
     const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/clusterMap.js"),
+      import("/src/chart/chart.js"),
       fetch("/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");

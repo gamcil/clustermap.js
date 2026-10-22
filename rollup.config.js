@@ -36,7 +36,7 @@ const core = {
   input: "src/index.js",
   // The optional HTML editor loads on demand; share core geometry through its
   // factory argument instead of bundling a second layout/cache implementation.
-  external: (id) => id === "./annotationOverlay.mjs",
+  external: (id) => id === "../annotations/overlay.mjs",
   output: [
     {
       file: "dist/clustermap.mjs",
@@ -53,7 +53,7 @@ const core = {
       name: "ClusterMap",
       plugins: [terser()],
     },
-  ],
+  ].map((output) => ({ ...output, paths: (id) => id.endsWith("/annotations/overlay.mjs") ? "./annotationOverlay.mjs" : id })),
   // Published modules bundle their D3 dependencies. Annotation controls are
   // the sole on-demand companion module; consumers need no global D3 runtime.
   plugins: [nodeResolve({ browser: true }), stripTrailingWhitespace, copyEditorCss],
@@ -64,7 +64,7 @@ const editor = {
     editor: "src/editor.js",
     "editor-data-panel": "src/editor/data-panel.js",
     "editor-appearance-panel": "src/editor/appearance-panel.js",
-    annotationOverlay: "src/annotationOverlay.mjs",
+    annotationOverlay: "src/annotations/overlay.mjs",
   },
   output: { dir: "dist", format: "es", entryFileNames: "[name].mjs", chunkFileNames: "editor/[name]-[hash].mjs" },
   plugins: [

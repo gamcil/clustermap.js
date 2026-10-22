@@ -1,5 +1,5 @@
-import { createTemplate, mountComponent } from "../../../uiControls.mjs";
-import { createVirtualRows } from "../../../virtualRows.mjs";
+import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
+import { createVirtualRows } from "../../../ui/virtualRows.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 
 const [markup, css] = await Promise.all([

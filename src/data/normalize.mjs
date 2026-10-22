@@ -1,5 +1,5 @@
-import { validateTreePresentation } from "../treePresentation.mjs";
-import { validateAnnotationPanels } from "../annotations.mjs";
+import { validateTreePresentation } from "../tree/presentation.mjs";
+import { validateAnnotationPanels } from "../annotations/model.mjs";
 
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned

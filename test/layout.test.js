@@ -9,11 +9,11 @@ test("scene derives world-space geometry without DOM state", async () => {
     createLocusTrimPreview,
     clusterLabelTextForPreview,
   }] = await Promise.all([
-    import("../src/layout.mjs"),
-    import("../src/scenePreview.mjs"),
+    import("../src/scene/layout.mjs"),
+    import("../src/scene/preview.mjs"),
   ]);
-  const { hitTest } = await import("../src/hitTest.mjs");
-  const { queryViewport } = await import("../src/spatialIndex.mjs");
+  const { hitTest } = await import("../src/scene/hitTest.mjs");
+  const { queryViewport } = await import("../src/scene/spatialIndex.mjs");
   const data = {
     clusters: [
       {

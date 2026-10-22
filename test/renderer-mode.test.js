@@ -5,7 +5,7 @@ import {
   isRendererMode,
   isRasterRenderer,
   isWebGpuRenderer,
-} from "../src/rendererMode.mjs";
+} from "../src/renderers/mode.mjs";
 
 test("renderer modes classify retained raster backends", () => {
   assert.equal(isRendererMode("svg"), true);

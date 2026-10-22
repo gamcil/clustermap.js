@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createRasterInteraction } from "../src/rasterInteraction.mjs";
+import { createRasterInteraction } from "../src/interaction/raster.mjs";
 
 for (const [action, kind, coordinate, edge] of [
   ["move-cluster", "ClusterDrag", "y"],

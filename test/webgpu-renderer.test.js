@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createWebGpuRenderer } from "../src/webgpuRenderer.js";
+import { createWebGpuRenderer } from "../src/renderers/webgpu.js";
 import { normalizeChartData } from "../src/data/normalize.mjs";
 import { createChartIndex } from "../src/data/index.mjs";
-import { createChartRuntime } from "../src/chartRuntime.js";
+import { createChartRuntime } from "../src/chart/runtime.js";
 import { createChartState, setClusterOffset, setLocusOffset, setPreviewClusterOrder,
-  commitPreviewClusterOrder, flipLocus, trimLocusToGeneBounds } from "../src/chartState.mjs";
+  commitPreviewClusterOrder, flipLocus, trimLocusToGeneBounds } from "../src/chart/state.mjs";
 
 // Exercise retained geometry without requiring a platform GPU adapter. This
 // checks buffer contents/lifetimes; browser tests cover native initialization.

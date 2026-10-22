@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("cluster range selection includes every locus in displayed clusters", async () => {
-  const { lociForClusterRange } = await import("../src/locusSelection.mjs");
+  const { lociForClusterRange } = await import("../src/interaction/locusSelection.mjs");
   const clusters = new Map([
     ["a", { loci: [{ uid: "a-1" }] }],
     ["b", { loci: [{ uid: "b-1" }, { uid: "b-2" }] }],

@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { normalizeChartData } from "../src/data/normalize.mjs";
-import { createChartState, getClusterOrder, setTreeClusterOrder } from "../src/chartState.mjs";
-import { chartStateFromSnapshot, serializeChartState } from "../src/chartStateSnapshot.mjs";
+import { createChartState, getClusterOrder, setTreeClusterOrder } from "../src/chart/state.mjs";
+import { chartStateFromSnapshot, serializeChartState } from "../src/chart/snapshot.mjs";
 
 function example() {
   return {

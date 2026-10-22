@@ -5,8 +5,8 @@ import { defineAnnotationToolbar } from "../annotation-toolbar/annotation-toolba
 import { defineAnnotationDataForm } from "../annotation-data-form/annotation-data-form.js";
 import { defineAnnotationGroupEditor } from "../annotation-group-editor/annotation-group-editor.js";
 import { defineAnnotationTable } from "../annotation-table/annotation-table.js";
-import { createTemplate, createActionRunner } from "../../../uiControls.mjs";
-import { createAnnotationPanel, parseAnnotationTable, annotationTableText, mapAnnotationValues } from "../../../annotationData.mjs";
+import { createTemplate, createActionRunner } from "../../../ui/controls.mjs";
+import { createAnnotationPanel, parseAnnotationTable, annotationTableText, mapAnnotationValues } from "../../../annotations/data.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 
 const [markup, css] = await Promise.all([

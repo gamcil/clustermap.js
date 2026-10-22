@@ -1,5 +1,5 @@
-import { i as installDataEditorStyle, h as defineAnnotationDataForm, j as createAnnotationPanel, f as defineAnnotationEditor } from './editor/annotation-editor-78c3fb84.mjs';
-import { f as createActionRunner, d as colourHex, h as createControls } from './editor/search-field-1d7e270f.mjs';
+import { i as installDataEditorStyle, h as defineAnnotationDataForm, j as createAnnotationPanel, f as defineAnnotationEditor } from './editor/annotation-editor-0619543f.mjs';
+import { f as createActionRunner, d as colourHex, h as createControls } from './editor/search-field-8ffb9d31.mjs';
 
 /** Quick styling stays in the plot; data and membership editing live in the data editor. */
 function createAnnotationControls({ getData, patch, document, panelUid, annotationApi, onEditData }) {

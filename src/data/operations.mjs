@@ -1,6 +1,6 @@
-import { isTreeOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../treeOperations.mjs";
+import { isTreeOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../tree/operations.mjs";
 import { isAnnotationOperation, normalizeAnnotationOperation, applyAnnotationOperation,
-  inverseAnnotationOperation, validateAnnotationChanges } from "../annotationOperations.mjs";
+  inverseAnnotationOperation, validateAnnotationChanges } from "../annotations/operations.mjs";
 
 // Public editing operations deliberately distinguish presentation updates from
 // structural group edits. Group membership is exclusive: assigning a gene to

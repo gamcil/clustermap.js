@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 test("interaction controller previews and commits drag state from world coordinates", async () => {
   const { createInteractionController } = await import(
-    "../src/interactionController.mjs"
+    "../src/interaction/controller.mjs"
   );
   const calls = [];
   const controller = createInteractionController({
@@ -54,7 +54,7 @@ test("interaction controller previews and commits drag state from world coordina
 
 test("interaction controller cancels an unstarted drag without committing state", async () => {
   const { createInteractionController } = await import(
-    "../src/interactionController.mjs"
+    "../src/interaction/controller.mjs"
   );
   const calls = [];
   const controller = createInteractionController({
@@ -91,7 +91,7 @@ test("interaction controller cancels an unstarted drag without committing state"
 
 test("interaction controller drags a selected locus set by one shared delta", async () => {
   const { createInteractionController } = await import(
-    "../src/interactionController.mjs"
+    "../src/interaction/controller.mjs"
   );
   const calls = [];
   const controller = createInteractionController({
@@ -125,7 +125,7 @@ test("interaction controller drags a selected locus set by one shared delta", as
 
 test("dragging a selected cluster reorders the selected clusters together", async () => {
   const { createInteractionController } = await import(
-    "../src/interactionController.mjs"
+    "../src/interaction/controller.mjs"
   );
   const calls = [];
   const controller = createInteractionController({

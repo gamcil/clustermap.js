@@ -1,9 +1,9 @@
-import { createTemplate, mountComponent, colourHex, createActionRunner, upgradeProperty } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent, colourHex, createActionRunner, upgradeProperty } from "../../../ui/controls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { controlStyles } from "../../shared/controls.mjs";
 import { defineSearchField } from "../search-field/search-field.js";
 import { defineTreeAppearance } from "../tree-appearance/tree-appearance.js";
-import { figureConfig } from "../../../theme.mjs";
+import { figureConfig } from "../../../ui/theme.mjs";
 import { applyEditorTheme, editorThemeStyles } from "../../shared/theme.js";
 
 const [markup, css] = await Promise.all([

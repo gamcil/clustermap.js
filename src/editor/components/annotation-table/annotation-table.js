@@ -1,6 +1,6 @@
 import { DATA_EDITOR_CSS } from "../../shared/styles.mjs";
-import { RowSelection } from "../../../rowSelection.mjs";
-import { createTemplate, mountComponent } from "../../../uiControls.mjs";
+import { RowSelection } from "../../../ui/selection.mjs";
+import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { defineEditableField } from "../editable-field/editable-field.js";
 import { defineSelectionBar } from "../selection-bar/selection-bar.js";

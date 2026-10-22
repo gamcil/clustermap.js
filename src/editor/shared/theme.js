@@ -1,4 +1,4 @@
-import { resolveTheme } from "../../theme.mjs";
+import { resolveTheme } from "../../ui/theme.mjs";
 
 export const editorThemeStyles = `
 :host {

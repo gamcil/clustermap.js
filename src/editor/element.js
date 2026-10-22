@@ -1,4 +1,4 @@
-import { createTemplate, upgradeProperty } from "../uiControls.mjs";
+import { createTemplate, upgradeProperty } from "../ui/controls.mjs";
 import { applyEditorTheme, editorThemeStyles } from "./shared/theme.js";
 import { controlStyles } from "./shared/controls.mjs";
 import { defineAppearancePanel } from "./components/appearance-panel/appearance-panel.js";

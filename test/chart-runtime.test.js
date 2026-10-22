@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("runtime keeps default interaction callbacks declarative", async () => {
-  const { createChartRuntime } = await import("../src/chartRuntime.js");
+  const { createChartRuntime } = await import("../src/chart/runtime.js");
   const runtime = createChartRuntime();
 
   assert.equal(runtime.config.gene.shape.onClick, null);
@@ -29,10 +29,10 @@ test("runtime applies best-only link visibility to the shared scene", async () =
     { createChartIndex },
     { createChartState },
   ] = await Promise.all([
-    import("../src/chartRuntime.js"),
+    import("../src/chart/runtime.js"),
     import("../src/data/normalize.mjs"),
     import("../src/data/index.mjs"),
-    import("../src/chartState.mjs"),
+    import("../src/chart/state.mjs"),
   ]);
   const data = normalizeChartData({
     clusters: [
@@ -83,10 +83,10 @@ test("runtime accepts initial locus offsets in sequence-coordinate units", async
     { createChartIndex },
     { createChartState, setLocusOffset },
   ] = await Promise.all([
-    import("../src/chartRuntime.js"),
+    import("../src/chart/runtime.js"),
     import("../src/data/normalize.mjs"),
     import("../src/data/index.mjs"),
-    import("../src/chartState.mjs"),
+    import("../src/chart/state.mjs"),
   ]);
   const data = normalizeChartData({
     clusters: [{

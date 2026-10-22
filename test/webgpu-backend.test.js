@@ -15,7 +15,7 @@ const paintRequest = (canvas, scene, onUnavailable = () => {}) => ({
 });
 
 test("WebGPU backend renders the newest scene after asynchronous initialization", async () => {
-  const { createWebGpuBackend } = await import("../src/webgpuBackend.mjs");
+  const { createWebGpuBackend } = await import("../src/renderers/webgpuBackend.mjs");
   let resolveRenderer;
   const rendererPromise = new Promise((resolve) => {
     resolveRenderer = resolve;
@@ -36,7 +36,7 @@ test("WebGPU backend renders the newest scene after asynchronous initialization"
 });
 
 test("destroying a WebGPU backend invalidates a pending initialization", async () => {
-  const { createWebGpuBackend } = await import("../src/webgpuBackend.mjs");
+  const { createWebGpuBackend } = await import("../src/renderers/webgpuBackend.mjs");
   let resolveRenderer;
   const rendererPromise = new Promise((resolve) => {
     resolveRenderer = resolve;
@@ -56,7 +56,7 @@ test("destroying a WebGPU backend invalidates a pending initialization", async (
 });
 
 test("replacing the canvas invalidates an in-flight WebGPU initialization", async () => {
-  const { createWebGpuBackend } = await import("../src/webgpuBackend.mjs");
+  const { createWebGpuBackend } = await import("../src/renderers/webgpuBackend.mjs");
   const resolvers = [];
   const backend = createWebGpuBackend({
     createRenderer: () => new Promise((resolve) => resolvers.push(resolve)),

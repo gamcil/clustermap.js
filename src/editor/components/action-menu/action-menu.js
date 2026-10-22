@@ -1,4 +1,4 @@
-import { createTemplate, mountComponent } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 
 const [markup, css] = await Promise.all([

@@ -1,4 +1,4 @@
-import { createTemplate, mountComponent } from "../../../uiControls.mjs";
+import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
 import { textAsset } from "../../shared/textAsset.js";
 import { controlStyles } from "../../shared/controls.mjs";
 
