@@ -596,10 +596,28 @@ for (const renderer of ["svg", "canvas"]) {
   });
 }
 
+test("a label click without dragging retains its text and leaves history unchanged", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  const label = page.locator("#plot text.clusterText").first();
+  const text = await label.evaluateHandle((node) => node.firstChild);
+  let prompts = 0;
+  page.once("dialog", async (dialog) => { prompts++; await dialog.dismiss(); });
+  const point = await plotPoint(page, "svg", "text.clusterText");
+  await page.mouse.click(point.x, point.y);
+  expect(prompts).toBe(1);
+  expect(await label.evaluate((node, text) => node.firstChild === text, text)).toBe(true);
+  expect(await page.evaluate(() => chart.canUndo())).toBe(false);
+  await text.dispose();
+});
+
 test("plot label and scale edits update the model, editor, history and export", async ({ page }) => {
+  // WebKit's automation bounds omit SVG text-anchor offsets; use DOM geometry.
+  const clickLabel = async (selector) => {
+    const point = await plotPoint(page, "svg", selector); await page.mouse.click(point.x, point.y);
+  };
   const label = page.locator("#plot text.clusterText").first();
   page.once("dialog", (dialog) => dialog.accept("Renamed cluster"));
-  await label.click();
+  await clickLabel("text.clusterText");
   await expect(label).toHaveText("Renamed cluster");
   expect(await page.evaluate(() => chart.data().clusters[0].name)).toBe("Renamed cluster");
   await annotation(page);
@@ -612,7 +630,7 @@ test("plot label and scale edits update the model, editor, history and export", 
 
   const before = await page.evaluate(() => chart.config().scaleBar.basePair);
   page.once("dialog", (dialog) => dialog.accept("5000"));
-  await page.locator("#plot text.barText").click();
+  await clickLabel("text.barText");
   expect(await page.evaluate(() => chart.project().config.scaleBar.basePair)).toBe(5000);
   await expect(page.locator("#plot text.barText")).toHaveText("5kb");
   await editor(page).getByRole("button", { name: "Undo", exact: true }).click();
@@ -933,7 +951,7 @@ const clusterLabel = (uid) => `[id$="cluster_${uid}"] text.clusterText`;
 const locusTrack = (uid) => `[id$="locus_${uid}"] line.trackBar`;
 async function plotPoint(page, renderer, selector) {
   if (renderer !== "svg") return canvasPoint(page, selector);
-  return page.locator(`#plot ${selector}`).evaluate((node) => {
+  return page.locator(`#plot ${selector}`).first().evaluate((node) => {
     const bounds = node.getBBox(), point = new DOMPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
       .matrixTransform(node.getScreenCTM());
     return { x: point.x, y: point.y };

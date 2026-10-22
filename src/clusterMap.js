@@ -252,6 +252,9 @@ export default function clusterMap() {
     commitClusterOrder: () => {
       const sourceScene = runtime.getScene();
       const preview = scenePreview?.type === "cluster-drag" ? scenePreview : null;
+      // A plain label click starts a drag too. Repainting on release can replace
+      // the text under the pointer before the browser dispatches its click.
+      if (!preview) { commitInteractionState(); return; }
       const order = displayClusterOrder();
       const rows = runtime.scales.y.range();
       if (sourceScene) sceneCommit = { sourceScene, changes: {} };
@@ -259,11 +262,7 @@ export default function clusterMap() {
       const treeOrder = setTreeClusterOrder(currentData.tree, order, { partial: chartState.excludedClusters.size > 0 });
       if (treeOrder) chartState.clusterOrder = treeOrder;
       plotDataDirty = true;
-      if (
-        preview &&
-        sourceScene &&
-        isRasterRenderer(runtime.config.plot.renderer)
-      ) {
+      if (sourceScene && isRasterRenderer(runtime.config.plot.renderer)) {
         // Paint the destination row once before the committed projection runs.
         // This avoids a release-time blank/stale frame while a large chart is
         // rebuilding its authoritative scene and indexes.
