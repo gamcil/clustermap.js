@@ -4034,7 +4034,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
   editAnnotations(panelUid) {
     this.#kind = "annotations";
     this.#selected.clear();
-    this.#renderData(); this.#syncHighlight();
+    this.#renderData();
     if (panelUid) this.#annotationEditor?.select(panelUid);
     return this;
   }
@@ -4050,7 +4050,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       if (row.locus) genes.push(...row.selectIds);
     }
     this.#selected.clear(); this.#selected.setMany(genes);
-    this.#renderData(); this.#syncHighlight();
+    this.#renderData();
     const first = this.#view().rows.findIndex((row) => row.selectIds?.some((id) => this.#selected.has(id)));
     this.querySelector(".cm-editor__table").scrollTop = Math.max(0, first) * DATA_ROW_HEIGHT;
     return this;
@@ -4064,7 +4064,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     this.#selectionBar = this.querySelector("clinker-selection-bar");
     this.#selectionBar.addEventListener("clear-selection", () => this.#clearDataSelection());
     this.#selectionBar.addEventListener("select-all", (event) => {
-      this.#selected.setMany(event.detail.ids); this.#renderData(); this.#syncHighlight();
+      this.#selected.setMany(event.detail.ids); this.#renderData();
     });
     this.#actions = this.querySelector("clinker-record-actions");
     this.#actions.addEventListener("selection-action", (event) => this.#command(event.detail.command, event.detail.value));
@@ -4083,7 +4083,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       } else if (event.target.matches("[data-gene-view]")) this.#geneView = event.detail.value;
       else return;
       this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-      this.#renderData(); this.#syncHighlight();
+      this.#renderData();
     });
     this.addEventListener("input", (event) => {
       if (event.target.matches("[data-filter]")) this.#setDataFilter(event.target.value);
@@ -4178,7 +4178,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
       this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null;
       this.#initializeExpanded();
     } else this.#selected.prune(this.#model.recordIds(this.#kind), this.#view().byKey.keys());
-    this.#renderData(); this.#syncHighlight();
+    this.#renderData();
   }
 
   #initializeExpanded() {
@@ -4202,7 +4202,7 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     const { byKey } = this.#view();
     this.#selected.select(id, checked, { range, orderedIds: [...byKey.keys()],
       idsFor: (key) => byKey.get(key).selectIds || [byKey.get(key).id] });
-    this.#renderData(); this.#syncHighlight();
+    this.#renderData();
   }
 
   #view(options = {}) {
@@ -4218,11 +4218,12 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
 
   #clearDataSelection() {
     if (this.#kind === "annotations") this.#annotationEditor?.clearSelection();
-    else { this.#selected.clear(); this.#renderData(); this.#syncHighlight(); }
+    else { this.#selected.clear(); this.#renderData(); }
   }
 
   #renderData() {
     if (!this.isConnected || !this.#table) return;
+    this.#table.cancelHover(); this.#highlight();
     const annotations = this.#kind === "annotations";
     this.querySelector("[data-kind-picker]").value = this.#kind;
     this.querySelector("[data-gene-view]").value = this.#geneView;
@@ -4303,7 +4304,6 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     this.#geneView = "list";
     this.#selected.clear();
     this.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
-    this.#syncHighlight();
     this.#renderData();
   }
 
@@ -4318,11 +4318,6 @@ class ClinkerDataPanelElement extends HTMLElementBase$1 {
     if (this.#view().hasCollapsed) this.#expandTree(this.#geneView);
     else this.#expanded.clear();
     this.#renderData();
-  }
-
-  #syncHighlight() {
-    this.#table?.cancelHover();
-    this.#highlight();
   }
 
   #highlight(row) {
