@@ -106,7 +106,10 @@ export function renderSvg({
     );
 
   clusters.select("text.clusterText")
-    .text((cluster) => cluster.name)
+    .each(function (cluster) {
+      const text = String(cluster.name ?? "");
+      if (this.textContent !== text) this.textContent = text;
+    })
     .attr("y", 8)
     .attr("dominant-baseline", null)
     .style("font-size", `${config.cluster.nameFontSize}px`);

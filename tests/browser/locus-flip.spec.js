@@ -778,6 +778,7 @@ test("zoom state persists across a chart redraw", async ({ page }, testInfo) => 
   await expect(locus).toBeVisible();
   const initial = await captureCheckpoint(page, testInfo, "initial-camera", () => readCamera(root));
   const initialLabelBounds = await readScreenBounds(clusterNames);
+  const initialNameText = await clusterNames.first().evaluateHandle((node) => node.firstChild);
 
   // The first chart redraw must retain both the automatic fit-to-view transform
   // and the screen-space geometry of labels whose content did not change.
@@ -787,6 +788,8 @@ test("zoom state persists across a chart redraw", async ({ page }, testInfo) => 
   await expect
     .poll(async () => boundsMatch(await readScreenBounds(clusterNames), initialLabelBounds))
     .toBe(true);
+  expect(await clusterNames.first().evaluate((node, text) => node.firstChild === text, initialNameText)).toBe(true);
+  await initialNameText.dispose();
 
   await svg.hover();
   await page.mouse.wheel(0, -400);
