@@ -1495,7 +1495,7 @@ test("demo mounts the editor and routes annotation requests explicitly", async (
     contentType: "text/javascript",
     body: `import "${url}/node_modules/d3/dist/d3.min.js"; export const select=window.d3.select; export const json=(path)=>fetch(path).then(response=>response.json());`,
   }));
-  await page.goto(`${url}/index.html?fixture=heatmap&renderer=svg&test=1&editor=1`);
+  await page.goto(`${url}/demo/index.html?fixture=heatmap&renderer=svg&test=1&editor=1`);
   await expect(editor(page)).toBeVisible();
   await expect(editor(page).locator(".cm-editor__row--groups").first()).toBeVisible();
   expect(await editor(page).evaluate((node) => node.chart === window.__demoChart)).toBe(true);

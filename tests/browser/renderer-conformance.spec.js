@@ -18,7 +18,7 @@ async function requireWebGpuCanvas(page) {
 // the backend under test. This makes the pointer interactions exercise the
 // renderer-independent controller rather than renderer DOM details.
 async function mountRenderer(page, renderer) {
-  await page.goto("http://127.0.0.1:8080/?test=1");
+  await page.goto("http://127.0.0.1:8080/demo/?test=1");
   if (renderer === "webgpu") {
     test.skip(!(await page.evaluate(() => Boolean(navigator.gpu))), "WebGPU is unavailable");
   }
@@ -38,7 +38,7 @@ async function mountRenderer(page, renderer) {
   await page.evaluate(async (selectedRenderer) => {
     const [{ default: clusterMap }, data] = await Promise.all([
       import("/src/chart/chart.js"),
-      fetch("/testing.json").then((response) => response.json()),
+      fetch("/fixtures/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
     host.replaceChildren();

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fixture from "../../testing.json" with { type: "json" };
+import fixture from "../../fixtures/testing.json" with { type: "json" };
 
 function collectEntities(data) {
   const clusters = data.clusters ?? [];

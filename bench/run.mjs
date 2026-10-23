@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import os from "node:os";
 import assert from "node:assert/strict";
 import { chromium } from "@playwright/test";
-import { createLargeTestingData, SYNTHETIC_FIXTURES } from "../largeTestingData.mjs";
+import { createLargeTestingData, SYNTHETIC_FIXTURES } from "../fixtures/synthetic.mjs";
 import { views } from "./views.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("../", import.meta.url)));

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("large demo fixture is deterministic and dense enough to exercise viewport culling", async () => {
-  const { createLargeTestingData } = await import("../../largeTestingData.mjs");
+  const { createLargeTestingData } = await import("../../fixtures/synthetic.mjs");
   const data = createLargeTestingData();
 
   assert.equal(data.clusters.length, 100);

@@ -1,9 +1,9 @@
 # SVG baseline
 
-`testing.json` is the baseline data fixture used while the SVG renderer is
+`fixtures/testing.json` is the baseline data fixture used while the SVG renderer is
 refactored. Run `npm run test:baseline` to verify its referential integrity.
 
-Before and after each structural refactor, open `index.html` with a local web
+Before and after each structural refactor, open `demo/index.html` with a local web
 server and verify the following behaviours using this fixture:
 
 1. Initial clusters, gene arrows, links, legend, scale bar, and colour bar render.

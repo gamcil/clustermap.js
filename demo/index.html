@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>clinker</title>
+    <script type="importmap">
+      { "imports": {
+        "d3": "https://cdn.jsdelivr.net/npm/d3@7.9.0/+esm",
+        "d3-array": "https://cdn.jsdelivr.net/npm/d3-array@3.2.4/+esm",
+        "d3-color": "https://cdn.jsdelivr.net/npm/d3-color@3.1.0/+esm",
+        "d3-dsv": "https://cdn.jsdelivr.net/npm/d3-dsv@3.0.1/+esm",
+        "d3-interpolate": "https://cdn.jsdelivr.net/npm/d3-interpolate@3.0.1/+esm",
+        "d3-drag": "https://cdn.jsdelivr.net/npm/d3-drag@3.0.0/+esm",
+        "d3-scale": "https://cdn.jsdelivr.net/npm/d3-scale@4.0.2/+esm",
+        "d3-scale-chromatic": "https://cdn.jsdelivr.net/npm/d3-scale-chromatic@3.1.0/+esm",
+        "d3-selection": "https://cdn.jsdelivr.net/npm/d3-selection@3.0.0/+esm",
+        "d3-transition": "https://cdn.jsdelivr.net/npm/d3-transition@3.0.1/+esm",
+        "d3-zoom": "https://cdn.jsdelivr.net/npm/d3-zoom@3.0.0/+esm"
+      } }
+    </script>
+    <link rel="stylesheet" href="./demo.css">
+  </head>
+  <body>
+    <main>
+      <div id="toolbar">
+        <button id="btn-save-svg">Export SVG</button>
+        <button id="btn-export-data">Export data</button>
+        <button id="btn-export-project">Export project</button>
+        <button id="btn-import-data">Load data…</button>
+        <input id="data-import-file" type="file" accept="application/json,.json" hidden>
+        <button id="btn-import-project">Load project…</button>
+        <input id="project-import-file" type="file" accept="application/json,.json" hidden>
+        <span id="data-import-status" role="status" aria-live="polite"></span>
+        <button id="btn-editor" aria-expanded="false">Edit data</button>
+        <label>Theme <select id="theme-mode"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+      </div>
+      <div id="workspace"><div id="plot"></div></div>
+      <clinker-editor id="editor" resizable hidden></clinker-editor>
+    </main>
+    <script type="module" src="./main.mjs"></script>
+  </body>
+</html>

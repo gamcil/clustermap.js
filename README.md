@@ -118,12 +118,12 @@ with `&renderer=svg`, `canvas` or `webgpu`.
 derived from Clinker render exports. The former contains 173 clusters, 7,511
 genes, 11,489 links, and 1,200 groups. The latter is a deliberately heavier
 stress case with 142 clusters, 7,359 genes, 112,320 links, and 726 groups.
-Load the examples locally:
+Serve the repository root with `python3 -m http.server 8080`, then open the demo:
 
 ```
-http://127.0.0.1:8080/?fixture=mcaa&minimap=1&minZoom=0.8
-http://127.0.0.1:8080/?fixture=pks&minimap=1&minZoom=0.8
-http://127.0.0.1:8080/?fixture=burnettii
+http://127.0.0.1:8080/demo/?fixture=mcaa&minimap=1&minZoom=0.8
+http://127.0.0.1:8080/demo/?fixture=pks&minimap=1&minZoom=0.8
+http://127.0.0.1:8080/demo/?fixture=burnettii
 ```
 
 The `burnettii` example uses the five GenBank records from the Clinker examples

@@ -49,7 +49,7 @@ test("WebGPU adopts shared scene changes without reallocating geometry", async (
   const context = { configure() {}, getCurrentTexture: () => ({ createView: () => ({}) }) };
   const renderer = await createWebGpuRenderer({ width: 0, height: 0, getContext: () => context });
   t.after(() => renderer.destroy());
-  const data = normalizeChartData(JSON.parse(await readFile(new URL("../../testing.json", import.meta.url), "utf8")));
+  const data = normalizeChartData(JSON.parse(await readFile(new URL("../../fixtures/testing.json", import.meta.url), "utf8")));
   const state = createChartState(data), runtime = createChartRuntime();
   runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   let scene = runtime.updateScene(data);
