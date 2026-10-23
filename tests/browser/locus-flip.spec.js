@@ -116,23 +116,23 @@ async function requireWebGpuCanvas(page) {
   return canvas;
 }
 
-async function canvasHasInkAt(canvas, point) {
-  return canvas.evaluate((node, { x, y }) => {
-    const bounds = node.getBoundingClientRect();
-    const sampleX = Math.round(((x - bounds.left) / bounds.width) * node.width);
-    const sampleY = Math.round(((y - bounds.top) / bounds.height) * node.height);
+async function screenHasInkAt(page, point) {
+  const screenshot = await page.screenshot({
+    clip: { x: point.x - 2, y: point.y - 2, width: 5, height: 5 }, scale: "css",
+  });
+  return page.evaluate(async (bytes) => {
+    const image = await createImageBitmap(new Blob([Uint8Array.from(bytes)], { type: "image/png" }));
     const snapshot = document.createElement("canvas");
-    snapshot.width = node.width;
-    snapshot.height = node.height;
+    snapshot.width = image.width; snapshot.height = image.height;
     const context = snapshot.getContext("2d");
-    context.drawImage(node, 0, 0);
-    const pixels = context.getImageData(sampleX - 2, sampleY - 2, 5, 5).data;
+    context.drawImage(image, 0, 0); image.close();
+    const pixels = context.getImageData(0, 0, snapshot.width, snapshot.height).data;
     for (let index = 0; index < pixels.length; index += 4) {
       const [red, green, blue, alpha] = pixels.slice(index, index + 4);
       if (alpha && red < 230 && green < 230 && blue < 230) return true;
     }
     return false;
-  }, point);
+  }, [...screenshot]);
 }
 
 test("double-clicking a locus reverses its gene layout", async ({ page }, testInfo) => {
@@ -1033,6 +1033,8 @@ test("WebGPU respects line and straight link appearance", async ({ page }, testI
       import("/src/chart/chart.js"),
       fetch("/fixtures/testing.json").then((response) => response.json()),
     ]);
+    // Vertical ribbons have identical straight and curved outlines.
+    Object.assign(data.clusters[1].loci[0].genes[0], { start: 1000, end: 2000 });
     const host = document.querySelector(".chart-host");
     host.replaceChildren();
     const chart = clusterMap().config({
@@ -1232,23 +1234,25 @@ test("WebGPU cluster preview hides links for separated clusters", async ({ page 
     ]);
     const host = document.querySelector(".chart-host");
     host.replaceChildren();
-    d3.select(host).datum(data).call(clusterMap().config({
+    const chart = clusterMap().config({
       plot: { renderer: "webgpu", transitionDuration: 0 },
-    }));
+    });
+    d3.select(host).datum(data).call(chart);
+    chart.state({ ...chart.state(), camera: window.__demoChart.state().camera });
   });
 
   const canvas = await requireWebGpuCanvas(page);
-  await expect.poll(() => canvasHasInkAt(canvas, linkPoint)).toBe(true);
+  await expect.poll(() => screenHasInkAt(page, linkPoint)).toBe(true);
   await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(thirdBox.x + thirdBox.width / 2, thirdBox.y + thirdBox.height / 2, {
     steps: 10,
   });
-  await expect.poll(() => canvasHasInkAt(canvas, linkPoint)).toBe(false);
+  await expect.poll(() => screenHasInkAt(page, linkPoint)).toBe(false);
   await page.mouse.move(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height / 2, {
     steps: 10,
   });
-  await expect.poll(() => canvasHasInkAt(canvas, linkPoint)).toBe(true);
+  await expect.poll(() => screenHasInkAt(page, linkPoint)).toBe(true);
   await page.mouse.up();
 });
 
