@@ -68,7 +68,6 @@ export function ensureSvgSurface({
   updateCameraZoom(currentZoom, zoomExtent);
   return {
     svg,
-    plot: svg.select("g.clusterMapG"),
     tooltip: container.select("div.tooltip"),
     zoom: currentZoom,
   };

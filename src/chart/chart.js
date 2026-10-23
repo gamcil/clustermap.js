@@ -1056,7 +1056,7 @@ export default function clusterMap() {
       onZoomStart: (surface) => surface.attr("cursor", "grabbing"),
       onZoomEnd: (surface) => surface.attr("cursor", "grab"),
     });
-    const { svg, plot } = svgSurface;
+    const { svg } = svgSurface;
     zoom = svgSurface.zoom;
     const rasterSurface = ensureRasterSurface({
       container,
@@ -1138,13 +1138,13 @@ export default function clusterMap() {
     const scene = runtime.updateScene(data, { ...committedScene, synchronize });
 
     if (useRaster) {
-      if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
+      if (!hasInitialView) fitInitialView(canvas, scene);
       scheduleMinimapBase(scene);
       animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene);
     } else {
       paintSvg({ annotationsOnly, previousScene, animate: hasInitialView && animate });
 
-      if (!hasInitialView) fitInitialView(svg, plot);
+      if (!hasInitialView) fitInitialView(svg, scene);
     }
     updateFigureSurface();
     if (runtime.config.annotations.enabled && plotData.clusters?.length) {
@@ -1177,56 +1177,32 @@ export default function clusterMap() {
     }
   }
 
-  function fitInitialView(svg, plot) {
-    const svgNode = svg.node();
-    const plotNode = plot.node();
-    if (!zoom || !svgNode || !plotNode) return;
-
-    const { width, height } = svgNode.getBoundingClientRect();
-    const bounds = plotNode.getBBox();
-    if (!width || !height || !bounds.width || !bounds.height) return;
-
-    const camera = fitCameraForBounds({
-      bounds: {
-        minX: bounds.x,
-        maxX: bounds.x + bounds.width,
-        minY: bounds.y,
-        maxY: bounds.y + bounds.height,
-      },
-      viewport: { width, height },
-      constrainScale: constrainZoom,
-    });
-    if (!camera) return;
-
-    svg.call(zoom.transform, zoomIdentity.translate(camera.x, camera.y).scale(camera.k));
-    hasInitialView = true;
-  }
-
-  function fitInitialCanvasView(canvas, scene) {
-    const { width, height } = canvas.getBoundingClientRect();
-    if (!width || !height || !scene.bounds) return;
-
-    const bounds = figureSurface.bounds(canvas, scene, runtime.renderConfig, plotData.tree);
-    if (!bounds) return;
-
+  function fitInitialView(surface, scene) {
+    const node = surface.node();
+    if (!node) return;
+    const raster = isRasterRenderer(runtime.config.plot.renderer);
+    const cameraZoom = raster ? canvasZoom : zoom;
+    if (!raster && !cameraZoom) return;
+    const viewport = node.getBoundingClientRect();
+    if (!viewport.width || !viewport.height) return;
+    let bounds;
+    if (raster) {
+      bounds = figureSurface.bounds(node, scene, runtime.renderConfig, plotData.tree);
+    } else {
+      const box = surface.select("g.clusterMapG").node()?.getBBox();
+      if (!box) return;
+      bounds = { minX: box.x, maxX: box.x + box.width, minY: box.y, maxY: box.y + box.height };
+    }
     const camera = fitCameraForBounds({
       bounds,
-      viewport: { width, height },
-      // A fit below this scale defeats raster culling and produces an
-      // impractically dense interaction surface. The helper then top-aligns
-      // the cropped figure, showing the first clusters and their labels.
-      minimumReadableScale: 1,
+      viewport,
+      // Oversized raster figures stay readable and crop from the top.
+      minimumReadableScale: raster ? 1 : 0,
       constrainScale: constrainZoom,
     });
     if (!camera) return;
-    if (canvasZoom) {
-      select(canvas).call(
-        canvasZoom.transform,
-        zoomIdentity.translate(camera.x, camera.y).scale(camera.k)
-      );
-    } else {
-      setCamera(chartState, camera);
-    }
+    if (cameraZoom) surface.call(cameraZoom.transform, zoomIdentity.translate(camera.x, camera.y).scale(camera.k));
+    else setCamera(chartState, camera);
     hasInitialView = true;
   }
 
