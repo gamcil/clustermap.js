@@ -59,10 +59,10 @@ test("WebGPU adopts shared scene changes without reallocating geometry", async (
   const initialGeometry = geometryBuffers(), first = data.clusters[0], locus = first.loci[0];
   const initialY = scene.clusters.get(first.uid).y;
   const vertexWrites = () => writes.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX).length;
-  const commit = (change, geometryChanged) => {
+  const commit = (change, geometryChanged, loci = []) => {
     const previous = scene;
-    change(); runtime.updateScales(data, { geometryOnly: true });
-    scene = runtime.patchScene(previous, {}, data);
+    change();
+    scene = runtime.updateScene(data, { sourceScene: previous, changes: { loci } });
     writes.length = 0;
     assert.equal(renderer.adoptScene(scene, previous, options), true);
     assert.equal(vertexWrites() > 0, geometryChanged);
@@ -77,6 +77,6 @@ test("WebGPU adopts shared scene changes without reallocating geometry", async (
   assert.equal(offsets[2], 25, "committed horizontal translation reaches the GPU");
   assert.equal(offsets[3], scene.clusters.get(first.uid).y - initialY, "committed row translation reaches the GPU");
   commit(() => setLocusOffset(state, locus.uid, 35), true);
-  commit(() => { trimLocusToGeneBounds(state, locus); runtime.synchronizeLocusLayoutState(locus); }, true);
-  commit(() => { flipLocus(state, locus); runtime.synchronizeLocusLayoutState(locus); }, true);
+  commit(() => trimLocusToGeneBounds(state, locus), true, [locus.uid]);
+  commit(() => flipLocus(state, locus), true, [locus.uid]);
 });

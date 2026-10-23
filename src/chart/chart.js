@@ -425,8 +425,9 @@ export default function clusterMap() {
 
   function commitLocusFlip(pending) {
     if (!pending.targetScene) {
-      runtime.synchronizeLocusLayoutState(pending.locus);
-      pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, plotData);
+      pending.targetScene = runtime.updateScene(plotData, {
+        sourceScene: pending.sourceScene, changes: { loci: [pending.locus.uid] },
+      });
       commitInteractionState();
     }
     return pending.targetScene;

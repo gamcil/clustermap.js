@@ -121,7 +121,7 @@ test("shared highlight and hit geometry fits tight row gaps, including scene pat
       assert.ok(loci[i - 1].y + loci[i - 1].hover.y + loci[i - 1].hover.height <= loci[i].y + loci[i].hover.y);
     }
     state.loci.get("locus-a").end -= 1;
-    const patched = runtime.patchScene(scene, { loci: ["locus-a"] }, data);
+    const patched = runtime.updateScene(data, { sourceScene: scene, changes: { loci: ["locus-a"] }, synchronize: false });
     assert.equal(patched.loci.get("locus-a").hover.height, height + padding * 2);
   }
 });

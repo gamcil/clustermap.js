@@ -258,57 +258,6 @@ function clusterOrderForData(data) {
   return getClusterOrder(chartState).filter((uid) => ids.has(uid));
 }
 
-function buildChartScene(data) {
-  // Resolve link policy once for all renderers and their previews.
-  allowedLinkIds = new Set(filterLinks(data.links, {
-    groupForGene: scales.group,
-    geneForUid: lookup.geneData,
-    bestOnly: config.link.bestOnly,
-    threshold: config.link.threshold,
-  }).map((link) => link.uid));
-  const clusterOrder = clusterOrderForData(data);
-  currentScene = buildScene(data, {
-    ...sceneProjectionOptions({
-      tree: data.tree,
-      clusterOrder,
-    }),
-    scaleY: scales.y,
-    clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
-    clusterOffset: scales.offset,
-    chrome: sceneChromeOptions(data),
-  });
-  return currentScene;
-}
-
-function patchChartScene(previousScene, changes = {}, data) {
-  const loci = new Set(changes.loci || []);
-  const clusters = new Set(changes.clusters || []);
-  // Packing, tree rotations and state changes can affect neighbours beyond
-  // the explicit edit. Compare only the cheap locus/cluster state here, never
-  // re-project all genes or repeat biological link filtering.
-  for (const [uid, cluster] of previousScene.clusters) {
-    if (cluster.x !== scales.offset(uid) || cluster.y !== getClusterPosition(chartState, uid, scales.y(uid))) {
-      clusters.add(uid);
-    }
-  }
-  for (const [uid, locus] of previousScene.loci) {
-    const state = locusState(locus.source);
-    if (locus.localX !== scales.locus(uid) ||
-        state.start !== locus.state.start || state.end !== locus.state.end ||
-        state.flipped !== locus.state.flipped) loci.add(uid);
-  }
-  currentScene = patchScene(previousScene, { loci, clusters }, {
-    ...sceneProjectionOptions({
-      tree: data.tree,
-      clusterOrder: clusterOrderForData(data),
-    }),
-    clusterOffset: scales.offset,
-    clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
-    chrome: sceneChromeOptions(data),
-  });
-  return currentScene;
-}
-
 function updateScene(data, { sourceScene = null, changes = {}, synchronize = true } = {}) {
   if (sourceScene && changes.annotationsOnly) {
     currentScene = patchAnnotationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
@@ -317,7 +266,37 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
   updateScales(data, { geometryOnly: Boolean(sourceScene) });
   if (synchronize) synchronizeLocusLayoutStates(data, sourceScene ? changes.loci || [] : null);
   if (!sourceScene) updateGroups(data.groups);
-  return sourceScene ? patchChartScene(sourceScene, changes, data) : buildChartScene(data);
+  const options = {
+    ...sceneProjectionOptions({ tree: data.tree, clusterOrder: clusterOrderForData(data) }),
+    scaleY: scales.y,
+    clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
+    clusterOffset: scales.offset,
+    chrome: sceneChromeOptions(data),
+  };
+  if (!sourceScene) {
+    allowedLinkIds = new Set(filterLinks(data.links, {
+      groupForGene: scales.group,
+      geneForUid: lookup.geneData,
+      bestOnly: config.link.bestOnly,
+      threshold: config.link.threshold,
+    }).map((link) => link.uid));
+    currentScene = buildScene(data, options);
+  } else {
+    const loci = new Set(changes.loci || []);
+    const clusters = new Set(changes.clusters || []);
+    // Packing and state changes can affect neighbours beyond the explicit edit.
+    for (const [uid, cluster] of sourceScene.clusters) {
+      if (cluster.x !== scales.offset(uid) || cluster.y !== options.clusterPosition(uid)) clusters.add(uid);
+    }
+    for (const [uid, locus] of sourceScene.loci) {
+      const state = locusState(locus.source);
+      if (locus.localX !== scales.locus(uid) ||
+          state.start !== locus.state.start || state.end !== locus.state.end ||
+          state.flipped !== locus.state.flipped) loci.add(uid);
+    }
+    currentScene = patchScene(sourceScene, { loci, clusters }, options);
+  }
+  return currentScene;
 }
 
 function getScene() {
@@ -426,13 +405,11 @@ return {
   lookup,
   ids,
   locusTextForCluster,
-  synchronizeLocusLayoutState,
   setChartIndex,
   setChartState,
   scales,
   updateScales,
   getScene,
-  patchScene: patchChartScene,
   updateScene,
   anchorGene,
 };
