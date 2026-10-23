@@ -15279,17 +15279,16 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         if (runtime.getScene()) {
           const useGpu = isWebGpuRenderer(runtime.config.plot.renderer);
           const sourceScene = runtime.getScene();
+          const pending = { locus, sourceScene, targetScene: null };
           const duration = runtime.config.plot.transitionDuration;
           const finish = () => {
-            runtime.synchronizeLocusLayoutState(locus);
-            const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, plotData);
+            const targetScene = commitLocusFlip(pending);
             if (useGpu) webgpuBackend.setScene(targetScene, {
               sourceScene, scales: runtime.scales, config: runtime.renderConfig,
             });
             scenePreview = null;
             cancelSceneFlip = null;
             scheduleScenePaint();
-            commitInteractionState();
           };
           if (!duration) {
             finish();
@@ -15333,17 +15332,21 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       clusterCommitFrame = null;
     }
 
-    function flushCanvasFlip() {
-      const pending = canvasPendingFlip;
-      if (!pending) return;
-      cancelCanvasFlip?.();
-      cancelCanvasFlip = null;
+    function commitLocusFlip(pending) {
       if (!pending.targetScene) {
         runtime.synchronizeLocusLayoutState(pending.locus);
         pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, plotData);
         commitInteractionState();
       }
-      canvasBackend.setScene(pending.targetScene);
+      return pending.targetScene;
+    }
+
+    function flushCanvasFlip() {
+      const pending = canvasPendingFlip;
+      if (!pending) return;
+      cancelCanvasFlip?.();
+      cancelCanvasFlip = null;
+      canvasBackend.setScene(commitLocusFlip(pending));
       scenePreview = null;
       canvasPendingFlip = null;
       canvasBackend.clearFlip();
@@ -15352,21 +15355,15 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     function startCanvasFlip(pending, initialProgress) {
       if (canvasPendingFlip !== pending) return;
       cancelCanvasFlip = null;
-      runtime.synchronizeLocusLayoutState(pending.locus);
-      pending.targetScene = runtime.patchScene(pending.sourceScene, { loci: [pending.locus.uid] }, plotData);
-      commitInteractionState();
+      commitLocusFlip(pending);
       canvasBackend.prepareFlip(pending.locus.uid, pending.sourceScene);
       // Restore and repaint the affected canvas region before the browser can
       // present a frame. The base image stays offscreen; the visible plot stays
       // a single canvas throughout the animation.
       paintScene();
       const finish = () => {
-        cancelCanvasFlip = null;
-        scenePreview = null;
-        canvasPendingFlip = null;
-        canvasBackend.setScene(pending.targetScene);
+        flushCanvasFlip();
         paintScene();
-        canvasBackend.clearFlip();
         scheduleScenePaint();
         scheduleMinimapBase(pending.targetScene);
       };
