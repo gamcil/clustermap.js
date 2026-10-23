@@ -7,7 +7,6 @@ import { queryViewportOrdered } from "../scene/spatialIndex.mjs";
 import {
   interpolateScene,
   clusterPreviewInViewport,
-  offsetsForGene,
   geneGeometryForPreview,
   linkGeometryForPreview,
   clusterLabelOffsetForPreview,
@@ -383,7 +382,7 @@ function recordsForClusterPreview(
       for (const gene of locusGenes) {
         if (
           geneVisibleForPreview(preview, gene) &&
-          boundsInViewport(gene.bounds, viewport, offsetsForGene(preview, gene))
+          boundsInViewport(gene.bounds, viewport, previewOffsetsForLocus(preview, gene.locus))
         ) {
           genes.push(gene);
         }
@@ -674,7 +673,7 @@ export function renderCanvas({
   for (const gene of (showGenes || showGeneLabels)
     ? previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes, "genes")
     : []) {
-    const offsets = offsetsForGene(preview, gene);
+    const offsets = previewOffsetsForLocus(preview, gene.locus);
     const visible = geneVisibleForPreview(preview, gene);
     const geometry = geneGeometryForPreview(preview, gene);
     if (showGenes) drawGene(context, gene, config, scales, offsets, visible, geometry, showGeneLabels);
@@ -690,7 +689,7 @@ export function renderCanvas({
         gene,
         camera,
         geneGeometryForPreview(preview, gene),
-        offsetsForGene(preview, gene)
+        previewOffsetsForLocus(preview, gene.locus)
       );
     }
   }

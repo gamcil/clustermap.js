@@ -5,7 +5,7 @@ import { getLinkLabelPosition } from "../links/layout.mjs";
 import { resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
 import {
   locusGeometryForPreview, clusterLabelOffsetForPreview, clusterLabelTextForPreview,
-  clusterOffsetForPreview, geneVisibleForPreview, offsetsForGene,
+  clusterOffsetForPreview, geneVisibleForPreview, previewOffsetsForLocus,
   geneGeometryForPreview, linkGeometryForPreview,
 } from "./preview.mjs";
 
@@ -121,7 +121,7 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
   if (config.gene.label.show) {
     for (const gene of scene.genes.values()) {
       if (!geneVisibleForPreview(preview, gene)) continue;
-      const offsets = offsetsForGene(preview, gene);
+      const offsets = previewOffsetsForLocus(preview, gene.locus);
       const geometry = geneGeometryForPreview(preview, gene);
       includeText(gene.source.label || gene.source.name || gene.source.uid,
         (geometry.labelX ?? gene.locus.x + gene.label.x) + offsets.x, gene.locus.y + gene.label.y + offsets.y,

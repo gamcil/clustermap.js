@@ -286,10 +286,6 @@ export function createClusterDragPreview(scene, { clusterUid, position, position
   return { type: "cluster-drag", clusterUid, clusterOffsets, clusterOrder };
 }
 
-export function offsetsForGene(preview, gene) {
-  return previewOffsetsForLocus(preview, gene.locus);
-}
-
 function flipAxisForGene(preview, gene) {
   return preview?.type === "locus-flip"
     ? preview.axes?.get(gene?.locus?.source?.uid)
@@ -328,7 +324,7 @@ export function previewLinkAnchors(scene, link, preview) {
   const target = scene.genes.get(link.source.target.uid);
   if (!query || !target) return null;
   const anchorForGene = (gene) => {
-    const offsets = offsetsForGene(preview, gene);
+    const offsets = previewOffsetsForLocus(preview, gene.locus);
     // Bounds are calculated when the retained scene is built and equal the
     // polygon's horizontal extent. Reusing them avoids a vertex scan for each
     // animated link endpoint on every frame.
@@ -514,7 +510,6 @@ function interpolateLocus(from, to, amount) {
     locus[side === "x1" ? "worldStart" : "worldEnd"] - locus.x;
   return {
     ...interpolateFields(from, to, amount, ["x", "y", "worldStart", "worldEnd"]),
-    transform: interpolateFields(from.transform, to.transform, amount),
     track: {
       ...to.track,
       x1: interpolateNumber(trackX(from, "x1"), trackX(to, "x1"), amount),

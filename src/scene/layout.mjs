@@ -258,8 +258,6 @@ function createLocusLayout(locus, clusterLayout, {
     localX,
     x: worldX,
     y: clusterLayout.y,
-    start,
-    end,
     worldStart: worldX + start,
     worldEnd: worldX + end,
     bounds: {
@@ -268,7 +266,6 @@ function createLocusLayout(locus, clusterLayout, {
       minY: clusterLayout.y - paddingY,
       maxY: clusterLayout.y + height + paddingY,
     },
-    transform: { x: localX, y: 0 },
     track: {
       // The physical extent is unchanged by a flip, but retaining the
       // endpoint orientation lets renderers animate the bar collapsing
@@ -714,7 +711,7 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
       ...previous, state: { ...state }, localX, x: previous.x + dx, y: previous.y + dy,
       worldStart: previous.worldStart + dx, worldEnd: previous.worldEnd + dx,
       bounds: translateBounds(previous.bounds, dx, dy),
-      transform: { x: localX, y: 0 }, genes: [],
+      genes: [],
       trimIndicators: previous.rawTrimIndicators || previous.trimIndicators,
     } : createLocusLayout(previous.source, cluster, { ...options, geneMidpoint });
     locus.rawTrimIndicators = locus.trimIndicators;

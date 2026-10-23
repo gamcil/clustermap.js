@@ -314,7 +314,7 @@ function renderPreview({ plot, data, scene, preview, config, scales, ids, intera
     if (!locus) continue;
     const geometry = locusGeometryForPreview(preview, locus);
     loci.set(uid, { ...locus, ...geometry,
-      transform: { x: locus.transform.x + geometry.offsets.x, y: locus.transform.y },
+      localX: locus.localX + geometry.offsets.x,
     });
   }
   const projected = { ...scene, loci: { get: (uid) => loci.get(uid) || scene.loci.get(uid) } };
@@ -430,10 +430,7 @@ function updateLoci(selection, scene, config, highlightLocusIds) {
   // transition's timing.
   const base = typeof selection.selection === "function" ? selection.selection() : selection;
 
-  selection.attr("transform", (locus) => {
-    const { x, y } = layout(locus).transform;
-    return `translate(${x}, ${y})`;
-  });
+  selection.attr("transform", (locus) => `translate(${layout(locus).localX}, 0)`);
   selection
     .select("line.trackBar")
     .attr("x1", (locus) => layout(locus).track.x1)

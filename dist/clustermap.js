@@ -1305,10 +1305,6 @@
     return { type: "cluster-drag", clusterUid, clusterOffsets, clusterOrder };
   }
 
-  function offsetsForGene(preview, gene) {
-    return previewOffsetsForLocus(preview, gene.locus);
-  }
-
   function flipAxisForGene(preview, gene) {
     return preview?.type === "locus-flip"
       ? preview.axes?.get(gene?.locus?.source?.uid)
@@ -1347,7 +1343,7 @@
     const target = scene.genes.get(link.source.target.uid);
     if (!query || !target) return null;
     const anchorForGene = (gene) => {
-      const offsets = offsetsForGene(preview, gene);
+      const offsets = previewOffsetsForLocus(preview, gene.locus);
       // Bounds are calculated when the retained scene is built and equal the
       // polygon's horizontal extent. Reusing them avoids a vertex scan for each
       // animated link endpoint on every frame.
@@ -1533,7 +1529,6 @@
       locus[side === "x1" ? "worldStart" : "worldEnd"] - locus.x;
     return {
       ...interpolateFields(from, to, amount, ["x", "y", "worldStart", "worldEnd"]),
-      transform: interpolateFields(from.transform, to.transform, amount),
       track: {
         ...to.track,
         x1: interpolateNumber$1(trackX(from, "x1"), trackX(to, "x1"), amount),
@@ -4223,8 +4218,6 @@
       localX,
       x: worldX,
       y: clusterLayout.y,
-      start,
-      end,
       worldStart: worldX + start,
       worldEnd: worldX + end,
       bounds: {
@@ -4233,7 +4226,6 @@
         minY: clusterLayout.y - paddingY,
         maxY: clusterLayout.y + height + paddingY,
       },
-      transform: { x: localX, y: 0 },
       track: {
         // The physical extent is unchanged by a flip, but retaining the
         // endpoint orientation lets renderers animate the bar collapsing
@@ -4679,7 +4671,7 @@
         ...previous, state: { ...state }, localX, x: previous.x + dx, y: previous.y + dy,
         worldStart: previous.worldStart + dx, worldEnd: previous.worldEnd + dx,
         bounds: translateBounds(previous.bounds, dx, dy),
-        transform: { x: localX, y: 0 }, genes: [],
+        genes: [],
         trimIndicators: previous.rawTrimIndicators || previous.trimIndicators,
       } : createLocusLayout(previous.source, cluster, { ...options, geneMidpoint });
       locus.rawTrimIndicators = locus.trimIndicators;
@@ -4896,7 +4888,7 @@
     if (config.gene.label.show) {
       for (const gene of scene.genes.values()) {
         if (!geneVisibleForPreview(preview, gene)) continue;
-        const offsets = offsetsForGene(preview, gene);
+        const offsets = previewOffsetsForLocus(preview, gene.locus);
         const geometry = geneGeometryForPreview(preview, gene);
         includeText(gene.source.label || gene.source.name || gene.source.uid,
           (geometry.labelX ?? gene.locus.x + gene.label.x) + offsets.x, gene.locus.y + gene.label.y + offsets.y,
@@ -10555,7 +10547,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
         for (const gene of locusGenes) {
           if (
             geneVisibleForPreview(preview, gene) &&
-            boundsInViewport(gene.bounds, viewport, offsetsForGene(preview, gene))
+            boundsInViewport(gene.bounds, viewport, previewOffsetsForLocus(preview, gene.locus))
           ) {
             genes.push(gene);
           }
@@ -10846,7 +10838,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     for (const gene of (showGenes || showGeneLabels)
       ? previewRecords?.genes || recordsFor(displayScene.genes, visible?.genes, "genes")
       : []) {
-      const offsets = offsetsForGene(preview, gene);
+      const offsets = previewOffsetsForLocus(preview, gene.locus);
       const visible = geneVisibleForPreview(preview, gene);
       const geometry = geneGeometryForPreview(preview, gene);
       if (showGenes) drawGene(context, gene, config, scales, offsets, visible, geometry, showGeneLabels);
@@ -10862,7 +10854,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
           gene,
           camera,
           geneGeometryForPreview(preview, gene),
-          offsetsForGene(preview, gene)
+          previewOffsetsForLocus(preview, gene.locus)
         );
       }
     }
@@ -11290,7 +11282,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       if (!locus) continue;
       const geometry = locusGeometryForPreview(preview, locus);
       loci.set(uid, { ...locus, ...geometry,
-        transform: { x: locus.transform.x + geometry.offsets.x, y: locus.transform.y },
+        localX: locus.localX + geometry.offsets.x,
       });
     }
     const projected = { ...scene, loci: { get: (uid) => loci.get(uid) || scene.loci.get(uid) } };
@@ -11406,10 +11398,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     // transition's timing.
     const base = typeof selection.selection === "function" ? selection.selection() : selection;
 
-    selection.attr("transform", (locus) => {
-      const { x, y } = layout(locus).transform;
-      return `translate(${x}, ${y})`;
-    });
+    selection.attr("transform", (locus) => `translate(${layout(locus).localX}, 0)`);
     selection
       .select("line.trackBar")
       .attr("x1", (locus) => layout(locus).track.x1)
