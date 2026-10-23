@@ -38,7 +38,7 @@ function flipRecords(scene, locusUid) {
 /** Own Canvas resources across paints; the chart supplies scenes and animation progress. */
 export function createCanvasBackend({ render = renderCanvas,
   requestFrame = globalThis.requestAnimationFrame, cancelFrame = globalThis.cancelAnimationFrame } = {}) {
-  let pendingScene = null, latest = null, cached = null, warmFrame = null;
+  let latest = null, cached = null, warmFrame = null;
   const dimensions = (request) => request.dimensions || request.canvas.getBoundingClientRect();
   const matches = (request, scene, locusUid) => {
     if (!cached || cached.scene !== scene || cached.locusUid !== locusUid || cached.canvas !== request.canvas ||
@@ -52,7 +52,7 @@ export function createCanvasBackend({ render = renderCanvas,
     warmFrame = null;
   };
   const clearFlip = () => { cancelWarm(); cached = null; };
-  const prepareFlip = (locusUid, scene = pendingScene) => {
+  const prepareFlip = (locusUid, scene = latest?.scene) => {
     cancelWarm();
     if (!latest?.canvas || !scene || matches(latest, scene, locusUid)) return;
     const records = flipRecords(scene, locusUid);
@@ -104,8 +104,6 @@ export function createCanvasBackend({ render = renderCanvas,
   };
 
   return {
-    get pendingScene() { return pendingScene; },
-    setScene(scene) { pendingScene = scene; },
     prepareFlip,
     clearFlip,
     warmLocus(locusUid) {
@@ -114,13 +112,12 @@ export function createCanvasBackend({ render = renderCanvas,
       warmFrame = requestFrame(() => { warmFrame = null; prepareFlip(locusUid); });
     },
     paint(request) {
-      if (request.scene) pendingScene = request.scene;
-      if (!request.canvas || !pendingScene) return null;
-      latest = { ...request, scene: pendingScene };
-      if (cached && !matches(latest, pendingScene, cached.locusUid)) clearFlip();
+      if (!request.canvas || !request.scene) return null;
+      latest = { ...request };
+      if (cached && !matches(latest, request.scene, cached.locusUid)) clearFlip();
       if (cached && request.preview?.type === "locus-flip" && cached.locusUid === request.preview.locusUid) return paintFlip(latest);
       return render(latest);
     },
-    destroy() { clearFlip(); pendingScene = latest = null; },
+    destroy() { clearFlip(); latest = null; },
   };
 }

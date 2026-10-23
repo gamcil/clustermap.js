@@ -35,8 +35,7 @@ function fixture() {
 
 test("Canvas flip warming and playback share one layer cache", () => {
   const { backend, request, renders, images, frames, canvases } = fixture();
-  backend.setScene(request.scene);
-  assert.equal(backend.paint({ ...request, scene: undefined }), "painted");
+  assert.equal(backend.paint(request), "painted");
   backend.warmLocus("locus");
   assert.equal(frames.size, 1);
   const [id, warm] = frames.entries().next().value; frames.delete(id); warm();
@@ -79,7 +78,6 @@ test("Canvas backend cancels warming and releases its retained frame on destroy"
   assert.equal(frames.size, 1);
   backend.destroy();
   assert.equal(frames.size, 0);
-  assert.equal(backend.pendingScene, null);
   assert.equal(backend.paint({ canvas: request.canvas }), null);
   backend.prepareFlip("locus"); backend.warmLocus("locus");
   assert.equal(frames.size, 0); assert.equal(renders.length, 1);

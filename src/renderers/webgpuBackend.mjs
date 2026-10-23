@@ -26,9 +26,6 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
   const fallback = () => latestPaint?.onUnavailable?.();
 
   return {
-    get pendingScene() {
-      return pendingScene;
-    },
     hasResources: () => Boolean(renderer || canvas || initialization || unavailable),
     setScene: (scene, { sourceScene, scales, config } = {}) => {
       if (sourceScene && !scene.changes?.annotationsOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
