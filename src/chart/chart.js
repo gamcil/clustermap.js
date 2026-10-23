@@ -456,8 +456,6 @@ export default function clusterMap() {
         clusterLabelText: pending.clusterLabelText,
       });
       // Paint the dirty region in this frame rather than one frame later.
-      if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
-      previewPaintFrame = null;
       paintScene();
     }, finish);
   }
@@ -813,6 +811,8 @@ export default function clusterMap() {
   }
 
   function paintScene() {
+    if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
+    previewPaintFrame = null;
     if (!container || !runtime.getScene()) return;
     if (isCanvasRenderer(runtime.config.plot.renderer)) return paintCanvas();
     if (isWebGpuRenderer(runtime.config.plot.renderer)) return paintWebGpu();

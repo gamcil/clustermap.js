@@ -17,6 +17,11 @@ export function createRasterMotion({
 }) {
   let moving = false;
   let settleTimer = null;
+  const pixelRatio = () => {
+    const ratio = devicePixelRatio();
+    if (getRenderer() === "webgpu" || !getAdaptiveResolution()) return ratio;
+    return canvasPixelRatioForCamera({ camera: getCamera(), moving, devicePixelRatio: ratio });
+  };
 
   return {
     begin() {
@@ -34,16 +39,13 @@ export function createRasterMotion({
       settleTimer = setTimer(() => {
         settleTimer = null;
         if (!moving) return;
+        const previousRatio = pixelRatio();
         moving = false;
-        schedulePaint();
+        if (pixelRatio() !== previousRatio) schedulePaint();
       }, settleDelay);
     },
 
-    pixelRatio() {
-      const ratio = devicePixelRatio();
-      if (getRenderer() === "webgpu" || !getAdaptiveResolution()) return ratio;
-      return canvasPixelRatioForCamera({ camera: getCamera(), moving, devicePixelRatio: ratio });
-    },
+    pixelRatio,
 
     dispose() {
       if (settleTimer !== null) clearTimer(settleTimer);

@@ -12159,6 +12159,11 @@ function createRasterMotion({
 }) {
   let moving = false;
   let settleTimer = null;
+  const pixelRatio = () => {
+    const ratio = devicePixelRatio();
+    if (getRenderer() === "webgpu" || !getAdaptiveResolution()) return ratio;
+    return canvasPixelRatioForCamera({ camera: getCamera(), moving, devicePixelRatio: ratio });
+  };
 
   return {
     begin() {
@@ -12176,16 +12181,13 @@ function createRasterMotion({
       settleTimer = setTimer(() => {
         settleTimer = null;
         if (!moving) return;
+        const previousRatio = pixelRatio();
         moving = false;
-        schedulePaint();
+        if (pixelRatio() !== previousRatio) schedulePaint();
       }, settleDelay);
     },
 
-    pixelRatio() {
-      const ratio = devicePixelRatio();
-      if (getRenderer() === "webgpu" || !getAdaptiveResolution()) return ratio;
-      return canvasPixelRatioForCamera({ camera: getCamera(), moving, devicePixelRatio: ratio });
-    },
+    pixelRatio,
 
     dispose() {
       if (settleTimer !== null) clearTimer(settleTimer);
@@ -12985,6 +12987,11 @@ return {
 };
 }
 
+const annotationLayers = ["annotations", "annotationLabels", "chrome"];
+const biologyLayers = CANVAS_LAYERS.filter((layer) => !annotationLayers.includes(layer));
+const highlightKeys = ["highlightGeneIds", "highlightLinkIds", "highlightLocusIds", "highlightClusterIds"];
+const noHighlights = Object.fromEntries(highlightKeys.map((key) => [key, null]));
+
 function recordBounds(scene, records) {
   let result = null;
   for (const [type, ids] of Object.entries(records)) for (const uid of ids) {
@@ -13023,8 +13030,48 @@ function flipRecords(scene, locusUid) {
 /** Own Canvas resources across paints; the chart supplies scenes and animation progress. */
 function createCanvasBackend({ render = renderCanvas,
   requestFrame = globalThis.requestAnimationFrame, cancelFrame = globalThis.cancelAnimationFrame } = {}) {
-  let latest = null, cached = null, warmFrame = null;
+  let latest = null, cached = null, biology = null, warmFrame = null;
   const dimensions = (request) => request.dimensions || request.canvas.getBoundingClientRect();
+  const canRetainBiology = (request) => request.scene.annotationPanels?.length &&
+    !request.preview && !request.previousScene && !request.previousTree &&
+    (request.treeProgress ?? 1) === 1;
+  const biologyMatches = (request) => {
+    if (!biology || !canRetainBiology(request)) return false;
+    const previous = biology.request, size = dimensions(request);
+    return (previous.scene === request.scene || request.scene.changes?.annotationsOnly) &&
+      previous.canvas === request.canvas && previous.config === request.config &&
+      previous.scales === request.scales && previous.tree === request.tree &&
+      previous.pixelRatio === request.pixelRatio &&
+      previous.hoverLocusUid === request.hoverLocusUid &&
+      previous.suppressLocusHover === request.suppressLocusHover &&
+      biology.highlights.every((ids, index) =>
+        ids.size === (request[highlightKeys[index]]?.size || 0) &&
+        [...ids].every((uid) => request[highlightKeys[index]].has(uid))) &&
+      biology.bitmap.width === request.canvas.width && biology.bitmap.height === request.canvas.height &&
+      biology.width === size.width && biology.height === size.height &&
+      previous.camera.x === request.camera.x && previous.camera.y === request.camera.y &&
+      previous.camera.k === request.camera.k &&
+      ["genes", "links", "loci", "clusters"].every((key) => previous.scene[key] === request.scene[key]);
+  };
+  const paintAnnotations = (request, retain) => {
+    const size = dimensions(request), canvas = request.canvas;
+    if (retain) {
+      render({ ...request, dimensions: size, layers: biologyLayers });
+      const bitmap = canvas.ownerDocument.createElement("canvas");
+      bitmap.width = canvas.width; bitmap.height = canvas.height;
+      bitmap.getContext("2d").drawImage(canvas, 0, 0);
+      biology = { request: { ...request, camera: { ...request.camera } },
+        highlights: highlightKeys.map((key) => new Set(request[key])),
+        width: size.width, height: size.height, bitmap };
+    } else {
+      const context = canvas.getContext("2d");
+      context.save(); context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(biology.bitmap, 0, 0); context.restore();
+    }
+    return render({ ...request, ...noHighlights, hoverLocusUid: null, suppressLocusHover: true,
+      dimensions: size, layers: annotationLayers, clear: false });
+  };
   const matches = (request, scene, locusUid) => {
     if (!cached || cached.scene !== scene || cached.locusUid !== locusUid || cached.canvas !== request.canvas ||
         cached.config !== request.config || cached.tree !== request.tree || cached.pixelRatio !== request.pixelRatio) return false;
@@ -13098,12 +13145,16 @@ function createCanvasBackend({ render = renderCanvas,
     },
     paint(request) {
       if (!request.canvas || !request.scene) return null;
+      // Prepare lazily after an annotation edit, rather than copying every navigation frame.
+      const annotationEdit = latest?.scene !== request.scene && request.scene.changes?.annotationsOnly;
       latest = { ...request };
+      if (!biologyMatches(request)) biology = null;
       if (cached && !matches(latest, request.scene, cached.locusUid)) clearFlip();
       if (cached && request.preview?.type === "locus-flip" && cached.locusUid === request.preview.locusUid) return paintFlip(latest);
+      if (biology || annotationEdit && canRetainBiology(request)) return paintAnnotations(latest, !biology);
       return render(latest);
     },
-    destroy() { clearFlip(); latest = null; },
+    destroy() { clearFlip(); biology = null; latest = null; },
   };
 }
 
@@ -15241,8 +15292,6 @@ function clusterMap() {
         clusterLabelText: pending.clusterLabelText,
       });
       // Paint the dirty region in this frame rather than one frame later.
-      if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
-      previewPaintFrame = null;
       paintScene();
     }, finish);
   }
@@ -15598,6 +15647,8 @@ function clusterMap() {
   }
 
   function paintScene() {
+    if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
+    previewPaintFrame = null;
     if (!container || !runtime.getScene()) return;
     if (isCanvasRenderer(runtime.config.plot.renderer)) return paintCanvas();
     if (isWebGpuRenderer(runtime.config.plot.renderer)) return paintWebGpu();
