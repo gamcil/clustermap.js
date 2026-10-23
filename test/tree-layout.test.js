@@ -136,8 +136,9 @@ test("tree scales inherit clustermap styling and fall back to depth when lengths
   assert.equal(proportional.scaleBar.fontFamily, scene.chrome.scaleBar.fontFamily);
   assert.equal(proportional.scaleBar.strokeWidth, scene.chrome.scaleBar.strokeWidth);
   assert.equal(proportional.scaleBar.lines[1].y2 - proportional.scaleBar.lines[1].y1, 12);
-  delete tree.nodes.find((node) => node.uid === "a").branchLength;
-  const cladogram = build();
+  const incomplete = structuredClone(tree);
+  delete incomplete.nodes.find((node) => node.uid === "a").branchLength;
+  const cladogram = build({ tree: incomplete });
   assert.equal(cladogram.scaleBar.label.text, "1 branch");
   assert.equal(mark(cladogram.guides, "a").x1, mark(cladogram.guides, "b").x1);
   assert.equal(build({ config: { tree: { show: false } } }), null);

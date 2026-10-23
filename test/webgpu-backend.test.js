@@ -77,3 +77,27 @@ test("replacing the canvas invalidates an in-flight WebGPU initialization", asyn
   assert.equal(secondCanvas.dataset.webgpu, "active");
   assert.equal(draws[0].nextScene.uid, "second");
 });
+
+test("accepting a scene patch delegates buffer reuse to the active renderer", async () => {
+  const { createWebGpuBackend } = await import("../src/renderers/webgpuBackend.mjs");
+  const draws = [], adoptions = [];
+  const backend = createWebGpuBackend({ createRenderer: async () => ({
+    render: (request) => draws.push(request.nextScene),
+    adoptScene: (...args) => { adoptions.push(args); return false; },
+    destroy() {},
+  }) });
+  const canvas = { dataset: {} }, sourceScene = {}, scene = { changes: { loci: new Set(["locus"]) } };
+  const request = paintRequest(canvas, sourceScene);
+  backend.paint(request);
+  await Promise.resolve();
+  backend.setScene(scene, { sourceScene, scales: request.scales, config: request.config });
+  backend.paint({ ...request, scene });
+  assert.deepEqual(adoptions, [[scene, sourceScene, { scales: request.scales, config: request.config }]]);
+  assert.deepEqual(draws, [sourceScene, scene], "a rejected adoption still renders the new scene");
+  const annotations = { changes: { annotationsOnly: true } };
+  backend.setScene(annotations, { sourceScene: scene, scales: request.scales, config: request.config });
+  backend.paint({ ...request, scene: annotations });
+  assert.equal(adoptions.length, 1, "annotation-only edits bypass biological buffer adoption");
+  assert.equal(draws.at(-1), annotations);
+  backend.destroy();
+});
