@@ -14626,7 +14626,8 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
       return pendingScene;
     },
     hasResources: () => Boolean(renderer || canvas || initialization || unavailable),
-    setScene: (scene) => {
+    setScene: (scene, { sourceScene, scales, config } = {}) => {
+      if (sourceScene && !scene.changes?.annotationsOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
       pendingScene = scene;
     },
     paint: (request) => {
@@ -14678,7 +14679,6 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
           fallback();
         });
     },
-    adoptScene: (...args) => renderer?.adoptScene(...args) || false,
     destroy: () => {
       release();
       pendingScene = null;
@@ -15277,12 +15277,9 @@ function clusterMap() {
         const finish = () => {
           runtime.synchronizeLocusLayoutState(locus);
           const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, plotData);
-          if (useGpu) {
-            webgpuBackend.adoptScene(targetScene, sourceScene, {
-              scales: runtime.scales, config: runtime.renderConfig,
-            });
-            webgpuBackend.setScene(targetScene);
-          }
+          if (useGpu) webgpuBackend.setScene(targetScene, {
+            sourceScene, scales: runtime.scales, config: runtime.renderConfig,
+          });
           scenePreview = null;
           cancelSceneFlip = null;
           scheduleScenePaint();
@@ -15855,7 +15852,7 @@ function clusterMap() {
     rasterAnimation = null;
   }
 
-  function animateRaster(scene, animate$1) {
+  function animateRaster(scene, animate$1, sourceScene) {
     const renderer = runtime.config.plot.renderer;
     const useWebGpu = isWebGpuRenderer(renderer);
     const backend = useWebGpu ? webgpuBackend : canvasBackend;
@@ -15865,7 +15862,7 @@ function clusterMap() {
     const finish = () => {
       rasterAnimation = null;
       treeAnimation = null;
-      backend.setScene(scene);
+      backend.setScene(scene, { sourceScene, scales: runtime.scales, config: runtime.renderConfig });
       paintScene();
     };
     if (!animate$1 || !previousScene || !duration) { finish(); return; }
@@ -16046,13 +16043,8 @@ function clusterMap() {
 
     if (useRaster) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
-      if (useWebGpu && committedScene && !annotationsOnly) {
-        webgpuBackend.adoptScene(scene, committedScene.sourceScene, {
-          scales: runtime.scales, config: runtime.renderConfig,
-        });
-      }
       scheduleMinimapBase(scene);
-      animateRaster(scene, hasInitialView && animate);
+      animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene);
     } else {
       paintSvg({ annotationsOnly, previousScene, animate: hasInitialView && animate });
 

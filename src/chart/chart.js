@@ -373,12 +373,9 @@ export default function clusterMap() {
         const finish = () => {
           runtime.synchronizeLocusLayoutState(locus);
           const targetScene = runtime.patchScene(sourceScene, { loci: [locus.uid] }, plotData);
-          if (useGpu) {
-            webgpuBackend.adoptScene(targetScene, sourceScene, {
-              scales: runtime.scales, config: runtime.renderConfig,
-            });
-            webgpuBackend.setScene(targetScene);
-          }
+          if (useGpu) webgpuBackend.setScene(targetScene, {
+            sourceScene, scales: runtime.scales, config: runtime.renderConfig,
+          });
           scenePreview = null;
           cancelSceneFlip = null;
           scheduleScenePaint();
@@ -951,7 +948,7 @@ export default function clusterMap() {
     rasterAnimation = null;
   }
 
-  function animateRaster(scene, animate) {
+  function animateRaster(scene, animate, sourceScene) {
     const renderer = runtime.config.plot.renderer;
     const useWebGpu = isWebGpuRenderer(renderer);
     const backend = useWebGpu ? webgpuBackend : canvasBackend;
@@ -961,7 +958,7 @@ export default function clusterMap() {
     const finish = () => {
       rasterAnimation = null;
       treeAnimation = null;
-      backend.setScene(scene);
+      backend.setScene(scene, { sourceScene, scales: runtime.scales, config: runtime.renderConfig });
       paintScene();
     };
     if (!animate || !previousScene || !duration) { finish(); return; }
@@ -1142,13 +1139,8 @@ export default function clusterMap() {
 
     if (useRaster) {
       if (!hasInitialView) fitInitialCanvasView(canvas.node(), scene);
-      if (useWebGpu && committedScene && !annotationsOnly) {
-        webgpuBackend.adoptScene(scene, committedScene.sourceScene, {
-          scales: runtime.scales, config: runtime.renderConfig,
-        });
-      }
       scheduleMinimapBase(scene);
-      animateRaster(scene, hasInitialView && animate);
+      animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene);
     } else {
       paintSvg({ annotationsOnly, previousScene, animate: hasInitialView && animate });
 

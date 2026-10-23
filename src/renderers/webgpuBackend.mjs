@@ -30,7 +30,8 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
       return pendingScene;
     },
     hasResources: () => Boolean(renderer || canvas || initialization || unavailable),
-    setScene: (scene) => {
+    setScene: (scene, { sourceScene, scales, config } = {}) => {
+      if (sourceScene && !scene.changes?.annotationsOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
       pendingScene = scene;
     },
     paint: (request) => {
@@ -82,7 +83,6 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
           fallback();
         });
     },
-    adoptScene: (...args) => renderer?.adoptScene(...args) || false,
     destroy: () => {
       release();
       pendingScene = null;
