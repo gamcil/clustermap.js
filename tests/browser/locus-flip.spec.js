@@ -1002,6 +1002,8 @@ test("WebGPU renderer forwards locus interactions through its Canvas overlay", a
     });
     window.__webgpuInteractionTest = { chart, data, host };
     d3.select(host).datum(data).call(chart);
+    // These pointer targets came from SVG; retain its camera when changing renderer.
+    chart.state({ ...chart.state(), camera: window.__demoChart.state().camera });
   });
 
   const canvas = await requireWebGpuCanvas(page);
@@ -1082,6 +1084,7 @@ test("WebGPU aligns a matching gene without leaving the retained scene", async (
     const chart = clusterMap().config({ plot: { renderer: "webgpu", transitionDuration: 0 } });
     window.__webgpuAnchorTest = { chart };
     d3.select(host).datum(data).call(chart);
+    chart.state({ ...chart.state(), camera: window.__demoChart.state().camera });
   });
 
   const canvas = await requireWebGpuCanvas(page);
@@ -1100,13 +1103,10 @@ test("WebGPU aligns a matching gene without leaving the retained scene", async (
       );
       const centreX = (uid) => {
         const gene = svg.querySelector(`[id$="gene_${uid}"]`);
-        const locus = gene?.closest("g.locus");
-        const offset = Number(/translate\(([^, ]+)/.exec(locus?.getAttribute("transform") || "")?.[1] || 0);
-        const points = (gene?.querySelector("polygon")?.getAttribute("points") || "")
-          .trim()
-          .split(/\s+/)
-          .map((point) => Number(point.split(",")[0]));
-        return offset + (Math.min(...points) + Math.max(...points)) / 2;
+        const offset = (node) => Number(/translate\(([^, ]+)/.exec(node?.getAttribute("transform") || "")?.[1] || 0);
+        const points = Array.from(gene.querySelector("polygon").points, (point) => point.x);
+        return offset(gene?.closest("g.cluster")) + offset(gene?.closest("g.locus")) +
+          (Math.min(...points) + Math.max(...points)) / 2;
       };
       return Math.abs(centreX("0") - centreX("1001"));
     }))
