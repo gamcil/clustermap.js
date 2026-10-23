@@ -241,7 +241,12 @@ test("editing the SVG scale bar delegates through the chart action", async ({ pa
   const label = page.locator("g.scaleBar text.barText");
   await expect(label).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept("5000"));
-  await label.click();
+  // WebKit's SVG click quad ignores this text's hanging baseline.
+  const point = await label.evaluate((node) => {
+    const { x, y, width, height } = node.getBoundingClientRect();
+    return { x: x + width / 2, y: y + height / 2 };
+  });
+  await page.mouse.click(point.x, point.y);
   await expect(label).toHaveText("5kb");
 });
 
@@ -650,8 +655,10 @@ test("dragging a locus persists its horizontal position", async ({ page }, testI
   const endX = end.x + end.width / 2;
   const dragY = end.y + end.height / 2;
   await page.mouse.move(startX + (endX - startX) / 3, dragY);
+  await waitForPaint(page);
   const firstPreviewX = await readTranslateX(locus);
   await page.mouse.move(startX + (2 * (endX - startX)) / 3, dragY);
+  await waitForPaint(page);
   const secondPreviewX = await readTranslateX(locus);
   expect(Math.sign(firstPreviewX - before.locusX)).toBe(Math.sign(endX - startX));
   expect(Math.abs(secondPreviewX - before.locusX)).toBeGreaterThan(
