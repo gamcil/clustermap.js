@@ -37,3 +37,23 @@ test("raster motion restores Canvas detail after a gesture and keeps WebGPU nati
   assert.equal(motion.pixelRatio(), 2, "WebGPU never enters the low-resolution mode");
   motion.dispose();
 });
+
+for (const [renderer, adaptiveResolution, ratio] of [
+  ["canvas", false, 2], ["webgpu", true, 2], ["canvas", true, 1],
+]) {
+  test(`${renderer} at DPR ${ratio}, adaptive ${adaptiveResolution}: unchanged resolution needs no settle repaint`, async () => {
+    const { createRasterMotion } = await import("../../src/interaction/motion.mjs");
+    let paints = 0, settle;
+    const motion = createRasterMotion({
+      schedulePaint: () => paints++,
+      getCamera: () => ({ k: 1 }),
+      getRenderer: () => renderer,
+      getAdaptiveResolution: () => adaptiveResolution,
+      devicePixelRatio: () => ratio,
+      setTimer: (callback) => { settle = callback; return 1; },
+    });
+    motion.begin(); motion.end(); settle();
+    assert.equal(paints, 1, "gesture completion does not repeat an unchanged frame");
+    assert.equal(motion.pixelRatio(), ratio);
+  });
+}

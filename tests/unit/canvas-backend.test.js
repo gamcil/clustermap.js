@@ -82,3 +82,89 @@ test("Canvas backend cancels warming and releases its retained frame on destroy"
   backend.prepareFlip("locus"); backend.warmLocus("locus");
   assert.equal(frames.size, 0); assert.equal(renders.length, 1);
 });
+
+function annotationFixture() {
+  const setup = fixture(), { backend, request } = setup;
+  request.scene = { ...request.scene, clusters: new Map(), annotationPanels: [{}] };
+  backend.paint(request);
+  return { ...setup, editAnnotations() {
+    request.scene = { ...request.scene, changes: { annotationsOnly: true } };
+    return backend.paint(request);
+  } };
+}
+
+test("annotation edits lazily retain biology and redraw only annotations on reuse", () => {
+  const { request, renders, images, canvases, editAnnotations } = annotationFixture();
+  assert.equal(canvases.length, 1, "ordinary paints do not allocate a snapshot");
+  assert.equal(editAnnotations(), "painted");
+  assert.ok(renders[1].layers.includes("genes"));
+  assert.ok(!renders[1].layers.includes("annotations"));
+  assert.deepEqual(renders[2].layers, ["annotations", "annotationLabels", "chrome"]);
+  assert.equal(renders[2].clear, false);
+  assert.equal(images[0][0], request.canvas, "snapshot comes from the visible biology pass");
+  editAnnotations();
+  assert.equal(renders.length, 4, "subsequent edits need only one annotation pass");
+  assert.equal(canvases.length, 2, "reuse does not allocate another bitmap");
+  assert.equal(images[1][0], canvases[1], "reuse restores the retained biology");
+});
+
+for (const change of ["camera", "dimensions", "pixelRatio", "config", "scales", "tree", "canvas",
+  "hoverLocusUid", "suppressLocusHover", "preview", "previousScene", "previousTree", "treeProgress",
+  "genes", "links", "loci", "clusters"]) {
+  test(`annotation biology invalidates when ${change} changes`, () => {
+    const { backend, request, renders, size, editAnnotations } = annotationFixture();
+    editAnnotations();
+    if (change === "camera") request.camera.x = 20;
+    else if (change === "dimensions") size.width = 500;
+    else if (change === "pixelRatio") request.pixelRatio = 1;
+    else if (change === "canvas") request.canvas = request.canvas.ownerDocument.createElement("canvas");
+    else if (change === "hoverLocusUid") request.hoverLocusUid = "locus";
+    else if (change === "suppressLocusHover") request.suppressLocusHover = true;
+    else if (change === "treeProgress") request.treeProgress = 0.5;
+    else if (["genes", "links", "loci", "clusters"].includes(change)) {
+      request.scene = { ...request.scene, [change]: new Map(request.scene[change]) };
+    } else request[change] = { ...request[change] };
+    const before = renders.length;
+    backend.paint(request);
+    assert.ok(renders.slice(before).some(({ layers }) => !layers || layers.includes("genes")),
+      "changed frame redraws biology instead of restoring stale pixels");
+  });
+}
+
+for (const key of ["highlightGeneIds", "highlightLinkIds", "highlightLocusIds", "highlightClusterIds"]) {
+  test(`annotation reuse snapshots ${key} membership and avoids drawing it twice`, () => {
+    const { request, renders, editAnnotations } = annotationFixture();
+    request[key] = new Set(["selected"]);
+    request.hoverLocusUid = "locus";
+    editAnnotations();
+    const before = renders.length;
+    request[key] = new Set(["selected"]);
+    editAnnotations();
+    assert.equal(renders.length, before + 1, "equal membership reuses the snapshot");
+    assert.equal(renders.at(-1)[key], null, "annotation pass omits retained highlights");
+    assert.equal(renders.at(-1).hoverLocusUid, null);
+    assert.equal(renders.at(-1).suppressLocusHover, true);
+    request[key].add("another");
+    editAnnotations();
+    assert.equal(renders.length, before + 3, "in-place membership changes rebuild biology");
+    assert.deepEqual([...renders.at(-2)[key]], ["selected", "another"]);
+    request[key].clear();
+    editAnnotations();
+    assert.equal(renders.length, before + 5, "clearing selection also rebuilds biology");
+  });
+}
+
+test("non-annotation scene commits and destroy discard retained biology", () => {
+  const { backend, request, renders, canvases, editAnnotations } = annotationFixture();
+  editAnnotations();
+  request.scene = { ...request.scene, changes: {} };
+  backend.paint(request);
+  assert.equal(renders.at(-1).layers, undefined, "shared maps alone do not permit reuse");
+  editAnnotations();
+  assert.equal(canvases.length, 3);
+  backend.destroy();
+  const before = renders.length;
+  backend.paint(request);
+  assert.equal(renders.length, before + 2, "destroyed snapshot must be rebuilt");
+  assert.equal(canvases.length, 4);
+});
