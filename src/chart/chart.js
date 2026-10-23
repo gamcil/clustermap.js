@@ -51,7 +51,6 @@ import {
   interpolateScene,
   createClusterDragPreview,
   createLocusFlipPreview,
-  createLocusOffsetPreview,
   createLocusOffsetsPreview,
   createLocusTrimPreview,
 } from "../scene/preview.mjs";
@@ -275,17 +274,6 @@ export default function clusterMap() {
       clearScenePreview();
       redraw({ animate: false });
       commitInteractionState();
-    },
-    previewLocusOffset: (uid, offset) => {
-      setPreviewLocusOffset(chartState, uid, offset);
-      if (runtime.getScene()) {
-        scenePreview = createLocusOffsetPreview(runtime.getScene(), uid, offset, {
-          alignLabels: runtime.config.cluster.alignLabels,
-        });
-        scheduleScenePaint();
-        return;
-      }
-      redraw({ animate: false });
     },
     previewLocusOffsets: (offsets) => {
       for (const [uid, offset] of offsets) setPreviewLocusOffset(chartState, uid, offset);

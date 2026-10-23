@@ -17,8 +17,7 @@ export function createInteractionController({
   setDragging,
   previewClusterDrag,
   commitClusterOrder,
-  previewLocusOffset,
-  previewLocusOffsets = null,
+  previewLocusOffsets,
   commitLocusOffset,
   previewLocusTrim,
   commitLocusTrim,
@@ -144,11 +143,7 @@ export function createInteractionController({
       const offsets = new Map(
         locusDrag.uids.map((uid) => [uid, locusDrag.initialOffsets.get(uid) + delta])
       );
-      if (locusDrag.uids.length > 1 && previewLocusOffsets) {
-        previewLocusOffsets(offsets);
-        return;
-      }
-      previewLocusOffset(locusDrag.uids[0], offsets.get(locusDrag.uids[0]));
+      previewLocusOffsets(offsets);
     },
 
     endLocusDrag() {

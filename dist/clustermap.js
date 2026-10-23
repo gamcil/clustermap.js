@@ -1092,26 +1092,6 @@
     };
   }
 
-  /**
-   * Describe a transient locus translation relative to an already projected
-   * scene. This is deliberately a sparse, renderer-neutral patch: it avoids
-   * rebuilding the scene while a drag is in progress.
-   */
-  function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels }) {
-    const locus = scene.loci.get(locusUid);
-    if (!locus) return null;
-    const offsetX = offset - locus.localX;
-    const startFor = (candidate) =>
-      candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart;
-    const endFor = (candidate) =>
-      candidate.source.uid === locusUid ? candidate.worldEnd + offsetX : candidate.worldEnd;
-    return locusPreview(scene, {
-      type: "locus-offset",
-      locusUid,
-      offsetX,
-    }, startFor, endFor, alignLabels, [scene.clusters.get(locus.cluster.uid)]);
-  }
-
   /** Describe several transient locus translations without rebuilding the scene. */
   function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
     const locusOffsets = new Map();
@@ -1220,10 +1200,7 @@
   // accessors keep SVG, Canvas chrome, and dense WebGPU marks on the same
   // locus, cluster, and link geometry.
   function locusOffsetForPreview(preview, locusUid) {
-    if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
-    return preview?.type === "locus-offset" && preview.locusUid === locusUid
-      ? preview.offsetX
-      : 0;
+    return preview?.locusOffsets?.get(locusUid) ?? 0;
   }
 
   function clusterLabelOffsetForPreview(preview, clusterUid) {
@@ -1469,7 +1446,6 @@
         if (clusterOffsetForPreview(preview, locus.cluster.uid)) loci.add(locus.source.uid);
       }
     }
-    if (preview.type === "locus-offset") loci.add(preview.locusUid);
     if (preview.type === "locus-offsets") {
       for (const locusUid of preview.locusOffsets.keys()) loci.add(locusUid);
     }
@@ -9904,8 +9880,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     setDragging,
     previewClusterDrag,
     commitClusterOrder,
-    previewLocusOffset,
-    previewLocusOffsets = null,
+    previewLocusOffsets,
     commitLocusOffset,
     previewLocusTrim,
     commitLocusTrim,
@@ -10031,11 +10006,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
         const offsets = new Map(
           locusDrag.uids.map((uid) => [uid, locusDrag.initialOffsets.get(uid) + delta])
         );
-        if (locusDrag.uids.length > 1 && previewLocusOffsets) {
-          previewLocusOffsets(offsets);
-          return;
-        }
-        previewLocusOffset(locusDrag.uids[0], offsets.get(locusDrag.uids[0]));
+        previewLocusOffsets(offsets);
       },
 
       endLocusDrag() {
@@ -13745,7 +13716,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   }
 
   function isLocusTransformPreview(preview) {
-    return ["locus-offset", "locus-offsets", "locus-flip"].includes(preview?.type);
+    return ["locus-offsets", "locus-flip"].includes(preview?.type);
   }
 
   function bufferFor(device, existing, data) {
@@ -15118,17 +15089,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         clearScenePreview();
         redraw({ animate: false });
         commitInteractionState();
-      },
-      previewLocusOffset: (uid, offset) => {
-        setPreviewLocusOffset(chartState, uid, offset);
-        if (runtime.getScene()) {
-          scenePreview = createLocusOffsetPreview(runtime.getScene(), uid, offset, {
-            alignLabels: runtime.config.cluster.alignLabels,
-          });
-          scheduleScenePaint();
-          return;
-        }
-        redraw({ animate: false });
       },
       previewLocusOffsets: (offsets) => {
         for (const [uid, offset] of offsets) setPreviewLocusOffset(chartState, uid, offset);

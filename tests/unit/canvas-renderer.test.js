@@ -390,9 +390,8 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     scales: { group: () => null, colour: () => "#bbb", score: () => "#000" },
     hoverLocusUid: "locus",
     preview: {
-      type: "locus-offset",
-      locusUid: "locus",
-      offsetX: 20,
+      type: "locus-offsets",
+      locusOffsets: new Map([["locus", 20]]),
       clusterLabelOffsets: new Map([["cluster", 20]]),
     },
   });

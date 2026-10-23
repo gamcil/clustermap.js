@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("bottom legends stack below lower chart chrome", async () => {
-  const [{ buildScene }, { createLocusOffsetPreview }] = await Promise.all([
+  const [{ buildScene }, { createLocusOffsetsPreview }] = await Promise.all([
     import("../../src/scene/layout.mjs"),
     import("../../src/scene/preview.mjs"),
   ]);
@@ -92,6 +92,6 @@ test("bottom legends stack below lower chart chrome", async () => {
     ]
   );
   assert.equal(scene.chrome.scaleBar.position.y, 42);
-  const preview = createLocusOffsetPreview(scene, "locus", -20, { alignLabels: true });
+  const preview = createLocusOffsetsPreview(scene, new Map([["locus", -20]]), { alignLabels: true });
   assert.equal(preview.chrome.legend.position.x, 0);
 });

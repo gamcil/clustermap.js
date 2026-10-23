@@ -73,26 +73,6 @@ function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClus
   };
 }
 
-/**
- * Describe a transient locus translation relative to an already projected
- * scene. This is deliberately a sparse, renderer-neutral patch: it avoids
- * rebuilding the scene while a drag is in progress.
- */
-export function createLocusOffsetPreview(scene, locusUid, offset, { alignLabels }) {
-  const locus = scene.loci.get(locusUid);
-  if (!locus) return null;
-  const offsetX = offset - locus.localX;
-  const startFor = (candidate) =>
-    candidate.source.uid === locusUid ? candidate.worldStart + offsetX : candidate.worldStart;
-  const endFor = (candidate) =>
-    candidate.source.uid === locusUid ? candidate.worldEnd + offsetX : candidate.worldEnd;
-  return locusPreview(scene, {
-    type: "locus-offset",
-    locusUid,
-    offsetX,
-  }, startFor, endFor, alignLabels, [scene.clusters.get(locus.cluster.uid)]);
-}
-
 /** Describe several transient locus translations without rebuilding the scene. */
 export function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
   const locusOffsets = new Map();
@@ -201,10 +181,7 @@ export function createLocusTrimPreview(
 // accessors keep SVG, Canvas chrome, and dense WebGPU marks on the same
 // locus, cluster, and link geometry.
 export function locusOffsetForPreview(preview, locusUid) {
-  if (preview?.locusOffsets?.has(locusUid)) return preview.locusOffsets.get(locusUid);
-  return preview?.type === "locus-offset" && preview.locusUid === locusUid
-    ? preview.offsetX
-    : 0;
+  return preview?.locusOffsets?.get(locusUid) ?? 0;
 }
 
 export function clusterLabelOffsetForPreview(preview, clusterUid) {
@@ -450,7 +427,6 @@ export function recordsForPreview(scene, preview, { includeClusters = false } = 
       if (clusterOffsetForPreview(preview, locus.cluster.uid)) loci.add(locus.source.uid);
     }
   }
-  if (preview.type === "locus-offset") loci.add(preview.locusUid);
   if (preview.type === "locus-offsets") {
     for (const locusUid of preview.locusOffsets.keys()) loci.add(locusUid);
   }

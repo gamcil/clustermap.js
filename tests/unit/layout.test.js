@@ -5,7 +5,7 @@ test("scene derives world-space geometry without DOM state", async () => {
   const [{ buildScene, patchScene }, {
     createClusterDragPreview,
     createLocusFlipPreview,
-    createLocusOffsetPreview,
+    createLocusOffsetsPreview,
     createLocusTrimPreview,
     clusterLabelTextForPreview,
   }] = await Promise.all([
@@ -110,20 +110,19 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.deepEqual(topGene.bounds, { minX: 8, maxX: 14, minY: 0, maxY: 22 });
   const topLocus = scene.loci.get("top-locus");
   assert.equal(topLocus.worldStart, 6);
-  const locusOffsetPreview = createLocusOffsetPreview(scene, "top-locus", 14, { alignLabels: true });
+  const locusOffsetPreview = createLocusOffsetsPreview(scene, new Map([["top-locus", 14]]), { alignLabels: true });
   const { chrome: previewChrome, ...previewWithoutChrome } = locusOffsetPreview;
   assert.deepEqual(previewWithoutChrome, {
-    type: "locus-offset",
+    type: "locus-offsets",
     contentMaxX: 39,
-    locusUid: "top-locus",
-    offsetX: 13,
+    locusOffsets: new Map([["top-locus", 13]]),
     clusterLabelOffsets: new Map([
       ["top", 6],
       ["bottom", 6],
     ]),
   });
   assert.deepEqual(previewChrome.legend.position, { x: 59, y: 0 });
-  assert.equal(createLocusOffsetPreview(scene, "unknown", 14, { alignLabels: true }), null);
+  assert.equal(createLocusOffsetsPreview(scene, new Map([["unknown", 14]]), { alignLabels: true }), null);
   assert.deepEqual(
     createLocusFlipPreview(scene, "top-locus", { progress: 0.12 }),
     {
@@ -167,7 +166,7 @@ test("scene derives world-space geometry without DOM state", async () => {
   // The initial loci share the same left coordinate, but `alignLabels: false`
   // must still keep the preview change local to the dragged cluster.
   assert.deepEqual(
-    createLocusOffsetPreview(scene, "top-locus", 14, { alignLabels: false }).clusterLabelOffsets,
+    createLocusOffsetsPreview(scene, new Map([["top-locus", 14]]), { alignLabels: false }).clusterLabelOffsets,
     new Map([["top", 13]])
   );
   const unalignedScene = {
@@ -178,7 +177,7 @@ test("scene derives world-space geometry without DOM state", async () => {
     ]),
   };
   assert.deepEqual(
-    createLocusOffsetPreview(unalignedScene, "top-locus", 14, { alignLabels: false })
+    createLocusOffsetsPreview(unalignedScene, new Map([["top-locus", 14]]), { alignLabels: false })
       .clusterLabelOffsets,
     new Map([["top", 13]])
   );

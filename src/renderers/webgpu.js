@@ -598,7 +598,7 @@ function buildGeometry(scene, scales, config) {
 }
 
 function isLocusTransformPreview(preview) {
-  return ["locus-offset", "locus-offsets", "locus-flip"].includes(preview?.type);
+  return ["locus-offsets", "locus-flip"].includes(preview?.type);
 }
 
 function bufferFor(device, existing, data) {
