@@ -13154,13 +13154,13 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       },
       paint(request) {
         if (!request.canvas || !request.scene) return null;
-        // Prepare lazily after an annotation edit, rather than copying every navigation frame.
-        const annotationEdit = latest?.scene !== request.scene && request.scene.changes?.annotationsOnly;
+        // Capture new stable scenes while painting them, without copying navigation frames.
+        const newScene = latest?.scene !== request.scene;
         latest = { ...request };
         if (!biologyMatches(request)) biology = null;
         if (cached && !matches(latest, request.scene, cached.locusUid)) clearFlip();
         if (cached && request.preview?.type === "locus-flip" && cached.locusUid === request.preview.locusUid) return paintFlip(latest);
-        if (biology || annotationEdit && canRetainBiology(request)) return paintAnnotations(latest, !biology);
+        if (biology || newScene && canRetainBiology(request)) return paintAnnotations(latest, !biology);
         return render(latest);
       },
       destroy() { clearFlip(); biology = null; latest = null; },

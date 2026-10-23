@@ -93,15 +93,16 @@ function annotationFixture() {
   } };
 }
 
-test("annotation edits lazily retain biology and redraw only annotations on reuse", () => {
+test("stable annotation scenes retain biology before the first edit", () => {
   const { request, renders, images, canvases, editAnnotations } = annotationFixture();
-  assert.equal(canvases.length, 1, "ordinary paints do not allocate a snapshot");
-  assert.equal(editAnnotations(), "painted");
-  assert.ok(renders[1].layers.includes("genes"));
-  assert.ok(!renders[1].layers.includes("annotations"));
-  assert.deepEqual(renders[2].layers, ["annotations", "annotationLabels", "chrome"]);
-  assert.equal(renders[2].clear, false);
+  assert.equal(canvases.length, 2, "initial paint captures biology once");
+  assert.ok(renders[0].layers.includes("genes"));
+  assert.ok(!renders[0].layers.includes("annotations"));
+  assert.deepEqual(renders[1].layers, ["annotations", "annotationLabels", "chrome"]);
+  assert.equal(renders[1].clear, false);
   assert.equal(images[0][0], request.canvas, "snapshot comes from the visible biology pass");
+  assert.equal(editAnnotations(), "painted");
+  assert.equal(renders.length, 3, "the first edit needs only the annotation pass");
   editAnnotations();
   assert.equal(renders.length, 4, "subsequent edits need only one annotation pass");
   assert.equal(canvases.length, 2, "reuse does not allocate another bitmap");
@@ -154,12 +155,13 @@ for (const key of ["highlightGeneIds", "highlightLinkIds", "highlightLocusIds", 
   });
 }
 
-test("non-annotation scene commits and destroy discard retained biology", () => {
+test("non-annotation scene commits and destroy rebuild retained biology", () => {
   const { backend, request, renders, canvases, editAnnotations } = annotationFixture();
   editAnnotations();
   request.scene = { ...request.scene, changes: {} };
   backend.paint(request);
-  assert.equal(renders.at(-1).layers, undefined, "shared maps alone do not permit reuse");
+  assert.ok(renders.at(-2).layers.includes("genes"), "new scenes capture fresh biology");
+  assert.equal(canvases.length, 3);
   editAnnotations();
   assert.equal(canvases.length, 3);
   backend.destroy();
@@ -167,4 +169,19 @@ test("non-annotation scene commits and destroy discard retained biology", () => 
   backend.paint(request);
   assert.equal(renders.length, before + 2, "destroyed snapshot must be rebuilt");
   assert.equal(canvases.length, 4);
+});
+
+test("navigation paints do not capture biology until the next annotation edit", () => {
+  const { backend, request, renders, canvases, editAnnotations } = annotationFixture();
+  for (let step = 1; step <= 5; step++) {
+    request.camera.x = step * 20;
+    backend.paint(request);
+    assert.equal(renders.at(-1).layers, undefined, "navigation uses the ordinary full paint");
+  }
+  assert.equal(canvases.length, 2, "navigation does not allocate snapshots per frame");
+  editAnnotations();
+  assert.equal(canvases.length, 3, "the next edit captures the settled viewport");
+  const before = renders.length;
+  editAnnotations();
+  assert.equal(renders.length, before + 1, "later edits reuse that viewport");
 });
