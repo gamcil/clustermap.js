@@ -1,39 +1,14 @@
+import { startTestServer } from "../helpers/server.mjs";
 import { test, expect } from "@playwright/test";
-import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
-import { extname, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 
 // Exercise the shipped editor offline, independently of the demo page/server.
 let server, url;
 const pageErrors = new WeakMap();
 test.beforeAll(async () => {
-  const root = fileURLToPath(new URL("../../", import.meta.url));
-  server = createServer(async (request, response) => {
-    const pathname = new URL(request.url, "http://localhost").pathname;
-    if (pathname === "/") {
-      response.writeHead(200, { "Content-Type": "text/html" });
-      response.end('<!doctype html><style>#plot{width:1200px;height:320px}clinker-editor{height:550px}</style><div id="plot"></div><clinker-editor>\n</clinker-editor><script src="/node_modules/d3/dist/d3.min.js"></script>');
-      return;
-    }
-    const filename = resolve(root, `.${pathname}`);
-    if (!filename.startsWith(root.endsWith(sep) ? root : `${root}${sep}`)) {
-      response.writeHead(403).end();
-      return;
-    }
-    try {
-      const body = await readFile(filename);
-      response.writeHead(200, { "Content-Type": ({ ".html": "text/html", ".json": "application/json", ".css": "text/css" })[extname(filename)] || "text/javascript" });
-      response.end(body);
-    } catch { response.writeHead(404).end(); }
-  });
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  url = `http://127.0.0.1:${server.address().port}`;
+  server = await startTestServer('<!doctype html><style>#plot{width:1200px;height:320px}clinker-editor{height:550px}</style><div id="plot"></div><clinker-editor>\n</clinker-editor><script src="/node_modules/d3/dist/d3.min.js"></script>');
+  url = server.url;
 });
-test.afterAll(async () => { await new Promise((resolve) => server.close(resolve)); });
+test.afterAll(() => server.close());
 test.use({ viewport: { width: 1600, height: 1000 } });
 test.beforeEach(async ({ page }) => {
   const errors = [];

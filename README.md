@@ -330,7 +330,7 @@ npm run test:editor-browser
 npm run test:tree-browser
 ```
 
-Browser checks start local servers and use local dependencies. They cover
+Browser checks start their local servers automatically and use local dependencies. They cover
 editing, themes, layout, history, tree interactions, virtual scrolling and
 project/SVG round trips from SVG and Canvas renderers.
 
