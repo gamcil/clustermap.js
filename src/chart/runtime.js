@@ -90,7 +90,6 @@ function renderConfig() {
 let chartIndex = null;
 let chartState = null;
 let currentScene = null;
-let beforeGeneAnchorUpdate = null;
 let allowedLinkIds = null;
 
 // IDs are part of the SVG surface, so they must be unique when several maps
@@ -325,10 +324,6 @@ function getScene() {
   return currentScene;
 }
 
-function setBeforeGeneAnchorUpdate(callback) {
-  beforeGeneAnchorUpdate = callback;
-}
-
 function anchorGene(anchor, { flipMismatchedLoci = false } = {}) {
   const genes = scales.group
     .domain()
@@ -356,7 +351,6 @@ function anchorGene(anchor, { flipMismatchedLoci = false } = {}) {
   });
 
   refreshClusterOffsetScale();
-  beforeGeneAnchorUpdate?.({ changes, flippedLoci });
   return { changes, flippedLoci };
 }
 
@@ -437,12 +431,9 @@ return {
   setChartState,
   scales,
   updateScales,
-  updateGroups,
   getScene,
-  buildScene: buildChartScene,
   patchScene: patchChartScene,
   updateScene,
-  setBeforeGeneAnchorUpdate,
   anchorGene,
 };
 }

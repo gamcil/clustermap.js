@@ -188,19 +188,17 @@ export default function clusterMap() {
     getRenderer: () => runtime.config.plot.renderer,
     getAdaptiveResolution: () => runtime.config.plot.adaptiveResolution,
   });
-  runtime.setBeforeGeneAnchorUpdate(({ changes, flippedLoci }) => {
-    const sourceScene = runtime.getScene();
-    // Anchoring changes cluster origins and, when strands disagree, a small
-    // set of loci. The scene patch retains everything else for every backend.
-    if (!sourceScene || (!changes.length && !flippedLoci.size)) return;
-    sceneCommit = {
-      sourceScene,
-      changes: { loci: [...flippedLoci], clusters: changes.map(({ clusterUid }) => clusterUid) },
-    };
-  });
   const anchorGene = (gene, { flipMismatchedLoci = false } = {}) => {
     beginInteractionState();
+    const sourceScene = runtime.getScene();
     const result = runtime.anchorGene(gene, { flipMismatchedLoci });
+    const { changes, flippedLoci } = result;
+    if (sourceScene && (changes.length || flippedLoci.size)) {
+      sceneCommit = {
+        sourceScene,
+        changes: { loci: [...flippedLoci], clusters: changes.map(({ clusterUid }) => clusterUid) },
+      };
+    }
     redraw();
     commitInteractionState();
     return result;

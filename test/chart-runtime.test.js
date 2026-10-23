@@ -8,7 +8,7 @@ test("runtime keeps default interaction callbacks declarative", async () => {
   assert.equal(runtime.config.gene.shape.onClick, null);
   assert.equal(runtime.config.legend.onClickText, null);
   assert.equal(typeof runtime.anchorGene, "function");
-  assert.equal(typeof runtime.buildScene, "function");
+  assert.equal(typeof runtime.updateScene, "function");
   assert.equal(typeof runtime.updateScales, "function");
   assert.equal("plot" in runtime, false);
   assert.equal("scale" in runtime, false);
@@ -65,11 +65,9 @@ test("runtime applies best-only link visibility to the shared scene", async () =
   const runtime = createChartRuntime();
   runtime.setChartIndex(createChartIndex(data));
   runtime.setChartState(createChartState(data));
-  runtime.updateGroups(data.groups);
-  runtime.updateScales(data);
   runtime.configure({ link: { bestOnly: true } });
 
-  const scene = runtime.buildScene(data);
+  const scene = runtime.updateScene(data);
   assert.equal(scene.links.get("lower").allowed, false);
   assert.equal(scene.links.get("lower").visible, false);
   assert.equal(scene.links.get("higher").allowed, true);
@@ -103,7 +101,6 @@ test("runtime accepts initial locus offsets in sequence-coordinate units", async
   const state = createChartState(data);
   runtime.setChartIndex(createChartIndex(data));
   runtime.setChartState(state);
-  runtime.updateGroups(data.groups);
   runtime.updateScales(data);
 
   assert.equal(

@@ -109,11 +109,11 @@ test("selection pruning validates parent anchors separately from member gene IDs
 
 test("shared highlight and hit geometry fits tight row gaps, including scene patches", async () => {
   const data = await fixture(), state = createChartState(data), runtime = createChartRuntime();
-  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state); runtime.updateGroups(data.groups);
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   const height = runtime.renderConfig.gene.shape.tipHeight * 2 + runtime.renderConfig.gene.shape.bodyHeight;
   for (const spacing of [40, 10, 4, 0]) {
-    runtime.configure({ cluster: { spacing } }); runtime.updateScales(data);
-    const scene = runtime.buildScene(data), loci = [...scene.loci.values()].sort((a, b) => a.y - b.y);
+    runtime.configure({ cluster: { spacing } });
+    const scene = runtime.updateScene(data), loci = [...scene.loci.values()].sort((a, b) => a.y - b.y);
     const padding = Math.min(10, spacing / 4);
     assert.equal(loci[0].hover.y, -padding);
     assert.equal(loci[0].hover.height, height + padding * 2);
