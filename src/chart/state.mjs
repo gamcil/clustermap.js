@@ -431,4 +431,5 @@ export function flipLocus(chartState, locus) {
   locus.genes.sort(
     (a, b) => getGeneState(chartState, a).start - getGeneState(chartState, b).start
   );
+  return true;
 }

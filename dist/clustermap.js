@@ -8588,6 +8588,7 @@
     locus.genes.sort(
       (a, b) => getGeneState(chartState, a).start - getGeneState(chartState, b).start
     );
+    return true;
   }
 
   function appendToIndex(index, key, value) {
@@ -16324,66 +16325,29 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     my.clusterSelection = function (ids) {
       return arguments.length ? my.selection({ kind: "clusters", ids }) : [...selectedClusterIds()];
     };
-    /** Flip the supplied loci, or the current locus selection, as one operation. */
-    my.flipLoci = function (ids = selectedLoci()) {
+    function editLoci(action, update, ids = selectedLoci(), animate = false) {
       if (!container || !currentData || !chartIndex || !chartState) {
-        throw new Error("Cannot flip loci before the chart has rendered.");
+        throw new Error(`Cannot ${action} loci before the chart has rendered.`);
       }
-      const loci = [...new Set(ids || [])]
-        .map(locusForId)
-        .filter(Boolean);
+      const loci = [...new Set(ids || [])].map(locusForId).filter(Boolean);
       if (!loci.length) return my;
       const before = stateSnapshots.serialize(chartState, currentData);
       flushCanvasFlip();
       clearScenePreview();
-      for (const locus of loci) flipLocus(chartState, locus);
-      redraw({ animate: true });
-      emitChange({ type: "loci.flip", locusIds: loci.map((locus) => locus.uid) });
+      let changed = false;
+      for (const locus of loci) changed = update(chartState, locus) || changed;
+      if (!changed) return my;
+      redraw({ animate });
+      emitChange({ type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) });
       remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
       return my;
-    };
+    }
+    /** Flip supplied loci, or the current selection, as one operation. */
+    my.flipLoci = (ids) => editLoci("flip", flipLocus, ids, true);
     /** Trim selected loci to their displayed outermost genes as one edit. */
-    my.trimLoci = function (ids = selectedLoci()) {
-      if (!container || !currentData || !chartIndex || !chartState) {
-        throw new Error("Cannot trim loci before the chart has rendered.");
-      }
-      const loci = [...new Set(ids || [])]
-        .map(locusForId)
-        .filter(Boolean);
-      if (!loci.length) return my;
-      const before = stateSnapshots.serialize(chartState, currentData);
-      flushCanvasFlip();
-      clearScenePreview();
-      let changed = false;
-      for (const locus of loci) changed = trimLocusToGeneBounds(chartState, locus) || changed;
-      if (!changed) return my;
-      redraw({ animate: false });
-      const locusIds = loci.map((locus) => locus.uid);
-      emitChange({ type: "loci.trim", locusIds });
-      remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
-      return my;
-    };
+    my.trimLoci = (ids) => editLoci("trim", trimLocusToGeneBounds, ids);
     /** Restore selected loci to their full bounds as one edit. */
-    my.restoreLoci = function (ids = selectedLoci()) {
-      if (!container || !currentData || !chartIndex || !chartState) {
-        throw new Error("Cannot restore loci before the chart has rendered.");
-      }
-      const loci = [...new Set(ids || [])]
-        .map(locusForId)
-        .filter(Boolean);
-      if (!loci.length) return my;
-      const before = stateSnapshots.serialize(chartState, currentData);
-      flushCanvasFlip();
-      clearScenePreview();
-      let changed = false;
-      for (const locus of loci) changed = restoreLocusBounds(chartState, locus) || changed;
-      if (!changed) return my;
-      redraw({ animate: false });
-      const locusIds = loci.map((locus) => locus.uid);
-      emitChange({ type: "loci.restore", locusIds });
-      remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
-      return my;
-    };
+    my.restoreLoci = (ids) => editLoci("restore", restoreLocusBounds, ids);
     /** Frame supplied record IDs without changing their selection. */
     my.focus = function (ids) {
       const isScoped = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
