@@ -153,17 +153,10 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
       colourBar: { visible: false },
     },
     hitRegions: {
-      all: [
-        {
-          type: "rect",
-          action: "move-locus",
-          locusUid: "locus",
-          x: 0,
-          y: 0,
-          width: 10,
-          height: 10,
-        },
-      ],
+      genes: new Map(),
+      loci: new Map([["locus", { move: {
+        type: "rect", action: "move-locus", locusUid: "locus", x: 0, y: 0, width: 10, height: 10,
+      } }]]),
     },
   };
   const distantGene = {
@@ -182,6 +175,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     ]),
     loci: createSpatialIndex([["locus", { minX: 5, maxX: 15, minY: 0, maxY: 30 }]]),
     links: createSpatialIndex([["link", renderedLink.bounds]]),
+    hitLoci: createSpatialIndex([["locus", { minX: 0, maxX: 10, minY: 0, maxY: 10 }]]),
   };
   const config = {
     plot: { fontFamily: "sans-serif" },
@@ -406,12 +400,12 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
       config,
       event: { clientX: 5, clientY: 5 },
     }),
-    scene.hitRegions.all[0]
+    scene.hitRegions.loci.get("locus").move
   );
   assert.deepEqual(
     hitTestCanvas({
       canvas,
-      scene: { ...scene, hitRegions: { all: [] } },
+      scene: { ...scene, hitRegions: { genes: new Map(), loci: new Map() } },
       camera: { x: 0, y: 0, k: 1 },
       config,
       event: { clientX: 0, clientY: 22 },

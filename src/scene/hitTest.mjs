@@ -1,3 +1,5 @@
+import { queryPointOrdered } from "./spatialIndex.mjs";
+
 function containsRect({ x, y, width, height }, point) {
   return (
     point.x >= x &&
@@ -47,23 +49,15 @@ function contains(region, point) {
  * precedence over a locus move region.
  */
 export function hitTest(scene, point) {
-  if (scene.index?.genes && scene.index?.hitLoci && scene.hitRegions.genes && scene.hitRegions.loci) {
-    for (const uid of queryPointOrdered(scene.index.genes, point).reverse()) {
-      const region = scene.hitRegions.genes.get(uid);
+  for (const uid of queryPointOrdered(scene.index.genes, point).reverse()) {
+    const region = scene.hitRegions.genes.get(uid);
+    if (region && contains(region, point)) return region;
+  }
+  for (const uid of queryPointOrdered(scene.index.hitLoci, point).reverse()) {
+    const regions = scene.hitRegions.loci.get(uid);
+    for (const region of [regions?.trimRight, regions?.trimLeft, regions?.move]) {
       if (region && contains(region, point)) return region;
     }
-    for (const uid of queryPointOrdered(scene.index.hitLoci, point).reverse()) {
-      const regions = scene.hitRegions.loci.get(uid);
-      for (const region of [regions?.trimRight, regions?.trimLeft, regions?.move]) {
-        if (region && contains(region, point)) return region;
-      }
-    }
-    return null;
-  }
-  for (let index = scene.hitRegions.all.length - 1; index >= 0; index -= 1) {
-    const region = scene.hitRegions.all[index];
-    if (contains(region, point)) return region;
   }
   return null;
 }
-import { queryPointOrdered } from "./spatialIndex.mjs";

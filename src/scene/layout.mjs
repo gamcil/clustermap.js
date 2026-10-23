@@ -398,22 +398,19 @@ function createGeneHitRegion(gene) {
 function buildHitRegions(loci, genes) {
   const locusRegions = new Map();
   const geneRegions = new Map();
-  const all = [];
 
   for (const locus of loci.values()) {
     const regions = createLocusHitRegions(locus);
     locusRegions.set(locus.source.uid, regions);
-    all.push(regions.move, regions.trimLeft, regions.trimRight);
   }
 
   for (const gene of genes.values()) {
     const region = createGeneHitRegion(gene);
     if (!region) continue;
     geneRegions.set(gene.source.uid, region);
-    all.push(region);
   }
 
-  return { all, loci: locusRegions, genes: geneRegions };
+  return { loci: locusRegions, genes: geneRegions };
 }
 
 function adjacencyForOrder(order, fallback) {
@@ -800,9 +797,6 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
   }
   const hitRegions = {
     loci: locusRegions, genes: geneRegions,
-    // Match full-build hit order: all locus handles, then visible genes.
-    all: [...locusRegions.values()].flatMap(({ move, trimLeft, trimRight }) => [move, trimLeft, trimRight])
-      .concat([...genes.keys()].map((uid) => geneRegions.get(uid)).filter(Boolean)),
   };
   const entries = (records, ids, boundsFor = (record) => record.bounds) =>
     [...ids].map((uid) => [uid, boundsFor(records.get(uid))]);

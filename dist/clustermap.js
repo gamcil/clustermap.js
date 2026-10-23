@@ -4363,22 +4363,19 @@
   function buildHitRegions(loci, genes) {
     const locusRegions = new Map();
     const geneRegions = new Map();
-    const all = [];
 
     for (const locus of loci.values()) {
       const regions = createLocusHitRegions(locus);
       locusRegions.set(locus.source.uid, regions);
-      all.push(regions.move, regions.trimLeft, regions.trimRight);
     }
 
     for (const gene of genes.values()) {
       const region = createGeneHitRegion(gene);
       if (!region) continue;
       geneRegions.set(gene.source.uid, region);
-      all.push(region);
     }
 
-    return { all, loci: locusRegions, genes: geneRegions };
+    return { loci: locusRegions, genes: geneRegions };
   }
 
   function adjacencyForOrder(order, fallback) {
@@ -4765,9 +4762,6 @@
     }
     const hitRegions = {
       loci: locusRegions, genes: geneRegions,
-      // Match full-build hit order: all locus handles, then visible genes.
-      all: [...locusRegions.values()].flatMap(({ move, trimLeft, trimRight }) => [move, trimLeft, trimRight])
-        .concat([...genes.keys()].map((uid) => geneRegions.get(uid)).filter(Boolean)),
     };
     const entries = (records, ids, boundsFor = (record) => record.bounds) =>
       [...ids].map((uid) => [uid, boundsFor(records.get(uid))]);
@@ -10109,22 +10103,15 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
    * precedence over a locus move region.
    */
   function hitTest(scene, point) {
-    if (scene.index?.genes && scene.index?.hitLoci && scene.hitRegions.genes && scene.hitRegions.loci) {
-      for (const uid of queryPointOrdered(scene.index.genes, point).reverse()) {
-        const region = scene.hitRegions.genes.get(uid);
+    for (const uid of queryPointOrdered(scene.index.genes, point).reverse()) {
+      const region = scene.hitRegions.genes.get(uid);
+      if (region && contains(region, point)) return region;
+    }
+    for (const uid of queryPointOrdered(scene.index.hitLoci, point).reverse()) {
+      const regions = scene.hitRegions.loci.get(uid);
+      for (const region of [regions?.trimRight, regions?.trimLeft, regions?.move]) {
         if (region && contains(region, point)) return region;
       }
-      for (const uid of queryPointOrdered(scene.index.hitLoci, point).reverse()) {
-        const regions = scene.hitRegions.loci.get(uid);
-        for (const region of [regions?.trimRight, regions?.trimLeft, regions?.move]) {
-          if (region && contains(region, point)) return region;
-        }
-      }
-      return null;
-    }
-    for (let index = scene.hitRegions.all.length - 1; index >= 0; index -= 1) {
-      const region = scene.hitRegions.all[index];
-      if (contains(region, point)) return region;
     }
     return null;
   }
