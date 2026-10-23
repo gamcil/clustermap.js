@@ -319,6 +319,9 @@ Loci menu, to the member loci of selected clusters.
 
 ## Development checks
 
+Unit tests live in `tests/unit/`; browser checks live in `tests/browser/`.
+The standalone tree check uses Node; the `.spec.js` files use Playwright.
+
 ```sh
 npm run build
 npm test

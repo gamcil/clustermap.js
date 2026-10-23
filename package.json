@@ -37,10 +37,10 @@
     "bench:rendering": "node bench/run.mjs",
     "build": "rollup --config",
     "import:clinker": "node scripts/import-clinker-render.mjs",
-    "test": "node --test test/*.test.js",
-    "test:baseline": "node --test test/baseline.test.js",
-    "test:tree-browser": "node test/tree-browser.mjs",
-    "test:editor-browser": "playwright test tests/editor-regressions.spec.js --project=chromium --workers=1"
+    "test": "node --test tests/unit/*.test.js",
+    "test:baseline": "node --test tests/unit/baseline.test.js",
+    "test:tree-browser": "node tests/browser/tree-browser.mjs",
+    "test:editor-browser": "playwright test tests/browser/editor-regressions.spec.js --project=chromium --workers=1"
   },
   "author": "",
   "license": "ISC",
