@@ -9,7 +9,7 @@ import { setTreeClusterOrder } from "../src/tree/model.mjs";
 import { serializeChartState, chartStateFromSnapshot } from "../src/chart/snapshot.mjs";
 import { createChartRuntime } from "../src/chart/runtime.js";
 import { plotSelectionOptions } from "../src/interaction/controller.mjs";
-import { RowSelection } from "../src/ui/selection.mjs";
+import { RowSelection } from "../src/editor/shared/selection.mjs";
 
 const fixture = async () => normalizeChartData(JSON.parse(await readFile(new URL("../fixtures/heatmap.json", import.meta.url), "utf8")));
 

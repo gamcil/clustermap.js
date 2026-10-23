@@ -4,7 +4,7 @@ import { installDataEditorStyle } from "../editor/shared/styles.mjs";
 import { defineAnnotationEditor } from "../editor/components/annotation-editor/annotation-editor.js";
 import { createAnnotationControls } from "./controls.mjs";
 import { defineAnnotationDataForm } from "../editor/components/annotation-data-form/annotation-data-form.js";
-import { createAnnotationPanel } from "./data.mjs";
+import { createAnnotationPanel } from "./io.mjs";
 
 const css = await textAsset(new URL("./overlay.css", import.meta.url));
 

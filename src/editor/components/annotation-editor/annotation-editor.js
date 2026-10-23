@@ -6,7 +6,7 @@ import { defineAnnotationDataForm } from "../annotation-data-form/annotation-dat
 import { defineAnnotationGroupEditor } from "../annotation-group-editor/annotation-group-editor.js";
 import { defineAnnotationTable } from "../annotation-table/annotation-table.js";
 import { createTemplate, createActionRunner } from "../../../ui/controls.mjs";
-import { createAnnotationPanel, parseAnnotationTable, annotationTableText, mapAnnotationValues } from "../../../annotations/data.mjs";
+import { createAnnotationPanel, parseAnnotationTable, annotationTableText, mapAnnotationValues } from "../../../annotations/io.mjs";
 import { textAsset, installStyle } from "../../../ui/assets.mjs";
 
 const [markup, css] = await Promise.all([

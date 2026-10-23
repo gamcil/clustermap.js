@@ -2,9 +2,9 @@ import { m as mountComponent, c as createTemplate, a as controlStyles, u as upgr
 import { e as editorThemeStyles, a as applyEditorTheme } from './editor/theme-3d7fc189.mjs';
 import { d as defineAppearancePanel } from './editor/appearance-panel-8402fbb3.mjs';
 export { C as ClinkerAppearancePanelElement, d as defineAppearancePanel } from './editor/appearance-panel-8402fbb3.mjs';
-import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-80d089d9.mjs';
-export { C as ClinkerDataPanelElement, d as defineDataPanel } from './editor/data-panel-80d089d9.mjs';
-import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-ac8a4410.mjs';
+import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-470094c9.mjs';
+export { C as ClinkerDataPanelElement, d as defineDataPanel } from './editor/data-panel-470094c9.mjs';
+import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-93f0191e.mjs';
 
 const [markup$1, css$2] = await Promise.all([
   "<div part=\"tab-list\" role=\"tablist\">\n  <template><button type=\"button\" role=\"tab\"></button></template>\n</div>\n<slot name=\"status\"></slot>\n<div part=\"panels\">\n  <template><div role=\"tabpanel\" tabindex=\"0\"><slot></slot></div></template>\n</div>\n",

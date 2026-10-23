@@ -1,6 +1,6 @@
 import { DATA_EDITOR_CSS } from "../../shared/styles.mjs";
-import { RowSelection } from "../../../ui/selection.mjs";
-import { DATA_ROW_HEIGHT } from "../../../ui/virtualRows.mjs";
+import { RowSelection } from "../../shared/selection.mjs";
+import { DATA_ROW_HEIGHT } from "../../shared/virtualRows.mjs";
 import { ANNOTATION_PALETTES, resolveAnnotationScale } from "../../../annotations/model.mjs";
 import { defineAnnotationEditor } from "../annotation-editor/annotation-editor.js";
 import { createActionRunner, createTemplate, upgradeProperty } from "../../../ui/controls.mjs";
