@@ -12626,36 +12626,20 @@ function xDistance(scaleX, start, end) {
   return scaleX(end) - scaleX(start);
 }
 
-function getClusterLocusRange(
-  cluster,
-  { scaleX, locusOffset, spacing, locusState }
-) {
-  const range = [];
-  let value = 1;
-  let start;
-  let end;
-
-  for (const [index, locus] of cluster.loci.entries()) {
-    if (index > 0) value = range[range.length - 1] + end - start + spacing;
-    const offset = locusOffset(locus.uid) || 0;
-    const state = locusState ? locusState(locus) : locus;
-    start = scaleX(state.start ?? locus.start);
-    end = scaleX(state.end ?? locus.end);
-    range.push(value - start + offset);
-  }
-
-  return range;
-}
-
-function getLocusScaleValues(clusters, layout) {
-  const domain = [];
-  const range = [];
-
+function getLocusScaleValues(clusters, { scaleX, locusOffset, spacing, locusState }) {
+  const domain = [], range = [];
   for (const cluster of clusters) {
-    domain.push(...cluster.loci.map((locus) => locus.uid));
-    range.push(...getClusterLocusRange(cluster, layout));
+    let value = 1, start, end;
+    for (const [index, locus] of cluster.loci.entries()) {
+      if (index > 0) value = range[range.length - 1] + end - start + spacing;
+      const offset = locusOffset(locus.uid) || 0;
+      const state = locusState ? locusState(locus) : locus;
+      start = scaleX(state.start ?? locus.start);
+      end = scaleX(state.end ?? locus.end);
+      domain.push(locus.uid);
+      range.push(value - start + offset);
+    }
   }
-
   return { domain, range };
 }
 
@@ -12693,16 +12677,6 @@ function refreshLocusOffsetScale() {
   scales.locus.range(
     scales.locus.domain().map((uid) => getLocusOffset(chartState, uid))
   );
-}
-
-function locusLayout() {
-  return {
-    scaleX: scales.x,
-    clusterOffset: scales.offset,
-    locusOffset: scales.locus,
-    locusState,
-    spacing: config.locus.spacing,
-  };
 }
 
 function synchronizeLocusLayoutState(locus, { refresh = true } = {}) {
@@ -13023,8 +12997,10 @@ function updateScales(data, { geometryOnly = false } = {}) {
   scales.offset.domain(data.clusters.map((cluster) => cluster.uid));
   refreshClusterOffsetScale();
   const { domain, range } = getLocusScaleValues(data.clusters, {
-    ...locusLayout(),
+    scaleX: scales.x,
     locusOffset: () => 0,
+    locusState,
+    spacing: config.locus.spacing,
   });
   // A producer such as clinker may supply an initial alignment as a locus
   // offset in sequence-coordinate units. Convert it through the active x

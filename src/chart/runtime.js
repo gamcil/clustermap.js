@@ -48,16 +48,6 @@ function refreshLocusOffsetScale() {
   );
 }
 
-function locusLayout() {
-  return {
-    scaleX: scales.x,
-    clusterOffset: scales.offset,
-    locusOffset: scales.locus,
-    locusState,
-    spacing: config.locus.spacing,
-  };
-}
-
 function synchronizeLocusLayoutState(locus, { refresh = true } = {}) {
   const { oldStart } = synchronizeLocusState(
     chartState,
@@ -376,8 +366,10 @@ function updateScales(data, { geometryOnly = false } = {}) {
   scales.offset.domain(data.clusters.map((cluster) => cluster.uid));
   refreshClusterOffsetScale();
   const { domain, range } = getLocusScaleValues(data.clusters, {
-    ...locusLayout(),
+    scaleX: scales.x,
     locusOffset: () => 0,
+    locusState,
+    spacing: config.locus.spacing,
   });
   // A producer such as clinker may supply an initial alignment as a locus
   // offset in sequence-coordinate units. Convert it through the active x
