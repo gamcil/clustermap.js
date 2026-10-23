@@ -11,6 +11,7 @@ import {
   clusterPreviewInViewport,
   genePolygonForPreview,
   linkGeometryForPreview,
+  linkVisibleForPreview,
   recordsForPreview,
   clusterOffsetForPreview,
   geneVisibleForPreview,
@@ -600,10 +601,6 @@ function isLocusTransformPreview(preview) {
   return ["locus-offset", "locus-offsets", "locus-flip"].includes(preview?.type);
 }
 
-function viewportForCamera(camera, width, height, overscan = 20) {
-  return worldViewport(camera, { width, height }, overscan);
-}
-
 function bufferFor(device, existing, data) {
   if (!data.byteLength) return null;
   if (!existing || existing.size < data.byteLength) {
@@ -947,18 +944,8 @@ export async function createWebGpuRenderer(canvas) {
     for (const pair of pairs) {
       for (const uid of scene.linksByClusterPair?.get(pair) || []) {
         const link = scene.links.get(uid);
-        const query = link && scene.genes.get(link.source.query.uid);
-        const target = link && scene.genes.get(link.source.target.uid);
         const index = link && linkRecordIndexByUid.get(link.source.uid);
-        if (
-          query?.visible &&
-          target?.visible &&
-          link.allowed &&
-          link.source.identity >= config.link.threshold &&
-          index !== undefined
-        ) {
-          indices.push(index);
-        }
+        if (index !== undefined && linkVisibleForPreview(scene, link, nextPreview, config)) indices.push(index);
       }
     }
     const values = new Uint32Array(indices);
@@ -1291,7 +1278,7 @@ export async function createWebGpuRenderer(canvas) {
         previewLinksActive = false;
       }
       if (preview !== nextPreview) {
-        applyPreview(nextPreview, scales, config, viewportForCamera(camera, width, height));
+        applyPreview(nextPreview, scales, config, worldViewport(camera, { width, height }));
         preview = nextPreview;
       }
       updateAnnotations(nextPreview);
@@ -1366,7 +1353,7 @@ export async function createWebGpuRenderer(canvas) {
         pass.draw(6, geneEdgeCount);
       }
       if (annotationCount || annotationKeyCount) {
-        const ranges = annotationDrawRanges(nextPreview, viewportForCamera(camera, width, height));
+        const ranges = annotationDrawRanges(nextPreview, worldViewport(camera, { width, height }));
         if (ranges.cells.length || ranges.keys.length) {
           rectanglePipeline ||= device.createRenderPipeline(rectanglePipelineDescriptor);
           pass.setPipeline(rectanglePipeline);

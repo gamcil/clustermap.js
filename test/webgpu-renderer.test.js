@@ -5,6 +5,7 @@ import { createWebGpuRenderer } from "../src/renderers/webgpu.js";
 import { normalizeChartData } from "../src/data/normalize.mjs";
 import { createChartIndex } from "../src/data/index.mjs";
 import { createChartRuntime } from "../src/chart/runtime.js";
+import { createClusterDragPreview } from "../src/scene/preview.mjs";
 import { createChartState, setClusterOffset, setLocusOffset, setPreviewClusterOrder,
   commitPreviewClusterOrder, flipLocus, trimLocusToGeneBounds } from "../src/chart/state.mjs";
 
@@ -53,7 +54,7 @@ test("WebGPU adopts shared scene changes without reallocating geometry", async (
   runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   let scene = runtime.updateScene(data);
   const options = { scales: runtime.scales, config: runtime.renderConfig };
-  const render = () => renderer.render({ nextScene: scene, ...options, camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 });
+  const render = (preview = null) => renderer.render({ nextScene: scene, preview, ...options, camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 });
   render();
   const geometryBuffers = () => buffers.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX);
   const initialGeometry = geometryBuffers(), first = data.clusters[0], locus = first.loci[0];
@@ -79,4 +80,9 @@ test("WebGPU adopts shared scene changes without reallocating geometry", async (
   commit(() => setLocusOffset(state, locus.uid, 35), true);
   commit(() => trimLocusToGeneBounds(state, locus), true, [locus.uid]);
   commit(() => flipLocus(state, locus), true, [locus.uid]);
+  render(createClusterDragPreview(scene, {
+    clusterUid: first.uid, position: initialY, order: state.clusterOrder, rows: runtime.scales.y.range(),
+  }));
+  assert.deepEqual(geometryBuffers(), initialGeometry, "cluster previews retain the geometry buffers");
+  render();
 });
