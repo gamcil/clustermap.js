@@ -1,14 +1,14 @@
 <div class="toolbar" part="toolbar"><clinker-search-field data-appearance-filter label="Find an appearance setting" placeholder="Find a setting"></clinker-search-field></div>
 <div class="settings" part="settings">
-  <fieldset>
+  <fieldset data-appearance-section="plot">
     <legend>Plot</legend>
     <label><span>Figure background</span><input type="color" data-config="plot.background" aria-label="Figure background"></label>
   </fieldset>
-  <fieldset>
+  <fieldset data-appearance-section="annotations">
     <legend>Annotations</legend>
     <label><span>Enable annotation panels</span><input type="checkbox" data-config="annotations.enabled" aria-label="Enable annotation panels"></label>
   </fieldset>
-  <fieldset>
+  <fieldset data-appearance-section="legend">
     <legend>Legend</legend>
     <label><span>Show legend</span><input type="checkbox" data-config="legend.show" aria-label="Show legend"></label>
     <label><span>Position</span><select data-config="legend.position" aria-label="Position"><option value="right">right</option><option value="bottom">bottom</option></select></label>
@@ -23,7 +23,7 @@
       <label><span>Top margin</span><input type="number" step="any" data-config="legend.marginTop" aria-label="Top margin"></label>
     </details>
   </fieldset>
-  <fieldset>
+  <fieldset data-appearance-section="links">
     <legend>Links</legend>
     <label><span>Show links</span><input type="checkbox" data-config="link.show" aria-label="Show links"></label>
     <label><span>Draw as lines</span><input type="checkbox" data-config="link.asLine" aria-label="Draw as lines"></label>
@@ -36,7 +36,7 @@
       <label><span>Stroke width</span><input type="number" step="any" data-config="link.strokeWidth" aria-label="Stroke width"></label>
     </details>
   </fieldset>
-  <fieldset>
+  <fieldset data-appearance-section="link-labels">
     <legend>Link labels</legend>
     <label><span>Show link labels</span><input type="checkbox" data-config="link.label.show" aria-label="Show link labels"></label>
     <details data-appearance-section="link-labels">
@@ -46,7 +46,7 @@
       <label><span>Position</span><input type="number" step="any" data-config="link.label.position" aria-label="Position"></label>
     </details>
   </fieldset>
-  <fieldset>
+  <fieldset data-appearance-section="tree">
     <legend>Tree</legend>
     <label><span>Show tree</span><input type="checkbox" data-config="tree.show" aria-label="Show tree"></label>
     <label><span>Tree width</span><input type="number" step="any" data-config="tree.width" aria-label="Tree width"></label>
@@ -65,7 +65,7 @@
       <label><span>Leaf guide dash pattern</span><input type="text" data-config="tree.leafGuide.dash" aria-label="Leaf guide dash pattern"></label>
     </details>
   </fieldset>
-  <fieldset>
+  <fieldset data-appearance-section="clusters-loci">
     <legend>Clusters &amp; loci</legend>
     <label><span>Align cluster labels</span><input type="checkbox" data-config="cluster.alignLabels" aria-label="Align cluster labels"></label>
     <label><span>Hide locus coordinates</span><input type="checkbox" data-config="cluster.hideLocusCoordinates" aria-label="Hide locus coordinates"></label>
@@ -84,7 +84,7 @@
       <label><span>Track stroke</span><input type="number" step="any" data-config="locus.trackBar.stroke" aria-label="Track stroke"></label>
     </details>
   </fieldset>
-  <fieldset>
+  <fieldset data-appearance-section="genes">
     <legend>Genes</legend>
     <label><span>Show gene labels</span><input type="checkbox" data-config="gene.label.show" aria-label="Show gene labels"></label>
     <label><span>Label field</span><select data-config="gene.label.name" aria-label="Label field"><option value="uid">uid</option><option value="name">name</option><option value="label">label</option></select></label>
@@ -103,7 +103,7 @@
       <label><span>Stroke width</span><input type="number" step="any" data-config="gene.shape.strokeWidth" aria-label="Stroke width"></label>
     </details>
   </fieldset>
-  <fieldset>
+  <fieldset data-appearance-section="scale-bars">
     <legend>Scale bars</legend>
     <label><span>Show scale bar</span><input type="checkbox" data-config="scaleBar.show" aria-label="Show scale bar"></label>
     <label><span>Base pairs</span><input type="number" step="any" data-config="scaleBar.basePair" aria-label="Base pairs"></label>
@@ -125,7 +125,7 @@
       <label><span>Identity margin</span><input type="number" step="any" data-config="colourBar.marginTop" aria-label="Identity margin"></label>
     </details>
   </fieldset>
-  <fieldset>
+  <fieldset data-appearance-section="plot-navigation">
     <legend>Plot &amp; navigation</legend>
     <label><span>Renderer</span><select data-config="plot.renderer" aria-label="Renderer"><option value="svg">svg</option><option value="canvas">canvas</option><option value="webgpu">webgpu</option></select></label>
     <label><span>Show minimap</span><input type="checkbox" data-config="plot.minimap.show" aria-label="Show minimap"></label>

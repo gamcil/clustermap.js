@@ -15,6 +15,7 @@ const HTMLElementBase = globalThis.HTMLElement || class {};
 
 /** Optional editor for an already rendered chart; edits use its public API. */
 export class ClinkerEditorElement extends HTMLElementBase {
+  static observedAttributes = ["hidden"];
   #chart = null;
   #dataPanel = null;
   #appearancePanel = null;
@@ -58,6 +59,13 @@ export class ClinkerEditorElement extends HTMLElementBase {
     this.#unsubscribe?.(); this.#unsubscribe = null;
   }
 
+  attributeChangedCallback(name, previous, next) {
+    if (name !== "hidden" || previous === next || !this.isConnected) return;
+    this.dispatchEvent(new CustomEvent(this.hidden ? "clinker-editor-close" : "clinker-editor-open", {
+      bubbles: true, composed: true,
+    }));
+  }
+
   get chart() { return this.#chart; }
   set chart(value) {
     if (value === this.#chart) return;
@@ -70,11 +78,25 @@ export class ClinkerEditorElement extends HTMLElementBase {
   editAnnotations(panelUid) { this.#openData().editAnnotations(panelUid); return this; }
   editSelection(selection) { this.#openData().editSelection(selection); return this; }
 
-  #openData() {
+  open({ tab = null } = {}) {
+    if (tab !== null && !["data", "appearance"].includes(tab)) throw new TypeError(`Unknown editor tab: ${tab}`);
     if (!this.#dataPanel) { this.#renderShell(); this.#render(); }
+    if (tab !== null) this.shadowRoot.querySelector("[data-editor-tabs]").value = tab;
     this.hidden = false;
-    this.shadowRoot.querySelector("[data-editor-tabs]")?.setAttribute("value", "data");
-    this.dispatchEvent(new CustomEvent("clinker-editor-open", { bubbles: true, composed: true }));
+    return this;
+  }
+
+  close() { this.hidden = true; return this; }
+
+  async openAppearance({ section = null, focus = true } = {}) {
+    if (!this.isConnected || !this.#chart) return false;
+    if (!this.#appearancePanel.sections.includes(section) && section !== null) return false;
+    this.open({ tab: "appearance" });
+    return this.#appearancePanel.openSection(section, { focus });
+  }
+
+  #openData() {
+    this.open({ tab: "data" });
     return this.#dataPanel;
   }
 

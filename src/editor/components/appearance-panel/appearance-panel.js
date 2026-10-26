@@ -23,6 +23,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
   #filter = "";
   #expanded = new Set();
   #sections;
+  #navigation = 0;
 
   constructor() {
     super();
@@ -37,7 +38,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
     this.#tree.addEventListener("colouring-change", (event) => { if (!runTreeEdit(() => this.#chart.patch(colouring(event.detail)))) event.preventDefault(); });
     this.#tree.addEventListener("colouring-preview", (event) => { if (!runPreview(() => this.#chart?.previewTreePresentation(event.detail ? colouring(event.detail) : null))) event.preventDefault(); });
     this.#tree.addEventListener("reset-styles", (event) => { if (!runTreeEdit(() => this.#chart.patch([{ type: "tree.presentation.reset", scope: "manual" }]))) event.preventDefault(); });
-    this.#sections = [...root.querySelectorAll("fieldset")].map((box) => ({ box, details: box.querySelector("details"),
+    this.#sections = [...root.querySelectorAll("fieldset")].map((box) => ({ box, key: box.dataset.appearanceSection, details: box.querySelector("details"),
       fields: [...box.querySelectorAll("[data-config]")].map((control) => ({ control, row: control.closest("label"), advanced: Boolean(control.closest("details")),
         search: `${box.querySelector("legend").textContent} ${control.getAttribute("aria-label")} ${control.dataset.config}`.toLowerCase() })) }));
     const search = root.querySelector("clinker-search-field");
@@ -60,8 +61,28 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
   }
 
   get chart() { return this.#chart; }
+  get sections() { return this.#sections.map(({ key }) => key); }
+
+  async openSection(section = null, { focus = true } = {}) {
+    const target = section === null ? this.#sections[0] : this.#sections.find(({ key }) => key === section);
+    if (!target || !this.isConnected || !this.#chart) return false;
+    const navigation = ++this.#navigation;
+    this.hidden = false;
+    this.#filter = "";
+    this.shadowRoot.querySelector("clinker-search-field").value = "";
+    if (target.details) this.#expanded.add(target.details.dataset.appearanceSection);
+    this.#render();
+    await new Promise((resolve) => this.ownerDocument.defaultView.requestAnimationFrame(resolve));
+    // A later navigation, close or tab switch must not steal focus back.
+    if (navigation !== this.#navigation || !this.isConnected || !target.box.getClientRects().length) return false;
+    const control = target.fields.find(({ control }) => !control.disabled)?.control;
+    (control || target.box).scrollIntoView({ block: "nearest" });
+    if (focus) control?.focus({ preventScroll: true });
+    return true;
+  }
   set chart(value) {
     if (value === this.#chart) return;
+    this.#navigation++;
     this.#chart?.previewTreePresentation?.(null);
     this.#unsubscribe?.(); this.#unsubscribe = null;
     this.#chart = value || null; this.#subscribe(); this.#render();
@@ -71,6 +92,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
     this.#subscribe(); this.#render();
   }
   disconnectedCallback() {
+    this.#navigation++;
     this.#chart?.previewTreePresentation?.(null);
     this.#unsubscribe?.(); this.#unsubscribe = null;
   }

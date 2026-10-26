@@ -83,6 +83,7 @@ source.then((loaded) => {
   if (project?.state) chart.state(project.state);
   editor.chart = chart;
   editor.addEventListener("clinker-editor-open", () => document.querySelector("#btn-editor").setAttribute("aria-expanded", "true"));
+  editor.addEventListener("clinker-editor-close", () => document.querySelector("#btn-editor").setAttribute("aria-expanded", "false"));
   const workspace = document.querySelector("#workspace");
   workspace.addEventListener("clustermap:edit-annotation", (event) => {
     if (event.detail.chart !== chart) return;
@@ -90,8 +91,7 @@ source.then((loaded) => {
   });
   mountPlotSelectionToolbar(chart, workspace, { editor });
   document.querySelector("#btn-editor").addEventListener("click", () => {
-    editor.hidden = !editor.hidden;
-    document.querySelector("#btn-editor").setAttribute("aria-expanded", String(!editor.hidden));
+    if (editor.hidden) editor.open(); else editor.close();
   });
   if (params.has("editor")) document.querySelector("#btn-editor").click();
   document.querySelector("#btn-save-svg").addEventListener("click", () => download(new Blob([chart.exportSvg()], { type: "image/svg+xml" }), "clinker.svg"));

@@ -193,8 +193,8 @@ order can be changed by dragging, arrow keys or the Position field.
 
 The import registers the component and includes its internal styles. The editor
 uses shadow DOM; application styles do not need to target its implementation.
-Size and position the host element using ordinary CSS. Set `hidden` to control
-visibility and add `resizable` to enable its resize handle.
+Size and position the host element using ordinary CSS. Use `editor.open()` and
+`editor.close()`, or set `hidden` directly. Add `resizable` for its resize handle.
 
 The chart owns data, validation and history. The editor calls its public methods
 and subscribes to `chart.on("change")`, including changes made elsewhere and
@@ -220,6 +220,35 @@ before connection is applied when the component mounts.
 The full editor exposes `header`, `tabs`, `data`, and `appearance` parts; the
 data panel exposes `content`, `toolbar`, `selection`, and `table`; the appearance
 panel exposes `toolbar` and `settings`.
+
+### Editor navigation
+
+```js
+await editor.openAppearance({ section: "tree", focus: true });
+editor.close();
+```
+
+`open({ tab: "data" | "appearance" })` and `close()` return the editor.
+Omit `tab` to retain the current tab when opening.
+`openAppearance({ section: null, focus: true })` returns a `Promise<boolean>`.
+Assign `.chart` and connect the editor before calling it. It opens the editor,
+selects Appearance, clears the appearance filter, expands the target section,
+scrolls it into view and optionally focuses its first enabled control. It waits
+for layout internally. `section: null` selects the first section.
+
+Supported section IDs: `plot`, `annotations`, `legend`, `links`, `link-labels`,
+`tree`, `clusters-loci`, `genes`, `scale-bars`, `plot-navigation`. Unknown IDs,
+an unconnected editor or a missing chart return `false` without opening it.
+Closing, changing tabs or superseding navigation before layout completes can
+also return `false`; focus will not be moved into hidden controls.
+The standalone appearance panel exposes the same section IDs through `.sections`
+and `openSection(section, { focus: true })`.
+
+The connected editor dispatches `clinker-editor-open` and `clinker-editor-close`
+when its visibility changes, including direct changes to `hidden`. Both bubble
+and cross shadow boundaries; neither fires for initial connection or unchanged
+visibility. Hosts can synchronize their toggle button from these events without
+querying shadow roots. Annotation and selection editing entry points are retained.
 
 ### UI styling contract
 
@@ -288,6 +317,9 @@ For the coordinated app update described by `CLUSTERMAP_UI_BOUNDARY_DESIGN.md`:
   Replace legacy `--clinker-*` properties and library-internal CSS overrides.
 - Set `chart.uiAppearance(appPreference)` instead of writing `config.plot.theme`.
   Keep application preference persistence in the host.
+- Replace Tree appearance's shadow-root traversal with
+  `await editor.openAppearance({ section: "tree", focus: true })`. Use public
+  open/close events to synchronize the host's editor toggle.
 - Update the dependency pin and deployment scripts together. Copy the selected
   core bundle, `dist/editor.mjs`, `dist/annotationOverlay.mjs` and the entire
   `dist/editor/` chunk directory. Keep companion modules beside the core bundle;
