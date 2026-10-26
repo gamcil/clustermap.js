@@ -3,6 +3,7 @@ import { validateGroupPanel, layoutGroupPanel, groupPanelMarks } from "./groups.
 import { color } from "d3-color";
 import { scaleLinear, scaleOrdinal } from "d3-scale";
 import { clusterOffsetForPreview, annotationOffsetForPreview } from "../scene/preview.mjs";
+import { sameArray } from "../utils/values.mjs";
 export { annotationOffsetForPreview } from "../scene/preview.mjs";
 
 const sequential = ["#f7fbff", "#08306b"];
@@ -206,8 +207,6 @@ function barRectangles(value, position, width, height, fill, missingColour, bord
   return rects;
 }
 
-const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
-  one.length === two.length && one.every((value, index) => value === two[index]);
 function sameCellStyle(before, after) {
   return before && sameArray(before.columns, after.columns) &&
     ["type", "width", "cellWidth", "cellHeight", "cellGap", "cellBorderWidth", "cellBorderColour", "colour", "missingColour"]

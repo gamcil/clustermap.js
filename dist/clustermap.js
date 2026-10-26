@@ -3528,6 +3528,18 @@
     return initInterpolator.apply(scale, arguments);
   }
 
+  /** Clone arrays and plain records while retaining primitive and class leaves. */
+  function clonePlainValue(value) {
+    if (Array.isArray(value)) return value.map(clonePlainValue);
+    if (!value || typeof value !== "object") return value;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return value;
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, clonePlainValue(child)]));
+  }
+
+  const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
+    one.length === two.length && one.every((value, index) => value === two[index]);
+
   const sequential = ["#f7fbff", "#08306b"];
   const categorical = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377", "#bbbbbb"];
   const ANNOTATION_DEFAULTS = Object.freeze({ cellWidth: 32, cellHeight: 20, gap: 24,
@@ -3729,8 +3741,6 @@
     return rects;
   }
 
-  const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
-    one.length === two.length && one.every((value, index) => value === two[index]);
   function sameCellStyle(before, after) {
     return before && sameArray(before.columns, after.columns) &&
       ["type", "width", "cellWidth", "cellHeight", "cellGap", "cellBorderWidth", "cellBorderColour", "colour", "missingColour"]
@@ -8590,14 +8600,6 @@
   // Chart data is JSON-like: it is also the format used for data/project export.
   // Clone plain values at the boundary so chart edits never mutate caller-owned
   // records, including nested link endpoints and user metadata.
-  function cloneDataValue(value) {
-    if (Array.isArray(value)) return value.map(cloneDataValue);
-    if (!value || typeof value !== "object") return value;
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return value;
-    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneDataValue(entry)]));
-  }
-
   function normalizeGene(gene, locusUid, clusterUid) {
     return {
       ...gene,
@@ -8626,7 +8628,7 @@
   }
 
   function normalizeChartData(data, treeConfig = {}) {
-    const source = cloneDataValue(data);
+    const source = clonePlainValue(data);
     if (source.tree != null) {
       validateTree(source.tree, source.clusters);
       validateTreePresentation(source.tree, treeConfig);
@@ -8809,10 +8811,9 @@
 
   const svgViews = new WeakMap();
 
-  const sameItems = (one, two) => one.length === two.length && one.every((item, i) => item === two[i]);
   const sameView = (one, two) => one.length === two.length && one.every((panel, i) => {
     const next = two[i];
-    return panel.uid === next.uid && sameItems(panel.texts, next.texts) && sameItems(panel.rects, next.rects) &&
+    return panel.uid === next.uid && sameArray(panel.texts, next.texts) && sameArray(panel.rects, next.rects) &&
       panel.rows.length === next.rows.length && panel.rows.every((row, index) =>
         row.uid === next.rows[index].uid && row.firstCell === next.rows[index].firstCell && row.lastCell === next.rows[index].lastCell);
   });
@@ -12558,18 +12559,9 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     },
   };
 
-  function cloneConfig(value) {
-    if (Array.isArray(value)) return value.map(cloneConfig);
-    if (value && value.constructor === Object) {
-      return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, cloneConfig(child)]));
-    }
-    // Functions and primitive values are immutable configuration leaves.
-    return value;
-  }
-
   /** Return independent, recursively cloned defaults for one chart instance. */
   function createDefaultConfig() {
-    return cloneConfig(defaultConfig);
+    return clonePlainValue(defaultConfig);
   }
 
   function updateConfig(target, source) {
@@ -14919,20 +14911,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   const projectVersion = 1;
   const historyLimit = 100;
   const isPlainObject = (value) => Boolean(value) && value.constructor === Object;
-  const copyConfigPatch = (value) => {
-    if (Array.isArray(value)) return value.map(copyConfigPatch);
-    if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, copyConfigPatch(child)]));
-    // Configuration callbacks are valid leaves. They are immutable by reference
-    // and intentionally remain callable when an edit is undone or redone.
-    return value;
-  };
   const previousConfigPatch = (config, patch) => Object.fromEntries(
     Object.entries(patch || {})
       .filter(([key]) => Object.hasOwn(config || {}, key))
       .map(([key, value]) => [key,
         isPlainObject(value) && isPlainObject(config[key])
           ? previousConfigPatch(config[key], value)
-          : copyConfigPatch(config[key]),
+          : clonePlainValue(config[key]),
       ])
   );
   const serializableConfig = (value) => {
@@ -16056,7 +16041,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       // requiring consumers to re-bind the chart's normalized data themselves.
       if (container && currentData) redraw({ animate: false });
       emitChange({ type: "config.change", config: runtime.config });
-      if (before) remember({ kind: "config", undo: before, redo: copyConfigPatch(_) });
+      if (before) remember({ kind: "config", undo: before, redo: clonePlainValue(_) });
       return my;
     };
     my.data = function (data) {

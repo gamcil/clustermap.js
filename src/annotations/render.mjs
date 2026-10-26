@@ -1,11 +1,11 @@
 import { annotationPanelsInViewport } from "./model.mjs";
+import { sameArray } from "../utils/values.mjs";
 import { select } from "d3-selection";
 const svgViews = new WeakMap();
 
-const sameItems = (one, two) => one.length === two.length && one.every((item, i) => item === two[i]);
 const sameView = (one, two) => one.length === two.length && one.every((panel, i) => {
   const next = two[i];
-  return panel.uid === next.uid && sameItems(panel.texts, next.texts) && sameItems(panel.rects, next.rects) &&
+  return panel.uid === next.uid && sameArray(panel.texts, next.texts) && sameArray(panel.rects, next.rects) &&
     panel.rows.length === next.rows.length && panel.rows.every((row, index) =>
       row.uid === next.rows[index].uid && row.firstCell === next.rows[index].firstCell && row.lastCell === next.rows[index].lastCell);
 });

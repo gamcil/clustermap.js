@@ -68,26 +68,20 @@ import {
   isWebGpuRenderer,
 } from "../renderers/mode.mjs";
 import { chartStateFromSnapshot, createChartStateSerializer } from "./snapshot.mjs";
+import { clonePlainValue } from "../utils/values.mjs";
 
 let nextChartInstance = 0;
 const projectFormat = "clinker-project";
 const projectVersion = 1;
 const historyLimit = 100;
 const isPlainObject = (value) => Boolean(value) && value.constructor === Object;
-const copyConfigPatch = (value) => {
-  if (Array.isArray(value)) return value.map(copyConfigPatch);
-  if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, copyConfigPatch(child)]));
-  // Configuration callbacks are valid leaves. They are immutable by reference
-  // and intentionally remain callable when an edit is undone or redone.
-  return value;
-};
 const previousConfigPatch = (config, patch) => Object.fromEntries(
   Object.entries(patch || {})
     .filter(([key]) => Object.hasOwn(config || {}, key))
     .map(([key, value]) => [key,
       isPlainObject(value) && isPlainObject(config[key])
         ? previousConfigPatch(config[key], value)
-        : copyConfigPatch(config[key]),
+        : clonePlainValue(config[key]),
     ])
 );
 const serializableConfig = (value) => {
@@ -1211,7 +1205,7 @@ export default function clusterMap() {
     // requiring consumers to re-bind the chart's normalized data themselves.
     if (container && currentData) redraw({ animate: false });
     emitChange({ type: "config.change", config: runtime.config });
-    if (before) remember({ kind: "config", undo: before, redo: copyConfigPatch(_) });
+    if (before) remember({ kind: "config", undo: before, redo: clonePlainValue(_) });
     return my;
   };
   my.data = function (data) {

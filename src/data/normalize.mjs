@@ -1,17 +1,10 @@
 import { validateTreePresentation } from "../tree/model.mjs";
 import { validateAnnotationPanels } from "../annotations/model.mjs";
+import { clonePlainValue } from "../utils/values.mjs";
 
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned
 // records, including nested link endpoints and user metadata.
-function cloneDataValue(value) {
-  if (Array.isArray(value)) return value.map(cloneDataValue);
-  if (!value || typeof value !== "object") return value;
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) return value;
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneDataValue(entry)]));
-}
-
 function normalizeGene(gene, locusUid, clusterUid) {
   return {
     ...gene,
@@ -40,7 +33,7 @@ function normalizeLocus(locus, clusterUid) {
 }
 
 export function normalizeChartData(data, treeConfig = {}) {
-  const source = cloneDataValue(data);
+  const source = clonePlainValue(data);
   if (source.tree != null) {
     validateTree(source.tree, source.clusters);
     validateTreePresentation(source.tree, treeConfig);
