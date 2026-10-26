@@ -36,6 +36,7 @@ import { applyChartOperations } from "../data/operations.mjs";
 import { isTreeOperation, inverseTreeOperation, applyTreeOperation } from "../tree/operations.mjs";
 import { fitCameraForBounds, worldViewport, worldPoint } from "../scene/camera.mjs";
 import { applyTheme, resolveTheme } from "../ui/theme.mjs";
+import { validateUiAppearance } from "../ui/appearance.mjs";
 import { createHtmlOverlay } from "../ui/overlay.js";
 import { createInteractionController } from "../interaction/controller.mjs";
 import {
@@ -105,10 +106,13 @@ export default function clusterMap() {
   }
   let annotationOverlay = null;
   let themeMedia = null;
+  let uiAppearance = "auto";
+  function refreshUiAppearance() {
+    applyTheme(container?.node(), uiAppearance);
+    emitChange({ type: "theme.change", theme: resolveTheme(uiAppearance).mode });
+  }
   function systemThemeChanged() {
-    if (runtime.config.plot.theme !== "auto" || !container || !currentData) return;
-    applyTheme(container.node(), resolveTheme(runtime.config.plot.theme));
-    emitChange({ type: "theme.change", theme: resolveTheme(runtime.config.plot.theme).mode });
+    if (uiAppearance === "auto") refreshUiAppearance();
   }
   let annotationUiContext = null, annotationUiLoad = null;
   let zoom = null;
@@ -989,7 +993,7 @@ export default function clusterMap() {
 
   function redraw({ animate = true, synchronize = true } = {}) {
     if (!currentData || !container) return;
-    applyTheme(container.node(), resolveTheme(runtime.config.plot.theme));
+    applyTheme(container.node(), uiAppearance);
     if (globalThis.getComputedStyle(container.node()).position === "static") container.style("position", "relative");
     container.style("isolation", "isolate");
     if (!themeMedia && globalThis.matchMedia) {
@@ -1031,7 +1035,6 @@ export default function clusterMap() {
       container,
       data,
       ids: runtime.ids,
-      fontFamily: runtime.config.plot.fontFamily,
       zoom,
       zoomExtent,
       onZoom: (event, viewport) => {
@@ -1144,7 +1147,6 @@ export default function clusterMap() {
         getScene: () => runtime.getScene(), getPreview: () => scenePreview,
         getCamera: () => getCamera(chartState),
         isBusy: () => isDragging(chartState) || Boolean(rasterAnimation),
-        fontFamily: runtime.config.plot.fontFamily,
       };
       if (annotationOverlay) annotationOverlay.update(annotationUiContext);
       else if (!annotationUiLoad) {
@@ -1203,6 +1205,13 @@ export default function clusterMap() {
     updateFigureSurface();
   }
 
+  // Host preference: deliberately absent from figure configuration/history.
+  my.uiAppearance = function (mode) {
+    if (!arguments.length) return uiAppearance;
+    validateUiAppearance(mode);
+    if (uiAppearance !== mode) { uiAppearance = mode; refreshUiAppearance(); }
+    return my;
+  };
   my.config = function (_) {
     if (!arguments.length) return runtime.config;
     cancelTreePresentationPreview();

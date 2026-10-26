@@ -1,6 +1,5 @@
 import { createTemplate, mountComponent, colourHex, updateSelectOptions } from "../../../ui/controls.mjs";
 import { textAsset } from "../../../ui/assets.mjs";
-import { controlStyles } from "../../shared/controls.mjs";
 import { defineEditableField } from "../editable-field/editable-field.js";
 
 const [markup, css] = await Promise.all([
@@ -27,7 +26,7 @@ class CategoryEditor extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = mountComponent(this, template, controlStyles + css);
+    const root = mountComponent(this, template, css);
     this.#details = root.querySelector("details"); this.#items = root.querySelector("[data-items]");
     this.#template = this.#items.querySelector("template"); this.#form = root.querySelector("form");
     this.#name = this.#form.querySelector('[type="text"]'); this.#colour = this.#form.querySelector('[type="color"]');

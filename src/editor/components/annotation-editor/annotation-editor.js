@@ -35,7 +35,7 @@ class AnnotationEditor extends HTMLElementBase {
   connectedCallback() {
     const root = this.getRootNode();
     installDataEditorStyle(root);
-    this.classList.add("cm-data-ui", "cm-annotation-data-editor");
+    this.classList.add("cm-ui", "cm-data-ui", "cm-annotation-data-editor");
     installStyle(root, "clinker-annotation-editor-style", css);
     if (!this.#body) this.#mount();
     this.#render();

@@ -1,23 +1,68 @@
 // Shared by shadow components and light DOM popovers. Keep defaults easy to override.
 const controlStyles = `
-:host([hidden]), :where(.cm-data-ui)[hidden], :where(:host,.cm-data-ui) [hidden] { display:none!important; }
-:where(:host,.cm-data-ui) form { margin:0; }
-:where(:host,.cm-data-ui) :is(button,input,select,textarea) { box-sizing:border-box; font:inherit; color:inherit; }
-:where(:host,.cm-data-ui) :where(button,input:not([type=color]):not([type=checkbox]):not([type=range]),select,textarea) {
-  min-height:var(--cm-control-height,30px);
-  padding:var(--cm-control-padding,4px 8px);
-  border:1px solid var(--cm-border,#cbd3de);
-  border-radius:var(--cm-control-radius,6px);
-  background:var(--cm-surface,#fff);
+:host([hidden]), :where(.cm-ui)[hidden], :where(:host,.cm-ui) [hidden] { display:none!important; }
+:where(:host,.cm-ui) :where(form) { margin:0; }
+:where(:host,.cm-ui) :where(.cm-button,.cm-field,.cm-disclosure) { box-sizing:border-box; font:inherit; color:inherit; }
+:where(:host,.cm-ui) :where(.cm-button,.cm-field:not([type=color]):not([type=checkbox]):not([type=range])) {
+  min-height:var(--cm-control-height,var(--_cm-control-height,30px));
+  padding:var(--cm-control-padding,var(--_cm-control-padding,4px 8px));
+  border:1px solid var(--cm-border,var(--_cm-border,#cbd3de));
+  border-radius:var(--cm-control-radius,var(--_cm-control-radius,6px));
+  background:var(--cm-surface,var(--_cm-surface,#fff));
 }
-:where(:host,.cm-data-ui) input[type=color] { width:30px; height:22px; padding:0; border:0; background:transparent; cursor:pointer; }
-:where(:host,.cm-data-ui) :is(input[type=checkbox],button,summary) { cursor:pointer; }
-:where(:host,.cm-data-ui) :is(input,textarea)::placeholder { color:var(--cm-muted,#687586); }
-:where(:host,.cm-data-ui) button:where(:hover:not(:disabled)) { border-color:var(--cm-accent,#78a9ed); background:var(--cm-hover,#f4f8ff); }
-:where(:host,.cm-data-ui) button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
-:where(:host,.cm-data-ui) :is(button,summary):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:2px; }
-:where(:host,.cm-data-ui) :is(input,select,textarea):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:-2px; }
+:where(:host,.cm-ui) :where(.cm-field[type=color]) { width:30px; height:22px; padding:0; border:0; background:transparent; cursor:pointer; }
+:where(:host,.cm-ui) :where(.cm-button,.cm-disclosure,.cm-field[type=checkbox]) { cursor:pointer; }
+:where(:host,.cm-ui) :where(.cm-field)::placeholder { color:var(--cm-muted,var(--_cm-muted,#687586)); }
+:where(:host,.cm-ui) :where(:is(.cm-button,.cm-disclosure):hover:not(:disabled)) { border-color:var(--cm-accent,var(--_cm-accent,#78a9ed)); background:var(--cm-hover,var(--_cm-hover,#f4f8ff)); }
+:where(:host,.cm-ui) :where(.cm-button:disabled) { color:var(--cm-muted,var(--_cm-muted,#8993a1)); opacity:.45; cursor:default; }
+:where(:host,.cm-ui) :where(.cm-field:disabled) { color:var(--cm-muted,var(--_cm-muted,#8993a1)); opacity:.6; cursor:default; }
+:where(:host,.cm-ui) :where(:is(.cm-button,.cm-disclosure):focus-visible) { outline:2px solid var(--cm-focus-ring,var(--_cm-focus-ring,#1677ff)); outline-offset:2px; }
+:where(:host,.cm-ui) :where(.cm-field:focus-visible) { outline:2px solid var(--cm-focus-ring,var(--_cm-focus-ring,#1677ff)); outline-offset:-2px; }
+:where(:host,.cm-ui) :where(.cm-menu-item,clinker-action-menu > .cm-button) { border:0; border-radius:4px; background:transparent; text-align:left; }
+:where(:host,.cm-ui) :where(:is(.cm-menu-item,clinker-action-menu > .cm-button):hover:not(:disabled)) { background:var(--cm-hover,var(--_cm-hover,#e3ecf8)); }
+:where(:host,.cm-ui) :where(:is(.cm-menu-item,clinker-action-menu > .cm-button)[aria-pressed=true]) { background:var(--cm-selection,var(--_cm-selection,#d6e6fc)); }
 `;
+
+// Light DOM needs an owned class scope; shadow component variants stay easy to override.
+const lightControlStyles = controlStyles.replaceAll(":where(:host,.cm-ui)", ".cm-ui");
+
+// UI appearance is separate from figure colours and persisted chart settings.
+const uiPalettes = {
+  light: { background: "#ffffff", surface: "#ffffff", subtle: "#f3f6fa", hover: "#e3ecf8",
+    foreground: "#20252c", muted: "#687586", border: "#cbd3de", accent: "#1677ff",
+    "focus-ring": "#1677ff", selection: "#d6e6fc", danger: "#b42318" },
+  dark: { background: "#171b22", surface: "#232a35", subtle: "#293241", hover: "#354660",
+    foreground: "#e5eaf1", muted: "#a0adbd", border: "#465365", accent: "#85b7ff",
+    "focus-ring": "#85b7ff", selection: "#3a5276", danger: "#ffaaa3" },
+};
+
+function validateUiAppearance(mode) {
+  if (!["auto", "light", "dark"].includes(mode)) throw new TypeError("UI appearance must be auto, light or dark.");
+  return mode;
+}
+
+/** Only private defaults are declared here: inherited public tokens always win. */
+function uiAppearanceStyles(scope) {
+  const attribute = (mode) => scope === ":host" ? `:host([appearance=${mode}])` : `${scope}[appearance=${mode}]`;
+  return `
+${scope} {
+  ${Object.entries(uiPalettes.light).map(([key, light]) => `--_cm-${key}:light-dark(${light},${uiPalettes.dark[key]});`).join("\n  ")}
+  --_cm-font:13px/1.4 system-ui,sans-serif;
+  color-scheme:var(--_cm-ui-scheme,var(--_cm-chart-scheme,light dark));
+  color:var(--cm-foreground,var(--_cm-foreground));
+  font:var(--cm-font,var(--_cm-font));
+}
+${attribute("light")} { --_cm-ui-scheme:light; }
+${attribute("dark")} { --_cm-ui-scheme:dark; }
+${attribute("auto")} { --_cm-ui-scheme:light dark; }
+`;
+}
+
+function applyUiAppearance(element, mode = "auto") {
+  validateUiAppearance(mode);
+  // Keep auto responsive through CSS, including disconnected standalone panels.
+  element.style.setProperty("--_cm-chart-scheme", mode === "auto" ? "light dark" : mode);
+}
 
 function define(constructor, factory, prototype) {
   constructor.prototype = factory.prototype = prototype;
@@ -425,6 +470,19 @@ function hsl2rgb(h, m1, m2) {
       : m1) * 255;
 }
 
+const controlClasses = { BUTTON: "cm-button", INPUT: "cm-field", SELECT: "cm-field", TEXTAREA: "cm-field", FIELDSET: "cm-section", SUMMARY: "cm-disclosure" };
+const classifyControl = (node) => {
+  const name = controlClasses[node.tagName];
+  if (name) node.classList.add(name);
+  if (node.tagName === "BUTTON" && node.closest("clinker-action-menu")) node.classList.add("cm-menu-item");
+};
+
+/** Classify only library-owned markup, including controls built dynamically. */
+function prepareUi(root) {
+  root.querySelectorAll("button,input,select,textarea,fieldset,summary").forEach(classifyControl);
+  root.querySelectorAll("template").forEach((template) => prepareUi(template.content));
+}
+
 const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
 
 function upgradeProperty(element, name) {
@@ -439,6 +497,7 @@ function createTemplate(markup) {
     let template = templates.get(document);
     if (!template) {
       template = document.createElement("template"); template.innerHTML = markup;
+      prepareUi(template.content);
       templates.set(document, template);
     }
     return document.importNode(template.content, true);
@@ -447,7 +506,7 @@ function createTemplate(markup) {
 
 function mountComponent(element, template, css) {
   const root = element.attachShadow({ mode: "open" });
-  const style = element.ownerDocument.createElement("style"); style.textContent = css;
+  const style = element.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
   root.append(style, template(element.ownerDocument));
   return root;
 }
@@ -471,6 +530,7 @@ function createControls(document) {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
     if (className) node.className = className;
+    classifyControl(node);
     parent?.append(node); return node;
   };
   const row = (parent, label) => {
@@ -508,7 +568,7 @@ function createActionRunner(report) {
 
 const [markup, css] = await Promise.all([
   "<input type=\"search\" part=\"input\">\n<button type=\"button\" part=\"clear\" aria-label=\"Clear search\" title=\"Clear search\" hidden>×</button>\n",
-  ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput, button { box-sizing: border-box; color: inherit; font: inherit; }\ninput {\n  width: 100%;\n  min-width: 0;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #687586);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n",
+  ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput {\n  width: 100%;\n  min-width: 0;\n  border-radius: var(--cm-control-radius,var(--_cm-control-radius, 6px));\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  min-height: 0;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius,var(--_cm-control-radius, 6px));\n  background: transparent;\n  color: var(--cm-muted,var(--_cm-muted, #687586));\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover,var(--_cm-hover, #e3ecf8)); color: var(--cm-accent,var(--_cm-accent, #1677ff)); }\n",
 ]);
 const template = createTemplate(markup);
 const HTMLElementBase = globalThis.HTMLElement || class {};
@@ -557,4 +617,4 @@ function defineSearchField() {
   if (!customElements.get("clinker-search-field")) customElements.define("clinker-search-field", SearchField);
 }
 
-export { controlStyles as a, updateSelectOptions as b, createTemplate as c, colourHex as d, defineSearchField as e, createActionRunner as f, color as g, createControls as h, mountComponent as m, rgb as r, upgradeProperty as u };
+export { controlStyles as a, uiAppearanceStyles as b, createTemplate as c, updateSelectOptions as d, colourHex as e, defineSearchField as f, createActionRunner as g, applyUiAppearance as h, color as i, createControls as j, classifyControl as k, lightControlStyles as l, mountComponent as m, rgb as r, upgradeProperty as u };

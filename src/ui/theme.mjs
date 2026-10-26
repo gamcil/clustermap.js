@@ -1,18 +1,11 @@
 import { textAsset, installStyle } from "./assets.mjs";
+import { resolveTheme, applyUiAppearance, uiAppearanceStyles } from "./appearance.mjs";
+import { lightControlStyles } from "./controlStyles.mjs";
 
-const css = await textAsset(new URL("./plot.css", import.meta.url));
+export { resolveTheme } from "./appearance.mjs";
 
-const palettes = {
-  light: { mode: "light", background: "#ffffff", foreground: "#20252c", muted: "#687586",
-    branch: "#555555", guide: "#999999", outline: "#111111", surface: "#ffffff", border: "#cbd3de", missing: "#eeeeee", subtle: "#f3f6fa", hover: "#e3ecf8", selection: "#d6e6fc", accent: "#1677ff", danger: "#b42318" },
-  dark: { mode: "dark", background: "#171b22", foreground: "#e5eaf1", muted: "#a0adbd",
-    branch: "#bac4d1", guide: "#748193", outline: "#c9d2df", surface: "#232a35", border: "#465365", missing: "#39414e", subtle: "#293241", hover: "#354660", selection: "#3a5276", accent: "#85b7ff", danger: "#ffaaa3" },
-};
-
-export function resolveTheme(mode = "auto") {
-  const dark = mode === "dark" || mode === "auto" && globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches;
-  return palettes[dark ? "dark" : "light"];
-}
+const css = uiAppearanceStyles(":where(.cm-chart,.cm-ui)") + lightControlStyles +
+  await textAsset(new URL("./plot.css", import.meta.url));
 
 /** Figure colours are independent of the interface/system theme. */
 export function figureConfig(config) {
@@ -31,10 +24,10 @@ export function figureConfig(config) {
 }
 
 /** Scoped CSS keeps multiple independently themed charts on one page possible. */
-export function applyTheme(element, theme) {
+export function applyTheme(element, mode = "auto") {
   if (!element) return;
-  element.dataset.clustermapTheme = theme.mode;
-  element.style.colorScheme = theme.mode;
-  for (const [key, value] of Object.entries(theme)) if (key !== "mode") element.style.setProperty(`--cm-${key}`, value);
+  element.classList.add("cm-chart");
+  element.dataset.clustermapTheme = resolveTheme(mode).mode;
+  applyUiAppearance(element, mode);
   installStyle(element.getRootNode(), "clustermap-theme-style", css);
 }

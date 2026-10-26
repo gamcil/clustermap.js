@@ -1,5 +1,5 @@
 :host { display: block; min-width: 0; color: inherit; font: inherit; }
-fieldset { min-width: 0; margin: 0 0 10px; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }
+fieldset { min-width: 0; margin: 0 0 10px; padding: 8px; border: 1px solid var(--cm-border,var(--_cm-border, #cbd3de)); border-radius: 6px; }
 legend { padding: 0 4px; font-weight: 600; }
 label { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
 label > span { flex: 1; min-width: 0; }
@@ -7,4 +7,4 @@ input[type=number] { width: 64px; min-width: 0; }
 input[type=range] { width: 100%; }
 select { width: 132px; min-width: 0; }
 button[aria-pressed=true] { font-weight: 600; }
-p { color: var(--cm-danger, #b42318); margin: 6px 0 0; }
+p { color: var(--cm-danger,var(--_cm-danger, #b42318)); margin: 6px 0 0; }

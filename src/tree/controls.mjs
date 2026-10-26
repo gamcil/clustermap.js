@@ -8,12 +8,12 @@ const css = await textAsset(new URL("./controls.css", import.meta.url));
 
 /** Controls for a single tree node and its subtree. */
 export function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUid = null,
-  onResize, document: doc = globalThis.document }) {
-  installDataEditorStyle(doc);
-  installStyle(doc, "clustermap-tree-controls-style", css);
+  onResize, document: doc = globalThis.document, styleRoot = doc }) {
+  installDataEditorStyle(styleRoot);
+  installStyle(styleRoot, "clustermap-tree-controls-style", css);
   const ui = createControls(doc);
   const element = (tag, parent, text, className) => ui.el(tag, text, parent, className);
-  const container = element("div", null, undefined, "cm-data-ui cm-tree-controls");
+  const container = element("div", null, undefined, "cm-ui cm-data-ui cm-tree-controls");
   const message = element("p"); message.setAttribute("role", "status");
   const run = createActionRunner((text) => { message.textContent = text; });
   const button = (parent, title, action, className) => ui.button(parent, title, () => run(action), className);

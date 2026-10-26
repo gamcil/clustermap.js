@@ -9413,19 +9413,79 @@ function installStyle(root, id, css) {
   (root.head || root).append(style);
 }
 
-const css$1 = "[data-clustermap-theme] { color:var(--cm-foreground); background:var(--cm-background); }\n[data-clustermap-theme] :is(.tooltip,.cm-annotation-menu,.cm-annotation-hidden,.annotation-tooltip) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }\n[data-clustermap-theme] :is(button,select,input:not([type=color]):not([type=checkbox]),textarea):not(.cm-data-ui *) { color:var(--cm-foreground)!important; background:var(--cm-surface)!important; border-color:var(--cm-border)!important; }\n[data-clustermap-theme] button:hover:not(.cm-data-ui *) { background:var(--cm-hover)!important; }\n[data-clustermap-theme] button:disabled { opacity:.45; }\n:is(clinker-editor,clinker-data-panel,clinker-appearance-panel)[data-clustermap-theme] { background:var(--cm-surface); color:var(--cm-foreground); border-color:var(--cm-border); }\n[data-clustermap-theme] .cm-annotation-menu :is(p,summary) { color:var(--cm-muted); }\n[data-clustermap-theme] :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { z-index:1; background:transparent; color-scheme:light; }\n[data-clustermap-theme] .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border); }\n[data-clustermap-theme] .clusterMapFigureDimensions { z-index:2; color:var(--cm-muted); font:12px/20px system-ui,sans-serif; white-space:nowrap; }\n[data-clustermap-theme] canvas.clusterMapMinimap { color-scheme:light; }\n\n[data-clustermap-theme] :is(svg.clusterMap,canvas.clusterMapCanvas) { position:relative; }\n[data-clustermap-theme] :is(canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { display:block; width:100%; height:100%; }\n[data-clustermap-theme] canvas.clusterMapCanvas { outline:none; cursor:grab; }\n[data-clustermap-theme] canvas.clusterMapWebGpuOverlay { position:absolute; inset:0; pointer-events:none; }\n[data-clustermap-theme] canvas.clusterMapMinimap { position:absolute; z-index:2; display:block; box-sizing:border-box; background:white; box-shadow:0 1px 4px rgba(0,0,0,.25); cursor:grab; touch-action:none; }\n[data-clustermap-theme] :is(.clusterMapFigureSurface,.clusterMapFigureDimensions) { position:absolute; left:0; top:0; pointer-events:none; }\n[data-clustermap-theme] .clusterMapFigureSurface { transform-origin:0 0; }\n[data-clustermap-theme] > input.colourPicker { position:absolute; opacity:0; }\n[data-clustermap-theme] > div.tooltip { position:absolute; pointer-events:none; z-index:4; box-sizing:border-box; padding:8px; background:white; border:1px solid #999; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.2); }\n";
-
-const palettes = {
-  light: { mode: "light", background: "#ffffff", foreground: "#20252c", muted: "#687586",
-    branch: "#555555", guide: "#999999", outline: "#111111", surface: "#ffffff", border: "#cbd3de", missing: "#eeeeee", subtle: "#f3f6fa", hover: "#e3ecf8", selection: "#d6e6fc", accent: "#1677ff", danger: "#b42318" },
-  dark: { mode: "dark", background: "#171b22", foreground: "#e5eaf1", muted: "#a0adbd",
-    branch: "#bac4d1", guide: "#748193", outline: "#c9d2df", surface: "#232a35", border: "#465365", missing: "#39414e", subtle: "#293241", hover: "#354660", selection: "#3a5276", accent: "#85b7ff", danger: "#ffaaa3" },
+// UI appearance is separate from figure colours and persisted chart settings.
+const uiPalettes = {
+  light: { background: "#ffffff", surface: "#ffffff", subtle: "#f3f6fa", hover: "#e3ecf8",
+    foreground: "#20252c", muted: "#687586", border: "#cbd3de", accent: "#1677ff",
+    "focus-ring": "#1677ff", selection: "#d6e6fc", danger: "#b42318" },
+  dark: { background: "#171b22", surface: "#232a35", subtle: "#293241", hover: "#354660",
+    foreground: "#e5eaf1", muted: "#a0adbd", border: "#465365", accent: "#85b7ff",
+    "focus-ring": "#85b7ff", selection: "#3a5276", danger: "#ffaaa3" },
 };
+
+function validateUiAppearance(mode) {
+  if (!["auto", "light", "dark"].includes(mode)) throw new TypeError("UI appearance must be auto, light or dark.");
+  return mode;
+}
 
 function resolveTheme(mode = "auto") {
   const dark = mode === "dark" || mode === "auto" && globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches;
-  return palettes[dark ? "dark" : "light"];
+  return { mode: dark ? "dark" : "light", ...uiPalettes[dark ? "dark" : "light"] };
 }
+
+/** Only private defaults are declared here: inherited public tokens always win. */
+function uiAppearanceStyles(scope) {
+  const attribute = (mode) => scope === ":host" ? `:host([appearance=${mode}])` : `${scope}[appearance=${mode}]`;
+  return `
+${scope} {
+  ${Object.entries(uiPalettes.light).map(([key, light]) => `--_cm-${key}:light-dark(${light},${uiPalettes.dark[key]});`).join("\n  ")}
+  --_cm-font:13px/1.4 system-ui,sans-serif;
+  color-scheme:var(--_cm-ui-scheme,var(--_cm-chart-scheme,light dark));
+  color:var(--cm-foreground,var(--_cm-foreground));
+  font:var(--cm-font,var(--_cm-font));
+}
+${attribute("light")} { --_cm-ui-scheme:light; }
+${attribute("dark")} { --_cm-ui-scheme:dark; }
+${attribute("auto")} { --_cm-ui-scheme:light dark; }
+`;
+}
+
+function applyUiAppearance(element, mode = "auto") {
+  validateUiAppearance(mode);
+  // Keep auto responsive through CSS, including disconnected standalone panels.
+  element.style.setProperty("--_cm-chart-scheme", mode === "auto" ? "light dark" : mode);
+}
+
+// Shared by shadow components and light DOM popovers. Keep defaults easy to override.
+const controlStyles = `
+:host([hidden]), :where(.cm-ui)[hidden], :where(:host,.cm-ui) [hidden] { display:none!important; }
+:where(:host,.cm-ui) :where(form) { margin:0; }
+:where(:host,.cm-ui) :where(.cm-button,.cm-field,.cm-disclosure) { box-sizing:border-box; font:inherit; color:inherit; }
+:where(:host,.cm-ui) :where(.cm-button,.cm-field:not([type=color]):not([type=checkbox]):not([type=range])) {
+  min-height:var(--cm-control-height,var(--_cm-control-height,30px));
+  padding:var(--cm-control-padding,var(--_cm-control-padding,4px 8px));
+  border:1px solid var(--cm-border,var(--_cm-border,#cbd3de));
+  border-radius:var(--cm-control-radius,var(--_cm-control-radius,6px));
+  background:var(--cm-surface,var(--_cm-surface,#fff));
+}
+:where(:host,.cm-ui) :where(.cm-field[type=color]) { width:30px; height:22px; padding:0; border:0; background:transparent; cursor:pointer; }
+:where(:host,.cm-ui) :where(.cm-button,.cm-disclosure,.cm-field[type=checkbox]) { cursor:pointer; }
+:where(:host,.cm-ui) :where(.cm-field)::placeholder { color:var(--cm-muted,var(--_cm-muted,#687586)); }
+:where(:host,.cm-ui) :where(:is(.cm-button,.cm-disclosure):hover:not(:disabled)) { border-color:var(--cm-accent,var(--_cm-accent,#78a9ed)); background:var(--cm-hover,var(--_cm-hover,#f4f8ff)); }
+:where(:host,.cm-ui) :where(.cm-button:disabled) { color:var(--cm-muted,var(--_cm-muted,#8993a1)); opacity:.45; cursor:default; }
+:where(:host,.cm-ui) :where(.cm-field:disabled) { color:var(--cm-muted,var(--_cm-muted,#8993a1)); opacity:.6; cursor:default; }
+:where(:host,.cm-ui) :where(:is(.cm-button,.cm-disclosure):focus-visible) { outline:2px solid var(--cm-focus-ring,var(--_cm-focus-ring,#1677ff)); outline-offset:2px; }
+:where(:host,.cm-ui) :where(.cm-field:focus-visible) { outline:2px solid var(--cm-focus-ring,var(--_cm-focus-ring,#1677ff)); outline-offset:-2px; }
+:where(:host,.cm-ui) :where(.cm-menu-item,clinker-action-menu > .cm-button) { border:0; border-radius:4px; background:transparent; text-align:left; }
+:where(:host,.cm-ui) :where(:is(.cm-menu-item,clinker-action-menu > .cm-button):hover:not(:disabled)) { background:var(--cm-hover,var(--_cm-hover,#e3ecf8)); }
+:where(:host,.cm-ui) :where(:is(.cm-menu-item,clinker-action-menu > .cm-button)[aria-pressed=true]) { background:var(--cm-selection,var(--_cm-selection,#d6e6fc)); }
+`;
+
+// Light DOM needs an owned class scope; shadow component variants stay easy to override.
+const lightControlStyles = controlStyles.replaceAll(":where(:host,.cm-ui)", ".cm-ui");
+
+const css$1 = uiAppearanceStyles(":where(.cm-chart,.cm-ui)") + lightControlStyles +
+  ".cm-chart { background:var(--cm-background,var(--_cm-background)); }\n.cm-chart > :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { z-index:1; background:transparent; color-scheme:light; }\n.cm-chart > .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border,var(--_cm-border)); }\n.cm-chart > .clusterMapFigureDimensions { z-index:2; color:var(--cm-muted,var(--_cm-muted)); font:var(--cm-font,var(--_cm-font)); line-height:20px; white-space:nowrap; }\n.cm-chart > canvas.clusterMapMinimap { color-scheme:light; }\n\n.cm-chart > :is(svg.clusterMap,canvas.clusterMapCanvas) { position:relative; }\n.cm-chart > :is(canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { display:block; width:100%; height:100%; }\n.cm-chart > canvas.clusterMapCanvas { outline:none; cursor:grab; }\n.cm-chart > canvas.clusterMapWebGpuOverlay { position:absolute; inset:0; pointer-events:none; }\n.cm-chart > canvas.clusterMapMinimap { position:absolute; z-index:2; display:block; box-sizing:border-box; background:white; box-shadow:0 1px 4px rgba(0,0,0,.25); cursor:grab; touch-action:none; }\n.cm-chart > :is(.clusterMapFigureSurface,.clusterMapFigureDimensions) { position:absolute; left:0; top:0; pointer-events:none; }\n.cm-chart > .clusterMapFigureSurface { transform-origin:0 0; }\n.cm-chart > input.colourPicker { position:absolute; opacity:0; }\n.cm-chart > div.tooltip { position:absolute; pointer-events:none; z-index:4; box-sizing:border-box; padding:8px; background:var(--cm-surface,var(--_cm-surface)); border:1px solid var(--cm-border,var(--_cm-border)); border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.2); }\n";
 
 /** Figure colours are independent of the interface/system theme. */
 function figureConfig(config) {
@@ -9444,67 +9504,56 @@ function figureConfig(config) {
 }
 
 /** Scoped CSS keeps multiple independently themed charts on one page possible. */
-function applyTheme(element, theme) {
+function applyTheme(element, mode = "auto") {
   if (!element) return;
-  element.dataset.clustermapTheme = theme.mode;
-  element.style.colorScheme = theme.mode;
-  for (const [key, value] of Object.entries(theme)) if (key !== "mode") element.style.setProperty(`--cm-${key}`, value);
+  element.classList.add("cm-chart");
+  element.dataset.clustermapTheme = resolveTheme(mode).mode;
+  applyUiAppearance(element, mode);
   installStyle(element.getRootNode(), "clustermap-theme-style", css$1);
 }
 
 /** Shared fixed-height row window for scrollable data editors. */
 const DATA_ROW_HEIGHT = 34;
 
-// Shared by shadow components and light DOM popovers. Keep defaults easy to override.
-const controlStyles = `
-:host([hidden]), :where(.cm-data-ui)[hidden], :where(:host,.cm-data-ui) [hidden] { display:none!important; }
-:where(:host,.cm-data-ui) form { margin:0; }
-:where(:host,.cm-data-ui) :is(button,input,select,textarea) { box-sizing:border-box; font:inherit; color:inherit; }
-:where(:host,.cm-data-ui) :where(button,input:not([type=color]):not([type=checkbox]):not([type=range]),select,textarea) {
-  min-height:var(--cm-control-height,30px);
-  padding:var(--cm-control-padding,4px 8px);
-  border:1px solid var(--cm-border,#cbd3de);
-  border-radius:var(--cm-control-radius,6px);
-  background:var(--cm-surface,#fff);
-}
-:where(:host,.cm-data-ui) input[type=color] { width:30px; height:22px; padding:0; border:0; background:transparent; cursor:pointer; }
-:where(:host,.cm-data-ui) :is(input[type=checkbox],button,summary) { cursor:pointer; }
-:where(:host,.cm-data-ui) :is(input,textarea)::placeholder { color:var(--cm-muted,#687586); }
-:where(:host,.cm-data-ui) button:where(:hover:not(:disabled)) { border-color:var(--cm-accent,#78a9ed); background:var(--cm-hover,#f4f8ff); }
-:where(:host,.cm-data-ui) button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
-:where(:host,.cm-data-ui) :is(button,summary):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:2px; }
-:where(:host,.cm-data-ui) :is(input,select,textarea):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:-2px; }
-`;
-
 const DATA_EDITOR_CSS = `
-@layer clinker-editor {
-${controlStyles}
-.cm-data-ui { color:var(--cm-foreground,#273444); font:var(--clinker-font,13px/1.4 system-ui,sans-serif); }
-.cm-data-ui summary:hover { color:var(--cm-accent,#1677ff); }
-.cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,#64748b); line-height:1; }
-.cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,#e3ecf8); color:var(--cm-accent,#1677ff); }
+${uiAppearanceStyles(":where(.cm-ui)")}
+.cm-data-ui summary:hover { color:var(--cm-accent,var(--_cm-accent,#1677ff)); }
+.cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,var(--_cm-muted,#64748b)); line-height:1; }
+.cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,var(--_cm-hover,#e3ecf8)); color:var(--cm-accent,var(--_cm-accent,#1677ff)); }
 .cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
 .cm-data-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
-.cm-data-error { color:var(--cm-danger,#b42318); font-size:12px; margin:6px 0; }
+.cm-data-error { color:var(--cm-danger,var(--_cm-danger,#b42318)); font-size:12px; margin:6px 0; }
 .cm-data-error:empty { display:none; }
 .cm-data-panel { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; gap:8px; }
 .cm-data-tools { flex-shrink:0; }
 .cm-data-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
-.cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,#dbe2eb); background:var(--cm-subtle,#f3f6fa); color:var(--cm-muted,#556274); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
-.cm-data-row { --cm-row-background:var(--cm-surface,#fff); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,#eee); background:var(--cm-row-background); font-size:13px; line-height:20px; }
-.cm-data-row > :is(th,td) { height:${DATA_ROW_HEIGHT}px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,#eee); }
-.cm-data-row:hover { --cm-row-background:var(--cm-hover,#e3ecf8); }
-.cm-data-row.is-selected { --cm-row-background:var(--cm-selection,#d6e6fc); }
+.cm-data-head { box-sizing:border-box; height:32px; border-bottom:1px solid var(--cm-border,var(--_cm-border,#dbe2eb)); background:var(--cm-subtle,var(--_cm-subtle,#f3f6fa)); color:var(--cm-muted,var(--_cm-muted,#556274)); font-size:11px; line-height:20px; font-weight:650; text-align:left; }
+.cm-data-row { --cm-row-background:var(--cm-surface,var(--_cm-surface,#fff)); box-sizing:border-box; height:${DATA_ROW_HEIGHT}px; border-bottom:1px solid var(--cm-border,var(--_cm-border,#eee)); background:var(--cm-row-background); font-size:13px; line-height:20px; }
+.cm-data-row > :is(th,td) { height:${DATA_ROW_HEIGHT}px; box-sizing:border-box; background:var(--cm-row-background); border-bottom:1px solid var(--cm-border,var(--_cm-border,#eee)); }
+.cm-data-row:hover { --cm-row-background:var(--cm-hover,var(--_cm-hover,#e3ecf8)); }
+.cm-data-row.is-selected { --cm-row-background:var(--cm-selection,var(--_cm-selection,#d6e6fc)); }
 .cm-data-row:is(:hover,.is-selected) { --cm-edit-icon-width:20px; }
 .cm-data-cell { box-sizing:border-box; padding:0 8px; text-align:left; vertical-align:middle; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cm-data-cell--select { width:32px; min-width:32px; padding:0; text-align:center; }
 span.cm-data-cell--select { display:flex; align-items:center; justify-content:center; }
 .cm-data-cell--select input { display:block; margin:auto; }
 .cm-data-cell > input[type=color] { display:block; }
-}
 `;
 
-function installDataEditorStyle(root) { installStyle(root, "cm-data-editor-style", DATA_EDITOR_CSS); }
+function installDataEditorStyle(root) { installStyle(root, "cm-data-editor-style", (root.host ? controlStyles : lightControlStyles) + DATA_EDITOR_CSS); }
+
+const controlClasses = { BUTTON: "cm-button", INPUT: "cm-field", SELECT: "cm-field", TEXTAREA: "cm-field", FIELDSET: "cm-section", SUMMARY: "cm-disclosure" };
+const classifyControl = (node) => {
+  const name = controlClasses[node.tagName];
+  if (name) node.classList.add(name);
+  if (node.tagName === "BUTTON" && node.closest("clinker-action-menu")) node.classList.add("cm-menu-item");
+};
+
+/** Classify only library-owned markup, including controls built dynamically. */
+function prepareUi(root) {
+  root.querySelectorAll("button,input,select,textarea,fieldset,summary").forEach(classifyControl);
+  root.querySelectorAll("template").forEach((template) => prepareUi(template.content));
+}
 
 const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
 
@@ -9527,6 +9576,7 @@ function createControls(document) {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
     if (className) node.className = className;
+    classifyControl(node);
     parent?.append(node); return node;
   };
   const row = (parent, label) => {
@@ -9562,16 +9612,16 @@ function createActionRunner(report) {
   };
 }
 
-const css = ".cm-tree-controls { --cm-control-height:24px; --cm-control-padding:2px 5px; --cm-control-radius:4px; width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font:inherit; font-size:12px; line-height:1.3; color:inherit; text-align:left; }\n.cm-tree-controls * { box-sizing:border-box; }\n.cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:4px; margin:4px 0; }\n.cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }\n.cm-tree-controls input[type=number] { width:52px; min-width:0; }\n.cm-tree-controls input[type=color] { width:24px; height:20px; }\n.cm-tree-controls input[type=checkbox] { width:12px; height:12px; margin:0; }\n.cm-tree-controls .cm-tree-heading { font-size:12px; font-weight:600; margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.cm-tree-controls .cm-tree-branch-row { display:grid; grid-template-columns:minmax(0,1fr) 24px 52px 22px; gap:5px; align-items:center; margin:5px 0; }\n.cm-tree-controls .cm-tree-reset { width:22px; min-height:22px; padding:0; }\n.cm-tree-controls .cm-tree-wide { display:block; }\n.cm-tree-controls .cm-tree-wide > span { display:block; margin-bottom:4px; }\n.cm-tree-controls .cm-tree-wide input { width:100%; }\n.cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:5px; }\n.cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }\n.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid var(--cm-border,#e5e9ef); margin:6px 0; }\n.cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:6px; }\n.cm-tree-controls [role=status]:empty { display:none; }\n.cm-tree-controls [role=status] { color:var(--cm-danger,#a13c46); margin:6px 0 0; }\n";
+const css = ".cm-tree-controls { --_cm-control-height:24px; --_cm-control-padding:2px 5px; --_cm-control-radius:4px; width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font:inherit; font-size:12px; line-height:1.3; color:inherit; text-align:left; }\n.cm-tree-controls * { box-sizing:border-box; }\n.cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:4px; margin:4px 0; }\n.cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }\n.cm-tree-controls input[type=number] { width:52px; min-width:0; }\n.cm-tree-controls input[type=color] { width:24px; height:20px; }\n.cm-tree-controls input[type=checkbox] { width:12px; height:12px; margin:0; }\n.cm-tree-controls .cm-tree-heading { font-size:12px; font-weight:600; margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.cm-tree-controls .cm-tree-branch-row { display:grid; grid-template-columns:minmax(0,1fr) 24px 52px 22px; gap:5px; align-items:center; margin:5px 0; }\n.cm-tree-controls .cm-tree-reset { width:22px; min-height:22px; padding:0; }\n.cm-tree-controls .cm-tree-wide { display:block; }\n.cm-tree-controls .cm-tree-wide > span { display:block; margin-bottom:4px; }\n.cm-tree-controls .cm-tree-wide input { width:100%; }\n.cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:5px; }\n.cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }\n.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid var(--cm-border,var(--_cm-border,#e5e9ef)); margin:6px 0; }\n.cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:6px; }\n.cm-tree-controls [role=status]:empty { display:none; }\n.cm-tree-controls [role=status] { color:var(--cm-danger,var(--_cm-danger,#a13c46)); margin:6px 0 0; }\n";
 
 /** Controls for a single tree node and its subtree. */
 function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUid = null,
-  onResize, document: doc = globalThis.document }) {
-  installDataEditorStyle(doc);
-  installStyle(doc, "clustermap-tree-controls-style", css);
+  onResize, document: doc = globalThis.document, styleRoot = doc }) {
+  installDataEditorStyle(styleRoot);
+  installStyle(styleRoot, "clustermap-tree-controls-style", css);
   const ui = createControls(doc);
   const element = (tag, parent, text, className) => ui.el(tag, text, parent, className);
-  const container = element("div", null, undefined, "cm-data-ui cm-tree-controls");
+  const container = element("div", null, undefined, "cm-ui cm-data-ui cm-tree-controls");
   const message = element("p"); message.setAttribute("role", "status");
   const run = createActionRunner((text) => { message.textContent = text; });
   const button = (parent, title, action, className) => ui.button(parent, title, () => run(action), className);
@@ -9754,6 +9804,7 @@ function createHtmlOverlay({
       .style("pointer-events", "all");
   };
   const show = (event, contents) => {
+    prepareUi(contents.node());
     tooltip.html("").append(() => contents.node());
     tooltip.attr("aria-hidden", null).property("inert", false).style("position", "fixed");
     position(event);
@@ -9859,6 +9910,7 @@ function createHtmlOverlay({
       const options = actions.treeControls();
       menuTree = options.tree;
       const controls = createTreeControls({ ...options, nodeUid: uid,
+        document: tooltip.node().ownerDocument, styleRoot: tooltip.node().getRootNode(),
         onResize: () => { if (treeMenu) position(event); } });
       show(event, select(controls));
       treeMenu = true;
@@ -12304,7 +12356,6 @@ function ensureSvgSurface({
   container,
   data,
   ids,
-  fontFamily,
   zoom,
   zoomExtent,
   onZoom,
@@ -12324,9 +12375,8 @@ function ensureSvgSurface({
 
       enter
         .append("div")
-        .attr("class", "tooltip")
-        .style("opacity", 0)
-        .style("font-family", fontFamily);
+        .attr("class", "cm-ui tooltip")
+        .style("opacity", 0);
 
       const surface = enter
         .append("svg")
@@ -12480,7 +12530,6 @@ const defaultConfig = {
     leafGuide: { show: false, colour: null, width: 1, dash: "4 3" },
   },
   plot: {
-    theme: "auto",
     // Figure appearance is stable across interface and system themes.
     background: "#ffffff",
     transitionDuration: 250,
@@ -12751,7 +12800,6 @@ function validateConfiguration(options, tree = null) {
   const candidate = createDefaultConfig();
   updateConfig(candidate, config);
   updateConfig(candidate, options);
-  if (!["light", "dark", "auto"].includes(candidate.plot.theme)) throw new TypeError("plot.theme must be light, dark or auto.");
   if (typeof candidate.annotations?.enabled !== "boolean") {
     throw new TypeError("annotations.enabled must be a boolean.");
   }
@@ -15108,10 +15156,13 @@ function clusterMap() {
   }
   let annotationOverlay = null;
   let themeMedia = null;
+  let uiAppearance = "auto";
+  function refreshUiAppearance() {
+    applyTheme(container?.node(), uiAppearance);
+    emitChange({ type: "theme.change", theme: resolveTheme(uiAppearance).mode });
+  }
   function systemThemeChanged() {
-    if (runtime.config.plot.theme !== "auto" || !container || !currentData) return;
-    applyTheme(container.node(), resolveTheme(runtime.config.plot.theme));
-    emitChange({ type: "theme.change", theme: resolveTheme(runtime.config.plot.theme).mode });
+    if (uiAppearance === "auto") refreshUiAppearance();
   }
   let annotationUiContext = null, annotationUiLoad = null;
   let zoom = null;
@@ -15992,7 +16043,7 @@ function clusterMap() {
 
   function redraw({ animate = true, synchronize = true } = {}) {
     if (!currentData || !container) return;
-    applyTheme(container.node(), resolveTheme(runtime.config.plot.theme));
+    applyTheme(container.node(), uiAppearance);
     if (globalThis.getComputedStyle(container.node()).position === "static") container.style("position", "relative");
     container.style("isolation", "isolate");
     if (!themeMedia && globalThis.matchMedia) {
@@ -16034,7 +16085,6 @@ function clusterMap() {
       container,
       data,
       ids: runtime.ids,
-      fontFamily: runtime.config.plot.fontFamily,
       zoom,
       zoomExtent,
       onZoom: (event, viewport) => {
@@ -16147,7 +16197,6 @@ function clusterMap() {
         getScene: () => runtime.getScene(), getPreview: () => scenePreview,
         getCamera: () => getCamera(chartState),
         isBusy: () => isDragging(chartState) || Boolean(rasterAnimation),
-        fontFamily: runtime.config.plot.fontFamily,
       };
       if (annotationOverlay) annotationOverlay.update(annotationUiContext);
       else if (!annotationUiLoad) {
@@ -16206,6 +16255,13 @@ function clusterMap() {
     updateFigureSurface();
   }
 
+  // Host preference: deliberately absent from figure configuration/history.
+  my.uiAppearance = function (mode) {
+    if (!arguments.length) return uiAppearance;
+    validateUiAppearance(mode);
+    if (uiAppearance !== mode) { uiAppearance = mode; refreshUiAppearance(); }
+    return my;
+  };
   my.config = function (_) {
     if (!arguments.length) return runtime.config;
     cancelTreePresentationPreview();

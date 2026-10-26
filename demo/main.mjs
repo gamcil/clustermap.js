@@ -2,7 +2,7 @@ import * as d3 from "d3";
 import { ClusterMap } from "../dist/clustermap.mjs";
 import { mountPlotSelectionToolbar } from "../dist/editor.mjs";
 import { createLargeTestingData, SYNTHETIC_FIXTURES } from "../fixtures/synthetic.mjs";
-import { applyTheme, resolveTheme } from "../src/ui/theme.mjs";
+import { applyTheme } from "../src/ui/theme.mjs";
 
 const params = new URLSearchParams(location.search);
 const testMode = params.has("test");
@@ -25,11 +25,11 @@ const chart = ClusterMap().config({
 const source = projectFixture ? d3.json(projectFixture) : syntheticFixture ? Promise.resolve(createLargeTestingData(syntheticFixture)) : treeFixture ? d3.json("../fixtures/bua-genbank-tree.json") : biologicalFixture ? d3.json(biologicalFixture) : d3.json("../fixtures/testing.json");
 const themeSelect = document.querySelector("#theme-mode");
 const syncTheme = () => {
-  themeSelect.value = chart.config().plot.theme;
-  applyTheme(document.querySelector("main"), resolveTheme(themeSelect.value));
+  themeSelect.value = chart.uiAppearance();
+  applyTheme(document.querySelector("main"), themeSelect.value);
 };
 chart.on("change", (event) => { if (event.type === "config.change" || event.type === "theme.change") syncTheme(); });
-themeSelect.addEventListener("change", () => chart.config({ plot: { theme: themeSelect.value } }));
+themeSelect.addEventListener("change", () => chart.uiAppearance(themeSelect.value));
 syncTheme();
 const download = (blob, filename) => {
   const url = URL.createObjectURL(blob);
@@ -76,7 +76,7 @@ source.then((loaded) => {
     ...(params.has("minimap") ? { minimap: { ...project.config.plot.minimap, show: true } } : {}),
   } });
   // Annotation examples opt in explicitly; ordinary charts remain synteny-only.
-  if (params.has("theme")) chart.config({ plot: { theme: params.get("theme") } });
+  if (params.has("theme")) chart.uiAppearance(params.get("theme"));
   if (fixture === "heatmap" || fixture === "heatmap-project" || fixture === "group-markers") chart.config({ annotations: { enabled: true } });
   if (testMode) { window.__demoChart = chart; window.d3 = d3; }
   d3.select("#plot").selectAll("div").data([data]).join("div").attr("class", "chart-host").call(chart);

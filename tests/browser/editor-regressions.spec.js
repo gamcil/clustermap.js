@@ -58,7 +58,7 @@ const canvasPoint = (page, selector, fraction = 0.5) => page.evaluate(({ selecto
 for (const theme of ["light", "dark"]) {
   test(`${theme}: shared geometry and interactive colours across data views`, async ({ page }) => {
     await selectionFixture(page, "svg");
-    await page.evaluate((theme) => chart.config({ plot: { theme } }), theme);
+    await page.evaluate((theme) => chart.uiAppearance(theme), theme);
     let checkboxX;
     for (const kind of ["groups", "links", "tree", "list", "numeric", "categorical"]) {
       if (["numeric", "categorical"].includes(kind)) await annotation(page, kind === "categorical");
@@ -587,7 +587,7 @@ for (const renderer of ["svg", "canvas"]) {
     ]));
     await page.getByRole("button", { name: "Tree node x: rotate children or open context menu", exact: true }).click();
     expect(await page.evaluate(() => chart.state().clusterOrder)).toEqual(["b", "a", "c", "d", "e"]);
-    await page.evaluate((renderer) => chart.config({ plot: { renderer, theme: "dark" } }), renderer);
+    await page.evaluate((renderer) => chart.config({ plot: { renderer } }).uiAppearance("dark"), renderer);
 
     const saved = await page.evaluate(() => JSON.parse(JSON.stringify(chart.project())));
     expect(saved.data.annotationPanels.find((panel) => panel.uid === "expression").values.a[0]).toBe(0.75);
@@ -1375,7 +1375,7 @@ for (const [entry, tag] of [["editor", "clinker-editor"], ["data-panel", "clinke
       document.querySelector("clinker-editor").remove();
       const { ClusterMap } = await import("/dist/clustermap.mjs");
       const data = await (await fetch("/fixtures/heatmap.json")).json();
-      window.chart = ClusterMap().config({ plot: { renderer: "svg", transitionDuration: 0, theme: "dark" } });
+      window.chart = ClusterMap().config({ plot: { renderer: "svg", transitionDuration: 0 } }).uiAppearance("dark");
       d3.select("#plot").datum(data).call(chart);
       const panel = document.createElement(tag); panel.id = "standalone"; panel.style.height = "400px"; panel.chart = chart;
       const host = document.createElement("section"); document.body.append(host);

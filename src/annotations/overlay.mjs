@@ -5,6 +5,7 @@ import { defineAnnotationEditor } from "../editor/components/annotation-editor/a
 import { createAnnotationControls } from "./controls.mjs";
 import { defineAnnotationDataForm } from "../editor/components/annotation-data-form/annotation-data-form.js";
 import { createAnnotationPanel } from "./io.mjs";
+import { classifyControl } from "../ui/controls.mjs";
 
 const css = await textAsset(new URL("./overlay.css", import.meta.url));
 
@@ -13,22 +14,23 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
   const getPanels = () => getData()?.annotationPanels || [];
   const { annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell } = annotationApi;
   const document = container.ownerDocument, window = document.defaultView;
-  installDataEditorStyle(document);
-  installStyle(document, "clustermap-annotation-ui-style", css);
+  const styleRoot = container.getRootNode();
+  installDataEditorStyle(styleRoot);
+  installStyle(styleRoot, "clustermap-annotation-ui-style", css);
   const element = (tag, className, parent = container) => {
-    const node = document.createElement(tag); node.className = className; parent.append(node); return node;
+    const node = document.createElement(tag); node.className = className; classifyControl(node); parent.append(node); return node;
   };
-  const frame = element("div", "cm-data-ui cm-annotation-ui cm-annotation-frame"); frame.hidden = true;
+  const frame = element("div", "cm-ui cm-data-ui cm-annotation-ui cm-annotation-frame"); frame.hidden = true;
   const edit = element("button", "", frame); edit.type = "button"; edit.textContent = "Edit";
   edit.setAttribute("aria-haspopup", "dialog"); edit.setAttribute("aria-expanded", "false");
-  const addFrame = element("div", "cm-data-ui cm-annotation-ui cm-annotation-frame cm-annotation-add"); addFrame.hidden = true;
+  const addFrame = element("div", "cm-ui cm-data-ui cm-annotation-ui cm-annotation-frame cm-annotation-add"); addFrame.hidden = true;
   const add = element("button", "", addFrame); add.type = "button"; add.textContent = "+";
   add.setAttribute("aria-label", "Add annotation panel"); add.setAttribute("aria-haspopup", "dialog");
-  const hiddenButton = element("button", "cm-data-ui cm-annotation-ui cm-annotation-hidden");
+  const hiddenButton = element("button", "cm-ui cm-data-ui cm-annotation-ui cm-annotation-hidden");
   hiddenButton.type = "button"; hiddenButton.hidden = true; hiddenButton.setAttribute("aria-haspopup", "dialog");
-  const menu = element("div", "cm-data-ui cm-annotation-ui cm-annotation-menu"); menu.hidden = true;
+  const menu = element("div", "cm-ui cm-data-ui cm-annotation-ui cm-annotation-menu"); menu.hidden = true;
   menu.setAttribute("role", "dialog"); menu.setAttribute("aria-label", "Annotation panel settings");
-  const tooltip = element("div", "annotation-tooltip"); tooltip.hidden = true;
+  const tooltip = element("div", "cm-ui annotation-tooltip"); tooltip.hidden = true;
   tooltip.setAttribute("role", "tooltip");
   let context = null, surfaces = [], hovered = null, menuState = null;
   let tooltipKey = null;
@@ -280,7 +282,6 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
       const surfacesChanged = surfaces.length !== nextSurfaces.length || surfaces.some((surface, i) => surface !== nextSurfaces[i]);
       if (surfacesChanged) detach();
       context = next; surfaces = nextSurfaces;
-      for (const item of [frame, addFrame, menu, hiddenButton, tooltip]) item.style.fontFamily = next.fontFamily;
       if (surfacesChanged) for (const surface of surfaces) {
         surface.addEventListener("pointermove", move); surface.addEventListener("pointerleave", leave);
         surface.addEventListener("pointerdown", dismissForGesture); surface.addEventListener("wheel", dismissForGesture);

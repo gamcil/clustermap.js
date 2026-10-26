@@ -1,7 +1,6 @@
 import { csvFormatRows } from "d3-dsv";
 import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
 import { textAsset } from "../../../ui/assets.mjs";
-import { controlStyles } from "../../shared/controls.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./annotation-data-form.html", import.meta.url)),
@@ -17,7 +16,7 @@ class AnnotationDataForm extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = mountComponent(this, template, controlStyles + css);
+    const root = mountComponent(this, template, css);
     this.#form = root.querySelector("form");
     this.#field("type").onchange = () => { this.#sync(); this.#example(); };
     this.#form.onsubmit = (event) => { event.preventDefault(); this.error = ""; this.#emit("data-submit", this.value); };

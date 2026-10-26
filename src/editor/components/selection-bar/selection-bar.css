@@ -5,11 +5,11 @@
   height: 32px;
   min-width: 0;
   flex-shrink: 0;
-  color: var(--cm-muted, #687586);
+  color: var(--cm-muted,var(--_cm-muted, #687586));
   font: 12px/1.4 system-ui, sans-serif;
 }
 span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-span.is-selected { color: var(--cm-foreground, #273444); font-weight: 600; }
+span.is-selected { color: var(--cm-foreground,var(--_cm-foreground, #273444)); font-weight: 600; }
 div { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 slot { display: contents; }
 button { flex-shrink: 0; }

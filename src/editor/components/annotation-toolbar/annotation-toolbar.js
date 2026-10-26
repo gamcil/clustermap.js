@@ -1,6 +1,5 @@
 import { createTemplate, mountComponent, updateSelectOptions } from "../../../ui/controls.mjs";
 import { textAsset } from "../../../ui/assets.mjs";
-import { controlStyles } from "../../shared/controls.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./annotation-toolbar.html", import.meta.url)),
@@ -15,7 +14,7 @@ class AnnotationToolbar extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = mountComponent(this, template, controlStyles + css);
+    const root = mountComponent(this, template, css);
     this.#select = root.querySelector("select");
     this.#buttons = Object.fromEntries([...root.querySelectorAll("button")].map((button) => [button.dataset.action, button]));
     this.#select.onchange = () => this.#emit("panel-change", { value: this.#select.value });

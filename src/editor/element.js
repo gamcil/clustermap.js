@@ -1,6 +1,6 @@
 import { createTemplate, upgradeProperty } from "../ui/controls.mjs";
 import { applyEditorTheme, editorThemeStyles } from "./shared/theme.js";
-import { controlStyles } from "./shared/controls.mjs";
+import { controlStyles } from "../ui/controlStyles.mjs";
 import { defineAppearancePanel } from "./components/appearance-panel/appearance-panel.js";
 import { defineTabs } from "./components/tabs/tabs.js";
 import { defineDataPanel } from "./components/data-panel/data-panel.js";
@@ -48,7 +48,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   connectedCallback() {
-    this.classList.add("cm-editor", "cm-data-ui");
+    this.classList.add("cm-ui", "cm-editor", "cm-data-ui");
     if (!this.#dataPanel) this.#renderShell();
     this.#subscribe(); this.#render();
   }
@@ -114,7 +114,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #syncTheme() {
-    applyEditorTheme(this, this.#chart?.config?.());
+    applyEditorTheme(this, this.#chart);
   }
 
 }

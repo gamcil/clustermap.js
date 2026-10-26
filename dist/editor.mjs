@@ -1,11 +1,11 @@
-import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-69025dd2.mjs';
-import { c as createTemplate, m as mountComponent, a as controlStyles, u as upgradeProperty } from './editor/search-field-3fabdfe6.mjs';
-import { e as editorThemeStyles, a as applyEditorTheme } from './editor/theme-3d7fc189.mjs';
-import { d as defineAppearancePanel } from './editor/appearance-panel-04ee7d66.mjs';
-import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-084b7d2a.mjs';
+import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-429b96e6.mjs';
+import { c as createTemplate, m as mountComponent, a as controlStyles, u as upgradeProperty } from './editor/search-field-8417656d.mjs';
+import { a as applyEditorTheme, e as editorThemeStyles } from './editor/theme-f4663192.mjs';
+import { d as defineAppearancePanel } from './editor/appearance-panel-0e383d20.mjs';
+import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-bd5d0f60.mjs';
 
 const toolbarTemplate = createTemplate("<strong></strong>\n<button type=\"button\" data-action=\"focus\">Focus</button>\n<button type=\"button\" data-action=\"flip\">Flip</button>\n<button type=\"button\" data-action=\"trim\">Trim</button>\n<clinker-action-menu label=\"Loci…\" data-loci-menu hidden>\n  <button type=\"button\" data-action=\"restore\">Restore full loci</button>\n</clinker-action-menu>\n<clinker-action-menu label=\"More…\" data-more-menu>\n  <button type=\"button\" data-action=\"edit\">Edit data…</button>\n  <button type=\"button\" data-action=\"remove\"></button>\n</clinker-action-menu>\n<button type=\"button\" data-action=\"clear\">Clear</button>\n");
-const css$2 = "@layer clinker-editor {\n  .cm-plot-selection-toolbar { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; align-items: center; gap: 6px; padding: 7px 8px; border: 1px solid var(--cm-border,#c7d9f1); border-radius: 8px; background: var(--cm-surface,rgba(255,255,255,.94)); box-shadow: 0 3px 12px rgba(23,36,54,.12); color: var(--cm-foreground,#273444); font: 13px/1.4 system-ui, sans-serif; }\n  .cm-plot-selection-toolbar[hidden] { display: none; }\n  .cm-plot-selection-toolbar strong { padding: 4px 6px; border-radius: 5px; background: var(--cm-hover,#e7f0ff); color: var(--cm-accent,#184a86); }\n  .cm-plot-selection-toolbar button { min-height: 28px; box-sizing: border-box; border: 1px solid var(--cm-border,#cbd3de); border-radius: 6px; padding: 3px 7px; background: var(--cm-surface,#fff); color: inherit; font: inherit; cursor: pointer; }\n  .cm-plot-selection-toolbar button:hover { border-color: var(--cm-accent,#78a9ed); background: var(--cm-hover,#f4f8ff); }\n}\n";
+const css$2 = ".cm-plot-selection-toolbar { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; align-items: center; gap: 6px; padding: 7px 8px; border: 1px solid var(--cm-border,var(--_cm-border,#c7d9f1)); border-radius: 8px; background: var(--cm-surface,var(--_cm-surface,rgba(255,255,255,.94))); box-shadow: 0 3px 12px rgba(23,36,54,.12); color: var(--cm-foreground,var(--_cm-foreground,#273444)); font: var(--cm-font,var(--_cm-font)); }\n.cm-plot-selection-toolbar[hidden] { display: none; }\n.cm-plot-selection-toolbar strong { padding: 4px 6px; border-radius: 5px; background: var(--cm-hover,var(--_cm-hover,#e7f0ff)); color: var(--cm-accent,var(--_cm-accent,#184a86)); }\n";
 
 let activeToolbar = null;
 
@@ -17,7 +17,7 @@ function mountPlotSelectionToolbar(chart, container, { editor = null } = {}) {
   const scope = container.getRootNode();
   defineActionMenu(); installDataEditorStyle(scope); installStyle(scope, "clinker-plot-selection-style", css$2);
   const root = document.createElement("div");
-  root.className = "cm-data-ui cm-plot-selection-toolbar";
+  root.className = "cm-ui cm-data-ui cm-plot-selection-toolbar";
   root.hidden = true;
   root.append(toolbarTemplate(document));
   const button = (action) => root.querySelector(`[data-action="${action}"]`);
@@ -27,6 +27,7 @@ function mountPlotSelectionToolbar(chart, container, { editor = null } = {}) {
   const lociFor = ({ kind, ids }) => kind === "loci" ? ids :
     (chart.visibleData()?.clusters || []).filter((cluster) => ids.includes(cluster.uid)).flatMap((cluster) => cluster.loci.map((locus) => locus.uid));
   const sync = () => {
+    applyEditorTheme(root, chart);
     const { kind, ids } = chart.selection(), clusters = kind === "clusters";
     root.hidden = !ids.length;
     const noun = ids.length === 1 ? (clusters ? "cluster" : "locus") : kind;
@@ -67,6 +68,7 @@ function mountPlotSelectionToolbar(chart, container, { editor = null } = {}) {
   container.addEventListener("focusin", activate);
   document.addEventListener("keydown", onKeyDown);
   const unsubscribe = chart.on("change", (change) => {
+    if (["theme.change", "config.change"].includes(change.type)) applyEditorTheme(root, chart);
     if (["selection.change", "state.replace", "data.apply", "data.replace"].includes(change.type)) sync();
   });
   container.append(root);
@@ -83,7 +85,7 @@ function mountPlotSelectionToolbar(chart, container, { editor = null } = {}) {
 
 const [markup$1, css$1] = await Promise.all([
   "<div part=\"tab-list\" role=\"tablist\">\n  <template><button type=\"button\" role=\"tab\"></button></template>\n</div>\n<slot name=\"status\"></slot>\n<div part=\"panels\">\n  <template><div role=\"tabpanel\" tabindex=\"0\"><slot></slot></div></template>\n</div>\n",
-  ":host { display: flex; flex: 1; flex-direction: column; min-height: 0; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\n[role=tablist] { display: flex; flex-shrink: 0; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--cm-border, #e1e5ea); }\nbutton {\n  box-sizing: border-box;\n  min-height: 30px;\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 0;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n  color: inherit;\n  font: inherit;\n  cursor: pointer;\n}\nbutton[aria-selected=true] { border-bottom-color: var(--cm-accent, #1677ff); font-weight: 600; }\nbutton:hover:not(:disabled) { background: var(--cm-hover, #e3ecf8); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\nbutton:disabled { color: var(--cm-muted, #8993a1); opacity: .45; cursor: default; }\n[part=panels], [role=tabpanel] { display: flex; flex: 1; flex-direction: column; min-height: 0; }\n[role=tabpanel]:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nslot { display: contents; }\n",
+  ":host { display: flex; flex: 1; flex-direction: column; min-height: 0; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\n[role=tablist] { display: flex; flex-shrink: 0; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--cm-border,var(--_cm-border, #e1e5ea)); }\nbutton {\n  min-height: var(--cm-control-height,var(--_cm-control-height,30px));\n  border: 0;\n  border-bottom: 2px solid transparent;\n  background: transparent;\n}\nbutton[aria-selected=true] { border-bottom-color: var(--cm-accent,var(--_cm-accent, #1677ff)); font-weight: 600; }\nbutton:hover:not(:disabled) { background: var(--cm-hover,var(--_cm-hover, #e3ecf8)); }\n[part=panels], [role=tabpanel] { display: flex; flex: 1; flex-direction: column; min-height: 0; }\n[role=tabpanel]:focus-visible { outline: 2px solid var(--cm-focus-ring,var(--_cm-focus-ring, #1677ff)); outline-offset: -2px; }\nslot { display: contents; }\n",
 ]);
 const template = createTemplate(markup$1);
 const HTMLElementBase$1 = globalThis.HTMLElement || class {};
@@ -156,7 +158,7 @@ function defineTabs() {
 
 const [markup, css] = await Promise.all([
   "<div data-editor-shell>\n<div class=\"cm-editor__resize-handle\" data-resize role=\"separator\" aria-label=\"Resize plot editor\" aria-orientation=\"horizontal\"></div>\n<header part=\"header\" class=\"cm-editor__header\">\n  <h2 class=\"cm-editor__title\">Plot editor</h2>\n  <div>\n    <button type=\"button\" data-command=\"undo\" disabled>Undo</button>\n    <button type=\"button\" data-command=\"redo\" disabled>Redo</button>\n  </div>\n</header>\n<clinker-tabs part=\"tabs\" data-editor-tabs label=\"Plot editor sections\" value=\"data\">\n  <clinker-data-panel part=\"data\" name=\"data\" label=\"Data\"></clinker-data-panel>\n  <clinker-appearance-panel part=\"appearance\" name=\"appearance\" label=\"Appearance\" hidden></clinker-appearance-panel>\n</clinker-tabs>\n</div>\n",
-  "@layer clinker-editor {\n  :host { display: flex; min-height: 180px; box-sizing: border-box; flex-direction: column; padding: 10px; border: 1px solid var(--cm-border,#d7dce3); border-radius: 10px; }\n  :host([resizable]) { overflow: hidden; }\n  .cm-editor__resize-handle { height: 10px; flex: 0 0 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }\n  .cm-editor__resize-handle::after { display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: var(--cm-muted,#aaa); content: \"\"; }\n  .cm-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }\n  .cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }\n  [data-editor-shell] { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; }\n}\n",
+  ":host { display: flex; min-height: 180px; box-sizing: border-box; flex-direction: column; padding: 10px; border: 1px solid var(--cm-border,var(--_cm-border,#d7dce3)); border-radius: 10px; }\n:host([resizable]) { overflow: hidden; }\n.cm-editor__resize-handle { height: 10px; flex: 0 0 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }\n.cm-editor__resize-handle::after { display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: var(--cm-muted,var(--_cm-muted,#aaa)); content: \"\"; }\n.cm-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }\n.cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }\n[data-editor-shell] { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; }\n",
 ]);
 const shellTemplate = createTemplate(markup);
 const HTMLElementBase = globalThis.HTMLElement || class {};
@@ -196,7 +198,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   }
 
   connectedCallback() {
-    this.classList.add("cm-editor", "cm-data-ui");
+    this.classList.add("cm-ui", "cm-editor", "cm-data-ui");
     if (!this.#dataPanel) this.#renderShell();
     this.#subscribe(); this.#render();
   }
@@ -262,7 +264,7 @@ class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #syncTheme() {
-    applyEditorTheme(this, this.#chart?.config?.());
+    applyEditorTheme(this, this.#chart);
   }
 
 }

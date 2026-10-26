@@ -1,19 +1,12 @@
 :host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }
 :host([hidden]), [hidden] { display: none !important; }
-input, button { box-sizing: border-box; color: inherit; font: inherit; }
 input {
   width: 100%;
   min-width: 0;
-  min-height: var(--cm-control-height, 30px);
-  padding: var(--cm-control-padding, 4px 8px);
-  border: 1px solid var(--cm-border, #cbd3de);
-  border-radius: var(--cm-control-radius, 6px);
-  background: var(--cm-surface, #fff);
+  border-radius: var(--cm-control-radius,var(--_cm-control-radius, 6px));
 }
 input[data-filled] { padding-inline-end: 30px; }
 input::-webkit-search-cancel-button { appearance: none; }
-input::placeholder { color: var(--cm-muted, #687586); }
-input:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }
 button {
   position: absolute;
   inset-inline-end: 4px;
@@ -23,12 +16,12 @@ button {
   place-items: center;
   width: 22px;
   height: 22px;
+  min-height: 0;
   padding: 0;
   border: 0;
-  border-radius: var(--cm-control-radius, 6px);
+  border-radius: var(--cm-control-radius,var(--_cm-control-radius, 6px));
   background: transparent;
-  color: var(--cm-muted, #687586);
+  color: var(--cm-muted,var(--_cm-muted, #687586));
   cursor: pointer;
 }
-button:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }
-button:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }
+button:hover { background: var(--cm-hover,var(--_cm-hover, #e3ecf8)); color: var(--cm-accent,var(--_cm-accent, #1677ff)); }

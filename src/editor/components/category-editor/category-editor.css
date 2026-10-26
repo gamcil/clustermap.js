@@ -1,8 +1,8 @@
 :host { display: block; color: inherit; font: inherit; }
-summary { cursor: pointer; color: var(--cm-muted, #687586); }
-summary:hover { color: var(--cm-accent, #1677ff); }
+summary { cursor: pointer; color: var(--cm-muted,var(--_cm-muted, #687586)); }
+summary:hover { color: var(--cm-accent,var(--_cm-accent, #1677ff)); }
 [data-items] { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 0 2px; }
 .category, [data-removal] { display: flex; align-items: center; gap: 5px; }
 .category:hover { --cm-edit-icon-width:20px; }
 clinker-editable-field, input[type=text] { width: 140px; min-width: 0; }
-[data-removal] { flex-wrap: wrap; margin-top: 6px; padding: 6px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 4px; }
+[data-removal] { flex-wrap: wrap; margin-top: 6px; padding: 6px; border: 1px solid var(--cm-border,var(--_cm-border, #cbd3de)); border-radius: 4px; }

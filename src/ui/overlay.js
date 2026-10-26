@@ -3,6 +3,7 @@
 import { color } from "d3-color";
 import { create, select } from "d3-selection";
 import { createTreeControls } from "../tree/controls.mjs";
+import { prepareUi } from "./controls.mjs";
 
 export function createHtmlOverlay({
   tooltip,
@@ -47,6 +48,7 @@ export function createHtmlOverlay({
       .style("pointer-events", "all");
   };
   const show = (event, contents) => {
+    prepareUi(contents.node());
     tooltip.html("").append(() => contents.node());
     tooltip.attr("aria-hidden", null).property("inert", false).style("position", "fixed");
     position(event);
@@ -152,6 +154,7 @@ export function createHtmlOverlay({
       const options = actions.treeControls();
       menuTree = options.tree;
       const controls = createTreeControls({ ...options, nodeUid: uid,
+        document: tooltip.node().ownerDocument, styleRoot: tooltip.node().getRootNode(),
         onResize: () => { if (treeMenu) position(event); } });
       show(event, select(controls));
       treeMenu = true;

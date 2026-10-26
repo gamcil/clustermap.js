@@ -1,6 +1,5 @@
 import { createTemplate, mountComponent, updateSelectOptions } from "../../../ui/controls.mjs";
 import { textAsset } from "../../../ui/assets.mjs";
-import { controlStyles } from "../../shared/controls.mjs";
 import { defineActionMenu } from "../action-menu/action-menu.js";
 
 const [markup, css] = await Promise.all([
@@ -16,7 +15,7 @@ class RecordActions extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = mountComponent(this, template, controlStyles + css);
+    const root = mountComponent(this, template, css);
     root.addEventListener("click", (event) => {
       const command = event.target.closest("[data-command]")?.dataset.command;
       if (!command) return;

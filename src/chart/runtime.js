@@ -124,7 +124,6 @@ function validateConfiguration(options, tree = null) {
   const candidate = createDefaultConfig();
   updateConfig(candidate, config);
   updateConfig(candidate, options);
-  if (!["light", "dark", "auto"].includes(candidate.plot.theme)) throw new TypeError("plot.theme must be light, dark or auto.");
   if (typeof candidate.annotations?.enabled !== "boolean") {
     throw new TypeError("annotations.enabled must be a boolean.");
   }

@@ -1,5 +1,5 @@
 :host { display: block; color: inherit; font: inherit; }
-fieldset { min-width: 0; margin: 0 0 8px; padding: 8px; border: 1px solid var(--cm-border, #cbd3de); border-radius: 6px; }
+fieldset { min-width: 0; margin: 0 0 8px; padding: 8px; border: 1px solid var(--cm-border,var(--_cm-border, #cbd3de)); border-radius: 6px; }
 legend { padding: 0 4px; font-weight: 600; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 clinker-editable-field { width: 140px; }

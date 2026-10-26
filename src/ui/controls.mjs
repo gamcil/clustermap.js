@@ -1,4 +1,18 @@
 import { color } from "d3-color";
+import { controlStyles } from "./controlStyles.mjs";
+
+const controlClasses = { BUTTON: "cm-button", INPUT: "cm-field", SELECT: "cm-field", TEXTAREA: "cm-field", FIELDSET: "cm-section", SUMMARY: "cm-disclosure" };
+export const classifyControl = (node) => {
+  const name = controlClasses[node.tagName];
+  if (name) node.classList.add(name);
+  if (node.tagName === "BUTTON" && node.closest("clinker-action-menu")) node.classList.add("cm-menu-item");
+};
+
+/** Classify only library-owned markup, including controls built dynamically. */
+export function prepareUi(root) {
+  root.querySelectorAll("button,input,select,textarea,fieldset,summary").forEach(classifyControl);
+  root.querySelectorAll("template").forEach((template) => prepareUi(template.content));
+}
 
 export const colourHex = (value, fallback = "#888888") => color(value)?.formatHex() || fallback;
 
@@ -14,6 +28,7 @@ export function createTemplate(markup) {
     let template = templates.get(document);
     if (!template) {
       template = document.createElement("template"); template.innerHTML = markup;
+      prepareUi(template.content);
       templates.set(document, template);
     }
     return document.importNode(template.content, true);
@@ -22,7 +37,7 @@ export function createTemplate(markup) {
 
 export function mountComponent(element, template, css) {
   const root = element.attachShadow({ mode: "open" });
-  const style = element.ownerDocument.createElement("style"); style.textContent = css;
+  const style = element.ownerDocument.createElement("style"); style.textContent = controlStyles + css;
   root.append(style, template(element.ownerDocument));
   return root;
 }
@@ -46,6 +61,7 @@ export function createControls(document) {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
     if (className) node.className = className;
+    classifyControl(node);
     parent?.append(node); return node;
   };
   const row = (parent, label) => {

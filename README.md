@@ -72,10 +72,16 @@ Try `?fixture=tree-styling&renderer=canvas`.
 
 ## Interface theme and figure background
 
-Use `chart.config({ plot: { theme: "auto" } })` to follow the system appearance,
-or choose `"light"` / `"dark"`. Auto is the default. This themes the controls,
-menus and editor; figure colours remain fixed when the interface theme changes.
-The demo toolbar and Appearance panel expose the setting.
+Use `chart.uiAppearance("auto")` to follow the system appearance, or choose
+`"light"` / `"dark"`. The getter `chart.uiAppearance()` returns the preference.
+This changes controls, menus and the attached editor without changing figure
+configuration, undo history, saved projects or SVG output. The demo toolbar
+exposes the setting; application appearance belongs to the host app.
+
+UI appearance defaults to `"auto"` and is never loaded from figure configuration
+or saved projects. Hosts set their preference through `chart.uiAppearance(...)`.
+Only `"auto"`, `"light"` and `"dark"` are accepted; other values, including `null`,
+throw `TypeError`.
 
 Figures use a white background by default. To choose a softer editing/figure
 background explicitly, use `chart.config({ plot: { background: "#f5f5f3" } })`
@@ -211,15 +217,87 @@ The full editor and data panel expose `editAnnotations(panelUid)` and `editSelec
 where `kind` is `"clusters"` or `"loci"`. Assign `.chart` first; navigation requested
 before connection is applied when the component mounts.
 
-Theme colors follow the chart. Public overrides include `--clinker-accent`,
-`--clinker-surface`, `--clinker-foreground`, `--clinker-border`, and
-`--clinker-font`. The full editor exposes `header`, `tabs`, `data`, and
-`appearance` parts; the data panel exposes `content`, `toolbar`, `selection`,
-and `table`; the appearance panel exposes `toolbar` and `settings`.
+The full editor exposes `header`, `tabs`, `data`, and `appearance` parts; the
+data panel exposes `content`, `toolbar`, `selection`, and `table`; the appearance
+panel exposes `toolbar` and `settings`.
+
+### UI styling contract
+
+Styles are included with the components. Set public properties on a common
+wrapper, the chart container or an editor host; they inherit through nested
+components. Explicit public properties override theme defaults. For example:
+
+```css
+.plot-workspace {
+  --cm-surface: var(--app-surface);
+  --cm-foreground: var(--app-foreground);
+  --cm-border: var(--app-border);
+  --cm-accent: var(--app-accent);
+  --cm-font: 13px/1.4 system-ui, sans-serif;
+}
+```
+
+| Property | Light default | Dark default |
+| --- | --- | --- |
+| `--cm-background` (workspace outside the figure) | `#ffffff` | `#171b22` |
+| `--cm-surface` | `#ffffff` | `#232a35` |
+| `--cm-subtle` | `#f3f6fa` | `#293241` |
+| `--cm-hover` | `#e3ecf8` | `#354660` |
+| `--cm-foreground` | `#20252c` | `#e5eaf1` |
+| `--cm-muted` | `#687586` | `#a0adbd` |
+| `--cm-border` | `#cbd3de` | `#465365` |
+| `--cm-accent`, `--cm-focus-ring` | `#1677ff` | `#85b7ff` |
+| `--cm-selection` | `#d6e6fc` | `#3a5276` |
+| `--cm-danger` | `#b42318` | `#ffaaa3` |
+| `--cm-font` | `13px/1.4 system-ui,sans-serif` | same |
+| `--cm-control-height` | `30px` | same |
+| `--cm-control-padding` | `4px 8px` | same |
+| `--cm-control-radius` | `6px` | same |
+
+Some compact controls have smaller defaults; virtualized data rows retain their
+fixed row height. `--_cm-*` properties and component implementation classes are
+private. The previous app-specific `--clinker-*` hooks have been removed.
+
+Editors and standalone panels follow their attached chart's UI preference, or
+the system when unattached. Set `appearance="light"`, `"dark"` or `"auto"` on an
+editor/panel to override that preference locally. The override reaches nested
+components. Native controls use the same colour scheme; `auto` responds to
+system changes. Colour overrides do not infer a native colour scheme, so set
+the UI preference/attribute as well when supplying a custom dark or light palette.
+
+Library-created light DOM controls use an owned `.cm-ui` scope. Floating menus
+and tooltips remain inside their chart container and inherit its public tokens.
+Selection toolbars mounted elsewhere follow the chart's UI mode; their placement
+container must receive the same public tokens, normally through a shared wrapper.
+Two independent charts can have different modes and palettes on the same page.
+Host CSS should scope app-owned controls; library rules do not theme arbitrary
+host buttons or scientific SVG content.
 
 Importing `clinker/editor` registers the full editor. The standalone panel
 imports register their own elements; styles are bundled with each component,
 so no separate stylesheet or registration call is needed.
+
+### Clinker integration migration
+
+For the coordinated app update described by `CLUSTERMAP_UI_BOUNDARY_DESIGN.md`:
+
+- Import the editor entry for registration; remove the old named
+  `defineClinkerEditor` import/call. Keep `mountPlotSelectionToolbar` if used.
+- Map app theme tokens to the documented `--cm-*` properties in one workspace
+  adapter. Apply it to both chart and editor/toolbar containers when separated.
+  Replace legacy `--clinker-*` properties and library-internal CSS overrides.
+- Set `chart.uiAppearance(appPreference)` instead of writing `config.plot.theme`.
+  Keep application preference persistence in the host.
+- Update the dependency pin and deployment scripts together. Copy the selected
+  core bundle, `dist/editor.mjs`, `dist/annotationOverlay.mjs` and the entire
+  `dist/editor/` chunk directory. Keep companion modules beside the core bundle;
+  the editor entry may be renamed if its relative `editor/` imports still resolve.
+  Remove `editor.css` from copying, packaging and HTML stylesheet links; styles
+  are embedded. The removed `editor/element` alias is also unnecessary.
+
+Clustermap owns editing controls and validation; the host owns file parsing,
+matching, project workflows, placement and application appearance. No external
+stylesheet service or CSS build dependency is needed.
 
 For the optional in-plot locus batch controls, import
 `mountPlotSelectionToolbar` from `clinker/editor` and call it with the mounted

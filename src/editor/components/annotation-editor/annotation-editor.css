@@ -1,5 +1,4 @@
-@layer clinker-editor {
-.cm-annotation-data-editor { --cm-control-height:30px; --cm-control-padding:4px 8px; --cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }
+.cm-annotation-data-editor { --_cm-control-height:30px; --_cm-control-padding:4px 8px; --_cm-control-radius:6px; outline:none; display:flex; flex-direction:column; gap:8px; min-height:0; }
 .cm-annotation-layout, .cm-annotation-content { display:flex; flex-direction:column; flex:1; gap:8px; min-width:0; min-height:0; }
 clinker-annotation-editor[embedded], clinker-annotation-editor[embedded] > .cm-annotation-layout { display:contents; }
 clinker-annotation-editor[hidden] { display:none; }
@@ -7,7 +6,5 @@ clinker-annotation-editor[embedded] .cm-annotation-layout > clinker-annotation-t
 clinker-annotation-editor[embedded] .cm-annotation-content { grid-area:content; }
 .cm-annotation-data-body { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
 .cm-annotation-group-list { overflow:auto; }
-.cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,#b42318); }
+.cm-annotation-data-editor [data-data-error] { color:var(--cm-danger,var(--_cm-danger,#b42318)); }
 .cm-annotation-data-editor [data-data-error]:empty { display:none; }
-
-}

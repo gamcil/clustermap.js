@@ -3,11 +3,11 @@ slot { display:contents; }
 .cm-annotation-matrix { position:relative; }
 .cm-annotation-matrix table { border-collapse:separate; border-spacing:0; font:inherit; color:inherit; width:max-content; min-width:100%; }
 
-.cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,#f3f6fa); }
+.cm-annotation-matrix thead th { position:sticky; top:0; z-index:2; background:var(--cm-subtle,var(--_cm-subtle,#f3f6fa)); }
 .cm-annotation-matrix tr > :first-child { position:sticky; left:0; z-index:1; width:32px; min-width:32px; background:var(--cm-row-background,var(--cm-subtle,#f3f6fa)); }
 .cm-annotation-matrix tr > :nth-child(2) { position:sticky; left:32px; z-index:1; }
 .cm-annotation-matrix tbody th { background:var(--cm-row-background); }
-.cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,#f3f6fa); }
+.cm-annotation-matrix thead th:nth-child(-n+2) { z-index:3; background:var(--cm-subtle,var(--_cm-subtle,#f3f6fa)); }
 .cm-annotation-matrix tbody th { cursor:pointer; min-width:200px; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }
 .cm-annotation-matrix :is(input:not([type=checkbox]),clinker-editable-field) { width:140px; }
 .cm-annotation-column { display:flex; align-items:center; }

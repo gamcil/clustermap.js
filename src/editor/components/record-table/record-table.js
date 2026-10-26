@@ -81,7 +81,7 @@ class RecordTable extends HTMLElementBase {
   connectedCallback() {
     const root = this.getRootNode();
     installDataEditorStyle(root);
-    this.classList.add("cm-data-ui");
+    this.classList.add("cm-ui", "cm-data-ui");
     installStyle(root, "clinker-record-table-style", css);
     if (!this.#table) {
       this.append(template(this.ownerDocument));

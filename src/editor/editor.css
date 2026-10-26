@@ -1,9 +1,7 @@
-@layer clinker-editor {
-  :host { display: flex; min-height: 180px; box-sizing: border-box; flex-direction: column; padding: 10px; border: 1px solid var(--cm-border,#d7dce3); border-radius: 10px; }
-  :host([resizable]) { overflow: hidden; }
-  .cm-editor__resize-handle { height: 10px; flex: 0 0 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }
-  .cm-editor__resize-handle::after { display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: var(--cm-muted,#aaa); content: ""; }
-  .cm-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-  .cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }
-  [data-editor-shell] { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; }
-}
+:host { display: flex; min-height: 180px; box-sizing: border-box; flex-direction: column; padding: 10px; border: 1px solid var(--cm-border,var(--_cm-border,#d7dce3)); border-radius: 10px; }
+:host([resizable]) { overflow: hidden; }
+.cm-editor__resize-handle { height: 10px; flex: 0 0 10px; margin: -10px -10px 0; cursor: ns-resize; touch-action: none; }
+.cm-editor__resize-handle::after { display: block; width: 36px; height: 3px; margin: 4px auto; border-radius: 3px; background: var(--cm-muted,var(--_cm-muted,#aaa)); content: ""; }
+.cm-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.cm-editor__title { margin: 0; font-size: 17px; letter-spacing: -.01em; }
+[data-editor-shell] { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; }

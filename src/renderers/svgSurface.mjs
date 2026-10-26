@@ -14,7 +14,6 @@ export function ensureSvgSurface({
   container,
   data,
   ids,
-  fontFamily,
   zoom,
   zoomExtent,
   onZoom,
@@ -34,9 +33,8 @@ export function ensureSvgSurface({
 
       enter
         .append("div")
-        .attr("class", "tooltip")
-        .style("opacity", 0)
-        .style("font-family", fontFamily);
+        .attr("class", "cm-ui tooltip")
+        .style("opacity", 0);
 
       const surface = enter
         .append("svg")

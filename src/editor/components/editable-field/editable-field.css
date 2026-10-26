@@ -1,8 +1,9 @@
 :host {
+  --_cm-control-height:28px;
   display: flex;
   align-items: center;
   min-width: 0;
-  height: 28px;
+  height: var(--cm-control-height,var(--_cm-control-height,28px));
   box-sizing: border-box;
   color: inherit;
   font: inherit;
@@ -11,7 +12,7 @@
 :host([compact]) { flex: 0 0 auto; width: var(--cm-edit-width, max-content); max-width: 100%; }
 :host(:hover) { --cm-edit-icon-width:20px; }
 span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
-span[data-placeholder] { color: var(--cm-muted, #687586); }
+span[data-placeholder] { color: var(--cm-muted,var(--_cm-muted, #687586)); }
 button, input, select { box-sizing: border-box; font: inherit; color: inherit; }
 button {
   display: inline-grid;
@@ -20,28 +21,29 @@ button {
   width: var(--cm-edit-icon-width, 0px);
   min-width: 0;
   height: 20px;
+  min-height: 0;
   overflow: hidden;
   padding: 0;
   border: 0;
-  border-radius: var(--cm-control-radius, 6px);
+  border-radius: var(--cm-control-radius,var(--_cm-control-radius, 6px));
   background: transparent;
-  color: var(--cm-muted, #64748b);
+  color: var(--cm-muted,var(--_cm-muted, #64748b));
   cursor: pointer;
 }
-button:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }
-button:focus-visible { width:20px; outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }
+button:hover { background: var(--cm-hover,var(--_cm-hover, #e3ecf8)); color: var(--cm-accent,var(--_cm-accent, #1677ff)); }
+button:focus-visible { width:20px; outline: 2px solid var(--cm-focus-ring,var(--_cm-focus-ring, #1677ff)); outline-offset: 2px; }
 button:disabled { cursor: default; opacity: .45; }
 svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 input, select {
   width: 100%;
   min-width: 0;
-  height: 28px;
+  height: var(--cm-control-height,var(--_cm-control-height,28px));
   margin-inline: -1px;
   padding: 2px 7px;
-  border: 1px solid var(--cm-border, #cbd3de);
-  border-radius: var(--cm-control-radius, 6px);
-  background: var(--cm-surface, #fff);
+  border: 1px solid var(--cm-border,var(--_cm-border, #cbd3de));
+  border-radius: var(--cm-control-radius,var(--_cm-control-radius, 6px));
+  background: var(--cm-surface,var(--_cm-surface, #fff));
   line-height: 20px;
 }
-input::placeholder { color: var(--cm-muted, #687586); }
-input:focus, select:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }
+input::placeholder { color: var(--cm-muted,var(--_cm-muted, #687586)); }
+input:focus, select:focus { outline: 2px solid var(--cm-focus-ring,var(--_cm-focus-ring, #1677ff)); outline-offset: -2px; }

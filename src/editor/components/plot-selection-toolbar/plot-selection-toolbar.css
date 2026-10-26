@@ -1,7 +1,3 @@
-@layer clinker-editor {
-  .cm-plot-selection-toolbar { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; align-items: center; gap: 6px; padding: 7px 8px; border: 1px solid var(--cm-border,#c7d9f1); border-radius: 8px; background: var(--cm-surface,rgba(255,255,255,.94)); box-shadow: 0 3px 12px rgba(23,36,54,.12); color: var(--cm-foreground,#273444); font: 13px/1.4 system-ui, sans-serif; }
-  .cm-plot-selection-toolbar[hidden] { display: none; }
-  .cm-plot-selection-toolbar strong { padding: 4px 6px; border-radius: 5px; background: var(--cm-hover,#e7f0ff); color: var(--cm-accent,#184a86); }
-  .cm-plot-selection-toolbar button { min-height: 28px; box-sizing: border-box; border: 1px solid var(--cm-border,#cbd3de); border-radius: 6px; padding: 3px 7px; background: var(--cm-surface,#fff); color: inherit; font: inherit; cursor: pointer; }
-  .cm-plot-selection-toolbar button:hover { border-color: var(--cm-accent,#78a9ed); background: var(--cm-hover,#f4f8ff); }
-}
+.cm-plot-selection-toolbar { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; align-items: center; gap: 6px; padding: 7px 8px; border: 1px solid var(--cm-border,var(--_cm-border,#c7d9f1)); border-radius: 8px; background: var(--cm-surface,var(--_cm-surface,rgba(255,255,255,.94))); box-shadow: 0 3px 12px rgba(23,36,54,.12); color: var(--cm-foreground,var(--_cm-foreground,#273444)); font: var(--cm-font,var(--_cm-font)); }
+.cm-plot-selection-toolbar[hidden] { display: none; }
+.cm-plot-selection-toolbar strong { padding: 4px 6px; border-radius: 5px; background: var(--cm-hover,var(--_cm-hover,#e7f0ff)); color: var(--cm-accent,var(--_cm-accent,#184a86)); }

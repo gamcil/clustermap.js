@@ -1,4 +1,5 @@
 import { DATA_EDITOR_CSS } from "../../shared/styles.mjs";
+import { controlStyles } from "../../../ui/controlStyles.mjs";
 import { RowSelection } from "../../shared/selection.mjs";
 import { DATA_ROW_HEIGHT } from "../../shared/virtualRows.mjs";
 import { ANNOTATION_PALETTES, resolveAnnotationScale } from "../../../annotations/model.mjs";
@@ -50,7 +51,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
-    const style = this.ownerDocument.createElement("style"); style.id = "cm-data-editor-style"; style.textContent = DATA_EDITOR_CSS + editorThemeStyles + css;
+    const style = this.ownerDocument.createElement("style"); style.id = "cm-data-editor-style"; style.textContent = controlStyles + DATA_EDITOR_CSS + editorThemeStyles + css;
     root.append(style);
     this.#bind();
     upgradeProperty(this, "chart");
@@ -58,7 +59,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 
   connectedCallback() {
     defineSelectionBar(); defineViewSwitcher(); defineSearchField(); defineRecordActions(); defineRecordTable(); defineAnnotationEditor();
-    this.classList.add("cm-data-ui");
+    this.classList.add("cm-ui", "cm-data-ui");
     if (!this.#table) this.#renderShell();
     this.#subscribe(); this.#syncTheme(); this.#refreshData();
     const edit = this.#pendingEdit; this.#pendingEdit = null; edit?.();
@@ -80,7 +81,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #syncTheme() {
-    applyEditorTheme(this, this.#chart?.config?.());
+    applyEditorTheme(this, this.#chart);
   }
 
   #subscribe() {

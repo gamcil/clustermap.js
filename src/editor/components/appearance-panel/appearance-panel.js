@@ -1,6 +1,5 @@
 import { createTemplate, mountComponent, colourHex, createActionRunner, upgradeProperty } from "../../../ui/controls.mjs";
 import { textAsset } from "../../../ui/assets.mjs";
-import { controlStyles } from "../../shared/controls.mjs";
 import { defineSearchField } from "../search-field/search-field.js";
 import { defineTreeAppearance } from "../tree-appearance/tree-appearance.js";
 import { figureConfig } from "../../../ui/theme.mjs";
@@ -27,7 +26,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = mountComponent(this, template, controlStyles + editorThemeStyles + css);
+    const root = mountComponent(this, template, editorThemeStyles + css);
     this.#tree = root.querySelector("clinker-tree-appearance");
     this.#runEdit = createActionRunner((message) => {
       const status = root.querySelector(".error"); status.textContent = message; status.hidden = !message;
@@ -68,7 +67,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
     this.#chart = value || null; this.#subscribe(); this.#render();
   }
   connectedCallback() {
-    this.classList.add("cm-data-ui");
+    this.classList.add("cm-ui", "cm-data-ui");
     this.#subscribe(); this.#render();
   }
   disconnectedCallback() {
@@ -86,7 +85,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
   #render() {
     if (!this.isConnected) return;
     const config = this.#chart?.config?.();
-    applyEditorTheme(this, config);
+    applyEditorTheme(this, this.#chart);
     this.shadowRoot.querySelector(".toolbar").hidden = !config;
     this.shadowRoot.querySelector(".settings").hidden = !config;
     if (!config) { this.#config = null; this.#hasTree = false; this.#tree.state = { tree: null }; return; }

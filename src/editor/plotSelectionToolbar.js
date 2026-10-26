@@ -2,6 +2,7 @@ import { installDataEditorStyle } from "./shared/styles.mjs";
 import { createTemplate } from "../ui/controls.mjs";
 import { textAsset, installStyle } from "../ui/assets.mjs";
 import { defineActionMenu } from "./components/action-menu/action-menu.js";
+import { applyEditorTheme } from "./shared/theme.js";
 
 const toolbarTemplate = createTemplate(await textAsset(new URL("./components/plot-selection-toolbar/plot-selection-toolbar.html", import.meta.url)));
 const css = await textAsset(new URL("./components/plot-selection-toolbar/plot-selection-toolbar.css", import.meta.url));
@@ -16,7 +17,7 @@ export function mountPlotSelectionToolbar(chart, container, { editor = null } = 
   const scope = container.getRootNode();
   defineActionMenu(); installDataEditorStyle(scope); installStyle(scope, "clinker-plot-selection-style", css);
   const root = document.createElement("div");
-  root.className = "cm-data-ui cm-plot-selection-toolbar";
+  root.className = "cm-ui cm-data-ui cm-plot-selection-toolbar";
   root.hidden = true;
   root.append(toolbarTemplate(document));
   const button = (action) => root.querySelector(`[data-action="${action}"]`);
@@ -26,6 +27,7 @@ export function mountPlotSelectionToolbar(chart, container, { editor = null } = 
   const lociFor = ({ kind, ids }) => kind === "loci" ? ids :
     (chart.visibleData()?.clusters || []).filter((cluster) => ids.includes(cluster.uid)).flatMap((cluster) => cluster.loci.map((locus) => locus.uid));
   const sync = () => {
+    applyEditorTheme(root, chart);
     const { kind, ids } = chart.selection(), clusters = kind === "clusters";
     root.hidden = !ids.length;
     const noun = ids.length === 1 ? (clusters ? "cluster" : "locus") : kind;
@@ -66,6 +68,7 @@ export function mountPlotSelectionToolbar(chart, container, { editor = null } = 
   container.addEventListener("focusin", activate);
   document.addEventListener("keydown", onKeyDown);
   const unsubscribe = chart.on("change", (change) => {
+    if (["theme.change", "config.change"].includes(change.type)) applyEditorTheme(root, chart);
     if (["selection.change", "state.replace", "data.apply", "data.replace"].includes(change.type)) sync();
   });
   container.append(root);

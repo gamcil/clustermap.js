@@ -16,7 +16,6 @@ const defaultConfig = {
     leafGuide: { show: false, colour: null, width: 1, dash: "4 3" },
   },
   plot: {
-    theme: "auto",
     // Figure appearance is stable across interface and system themes.
     background: "#ffffff",
     transitionDuration: 250,

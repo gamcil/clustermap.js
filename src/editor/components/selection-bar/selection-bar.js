@@ -1,6 +1,5 @@
 import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
 import { textAsset } from "../../../ui/assets.mjs";
-import { controlStyles } from "../../shared/controls.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./selection-bar.html", import.meta.url)),
@@ -17,7 +16,7 @@ class SelectionBar extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = mountComponent(this, template, controlStyles + css);
+    const root = mountComponent(this, template, css);
     this.#summary = root.querySelector("span");
     this.#actions = root.querySelector("div");
     this.#all = root.querySelector("[data-all]");

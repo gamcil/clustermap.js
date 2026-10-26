@@ -1,6 +1,5 @@
 import { createTemplate, mountComponent, colourHex, updateSelectOptions } from "../../../ui/controls.mjs";
 import { textAsset } from "../../../ui/assets.mjs";
-import { controlStyles } from "../../shared/controls.mjs";
 import { defineEditableField } from "../editable-field/editable-field.js";
 
 const [markup, css] = await Promise.all([
@@ -20,7 +19,7 @@ class AnnotationGroupEditor extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = mountComponent(this, template, controlStyles + css);
+    const root = mountComponent(this, template, css);
     this.#items = root.querySelector("[data-groups]"); this.#template = this.#items.querySelector("template");
     this.#add = root.querySelector("[data-add]");
     this.#add.onclick = () => {

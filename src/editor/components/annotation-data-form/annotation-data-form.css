@@ -4,6 +4,6 @@ label > span { flex: 1; min-width: 0; }
 input, select { width: 140px; max-width: 65%; }
 .data { display: block; }
 textarea { display: block; width: 100%; margin-top: 4px; resize: vertical; }
-p { margin: 8px 0; color: var(--cm-muted, #687586); }
-[data-error] { color: var(--cm-danger, #b42318); }
+p { margin: 8px 0; color: var(--cm-muted,var(--_cm-muted, #687586)); }
+[data-error] { color: var(--cm-danger,var(--_cm-danger, #b42318)); }
 .actions { display: flex; gap: 8px; }

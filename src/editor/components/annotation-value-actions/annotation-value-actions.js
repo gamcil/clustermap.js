@@ -1,6 +1,5 @@
 import { createTemplate, mountComponent, updateSelectOptions } from "../../../ui/controls.mjs";
 import { textAsset } from "../../../ui/assets.mjs";
-import { controlStyles } from "../../shared/controls.mjs";
 
 const [markup, css] = await Promise.all([
   textAsset(new URL("./annotation-value-actions.html", import.meta.url)),
@@ -18,7 +17,7 @@ class AnnotationValueActions extends HTMLElementBase {
 
   constructor() {
     super();
-    const root = mountComponent(this, template, controlStyles + css);
+    const root = mountComponent(this, template, css);
     this.#columns = root.querySelector("[data-columns]"); this.#numeric = root.querySelector("input"); this.#categories = root.querySelector("[data-categories]");
     root.querySelector("[data-set]").onclick = () => this.#submit(false);
     root.querySelector("[data-clear]").onclick = () => this.#submit(true);

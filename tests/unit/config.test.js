@@ -23,7 +23,7 @@ test("default configuration is recursively isolated per chart runtime", async ()
 
 test("figure defaults resolve partial configs without changing explicit colours or source data", async () => {
   const { figureConfig } = await import("../../src/ui/theme.mjs");
-  const config = { plot: { theme: "dark" }, gene: { shape: { stroke: "red", strokeWidth: 2 } } };
+  const config = { gene: { shape: { stroke: "red", strokeWidth: 2 } } };
   const original = structuredClone(config);
   const resolved = figureConfig(config);
   assert.deepEqual(config, original);
