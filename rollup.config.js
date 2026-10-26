@@ -1,6 +1,6 @@
 import { terser } from "rollup-plugin-terser";
 import { nodeResolve } from "@rollup/plugin-node-resolve";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 const componentAssets = {
@@ -14,14 +14,6 @@ const componentAssets = {
     if (!assets.length) return null;
     for (const [expression, text] of assets) code = code.replace(expression, () => text);
     return { code, map: null };
-  },
-};
-
-const copyEditorCss = {
-  name: "copy-editor-css",
-  async writeBundle() {
-    await mkdir("dist", { recursive: true });
-    await writeFile("dist/editor.css", "/* Editor styles are included by the component imports. */\n");
   },
 };
 
@@ -56,7 +48,7 @@ const core = {
   ].map((output) => ({ ...output, paths: (id) => id.endsWith("/annotations/overlay.mjs") ? "./annotationOverlay.mjs" : id })),
   // Published modules bundle their D3 dependencies. Annotation controls are
   // the sole on-demand companion module; consumers need no global D3 runtime.
-  plugins: [componentAssets, nodeResolve({ browser: true }), stripTrailingWhitespace, copyEditorCss],
+  plugins: [componentAssets, nodeResolve({ browser: true }), stripTrailingWhitespace],
 };
 
 const editor = {

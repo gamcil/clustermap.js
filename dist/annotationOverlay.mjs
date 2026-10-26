@@ -1,5 +1,5 @@
-import { i as installDataEditorStyle, a as installStyle, h as defineAnnotationDataForm, j as createAnnotationPanel, f as defineAnnotationEditor } from './editor/annotation-editor-e2aee3f2.mjs';
-import { f as createActionRunner, d as colourHex, h as createControls } from './editor/search-field-726d4e23.mjs';
+import { i as installDataEditorStyle, a as installStyle, h as defineAnnotationDataForm, j as createAnnotationPanel, f as defineAnnotationEditor } from './editor/annotation-editor-69025dd2.mjs';
+import { f as createActionRunner, d as colourHex, h as createControls } from './editor/search-field-3fabdfe6.mjs';
 
 /** Test world bounds after applying a preview translation. */
 

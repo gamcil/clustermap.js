@@ -217,9 +217,9 @@ Theme colors follow the chart. Public overrides include `--clinker-accent`,
 `appearance` parts; the data panel exposes `content`, `toolbar`, `selection`,
 and `table`; the appearance panel exposes `toolbar` and `settings`.
 
-The existing `defineClinkerEditor`, `defineDataPanel`, `defineAppearancePanel`,
-class exports, and `clinker/editor.css` entry remain available for compatibility.
-Explicit registration and the stylesheet are no longer needed for normal use.
+Importing `clinker/editor` registers the full editor. The standalone panel
+imports register their own elements; styles are bundled with each component,
+so no separate stylesheet or registration call is needed.
 
 For the optional in-plot locus batch controls, import
 `mountPlotSelectionToolbar` from `clinker/editor` and call it with the mounted

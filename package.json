@@ -11,16 +11,12 @@
     "./editor": {
       "import": "./dist/editor.mjs"
     },
-    "./editor/element": {
-      "import": "./dist/editor.mjs"
-    },
     "./editor/data-panel": {
       "import": "./dist/editor-data-panel.mjs"
     },
     "./editor/appearance-panel": {
       "import": "./dist/editor-appearance-panel.mjs"
     },
-    "./editor.css": "./dist/editor.css",
     "./dist/clustermap.js": "./dist/clustermap.js",
     "./dist/clustermap.min.js": "./dist/clustermap.min.js"
   },

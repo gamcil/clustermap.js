@@ -1,3 +1,24 @@
+// Shared by shadow components and light DOM popovers. Keep defaults easy to override.
+const controlStyles = `
+:host([hidden]), :where(.cm-data-ui)[hidden], :where(:host,.cm-data-ui) [hidden] { display:none!important; }
+:where(:host,.cm-data-ui) form { margin:0; }
+:where(:host,.cm-data-ui) :is(button,input,select,textarea) { box-sizing:border-box; font:inherit; color:inherit; }
+:where(:host,.cm-data-ui) :where(button,input:not([type=color]):not([type=checkbox]):not([type=range]),select,textarea) {
+  min-height:var(--cm-control-height,30px);
+  padding:var(--cm-control-padding,4px 8px);
+  border:1px solid var(--cm-border,#cbd3de);
+  border-radius:var(--cm-control-radius,6px);
+  background:var(--cm-surface,#fff);
+}
+:where(:host,.cm-data-ui) input[type=color] { width:30px; height:22px; padding:0; border:0; background:transparent; cursor:pointer; }
+:where(:host,.cm-data-ui) :is(input[type=checkbox],button,summary) { cursor:pointer; }
+:where(:host,.cm-data-ui) :is(input,textarea)::placeholder { color:var(--cm-muted,#687586); }
+:where(:host,.cm-data-ui) button:where(:hover:not(:disabled)) { border-color:var(--cm-accent,#78a9ed); background:var(--cm-hover,#f4f8ff); }
+:where(:host,.cm-data-ui) button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
+:where(:host,.cm-data-ui) :is(button,summary):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:2px; }
+:where(:host,.cm-data-ui) :is(input,select,textarea):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:-2px; }
+`;
+
 function define(constructor, factory, prototype) {
   constructor.prototype = factory.prototype = prototype;
   prototype.constructor = constructor;
@@ -485,27 +506,6 @@ function createActionRunner(report) {
   };
 }
 
-// Shared by shadow components and light DOM popovers. Keep defaults easy to override.
-const controlStyles = `
-:host([hidden]), :where(.cm-data-ui)[hidden], :where(:host,.cm-data-ui) [hidden] { display:none!important; }
-:where(:host,.cm-data-ui) form { margin:0; }
-:where(:host,.cm-data-ui) :is(button,input,select,textarea) { box-sizing:border-box; font:inherit; color:inherit; }
-:where(:host,.cm-data-ui) :where(button,input:not([type=color]):not([type=checkbox]):not([type=range]),select,textarea) {
-  min-height:var(--cm-control-height,30px);
-  padding:var(--cm-control-padding,4px 8px);
-  border:1px solid var(--cm-border,#cbd3de);
-  border-radius:var(--cm-control-radius,6px);
-  background:var(--cm-surface,#fff);
-}
-:where(:host,.cm-data-ui) input[type=color] { width:30px; height:22px; padding:0; border:0; background:transparent; cursor:pointer; }
-:where(:host,.cm-data-ui) :is(input[type=checkbox],button,summary) { cursor:pointer; }
-:where(:host,.cm-data-ui) :is(input,textarea)::placeholder { color:var(--cm-muted,#687586); }
-:where(:host,.cm-data-ui) button:where(:hover:not(:disabled)) { border-color:var(--cm-accent,#78a9ed); background:var(--cm-hover,#f4f8ff); }
-:where(:host,.cm-data-ui) button:disabled { color:var(--cm-muted,#8993a1); opacity:.45; cursor:default; }
-:where(:host,.cm-data-ui) :is(button,summary):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:2px; }
-:where(:host,.cm-data-ui) :is(input,select,textarea):focus-visible { outline:2px solid var(--cm-accent,#1677ff); outline-offset:-2px; }
-`;
-
 const [markup, css] = await Promise.all([
   "<input type=\"search\" part=\"input\">\n<button type=\"button\" part=\"clear\" aria-label=\"Clear search\" title=\"Clear search\" hidden>×</button>\n",
   ":host { position: relative; display: flex; flex: 1; min-width: 140px; color: inherit; font: inherit; }\n:host([hidden]), [hidden] { display: none !important; }\ninput, button { box-sizing: border-box; color: inherit; font: inherit; }\ninput {\n  width: 100%;\n  min-width: 0;\n  min-height: var(--cm-control-height, 30px);\n  padding: var(--cm-control-padding, 4px 8px);\n  border: 1px solid var(--cm-border, #cbd3de);\n  border-radius: var(--cm-control-radius, 6px);\n  background: var(--cm-surface, #fff);\n}\ninput[data-filled] { padding-inline-end: 30px; }\ninput::-webkit-search-cancel-button { appearance: none; }\ninput::placeholder { color: var(--cm-muted, #687586); }\ninput:focus { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: -2px; }\nbutton {\n  position: absolute;\n  inset-inline-end: 4px;\n  top: 50%;\n  transform: translateY(-50%);\n  display: grid;\n  place-items: center;\n  width: 22px;\n  height: 22px;\n  padding: 0;\n  border: 0;\n  border-radius: var(--cm-control-radius, 6px);\n  background: transparent;\n  color: var(--cm-muted, #687586);\n  cursor: pointer;\n}\nbutton:hover { background: var(--cm-hover, #e3ecf8); color: var(--cm-accent, #1677ff); }\nbutton:focus-visible { outline: 2px solid var(--cm-accent, #1677ff); outline-offset: 2px; }\n",
@@ -557,4 +557,4 @@ function defineSearchField() {
   if (!customElements.get("clinker-search-field")) customElements.define("clinker-search-field", SearchField);
 }
 
-export { controlStyles as a, color as b, createTemplate as c, colourHex as d, updateSelectOptions as e, createActionRunner as f, defineSearchField as g, createControls as h, mountComponent as m, rgb as r, upgradeProperty as u };
+export { controlStyles as a, updateSelectOptions as b, createTemplate as c, colourHex as d, defineSearchField as e, createActionRunner as f, color as g, createControls as h, mountComponent as m, rgb as r, upgradeProperty as u };

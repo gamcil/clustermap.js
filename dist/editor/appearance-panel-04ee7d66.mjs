@@ -1,4 +1,4 @@
-import { b as color, m as mountComponent, a as controlStyles, c as createTemplate, f as createActionRunner, u as upgradeProperty, d as colourHex, g as defineSearchField } from './search-field-726d4e23.mjs';
+import { g as color, m as mountComponent, a as controlStyles, c as createTemplate, e as defineSearchField, f as createActionRunner, u as upgradeProperty, d as colourHex } from './search-field-3fabdfe6.mjs';
 import { a as applyEditorTheme, f as figureConfig, e as editorThemeStyles } from './theme-3d7fc189.mjs';
 
 const TREE_COLOURING_DEFAULTS = {
@@ -362,4 +362,4 @@ function defineAppearancePanel() {
   if (!customElements.get("clinker-appearance-panel")) customElements.define("clinker-appearance-panel", ClinkerAppearancePanelElement);
 }
 
-export { ClinkerAppearancePanelElement as C, defineAppearancePanel as d };
+export { defineAppearancePanel as d };
