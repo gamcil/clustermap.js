@@ -2,6 +2,46 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createRasterInteraction } from "../../src/interaction/raster.mjs";
 
+test("canvas hover preserves editor focus and direct interaction restores canvas focus", () => {
+  const handlers = new Map(), listeners = new Map();
+  const document = { body: {}, documentElement: {}, defaultView: {
+    addEventListener: (name, handler) => listeners.set(name, handler), removeEventListener() {},
+  } };
+  const surface = { ownerDocument: document, focus() { document.activeElement = this; } };
+  const selection = { node: () => surface, on(names, handler) {
+    for (const name of names.split(" ")) handlers.set(name, handler);
+    return this;
+  } };
+  const controller = createRasterInteraction({
+    targetForEvent: () => null, setHoverLocus: () => false, interactions: {}, actions: {},
+  });
+  controller.bind(selection);
+  const enter = () => handlers.get("pointerenter.canvasKeyboard").call(surface);
+  document.activeElement = document.body;
+  enter();
+  assert.equal(document.activeElement, surface, "the initially idle canvas can receive keyboard focus");
+  const editor = { closest: () => null };
+  document.activeElement = editor;
+  enter();
+  assert.equal(document.activeElement, editor, "hover leaves editor focus intact");
+  let prevented = false;
+  listeners.get("keydown")({ code: "Space", target: editor,
+    composedPath: () => [{ closest: () => ({}) }, editor],
+    preventDefault() { prevented = true; } });
+  assert.equal(prevented, false, "Space belongs to the focused control inside the editor shadow root");
+  assert.equal(controller.zoomFilter(surface, { type: "mousedown", button: 0, ctrlKey: true }), false,
+    "editor Space does not enable plot panning");
+  handlers.get("pointerdown.canvasInteraction").call(surface, { button: 0 });
+  assert.equal(document.activeElement, surface, "an explicit canvas click transfers keyboard focus");
+  listeners.get("keydown")({ code: "Space", target: surface, composedPath: () => [surface],
+    preventDefault() { prevented = true; } });
+  assert.equal(prevented, true, "Space still enables panning on the focused canvas");
+  assert.equal(controller.zoomFilter(surface, { type: "mousedown", button: 0, ctrlKey: true }), true);
+  listeners.get("keyup")({ code: "Space" });
+  assert.equal(controller.zoomFilter(surface, { type: "mousedown", button: 0, ctrlKey: true }), false,
+    "releasing Space ends pan mode");
+});
+
 for (const [action, kind, coordinate, edge] of [
   ["move-cluster", "ClusterDrag", "y"],
   ["move-locus", "LocusDrag", "x"],
