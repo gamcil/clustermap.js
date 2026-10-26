@@ -9,7 +9,7 @@ import {
 } from "../links/layout.mjs";
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
 import { arrangeTrimIndicators, createTrimIndicators, resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
-import { layoutAnnotationPanels, annotationFigureBounds, annotationChromeRightEdge } from "../annotations/model.mjs";
+import { layoutAnnotationPanels, annotationFigureBounds, annotationChromeRightEdge, legendTopExtent } from "../annotations/model.mjs";
 
 function worldPolygon(points, x, y) {
   return points.map((point, index) => point + (index % 2 === 0 ? x : y));
@@ -632,10 +632,11 @@ function projectSceneAnnotations(definitions, clusters, bounds, chrome, options,
     // One reuse policy handles geometry commits, presentation and font changes.
     annotationPanels = layoutAnnotationPanels(annotationPanelData, clusters, bounds,
       { ...options, anchorX: annotationAnchorX, previousPanels: previous?.annotationPanels });
-    placeLegendAfterAnnotations(chrome, annotationPanels);
   }
+  const annotationBounds = annotationFigureBounds(bounds, annotationPanels, clusters);
+  placeLegendAfterAnnotations(chrome, annotationPanels, annotationBounds, options.measureText);
   return { annotationPanelData, annotationPanels, annotationAnchorX, annotationChromeRight,
-    figureBounds: annotationFigureBounds(figureBoundsForChrome(bounds, chrome), annotationPanels, clusters) };
+    figureBounds: figureBoundsForChrome(annotationBounds, chrome) };
 }
 
 /** Presentation/data edits to annotations leave synteny and its indexes intact. */
@@ -647,10 +648,16 @@ export function patchAnnotationScene(scene, definitions, options) {
     changes: { annotationsOnly: true } };
 }
 
-function placeLegendAfterAnnotations(chrome, panels) {
-  if (chrome?.legend.placement === "right" && panels.length) {
+function placeLegendAfterAnnotations(chrome, panels, annotationBounds, measureText) {
+  const legend = chrome?.legend;
+  if (!legend || !annotationBounds) return;
+  if (legend.placement === "right" && panels.length) {
     const right = Math.max(...panels.map((panel) => panel.x + panel.horizontalBounds.maxX));
-    chrome.legend.position = { ...chrome.legend.position, x: right + chrome.legend.marginLeft };
+    legend.position = { ...legend.position, x: right + legend.marginLeft };
+  } else if (legend.placement === "bottom") {
+    // Stack below keys and axes as well as scale bars, independently of width.
+    legend.position = { ...legend.position,
+      y: Math.max(legend.position.y, annotationBounds.maxY + legend.marginTop) - legendTopExtent(legend, measureText) };
   }
 }
 

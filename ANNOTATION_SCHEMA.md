@@ -82,7 +82,7 @@ Every panel defaults to the same `gap` (24 world units). Automatic placement
 reserves the complete measured horizontal footprint: cells/bars, keys, group
 labels, titles, rotated headings and legend or axis text. The first footprint
 starts that distance after the full cluster area, including visible scale/identity
-bars and a bottom legend. Each following footprint starts `gap` units after the
+bars. Each following footprint starts `gap` units after the
 preceding footprint's right edge. Left text overhang is reserved as well; the
 data-mark origin may therefore sit to the right of the footprint's left edge.
 
@@ -183,8 +183,10 @@ column. Each row draws one horizontal bar on a common linear scale:
 
 - Membership and values use cluster IDs. Panels stay aligned with cluster rows
   during reordering and tree rotations; locus movement preserves column alignment.
-- Panels start after the cluster area, including trim indicators, scales and a
-  bottom legend. A right-positioned gene legend follows the panels.
+- Panels start after the cluster area, including trim indicators and scales.
+  A right-positioned gene legend follows the panels horizontally. A bottom
+  gene legend sits below the annotation keys/axes and visible scale/identity
+  bars; changing its column count does not move annotation panels sideways.
 - Visible panels share title, heading and key baselines, reserving enough space
   for the tallest heading/key. Cell heights may be styled separately.
 - Titles, rotated headings and keys contribute to figure bounds and SVG export.

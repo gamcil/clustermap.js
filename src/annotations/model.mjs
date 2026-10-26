@@ -98,14 +98,15 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
 const numberLabel = (value) => Number(value.toPrecision(3)).toString();
 const text = (value, x, y, extra = {}) => ({ text: String(value), x, y, anchor: "start", ...extra });
 
-function textBounds(value, fontSize, fontFamily, measureText, { weight = 400, rotation = 0, anchor = "start" } = {}) {
-  const metrics = measureText?.(String(value), { fontSize, fontFamily, fontWeight: weight });
+function textBounds(value, fontSize, fontFamily, measureText,
+  { weight = 400, rotation = 0, anchor = "start", baseline = "alphabetic" } = {}) {
+  const metrics = measureText?.(String(value), { fontSize, fontFamily, fontWeight: weight, textBaseline: baseline });
   const width = metrics?.width ?? String(value).length * fontSize * 0.6;
   const shift = anchor === "end" ? -width : anchor === "middle" ? -width / 2 : 0;
   const left = -(metrics?.actualBoundingBoxLeft ?? 0) + shift;
   const right = (metrics?.actualBoundingBoxRight ?? width) + shift;
-  const top = -(metrics?.actualBoundingBoxAscent ?? fontSize * 0.8);
-  const bottom = metrics?.actualBoundingBoxDescent ?? fontSize * 0.2;
+  const top = -(metrics?.actualBoundingBoxAscent ?? fontSize * (baseline === "middle" ? 0.5 : 0.8));
+  const bottom = metrics?.actualBoundingBoxDescent ?? fontSize * (baseline === "middle" ? 0.5 : 0.2);
   const angle = rotation * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
   const points = [[left, top], [right, top], [left, bottom], [right, bottom]]
     .map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
@@ -113,10 +114,10 @@ function textBounds(value, fontSize, fontFamily, measureText, { weight = 400, ro
     minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)) };
 }
 
-/** Right edge of cluster decorations, excluding a right legend placed after annotations. */
+/** Right edge of scale/identity decorations; gene legends are placed separately. */
 export function annotationChromeRightEdge(chrome, measureText = null) {
   let right = -Infinity;
-  const bar = chrome?.scaleBar, identity = chrome?.colourBar, legend = chrome?.legend;
+  const bar = chrome?.scaleBar, identity = chrome?.colourBar;
   if (bar?.visible) {
     const label = textBounds(bar.label, bar.fontSize * 4 / 3, bar.fontFamily, measureText, { anchor: "middle" });
     right = Math.max(right, bar.position.x + bar.length + (bar.strokeWidth || 0) / 2,
@@ -128,15 +129,22 @@ export function annotationChromeRightEdge(chrome, measureText = null) {
     right = Math.max(right, identity.position.x + identity.width + 0.5,
       identity.position.x + identity.width / 2 + label.maxX, identity.position.x + start.maxX);
   }
-  if (legend?.visible && legend.placement === "bottom") {
-    for (const item of legend.items) {
-      const label = textBounds(item.label, legend.fontSize, legend.fontFamily, measureText);
-      const subtitle = textBounds(item.subtitle || "", legend.subtitleFontSize, legend.fontFamily, measureText);
-      right = Math.max(right, legend.position.x + item.x + item.radius,
-        legend.position.x + item.textX + Math.max(label.maxX, subtitle.maxX));
+  return right;
+}
+
+/** Top ink extent relative to a legend's origin, including tall text/subtitles. */
+export function legendTopExtent(legend, measureText = null) {
+  let top = 0;
+  if (!legend.visible) return top;
+  for (const item of legend.items) {
+    const label = textBounds(item.label, legend.fontSize, legend.fontFamily, measureText, { baseline: "middle" });
+    top = Math.min(top, item.y + item.circleY - item.radius, item.y + item.textY + label.minY);
+    if (item.subtitle) {
+      const subtitle = textBounds(item.subtitle, legend.subtitleFontSize, legend.fontFamily, measureText, { baseline: "middle" });
+      top = Math.min(top, item.y + item.subtitleY + subtitle.minY);
     }
   }
-  return right;
+  return top;
 }
 
 // Values are replaced at data boundaries and shared by presentation edits.

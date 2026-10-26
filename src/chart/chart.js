@@ -172,13 +172,13 @@ export default function clusterMap() {
   const stateSnapshots = createChartStateSerializer();
   let pendingInteractionState = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-`,
-    measureText: (text, { fontSize, fontFamily, fontWeight = 400 }) => {
+    measureText: (text, { fontSize, fontFamily, fontWeight = 400, textBaseline = "alphabetic" }) => {
       if (!container) return null;
       figureMeasurementContext ||= container.node().ownerDocument.createElement("canvas").getContext("2d");
       const context = figureMeasurementContext;
       context.save();
       context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-      context.textAlign = "left"; context.textBaseline = "alphabetic";
+      context.textAlign = "left"; context.textBaseline = textBaseline;
       const metrics = context.measureText(text);
       context.restore();
       return metrics;
