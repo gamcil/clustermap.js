@@ -2,6 +2,7 @@ import { terser } from "rollup-plugin-terser";
 import { nodeResolve } from "@rollup/plugin-node-resolve";
 import { readFile, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { createHash } from "node:crypto";
 
 const componentAssets = {
   name: "component-assets",
@@ -24,6 +25,7 @@ const stripTrailingWhitespace = {
   },
 };
 
+let annotationOverlayVersion;
 const core = {
   input: "src/index.js",
   // The optional HTML editor loads on demand; share core geometry through its
@@ -45,10 +47,19 @@ const core = {
       name: "ClusterMap",
       plugins: [terser()],
     },
-  ].map((output) => ({ ...output, paths: (id) => id.endsWith("/annotations/overlay.mjs") ? "./annotationOverlay.mjs" : id })),
+  ].map((output) => ({ ...output, paths: (id) => id.endsWith("/annotations/overlay.mjs") ? `./annotationOverlay.mjs?v=${annotationOverlayVersion}` : id })),
   // Published modules bundle their D3 dependencies. Annotation controls are
   // the sole on-demand companion module; consumers need no global D3 runtime.
-  plugins: [componentAssets, nodeResolve({ browser: true }), stripTrailingWhitespace],
+  plugins: [
+    {
+      name: "version-annotation-overlay",
+      async buildStart() {
+        const overlay = await readFile("dist/annotationOverlay.mjs");
+        annotationOverlayVersion = createHash("sha256").update(overlay).digest("hex").slice(0, 12);
+      },
+    },
+    componentAssets, nodeResolve({ browser: true }), stripTrailingWhitespace,
+  ],
 };
 
 const editor = {
@@ -65,4 +76,5 @@ const editor = {
   ],
 };
 
-export default [core, editor];
+// Build the optional UI first so the core imports its exact published version.
+export default [editor, core];

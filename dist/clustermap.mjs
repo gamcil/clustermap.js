@@ -16260,7 +16260,7 @@ function clusterMap() {
       };
       if (annotationOverlay) annotationOverlay.update(annotationUiContext);
       else if (!annotationUiLoad) {
-        annotationUiLoad = import('./annotationOverlay.mjs').then(({ createAnnotationOverlay }) => {
+        annotationUiLoad = import('./annotationOverlay.mjs?v=7d2ffaa0267d').then(({ createAnnotationOverlay }) => {
           if (!annotationUiContext) return;
           annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
             ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,
