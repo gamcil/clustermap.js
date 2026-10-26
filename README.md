@@ -242,7 +242,7 @@ selects Appearance, clears the appearance filter, expands the target section,
 scrolls it into view and optionally focuses its first enabled control. It waits
 for layout internally. `section: null` selects the first section.
 
-Supported section IDs: `plot`, `annotations`, `legend`, `links`, `link-labels`,
+Supported section IDs: `plot`, `legend`, `links`, `link-labels`,
 `tree`, `clusters-loci`, `genes`, `scale-bars`, `plot-navigation`. Unknown IDs,
 an unconnected editor or a missing chart return `false` without opening it.
 Closing, changing tabs or superseding navigation before layout completes can
