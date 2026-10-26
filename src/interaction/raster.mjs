@@ -71,7 +71,9 @@ export function createRasterInteraction({
 
   const moveGesture = (surface, event) => {
     if (!gesture) {
-      updateAffordance(surface, targetForEvent(surface, event));
+      // D3 owns camera panning, so it has no record gesture here. Avoid hover
+      // hit testing while a button is held, including drags begun elsewhere.
+      if (!event.buttons) updateAffordance(surface, targetForEvent(surface, event));
       return;
     }
     if (gesture.start && !gesture.moved) {
@@ -114,6 +116,7 @@ export function createRasterInteraction({
 
   return {
     zoomFilter(surface, event) {
+      if (gesture) return false;
       if (panMode) return event.type === "wheel" || event.button === 0;
       if (event.type === "wheel") return true;
       if (event.ctrlKey || event.button) return false;
@@ -171,9 +174,10 @@ export function createRasterInteraction({
           panMode = false;
         })
         .on("pointerdown.canvasInteraction", function (event) {
-          if (panMode || event.button) return;
+          if (panMode) { setHoverLocus(null); return; }
+          if (gesture || event.button) return;
           const target = targetForEvent(this, event);
-          if (!target) return;
+          if (!target) { setHoverLocus(null); return; }
           const locusUid = locusForTarget(target);
           if ((event.shiftKey || event.ctrlKey || event.metaKey) && (target.action === "move-cluster" || locusUid)) {
             const options = plotSelectionOptions(event);
@@ -188,20 +192,21 @@ export function createRasterInteraction({
         .on("pointermove.canvasInteraction", function (event) {
           if (!panMode) moveGesture(this, event);
         })
-        .on("pointerleave.canvasInteraction", function () {
+        .on("pointerleave.canvasInteraction", function (event) {
           if (activeSurface === this) activeSurface = null;
-          if (!gesture && !panMode) updateAffordance(this, null);
+          if (!gesture && !panMode && !event.buttons) updateAffordance(this, null);
         })
         .on("pointerup.canvasInteraction pointercancel.canvasInteraction", function (event) {
           finishGesture(this, event);
         })
         .on("dblclick.canvasInteraction", function (event) {
-          if (panMode || event.shiftKey || event.ctrlKey || event.metaKey) return;
+          if (gesture || panMode || event.shiftKey || event.ctrlKey || event.metaKey) return;
           const target = targetForEvent(this, event);
           const locusUid = locusForTarget(target);
           if (locusUid) actions.flipLocus(locusUid);
         })
         .on("contextmenu.canvasInteraction", function (event) {
+          if (gesture) { event.preventDefault(); return; }
           const target = targetForEvent(this, event);
           if (target?.action === "tree-node") {
             event.preventDefault(); event.stopPropagation();

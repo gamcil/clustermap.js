@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { layoutTree, interpolateTreeLayout, hitTestTreeNode } from "../../src/tree/layout.mjs";
+import { measureTreeLayout } from "../../src/scene/measure.mjs";
 
 function example() {
   const tree = {
@@ -24,6 +25,7 @@ function example() {
     tree: { show: true, width: 160, support: { show: true }, leafGuide: { show: true } },
     plot: { fontFamily: "sans-serif" },
     gene: { shape: { tipHeight: 5, bodyHeight: 10 } },
+    cluster: { nameFontSize: 12, lociFontSize: 10 },
   };
   const build = (options = {}) => layoutTree({ tree, scene, config, measureLabel: () => 100, trackAnchor: false, ...options });
   const reorderedScene = (order) => ({ ...scene, clusters: new Map(order.map((uid, i) => [uid, { ...scene.clusters.get(uid), y: i * 100 }])) });
@@ -31,6 +33,48 @@ function example() {
 }
 
 const mark = (marks, uid) => marks.find((value) => value.uid === uid);
+
+const measurementContext = () => ({
+  save() {}, restore() {}, measureText: (text) => ({ width: text.length * 8 }),
+});
+
+test("settled tree drawing and hit testing share layout until its inputs change", () => {
+  const { tree, scene, config, reorderedScene } = example();
+  const context = measurementContext();
+  const first = measureTreeLayout(context, tree, scene, config, { targetScene: scene, trackAnchor: true });
+  assert.equal(measureTreeLayout(context, tree, scene, config, { dragging: false }), first);
+  assert.deepEqual(hitTestTreeNode(first, mark(first.nodes, "pair")), { action: "tree-node", nodeUid: "pair" });
+
+  const widerConfig = { ...config, tree: { ...config.tree, width: 320 } };
+  const wider = measureTreeLayout(context, tree, scene, widerConfig);
+  assert.notEqual(wider.rootBranch.x1, first.rootBranch.x1, "styling updates replace cached positions");
+  const reordered = measureTreeLayout(context, tree, reorderedScene(["c", "a", "b"]), widerConfig);
+  assert.notEqual(mark(reordered.guides, "a").y1, mark(wider.guides, "a").y1, "scene updates move leaves");
+  const nextTree = structuredClone(tree);
+  nextTree.nodes[1].support.value = 75;
+  const relabelled = measureTreeLayout(context, nextTree, scene, config);
+  assert.equal(mark(relabelled.supports, "pair").text, "75.0");
+  assert.equal(measureTreeLayout(context, nextTree, scene, config), relabelled);
+  context.direction = "rtl";
+  assert.notEqual(measureTreeLayout(context, nextTree, scene, config), relabelled,
+    "text measurement settings also invalidate the layout");
+});
+
+test("live tree previews recompute in-place changes and invalidate settled layout", () => {
+  const { tree, scene, config } = example();
+  const context = measurementContext();
+  const first = measureTreeLayout(context, tree, scene, config);
+  const preview = { type: "cluster-drag", clusterOffsets: new Map([["a", 20]]) };
+  const dragged = measureTreeLayout(context, tree, scene, config, { preview });
+  assert.equal(mark(dragged.guides, "a").y1, mark(first.guides, "a").y1 + 20);
+  preview.clusterOffsets.set("a", 40);
+  const moved = measureTreeLayout(context, tree, scene, config, { preview });
+  assert.equal(mark(moved.guides, "a").y1, mark(first.guides, "a").y1 + 40);
+  const settled = measureTreeLayout(context, tree, scene, config);
+  assert.notEqual(settled, first);
+  assert.equal(mark(settled.guides, "a").y1, mark(first.guides, "a").y1);
+  assert.equal(measureTreeLayout(context, tree, scene, config), settled);
+});
 
 test("tree envelopes include support text, markers, square caps and measured scale labels", () => {
   const { tree, config, build } = example();

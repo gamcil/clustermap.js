@@ -14,6 +14,40 @@ const paintRequest = (canvas, scene, onUnavailable = () => {}) => ({
   onUnavailable,
 });
 
+for (const failure of ["render", "adoptScene", "device"]) {
+  test(`WebGPU falls back after a ${failure} failure and ignores stale device errors`, async (t) => {
+    const { createWebGpuBackend } = await import("../../src/renderers/webgpuBackend.mjs");
+    t.mock.method(console, "warn", () => {});
+    let onError, broken = false, destroyed = 0, setups = 0, fallbacks = 0;
+    const backend = createWebGpuBackend({ createRenderer: async (_canvas, options) => {
+      setups++;
+      onError = options.onError;
+      const attempt = () => { if (broken) throw new Error("GPU failure"); };
+      return { render: attempt, adoptScene: attempt, destroy: () => { destroyed++; } };
+    } });
+    const canvas = { dataset: {} }, scene = {};
+    const request = paintRequest(canvas, scene, () => { fallbacks++; });
+    backend.paint(request);
+    await Promise.resolve();
+    broken = true;
+    if (failure === "render") backend.paint(request);
+    else if (failure === "adoptScene") backend.setScene({}, { sourceScene: scene });
+    else onError(new Error("device lost"));
+    assert.equal(fallbacks, 1);
+    assert.equal(destroyed, 1);
+    assert.equal(canvas.dataset.webgpu, "error");
+    onError(new Error("stale callback"));
+    assert.equal(fallbacks, 1);
+    backend.paint({ ...request, onUnavailable: () => { fallbacks += 10; } });
+    assert.equal(fallbacks, 11, "subsequent frames use the latest fallback");
+    assert.equal(setups, 1, "failed GPU initialization is not retried every frame");
+    backend.destroy();
+    onError(new Error("disposed callback"));
+    assert.equal(fallbacks, 11);
+    assert.equal(destroyed, 1);
+  });
+}
+
 test("WebGPU backend renders the newest scene after asynchronous initialization", async () => {
   const { createWebGpuBackend } = await import("../../src/renderers/webgpuBackend.mjs");
   let resolveRenderer;

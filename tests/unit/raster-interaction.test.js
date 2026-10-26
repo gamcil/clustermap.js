@@ -10,6 +10,7 @@ for (const [action, kind, coordinate, edge] of [
 ]) {
   test(`raster ${action} shares drag threshold, commit and click cancellation`, () => {
     const calls = [], handlers = new Map();
+    let hitTests = 0;
     const interactions = Object.fromEntries(["begin", "move", "end", "cancel"].map((stage) =>
       [`${stage}${kind}`, (...args) => calls.push([stage, ...args])]));
     const target = { action, locusUid: "locus", clusterUid: "cluster" };
@@ -23,19 +24,24 @@ for (const [action, kind, coordinate, edge] of [
       on(names, handler) { for (const name of names.split(" ")) handlers.set(name, handler); return this; },
     };
     const controller = createRasterInteraction({
-      targetForEvent: () => target, worldPoint: (_surface, event) => ({ x: event.clientX, y: event.clientY }),
+      targetForEvent: () => { hitTests++; return target; }, worldPoint: (_surface, event) => ({ x: event.clientX, y: event.clientY }),
       locusForTarget: () => "locus", setHoverLocus: () => false,
       beginMotion: () => calls.push(["motion"]), endMotion: () => calls.push(["settle"]),
       interactions, actions: {},
     });
     const dispose = controller.bind(selection);
     const pointer = (name, x, y) => handlers.get(`${name}.canvasInteraction`).call(surface,
-      { pointerId: 1, button: 0, clientX: x, clientY: y, preventDefault() {} });
+      { pointerId: 1, button: 0, buttons: name === "pointerup" ? 0 : 1,
+        clientX: x, clientY: y, preventDefault() {} });
     pointer("pointerdown", 10, 20);
+    assert.equal(controller.zoomFilter(surface, { type: "wheel" }), false, "record drags exclude camera gestures");
     pointer("pointermove", 10.5, 20.5);
     assert.equal(calls.length, 1, "sub-threshold motion does not update the plot");
     pointer("pointermove", 15, 25);
+    handlers.get("contextmenu.canvasInteraction").call(surface, { preventDefault() {} });
+    assert.equal(hitTests, 1, "active drags do not perform hover or menu hit tests");
     pointer("pointerup", 15, 25);
+    assert.equal(hitTests, 2, "hover is refreshed after the drag ends");
     assert.deepEqual(calls, [
       edge ? ["begin"] : ["begin", coordinate === "y" ? "cluster" : "locus", coordinate === "y" ? 20 : 10],
       ["motion"], edge ? ["move", "locus", edge, 15] : ["move", coordinate === "y" ? 25 : 15],
@@ -50,6 +56,35 @@ for (const [action, kind, coordinate, edge] of [
     dispose();
   });
 }
+
+test("camera pans skip hover hit tests and resume hovering after release", () => {
+  const handlers = new Map();
+  let hitTests = 0, cursorUpdates = 0;
+  const surface = {};
+  const selection = { node: () => surface,
+    on(names, handler) { for (const name of names.split(" ")) handlers.set(name, handler); return this; } };
+  const controller = createRasterInteraction({
+    targetForEvent: () => { hitTests++; return null; },
+    locusForTarget: () => null, setHoverLocus: () => false,
+    setCursor: () => { cursorUpdates++; }, interactions: {}, actions: {},
+  });
+  controller.bind(selection);
+  const dispatch = (type, buttons) => handlers.get(`${type}.canvasInteraction`).call(surface,
+    { button: 0, buttons });
+  dispatch("pointermove", 0);
+  assert.equal(hitTests, 1);
+  dispatch("pointerdown", 1); // Empty space: D3 handles this as a camera pan.
+  assert.equal(hitTests, 2);
+  dispatch("pointermove", 1);
+  dispatch("pointermove", 1);
+  dispatch("pointerleave", 1);
+  assert.equal(hitTests, 2);
+  assert.equal(cursorUpdates, 1, "hover does not replace the grabbing cursor");
+  dispatch("pointerup", 0);
+  dispatch("pointermove", 0);
+  assert.equal(hitTests, 3);
+  assert.equal(cursorUpdates, 2);
+});
 
 test("raster bindings persist on one surface and release listeners when replaced", () => {
   const listeners = new Map(), calls = [];

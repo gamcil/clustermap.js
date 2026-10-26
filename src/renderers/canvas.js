@@ -3,7 +3,7 @@ import { linkColours } from "../links/style.mjs";
 import { hitTest } from "../scene/hitTest.mjs";
 import { boundsInViewport, worldViewport, worldPoint } from "../scene/camera.mjs";
 import { figureConfig } from "../ui/theme.mjs";
-import { queryViewportOrdered } from "../scene/spatialIndex.mjs";
+import { sceneRecordsInViewport } from "../scene/viewport.mjs";
 import {
   interpolateScene,
   clusterPreviewInViewport,
@@ -517,13 +517,13 @@ export function renderCanvas({
 }) {
   config = figureConfig(config);
   const show = (layer) => layers.includes(layer);
-  const showLinks = show("links"), showGenes = show("genes");
+  const showLinks = show("links") && config.link.show !== false, showGenes = show("genes");
   const displayScene = interpolateScene(previousScene, scene, progress);
   const showTrimIndicators = show("trimIndicators") && config.locus.trimIndicators?.show !== false &&
     (preview?.type === "locus-trim" || hasTrimIndicators(displayScene.loci));
   const showLoci = showTrimIndicators || show("tracks");
   const showGeneLabels = show("geneLabels") && config.gene.label.show;
-  const showLinkLabels = show("linkLabels") && config.link.label.show;
+  const showLinkLabels = show("linkLabels") && config.link.show !== false && config.link.label.show;
   const context = canvas.getContext("2d");
   const bounds = dimensions || canvas.getBoundingClientRect();
   const width = bounds.width;
@@ -544,19 +544,18 @@ export function renderCanvas({
   context.translate(camera.x, camera.y);
   context.scale(camera.k, camera.k);
 
-  // During an animation, geometry is between the previous and target scenes,
-  // while the index describes only the target scene. Draw the full frame then
-  // so an in-flight record cannot be incorrectly culled.
+  // Animation and locus previews move geometry away from indexed bounds.
+  // Use all candidates then; cluster drags have a preview-aware query below.
   const viewport = previousScene || fullScene
     ? null
     : canvasWorldViewport(canvas, camera, 20, dimensions);
   const clusterPreview = preview?.type === "cluster-drag";
-  const visible = !clusterPreview && viewport && displayScene.index
-    ? {
-        links: (showLinks || showLinkLabels) ? queryViewportOrdered(displayScene.index.links, viewport) : null,
-        loci: showLoci ? queryViewportOrdered(displayScene.index.loci, viewport) : null,
-        genes: (showGenes || showGeneLabels) ? queryViewportOrdered(displayScene.index.genes, viewport) : null,
-      }
+  const visible = !preview && viewport && displayScene.index
+    ? sceneRecordsInViewport(displayScene, viewport, {
+        links: showLinks || showLinkLabels,
+        loci: showLoci,
+        genes: showGenes || showGeneLabels,
+      })
     : null;
 
   const recordsFor = (records, ids, type, { ignoreOmit = false } = {}) => {

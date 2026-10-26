@@ -384,6 +384,7 @@ export function linkGeometryForPreview(scene, link, preview, config) {
 }
 
 export function linkVisibleForPreview(scene, link, preview, config) {
+  if (config.link.show === false) return false;
   if (!preview) return link.visible;
   const query = scene.genes.get(link.source.query.uid);
   const target = scene.genes.get(link.source.target.uid);

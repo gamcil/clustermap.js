@@ -58,6 +58,7 @@ import { exportChartSvg } from "../renderers/export.mjs";
 import { createChartRuntime } from "./runtime.js";
 import { createCanvasBackend } from "../renderers/canvasBackend.mjs";
 import { createWebGpuBackend } from "../renderers/webgpuBackend.mjs";
+import { createRendererLifecycle } from "../renderers/lifecycle.mjs";
 import { ensureSvgSurface } from "../renderers/svgSurface.mjs";
 import { ensureRasterSurface } from "../renderers/rasterSurface.mjs";
 import { syncCameraZoom } from "../interaction/zoom.mjs";
@@ -100,7 +101,7 @@ export default function clusterMap() {
   const figureSurface = createFigureSurface();
   function updateFigureSurface() {
     if (container) figureSurface.update(container, runtime.getScene(), runtime.renderConfig,
-      plotData?.tree, getCamera(chartState), scenePreview);
+      plotData?.tree, getCamera(chartState), scenePreview?.type === "locus-trim" ? null : scenePreview);
   }
   let annotationOverlay = null;
   let themeMedia = null;
@@ -174,6 +175,11 @@ export default function clusterMap() {
   });
   const canvasBackend = createCanvasBackend();
   const webgpuBackend = createWebGpuBackend();
+  const rendererLifecycle = createRendererLifecycle({
+    svg: { setup() {}, paint: renderSvg, destroy() {} },
+    canvas: canvasBackend,
+    webgpu: webgpuBackend,
+  });
   const rasterMinimap = createRasterMinimap();
   const rasterMotion = createRasterMotion({
     schedulePaint: () => scheduleScenePaint(),
@@ -320,6 +326,10 @@ export default function clusterMap() {
       return result;
     },
     commitLocusTrim: (locus) => {
+      // Trimming changes the content inside a locus, but should not make the
+      // figure surface jump or contract. Keep its existing extent and grow it
+      // only if the committed layout now reaches beyond that edge.
+      figureSurface.preserveBoundsOnNextScene();
       commitLocusEdit([locus.uid], () => {
         finalizeLocusTrim(chartState, locus);
         commitPreviewLocusState(chartState, locus);
@@ -817,7 +827,7 @@ export default function clusterMap() {
     const svg = container?.select("svg.clusterMap");
     if (!svg || svg.empty()) return;
     updateFigureSurface();
-    return renderSvg({ ...sceneFrame(runtime.getScene()),
+    return rendererLifecycle.paint("svg", { ...sceneFrame(runtime.getScene()),
       plot: svg.select("g.clusterMapG"), data: plotData, annotationsOnly, previousScene, animate,
       annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
       transition: animate ? createTransition().duration(runtime.config.plot.transitionDuration) : null,
@@ -878,8 +888,11 @@ export default function clusterMap() {
     scene ||= canvasPendingFlip?.sourceScene || rasterScene || runtime.getScene();
     if (!canvas || !scene) return null;
     updateFigureSurface();
-    const result = canvasBackend.paint({ ...sceneFrame(scene), canvas,
-      previousScene: animation?.previousScene, progress: animation?.progress });
+    const request = { ...sceneFrame(scene), canvas,
+      previousScene: animation?.previousScene, progress: animation?.progress };
+    const result = canvas === rasterCanvas && isCanvasRenderer(runtime.config.plot.renderer)
+      ? rendererLifecycle.paint("canvas", request)
+      : canvasBackend.paint(request);
     paintMinimap();
     return result;
   }
@@ -891,7 +904,8 @@ export default function clusterMap() {
     if (overlayCanvas) renderCanvas({ ...frame, canvas: overlayCanvas,
       layers: ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"] });
     const { width, height } = rasterCanvas.getBoundingClientRect();
-    webgpuBackend.paint({ ...frame, canvas: rasterCanvas, width, height, onUnavailable: paintWebGpuFallback });
+    rendererLifecycle.paint("webgpu", { ...frame, canvas: rasterCanvas, width, height,
+      onUnavailable: paintWebGpuFallback });
     paintMinimap();
   }
 
@@ -1000,17 +1014,12 @@ export default function clusterMap() {
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
+    const leavingWebGpu = !useWebGpu && webgpuBackend.hasResources();
+    rendererLifecycle.select(runtime.config.plot.renderer);
     if (rasterAnimation?.renderer !== runtime.config.plot.renderer) stopRasterAnimation();
     if (rasterCanvas?.dataset.renderer !== runtime.config.plot.renderer) rasterScene = null;
-    if (!useWebGpu && webgpuBackend.hasResources()) {
-      // A renderer owns the WebGPU context for its canvas. Dispose it before
-      // the chart changes backend, and invalidate any async setup that might
-      // otherwise resolve after that canvas has been removed.
-      webgpuBackend.destroy();
-      sceneCommit = null;
-    }
+    if (leavingWebGpu) sceneCommit = null;
     if (!useRaster) { disposeRasterInteraction(); disposeRasterInteraction = () => {}; }
-    if (!useCanvas) canvasBackend.destroy();
     const minimapOptions = runtime.config.plot.minimap || {};
     // The overview is a separate 2D canvas, so it works for both raster
     // backends. WebGPU owns only the main plot surface.
@@ -1443,8 +1452,7 @@ export default function clusterMap() {
     stopRasterAnimation();
     rasterMotion.dispose();
     rasterMinimap.clear();
-    webgpuBackend.destroy();
-    canvasBackend.destroy();
+    rendererLifecycle.destroy();
     container
       ?.selectAll([
         "svg.clusterMap",

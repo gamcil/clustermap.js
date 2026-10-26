@@ -3,6 +3,48 @@ import { measureFigureBounds } from "../../src/scene/measure.mjs";
 import { interpolateScene } from "../../src/scene/preview.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { renderCanvas } from "../../src/renderers/canvas.js";
+import { createLargeTestingData } from "../../fixtures/synthetic.mjs";
+import { normalizeChartData } from "../../src/data/normalize.mjs";
+import { createChartIndex } from "../../src/data/index.mjs";
+import { createChartRuntime } from "../../src/chart/runtime.js";
+import { createChartState, setLocusOffset } from "../../src/chart/state.mjs";
+import { createLocusOffsetsPreview } from "../../src/scene/preview.mjs";
+
+test("Canvas hides links and retains geometry and labels moved into view by a preview", () => {
+  const calls = [];
+  const context = new Proxy({ measureText: (text) => ({ width: String(text).length * 8 }) }, {
+    get: (target, key) => key in target ? target[key] : (...args) => calls.push([key, ...args]),
+  });
+  const canvas = { width: 0, height: 0, getContext: () => context,
+    getBoundingClientRect: () => ({ width: 200, height: 100 }) };
+  const data = normalizeChartData(createLargeTestingData({ clusterCount: 3, genesPerCluster: 3 }));
+  const state = createChartState(data), runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
+  runtime.configure({ gene: { label: { show: true } }, link: { label: { show: true } } });
+  let scene = runtime.updateScene(data);
+  const paint = (layers, preview = null, fullScene = false) => {
+    calls.length = 0;
+    renderCanvas({ canvas, scene, layers, preview, fullScene,
+      config: runtime.renderConfig, scales: runtime.scales, camera: { x: 0, y: 0, k: 1 } });
+    return [...calls];
+  };
+  assert.ok(paint(["links"], null, true).some(([method]) => method === "bezierCurveTo"));
+  runtime.configure({ link: { show: false } });
+  assert.equal(paint(["links", "linkLabels"], null, true).some(([method]) =>
+    method === "bezierCurveTo" || method === "fillText"), false);
+
+  const locus = data.clusters[0].loci[0];
+  setLocusOffset(state, locus.uid, 10000);
+  scene = runtime.updateScene(data);
+  const preview = createLocusOffsetsPreview(scene, new Map([[locus.uid, 0]]), { alignLabels: false });
+  for (const layers of [["genes"], ["geneLabels"]]) {
+    const actual = paint(layers, preview);
+    const expected = paint(layers, preview, true);
+    assert.deepEqual(actual, expected, `${layers[0]} must not use stale indexed positions`);
+    assert.ok(actual.some(([method]) => method === (layers[0] === "genes" ? "fill" : "fillText")));
+  }
+});
 
 test("canvas renderer draws world-space scene geometry through the camera", async () => {
   const {
@@ -194,7 +236,8 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
       label: { show: false, position: 0.5 },
     },
   };
-  scene.bounds = { minX: 0, maxX: 20, minY: 10, maxY: 30 };
+  // Structural bounds must include the offscreen gene as a real scene would.
+  scene.bounds = { minX: 0, maxX: 1005, minY: 10, maxY: 30 };
   assert.deepEqual(measureFigureBounds(context, scene, config), {
     minX: -85,
     maxX: 1028, // Include the distant gene label even outside the viewport.

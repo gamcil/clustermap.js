@@ -1397,6 +1397,7 @@ function linkGeometryForPreview(scene, link, preview, config) {
 }
 
 function linkVisibleForPreview(scene, link, preview, config) {
+  if (config.link.show === false) return false;
   if (!preview) return link.visible;
   const query = scene.genes.get(link.source.query.uid);
   const target = scene.genes.get(link.source.target.uid);
@@ -4781,6 +4782,7 @@ function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = 
 }
 
 const sceneMetrics = new WeakMap();
+const treeLayouts = new WeakMap();
 const textProperties = ["direction", "fontKerning", "fontStretch", "fontVariantCaps", "letterSpacing", "wordSpacing"];
 
 /** Share native text metrics across Canvas consumers without changing their context. */
@@ -4809,9 +4811,21 @@ function measureCanvasText(context, scene, text, {
 /** Supply native text metrics to the shared tree layout. */
 function measureTreeLayout(context, tree, scene, config, options = {}) {
   if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
+  // Camera motion does not change world-space tree layout. Share the settled
+  // layout between drawing and hit testing, but recompute live previews and
+  // animations (whose objects may be updated in place).
+  const settled = !options.preview && !options.previousTree && !options.previousScene &&
+    (!options.targetScene || options.targetScene === scene) &&
+    !options.dragging && options.trackAnchor !== false;
+  const cached = treeLayouts.get(context);
+  if (settled && cached?.scene === scene && cached.tree === tree && cached.config === config &&
+      cached.textProperties.every((value, index) => value === context[textProperties[index]])) {
+    return cached.layout;
+  }
+  treeLayouts.delete(context);
   const measure = (text, font) => measureCanvasText(context, scene, text,
     { font, align: "left", baseline: "alphabetic" });
-  return layoutTree({
+  const layout = layoutTree({
     ...options,
     tree, scene, config,
     measureText: (text, style) => {
@@ -4824,6 +4838,9 @@ function measureTreeLayout(context, tree, scene, config, options = {}) {
       measure(locusText, `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`).width
     ),
   });
+  if (settled) treeLayouts.set(context, { scene, tree, config, layout,
+    textProperties: textProperties.map((name) => context[name]) });
+  return layout;
 }
 
 
@@ -4967,6 +4984,7 @@ function measureFigureBounds(context, scene, config, tree = null, { preview = nu
 /** One backdrop shared by all renderers; camera changes only update its transform. */
 function createFigureSurface() {
   let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
+  let preserveNextSceneBounds = null;
 
   function bounds(container, scene, config, tree, preview = null) {
     if (!container || !scene?.bounds) return null;
@@ -4975,6 +4993,16 @@ function createFigureSurface() {
     if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
       context ||= container.ownerDocument.createElement("canvas").getContext("2d");
       measuredBounds = measureFigureBounds(context, scene, config, tree, { preview });
+      if (preserveNextSceneBounds) {
+        const previous = preserveNextSceneBounds;
+        preserveNextSceneBounds = null;
+        measuredBounds = {
+          minX: Math.min(previous.minX, measuredBounds.minX),
+          maxX: Math.max(previous.maxX, measuredBounds.maxX),
+          minY: Math.min(previous.minY, measuredBounds.minY),
+          maxY: Math.max(previous.maxY, measuredBounds.maxY),
+        };
+      }
       measuredScene = scene;
       measuredConfig = config;
       measuredPreview = preview;
@@ -5008,10 +5036,14 @@ function createFigureSurface() {
   }
 
   function clear() {
-    context = measuredScene = measuredConfig = measuredBounds = measuredPreview = null;
+    context = measuredScene = measuredConfig = measuredBounds = measuredPreview = preserveNextSceneBounds = null;
   }
 
-  return { bounds, update, clear };
+  function preserveBoundsOnNextScene() {
+    if (measuredBounds) preserveNextSceneBounds = { ...measuredBounds };
+  }
+
+  return { bounds, update, clear, preserveBoundsOnNextScene };
 }
 
 /** Prune absent leaves and collapse unary ancestors without changing source records. */
@@ -10103,6 +10135,22 @@ function hitTest(scene, point) {
   return null;
 }
 
+/** Select scene records intersecting a world-space viewport, in painter order. */
+function sceneRecordsInViewport(scene, viewport, include = {}) {
+  if (!viewport || !scene?.index) return null;
+  // These indexes contain biological geometry. An offscreen tree, legend or
+  // annotation panel does not require culling when all that geometry fits.
+  const bounds = scene.bounds;
+  if (bounds && viewport.minX <= bounds.minX && viewport.maxX >= bounds.maxX &&
+      viewport.minY <= bounds.minY && viewport.maxY >= bounds.maxY) return null;
+
+  return {
+    links: include.links === false ? null : queryViewportOrdered(scene.index.links, viewport),
+    loci: include.loci === false ? null : queryViewportOrdered(scene.index.loci, viewport),
+    genes: include.genes === false ? null : queryViewportOrdered(scene.index.genes, viewport),
+  };
+}
+
 function traceLines(context, lines) {
   context.beginPath();
   for (const line of lines) {
@@ -10677,13 +10725,13 @@ function renderCanvas({
 }) {
   config = figureConfig(config);
   const show = (layer) => layers.includes(layer);
-  const showLinks = show("links"), showGenes = show("genes");
+  const showLinks = show("links") && config.link.show !== false, showGenes = show("genes");
   const displayScene = interpolateScene(previousScene, scene, progress);
   const showTrimIndicators = show("trimIndicators") && config.locus.trimIndicators?.show !== false &&
     (preview?.type === "locus-trim" || hasTrimIndicators(displayScene.loci));
   const showLoci = showTrimIndicators || show("tracks");
   const showGeneLabels = show("geneLabels") && config.gene.label.show;
-  const showLinkLabels = show("linkLabels") && config.link.label.show;
+  const showLinkLabels = show("linkLabels") && config.link.show !== false && config.link.label.show;
   const context = canvas.getContext("2d");
   const bounds = dimensions || canvas.getBoundingClientRect();
   const width = bounds.width;
@@ -10704,19 +10752,18 @@ function renderCanvas({
   context.translate(camera.x, camera.y);
   context.scale(camera.k, camera.k);
 
-  // During an animation, geometry is between the previous and target scenes,
-  // while the index describes only the target scene. Draw the full frame then
-  // so an in-flight record cannot be incorrectly culled.
+  // Animation and locus previews move geometry away from indexed bounds.
+  // Use all candidates then; cluster drags have a preview-aware query below.
   const viewport = previousScene || fullScene
     ? null
     : canvasWorldViewport(canvas, camera, 20, dimensions);
   const clusterPreview = preview?.type === "cluster-drag";
-  const visible = !clusterPreview && viewport && displayScene.index
-    ? {
-        links: (showLinks || showLinkLabels) ? queryViewportOrdered(displayScene.index.links, viewport) : null,
-        loci: showLoci ? queryViewportOrdered(displayScene.index.loci, viewport) : null,
-        genes: (showGenes || showGeneLabels) ? queryViewportOrdered(displayScene.index.genes, viewport) : null,
-      }
+  const visible = !preview && viewport && displayScene.index
+    ? sceneRecordsInViewport(displayScene, viewport, {
+        links: showLinks || showLinkLabels,
+        loci: showLoci,
+        genes: showGenes || showGeneLabels,
+      })
     : null;
 
   const recordsFor = (records, ids, type, { ignoreOmit = false } = {}) => {
@@ -11989,7 +12036,9 @@ function createRasterInteraction({
 
   const moveGesture = (surface, event) => {
     if (!gesture) {
-      updateAffordance(surface, targetForEvent(surface, event));
+      // D3 owns camera panning, so it has no record gesture here. Avoid hover
+      // hit testing while a button is held, including drags begun elsewhere.
+      if (!event.buttons) updateAffordance(surface, targetForEvent(surface, event));
       return;
     }
     if (gesture.start && !gesture.moved) {
@@ -12032,6 +12081,7 @@ function createRasterInteraction({
 
   return {
     zoomFilter(surface, event) {
+      if (gesture) return false;
       if (panMode) return event.type === "wheel" || event.button === 0;
       if (event.type === "wheel") return true;
       if (event.ctrlKey || event.button) return false;
@@ -12089,9 +12139,10 @@ function createRasterInteraction({
           panMode = false;
         })
         .on("pointerdown.canvasInteraction", function (event) {
-          if (panMode || event.button) return;
+          if (panMode) { setHoverLocus(null); return; }
+          if (gesture || event.button) return;
           const target = targetForEvent(this, event);
-          if (!target) return;
+          if (!target) { setHoverLocus(null); return; }
           const locusUid = locusForTarget(target);
           if ((event.shiftKey || event.ctrlKey || event.metaKey) && (target.action === "move-cluster" || locusUid)) {
             const options = plotSelectionOptions(event);
@@ -12106,20 +12157,21 @@ function createRasterInteraction({
         .on("pointermove.canvasInteraction", function (event) {
           if (!panMode) moveGesture(this, event);
         })
-        .on("pointerleave.canvasInteraction", function () {
+        .on("pointerleave.canvasInteraction", function (event) {
           if (activeSurface === this) activeSurface = null;
-          if (!gesture && !panMode) updateAffordance(this, null);
+          if (!gesture && !panMode && !event.buttons) updateAffordance(this, null);
         })
         .on("pointerup.canvasInteraction pointercancel.canvasInteraction", function (event) {
           finishGesture(this, event);
         })
         .on("dblclick.canvasInteraction", function (event) {
-          if (panMode || event.shiftKey || event.ctrlKey || event.metaKey) return;
+          if (gesture || panMode || event.shiftKey || event.ctrlKey || event.metaKey) return;
           const target = targetForEvent(this, event);
           const locusUid = locusForTarget(target);
           if (locusUid) actions.flipLocus(locusUid);
         })
         .on("contextmenu.canvasInteraction", function (event) {
+          if (gesture) { event.preventDefault(); return; }
           const target = targetForEvent(this, event);
           if (target?.action === "tree-node") {
             event.preventDefault(); event.stopPropagation();
@@ -13131,6 +13183,7 @@ function createCanvasBackend({ render = renderCanvas,
   };
 
   return {
+    setup() {},
     prepareFlip,
     clearFlip,
     warmLocus(locusUid) {
@@ -13736,7 +13789,7 @@ function isLocusTransformPreview(preview) {
 }
 
 function bufferFor(device, existing, data) {
-  if (!data.byteLength) return null;
+  if (!data.byteLength) { existing?.destroy(); return null; }
   if (!existing || existing.size < data.byteLength) {
     existing?.destroy();
     existing = device.createBuffer({
@@ -13749,13 +13802,18 @@ function bufferFor(device, existing, data) {
 }
 
 /** Create an opt-in direct WebGPU renderer for dense scene geometry. */
-async function createWebGpuRenderer(canvas) {
+async function createWebGpuRenderer(canvas, options = {}) {
   if (!globalThis.navigator?.gpu) return null;
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) return null;
   const device = await adapter.requestDevice();
+  try { return await initializeWebGpuRenderer(canvas, device, options); }
+  catch (error) { device.destroy(); throw error; }
+}
+
+async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } = {}) {
   const context = canvas.getContext("webgpu");
-  if (!context) return null;
+  if (!context) { device.destroy(); return null; }
   const format = navigator.gpu.getPreferredCanvasFormat();
   const module = device.createShaderModule({ code: shader });
   // Browser implementations are allowed to defer WGSL validation until a
@@ -13811,36 +13869,29 @@ async function createWebGpuRenderer(canvas) {
   const createPipeline = device.createRenderPipelineAsync
     ? (descriptor) => device.createRenderPipelineAsync(descriptor)
     : (descriptor) => Promise.resolve(device.createRenderPipeline(descriptor));
-  // Canvas/SVG smooth shape edges by default. Use multisampling for comparable
-  // WebGPU edge quality without reducing the requested backing resolution.
-  const multisample = { count: 4 };
   const pipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "vertexMain", buffers: vertexBuffers },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
-    multisample,
   });
   const strokePipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "strokeVertex", buffers: strokeVertexBuffers },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
-    multisample,
   });
   const linkPipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "linkFillVertex" },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
-    multisample,
   });
   const linkLinePipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "linkEdgeVertex" },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
-    multisample,
   });
   // Annotation-only pipeline: ordinary synteny charts never compile it.
   let rectanglePipeline = null;
@@ -13857,7 +13908,6 @@ async function createWebGpuRenderer(canvas) {
     }] },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
-    multisample,
   };
   const uniform = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   let clusterOffsetBuffer = device.createBuffer({
@@ -13905,6 +13955,7 @@ async function createWebGpuRenderer(canvas) {
   let linkEdgeCount = 0;
   let previewLinkCount = 0;
   let previewLinksActive = false;
+  let linkIndicesCulled = false;
   let retainedClusterGeometry = false;
   let linkRecordIndexByUid = new Map();
   let clusterPreviewIndexCache = new Map();
@@ -13916,7 +13967,6 @@ async function createWebGpuRenderer(canvas) {
   let geometry = null;
   let patchedRecords = null;
   let configured = false;
-  let multisampleTexture = null;
   let annotationBuffer = null, annotationKeyBuffer = null;
   let annotationCount = 0, annotationKeyCount = 0;
   let annotationPanels = null, annotationKeyPreview = null, annotationGroupRows = null;
@@ -14087,12 +14137,13 @@ async function createWebGpuRenderer(canvas) {
     return values;
   };
 
-  const uploadPreviewLinkIndices = (values) => {
+  const uploadPreviewLinkIndices = (values, culled = false) => {
     const resized = resizeStorageBuffer(linkIndexBuffer, linkIndexCapacity, values);
     linkIndexBuffer = resized.buffer;
     linkIndexCapacity = resized.capacity;
     if (values.byteLength) device.queue.writeBuffer(linkIndexBuffer, 0, values);
     previewLinkCount = values.length;
+    linkIndicesCulled = culled;
     // Recreating a bind group per pointer frame costs more than the tiny
     // index upload. It is needed only if the backing buffer grew.
     if (resized.resized) bindGroup = createBindGroup();
@@ -14186,16 +14237,42 @@ async function createWebGpuRenderer(canvas) {
     geneCount = data.genes.length / 7;
     geneEdgeCount = data.geneEdges.length / 10;
   };
-  const visibleLinkIndices = () => new Uint32Array(
-    [...scene.links.values()]
-      .filter((link) => link.visible)
-      .map((link) => linkRecordIndexByUid.get(link.source.uid))
-      .filter((index) => index !== undefined)
-  );
+  const visibleDrawRanges = (kind, fields, ids) => {
+    const rangesByField = Object.fromEntries(fields.map((field) => [field, []]));
+    for (const uid of ids) {
+      const recordRanges = geometry.ranges[kind].get(uid);
+      for (const field of fields) {
+        const range = recordRanges?.[field];
+        if (range?.length) rangesByField[field].push([range.offset, range.offset + range.length]);
+      }
+    }
+    for (const [field, ranges] of Object.entries(rangesByField)) {
+      ranges.sort((left, right) => left[0] - right[0]);
+      const merged = [];
+      for (const range of ranges) {
+        const previous = merged[merged.length - 1];
+        if (previous && previous[1] >= range[0]) previous[1] = Math.max(previous[1], range[1]);
+        else merged.push(range);
+      }
+      rangesByField[field] = merged;
+    }
+    return rangesByField;
+  };
+  const visibleLinkIndices = (ids = scene.links.keys()) => {
+    const indices = [];
+    for (const uid of ids) {
+      const link = scene.links.get(uid);
+      if (!link?.visible) continue;
+      const index = linkRecordIndexByUid.get(link.source.uid);
+      if (index !== undefined) indices.push(index);
+    }
+    return new Uint32Array(indices);
+  };
   const resetRetainedClusterGeometry = () => {
     retainedClusterGeometry = false;
     clusterBaseOffsets.fill(0);
     previewLinksActive = false;
+    linkIndicesCulled = false;
     annotationPanels = null;
   };
   const restorePreview = (records) => {
@@ -14224,7 +14301,7 @@ async function createWebGpuRenderer(canvas) {
     if (isLocusTransformPreview(nextPreview)) {
       // Reuse retained polygons and shader-generated ribbons. No per-gene or
       // per-link vertices are generated/uploaded while dragging or flipping.
-      if (!previewLinksActive || preview?.type === "cluster-drag" || patchedRecords) {
+      if (!previewLinksActive || preview?.type === "cluster-drag" || patchedRecords || linkIndicesCulled) {
         uploadPreviewLinkIndices(visibleLinkIndices());
       }
       previewLinksActive = true;
@@ -14373,6 +14450,16 @@ async function createWebGpuRenderer(canvas) {
     return true;
   };
 
+  let destroyed = false;
+  const deviceError = (event) => {
+    event.preventDefault?.();
+    if (!destroyed) onError(event.error);
+  };
+  device.addEventListener?.("uncapturederror", deviceError);
+  device.lost?.then((info) => {
+    if (!destroyed) onError(new Error(`WebGPU device lost: ${info.message || info.reason}`));
+  });
+
   return {
     render({ nextScene, preview: nextPreview = null, camera, scales, config, width, height, pixelRatio }) {
       config = figureConfig(config);
@@ -14385,13 +14472,6 @@ async function createWebGpuRenderer(canvas) {
       }
       if (resized || !configured) {
         context.configure({ device, format, alphaMode: "premultiplied" });
-        multisampleTexture?.destroy();
-        multisampleTexture = device.createTexture({
-          size: [pixelWidth, pixelHeight],
-          format,
-          sampleCount: multisample.count,
-          usage: GPUTextureUsage.RENDER_ATTACHMENT,
-        });
         configured = true;
       }
       if (scene !== nextScene && nextScene.genes === scene?.genes && nextScene.links === scene?.links &&
@@ -14435,56 +14515,96 @@ async function createWebGpuRenderer(canvas) {
         ])
       );
       const encoder = device.createCommandEncoder();
+      // Preview transforms can move records away from their indexed bounds.
+      // Committed moves update those indexes, even when GPU vertices retain
+      // their original coordinates and inherit the move through offsets.
+      let cullViewport = null;
+      if (!nextPreview) {
+        const viewport = worldViewport(camera, { width, height });
+        const bounds = scene.bounds;
+        const containsScene = bounds && viewport.minX <= bounds.minX && viewport.maxX >= bounds.maxX &&
+          viewport.minY <= bounds.minY && viewport.maxY >= bounds.maxY;
+        if (!containsScene) {
+          const padding = Math.max(config.gene.shape.strokeWidth || 0,
+            config.locus.trackBar.stroke || 0, config.link.strokeWidth || 0) / camera.k + 2;
+          cullViewport = {
+            minX: viewport.minX - padding, maxX: viewport.maxX + padding,
+            minY: viewport.minY - padding, maxY: viewport.maxY + padding,
+          };
+        }
+      }
+      const visibleRecords = cullViewport ? sceneRecordsInViewport(scene, cullViewport) : null;
+      const shouldCull = Boolean(cullViewport && visibleRecords);
+      const linkDrawRanges = shouldCull && !previewLinksActive
+        ? visibleDrawRanges("links", ["links", "linkEdges"], visibleRecords.links) : null;
+      const trackDrawRanges = shouldCull
+        ? visibleDrawRanges("loci", ["tracks"], visibleRecords.loci) : null;
+      const geneDrawRanges = shouldCull
+        ? visibleDrawRanges("genes", ["genes", "geneEdges"], visibleRecords.genes) : null;
+      if (previewLinksActive && !nextPreview && (shouldCull || linkIndicesCulled)) {
+        // Retained ribbons use an instance-index buffer instead of vertex
+        // ranges. Restore the full list when the camera shows everything.
+        uploadPreviewLinkIndices(visibleLinkIndices(visibleRecords?.links), shouldCull);
+      }
       const pass = encoder.beginRenderPass({
         colorAttachments: [{
-          view: multisampleTexture.createView(),
-          resolveTarget: context.getCurrentTexture().createView(),
+          view: context.getCurrentTexture().createView(),
           clearValue: [0, 0, 0, 0],
           loadOp: "clear",
-          storeOp: "discard",
+          storeOp: "store",
         }],
       });
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, bindGroup);
-      if (previewLinksActive) {
-        if (previewLinkCount) {
-          pass.setPipeline(linkPipeline);
-          pass.setBindGroup(0, bindGroup);
-          pass.draw(60, previewLinkCount);
+      if (config.link.show !== false) {
+        if (previewLinksActive) {
+          if (previewLinkCount) {
+            pass.setPipeline(linkPipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.draw(60, previewLinkCount);
+          }
+        } else if (linkBuffer) {
+          pass.setVertexBuffer(0, linkBuffer);
+          if (linkDrawRanges) for (const [first, end] of linkDrawRanges.links) pass.draw((end - first) / 7, 1, first / 7);
+          else pass.draw(linkCount);
         }
-      } else if (linkBuffer) {
-        pass.setVertexBuffer(0, linkBuffer);
-        pass.draw(linkCount);
-      }
-      if (previewLinksActive) {
-        if (previewLinkCount) {
-          pass.setPipeline(linkLinePipeline);
+        if (previewLinksActive) {
+          if (previewLinkCount) {
+            pass.setPipeline(linkLinePipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.draw(132, previewLinkCount);
+          }
+        } else if (linkEdgeBuffer) {
+          pass.setPipeline(strokePipeline);
           pass.setBindGroup(0, bindGroup);
-          pass.draw(132, previewLinkCount);
+          pass.setVertexBuffer(0, linkEdgeBuffer);
+          if (linkDrawRanges) {
+            for (const [first, end] of linkDrawRanges.linkEdges) pass.draw(6, (end - first) / 10, 0, first / 10);
+          } else pass.draw(6, linkEdgeCount);
         }
-      } else if (linkEdgeBuffer) {
-        pass.setPipeline(strokePipeline);
-        pass.setBindGroup(0, bindGroup);
-        pass.setVertexBuffer(0, linkEdgeBuffer);
-        pass.draw(6, linkEdgeCount);
       }
       pass.setPipeline(strokePipeline);
       pass.setBindGroup(0, bindGroup);
       if (trackBuffer) {
         pass.setVertexBuffer(0, trackBuffer);
-        pass.draw(6, trackCount);
+        if (trackDrawRanges) {
+          for (const [first, end] of trackDrawRanges.tracks) pass.draw(6, (end - first) / 10, 0, first / 10);
+        } else pass.draw(6, trackCount);
       }
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, bindGroup);
       if (geneBuffer) {
         pass.setVertexBuffer(0, geneBuffer);
-        pass.draw(geneCount);
+        if (geneDrawRanges) for (const [first, end] of geneDrawRanges.genes) pass.draw((end - first) / 7, 1, first / 7);
+        else pass.draw(geneCount);
       }
       pass.setPipeline(strokePipeline);
       pass.setBindGroup(0, bindGroup);
       if (geneEdgeBuffer) {
         pass.setVertexBuffer(0, geneEdgeBuffer);
-        pass.draw(6, geneEdgeCount);
+        if (geneDrawRanges) {
+          for (const [first, end] of geneDrawRanges.geneEdges) pass.draw(6, (end - first) / 10, 0, first / 10);
+        } else pass.draw(6, geneEdgeCount);
       }
       if (annotationCount || annotationKeyCount) {
         const ranges = annotationDrawRanges(nextPreview, worldViewport(camera, { width, height }));
@@ -14507,7 +14627,10 @@ async function createWebGpuRenderer(canvas) {
     },
     adoptScene,
     destroy() {
-      multisampleTexture?.destroy();
+      if (destroyed) return;
+      destroyed = true;
+      device.removeEventListener?.("uncapturederror", deviceError);
+      context.unconfigure?.();
       linkBuffer?.destroy();
       linkEdgeBuffer?.destroy();
       linkRecordBuffer.destroy();
@@ -14544,17 +14667,68 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
     unavailable = false;
   };
 
+  const fallback = () => latestPaint?.onUnavailable?.();
+  const fail = (error) => {
+    if (unavailable) return;
+    const failedCanvas = canvas;
+    release();
+    unavailable = true;
+    if (failedCanvas) failedCanvas.dataset.webgpu = error ? "error" : "unavailable";
+    if (error) console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
+    fallback();
+  };
   const draw = () => {
-    if (renderer && latestPaint) renderer.render({ ...latestPaint, nextScene: pendingScene });
+    if (!renderer || !latestPaint) return;
+    try { renderer.render({ ...latestPaint, nextScene: pendingScene }); }
+    catch (error) { fail(error); }
   };
 
-  const fallback = () => latestPaint?.onUnavailable?.();
+  const setup = (request) => {
+    const targetCanvas = request.canvas;
+    if (!targetCanvas || !request.scene || unavailable) return;
+    pendingScene = request.scene;
+    latestPaint = request;
+    if (renderer && canvas === targetCanvas || initialization && canvas === targetCanvas) return;
+    if (canvas && canvas !== targetCanvas) {
+      // A redraw can replace the DOM canvas while adapter setup is in flight.
+      // Invalidate that setup before the new canvas acquires a WebGPU context.
+      release();
+    }
+    if (initialization) return;
+
+    canvas = targetCanvas;
+    const currentGeneration = ++generation;
+    initialization = createRenderer(targetCanvas, { onError: (error) => {
+      if (currentGeneration === generation && canvas === targetCanvas) fail(error);
+    } })
+      .then((nextRenderer) => {
+        if (currentGeneration !== generation || canvas !== targetCanvas) {
+          nextRenderer?.destroy();
+          return;
+        }
+        renderer = nextRenderer;
+        initialization = null;
+        if (renderer) {
+          targetCanvas.dataset.webgpu = "active";
+          draw();
+          return;
+        }
+        fail();
+      })
+      .catch((error) => {
+        if (currentGeneration !== generation || canvas !== targetCanvas) return;
+        fail(error);
+      });
+  };
 
   return {
     hasResources: () => Boolean(renderer || canvas || initialization || unavailable),
+    setup,
     setScene: (scene, { sourceScene, scales, config } = {}) => {
-      if (sourceScene && !scene.changes?.annotationsOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
       pendingScene = scene;
+      try {
+        if (sourceScene && !scene.changes?.annotationsOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
+      } catch (error) { fail(error); }
     },
     paint: (request) => {
       const targetCanvas = request.canvas;
@@ -14569,46 +14743,46 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
         draw();
         return;
       }
-      if (canvas && canvas !== targetCanvas) {
-        // A redraw can replace the DOM canvas while adapter setup is still in
-        // flight. Invalidate that setup before allowing the new canvas to
-        // acquire a WebGPU context.
-        release();
-      }
-      if (initialization) return;
-
-      canvas = targetCanvas;
-      const currentGeneration = ++generation;
-      initialization = createRenderer(targetCanvas)
-        .then((nextRenderer) => {
-          if (currentGeneration !== generation || canvas !== targetCanvas) {
-            nextRenderer?.destroy();
-            return;
-          }
-          renderer = nextRenderer;
-          initialization = null;
-          if (renderer) {
-            targetCanvas.dataset.webgpu = "active";
-            draw();
-            return;
-          }
-          unavailable = true;
-          targetCanvas.dataset.webgpu = "unavailable";
-          fallback();
-        })
-        .catch((error) => {
-          if (currentGeneration !== generation || canvas !== targetCanvas) return;
-          initialization = null;
-          unavailable = true;
-          targetCanvas.dataset.webgpu = "error";
-          console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
-          fallback();
-        });
+      setup(request);
     },
     destroy: () => {
       release();
       pendingScene = null;
       latestPaint = null;
+    },
+  };
+}
+
+/** Route renderer paints through one setup, paint, and teardown lifecycle. */
+function createRendererLifecycle(renderers) {
+  let active = null;
+  let setup = false;
+
+  const select = (name) => {
+    if (!Object.hasOwn(renderers, name)) throw new TypeError(`Unknown renderer: ${name}`);
+    if (active === name) return;
+    if (active !== null) {
+      for (const renderer of Object.values(renderers)) renderer.destroy?.();
+    }
+    active = name;
+    setup = false;
+  };
+
+  return {
+    select,
+    paint(name, request) {
+      select(name);
+      const renderer = renderers[name];
+      if (!setup) {
+        renderer.setup?.(request);
+        setup = true;
+      }
+      return renderer.paint(request);
+    },
+    destroy() {
+      for (const renderer of Object.values(renderers)) renderer.destroy?.();
+      active = null;
+      setup = false;
     },
   };
 }
@@ -14930,7 +15104,7 @@ function clusterMap() {
   const figureSurface = createFigureSurface();
   function updateFigureSurface() {
     if (container) figureSurface.update(container, runtime.getScene(), runtime.renderConfig,
-      plotData?.tree, getCamera(chartState), scenePreview);
+      plotData?.tree, getCamera(chartState), scenePreview?.type === "locus-trim" ? null : scenePreview);
   }
   let annotationOverlay = null;
   let themeMedia = null;
@@ -15004,6 +15178,11 @@ function clusterMap() {
   });
   const canvasBackend = createCanvasBackend();
   const webgpuBackend = createWebGpuBackend();
+  const rendererLifecycle = createRendererLifecycle({
+    svg: { setup() {}, paint: renderSvg, destroy() {} },
+    canvas: canvasBackend,
+    webgpu: webgpuBackend,
+  });
   const rasterMinimap = createRasterMinimap();
   const rasterMotion = createRasterMotion({
     schedulePaint: () => scheduleScenePaint(),
@@ -15150,6 +15329,10 @@ function clusterMap() {
       return result;
     },
     commitLocusTrim: (locus) => {
+      // Trimming changes the content inside a locus, but should not make the
+      // figure surface jump or contract. Keep its existing extent and grow it
+      // only if the committed layout now reaches beyond that edge.
+      figureSurface.preserveBoundsOnNextScene();
       commitLocusEdit([locus.uid], () => {
         finalizeLocusTrim(chartState, locus);
         commitPreviewLocusState(chartState, locus);
@@ -15647,7 +15830,7 @@ function clusterMap() {
     const svg = container?.select("svg.clusterMap");
     if (!svg || svg.empty()) return;
     updateFigureSurface();
-    return renderSvg({ ...sceneFrame(runtime.getScene()),
+    return rendererLifecycle.paint("svg", { ...sceneFrame(runtime.getScene()),
       plot: svg.select("g.clusterMapG"), data: plotData, annotationsOnly, previousScene, animate,
       annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
       transition: animate ? transition().duration(runtime.config.plot.transitionDuration) : null,
@@ -15708,8 +15891,11 @@ function clusterMap() {
     scene ||= canvasPendingFlip?.sourceScene || rasterScene || runtime.getScene();
     if (!canvas || !scene) return null;
     updateFigureSurface();
-    const result = canvasBackend.paint({ ...sceneFrame(scene), canvas,
-      previousScene: animation?.previousScene, progress: animation?.progress });
+    const request = { ...sceneFrame(scene), canvas,
+      previousScene: animation?.previousScene, progress: animation?.progress };
+    const result = canvas === rasterCanvas && isCanvasRenderer(runtime.config.plot.renderer)
+      ? rendererLifecycle.paint("canvas", request)
+      : canvasBackend.paint(request);
     paintMinimap();
     return result;
   }
@@ -15721,7 +15907,8 @@ function clusterMap() {
     if (overlayCanvas) renderCanvas({ ...frame, canvas: overlayCanvas,
       layers: ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"] });
     const { width, height } = rasterCanvas.getBoundingClientRect();
-    webgpuBackend.paint({ ...frame, canvas: rasterCanvas, width, height, onUnavailable: paintWebGpuFallback });
+    rendererLifecycle.paint("webgpu", { ...frame, canvas: rasterCanvas, width, height,
+      onUnavailable: paintWebGpuFallback });
     paintMinimap();
   }
 
@@ -15830,17 +16017,12 @@ function clusterMap() {
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
+    const leavingWebGpu = !useWebGpu && webgpuBackend.hasResources();
+    rendererLifecycle.select(runtime.config.plot.renderer);
     if (rasterAnimation?.renderer !== runtime.config.plot.renderer) stopRasterAnimation();
     if (rasterCanvas?.dataset.renderer !== runtime.config.plot.renderer) rasterScene = null;
-    if (!useWebGpu && webgpuBackend.hasResources()) {
-      // A renderer owns the WebGPU context for its canvas. Dispose it before
-      // the chart changes backend, and invalidate any async setup that might
-      // otherwise resolve after that canvas has been removed.
-      webgpuBackend.destroy();
-      sceneCommit = null;
-    }
+    if (leavingWebGpu) sceneCommit = null;
     if (!useRaster) { disposeRasterInteraction(); disposeRasterInteraction = () => {}; }
-    if (!useCanvas) canvasBackend.destroy();
     const minimapOptions = runtime.config.plot.minimap || {};
     // The overview is a separate 2D canvas, so it works for both raster
     // backends. WebGPU owns only the main plot surface.
@@ -16273,8 +16455,7 @@ function clusterMap() {
     stopRasterAnimation();
     rasterMotion.dispose();
     rasterMinimap.clear();
-    webgpuBackend.destroy();
-    canvasBackend.destroy();
+    rendererLifecycle.destroy();
     container
       ?.selectAll([
         "svg.clusterMap",

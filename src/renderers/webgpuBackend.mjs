@@ -19,17 +19,68 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
     unavailable = false;
   };
 
+  const fallback = () => latestPaint?.onUnavailable?.();
+  const fail = (error) => {
+    if (unavailable) return;
+    const failedCanvas = canvas;
+    release();
+    unavailable = true;
+    if (failedCanvas) failedCanvas.dataset.webgpu = error ? "error" : "unavailable";
+    if (error) console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
+    fallback();
+  };
   const draw = () => {
-    if (renderer && latestPaint) renderer.render({ ...latestPaint, nextScene: pendingScene });
+    if (!renderer || !latestPaint) return;
+    try { renderer.render({ ...latestPaint, nextScene: pendingScene }); }
+    catch (error) { fail(error); }
   };
 
-  const fallback = () => latestPaint?.onUnavailable?.();
+  const setup = (request) => {
+    const targetCanvas = request.canvas;
+    if (!targetCanvas || !request.scene || unavailable) return;
+    pendingScene = request.scene;
+    latestPaint = request;
+    if (renderer && canvas === targetCanvas || initialization && canvas === targetCanvas) return;
+    if (canvas && canvas !== targetCanvas) {
+      // A redraw can replace the DOM canvas while adapter setup is in flight.
+      // Invalidate that setup before the new canvas acquires a WebGPU context.
+      release();
+    }
+    if (initialization) return;
+
+    canvas = targetCanvas;
+    const currentGeneration = ++generation;
+    initialization = createRenderer(targetCanvas, { onError: (error) => {
+      if (currentGeneration === generation && canvas === targetCanvas) fail(error);
+    } })
+      .then((nextRenderer) => {
+        if (currentGeneration !== generation || canvas !== targetCanvas) {
+          nextRenderer?.destroy();
+          return;
+        }
+        renderer = nextRenderer;
+        initialization = null;
+        if (renderer) {
+          targetCanvas.dataset.webgpu = "active";
+          draw();
+          return;
+        }
+        fail();
+      })
+      .catch((error) => {
+        if (currentGeneration !== generation || canvas !== targetCanvas) return;
+        fail(error);
+      });
+  };
 
   return {
     hasResources: () => Boolean(renderer || canvas || initialization || unavailable),
+    setup,
     setScene: (scene, { sourceScene, scales, config } = {}) => {
-      if (sourceScene && !scene.changes?.annotationsOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
       pendingScene = scene;
+      try {
+        if (sourceScene && !scene.changes?.annotationsOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
+      } catch (error) { fail(error); }
     },
     paint: (request) => {
       const targetCanvas = request.canvas;
@@ -44,41 +95,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
         draw();
         return;
       }
-      if (canvas && canvas !== targetCanvas) {
-        // A redraw can replace the DOM canvas while adapter setup is still in
-        // flight. Invalidate that setup before allowing the new canvas to
-        // acquire a WebGPU context.
-        release();
-      }
-      if (initialization) return;
-
-      canvas = targetCanvas;
-      const currentGeneration = ++generation;
-      initialization = createRenderer(targetCanvas)
-        .then((nextRenderer) => {
-          if (currentGeneration !== generation || canvas !== targetCanvas) {
-            nextRenderer?.destroy();
-            return;
-          }
-          renderer = nextRenderer;
-          initialization = null;
-          if (renderer) {
-            targetCanvas.dataset.webgpu = "active";
-            draw();
-            return;
-          }
-          unavailable = true;
-          targetCanvas.dataset.webgpu = "unavailable";
-          fallback();
-        })
-        .catch((error) => {
-          if (currentGeneration !== generation || canvas !== targetCanvas) return;
-          initialization = null;
-          unavailable = true;
-          targetCanvas.dataset.webgpu = "error";
-          console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
-          fallback();
-        });
+      setup(request);
     },
     destroy: () => {
       release();

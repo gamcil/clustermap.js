@@ -149,6 +149,7 @@ export function createCanvasBackend({ render = renderCanvas,
   };
 
   return {
+    setup() {},
     prepareFlip,
     clearFlip,
     warmLocus(locusUid) {

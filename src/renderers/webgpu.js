@@ -4,6 +4,7 @@
 
 import { color } from "d3-color";
 import { worldViewport } from "../scene/camera.mjs";
+import { sceneRecordsInViewport } from "../scene/viewport.mjs";
 import { figureConfig } from "../ui/theme.mjs";
 import { sampleLinkGeometry } from "../links/layout.mjs";
 import { linkColours } from "../links/style.mjs";
@@ -602,7 +603,7 @@ function isLocusTransformPreview(preview) {
 }
 
 function bufferFor(device, existing, data) {
-  if (!data.byteLength) return null;
+  if (!data.byteLength) { existing?.destroy(); return null; }
   if (!existing || existing.size < data.byteLength) {
     existing?.destroy();
     existing = device.createBuffer({
@@ -615,13 +616,18 @@ function bufferFor(device, existing, data) {
 }
 
 /** Create an opt-in direct WebGPU renderer for dense scene geometry. */
-export async function createWebGpuRenderer(canvas) {
+export async function createWebGpuRenderer(canvas, options = {}) {
   if (!globalThis.navigator?.gpu) return null;
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) return null;
   const device = await adapter.requestDevice();
+  try { return await initializeWebGpuRenderer(canvas, device, options); }
+  catch (error) { device.destroy(); throw error; }
+}
+
+async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } = {}) {
   const context = canvas.getContext("webgpu");
-  if (!context) return null;
+  if (!context) { device.destroy(); return null; }
   const format = navigator.gpu.getPreferredCanvasFormat();
   const module = device.createShaderModule({ code: shader });
   // Browser implementations are allowed to defer WGSL validation until a
@@ -677,36 +683,29 @@ export async function createWebGpuRenderer(canvas) {
   const createPipeline = device.createRenderPipelineAsync
     ? (descriptor) => device.createRenderPipelineAsync(descriptor)
     : (descriptor) => Promise.resolve(device.createRenderPipeline(descriptor));
-  // Canvas/SVG smooth shape edges by default. Use multisampling for comparable
-  // WebGPU edge quality without reducing the requested backing resolution.
-  const multisample = { count: 4 };
   const pipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "vertexMain", buffers: vertexBuffers },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
-    multisample,
   });
   const strokePipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "strokeVertex", buffers: strokeVertexBuffers },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
-    multisample,
   });
   const linkPipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "linkFillVertex" },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
-    multisample,
   });
   const linkLinePipeline = await createPipeline({
     layout: pipelineLayout,
     vertex: { module, entryPoint: "linkEdgeVertex" },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
-    multisample,
   });
   // Annotation-only pipeline: ordinary synteny charts never compile it.
   let rectanglePipeline = null;
@@ -723,7 +722,6 @@ export async function createWebGpuRenderer(canvas) {
     }] },
     fragment: { module, entryPoint: "fragmentMain", targets: target },
     primitive: { topology: "triangle-list" },
-    multisample,
   };
   const uniform = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   let clusterOffsetBuffer = device.createBuffer({
@@ -771,6 +769,7 @@ export async function createWebGpuRenderer(canvas) {
   let linkEdgeCount = 0;
   let previewLinkCount = 0;
   let previewLinksActive = false;
+  let linkIndicesCulled = false;
   let retainedClusterGeometry = false;
   let linkRecordIndexByUid = new Map();
   let clusterPreviewIndexCache = new Map();
@@ -782,7 +781,6 @@ export async function createWebGpuRenderer(canvas) {
   let geometry = null;
   let patchedRecords = null;
   let configured = false;
-  let multisampleTexture = null;
   let annotationBuffer = null, annotationKeyBuffer = null;
   let annotationCount = 0, annotationKeyCount = 0;
   let annotationPanels = null, annotationKeyPreview = null, annotationGroupRows = null;
@@ -953,12 +951,13 @@ export async function createWebGpuRenderer(canvas) {
     return values;
   };
 
-  const uploadPreviewLinkIndices = (values) => {
+  const uploadPreviewLinkIndices = (values, culled = false) => {
     const resized = resizeStorageBuffer(linkIndexBuffer, linkIndexCapacity, values);
     linkIndexBuffer = resized.buffer;
     linkIndexCapacity = resized.capacity;
     if (values.byteLength) device.queue.writeBuffer(linkIndexBuffer, 0, values);
     previewLinkCount = values.length;
+    linkIndicesCulled = culled;
     // Recreating a bind group per pointer frame costs more than the tiny
     // index upload. It is needed only if the backing buffer grew.
     if (resized.resized) bindGroup = createBindGroup();
@@ -1052,16 +1051,42 @@ export async function createWebGpuRenderer(canvas) {
     geneCount = data.genes.length / 7;
     geneEdgeCount = data.geneEdges.length / 10;
   };
-  const visibleLinkIndices = () => new Uint32Array(
-    [...scene.links.values()]
-      .filter((link) => link.visible)
-      .map((link) => linkRecordIndexByUid.get(link.source.uid))
-      .filter((index) => index !== undefined)
-  );
+  const visibleDrawRanges = (kind, fields, ids) => {
+    const rangesByField = Object.fromEntries(fields.map((field) => [field, []]));
+    for (const uid of ids) {
+      const recordRanges = geometry.ranges[kind].get(uid);
+      for (const field of fields) {
+        const range = recordRanges?.[field];
+        if (range?.length) rangesByField[field].push([range.offset, range.offset + range.length]);
+      }
+    }
+    for (const [field, ranges] of Object.entries(rangesByField)) {
+      ranges.sort((left, right) => left[0] - right[0]);
+      const merged = [];
+      for (const range of ranges) {
+        const previous = merged[merged.length - 1];
+        if (previous && previous[1] >= range[0]) previous[1] = Math.max(previous[1], range[1]);
+        else merged.push(range);
+      }
+      rangesByField[field] = merged;
+    }
+    return rangesByField;
+  };
+  const visibleLinkIndices = (ids = scene.links.keys()) => {
+    const indices = [];
+    for (const uid of ids) {
+      const link = scene.links.get(uid);
+      if (!link?.visible) continue;
+      const index = linkRecordIndexByUid.get(link.source.uid);
+      if (index !== undefined) indices.push(index);
+    }
+    return new Uint32Array(indices);
+  };
   const resetRetainedClusterGeometry = () => {
     retainedClusterGeometry = false;
     clusterBaseOffsets.fill(0);
     previewLinksActive = false;
+    linkIndicesCulled = false;
     annotationPanels = null;
   };
   const restorePreview = (records) => {
@@ -1090,7 +1115,7 @@ export async function createWebGpuRenderer(canvas) {
     if (isLocusTransformPreview(nextPreview)) {
       // Reuse retained polygons and shader-generated ribbons. No per-gene or
       // per-link vertices are generated/uploaded while dragging or flipping.
-      if (!previewLinksActive || preview?.type === "cluster-drag" || patchedRecords) {
+      if (!previewLinksActive || preview?.type === "cluster-drag" || patchedRecords || linkIndicesCulled) {
         uploadPreviewLinkIndices(visibleLinkIndices());
       }
       previewLinksActive = true;
@@ -1239,6 +1264,16 @@ export async function createWebGpuRenderer(canvas) {
     return true;
   };
 
+  let destroyed = false;
+  const deviceError = (event) => {
+    event.preventDefault?.();
+    if (!destroyed) onError(event.error);
+  };
+  device.addEventListener?.("uncapturederror", deviceError);
+  device.lost?.then((info) => {
+    if (!destroyed) onError(new Error(`WebGPU device lost: ${info.message || info.reason}`));
+  });
+
   return {
     render({ nextScene, preview: nextPreview = null, camera, scales, config, width, height, pixelRatio }) {
       config = figureConfig(config);
@@ -1251,13 +1286,6 @@ export async function createWebGpuRenderer(canvas) {
       }
       if (resized || !configured) {
         context.configure({ device, format, alphaMode: "premultiplied" });
-        multisampleTexture?.destroy();
-        multisampleTexture = device.createTexture({
-          size: [pixelWidth, pixelHeight],
-          format,
-          sampleCount: multisample.count,
-          usage: GPUTextureUsage.RENDER_ATTACHMENT,
-        });
         configured = true;
       }
       if (scene !== nextScene && nextScene.genes === scene?.genes && nextScene.links === scene?.links &&
@@ -1301,56 +1329,96 @@ export async function createWebGpuRenderer(canvas) {
         ])
       );
       const encoder = device.createCommandEncoder();
+      // Preview transforms can move records away from their indexed bounds.
+      // Committed moves update those indexes, even when GPU vertices retain
+      // their original coordinates and inherit the move through offsets.
+      let cullViewport = null;
+      if (!nextPreview) {
+        const viewport = worldViewport(camera, { width, height });
+        const bounds = scene.bounds;
+        const containsScene = bounds && viewport.minX <= bounds.minX && viewport.maxX >= bounds.maxX &&
+          viewport.minY <= bounds.minY && viewport.maxY >= bounds.maxY;
+        if (!containsScene) {
+          const padding = Math.max(config.gene.shape.strokeWidth || 0,
+            config.locus.trackBar.stroke || 0, config.link.strokeWidth || 0) / camera.k + 2;
+          cullViewport = {
+            minX: viewport.minX - padding, maxX: viewport.maxX + padding,
+            minY: viewport.minY - padding, maxY: viewport.maxY + padding,
+          };
+        }
+      }
+      const visibleRecords = cullViewport ? sceneRecordsInViewport(scene, cullViewport) : null;
+      const shouldCull = Boolean(cullViewport && visibleRecords);
+      const linkDrawRanges = shouldCull && !previewLinksActive
+        ? visibleDrawRanges("links", ["links", "linkEdges"], visibleRecords.links) : null;
+      const trackDrawRanges = shouldCull
+        ? visibleDrawRanges("loci", ["tracks"], visibleRecords.loci) : null;
+      const geneDrawRanges = shouldCull
+        ? visibleDrawRanges("genes", ["genes", "geneEdges"], visibleRecords.genes) : null;
+      if (previewLinksActive && !nextPreview && (shouldCull || linkIndicesCulled)) {
+        // Retained ribbons use an instance-index buffer instead of vertex
+        // ranges. Restore the full list when the camera shows everything.
+        uploadPreviewLinkIndices(visibleLinkIndices(visibleRecords?.links), shouldCull);
+      }
       const pass = encoder.beginRenderPass({
         colorAttachments: [{
-          view: multisampleTexture.createView(),
-          resolveTarget: context.getCurrentTexture().createView(),
+          view: context.getCurrentTexture().createView(),
           clearValue: [0, 0, 0, 0],
           loadOp: "clear",
-          storeOp: "discard",
+          storeOp: "store",
         }],
       });
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, bindGroup);
-      if (previewLinksActive) {
-        if (previewLinkCount) {
-          pass.setPipeline(linkPipeline);
-          pass.setBindGroup(0, bindGroup);
-          pass.draw(60, previewLinkCount);
+      if (config.link.show !== false) {
+        if (previewLinksActive) {
+          if (previewLinkCount) {
+            pass.setPipeline(linkPipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.draw(60, previewLinkCount);
+          }
+        } else if (linkBuffer) {
+          pass.setVertexBuffer(0, linkBuffer);
+          if (linkDrawRanges) for (const [first, end] of linkDrawRanges.links) pass.draw((end - first) / 7, 1, first / 7);
+          else pass.draw(linkCount);
         }
-      } else if (linkBuffer) {
-        pass.setVertexBuffer(0, linkBuffer);
-        pass.draw(linkCount);
-      }
-      if (previewLinksActive) {
-        if (previewLinkCount) {
-          pass.setPipeline(linkLinePipeline);
+        if (previewLinksActive) {
+          if (previewLinkCount) {
+            pass.setPipeline(linkLinePipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.draw(132, previewLinkCount);
+          }
+        } else if (linkEdgeBuffer) {
+          pass.setPipeline(strokePipeline);
           pass.setBindGroup(0, bindGroup);
-          pass.draw(132, previewLinkCount);
+          pass.setVertexBuffer(0, linkEdgeBuffer);
+          if (linkDrawRanges) {
+            for (const [first, end] of linkDrawRanges.linkEdges) pass.draw(6, (end - first) / 10, 0, first / 10);
+          } else pass.draw(6, linkEdgeCount);
         }
-      } else if (linkEdgeBuffer) {
-        pass.setPipeline(strokePipeline);
-        pass.setBindGroup(0, bindGroup);
-        pass.setVertexBuffer(0, linkEdgeBuffer);
-        pass.draw(6, linkEdgeCount);
       }
       pass.setPipeline(strokePipeline);
       pass.setBindGroup(0, bindGroup);
       if (trackBuffer) {
         pass.setVertexBuffer(0, trackBuffer);
-        pass.draw(6, trackCount);
+        if (trackDrawRanges) {
+          for (const [first, end] of trackDrawRanges.tracks) pass.draw(6, (end - first) / 10, 0, first / 10);
+        } else pass.draw(6, trackCount);
       }
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, bindGroup);
       if (geneBuffer) {
         pass.setVertexBuffer(0, geneBuffer);
-        pass.draw(geneCount);
+        if (geneDrawRanges) for (const [first, end] of geneDrawRanges.genes) pass.draw((end - first) / 7, 1, first / 7);
+        else pass.draw(geneCount);
       }
       pass.setPipeline(strokePipeline);
       pass.setBindGroup(0, bindGroup);
       if (geneEdgeBuffer) {
         pass.setVertexBuffer(0, geneEdgeBuffer);
-        pass.draw(6, geneEdgeCount);
+        if (geneDrawRanges) {
+          for (const [first, end] of geneDrawRanges.geneEdges) pass.draw(6, (end - first) / 10, 0, first / 10);
+        } else pass.draw(6, geneEdgeCount);
       }
       if (annotationCount || annotationKeyCount) {
         const ranges = annotationDrawRanges(nextPreview, worldViewport(camera, { width, height }));
@@ -1373,7 +1441,10 @@ export async function createWebGpuRenderer(canvas) {
     },
     adoptScene,
     destroy() {
-      multisampleTexture?.destroy();
+      if (destroyed) return;
+      destroyed = true;
+      device.removeEventListener?.("uncapturederror", deviceError);
+      context.unconfigure?.();
       linkBuffer?.destroy();
       linkEdgeBuffer?.destroy();
       linkRecordBuffer.destroy();

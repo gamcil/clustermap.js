@@ -10,6 +10,7 @@ import {
 } from "./preview.mjs";
 
 const sceneMetrics = new WeakMap();
+const treeLayouts = new WeakMap();
 const textProperties = ["direction", "fontKerning", "fontStretch", "fontVariantCaps", "letterSpacing", "wordSpacing"];
 
 /** Share native text metrics across Canvas consumers without changing their context. */
@@ -38,9 +39,21 @@ export function measureCanvasText(context, scene, text, {
 /** Supply native text metrics to the shared tree layout. */
 export function measureTreeLayout(context, tree, scene, config, options = {}) {
   if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
+  // Camera motion does not change world-space tree layout. Share the settled
+  // layout between drawing and hit testing, but recompute live previews and
+  // animations (whose objects may be updated in place).
+  const settled = !options.preview && !options.previousTree && !options.previousScene &&
+    (!options.targetScene || options.targetScene === scene) &&
+    !options.dragging && options.trackAnchor !== false;
+  const cached = treeLayouts.get(context);
+  if (settled && cached?.scene === scene && cached.tree === tree && cached.config === config &&
+      cached.textProperties.every((value, index) => value === context[textProperties[index]])) {
+    return cached.layout;
+  }
+  treeLayouts.delete(context);
   const measure = (text, font) => measureCanvasText(context, scene, text,
     { font, align: "left", baseline: "alphabetic" });
-  return layoutTree({
+  const layout = layoutTree({
     ...options,
     tree, scene, config,
     measureText: (text, style) => {
@@ -53,6 +66,9 @@ export function measureTreeLayout(context, tree, scene, config, options = {}) {
       measure(locusText, `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`).width
     ),
   });
+  if (settled) treeLayouts.set(context, { scene, tree, config, layout,
+    textProperties: textProperties.map((name) => context[name]) });
+  return layout;
 }
 
 
