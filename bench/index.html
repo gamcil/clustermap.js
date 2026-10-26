@@ -9,13 +9,35 @@ body{margin:0}#plot{width:1440px;height:900px;position:relative}
 <div id="plot"></div>
 <script src="/node_modules/d3-v1/dist/d3.min.js"></script>
 <script type="module">
-import { onINP } from "/node_modules/web-vitals/dist/web-vitals.js";
+import { onINP } from "/node_modules/web-vitals/dist/web-vitals.attribution.js";
 import { views } from "./views.mjs";
 
 // web-vitals owns all INP collection and calculation. No custom timing metric.
 window.inp = null;
 onINP((metric) => {
-  window.inp = { value: metric.value, entries: metric.entries.map((e) => e.toJSON()) };
+  const attribution = metric.attribution;
+  window.inp = {
+    value: metric.value,
+    entries: metric.entries.map((e) => e.toJSON()),
+    attribution: attribution && {
+      interactionTarget: attribution.interactionTarget,
+      interactionType: attribution.interactionType,
+      loadState: attribution.loadState,
+      inputDelay: attribution.inputDelay,
+      processingDuration: attribution.processingDuration,
+      presentationDelay: attribution.presentationDelay,
+      totalScriptDuration: attribution.totalScriptDuration,
+      totalStyleAndLayoutDuration: attribution.totalStyleAndLayoutDuration,
+      totalPaintDuration: attribution.totalPaintDuration,
+      totalUnattributedDuration: attribution.totalUnattributedDuration,
+      longestScript: attribution.longestScript && {
+        subpart: attribution.longestScript.subpart,
+        intersectingDuration: attribution.longestScript.intersectingDuration,
+        entry: attribution.longestScript.entry.toJSON(),
+      },
+      longAnimationFrames: attribution.longAnimationFrameEntries.map((entry) => entry.toJSON()),
+    },
+  };
 }, { reportAllChanges: true, durationThreshold: 16 });
 
 const params = new URLSearchParams(location.search);

@@ -182,7 +182,7 @@ try {
   }
   assert.ok(browserEnvironments.disabled.commandLine.includes("--disable-accelerated-2d-canvas"),
     "Canvas acceleration disable flag missing from browser process");
-  await writeFile(resolve(output, "metadata.json"), json({ formatVersion: 11, baseline: BASELINE,
+  await writeFile(resolve(output, "metadata.json"), json({ formatVersion: 12, baseline: BASELINE,
     currentCommit: git("rev-parse", "HEAD"), dirtyWorktree: git("status", "--porcelain"),
     browser: browsers.default.version(), browserEnvironments, playwright: JSON.parse(await readFile(resolve(ROOT, "node_modules/@playwright/test/package.json"))).version,
     d3Baseline: "6.7.0", webVitals: "5.1.0", cpu: os.cpus()[0]?.model, os: `${os.type()} ${os.release()}`,

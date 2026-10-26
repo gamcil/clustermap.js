@@ -118,9 +118,14 @@ for diagnostics; WebGPU may not be available there.
 visual consistency, without adding screenshot work to the INP measurement.
 
 `runs.csv` identifies the view and reports one INP and one frame-interval p95 per workflow, with the frame sample count. Raw JSON preserves the `web-vitals`
-value and contributing entries, final state, and graphics checks. Metadata
-records versions, bundle/fixture/lockfile hashes, dirty status, CPU/OS, viewport,
-resolution, and execution order. Summary statistics use runs as repetitions, grouped by view and implementation.
+value and contributing entries, final state, and graphics checks. It also records
+Web Vitals INP attribution when available: target, input delay, handler processing
+duration, presentation delay, and Long Animation Frame script details. Long
+Animation Frame details are only available for frames of at least 50 ms; shorter
+interactions still have INP subpart timings. Metadata records versions,
+bundle/fixture/lockfile hashes, dirty status, CPU/OS, viewport, resolution, and
+execution order. Summary statistics use runs as repetitions, grouped by view and
+implementation.
 
 INP covers qualifying discrete inputs within this mixed workflow; it does not
 directly measure continuous pan/zoom latency, GPU throughput, or physical display
@@ -164,6 +169,8 @@ data. Compare results using the recorded fixture, view, and gesture settings.
 Format-11 adds the verified trim drag to the workflow and frame sampler. Later
 cluster reordering therefore operates on a trimmed locus. Treat this as a new
 workload; do not pool its timings with earlier workflows that omitted trimming.
+
+Format-12 adds Web Vitals INP attribution to raw run data.
 
 ## Renderer optimization status
 
