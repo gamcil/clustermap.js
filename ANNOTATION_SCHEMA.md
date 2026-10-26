@@ -72,10 +72,16 @@ fields are described [below](#group-markers).
 | `cellBorderWidth` | Inset cell border width in chart/world units | `0` |
 | `cellBorderColour` | Cell border CSS colour | `"#ffffff"` |
 | `gap` | Distance from the preceding panel's grid edge, in chart/world units | `24` |
-| `fontSize` | Heading/key text size in chart/world units | `10` |
+| `titleFontSize` | Panel title size in chart/world units | `10` |
+| `columnFontSize` | Column heading size in chart/world units | `10` |
+| `labelFontSize` | Axis, key and group label size in chart/world units | `10` |
 | `headingRotation` | Column heading rotation, from -90 to 0 degrees | Heatmap `-60`; bar `0` |
 | `showColumnLabels` | Whether column headings are drawn | `true` |
 | `showKey` | Whether the heatmap colour key or bar numeric axis is drawn | `true` |
+
+Text sizes are independent: enlarging `titleFontSize` leaves column headings and
+axis/key labels unchanged. Layout and SVG export measure each text item using
+its own size. These fields replace the former single `fontSize` setting.
 
 The chart's `plot.fontFamily` applies to panels. Sizes follow chart pan/zoom.
 Every panel defaults to the same `gap` (24 world units). Automatic placement
@@ -284,7 +290,7 @@ unselected intervening rows are never included. Overlapping/nested groups use
 separate lanes, allocated in group definition order. Disjoint groups share a
 lane. Labels are vertically centred beside each segment.
 
-Common `show`, `title`, `gap`, `fontSize` and `cellHeight` fields apply.
+Common `show`, `title`, `gap`, `titleFontSize`, `labelFontSize` and `cellHeight` fields apply.
 `markerWidth` controls bar thickness (default 3); `laneGap` controls the gap
 between lanes (default 12). Width is computed from lanes and label lengths.
 `cellHeight` controls the padding about each segment's first and last row

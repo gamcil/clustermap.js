@@ -172,7 +172,7 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
   }
   for (const panel of panels) {
     for (const item of panel.texts) includeText(item.text, panel.x + item.x, item.y,
-      { fontSize: panel.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
+      { fontSize: item.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
         align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
   }
   if (chrome?.legend.visible) {

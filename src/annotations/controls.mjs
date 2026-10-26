@@ -54,7 +54,10 @@ export function createAnnotationControls({ getData, patch, document, panelUid, a
     const sizes = groups ? [["markerWidth", "Bar thickness", 3], ["laneGap", "Lane gap", 12]]
       : bar ? [["width", "Panel width", defaults.width], ["cellHeight", "Bar height", defaults.cellHeight]]
         : [["cellWidth", "Cell width", defaults.cellWidth], ["cellHeight", "Cell height", defaults.cellHeight], ["cellGap", "Cell gap", defaults.cellGap]];
-    for (const [field, label, fallback] of [...sizes, ["gap", "Panel gap", defaults.gap], ["fontSize", "Font size", defaults.fontSize]]) {
+    const fonts = [["titleFontSize", "Title font size", defaults.titleFontSize],
+      ...(!groups ? [["columnFontSize", "Column title font size", defaults.columnFontSize]] : []),
+      ["labelFontSize", groups ? "Group label font size" : "Axis/legend font size", defaults.labelFontSize]];
+    for (const [field, label, fallback] of [...sizes, ["gap", "Panel gap", defaults.gap], ...fonts]) {
       input(advanced, label, field, panel[field] ?? fallback, "number", { min: ["gap", "cellGap"].includes(field) ? "0" : "0.1" });
     }
     if (!groups) {

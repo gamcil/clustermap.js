@@ -9,7 +9,7 @@ export { annotationOffsetForPreview } from "../scene/preview.mjs";
 const sequential = ["#f7fbff", "#08306b"];
 const categorical = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377", "#bbbbbb"];
 export const ANNOTATION_DEFAULTS = Object.freeze({ cellWidth: 32, cellHeight: 20, gap: 24,
-  fontSize: 10, headingRotation: -60, missingColour: "#eeeeee",
+  titleFontSize: 10, columnFontSize: 10, labelFontSize: 10, headingRotation: -60, missingColour: "#eeeeee",
   cellGap: 0, cellBorderWidth: 0, cellBorderColour: "#ffffff", width: 120, colour: "#267c9e" });
 export const ANNOTATION_PALETTES = {
   Blue: sequential,
@@ -37,7 +37,7 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
       if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
     }
     if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
-    for (const key of ["cellWidth", "cellHeight", "fontSize", "width"]) {
+    for (const key of ["cellWidth", "cellHeight", "titleFontSize", "columnFontSize", "labelFontSize", "width"]) {
       if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
     }
     if (panel.gap !== undefined && (!Number.isFinite(panel.gap) || panel.gap < 0)) fail("gap must be non-negative.");
@@ -227,7 +227,7 @@ function samePanelRows(panel, clusters) {
   return panel?.rows.length === clusters.size && panel.rows.every((row) => clusters.has(row.uid));
 }
 
-function layoutMatrixPanel(source, clusters, { before, fontSize, cellHeight, theme }) {
+function layoutMatrixPanel(source, clusters, { before, labelFontSize, columnFontSize, cellHeight, theme }) {
   const isBar = source.type === "bar";
   const cellWidth = isBar ? source.width ?? ANNOTATION_DEFAULTS.width : source.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth;
   const width = cellWidth * source.columns.length;
@@ -256,7 +256,7 @@ function layoutMatrixPanel(source, clusters, { before, fontSize, cellHeight, the
     }) };
   });
   const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
-  const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation }));
+  const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation, fontSize: columnFontSize }));
   const footer = [], key = [];
   if (source.showKey !== false && isBar) {
     key.push({ x: 0, y: 0, width, height: 1, fill: theme?.muted ?? "#555555" });
@@ -266,18 +266,19 @@ function layoutMatrixPanel(source, clusters, { before, fontSize, cellHeight, the
       const tickX = position(value);
       key.push({ x: Math.max(0, Math.min(width - Math.min(1, width), tickX - 0.5)), y: 0,
         width: Math.min(1, width), height: 5, fill: theme?.muted ?? "#555555" });
-      footer.push(text(numberLabel(value), tickX, fontSize + 9,
+      footer.push(text(numberLabel(value), tickX, labelFontSize + 9,
         { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
     }
   } else if (source.showKey !== false && type === "continuous") {
     for (let i = 0; i < 32; i++) key.push({ x: i * width / 32, y: 0, width: width / 32 + 0.1, height: 8,
       fill: colour(domain[0] + (domain[1] - domain[0]) * i / 31) });
-    footer.push(text(numberLabel(domain[0]), 0, 8 + fontSize + 3),
-      text(numberLabel(domain[1]), width, 8 + fontSize + 3, { anchor: "end" }));
+    footer.push(text(numberLabel(domain[0]), 0, 8 + labelFontSize + 3),
+      text(numberLabel(domain[1]), width, 8 + labelFontSize + 3, { anchor: "end" }));
   } else if (source.showKey !== false) domain.forEach((category, i) => {
-    key.push({ x: 0, y: i * (fontSize + 6), width: 10, height: 10, fill: colour(category) });
-    footer.push(text(category, 15, i * (fontSize + 6) + 9));
+    key.push({ x: 0, y: i * (labelFontSize + 6), width: 10, height: 10, fill: colour(category) });
+    footer.push(text(category, 15, i * (labelFontSize + 6) + 9));
   });
+  for (const item of footer) item.fontSize = labelFontSize;
   return { width, rows, header, footer, key, domain, missingColour };
 }
 
@@ -305,25 +306,27 @@ export function layoutAnnotationPanels(definitions, clusters, bounds,
         inputs.measureText === measureText && inputs.textMetricsRevision === textMetricsRevision &&
         inputs.theme === theme && (source.type !== "groups" || inputs.tree === tree) &&
         samePanelRows(before, clusters)) return place(before);
-    const fontSize = source.fontSize ?? ANNOTATION_DEFAULTS.fontSize;
+    const titleFontSize = source.titleFontSize ?? ANNOTATION_DEFAULTS.titleFontSize;
+    const columnFontSize = source.columnFontSize ?? ANNOTATION_DEFAULTS.columnFontSize;
+    const labelFontSize = source.labelFontSize ?? ANNOTATION_DEFAULTS.labelFontSize;
     const cellHeight = source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight;
-    const measureBounds = (value, options) => textBounds(value, fontSize, fontFamily, measureText, options);
+    const measureBounds = (value, options = {}) => textBounds(value, options.fontSize ?? labelFontSize, fontFamily, measureText, options);
     const geometry = source.type === "groups"
       ? layoutGroupPanel(source, clusters, { tree, measureBounds })
-      : layoutMatrixPanel(source, clusters, { before, fontSize, cellHeight, theme });
+      : layoutMatrixPanel(source, clusters, { before, labelFontSize, columnFontSize, cellHeight, theme });
     const { header = [], footer = [], key = [] } = geometry;
     for (const item of [...header, ...footer]) item.bounds = measureBounds(item.text, item);
     const headingHeight = Math.max(0, ...header.map((item) => -item.bounds.minY));
     const title = source.title ?? source.uid;
     let titleDescent = 0;
     if (title) {
-      const item = text(title, 0, 0, { weight: 700, kind: "title" });
+      const item = text(title, 0, 0, { weight: 700, kind: "title", fontSize: titleFontSize });
       item.bounds = measureBounds(title, item);
       titleDescent = Math.max(0, item.bounds.maxY);
       header.push(item);
     }
     const panel = { ...geometry, uid: source.uid, definition: source, title, cellHeight, rowOffset,
-      fontSize, fontFamily, textColour: theme?.foreground ?? "#333333", header, footer, key,
+      labelFontSize, fontFamily, textColour: theme?.foreground ?? "#333333", header, footer, key,
       headingHeight, titleDescent };
     const texts = [...header, ...footer];
     panel.horizontalBounds = {

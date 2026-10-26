@@ -67,7 +67,7 @@ export function groupPanelMarks(panel, rows) {
         fill: group.colour, keyIndex: rects.length });
       if (group.label) texts.push({ uid, text: group.label, x: group.x + panel.markerWidth + 6 - group.labelBounds.minX,
         y: (top + bottom - group.labelBounds.minY - group.labelBounds.maxY) / 2,
-        anchor: "start", bounds: group.labelBounds });
+        anchor: "start", fontSize: panel.labelFontSize, bounds: group.labelBounds });
     };
     for (let i = 0; i <= sorted.length; i++) {
       const member = i < sorted.length && group.clusterIds.has(sorted[i].uid);

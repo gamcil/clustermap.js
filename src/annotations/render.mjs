@@ -32,7 +32,7 @@ export function renderSvgAnnotations(plot, scene, { preview = null, transition =
     .attr("class", "annotationPanels").attr("pointer-events", "none")
     .selectAll("g.annotationPanel").data(view, (panel) => panel.uid)
     .join("g").attr("class", "annotationPanel")
-    .attr("font-family", (panel) => panel.fontFamily).attr("font-size", (panel) => panel.fontSize);
+    .attr("font-family", (panel) => panel.fontFamily);
   moving(panels).attr("transform", (panel) => `translate(${panel.x},0)`);
   panels.each(function (panel) {
     const group = select(this);
@@ -48,6 +48,7 @@ export function renderSvgAnnotations(plot, scene, { preview = null, transition =
       .attr("width", (item) => item.width).attr("height", (item) => item.height).attr("fill", (item) => item.fill);
     const texts = group.selectAll("text").data(panel.texts).join("text")
       .text((item) => item.text).attr("text-anchor", (item) => item.anchor)
+      .attr("font-size", (item) => item.fontSize)
       .attr("font-weight", (item) => item.weight || 400).attr("fill", panel.textColour);
     moving(texts).attr("transform", (item) => `translate(${item.x},${item.y}) rotate(${item.rotation || 0})`);
   });
@@ -75,7 +76,7 @@ export function drawCanvasAnnotations(context, scene, preview = null, { showGeom
       context.save();
       context.translate(item.x, item.y);
       context.rotate((item.rotation || 0) * Math.PI / 180);
-      context.font = `${item.weight || 400} ${panel.fontSize}px ${panel.fontFamily}`;
+      context.font = `${item.weight || 400} ${item.fontSize}px ${panel.fontFamily}`;
       context.fillStyle = panel.textColour;
       context.textAlign = item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left";
       context.textBaseline = "alphabetic";

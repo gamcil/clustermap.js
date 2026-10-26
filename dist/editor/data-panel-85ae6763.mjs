@@ -1,6 +1,6 @@
-import { b as defineDataTable, c as defineEditableField, i as installDataEditorStyle, a as installStyle, d as defineActionMenu, R as RowSelection, D as DATA_EDITOR_CSS, e as defineSelectionBar, f as defineAnnotationEditor, g as DATA_ROW_HEIGHT } from './annotation-editor-429b96e6.mjs';
-import { r as rgb$1, i as color, e as colourHex, c as createTemplate, m as mountComponent, d as updateSelectOptions, g as createActionRunner, a as controlStyles, u as upgradeProperty, f as defineSearchField } from './search-field-8417656d.mjs';
-import { e as editorThemeStyles, a as applyEditorTheme } from './theme-f4663192.mjs';
+import { b as defineDataTable, c as defineEditableField, i as installDataEditorStyle, a as installStyle, d as defineActionMenu, R as RowSelection, D as DATA_EDITOR_CSS, e as defineSelectionBar, f as defineAnnotationEditor, g as DATA_ROW_HEIGHT } from './annotation-editor-20ae8582.mjs';
+import { r as rgb$1, i as color, e as colourHex, c as createTemplate, m as mountComponent, d as updateSelectOptions, g as createActionRunner, a as controlStyles, u as upgradeProperty, f as defineSearchField } from './search-field-595834d9.mjs';
+import { e as editorThemeStyles, a as applyEditorTheme } from './theme-8bd47f2f.mjs';
 
 /** Shared activation and horizontal keyboard navigation for option buttons. */
 function bindOptionButtons(group, choose) {
@@ -993,7 +993,7 @@ function linear() {
 const sequential = ["#f7fbff", "#08306b"];
 const categorical = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377", "#bbbbbb"];
 Object.freeze({ cellWidth: 32, cellHeight: 20, gap: 24,
-  fontSize: 10, headingRotation: -60, missingColour: "#eeeeee",
+  titleFontSize: 10, columnFontSize: 10, labelFontSize: 10, headingRotation: -60, missingColour: "#eeeeee",
   cellGap: 0, cellBorderWidth: 0, cellBorderColour: "#ffffff", width: 120, colour: "#267c9e" });
 const ANNOTATION_PALETTES = {
   Blue: sequential,
