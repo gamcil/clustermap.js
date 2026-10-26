@@ -93,6 +93,12 @@ height in CSS pixels at 100% zoom, including padding; zooming does not change
 these dimensions. The surface and dimensions follow live drag/trim previews,
 including labels, trees and annotation panels. SVG output remains resolution independent.
 
+The figure border, shadow and dimensions label are visible by default. Hide
+them with `chart.config({ plot: { showFigureFrame: false } })`, or toggle
+**Show figure frame** under Appearance → Plot. The figure background and plot
+remain visible, and figure bounds and SVG output are unchanged. Set the option
+back to `true` to restore the frame.
+
 Gene/group colours, heatmap ramps, bar fills and manual styles remain unchanged.
 Neutral configuration colours (`gene.shape.stroke`, `locus.trackBar.colour`,
 `scaleBar.colour`, `tree.branch.colour`, `tree.leafGuide.colour`) default to

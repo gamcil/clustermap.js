@@ -18,6 +18,7 @@ const defaultConfig = {
   plot: {
     // Figure appearance is stable across interface and system themes.
     background: "#ffffff",
+    showFigureFrame: true,
     transitionDuration: 250,
     renderer: "svg",
     // Canvas may reduce resolution during motion and at small zoom scales.

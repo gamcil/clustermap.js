@@ -5035,10 +5035,12 @@ function createFigureSurface() {
     const height = extent.maxY - extent.minY + padding * 2;
     const left = x + (extent.minX - padding) * k;
     const top = y + (extent.minY - padding) * k;
+    const showFrame = config.plot.showFigureFrame !== false;
     container.selectAll("div.clusterMapFigureSurface").data([extent]).join(
       (enter) => enter.insert("div", ":first-child")
         .attr("class", "clusterMapFigureSurface").attr("aria-hidden", "true")
     )
+      .classed("clusterMapFigureSurface--frameless", !showFrame)
       .style("width", `${width}px`)
       .style("height", `${height}px`)
       .style("background", config.plot.background)
@@ -5046,7 +5048,8 @@ function createFigureSurface() {
     const label = container.selectAll("div.clusterMapFigureDimensions").data([extent]).join(
       (enter) => enter.append("div").attr("class", "clusterMapFigureDimensions")
         .attr("title", "Figure width × height at 100% zoom, including padding. SVG output is resolution independent.")
-    ).style("transform", `translate(${left}px, ${top - 24}px)`);
+    ).style("transform", `translate(${left}px, ${top - 24}px)`)
+      .style("display", showFrame ? null : "none");
     const text = `${Math.round(width).toLocaleString("en-US")} × ${Math.round(height).toLocaleString("en-US")} px`;
     if (label.text() !== text) label.text(text);
   }
@@ -9501,7 +9504,7 @@ const controlStyles = `
 const lightControlStyles = controlStyles.replaceAll(":where(:host,.cm-ui)", ".cm-ui");
 
 const css$1 = uiAppearanceStyles(":where(.cm-chart,.cm-ui)") + lightControlStyles +
-  ".cm-chart { background:var(--cm-background,var(--_cm-background)); }\n.cm-chart > :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { z-index:1; background:transparent; color-scheme:light; }\n.cm-chart > .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border,var(--_cm-border)); }\n.cm-chart > .clusterMapFigureDimensions { z-index:2; color:var(--cm-muted,var(--_cm-muted)); font:var(--cm-font,var(--_cm-font)); line-height:20px; white-space:nowrap; }\n.cm-chart > canvas.clusterMapMinimap { color-scheme:light; }\n\n.cm-chart > :is(svg.clusterMap,canvas.clusterMapCanvas) { position:relative; }\n.cm-chart > :is(canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { display:block; width:100%; height:100%; }\n.cm-chart > canvas.clusterMapCanvas { outline:none; cursor:grab; }\n.cm-chart > canvas.clusterMapWebGpuOverlay { position:absolute; inset:0; pointer-events:none; }\n.cm-chart > canvas.clusterMapMinimap { position:absolute; z-index:2; display:block; box-sizing:border-box; background:white; box-shadow:0 1px 4px rgba(0,0,0,.25); cursor:grab; touch-action:none; }\n.cm-chart > :is(.clusterMapFigureSurface,.clusterMapFigureDimensions) { position:absolute; left:0; top:0; pointer-events:none; }\n.cm-chart > .clusterMapFigureSurface { transform-origin:0 0; }\n.cm-chart > input.colourPicker { position:absolute; opacity:0; }\n.cm-chart > div.tooltip { position:absolute; pointer-events:none; z-index:4; box-sizing:border-box; padding:8px; background:var(--cm-surface,var(--_cm-surface)); border:1px solid var(--cm-border,var(--_cm-border)); border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.2); }\n";
+  ".cm-chart { background:var(--cm-background,var(--_cm-background)); }\n.cm-chart > :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { z-index:1; background:transparent; color-scheme:light; }\n.cm-chart > .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border,var(--_cm-border)); }\n.cm-chart > .clusterMapFigureDimensions { z-index:2; color:var(--cm-muted,var(--_cm-muted)); font:var(--cm-font,var(--_cm-font)); line-height:20px; white-space:nowrap; }\n.cm-chart > canvas.clusterMapMinimap { color-scheme:light; }\n\n.cm-chart > :is(svg.clusterMap,canvas.clusterMapCanvas) { position:relative; }\n.cm-chart > :is(canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { display:block; width:100%; height:100%; }\n.cm-chart > canvas.clusterMapCanvas { outline:none; cursor:grab; }\n.cm-chart > canvas.clusterMapWebGpuOverlay { position:absolute; inset:0; pointer-events:none; }\n.cm-chart > canvas.clusterMapMinimap { position:absolute; z-index:2; display:block; box-sizing:border-box; background:white; box-shadow:0 1px 4px rgba(0,0,0,.25); cursor:grab; touch-action:none; }\n.cm-chart > :is(.clusterMapFigureSurface,.clusterMapFigureDimensions) { position:absolute; left:0; top:0; pointer-events:none; }\n.cm-chart > .clusterMapFigureSurface { transform-origin:0 0; }\n.cm-chart > .clusterMapFigureSurface--frameless { outline:none; box-shadow:none; }\n.cm-chart > input.colourPicker { position:absolute; opacity:0; }\n.cm-chart > div.tooltip { position:absolute; pointer-events:none; z-index:4; box-sizing:border-box; padding:8px; background:var(--cm-surface,var(--_cm-surface)); border:1px solid var(--cm-border,var(--_cm-border)); border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.2); }\n";
 
 /** Figure colours are independent of the interface/system theme. */
 function figureConfig(config) {
@@ -12548,6 +12551,7 @@ const defaultConfig = {
   plot: {
     // Figure appearance is stable across interface and system themes.
     background: "#ffffff",
+    showFigureFrame: true,
     transitionDuration: 250,
     renderer: "svg",
     // Canvas may reduce resolution during motion and at small zoom scales.
@@ -12817,6 +12821,7 @@ function validateConfiguration(options, tree = null) {
   const candidate = createDefaultConfig();
   updateConfig(candidate, config);
   updateConfig(candidate, options);
+  if (typeof candidate.plot.showFigureFrame !== "boolean") throw new TypeError("plot.showFigureFrame must be a boolean.");
   if (typeof candidate.annotations?.enabled !== "boolean") {
     throw new TypeError("annotations.enabled must be a boolean.");
   }

@@ -11,5 +11,6 @@
 .cm-chart > canvas.clusterMapMinimap { position:absolute; z-index:2; display:block; box-sizing:border-box; background:white; box-shadow:0 1px 4px rgba(0,0,0,.25); cursor:grab; touch-action:none; }
 .cm-chart > :is(.clusterMapFigureSurface,.clusterMapFigureDimensions) { position:absolute; left:0; top:0; pointer-events:none; }
 .cm-chart > .clusterMapFigureSurface { transform-origin:0 0; }
+.cm-chart > .clusterMapFigureSurface--frameless { outline:none; box-shadow:none; }
 .cm-chart > input.colourPicker { position:absolute; opacity:0; }
 .cm-chart > div.tooltip { position:absolute; pointer-events:none; z-index:4; box-sizing:border-box; padding:8px; background:var(--cm-surface,var(--_cm-surface)); border:1px solid var(--cm-border,var(--_cm-border)); border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.2); }

@@ -1,5 +1,5 @@
-import { d as defineAppearancePanel } from './editor/appearance-panel-666bb260.mjs';
-import './editor/search-field-8417656d.mjs';
-import './editor/theme-f4663192.mjs';
+import { d as defineAppearancePanel } from './editor/appearance-panel-59baf565.mjs';
+import './editor/search-field-595834d9.mjs';
+import './editor/theme-8bd47f2f.mjs';
 
 if (globalThis.customElements) defineAppearancePanel();

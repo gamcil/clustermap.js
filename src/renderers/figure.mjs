@@ -38,10 +38,12 @@ export function createFigureSurface() {
     const height = extent.maxY - extent.minY + padding * 2;
     const left = x + (extent.minX - padding) * k;
     const top = y + (extent.minY - padding) * k;
+    const showFrame = config.plot.showFigureFrame !== false;
     container.selectAll("div.clusterMapFigureSurface").data([extent]).join(
       (enter) => enter.insert("div", ":first-child")
         .attr("class", "clusterMapFigureSurface").attr("aria-hidden", "true")
     )
+      .classed("clusterMapFigureSurface--frameless", !showFrame)
       .style("width", `${width}px`)
       .style("height", `${height}px`)
       .style("background", config.plot.background)
@@ -49,7 +51,8 @@ export function createFigureSurface() {
     const label = container.selectAll("div.clusterMapFigureDimensions").data([extent]).join(
       (enter) => enter.append("div").attr("class", "clusterMapFigureDimensions")
         .attr("title", "Figure width × height at 100% zoom, including padding. SVG output is resolution independent.")
-    ).style("transform", `translate(${left}px, ${top - 24}px)`);
+    ).style("transform", `translate(${left}px, ${top - 24}px)`)
+      .style("display", showFrame ? null : "none");
     const text = `${Math.round(width).toLocaleString("en-US")} × ${Math.round(height).toLocaleString("en-US")} px`;
     if (label.text() !== text) label.text(text);
   }

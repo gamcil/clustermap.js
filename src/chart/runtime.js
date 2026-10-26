@@ -125,6 +125,7 @@ function validateConfiguration(options, tree = null) {
   const candidate = createDefaultConfig();
   updateConfig(candidate, config);
   updateConfig(candidate, options);
+  if (typeof candidate.plot.showFigureFrame !== "boolean") throw new TypeError("plot.showFigureFrame must be a boolean.");
   if (typeof candidate.annotations?.enabled !== "boolean") {
     throw new TypeError("annotations.enabled must be a boolean.");
   }
