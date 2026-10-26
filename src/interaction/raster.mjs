@@ -133,7 +133,10 @@ export function createRasterInteraction({
         activeSurface === surface || surface?.ownerDocument?.activeElement === surface;
       const keydown = (event) => {
         if (event.code !== "Space") return;
-        if (event.target?.closest?.("input, textarea, select, button, [contenteditable='true']")) return;
+        // Window listeners see a shadow host as event.target. Respect the
+        // actual control so Space still toggles editor fields and menus.
+        const target = event.composedPath?.()[0] || event.target;
+        if (target?.closest?.("input, textarea, select, button, summary, a[href], [contenteditable='true']")) return;
         spaceDown = true;
         if (!isActive()) return;
         panMode = true;
@@ -151,7 +154,12 @@ export function createRasterInteraction({
       selection
         .on("pointerenter.canvasKeyboard", function () {
           activeSurface = this;
-          this.focus({ preventScroll: true });
+          const document = this.ownerDocument, focused = document?.activeElement;
+          // Closing a menu can expose the canvas beneath a stationary pointer.
+          // Hover must not steal focus from the editor or another UI control.
+          if (!focused || focused === this || focused === document.body || focused === document.documentElement) {
+            this.focus({ preventScroll: true });
+          }
           if (spaceDown) {
             panMode = true;
             setCursor(this, "grab");
@@ -174,6 +182,7 @@ export function createRasterInteraction({
           panMode = false;
         })
         .on("pointerdown.canvasInteraction", function (event) {
+          if (!event.button) this.focus?.({ preventScroll: true });
           if (panMode) { setHoverLocus(null); return; }
           if (gesture || event.button) return;
           const target = targetForEvent(this, event);
