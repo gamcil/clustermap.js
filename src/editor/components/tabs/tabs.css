@@ -5,6 +5,7 @@ button {
   min-height: var(--cm-control-height,var(--_cm-control-height,30px));
   border: 0;
   border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: transparent;
 }
 button[aria-selected=true] { border-bottom-color: var(--cm-accent,var(--_cm-accent, #1677ff)); font-weight: 600; }
