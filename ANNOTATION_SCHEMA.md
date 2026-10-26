@@ -78,16 +78,24 @@ fields are described [below](#group-markers).
 | `showKey` | Whether the heatmap colour key or bar numeric axis is drawn | `true` |
 
 The chart's `plot.fontFamily` applies to panels. Sizes follow chart pan/zoom.
-Every panel defaults to the same `gap` (24 world units). The first panel starts
-that distance after the full cluster area, including visible scale/identity
-bars and a bottom legend; each following visible panel starts at
-`previous.x + previous.width + gap`, where width is the column count times
-`cellWidth` for heatmaps, or `width` for bars. Hidden panels reserve no space. Titles, heading lengths, colour-key
-labels and font sizes do not add implicit padding between panels. Text overhang
-is still included in figure bounds and right-side gene legend placement.
+Every panel defaults to the same `gap` (24 world units). Automatic placement
+reserves the complete measured horizontal footprint: cells/bars, keys, group
+labels, titles, rotated headings and legend or axis text. The first footprint
+starts that distance after the full cluster area, including visible scale/identity
+bars and a bottom legend. Each following footprint starts `gap` units after the
+preceding footprint's right edge. Left text overhang is reserved as well; the
+data-mark origin may therefore sit to the right of the footprint's left edge.
+
+This spacing never stretches data marks: heatmap width remains column count
+times `cellWidth`, and bar width remains `width`. Hidden panels reserve no space.
+Panel order follows the array; there is no manual overlapping placement mode.
+Figure bounds, the right-side gene legend, minimap and panel hover frames use
+the same full footprint. Cell tooltips continue to target actual cells.
+Label, style and font changes remeasure the footprint, including when browser
+fonts finish loading; unchanged panels retain cached geometry.
 
 Cell gaps are inset equally on both sides of each cell. `cellWidth` remains the
-column pitch, and cluster rows keep their existing centers; changing the gap
+column pitch, and cluster rows keep their existing centers; changing `cellGap`
 does not move headings or change panel alignment. `cellGap` must be non-negative
 and smaller than both cell dimensions. A zero gap gives touching columns.
 

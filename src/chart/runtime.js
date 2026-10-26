@@ -81,6 +81,7 @@ let chartIndex = null;
 let chartState = null;
 let currentScene = null;
 let allowedLinkIds = null;
+let textMetricsRevision = 0;
 
 // IDs are part of the SVG surface, so they must be unique when several maps
 // are mounted on the same document. Keep the logical suffix stable: it is
@@ -204,6 +205,7 @@ function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
     trimIndicatorStyle: config.locus.trimIndicators,
     fontFamily: config.plot.fontFamily,
     measureText,
+    textMetricsRevision,
     annotationsEnabled: config.annotations.enabled,
     tree,
     theme: config.figureStyle,
@@ -389,6 +391,7 @@ function updateScales(data, { geometryOnly = false } = {}) {
 }
 
 return {
+  invalidateTextMetrics() { textMetricsRevision++; },
   config,
   get renderConfig() { return renderConfig(); },
   configure,

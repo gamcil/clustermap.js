@@ -444,6 +444,7 @@ export function buildScene(
     chrome = null,
     fontFamily = "sans-serif",
     measureText = null,
+    textMetricsRevision = 0,
     annotationsEnabled = false,
     tree = null,
     theme = null,
@@ -524,7 +525,7 @@ export function buildScene(
   const hitRegions = buildHitRegions(loci, genes);
   const chromeLayout = buildChrome(bounds, genes, chrome);
   const annotations = projectSceneAnnotations(data.annotationPanels, clusters, bounds, chromeLayout,
-    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, theme, tree });
+    { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, textMetricsRevision, theme, tree });
   return {
     clusters,
     loci,
@@ -628,13 +629,9 @@ function projectSceneAnnotations(definitions, clusters, bounds, chrome, options,
   const annotationAnchorX = Math.max(bounds?.maxX ?? 0, annotationChromeRight);
   let annotationPanels = emptyAnnotationPanels;
   if (visible) {
-    if (previous?.annotationPanelData === annotationPanelData) {
-      const dx = annotationAnchorX - previous.annotationAnchorX;
-      annotationPanels = dx ? previous.annotationPanels.map((panel) => ({ ...panel, x: panel.x + dx })) : previous.annotationPanels;
-    } else {
-      annotationPanels = layoutAnnotationPanels(annotationPanelData, clusters, bounds,
-        { ...options, anchorX: annotationAnchorX, previousPanels: previous?.annotationPanels });
-    }
+    // One reuse policy handles geometry commits, presentation and font changes.
+    annotationPanels = layoutAnnotationPanels(annotationPanelData, clusters, bounds,
+      { ...options, anchorX: annotationAnchorX, previousPanels: previous?.annotationPanels });
     placeLegendAfterAnnotations(chrome, annotationPanels);
   }
   return { annotationPanelData, annotationPanels, annotationAnchorX, annotationChromeRight,
@@ -652,7 +649,7 @@ export function patchAnnotationScene(scene, definitions, options) {
 
 function placeLegendAfterAnnotations(chrome, panels) {
   if (chrome?.legend.placement === "right" && panels.length) {
-    const right = Math.max(...panels.map((panel) => panel.x + panel.extentWidth));
+    const right = Math.max(...panels.map((panel) => panel.x + panel.horizontalBounds.maxX));
     chrome.legend.position = { ...chrome.legend.position, x: right + chrome.legend.marginLeft };
   }
 }

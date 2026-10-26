@@ -1,5 +1,5 @@
-import { i as color, m as mountComponent, c as createTemplate, b as uiAppearanceStyles, l as lightControlStyles, f as defineSearchField, g as createActionRunner, u as upgradeProperty, e as colourHex } from './search-field-595834d9.mjs';
-import { a as applyEditorTheme, e as editorThemeStyles } from './theme-8bd47f2f.mjs';
+import { i as color, m as mountComponent, c as createTemplate, b as uiAppearanceStyles, l as lightControlStyles, f as defineSearchField, g as createActionRunner, u as upgradeProperty, e as colourHex } from './search-field-8417656d.mjs';
+import { a as applyEditorTheme, e as editorThemeStyles } from './theme-f4663192.mjs';
 
 const TREE_COLOURING_DEFAULTS = {
   mode: "none",

@@ -106,6 +106,13 @@ export default function clusterMap() {
   }
   let annotationOverlay = null;
   let themeMedia = null;
+  let fontSet = null;
+  function fontsChanged() {
+    if (!container || !currentData) return;
+    runtime.invalidateTextMetrics();
+    sceneCommit = null;
+    redraw({ animate: false });
+  }
   let uiAppearance = "auto";
   function refreshUiAppearance() {
     applyTheme(container?.node(), uiAppearance);
@@ -993,6 +1000,14 @@ export default function clusterMap() {
 
   function redraw({ animate = true, synchronize = true } = {}) {
     if (!currentData || !container) return;
+    const fonts = container.node().ownerDocument.fonts;
+    if (fontSet !== fonts) {
+      fontSet?.removeEventListener("loadingdone", fontsChanged);
+      fontSet?.removeEventListener("loadingerror", fontsChanged);
+      fontSet = fonts;
+      fontSet?.addEventListener("loadingdone", fontsChanged);
+      fontSet?.addEventListener("loadingerror", fontsChanged);
+    }
     applyTheme(container.node(), uiAppearance);
     if (globalThis.getComputedStyle(container.node()).position === "static") container.style("position", "relative");
     container.style("isolation", "isolate");
@@ -1447,6 +1462,9 @@ export default function clusterMap() {
   };
   my.destroy = () => {
     figureSurface.clear();
+    fontSet?.removeEventListener("loadingdone", fontsChanged);
+    fontSet?.removeEventListener("loadingerror", fontsChanged);
+    fontSet = null;
     themeMedia?.removeEventListener("change", systemThemeChanged); themeMedia = null;
     annotationUiContext = null;
     annotationOverlay?.dispose(); annotationOverlay = null;

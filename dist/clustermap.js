@@ -3750,6 +3750,10 @@
       sameArray(before.scale?.colours, after.scale?.colours);
   }
 
+  function samePanelRows(panel, clusters) {
+    return panel?.rows.length === clusters.size && panel.rows.every((row) => clusters.has(row.uid));
+  }
+
   function layoutMatrixPanel(source, clusters, { before, fontSize, cellHeight, theme }) {
     const isBar = source.type === "bar";
     const cellWidth = isBar ? source.width ?? ANNOTATION_DEFAULTS.width : source.cellWidth ?? ANNOTATION_DEFAULTS.cellWidth;
@@ -3762,9 +3766,10 @@
     const position = isBar ? linear().domain(domain).range([0, width]).clamp(true) : null;
     const reuseRows = sameCellStyle(before?.definition, source) && sameArray(before.domain, domain) &&
       before.missingColour === missingColour;
-    const previousRows = reuseRows && before.definition.values !== source.values
+    const sameRows = samePanelRows(before, clusters);
+    const previousRows = reuseRows && (before.definition.values !== source.values || !sameRows)
       ? new Map(before.rows.map((row) => [row.uid, row])) : null;
-    const rows = reuseRows && before.definition.values === source.values ? before.rows : [...clusters.keys()].map((uid) => {
+    const rows = reuseRows && sameRows && before.definition.values === source.values ? before.rows : [...clusters.keys()].map((uid) => {
       if (previousRows?.has(uid) && before.definition.values[uid] === source.values[uid]) return previousRows.get(uid);
       return { uid, cells: source.columns.map((_, i) => {
         const value = Object.hasOwn(source.values, uid) ? source.values[uid][i] : null;
@@ -3803,20 +3808,30 @@
     return { width, rows, header, footer, key, domain, missingColour };
   }
 
+  const panelLayoutInputs = new WeakMap();
+
   /** Project JSON annotations once, using the same row coordinates as loci. */
   function layoutAnnotationPanels(definitions, clusters, bounds,
-    { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null, previousPanels = null, theme = null, tree = null } = {}) {
+    { fontFamily = "sans-serif", rowOffset = 0, anchorX = bounds?.maxX, measureText = null,
+      textMetricsRevision = 0, previousPanels = null, theme = null, tree = null } = {}) {
     if (!definitions?.length || !bounds || !clusters.size) return [];
     const previous = new Map(previousPanels?.map((panel) => [panel.uid, panel]));
-    let x = anchorX;
-    return definitions.filter((source) => source.show !== false).map((source) => {
+    let right = anchorX;
+    const panels = definitions.filter((source) => source.show !== false).map((source) => {
       const before = previous.get(source.uid);
-      x += source.gap ?? ANNOTATION_DEFAULTS.gap;
-      if (before?.definition === source && before.fontFamily === fontFamily && before.rowOffset === rowOffset) {
-        const panel = before.x === x ? before : { ...before, x };
-        x += panel.width;
-        return panel;
-      }
+      const inputs = panelLayoutInputs.get(before);
+      const place = (panel) => {
+        // x remains the origin of the data marks; gap separates full footprints.
+        const x = right + (source.gap ?? ANNOTATION_DEFAULTS.gap) - panel.horizontalBounds.minX;
+        const placed = panel.x === x ? panel : { ...panel, x };
+        right = x + panel.horizontalBounds.maxX;
+        panelLayoutInputs.set(placed, { measureText, textMetricsRevision, theme, tree });
+        return placed;
+      };
+      if (inputs && before.definition === source && before.fontFamily === fontFamily && before.rowOffset === rowOffset &&
+          inputs.measureText === measureText && inputs.textMetricsRevision === textMetricsRevision &&
+          inputs.theme === theme && (source.type !== "groups" || inputs.tree === tree) &&
+          samePanelRows(before, clusters)) return place(before);
       const fontSize = source.fontSize ?? ANNOTATION_DEFAULTS.fontSize;
       const cellHeight = source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight;
       const measureBounds = (value, options) => textBounds(value, fontSize, fontFamily, measureText, options);
@@ -3834,16 +3849,18 @@
         titleDescent = Math.max(0, item.bounds.maxY);
         header.push(item);
       }
-      const panel = { ...geometry, uid: source.uid, definition: source, title, x, cellHeight, rowOffset,
+      const panel = { ...geometry, uid: source.uid, definition: source, title, cellHeight, rowOffset,
         fontSize, fontFamily, textColour: theme?.foreground ?? "#333333", header, footer, key,
         headingHeight, titleDescent };
-      // Text overhang contributes to figure bounds, not inter-panel spacing.
-      panel.extentWidth = Math.max(panel.width,
-        ...header.map((item) => item.x + item.bounds.maxX),
-        ...footer.map((item) => item.x + item.bounds.maxX));
-      x += panel.width;
-      return panel;
+      const texts = [...header, ...footer];
+      panel.horizontalBounds = {
+        minX: Math.min(0, ...texts.map((item) => item.x + item.bounds.minX), ...key.map((item) => item.x)),
+        maxX: Math.max(panel.width, ...texts.map((item) => item.x + item.bounds.maxX),
+          ...key.map((item) => item.x + item.width)),
+      };
+      return place(panel);
     });
+    return sameArray(panels, previousPanels) ? previousPanels : panels;
   }
 
   // Keep the static projection and only the latest preview per scene. Weak keys
@@ -3938,7 +3955,8 @@
     const result = { ...bounds };
     for (const panel of frames || annotationPanelsForFrame({ annotationPanels: panels, clusters })) {
       const area = annotationPanelBounds(panel);
-      result.maxX = Math.max(result.maxX, panel.x + panel.extentWidth);
+      result.minX = Math.min(result.minX, area.minX);
+      result.maxX = Math.max(result.maxX, area.maxX);
       result.minY = Math.min(result.minY, area.minY);
       result.maxY = Math.max(result.maxY, area.maxY);
     }
@@ -3947,7 +3965,8 @@
 
   /** Panel area includes whitespace between rows, headings and the colour key. */
   function annotationPanelBounds(panel) {
-    const bounds = { minX: panel.x, maxX: panel.x + panel.width, minY: Infinity, maxY: -Infinity };
+    const bounds = { minX: panel.x + panel.horizontalBounds.minX,
+      maxX: panel.x + panel.horizontalBounds.maxX, minY: Infinity, maxY: -Infinity };
     if (panel.verticalBounds) return { ...bounds, ...panel.verticalBounds };
     for (const item of panel.texts) {
       bounds.minY = Math.min(bounds.minY, item.y + item.bounds.minY);
@@ -4415,6 +4434,7 @@
       chrome = null,
       fontFamily = "sans-serif",
       measureText = null,
+      textMetricsRevision = 0,
       annotationsEnabled = false,
       tree = null,
       theme = null,
@@ -4495,7 +4515,7 @@
     const hitRegions = buildHitRegions(loci, genes);
     const chromeLayout = buildChrome(bounds, genes, chrome);
     const annotations = projectSceneAnnotations(data.annotationPanels, clusters, bounds, chromeLayout,
-      { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, theme, tree });
+      { annotationsEnabled, fontFamily, rowOffset: geneMidpoint, measureText, textMetricsRevision, theme, tree });
     return {
       clusters,
       loci,
@@ -4599,13 +4619,9 @@
     const annotationAnchorX = Math.max(bounds?.maxX ?? 0, annotationChromeRight);
     let annotationPanels = emptyAnnotationPanels;
     if (visible) {
-      if (previous?.annotationPanelData === annotationPanelData) {
-        const dx = annotationAnchorX - previous.annotationAnchorX;
-        annotationPanels = dx ? previous.annotationPanels.map((panel) => ({ ...panel, x: panel.x + dx })) : previous.annotationPanels;
-      } else {
-        annotationPanels = layoutAnnotationPanels(annotationPanelData, clusters, bounds,
-          { ...options, anchorX: annotationAnchorX, previousPanels: previous?.annotationPanels });
-      }
+      // One reuse policy handles geometry commits, presentation and font changes.
+      annotationPanels = layoutAnnotationPanels(annotationPanelData, clusters, bounds,
+        { ...options, anchorX: annotationAnchorX, previousPanels: previous?.annotationPanels });
       placeLegendAfterAnnotations(chrome, annotationPanels);
     }
     return { annotationPanelData, annotationPanels, annotationAnchorX, annotationChromeRight,
@@ -4623,7 +4639,7 @@
 
   function placeLegendAfterAnnotations(chrome, panels) {
     if (chrome?.legend.placement === "right" && panels.length) {
-      const right = Math.max(...panels.map((panel) => panel.x + panel.extentWidth));
+      const right = Math.max(...panels.map((panel) => panel.x + panel.horizontalBounds.maxX));
       chrome.legend.position = { ...chrome.legend.position, x: right + chrome.legend.marginLeft };
     }
   }
@@ -12763,6 +12779,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   let chartState = null;
   let currentScene = null;
   let allowedLinkIds = null;
+  let textMetricsRevision = 0;
 
   // IDs are part of the SVG surface, so they must be unique when several maps
   // are mounted on the same document. Keep the logical suffix stable: it is
@@ -12886,6 +12903,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       trimIndicatorStyle: config.locus.trimIndicators,
       fontFamily: config.plot.fontFamily,
       measureText,
+      textMetricsRevision,
       annotationsEnabled: config.annotations.enabled,
       tree,
       theme: config.figureStyle,
@@ -13071,6 +13089,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   }
 
   return {
+    invalidateTextMetrics() { textMetricsRevision++; },
     config,
     get renderConfig() { return renderConfig(); },
     configure,
@@ -15162,6 +15181,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     }
     let annotationOverlay = null;
     let themeMedia = null;
+    let fontSet = null;
+    function fontsChanged() {
+      if (!container || !currentData) return;
+      runtime.invalidateTextMetrics();
+      sceneCommit = null;
+      redraw({ animate: false });
+    }
     let uiAppearance = "auto";
     function refreshUiAppearance() {
       applyTheme(container?.node(), uiAppearance);
@@ -16049,6 +16075,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     function redraw({ animate = true, synchronize = true } = {}) {
       if (!currentData || !container) return;
+      const fonts = container.node().ownerDocument.fonts;
+      if (fontSet !== fonts) {
+        fontSet?.removeEventListener("loadingdone", fontsChanged);
+        fontSet?.removeEventListener("loadingerror", fontsChanged);
+        fontSet = fonts;
+        fontSet?.addEventListener("loadingdone", fontsChanged);
+        fontSet?.addEventListener("loadingerror", fontsChanged);
+      }
       applyTheme(container.node(), uiAppearance);
       if (globalThis.getComputedStyle(container.node()).position === "static") container.style("position", "relative");
       container.style("isolation", "isolate");
@@ -16503,6 +16537,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     };
     my.destroy = () => {
       figureSurface.clear();
+      fontSet?.removeEventListener("loadingdone", fontsChanged);
+      fontSet?.removeEventListener("loadingerror", fontsChanged);
+      fontSet = null;
       themeMedia?.removeEventListener("change", systemThemeChanged); themeMedia = null;
       annotationUiContext = null;
       annotationOverlay?.dispose(); annotationOverlay = null;
