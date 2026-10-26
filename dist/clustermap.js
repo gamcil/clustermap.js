@@ -1754,7 +1754,7 @@
     for (const node of tree.nodes) {
       const x = xs.get(node.uid);
       if (node.children?.length) {
-        nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
+        if (config.tree.node?.show !== false) nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
         // Stems and horizontal edges are separate marks. Square stem caps fill
         // the outer corners without extending leaf tips or changing distances.
         if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children, style: presentation.stems.get(node.uid), lineCap: "square" });
@@ -12564,6 +12564,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       colouring: TREE_COLOURING_DEFAULTS,
       width: 100,
       useBranchLengths: true,
+      node: { show: true },
       branch: { width: 1.5, colour: null },
       support: { show: true, fontSize: 9, precision: 1 },
       scaleBar: { show: true },
@@ -12849,6 +12850,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     if (!isRendererMode(candidate.plot.renderer)) {
       throw new TypeError(`Unknown plot renderer: ${candidate.plot.renderer}. Expected svg, canvas, or webgpu.`);
     }
+    if (typeof candidate.tree.node?.show !== "boolean") throw new TypeError("tree.node.show must be a boolean.");
     validateTreePresentation(tree, candidate.tree);
     return candidate;
   }

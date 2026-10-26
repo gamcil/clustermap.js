@@ -132,6 +132,7 @@ function validateConfiguration(options, tree = null) {
   if (!isRendererMode(candidate.plot.renderer)) {
     throw new TypeError(`Unknown plot renderer: ${candidate.plot.renderer}. Expected svg, canvas, or webgpu.`);
   }
+  if (typeof candidate.tree.node?.show !== "boolean") throw new TypeError("tree.node.show must be a boolean.");
   validateTreePresentation(tree, candidate.tree);
   return candidate;
 }

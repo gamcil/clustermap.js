@@ -159,6 +159,9 @@ interface TreeConfig {
   width?: number;
   useBranchLengths?: boolean;
 
+  /** Internal-node circles and their pointer/keyboard targets; default true. */
+  node?: { show?: boolean };
+
   branch?: {
     width?: number;
     colour?: string;
@@ -201,6 +204,10 @@ The tree stays aligned with cluster rows during camera movement and appears in
 SVG exports. Hiding the tree changes visibility only; it does not remove
 ordering constraints. Horizontal locus movement, flipping and trimming remain
 independent of tree ordering.
+
+`config.tree.node.show` hides internal-node circles and their interaction targets
+without hiding branches, support values or annotations. It defaults to `true`.
+Tree rotation remains available through `chart.rotateTreeNode(uid)`.
 
 Support labels default to one decimal place and sit above and left of their
 supported node. Font family follows `config.plot.fontFamily`. The tree scale

@@ -159,7 +159,7 @@ export function layoutTree({
   for (const node of tree.nodes) {
     const x = xs.get(node.uid);
     if (node.children?.length) {
-      nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
+      if (config.tree.node?.show !== false) nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
       // Stems and horizontal edges are separate marks. Square stem caps fill
       // the outer corners without extending leaf tips or changing distances.
       if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children, style: presentation.stems.get(node.uid), lineCap: "square" });
