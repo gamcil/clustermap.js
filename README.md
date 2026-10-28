@@ -395,6 +395,11 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | `exportSvg({padding})` | Export the complete figure as an SVG string from any renderer. Padding defaults to 20. |
 | `destroy()` | Release chart-owned handlers, animations, rendering resources and DOM. |
 
+Transient UI highlights can supply an ownership token:
+`chart.highlight(ids, { owner })`. Clearing with the same token only clears
+that owner's highlight; ordinary calls remain authoritative. The editor uses
+this to avoid clearing highlights subsequently set by the host app.
+
 Chart data requires unique IDs within each record kind. IDs may be non-empty
 strings or finite numbers. State imports require `version: 1`, finite numeric
 coordinates, ordered ranges, and boolean flip flags. Trim boundaries use gene

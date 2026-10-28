@@ -68,14 +68,14 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   disconnectedCallback() {
     this.#unsubscribe?.(); this.#unsubscribe = null;
     this.#table?.reset();
-    this.#chart?.highlight?.([]);
+    this.#chart?.highlight?.([], { owner: this });
   }
 
   get chart() { return this.#chart; }
   set chart(value) {
     if (value === this.#chart) return;
     this.#unsubscribe?.(); this.#unsubscribe = null;
-    this.#table?.cancelHover(); this.#chart?.highlight?.([]);
+    this.#table?.cancelHover(); this.#chart?.highlight?.([], { owner: this });
     this.#chart = value || null;
     this.#subscribe(); this.#syncTheme(); this.#refreshData({ replace: true });
   }
@@ -390,7 +390,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #highlight(row) {
-    this.#chart?.highlight?.(this.#model.plotTarget(this.#kind, row ? row.selectIds || [row.id] : this.#selected));
+    this.#chart?.highlight?.(this.#model.plotTarget(this.#kind, row ? row.selectIds || [row.id] : this.#selected), { owner: this });
   }
 
 }

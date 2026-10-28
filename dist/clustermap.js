@@ -15391,6 +15391,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let chartIndex = null;
     let highlightGeneIds = new Set();
     let highlightLinkIds = new Set();
+    let highlightOwner = null;
     let plotSelection = { kind: "loci", ids: new Set() };
     let selectionAnchor = null;
     const noSelection = new Set();
@@ -16638,11 +16639,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     }
     my.undo = () => replayHistory(history, future, "undo");
     my.redo = () => replayHistory(future, history, "redo");
-    my.highlight = function (ids) {
+    my.highlight = function (ids, { owner = null } = {}) {
       if (!arguments.length) return [...highlightGeneIds];
       const isScopedHighlight = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
       const nextGenes = new Set(isScopedHighlight ? ids.genes || [] : ids || []);
       const nextLinks = new Set(isScopedHighlight ? ids.links || [] : []);
+      const clearing = !nextGenes.size && !nextLinks.size;
+      if (clearing && owner !== null && highlightOwner !== owner) return my;
+      highlightOwner = clearing ? null : owner;
       if (
         nextGenes.size === highlightGeneIds.size &&
         [...nextGenes].every((uid) => highlightGeneIds.has(uid)) &&
@@ -16779,6 +16783,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       runtime.reset();
       highlightGeneIds.clear();
       highlightLinkIds.clear();
+      highlightOwner = null;
       plotSelection.ids.clear();
       selectionAnchor = null;
       changeListeners.clear();
