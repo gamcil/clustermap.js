@@ -8543,14 +8543,18 @@
 
   /** Trim both flanks of a locus to its displayed outermost genes. */
   function trimLocusToGeneBounds(chartState, locus) {
-    if (!locus.genes.length) return false;
-    const genes = [...locus.genes].sort(
+    const state = chartState.loci.get(locus.uid);
+    const genes = locus.genes.filter((gene) => {
+      const display = getGeneState(chartState, gene);
+      return display.start >= state.start && display.end <= state.end;
+    }).sort(
       (left, right) =>
         getGeneState(chartState, left).start - getGeneState(chartState, right).start
     );
+    if (!genes.length) return false;
     const first = genes[0];
-    const last = genes.at(-1);
-    const state = chartState.loci.get(locus.uid);
+    const last = genes.reduce((rightmost, gene) =>
+      getGeneState(chartState, gene).end > getGeneState(chartState, rightmost).end ? gene : rightmost);
     const start = getGeneState(chartState, first).start;
     const end = getGeneState(chartState, last).end;
     const changed =

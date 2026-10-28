@@ -12,6 +12,30 @@ const createLocus = () => ({
   ],
 });
 
+for (const flipped of [false, true]) {
+  test(`batch trim preserves existing bounds, flipped=${flipped}`, async () => {
+    const { createChartState, flipLocus, getGeneState, trimLocusToGeneBounds } = await import("../../src/chart/state.mjs");
+    const locus = { ...createLocus(), genes: [
+      { uid: "a", locusUid: "locus", start: 100, end: 1000 },
+      { uid: "b", locusUid: "locus", start: 2500, end: 4500 },
+      { uid: "c", locusUid: "locus", start: 3500, end: 4000 },
+      { uid: "d", locusUid: "locus", start: 7000, end: 9000 },
+    ] };
+    const state = createChartState({ clusters: [{ loci: [locus] }] });
+    if (flipped) flipLocus(state, locus);
+    const current = state.loci.get(locus.uid);
+    Object.assign(current, flipped ? { start: 5400, end: 8000 } : { start: 2000, end: 4600 });
+    assert.equal(trimLocusToGeneBounds(state, locus), true);
+    assert.equal(current.start, Math.min(...[1, 2].map((i) => getGeneState(state, locus.genes[i]).start)));
+    assert.equal(current.end, Math.max(...[1, 2].map((i) => getGeneState(state, locus.genes[i]).end)));
+    assert.equal(trimLocusToGeneBounds(state, locus), false);
+    Object.assign(current, { start: 4600, end: 5000, trimLeft: null, trimRight: null });
+    const before = { ...current };
+    assert.equal(trimLocusToGeneBounds(state, locus), false);
+    assert.deepEqual(current, before, "an empty visible range is left intact");
+  });
+}
+
 test("flipping a locus twice restores its gene state", async () => {
   const { createChartState, flipLocus } = await import("../../src/chart/state.mjs");
   const locus = createLocus();
