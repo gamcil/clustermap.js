@@ -1,4 +1,5 @@
 import { measureCanvasText, measureTreeLayout } from "../scene/measure.mjs";
+import { clusterLabelLayout } from "../scene/clusterLabels.mjs";
 import { linkColours } from "../links/style.mjs";
 import { hitTest } from "../scene/hitTest.mjs";
 import { boundsInViewport, worldViewport, worldPoint } from "../scene/camera.mjs";
@@ -50,6 +51,7 @@ export function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = 
 }
 
 function clusterLabelHit(context, scene, point, config) {
+  const label = clusterLabelLayout(config);
   for (const cluster of [...scene.clusters.values()].reverse()) {
     const anchorX = cluster.x + cluster.info.x;
     const nameFont = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
@@ -60,8 +62,8 @@ function clusterLabelHit(context, scene, point, config) {
     if (
       point.x >= anchorX - width &&
       point.x <= anchorX &&
-      point.y >= cluster.y - config.cluster.nameFontSize &&
-      point.y <= cluster.y + (cluster.info.locusText ? config.cluster.lociFontSize + 12 : 8)
+      point.y >= cluster.y + label.top &&
+      point.y <= cluster.y + label.bottom
     ) {
       return { action: "move-cluster", clusterUid: cluster.source.uid };
     }
@@ -206,11 +208,12 @@ function drawClusterInfo(
 ) {
   const { x, y } = cluster;
   const anchorX = x + cluster.info.x + offsetX;
+  const label = clusterLabelLayout(config);
   context.fillStyle = selected ? "#1677ff" : config.figureStyle?.foreground || "black";
   context.textAlign = "end";
   context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
-  context.textBaseline = "alphabetic";
-  context.fillText(cluster.source.name, anchorX, y + offsetY + 8);
+  context.textBaseline = label.nameBaseline;
+  context.fillText(cluster.source.name, anchorX, y + offsetY + label.nameY);
   context.font = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
   context.textBaseline = "top";
   context.fillText(locusText, anchorX, y + offsetY + 12);

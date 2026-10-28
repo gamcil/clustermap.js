@@ -4,6 +4,7 @@ import { annotationPanelsForFrame, annotationFigureBounds } from "../annotations
 import { getLinkLabelPosition } from "../links/layout.mjs";
 import { resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
 import { locusContentBounds } from "../loci/layout.mjs";
+import { clusterLabelLayout } from "./clusterLabels.mjs";
 import {
   locusGeometryForPreview, clusterLabelOffsetForPreview, clusterLabelTextForPreview,
   clusterOffsetForPreview, geneVisibleForPreview, previewOffsetsForLocus,
@@ -129,11 +130,12 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
     config.link.show ? config.link.strokeWidth || 0 : 0) / 2;
   include(structural.minX - halfStroke, structural.minY - halfStroke);
   include(structural.maxX + halfStroke, structural.maxY + halfStroke);
+  const label = clusterLabelLayout(config);
   for (const cluster of scene.clusters.values()) {
     const x = cluster.x + cluster.info.x + clusterLabelOffsetForPreview(preview, cluster.source.uid);
     const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
-    includeText(cluster.source.name, x, y + 8,
-      { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right" });
+    includeText(cluster.source.name, x, y + label.nameY,
+      { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right", baseline: label.nameBaseline });
     includeText(clusterLabelTextForPreview(preview, cluster.source.uid, cluster.info.locusText), x, y + 12,
       { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
   }

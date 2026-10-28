@@ -1591,6 +1591,17 @@ function interpolateScene(previous, scene, amount) {
   return { ...scene, clusters, loci, genes, links, annotationPanels };
 }
 
+/** Shared label positions for drawing, figure bounds and interaction. */
+function clusterLabelLayout(config) {
+  const nameSize = config.cluster.nameFontSize;
+  if (config.cluster.hideLocusLabels) {
+    const shape = config.gene.shape;
+    const nameY = shape.tipHeight + shape.bodyHeight / 2;
+    return { nameY, nameBaseline: "middle", top: nameY - nameSize / 2, bottom: nameY + nameSize / 2 };
+  }
+  return { nameY: 8, nameBaseline: "alphabetic", top: 8 - nameSize, bottom: 12 + config.cluster.lociFontSize };
+}
+
 const leafXAnchors = new WeakMap();
 
 /** Keep the tree in its base position until a dragged label reaches a leaf. */
@@ -1709,9 +1720,10 @@ function layoutTree({
     return { uid, ...font, ...measureText(style.text, font), x: horizontal.xs.get(uid) + 6, y: ys.get(uid) + 6 };
   });
   let proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
+  const labelLayout = clusterLabelLayout(config);
   const rows = [...scene.clusters.values()].map((cluster) => {
     const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
-    return { top: y + 8 - (config.cluster?.nameFontSize ?? 12), bottom: y + 12 + (config.cluster?.lociFontSize ?? 10), start: labelStarts.get(cluster.source.uid) };
+    return { top: y + labelLayout.top, bottom: y + labelLayout.bottom, start: labelStarts.get(cluster.source.uid) };
   }).sort((a, b) => a.top - b.top);
   for (const label of annotations) {
     let low = 0, high = rows.length;
@@ -4964,11 +4976,12 @@ function measureFigureBounds(context, scene, config, tree = null, { preview = nu
     config.link.show ? config.link.strokeWidth || 0 : 0) / 2;
   include(structural.minX - halfStroke, structural.minY - halfStroke);
   include(structural.maxX + halfStroke, structural.maxY + halfStroke);
+  const label = clusterLabelLayout(config);
   for (const cluster of scene.clusters.values()) {
     const x = cluster.x + cluster.info.x + clusterLabelOffsetForPreview(preview, cluster.source.uid);
     const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
-    includeText(cluster.source.name, x, y + 8,
-      { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right" });
+    includeText(cluster.source.name, x, y + label.nameY,
+      { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right", baseline: label.nameBaseline });
     includeText(clusterLabelTextForPreview(preview, cluster.source.uid, cluster.info.locusText), x, y + 12,
       { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
   }
@@ -10365,6 +10378,7 @@ function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
 }
 
 function clusterLabelHit(context, scene, point, config) {
+  const label = clusterLabelLayout(config);
   for (const cluster of [...scene.clusters.values()].reverse()) {
     const anchorX = cluster.x + cluster.info.x;
     const nameFont = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
@@ -10375,8 +10389,8 @@ function clusterLabelHit(context, scene, point, config) {
     if (
       point.x >= anchorX - width &&
       point.x <= anchorX &&
-      point.y >= cluster.y - config.cluster.nameFontSize &&
-      point.y <= cluster.y + (cluster.info.locusText ? config.cluster.lociFontSize + 12 : 8)
+      point.y >= cluster.y + label.top &&
+      point.y <= cluster.y + label.bottom
     ) {
       return { action: "move-cluster", clusterUid: cluster.source.uid };
     }
@@ -10521,11 +10535,12 @@ function drawClusterInfo(
 ) {
   const { x, y } = cluster;
   const anchorX = x + cluster.info.x + offsetX;
+  const label = clusterLabelLayout(config);
   context.fillStyle = selected ? "#1677ff" : config.figureStyle?.foreground || "black";
   context.textAlign = "end";
   context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
-  context.textBaseline = "alphabetic";
-  context.fillText(cluster.source.name, anchorX, y + offsetY + 8);
+  context.textBaseline = label.nameBaseline;
+  context.fillText(cluster.source.name, anchorX, y + offsetY + label.nameY);
   context.font = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
   context.textBaseline = "top";
   context.fillText(locusText, anchorX, y + offsetY + 12);
@@ -11222,13 +11237,14 @@ function renderSvg({
       (update) => update
     );
 
+  const label = clusterLabelLayout(config);
   clusters.select("text.clusterText")
     .each(function (cluster) {
       const text = String(cluster.name ?? "");
       if (this.textContent !== text) this.textContent = text;
     })
-    .attr("y", 8)
-    .attr("dominant-baseline", null)
+    .attr("y", label.nameY)
+    .attr("dominant-baseline", label.nameBaseline === "middle" ? "central" : null)
     .style("font-size", `${config.cluster.nameFontSize}px`);
   clusters.select("text.locusText")
     .attr("y", 12)

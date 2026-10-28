@@ -7,6 +7,7 @@ import { renderSvgTree as renderTree } from "../tree/svg.mjs";
 import { resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
 import { renderSvgAnnotations } from "../annotations/render.mjs";
 import { figureConfig } from "../ui/theme.mjs";
+import { clusterLabelLayout } from "../scene/clusterLabels.mjs";
 
 import {
   clusterLabelOffsetForPreview, clusterLabelTextForPreview, clusterOffsetForPreview,
@@ -105,13 +106,14 @@ export function renderSvg({
       (update) => update
     );
 
+  const label = clusterLabelLayout(config);
   clusters.select("text.clusterText")
     .each(function (cluster) {
       const text = String(cluster.name ?? "");
       if (this.textContent !== text) this.textContent = text;
     })
-    .attr("y", 8)
-    .attr("dominant-baseline", null)
+    .attr("y", label.nameY)
+    .attr("dominant-baseline", label.nameBaseline === "middle" ? "central" : null)
     .style("font-size", `${config.cluster.nameFontSize}px`);
   clusters.select("text.locusText")
     .attr("y", 12)

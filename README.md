@@ -102,6 +102,7 @@ back to `true` to restore the frame.
 Under Appearance → Clusters & loci, **Hide locus labels** removes the complete
 locus label line while keeping cluster names visible. Its API setting is
 `chart.config({ cluster: { hideLocusLabels: true } })` (default `false`).
+Cluster names are vertically centred on their gene rows when locus labels are hidden.
 **Hide locus coordinates** remains independent: it keeps locus names and hides
 only their coordinate ranges when labels are visible.
 

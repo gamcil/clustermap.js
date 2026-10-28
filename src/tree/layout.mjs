@@ -1,6 +1,7 @@
 import { clusterLabelOffsetForPreview, clusterLabelTextForPreview, clusterOffsetForPreview } from "../scene/preview.mjs";
 
 import { resolveTreePresentation, treeMetrics } from "./model.mjs";
+import { clusterLabelLayout } from "../scene/clusterLabels.mjs";
 
 const leafXAnchors = new WeakMap();
 
@@ -120,9 +121,10 @@ export function layoutTree({
     return { uid, ...font, ...measureText(style.text, font), x: horizontal.xs.get(uid) + 6, y: ys.get(uid) + 6 };
   });
   let proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
+  const labelLayout = clusterLabelLayout(config);
   const rows = [...scene.clusters.values()].map((cluster) => {
     const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
-    return { top: y + 8 - (config.cluster?.nameFontSize ?? 12), bottom: y + 12 + (config.cluster?.lociFontSize ?? 10), start: labelStarts.get(cluster.source.uid) };
+    return { top: y + labelLayout.top, bottom: y + labelLayout.bottom, start: labelStarts.get(cluster.source.uid) };
   }).sort((a, b) => a.top - b.top);
   for (const label of annotations) {
     let low = 0, high = rows.length;
