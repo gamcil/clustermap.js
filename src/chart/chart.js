@@ -1531,7 +1531,9 @@ export default function clusterMap() {
     rasterScene = null;
     rasterCanvas = overlayCanvas = minimapCanvas = null;
     sceneCommit = null;
-    chartIndex = null;
+    chartIndex = currentData = chartState = treeAnimation = null;
+    clearHistory(false);
+    runtime.reset();
     highlightGeneIds.clear();
     highlightLinkIds.clear();
     plotSelection.ids.clear();

@@ -402,7 +402,17 @@ function updateScales(data, { geometryOnly = false } = {}) {
   refreshLocusOffsetScale();
 }
 
+function reset() {
+  chartIndex = chartState = currentScene = allowedLinkIds = renderedConfig = null;
+  for (const scale of [scales.y, scales.group, scales.colour, scales.name, scales.offset, scales.locus]) {
+    scale.domain([]).range([]);
+  }
+  scales.x.domain([1, 1001]).range([0, config.plot.scaleFactor]);
+  scales.score.domain([0, 1]);
+}
+
 return {
+  reset,
   invalidateTextMetrics() { textMetricsRevision++; },
   config,
   get renderConfig() { return renderConfig(); },
