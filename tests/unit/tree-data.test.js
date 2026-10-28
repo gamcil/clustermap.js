@@ -117,6 +117,6 @@ test("invalid programmatic ordering cannot change the topology or child order", 
     assert.throws(() => setTreeClusterOrder(data.tree, order), /every tree clade contiguous/);
     assert.deepEqual(data.tree, original);
   }
-  assert.throws(() => chartStateFromSnapshot(data, { clusterOrder: ["a", "c", "b"] }), /every tree clade contiguous/);
+  assert.throws(() => chartStateFromSnapshot(data, { version: 1, clusterOrder: ["a", "c", "b"] }), /every tree clade contiguous/);
   assert.deepEqual(data.tree, original);
 });

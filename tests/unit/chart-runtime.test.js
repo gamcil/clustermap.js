@@ -17,7 +17,7 @@ test("runtime keeps default interaction callbacks declarative", async () => {
   assert.equal(runtime.config.plot.renderer, "canvas");
   assert.throws(
     () => runtime.configure({ plot: { renderer: "webgl" } }),
-    /Unknown plot renderer: webgl/
+    /plot.renderer must be svg, canvas or webgpu/
   );
   assert.equal(runtime.config.plot.renderer, "canvas");
 });

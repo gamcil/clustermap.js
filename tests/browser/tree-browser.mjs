@@ -296,8 +296,7 @@ test("tree edits, history, projects, and static export through the public chart 
   assert.deepEqual(persisted.project, persisted.reloaded);
 
   await page.evaluate(async () => {
-    const { defineClinkerEditor } = await import("/dist/editor.mjs");
-    defineClinkerEditor();
+    await import("/dist/editor.mjs");
     const editor = document.createElement("clinker-editor"); document.body.append(editor); editor.chart = testChart;
   });
   await page.getByRole("tab", { name: "Appearance", exact: true }).click();

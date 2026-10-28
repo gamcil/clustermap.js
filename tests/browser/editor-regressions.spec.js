@@ -93,7 +93,7 @@ for (const theme of ["light", "dark"]) {
       // Compare computed colours to the active theme tokens, including native table cells.
       const tokens = await editor(page).evaluate((node) => {
         const probe = document.createElement("span"); node.shadowRoot.append(probe);
-        const colour = (token) => { probe.style.color = `var(${token})`; return getComputedStyle(probe).color; };
+        const colour = (token) => { probe.style.color = `var(${token},var(${token.replace("--cm-", "--_cm-")}))`; return getComputedStyle(probe).color; };
         const result = Object.fromEntries(["surface", "subtle", "foreground", "hover", "selection"].map((name) => [name, colour(`--cm-${name}`)]));
         probe.remove(); return result;
       });
@@ -382,7 +382,7 @@ test("appearance component synchronizes config and preserves disclosure state th
   await expect(panel.locator('[data-config="plot.minimap.width"]')).toBeVisible();
   await search.press("Escape");
   await expect(legend.locator("details")).toHaveAttribute("open", "");
-  await expect(panel.locator('[data-appearance-section="genes"]')).not.toHaveAttribute("open");
+  await expect(panel.locator('details[data-appearance-section="genes"]')).not.toHaveAttribute("open");
   await legend.locator("summary").press("Enter");
   await search.fill("minimap"); await search.press("Escape");
   await expect(legend.locator("details")).not.toHaveAttribute("open");
@@ -994,12 +994,12 @@ test("camera focus uses the current renderer and becomes inert after destruction
     chart.destroy();
     const chainable = chart.focus([uid]) === chart;
     return { canvas: { x: canvas.x, y: canvas.y, k: canvas.k }, focusedCanvas,
-      svg: { x: svg.x, y: svg.y, k: svg.k }, focusedSvg, chainable, after: chart.state().camera };
+      svg: { x: svg.x, y: svg.y, k: svg.k }, focusedSvg, chainable, after: chart.state() };
   });
   expect(result.canvas).toEqual(result.focusedCanvas);
   expect(result.svg).toEqual(result.focusedSvg);
   expect(result.chainable).toBe(true);
-  expect(result.after).toEqual(result.focusedSvg);
+  expect(result.after).toBeNull();
 });
 
 async function selectionFixture(page, renderer) {
@@ -1357,7 +1357,7 @@ test("controller restores selection highlights when filtering removes the hovere
 test("editor styles are self-contained and expose explicit theme overrides", async ({ page }) => {
   await selectionFixture(page, "svg");
   await page.addStyleTag({ content: "button{font-size:40px!important;background:magenta!important}.cm-data-row{height:90px!important;background:magenta!important}" });
-  await editor(page).evaluate((node) => node.style.setProperty("--clinker-accent", "#7134c6"));
+  await editor(page).evaluate((node) => node.style.setProperty("--cm-accent", "#7134c6"));
   await expect(editor(page).getByRole("button", { name: "Undo", exact: true })).toHaveCSS("font-size", "13px");
   await expect(editor(page).locator(".cm-data-row").first()).toHaveCSS("height", "34px");
   await expect(editor(page).getByRole("tab", { name: "Data", exact: true })).toHaveCSS("border-bottom-color", "rgb(113, 52, 198)");
@@ -1388,6 +1388,7 @@ for (const [entry, tag] of [["editor", "clinker-editor"], ["data-panel", "clinke
     await expect(panel).toHaveCSS("background-color", "rgb(35, 42, 53)");
     if (entry !== "appearance-panel") {
       if (entry === "editor") await page.evaluate(() => {
+        document.querySelector("section").shadowRoot.querySelector("clinker-editor").hidden = true;
         window.openEvents = 0;
         document.addEventListener("clinker-editor-open", () => openEvents++);
       });

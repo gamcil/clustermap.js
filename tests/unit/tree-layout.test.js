@@ -49,7 +49,7 @@ test("settled tree drawing and hit testing share layout until its inputs change"
   const wider = measureTreeLayout(context, tree, scene, widerConfig);
   assert.notEqual(wider.rootBranch.x1, first.rootBranch.x1, "styling updates replace cached positions");
   const reordered = measureTreeLayout(context, tree, reorderedScene(["c", "a", "b"]), widerConfig);
-  assert.notEqual(mark(reordered.guides, "a").y1, mark(wider.guides, "a").y1, "scene updates move leaves");
+  assert.notEqual(mark(reordered.branches, "pair:a").y1, mark(wider.branches, "pair:a").y1, "scene updates move leaves");
   const nextTree = structuredClone(tree);
   nextTree.nodes[1].support.value = 75;
   const relabelled = measureTreeLayout(context, nextTree, scene, config);
@@ -66,13 +66,13 @@ test("live tree previews recompute in-place changes and invalidate settled layou
   const first = measureTreeLayout(context, tree, scene, config);
   const preview = { type: "cluster-drag", clusterOffsets: new Map([["a", 20]]) };
   const dragged = measureTreeLayout(context, tree, scene, config, { preview });
-  assert.equal(mark(dragged.guides, "a").y1, mark(first.guides, "a").y1 + 20);
+  assert.equal(mark(dragged.branches, "pair:a").y1, mark(first.branches, "pair:a").y1 + 20);
   preview.clusterOffsets.set("a", 40);
   const moved = measureTreeLayout(context, tree, scene, config, { preview });
-  assert.equal(mark(moved.guides, "a").y1, mark(first.guides, "a").y1 + 40);
+  assert.equal(mark(moved.branches, "pair:a").y1, mark(first.branches, "pair:a").y1 + 40);
   const settled = measureTreeLayout(context, tree, scene, config);
   assert.notEqual(settled, first);
-  assert.equal(mark(settled.guides, "a").y1, mark(first.guides, "a").y1);
+  assert.equal(mark(settled.branches, "pair:a").y1, mark(first.branches, "pair:a").y1);
   assert.equal(measureTreeLayout(context, tree, scene, config), settled);
 });
 
@@ -97,10 +97,11 @@ test("tree envelopes include support text, markers, square caps and measured sca
 test("the first leaf/label collision positions a proportional tree, independent of its longest branch", () => {
   const { build } = example();
   const layout = build();
-  const a = mark(layout.guides, "a");
+  const a = mark(layout.branches, "pair:a");
   const c = mark(layout.guides, "c");
-  assert.equal(a.x2 - a.x1, 16);
-  assert.ok(c.x2 - c.x1 > 16);
+  assert.equal(mark(layout.guides, "a"), undefined, "the limiting leaf needs no guide");
+  assert.equal(260 - 100 - a.x2, 16, "leaf tips retain the label clearance");
+  assert.ok(c.x2 > c.x1);
   assert.equal(c.x1 - layout.rootBranch.x2, 160, "configured width covers the longest root-to-tip path");
   const pair = mark(layout.nodes, "pair");
   assert.ok(Math.abs((pair.x - layout.rootBranch.x2) / (c.x1 - layout.rootBranch.x2) - 0.25) < 1e-10);
@@ -165,8 +166,8 @@ test("label changes and drag previews reposition the tree and guides through the
   };
   const dragged = build({ trackAnchor: true, preview });
   assert.equal(dragged.rootBranch.x1, initial.rootBranch.x1 - 30);
-  assert.equal(mark(dragged.guides, "a").x2, mark(initial.guides, "a").x2 - 30);
-  assert.equal(mark(dragged.guides, "a").y1, mark(initial.guides, "a").y1 + 20);
+  assert.equal(mark(dragged.branches, "pair:a").x2, mark(initial.branches, "pair:a").x2 - 30);
+  assert.equal(mark(dragged.branches, "pair:a").y1, mark(initial.branches, "pair:a").y1 + 20);
   preview.clusterLabelOffsets.set("a", -10);
   assert.equal(build({ trackAnchor: true, preview }).rootBranch.x1, initial.rootBranch.x1 - 10);
   const smallerLabel = build({ measureLabel: () => 50 });
@@ -184,7 +185,7 @@ test("tree scales inherit clustermap styling and fall back to depth when lengths
   delete incomplete.nodes.find((node) => node.uid === "a").branchLength;
   const cladogram = build({ tree: incomplete });
   assert.equal(cladogram.scaleBar.label.text, "1 branch");
-  assert.equal(mark(cladogram.guides, "a").x1, mark(cladogram.guides, "b").x1);
+  assert.equal(mark(cladogram.branches, "pair:a").x2, mark(cladogram.branches, "pair:b").x2);
   assert.equal(build({ config: { tree: { show: false } } }), null);
 });
 

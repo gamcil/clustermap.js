@@ -163,8 +163,7 @@ test("scene derives world-space geometry without DOM state", async () => {
     clusterLabelTextForPreview(labelledFlipPreview, "bottom", "unchanged label"),
     "unchanged label"
   );
-  // The initial loci share the same left coordinate, but `alignLabels: false`
-  // must still keep the preview change local to the dragged cluster.
+  // A shared initial label anchor must not make an unaligned drag move other rows.
   assert.deepEqual(
     createLocusOffsetsPreview(scene, new Map([["top-locus", 14]]), { alignLabels: false }).clusterLabelOffsets,
     new Map([["top", 13]])
@@ -172,8 +171,8 @@ test("scene derives world-space geometry without DOM state", async () => {
   const unalignedScene = {
     ...scene,
     clusters: new Map([
-      ["top", { ...scene.clusters.get("top"), info: { x: -10 }, loci: [topLocus] }],
-      ["bottom", { ...scene.clusters.get("bottom"), info: { x: -10 }, loci: [scene.loci.get("bottom-locus")] }],
+      ["top", { ...scene.clusters.get("top"), info: { x: topLocus.worldStart - scene.clusters.get("top").x - 10 }, loci: [topLocus] }],
+      ["bottom", { ...scene.clusters.get("bottom"), info: { x: scene.loci.get("bottom-locus").worldStart - scene.clusters.get("bottom").x - 10 }, loci: [scene.loci.get("bottom-locus")] }],
     ]),
   };
   assert.deepEqual(
@@ -202,7 +201,7 @@ test("scene derives world-space geometry without DOM state", async () => {
     }
   );
   const trimPreview = createLocusTrimPreview(
-    scene,
+    unalignedScene,
     "top-locus",
     { start: 8, end: 20 },
     {
