@@ -40,7 +40,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
     catch (error) { fail(error); }
   };
 
-  const setup = (request) => {
+  const initialize = (request) => {
     const targetCanvas = request.canvas;
     if (!targetCanvas || !request.scene || unavailable) return;
     pendingScene = request.scene;
@@ -79,8 +79,6 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
   };
 
   return {
-    hasResources: () => Boolean(renderer || canvas || initialization || unavailable),
-    setup,
     setScene: (scene, { sourceScene, scales, config } = {}) => {
       pendingScene = scene;
       try {
@@ -100,7 +98,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
         draw();
         return;
       }
-      setup(request);
+      initialize(request);
     },
     destroy: () => {
       release();

@@ -188,7 +188,7 @@ export default function clusterMap() {
   const canvasBackend = createCanvasBackend();
   const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint });
   const rendererLifecycle = createRendererLifecycle({
-    svg: { setup() {}, paint: renderSvg, destroy() {} },
+    svg: { paint: renderSvg },
     canvas: canvasBackend,
     webgpu: webgpuBackend,
   });
@@ -1028,11 +1028,9 @@ export default function clusterMap() {
     const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
-    const leavingWebGpu = !useWebGpu && webgpuBackend.hasResources();
     rendererLifecycle.select(runtime.config.plot.renderer);
     if (rasterAnimation?.renderer !== runtime.config.plot.renderer) stopRasterAnimation();
     if (rasterCanvas?.dataset.renderer !== runtime.config.plot.renderer) rasterScene = null;
-    if (leavingWebGpu) sceneCommit = null;
     if (!useRaster) { disposeRasterInteraction(); disposeRasterInteraction = () => {}; }
     const minimapOptions = runtime.config.plot.minimap || {};
     // The overview is a separate 2D canvas, so it works for both raster

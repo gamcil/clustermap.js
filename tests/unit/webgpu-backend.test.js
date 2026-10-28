@@ -113,7 +113,7 @@ test("destroying a WebGPU backend invalidates a pending initialization", async (
   await Promise.resolve();
 
   assert.equal(destroyed, true);
-  assert.equal(backend.hasResources(), false);
+  assert.notEqual(canvas.dataset.webgpu, "active", "a disposed initialization cannot activate its surface");
 });
 
 test("replacing the canvas invalidates an in-flight WebGPU initialization", async () => {

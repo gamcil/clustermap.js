@@ -13404,7 +13404,6 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     };
 
     return {
-      setup() {},
       prepareFlip,
       clearFlip,
       warmLocus(locusUid) {
@@ -14908,7 +14907,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       catch (error) { fail(error); }
     };
 
-    const setup = (request) => {
+    const initialize = (request) => {
       const targetCanvas = request.canvas;
       if (!targetCanvas || !request.scene || unavailable) return;
       pendingScene = request.scene;
@@ -14947,8 +14946,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     };
 
     return {
-      hasResources: () => Boolean(renderer || canvas || initialization || unavailable),
-      setup,
       setScene: (scene, { sourceScene, scales, config } = {}) => {
         pendingScene = scene;
         try {
@@ -14968,7 +14965,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           draw();
           return;
         }
-        setup(request);
+        initialize(request);
       },
       destroy: () => {
         release();
@@ -14978,36 +14975,29 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     };
   }
 
-  /** Route renderer paints through one setup, paint, and teardown lifecycle. */
+  /** Select, paint, and release renderer resources, including shared fallbacks. */
   function createRendererLifecycle(renderers) {
     let active = null;
-    let setup = false;
+    const release = () => {
+      for (const renderer of Object.values(renderers)) renderer.destroy?.();
+    };
 
     const select = (name) => {
       if (!Object.hasOwn(renderers, name)) throw new TypeError(`Unknown renderer: ${name}`);
       if (active === name) return;
-      if (active !== null) {
-        for (const renderer of Object.values(renderers)) renderer.destroy?.();
-      }
+      if (active !== null) release();
       active = name;
-      setup = false;
     };
 
     return {
       select,
       paint(name, request) {
         select(name);
-        const renderer = renderers[name];
-        if (!setup) {
-          renderer.setup?.(request);
-          setup = true;
-        }
-        return renderer.paint(request);
+        return renderers[name].paint(request);
       },
       destroy() {
-        for (const renderer of Object.values(renderers)) renderer.destroy?.();
+        release();
         active = null;
-        setup = false;
       },
     };
   }
@@ -15442,7 +15432,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const canvasBackend = createCanvasBackend();
     const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint });
     const rendererLifecycle = createRendererLifecycle({
-      svg: { setup() {}, paint: renderSvg, destroy() {} },
+      svg: { paint: renderSvg },
       canvas: canvasBackend,
       webgpu: webgpuBackend,
     });
@@ -16282,11 +16272,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const useCanvas = isCanvasRenderer(runtime.config.plot.renderer);
       const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
       const useRaster = isRasterRenderer(runtime.config.plot.renderer);
-      const leavingWebGpu = !useWebGpu && webgpuBackend.hasResources();
       rendererLifecycle.select(runtime.config.plot.renderer);
       if (rasterAnimation?.renderer !== runtime.config.plot.renderer) stopRasterAnimation();
       if (rasterCanvas?.dataset.renderer !== runtime.config.plot.renderer) rasterScene = null;
-      if (leavingWebGpu) sceneCommit = null;
       if (!useRaster) { disposeRasterInteraction(); disposeRasterInteraction = () => {}; }
       const minimapOptions = runtime.config.plot.minimap || {};
       // The overview is a separate 2D canvas, so it works for both raster
