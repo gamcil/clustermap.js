@@ -4,6 +4,7 @@ import { resolveTreePresentation, treeMetrics } from "./model.mjs";
 import { clusterLabelLayout } from "../scene/clusterLabels.mjs";
 
 const leafXAnchors = new WeakMap();
+const labelClearance = 16;
 
 /** Keep the tree in its base position until a dragged label reaches a leaf. */
 function treeLeafX(tree, proposedX, dragging = false) {
@@ -45,14 +46,14 @@ export function treeHorizontalLayout(tree, leafX, width, useBranchLengths = true
 }
 
 /** Place the tree as far right as possible without leaf tips reaching labels. */
-function treeLeafAnchorX(tree, labelStarts, width, relative, clearance = 16) {
+function treeLeafAnchorX(tree, labelStarts, width, relative) {
   if (!tree || !labelStarts?.size) return 0;
   let anchor = Infinity;
   for (const node of tree.nodes) {
     if (node.children?.length) continue;
     const labelStart = labelStarts.get(node.cluster);
     if (!Number.isFinite(labelStart)) continue;
-    anchor = Math.min(anchor, labelStart - clearance + width - relative.get(node.uid));
+    anchor = Math.min(anchor, labelStart - labelClearance + width - relative.get(node.uid));
   }
   return Number.isFinite(anchor) ? anchor : 0;
 }
@@ -137,7 +138,7 @@ export function layoutTree({
     for (let index = low; index < rows.length; index++) {
       const row = rows[index];
       if (row.top > label.y + label.height) break;
-      if (row.bottom >= label.y) proposedX = Math.min(proposedX, row.start - 16 + width - label.x - label.width);
+      if (row.bottom >= label.y) proposedX = Math.min(proposedX, row.start - labelClearance + width - label.x - label.width);
     }
   }
   const leafX = trackAnchor ? treeLeafX(tree, proposedX, dragging) : proposedX;
@@ -170,8 +171,8 @@ export function layoutTree({
         branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child), style: presentation.branches.get(child) });
       }
     } else if (config.tree.leafGuide?.show && Number.isFinite(labelStarts.get(node.cluster))) {
-      const end = labelStarts.get(node.cluster) - 6;
-      if (end > x) guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: end });
+      const end = labelStarts.get(node.cluster) - labelClearance;
+      if (end - x > 1e-9) guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: end });
     }
     if (node.uid !== tree.root && config.tree.support?.show && node.support) {
       const text = Number(node.support.value).toFixed(config.tree.support.precision ?? 1);

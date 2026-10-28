@@ -213,8 +213,9 @@ Support labels default to one decimal place and sit above and left of their
 supported node. Font family follows `config.plot.fontFamily`. The tree scale
 bar inherits the main `config.scaleBar` styling and shares its vertical
 position; `config.tree.scaleBar.show` controls its visibility independently.
-Dashed leaf guides are hidden by default and stop 6 chart units before labels.
-Guides are omitted when there is no room before that gap. The tree is positioned as far right
+Dashed leaf guides are hidden by default and stop at the normal 16-unit
+tree-to-label clearance. Leaves that already reach this boundary have no guide.
+The tree is positioned as far right
 as possible while leaving a gap between every leaf tip and its cluster label.
 
 Tree geometry is shared across SVG, Canvas and WebGPU; static SVG exports
