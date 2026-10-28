@@ -3,7 +3,6 @@ import { measureFigureBounds } from "../scene/measure.mjs";
 /** One backdrop shared by all renderers; camera changes only update its transform. */
 export function createFigureSurface() {
   let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
-  let preserveNextSceneBounds = null;
 
   function bounds(container, scene, config, tree, preview = null) {
     if (!container || !scene?.bounds) return null;
@@ -12,16 +11,6 @@ export function createFigureSurface() {
     if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
       context ||= container.ownerDocument.createElement("canvas").getContext("2d");
       measuredBounds = measureFigureBounds(context, scene, config, tree, { preview });
-      if (preserveNextSceneBounds) {
-        const previous = preserveNextSceneBounds;
-        preserveNextSceneBounds = null;
-        measuredBounds = {
-          minX: Math.min(previous.minX, measuredBounds.minX),
-          maxX: Math.max(previous.maxX, measuredBounds.maxX),
-          minY: Math.min(previous.minY, measuredBounds.minY),
-          maxY: Math.max(previous.maxY, measuredBounds.maxY),
-        };
-      }
       measuredScene = scene;
       measuredConfig = config;
       measuredPreview = preview;
@@ -58,12 +47,8 @@ export function createFigureSurface() {
   }
 
   function clear() {
-    context = measuredScene = measuredConfig = measuredBounds = measuredPreview = preserveNextSceneBounds = null;
+    context = measuredScene = measuredConfig = measuredBounds = measuredPreview = null;
   }
 
-  function preserveBoundsOnNextScene() {
-    if (measuredBounds) preserveNextSceneBounds = { ...measuredBounds };
-  }
-
-  return { bounds, update, clear, preserveBoundsOnNextScene };
+  return { bounds, update, clear };
 }

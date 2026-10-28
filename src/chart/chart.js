@@ -337,10 +337,6 @@ export default function clusterMap() {
       return result;
     },
     commitLocusTrim: (locus) => {
-      // Trimming changes the content inside a locus, but should not make the
-      // figure surface jump or contract. Keep its existing extent and grow it
-      // only if the committed layout now reaches beyond that edge.
-      figureSurface.preserveBoundsOnNextScene();
       commitLocusEdit([locus.uid], () => {
         finalizeLocusTrim(chartState, locus);
         commitPreviewLocusState(chartState, locus);

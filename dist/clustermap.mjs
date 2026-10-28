@@ -5018,7 +5018,6 @@ function measureFigureBounds(context, scene, config, tree = null, { preview = nu
 /** One backdrop shared by all renderers; camera changes only update its transform. */
 function createFigureSurface() {
   let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
-  let preserveNextSceneBounds = null;
 
   function bounds(container, scene, config, tree, preview = null) {
     if (!container || !scene?.bounds) return null;
@@ -5027,16 +5026,6 @@ function createFigureSurface() {
     if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
       context ||= container.ownerDocument.createElement("canvas").getContext("2d");
       measuredBounds = measureFigureBounds(context, scene, config, tree, { preview });
-      if (preserveNextSceneBounds) {
-        const previous = preserveNextSceneBounds;
-        preserveNextSceneBounds = null;
-        measuredBounds = {
-          minX: Math.min(previous.minX, measuredBounds.minX),
-          maxX: Math.max(previous.maxX, measuredBounds.maxX),
-          minY: Math.min(previous.minY, measuredBounds.minY),
-          maxY: Math.max(previous.maxY, measuredBounds.maxY),
-        };
-      }
       measuredScene = scene;
       measuredConfig = config;
       measuredPreview = preview;
@@ -5073,14 +5062,10 @@ function createFigureSurface() {
   }
 
   function clear() {
-    context = measuredScene = measuredConfig = measuredBounds = measuredPreview = preserveNextSceneBounds = null;
+    context = measuredScene = measuredConfig = measuredBounds = measuredPreview = null;
   }
 
-  function preserveBoundsOnNextScene() {
-    if (measuredBounds) preserveNextSceneBounds = { ...measuredBounds };
-  }
-
-  return { bounds, update, clear, preserveBoundsOnNextScene };
+  return { bounds, update, clear };
 }
 
 /** Prune absent leaves and collapse unary ancestors without changing source records. */
@@ -15441,10 +15426,6 @@ function clusterMap() {
       return result;
     },
     commitLocusTrim: (locus) => {
-      // Trimming changes the content inside a locus, but should not make the
-      // figure surface jump or contract. Keep its existing extent and grow it
-      // only if the committed layout now reaches beyond that edge.
-      figureSurface.preserveBoundsOnNextScene();
       commitLocusEdit([locus.uid], () => {
         finalizeLocusTrim(chartState, locus);
         commitPreviewLocusState(chartState, locus);
