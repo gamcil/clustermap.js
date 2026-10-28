@@ -2,17 +2,19 @@ export function textFont({ fontSize, fontFamily, fontWeight = 400, fontStyle = "
   return `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
 }
 
+const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
+
 function measure(value, { fontSize, fontFamily, fontWeight = 400, fontStyle = "normal", baseline = "alphabetic" }, measureText) {
   const text = String(value ?? "");
   if (!text) return { width: 0, left: 0, right: 0, top: 0, bottom: 0 };
   const metrics = measureText?.(text, { fontSize, fontFamily, fontWeight, fontStyle, textBaseline: baseline });
-  const width = metrics?.width ?? text.length * fontSize * 0.6;
+  const width = finite(metrics?.width, text.length * fontSize * 0.6);
   const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize * 0.8;
   return { width,
-    left: -(metrics?.actualBoundingBoxLeft ?? 0),
-    right: metrics?.actualBoundingBoxRight ?? width,
-    top: metrics?.actualBoundingBoxAscent !== undefined ? -metrics.actualBoundingBoxAscent : top,
-    bottom: metrics?.actualBoundingBoxDescent ?? top + fontSize,
+    left: -finite(metrics?.actualBoundingBoxLeft, 0),
+    right: finite(metrics?.actualBoundingBoxRight, width),
+    top: -finite(metrics?.actualBoundingBoxAscent, -top),
+    bottom: finite(metrics?.actualBoundingBoxDescent, top + fontSize),
   };
 }
 

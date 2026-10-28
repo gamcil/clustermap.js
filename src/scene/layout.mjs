@@ -1,3 +1,4 @@
+import { layoutClusterLabels } from "./clusterLabels.mjs";
 import {
   getGeneLabelLayout,
   getGenePolygonCoordinates,
@@ -575,21 +576,9 @@ function sceneBounds(loci, options) {
 
 function clusterInfos(clusters, bounds, { alignLabels = true, clusterLabel = () => "",
   labelAlignment = "right", clusterLabelWidth = () => 0 }) {
-  const left = labelAlignment === "left";
-  const infos = new Map([...clusters].map(([uid, cluster]) => {
-    const locusText = clusterLabel(cluster.source);
-    return [uid, { locusText, width: left ? clusterLabelWidth(cluster.source, locusText) : 0,
-      anchor: left ? "start" : "end", y: 0 }];
-  }));
-  const width = Math.max(0, ...[...infos.values()].map((info) => info.width));
-  for (const [uid, cluster] of clusters) {
-    const info = infos.get(uid);
-    const start = cluster.loci.length
-      ? Math.min(...cluster.loci.map((locus) => locus.worldStart)) : cluster.x;
-    info.x = (alignLabels && bounds ? bounds.minX : start) - cluster.x - 10 -
-      (left ? alignLabels ? width : info.width : 0);
-  }
-  return infos;
+  return layoutClusterLabels(clusters.values(), { alignLabels, labelAlignment, contentStart: bounds?.minX,
+    textFor: (cluster) => clusterLabel(cluster.source),
+    widthFor: (cluster, text) => clusterLabelWidth(cluster.source, text) });
 }
 
 function updateSpatialIndex(index, changedEntries, entriesForRebuild) {

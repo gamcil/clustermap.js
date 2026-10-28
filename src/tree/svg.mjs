@@ -16,6 +16,10 @@ function positionBranches(selection, lines) {
 
 /** SVG owns DOM joins and transitions; the shared layout supplies every frame. */
 export function renderSvgTree(plot, tree, scene, config, interactions, transition, animate, motion = {}) {
+  if (!tree || !config.tree?.show || !scene?.clusters.size) {
+    plot.selectAll("g.phylogenetic-tree").remove();
+    return;
+  }
   let context = measurementContexts.get(plot.node());
   if (!context) {
     context = plot.node().ownerDocument.createElement("canvas").getContext("2d");

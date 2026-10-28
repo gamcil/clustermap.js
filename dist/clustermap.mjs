@@ -2,17 +2,19 @@ function textFont({ fontSize, fontFamily, fontWeight = 400, fontStyle = "normal"
   return `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
 }
 
+const finite = (value, fallback) => Number.isFinite(value) ? value : fallback;
+
 function measure(value, { fontSize, fontFamily, fontWeight = 400, fontStyle = "normal", baseline = "alphabetic" }, measureText) {
   const text = String(value ?? "");
   if (!text) return { width: 0, left: 0, right: 0, top: 0, bottom: 0 };
   const metrics = measureText?.(text, { fontSize, fontFamily, fontWeight, fontStyle, textBaseline: baseline });
-  const width = metrics?.width ?? text.length * fontSize * 0.6;
+  const width = finite(metrics?.width, text.length * fontSize * 0.6);
   const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize * 0.8;
   return { width,
-    left: -(metrics?.actualBoundingBoxLeft ?? 0),
-    right: metrics?.actualBoundingBoxRight ?? width,
-    top: metrics?.actualBoundingBoxAscent !== undefined ? -metrics.actualBoundingBoxAscent : top,
-    bottom: metrics?.actualBoundingBoxDescent ?? top + fontSize,
+    left: -finite(metrics?.actualBoundingBoxLeft, 0),
+    right: finite(metrics?.actualBoundingBoxRight, width),
+    top: -finite(metrics?.actualBoundingBoxAscent, -top),
+    bottom: finite(metrics?.actualBoundingBoxDescent, top + fontSize),
   };
 }
 
@@ -729,6 +731,48 @@ function resolveTreePresentation(tree, config = {}) {
   return value;
 }
 
+/** Shared label positions for drawing, figure bounds and interaction. */
+function clusterLabelLayout(config) {
+  const nameSize = config.cluster.nameFontSize;
+  if (config.cluster.hideLocusLabels) {
+    const shape = config.gene.shape;
+    const nameY = shape.tipHeight + shape.bodyHeight / 2;
+    return { nameY, nameBaseline: "middle", top: nameY - nameSize / 2, bottom: nameY + nameSize / 2 };
+  }
+  return { nameY: 8, nameBaseline: "alphabetic", top: 8 - nameSize, bottom: 12 + config.cluster.lociFontSize };
+}
+
+/** Width shared by label layout, tree placement and hit testing. */
+function clusterLabelWidth(name, locusText, config, measureText) {
+  const width = (text, fontSize, fontWeight) =>
+    textDimensions(text, { fontSize, fontWeight, fontFamily: config.plot.fontFamily }, measureText).width;
+  return Math.max(width(name, config.cluster.nameFontSize, 700),
+    width(locusText, config.cluster.lociFontSize, 400));
+}
+
+/** Project the same label blocks for committed geometry and live previews. */
+function layoutClusterLabels(clusters, { alignLabels = true, labelAlignment = "right", contentStart,
+  startFor = (locus) => locus.worldStart, textFor = (cluster) => cluster.info.locusText,
+  widthFor = (cluster) => cluster.info.width } = {}) {
+  const left = labelAlignment === "left", labels = [];
+  let firstStart = Infinity, maxWidth = 0;
+  for (const cluster of clusters) {
+    let start = Infinity;
+    for (const locus of cluster.loci) start = Math.min(start, startFor(locus));
+    firstStart = Math.min(firstStart, start);
+    const locusText = textFor(cluster), width = left ? widthFor(cluster, locusText) : 0;
+    maxWidth = Math.max(maxWidth, width);
+    labels.push({ cluster, start: Number.isFinite(start) ? start : cluster.x, locusText, width });
+  }
+  const sharedStart = contentStart ?? firstStart;
+  return new Map(labels.map(({ cluster, start, locusText, width }) => {
+    const edge = alignLabels && Number.isFinite(sharedStart) ? sharedStart : start;
+    const blockWidth = left ? (alignLabels ? maxWidth : width) : 0;
+    return [cluster.source.uid, { x: edge - cluster.x - 10 - blockWidth,
+      y: 0, locusText, width, anchor: left ? "start" : "end" }];
+  }));
+}
+
 /** Test world bounds after applying a preview translation. */
 function boundsInViewport(bounds, viewport, { x = 0, y = 0 } = {}) {
   return !viewport || !bounds || bounds.minX + x <= viewport.maxX && bounds.maxX + x >= viewport.minX &&
@@ -1041,36 +1085,8 @@ function createTrimIndicators({ locus, state, getGeneState, scaleX, shape = {} }
   return indicators;
 }
 
-function minStart(loci, startFor) {
-  let start = Infinity;
-  for (const locus of loci) start = Math.min(start, startFor(locus));
-  return start;
-}
-
 function clusterUidForLocus(locus) {
   return locus.cluster?.uid ?? locus.cluster?.source?.uid ?? locus.source.clusterUid;
-}
-
-function clusterLabelOffsetsForStarts(
-  scene,
-  startFor,
-  alignLabels,
-  affectedClusters = scene.clusters.values()
-) {
-  const offsets = new Map();
-  if (alignLabels) {
-    const offset = minStart(scene.loci.values(), startFor) -
-      minStart(scene.loci.values(), (locus) => locus.worldStart);
-    for (const cluster of scene.clusters.values()) offsets.set(cluster.source.uid, offset);
-    return offsets;
-  }
-  for (const cluster of affectedClusters) {
-    offsets.set(
-      cluster.source.uid,
-      minStart(cluster.loci, startFor) - minStart(cluster.loci, (locus) => locus.worldStart)
-    );
-  }
-  return offsets;
 }
 
 function chromeForPreview(scene, maxX) {
@@ -1101,23 +1117,19 @@ function annotationOffsetForPreview(scene, preview) {
     (scene.annotationAnchorX ?? scene.bounds.maxX);
 }
 
-function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClusters, labelWidthFor = null) {
+function locusPreview(scene, fields, { startFor, endFor, alignLabels = false,
+  affectedClusters = scene.clusters.values(), labelWidthFor = null }) {
   let contentMaxX = -Infinity;
   for (const locus of scene.loci.values()) contentMaxX = Math.max(contentMaxX, endFor(locus));
-  const clusterLabelOffsets = clusterLabelOffsetsForStarts(scene, startFor, alignLabels, affectedClusters);
-  if (labelWidthFor && [...scene.clusters.values()].some((cluster) => cluster.info.anchor === "start")) {
-    const widths = [...scene.clusters.values()].map((cluster) => ({ cluster,
-      before: cluster.info.width,
-      after: fields.clusterLabelTexts?.has(cluster.source.uid)
-        ? labelWidthFor(cluster.source, fields.clusterLabelTexts.get(cluster.source.uid))
-        : cluster.info.width,
-    }));
-    const delta = Math.max(...widths.map((item) => item.after)) - Math.max(...widths.map((item) => item.before));
-    for (const { cluster, before, after } of widths) {
-      const uid = cluster.source.uid;
-      clusterLabelOffsets.set(uid, (clusterLabelOffsets.get(uid) || 0) - (alignLabels ? delta : after - before));
-    }
-  }
+  const alignment = scene.clusters.values().next().value?.info.anchor === "start" ? "left" : "right";
+  const labels = layoutClusterLabels(alignLabels ? scene.clusters.values() : affectedClusters, {
+    alignLabels, labelAlignment: alignment, startFor,
+    textFor: (cluster) => fields.clusterLabelTexts?.get(cluster.source.uid) ?? cluster.info.locusText,
+    widthFor: (cluster, text) => labelWidthFor && fields.clusterLabelTexts?.has(cluster.source.uid)
+      ? labelWidthFor(cluster.source, text) : cluster.info.width,
+  });
+  const clusterLabelOffsets = new Map([...labels].map(([uid, info]) =>
+    [uid, info.x - scene.clusters.get(uid).info.x]));
   return {
     ...fields,
     contentMaxX,
@@ -1144,7 +1156,7 @@ function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
   return locusPreview(scene, {
     type: "locus-offsets",
     locusOffsets,
-  }, startFor, endFor, alignLabels, affectedClusters);
+  }, { startFor, endFor, alignLabels, affectedClusters });
 }
 
 /**
@@ -1227,7 +1239,7 @@ function createLocusTrimPreview(
             clusterLabelText,
           ]]),
         }),
-  }, startFor, endFor, alignLabels, undefined, labelWidthFor);
+  }, { startFor, endFor, alignLabels, labelWidthFor });
 }
 
 // Preview patches carry layout deltas rather than cloned scenes. These
@@ -1629,25 +1641,6 @@ function interpolateScene(previous, scene, amount) {
   const annotationPanels = (scene.annotationPanels || []).map((panel) => ({ ...panel,
     x: interpolateNumber$1(priorPanels.get(panel.uid)?.x ?? panel.x, panel.x, amount) }));
   return { ...scene, clusters, loci, genes, links, annotationPanels };
-}
-
-/** Shared label positions for drawing, figure bounds and interaction. */
-function clusterLabelLayout(config) {
-  const nameSize = config.cluster.nameFontSize;
-  if (config.cluster.hideLocusLabels) {
-    const shape = config.gene.shape;
-    const nameY = shape.tipHeight + shape.bodyHeight / 2;
-    return { nameY, nameBaseline: "middle", top: nameY - nameSize / 2, bottom: nameY + nameSize / 2 };
-  }
-  return { nameY: 8, nameBaseline: "alphabetic", top: 8 - nameSize, bottom: 12 + config.cluster.lociFontSize };
-}
-
-/** Measure both lines once while projecting a left-aligned label block. */
-function clusterLabelWidth(name, locusText, config, measureText) {
-  const width = (text, fontSize, fontWeight) =>
-    textDimensions(text, { fontSize, fontWeight, fontFamily: config.plot.fontFamily }, measureText).width;
-  return Math.max(width(name, config.cluster.nameFontSize, 700),
-    width(locusText, config.cluster.lociFontSize, 400));
 }
 
 const leafXAnchors = new WeakMap();
@@ -4671,21 +4664,9 @@ function sceneBounds(loci, options) {
 
 function clusterInfos(clusters, bounds, { alignLabels = true, clusterLabel = () => "",
   labelAlignment = "right", clusterLabelWidth = () => 0 }) {
-  const left = labelAlignment === "left";
-  const infos = new Map([...clusters].map(([uid, cluster]) => {
-    const locusText = clusterLabel(cluster.source);
-    return [uid, { locusText, width: left ? clusterLabelWidth(cluster.source, locusText) : 0,
-      anchor: left ? "start" : "end", y: 0 }];
-  }));
-  const width = Math.max(0, ...[...infos.values()].map((info) => info.width));
-  for (const [uid, cluster] of clusters) {
-    const info = infos.get(uid);
-    const start = cluster.loci.length
-      ? Math.min(...cluster.loci.map((locus) => locus.worldStart)) : cluster.x;
-    info.x = (alignLabels && bounds ? bounds.minX : start) - cluster.x - 10 -
-      (left ? alignLabels ? width : info.width : 0);
-  }
-  return infos;
+  return layoutClusterLabels(clusters.values(), { alignLabels, labelAlignment, contentStart: bounds?.minX,
+    textFor: (cluster) => clusterLabel(cluster.source),
+    widthFor: (cluster, text) => clusterLabelWidth(cluster.source, text) });
 }
 
 function updateSpatialIndex(index, changedEntries, entriesForRebuild) {
@@ -11109,6 +11090,10 @@ function positionBranches(selection, lines) {
 
 /** SVG owns DOM joins and transitions; the shared layout supplies every frame. */
 function renderSvgTree(plot, tree, scene, config, interactions, transition, animate, motion = {}) {
+  if (!tree || !config.tree?.show || !scene?.clusters.size) {
+    plot.selectAll("g.phylogenetic-tree").remove();
+    return;
+  }
   let context = measurementContexts.get(plot.node());
   if (!context) {
     context = plot.node().ownerDocument.createElement("canvas").getContext("2d");

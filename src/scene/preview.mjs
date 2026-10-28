@@ -1,37 +1,10 @@
+import { layoutClusterLabels } from "./clusterLabels.mjs";
 import { boundsInViewport } from "./camera.mjs";
 import { clusterPairKey, orderLinkAnchors, interpolateLinkAnchors, interpolateLinkOpacity } from "../links/layout.mjs";
 import { arrangeTrimIndicators, createTrimIndicators } from "../loci/trimIndicators.mjs";
 
-function minStart(loci, startFor) {
-  let start = Infinity;
-  for (const locus of loci) start = Math.min(start, startFor(locus));
-  return start;
-}
-
 function clusterUidForLocus(locus) {
   return locus.cluster?.uid ?? locus.cluster?.source?.uid ?? locus.source.clusterUid;
-}
-
-function clusterLabelOffsetsForStarts(
-  scene,
-  startFor,
-  alignLabels,
-  affectedClusters = scene.clusters.values()
-) {
-  const offsets = new Map();
-  if (alignLabels) {
-    const offset = minStart(scene.loci.values(), startFor) -
-      minStart(scene.loci.values(), (locus) => locus.worldStart);
-    for (const cluster of scene.clusters.values()) offsets.set(cluster.source.uid, offset);
-    return offsets;
-  }
-  for (const cluster of affectedClusters) {
-    offsets.set(
-      cluster.source.uid,
-      minStart(cluster.loci, startFor) - minStart(cluster.loci, (locus) => locus.worldStart)
-    );
-  }
-  return offsets;
 }
 
 function chromeForPreview(scene, maxX) {
@@ -62,23 +35,19 @@ export function annotationOffsetForPreview(scene, preview) {
     (scene.annotationAnchorX ?? scene.bounds.maxX);
 }
 
-function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClusters, labelWidthFor = null) {
+function locusPreview(scene, fields, { startFor, endFor, alignLabels = false,
+  affectedClusters = scene.clusters.values(), labelWidthFor = null }) {
   let contentMaxX = -Infinity;
   for (const locus of scene.loci.values()) contentMaxX = Math.max(contentMaxX, endFor(locus));
-  const clusterLabelOffsets = clusterLabelOffsetsForStarts(scene, startFor, alignLabels, affectedClusters);
-  if (labelWidthFor && [...scene.clusters.values()].some((cluster) => cluster.info.anchor === "start")) {
-    const widths = [...scene.clusters.values()].map((cluster) => ({ cluster,
-      before: cluster.info.width,
-      after: fields.clusterLabelTexts?.has(cluster.source.uid)
-        ? labelWidthFor(cluster.source, fields.clusterLabelTexts.get(cluster.source.uid))
-        : cluster.info.width,
-    }));
-    const delta = Math.max(...widths.map((item) => item.after)) - Math.max(...widths.map((item) => item.before));
-    for (const { cluster, before, after } of widths) {
-      const uid = cluster.source.uid;
-      clusterLabelOffsets.set(uid, (clusterLabelOffsets.get(uid) || 0) - (alignLabels ? delta : after - before));
-    }
-  }
+  const alignment = scene.clusters.values().next().value?.info.anchor === "start" ? "left" : "right";
+  const labels = layoutClusterLabels(alignLabels ? scene.clusters.values() : affectedClusters, {
+    alignLabels, labelAlignment: alignment, startFor,
+    textFor: (cluster) => fields.clusterLabelTexts?.get(cluster.source.uid) ?? cluster.info.locusText,
+    widthFor: (cluster, text) => labelWidthFor && fields.clusterLabelTexts?.has(cluster.source.uid)
+      ? labelWidthFor(cluster.source, text) : cluster.info.width,
+  });
+  const clusterLabelOffsets = new Map([...labels].map(([uid, info]) =>
+    [uid, info.x - scene.clusters.get(uid).info.x]));
   return {
     ...fields,
     contentMaxX,
@@ -105,7 +74,7 @@ export function createLocusOffsetsPreview(scene, offsets, { alignLabels }) {
   return locusPreview(scene, {
     type: "locus-offsets",
     locusOffsets,
-  }, startFor, endFor, alignLabels, affectedClusters);
+  }, { startFor, endFor, alignLabels, affectedClusters });
 }
 
 /**
@@ -188,7 +157,7 @@ export function createLocusTrimPreview(
             clusterLabelText,
           ]]),
         }),
-  }, startFor, endFor, alignLabels, undefined, labelWidthFor);
+  }, { startFor, endFor, alignLabels, labelWidthFor });
 }
 
 // Preview patches carry layout deltas rather than cloned scenes. These
