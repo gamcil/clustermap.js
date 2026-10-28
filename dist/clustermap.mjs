@@ -1793,7 +1793,8 @@ function layoutTree({
         branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child), style: presentation.branches.get(child) });
       }
     } else if (config.tree.leafGuide?.show && Number.isFinite(labelStarts.get(node.cluster))) {
-      guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: labelStarts.get(node.cluster) });
+      const end = labelStarts.get(node.cluster) - 6;
+      if (end > x) guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: end });
     }
     if (node.uid !== tree.root && config.tree.support?.show && node.support) {
       const text = Number(node.support.value).toFixed(config.tree.support.precision ?? 1);
