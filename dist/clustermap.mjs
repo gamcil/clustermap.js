@@ -14863,10 +14863,10 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
   };
 }
 
-// Owns the lifetime of a WebGPU context, not chart state or interaction
-// policy. The chart controller supplies the current scene and the Canvas
-// fallback for each paint request.
-function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
+const overlayLayers = ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"];
+
+function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
+  paintOverlay = renderCanvas, paintFallback = renderCanvas } = {}) {
   let renderer = null;
   let canvas = null;
   let initialization = null;
@@ -14882,7 +14882,10 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
     unavailable = false;
   };
 
-  const fallback = () => latestPaint?.onUnavailable?.();
+  const fallback = () => {
+    if (latestPaint) return paintFallback({ ...latestPaint,
+      canvas: latestPaint.overlayCanvas, scene: pendingScene });
+  };
   const fail = (error) => {
     if (unavailable) return;
     const failedCanvas = canvas;
@@ -14894,7 +14897,8 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
   };
   const draw = () => {
     if (!renderer || !latestPaint) return;
-    try { renderer.render({ ...latestPaint, nextScene: pendingScene }); }
+    const { width, height } = latestPaint.dimensions;
+    try { renderer.render({ ...latestPaint, width, height, nextScene: pendingScene }); }
     catch (error) { fail(error); }
   };
 
@@ -14951,9 +14955,9 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
       pendingScene = request.scene;
       latestPaint = request;
       if (unavailable) {
-        fallback();
-        return;
+        return fallback();
       }
+      if (request.overlayCanvas) paintOverlay({ ...request, canvas: request.overlayCanvas, layers: overlayLayers });
       if (renderer && canvas === targetCanvas) {
         draw();
         return;
@@ -15430,7 +15434,7 @@ function clusterMap() {
     },
   });
   const canvasBackend = createCanvasBackend();
-  const webgpuBackend = createWebGpuBackend();
+  const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint });
   const rendererLifecycle = createRendererLifecycle({
     svg: { setup() {}, paint: renderSvg, destroy() {} },
     canvas: canvasBackend,
@@ -16086,8 +16090,7 @@ function clusterMap() {
     if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
     previewPaintFrame = null;
     if (!container || !runtime.getScene()) return;
-    if (isCanvasRenderer(runtime.config.plot.renderer)) return paintCanvas();
-    if (isWebGpuRenderer(runtime.config.plot.renderer)) return paintWebGpu();
+    if (isRasterRenderer(runtime.config.plot.renderer)) return paintRaster();
     return paintSvg();
   }
 
@@ -16151,34 +16154,17 @@ function clusterMap() {
     return true;
   }
 
-  function paintCanvas(canvas = rasterCanvas, scene = null) {
+  function paintRaster() {
+    const renderer = runtime.config.plot.renderer;
     const animation = rasterAnimation?.renderer === "canvas" ? rasterAnimation : null;
-    scene ||= canvasPendingFlip?.sourceScene || rasterScene || runtime.getScene();
-    if (!canvas || !scene) return null;
+    const scene = canvasPendingFlip?.sourceScene || rasterScene || runtime.getScene();
+    if (!rasterCanvas || !scene) return null;
     updateFigureSurface();
-    const request = { ...sceneFrame(scene), canvas,
-      previousScene: animation?.previousScene, progress: animation?.progress };
-    const result = canvas === rasterCanvas && isCanvasRenderer(runtime.config.plot.renderer)
-      ? rendererLifecycle.paint("canvas", request)
-      : canvasBackend.paint(request);
+    const result = rendererLifecycle.paint(renderer, { ...sceneFrame(scene),
+      canvas: rasterCanvas, overlayCanvas, dimensions: rasterCanvas.getBoundingClientRect(),
+      previousScene: animation?.previousScene, progress: animation?.progress });
     paintMinimap();
     return result;
-  }
-
-  function paintWebGpu(scene = rasterScene || runtime.getScene()) {
-    if (!rasterCanvas || !scene) return;
-    updateFigureSurface();
-    const frame = sceneFrame(scene);
-    if (overlayCanvas) renderCanvas({ ...frame, canvas: overlayCanvas,
-      layers: ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"] });
-    const { width, height } = rasterCanvas.getBoundingClientRect();
-    rendererLifecycle.paint("webgpu", { ...frame, canvas: rasterCanvas, width, height,
-      onUnavailable: paintWebGpuFallback });
-    paintMinimap();
-  }
-
-  function paintWebGpuFallback() {
-    paintCanvas(overlayCanvas, rasterScene);
   }
 
   function paintMinimap() {

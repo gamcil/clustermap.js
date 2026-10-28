@@ -1,9 +1,10 @@
 import { createWebGpuRenderer } from "./webgpu.js";
+import { renderCanvas } from "./canvas.js";
 
-// Owns the lifetime of a WebGPU context, not chart state or interaction
-// policy. The chart controller supplies the current scene and the Canvas
-// fallback for each paint request.
-export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = {}) {
+const overlayLayers = ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"];
+
+export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
+  paintOverlay = renderCanvas, paintFallback = renderCanvas } = {}) {
   let renderer = null;
   let canvas = null;
   let initialization = null;
@@ -19,7 +20,10 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
     unavailable = false;
   };
 
-  const fallback = () => latestPaint?.onUnavailable?.();
+  const fallback = () => {
+    if (latestPaint) return paintFallback({ ...latestPaint,
+      canvas: latestPaint.overlayCanvas, scene: pendingScene });
+  };
   const fail = (error) => {
     if (unavailable) return;
     const failedCanvas = canvas;
@@ -31,7 +35,8 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
   };
   const draw = () => {
     if (!renderer || !latestPaint) return;
-    try { renderer.render({ ...latestPaint, nextScene: pendingScene }); }
+    const { width, height } = latestPaint.dimensions;
+    try { renderer.render({ ...latestPaint, width, height, nextScene: pendingScene }); }
     catch (error) { fail(error); }
   };
 
@@ -88,9 +93,9 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer } = 
       pendingScene = request.scene;
       latestPaint = request;
       if (unavailable) {
-        fallback();
-        return;
+        return fallback();
       }
+      if (request.overlayCanvas) paintOverlay({ ...request, canvas: request.overlayCanvas, layers: overlayLayers });
       if (renderer && canvas === targetCanvas) {
         draw();
         return;

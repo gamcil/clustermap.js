@@ -1,49 +1,52 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const paintRequest = (canvas, scene, onUnavailable = () => {}) => ({
+const paintRequest = (canvas, scene) => ({
   canvas,
   scene,
   preview: null,
   camera: { x: 0, y: 0, k: 1 },
   scales: {},
   config: {},
-  width: 100,
-  height: 100,
+  dimensions: { width: 100, height: 100 },
   pixelRatio: 1,
-  onUnavailable,
 });
 
 for (const failure of ["render", "adoptScene", "device"]) {
   test(`WebGPU falls back after a ${failure} failure and ignores stale device errors`, async (t) => {
     const { createWebGpuBackend } = await import("../../src/renderers/webgpuBackend.mjs");
     t.mock.method(console, "warn", () => {});
-    let onError, broken = false, destroyed = 0, setups = 0, fallbacks = 0;
-    const backend = createWebGpuBackend({ createRenderer: async (_canvas, options) => {
+    let onError, broken = false, destroyed = 0, setups = 0;
+    const fallbacks = [];
+    const backend = createWebGpuBackend({ paintOverlay() {},
+      paintFallback: (request) => fallbacks.push(request), createRenderer: async (_canvas, options) => {
       setups++;
       onError = options.onError;
       const attempt = () => { if (broken) throw new Error("GPU failure"); };
       return { render: attempt, adoptScene: attempt, destroy: () => { destroyed++; } };
     } });
     const canvas = { dataset: {} }, scene = {};
-    const request = paintRequest(canvas, scene, () => { fallbacks++; });
+    const request = { ...paintRequest(canvas, scene), overlayCanvas: {} };
     backend.paint(request);
     await Promise.resolve();
     broken = true;
     if (failure === "render") backend.paint(request);
     else if (failure === "adoptScene") backend.setScene({}, { sourceScene: scene });
     else onError(new Error("device lost"));
-    assert.equal(fallbacks, 1);
+    assert.equal(fallbacks.length, 1);
+    assert.equal(fallbacks[0].canvas, request.overlayCanvas, "fallback uses the 2D overlay, not the GPU surface");
     assert.equal(destroyed, 1);
     assert.equal(canvas.dataset.webgpu, "error");
     onError(new Error("stale callback"));
-    assert.equal(fallbacks, 1);
-    backend.paint({ ...request, onUnavailable: () => { fallbacks += 10; } });
-    assert.equal(fallbacks, 11, "subsequent frames use the latest fallback");
+    assert.equal(fallbacks.length, 1);
+    const nextScene = {};
+    backend.paint({ ...request, scene: nextScene });
+    assert.equal(fallbacks.length, 2);
+    assert.equal(fallbacks.at(-1).scene, nextScene, "subsequent frames use the latest scene");
     assert.equal(setups, 1, "failed GPU initialization is not retried every frame");
     backend.destroy();
     onError(new Error("disposed callback"));
-    assert.equal(fallbacks, 11);
+    assert.equal(fallbacks.length, 2);
     assert.equal(destroyed, 1);
   });
 }
@@ -67,6 +70,30 @@ test("WebGPU backend renders the newest scene after asynchronous initialization"
   assert.equal(canvas.dataset.webgpu, "active");
   assert.equal(draws.length, 1);
   assert.equal(draws[0].nextScene.uid, "latest");
+});
+
+test("WebGPU coordinates its overlay and GPU pass from the same frame", async () => {
+  const { createWebGpuBackend } = await import("../../src/renderers/webgpuBackend.mjs");
+  const overlays = [], draws = [];
+  const backend = createWebGpuBackend({
+    createRenderer: async () => ({ render: (request) => draws.push(request), destroy() {} }),
+    paintOverlay: (request) => overlays.push(request),
+    paintFallback: () => assert.fail("an active renderer should not fall back"),
+  });
+  const request = { ...paintRequest({ dataset: {} }, { uid: "scene" }), overlayCanvas: {},
+    dimensions: { get width() { return 200; }, get height() { return 150; } } };
+  backend.paint(request);
+  await Promise.resolve();
+  assert.equal(overlays.length, 1);
+  assert.equal(overlays[0].canvas, request.overlayCanvas);
+  assert.equal(overlays[0].scene, request.scene);
+  assert.ok(overlays[0].layers.includes("clusterLabels"));
+  assert.ok(!overlays[0].layers.includes("genes"));
+  assert.equal(draws[0].canvas, request.canvas);
+  assert.equal(draws[0].nextScene, request.scene);
+  assert.equal(draws[0].width, 200);
+  assert.equal(draws[0].height, 150);
+  backend.destroy();
 });
 
 test("destroying a WebGPU backend invalidates a pending initialization", async () => {
