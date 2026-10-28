@@ -92,7 +92,7 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     .attr("x", (label) => label.x).attr("y", (label) => label.y)
     .attr("text-anchor", "middle").attr("dominant-baseline", "hanging")
     // Match the existing SVG clustermap scale bar, whose font size uses pt.
-    .attr("font-size", `${layout.scaleBar?.fontSize}pt`).attr("font-family", layout.scaleBar?.fontFamily)
+    .attr("font-size", `${layout.scaleBar?.fontSize}px`).attr("font-family", layout.scaleBar?.fontFamily)
     .attr("fill", layout.foreground).text((label) => label.text);
   const paintFrame = (frame) => {
     positionBranches(root, [frame.rootBranch]);

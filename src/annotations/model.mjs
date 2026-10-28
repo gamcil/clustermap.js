@@ -119,13 +119,13 @@ export function annotationChromeRightEdge(chrome, measureText = null) {
   let right = -Infinity;
   const bar = chrome?.scaleBar, identity = chrome?.colourBar;
   if (bar?.visible) {
-    const label = textBounds(bar.label, bar.fontSize * 4 / 3, bar.fontFamily, measureText, { anchor: "middle" });
+    const label = textBounds(bar.label, bar.fontSize, bar.fontFamily, measureText, { anchor: "middle" });
     right = Math.max(right, bar.position.x + bar.length + (bar.strokeWidth || 0) / 2,
       bar.position.x + bar.length / 2 + label.maxX);
   }
   if (identity?.visible) {
-    const label = textBounds(identity.label, identity.fontSize * 4 / 3, identity.fontFamily, measureText, { anchor: "middle" });
-    const start = textBounds(identity.startLabel, identity.fontSize * 4 / 3, identity.fontFamily, measureText);
+    const label = textBounds(identity.label, identity.fontSize, identity.fontFamily, measureText, { anchor: "middle" });
+    const start = textBounds(identity.startLabel, identity.fontSize, identity.fontFamily, measureText);
     right = Math.max(right, identity.position.x + identity.width + 0.5,
       identity.position.x + identity.width / 2 + label.maxX, identity.position.x + start.maxX);
   }

@@ -197,13 +197,13 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
     include(bar.position.x - half, bar.position.y - half);
     include(bar.position.x + bar.length + half, bar.position.y + bar.height + half);
     includeText(bar.label, bar.position.x + bar.length / 2, bar.position.y + bar.height + 5,
-      { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
+      { fontSize: bar.fontSize, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
   }
   if (chrome?.colourBar.visible) {
     const bar = chrome.colourBar;
     include(bar.position.x - 0.5, bar.position.y - 0.5);
     include(bar.position.x + bar.width + 0.5, bar.position.y + bar.height + 0.5);
-    const font = { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, baseline: "top" };
+    const font = { fontSize: bar.fontSize, fontFamily: bar.fontFamily, baseline: "top" };
     const y = bar.position.y + bar.height + 5;
     includeText(bar.label, bar.position.x + bar.width / 2, y, { ...font, align: "center" });
     includeText(bar.startLabel, bar.position.x, y, font);

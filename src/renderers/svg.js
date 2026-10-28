@@ -578,8 +578,8 @@ function updateLinks(selection, scene, previousScene, config, scales, ids, highl
   selection
     .select("text.geneLinkLabel")
     .text((link) => link.label ?? link.identity.toFixed(2))
-    .attr("opacity", (link) =>
-      config.link.label.show && linkLayout(link)?.visible ? 1 : 0
+    .attr("display", (link) =>
+      config.link.label.show && linkLayout(link)?.visible ? null : "none"
     )
     .attr("filter", config.link.label.background ? `url(#${ids.filter})` : null)
     .style("font-size", `${config.link.label.fontSize}px`)
@@ -599,10 +599,9 @@ function renderChrome({ plot, chrome, ids, interactions }) {
 function renderLegend({ plot, legend, interactions, transform }) {
   const key = plot
     .selectAll("g.legend")
-    .data([legend])
+    .data(legend.visible ? [legend] : [])
     .join("g")
     .attr("class", "legend")
-    .attr("opacity", legend.visible ? 1 : 0)
     .attr("transform", () => transform(legend.position));
 
   const items = key
@@ -653,7 +652,7 @@ function renderLegend({ plot, legend, interactions, transform }) {
 function renderScaleBar({ plot, scaleBar, interactions, transform }) {
   const bar = plot
     .selectAll("g.scaleBar")
-    .data([scaleBar])
+    .data(scaleBar.visible ? [scaleBar] : [])
     .join((enter) => {
       const group = enter.append("g").attr("class", "scaleBar");
       group.append("line").attr("class", "flatBar");
@@ -662,7 +661,6 @@ function renderScaleBar({ plot, scaleBar, interactions, transform }) {
       group.append("text").attr("class", "barText").attr("text-anchor", "middle");
       return group;
     })
-    .attr("opacity", scaleBar.visible ? 1 : 0)
     .attr("transform", () => transform(scaleBar.position));
 
   bar
@@ -682,7 +680,7 @@ function renderScaleBar({ plot, scaleBar, interactions, transform }) {
     .attr("x", scaleBar.length / 2)
     .attr("y", scaleBar.height + 5)
     .style("dominant-baseline", "hanging")
-    .style("font-size", `${scaleBar.fontSize}pt`)
+    .style("font-size", `${scaleBar.fontSize}px`)
     .style("font-family", scaleBar.fontFamily)
     .attr("cursor", "pointer")
     .on("click", () => interactions.setScaleBarLength());
@@ -695,7 +693,7 @@ function renderScaleBar({ plot, scaleBar, interactions, transform }) {
 function renderColourBar({ plot, colourBar, ids, transform }) {
   const bar = plot
     .selectAll("g.colourBar")
-    .data([colourBar])
+    .data(colourBar.visible ? [colourBar] : [])
     .join((enter) => {
       const group = enter.append("g").attr("class", "colourBar");
       const gradient = group
@@ -714,7 +712,6 @@ function renderColourBar({ plot, colourBar, ids, transform }) {
       parts.append("text").attr("class", "endText").attr("text-anchor", "end");
       return group;
     })
-    .attr("opacity", colourBar.visible ? 1 : 0)
     .attr("transform", () => transform(colourBar.position));
 
   bar.select(".startStop").attr("stop-color", colourBar.startColour);
@@ -748,6 +745,6 @@ function renderColourBar({ plot, colourBar, ids, transform }) {
   bar
     .selectAll("text")
     .style("font-family", colourBar.fontFamily)
-    .style("font-size", `${colourBar.fontSize}pt`)
+    .style("font-size", `${colourBar.fontSize}px`)
     .style("dominant-baseline", "hanging");
 }

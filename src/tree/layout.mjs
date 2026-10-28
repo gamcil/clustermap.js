@@ -205,7 +205,7 @@ export function layoutTree({
     };
     // SVG scale labels use points; Canvas uses pixels. Measure the larger
     // size for a common envelope without changing either renderer's drawing.
-    Object.assign(scaleBar.label, measureText(scaleBar.label.text, { ...scaleBar, fontSize: scaleBar.fontSize * 4 / 3 }));
+    Object.assign(scaleBar.label, measureText(scaleBar.label.text, { ...scaleBar, fontSize: scaleBar.fontSize }));
   }
   let cutLine = null;
   if (presentation.metric && presentation.policy.showCutLine && horizontal.proportional &&

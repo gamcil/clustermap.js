@@ -1828,7 +1828,7 @@ function layoutTree({
     };
     // SVG scale labels use points; Canvas uses pixels. Measure the larger
     // size for a common envelope without changing either renderer's drawing.
-    Object.assign(scaleBar.label, measureText(scaleBar.label.text, { ...scaleBar, fontSize: scaleBar.fontSize * 4 / 3 }));
+    Object.assign(scaleBar.label, measureText(scaleBar.label.text, { ...scaleBar, fontSize: scaleBar.fontSize }));
   }
   let cutLine = null;
   if (presentation.metric && presentation.policy.showCutLine && horizontal.proportional &&
@@ -3724,13 +3724,13 @@ function annotationChromeRightEdge(chrome, measureText = null) {
   let right = -Infinity;
   const bar = chrome?.scaleBar, identity = chrome?.colourBar;
   if (bar?.visible) {
-    const label = textBounds(bar.label, bar.fontSize * 4 / 3, bar.fontFamily, measureText, { anchor: "middle" });
+    const label = textBounds(bar.label, bar.fontSize, bar.fontFamily, measureText, { anchor: "middle" });
     right = Math.max(right, bar.position.x + bar.length + (bar.strokeWidth || 0) / 2,
       bar.position.x + bar.length / 2 + label.maxX);
   }
   if (identity?.visible) {
-    const label = textBounds(identity.label, identity.fontSize * 4 / 3, identity.fontFamily, measureText, { anchor: "middle" });
-    const start = textBounds(identity.startLabel, identity.fontSize * 4 / 3, identity.fontFamily, measureText);
+    const label = textBounds(identity.label, identity.fontSize, identity.fontFamily, measureText, { anchor: "middle" });
+    const start = textBounds(identity.startLabel, identity.fontSize, identity.fontFamily, measureText);
     right = Math.max(right, identity.position.x + identity.width + 0.5,
       identity.position.x + identity.width / 2 + label.maxX, identity.position.x + start.maxX);
   }
@@ -5087,13 +5087,13 @@ function measureFigureBounds(context, scene, config, tree = null, { preview = nu
     include(bar.position.x - half, bar.position.y - half);
     include(bar.position.x + bar.length + half, bar.position.y + bar.height + half);
     includeText(bar.label, bar.position.x + bar.length / 2, bar.position.y + bar.height + 5,
-      { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
+      { fontSize: bar.fontSize, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
   }
   if (chrome?.colourBar.visible) {
     const bar = chrome.colourBar;
     include(bar.position.x - 0.5, bar.position.y - 0.5);
     include(bar.position.x + bar.width + 0.5, bar.position.y + bar.height + 0.5);
-    const font = { fontSize: bar.fontSize * 4 / 3, fontFamily: bar.fontFamily, baseline: "top" };
+    const font = { fontSize: bar.fontSize, fontFamily: bar.fontFamily, baseline: "top" };
     const y = bar.position.y + bar.height + 5;
     includeText(bar.label, bar.position.x + bar.width / 2, y, { ...font, align: "center" });
     includeText(bar.startLabel, bar.position.x, y, font);
@@ -11170,7 +11170,7 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
     .attr("x", (label) => label.x).attr("y", (label) => label.y)
     .attr("text-anchor", "middle").attr("dominant-baseline", "hanging")
     // Match the existing SVG clustermap scale bar, whose font size uses pt.
-    .attr("font-size", `${layout.scaleBar?.fontSize}pt`).attr("font-family", layout.scaleBar?.fontFamily)
+    .attr("font-size", `${layout.scaleBar?.fontSize}px`).attr("font-family", layout.scaleBar?.fontFamily)
     .attr("fill", layout.foreground).text((label) => label.text);
   const paintFrame = (frame) => {
     positionBranches(root, [frame.rootBranch]);
@@ -11752,8 +11752,8 @@ function updateLinks(selection, scene, previousScene, config, scales, ids, highl
   selection
     .select("text.geneLinkLabel")
     .text((link) => link.label ?? link.identity.toFixed(2))
-    .attr("opacity", (link) =>
-      config.link.label.show && linkLayout(link)?.visible ? 1 : 0
+    .attr("display", (link) =>
+      config.link.label.show && linkLayout(link)?.visible ? null : "none"
     )
     .attr("filter", config.link.label.background ? `url(#${ids.filter})` : null)
     .style("font-size", `${config.link.label.fontSize}px`)
@@ -11773,10 +11773,9 @@ function renderChrome({ plot, chrome, ids, interactions }) {
 function renderLegend({ plot, legend, interactions, transform }) {
   const key = plot
     .selectAll("g.legend")
-    .data([legend])
+    .data(legend.visible ? [legend] : [])
     .join("g")
     .attr("class", "legend")
-    .attr("opacity", legend.visible ? 1 : 0)
     .attr("transform", () => transform(legend.position));
 
   const items = key
@@ -11827,7 +11826,7 @@ function renderLegend({ plot, legend, interactions, transform }) {
 function renderScaleBar({ plot, scaleBar, interactions, transform }) {
   const bar = plot
     .selectAll("g.scaleBar")
-    .data([scaleBar])
+    .data(scaleBar.visible ? [scaleBar] : [])
     .join((enter) => {
       const group = enter.append("g").attr("class", "scaleBar");
       group.append("line").attr("class", "flatBar");
@@ -11836,7 +11835,6 @@ function renderScaleBar({ plot, scaleBar, interactions, transform }) {
       group.append("text").attr("class", "barText").attr("text-anchor", "middle");
       return group;
     })
-    .attr("opacity", scaleBar.visible ? 1 : 0)
     .attr("transform", () => transform(scaleBar.position));
 
   bar
@@ -11856,7 +11854,7 @@ function renderScaleBar({ plot, scaleBar, interactions, transform }) {
     .attr("x", scaleBar.length / 2)
     .attr("y", scaleBar.height + 5)
     .style("dominant-baseline", "hanging")
-    .style("font-size", `${scaleBar.fontSize}pt`)
+    .style("font-size", `${scaleBar.fontSize}px`)
     .style("font-family", scaleBar.fontFamily)
     .attr("cursor", "pointer")
     .on("click", () => interactions.setScaleBarLength());
@@ -11869,7 +11867,7 @@ function renderScaleBar({ plot, scaleBar, interactions, transform }) {
 function renderColourBar({ plot, colourBar, ids, transform }) {
   const bar = plot
     .selectAll("g.colourBar")
-    .data([colourBar])
+    .data(colourBar.visible ? [colourBar] : [])
     .join((enter) => {
       const group = enter.append("g").attr("class", "colourBar");
       const gradient = group
@@ -11888,7 +11886,6 @@ function renderColourBar({ plot, colourBar, ids, transform }) {
       parts.append("text").attr("class", "endText").attr("text-anchor", "end");
       return group;
     })
-    .attr("opacity", colourBar.visible ? 1 : 0)
     .attr("transform", () => transform(colourBar.position));
 
   bar.select(".startStop").attr("stop-color", colourBar.startColour);
@@ -11922,7 +11919,7 @@ function renderColourBar({ plot, colourBar, ids, transform }) {
   bar
     .selectAll("text")
     .style("font-family", colourBar.fontFamily)
-    .style("font-size", `${colourBar.fontSize}pt`)
+    .style("font-size", `${colourBar.fontSize}px`)
     .style("dominant-baseline", "hanging");
 }
 
@@ -12574,6 +12571,7 @@ function exportChartSvg({
     // Event listeners do not serialize, but hover/trim affordances would still
     // be visible as nodes in an exported publication figure.
     plot.selectAll("g.hover").remove();
+    plot.selectAll('[opacity="0"], [display="none"]').remove();
     // This is a static figure, so strip interaction affordances even when an
     // element's cursor or pointer policy was set by the live renderer.
     plot.selectAll("*").each(function () {

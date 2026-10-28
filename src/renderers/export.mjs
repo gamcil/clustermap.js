@@ -40,6 +40,7 @@ export function exportChartSvg({
     // Event listeners do not serialize, but hover/trim affordances would still
     // be visible as nodes in an exported publication figure.
     plot.selectAll("g.hover").remove();
+    plot.selectAll('[opacity="0"], [display="none"]').remove();
     // This is a static figure, so strip interaction affordances even when an
     // element's cursor or pointer policy was set by the live renderer.
     plot.selectAll("*").each(function () {
