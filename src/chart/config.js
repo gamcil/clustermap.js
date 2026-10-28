@@ -1,6 +1,9 @@
-import { TREE_COLOURING_DEFAULTS } from "../tree/model.mjs";
+import { color } from "d3-color";
+import { TRIM_INDICATOR_DEFAULTS } from "../loci/trimIndicators.mjs";
+import { isRendererMode } from "../renderers/mode.mjs";
+import { TREE_COLOURING_DEFAULTS, validateTreeColouring } from "../tree/model.mjs";
 
-import { clonePlainValue } from "../utils/values.mjs";
+import { clonePlainValue, isPlainObject } from "../utils/values.mjs";
 
 const defaultConfig = {
   // Optional row-aligned metadata panels. Synteny remains the default view.
@@ -13,7 +16,7 @@ const defaultConfig = {
     node: { show: true },
     branch: { width: 1.5, colour: null },
     support: { show: true, fontSize: 9, precision: 1 },
-    scaleBar: { show: true },
+    scaleBar: { show: true, label: "" },
     leafGuide: { show: false, colour: null, width: 1, dash: "4 3" },
   },
   plot: {
@@ -106,13 +109,7 @@ const defaultConfig = {
     labelAlignment: "right",
   },
   locus: {
-    trimIndicators: {
-      show: true,
-      fontSize: 10,
-      fontWeight: 600,
-      borderWidth: 3,
-      borderOpacity: 1,
-    },
+    trimIndicators: TRIM_INDICATOR_DEFAULTS,
     trackBar: {
       colour: null,
       stroke: 1,
@@ -149,12 +146,78 @@ export function createDefaultConfig() {
   return clonePlainValue(defaultConfig);
 }
 
-export function updateConfig(target, source) {
-  for (const [key, value] of Object.entries(source)) {
-    if (!Object.hasOwn(target, key)) continue;
-    if (value && value.constructor === Object) updateConfig(target[key], value);
-    else target[key] = clonePlainValue(value);
+const choices = {
+  "legend.position": ["right", "bottom"],
+  "cluster.labelAlignment": ["left", "right"],
+  "colourBar.domain.minMode": ["fixed", "data"],
+  "colourBar.domain.maxMode": ["fixed", "data"],
+  "gene.label.anchor": ["start", "middle", "end"],
+  "gene.label.position": ["top", "middle", "bottom"],
+};
+const positive = new Set([
+  "tree.width", "tree.branch.width", "tree.leafGuide.width", "plot.scaleFactor", "plot.maxZoom",
+  "plot.minimap.width", "plot.minimap.height", "legend.columns", "legend.columnWidth",
+  "legend.entryHeight", "colourBar.width", "colourBar.height", "scaleBar.height", "scaleBar.basePair",
+]);
+const signed = new Set(["gene.label.rotation", "gene.label.spacing", "legend.marginLeft", "legend.marginTop",
+  "colourBar.marginTop", "scaleBar.marginTop"]);
+const ranges = {
+  "link.threshold": [0, 1], "link.label.position": [0, 1], "gene.label.start": [0, 1],
+  "colourBar.domain.min": [0, 1], "colourBar.domain.max": [0, 1],
+  "tree.support.precision": [0, 100],
+  "locus.trimIndicators.fontSize": [6, 48], "locus.trimIndicators.fontWeight": [100, 900],
+  "locus.trimIndicators.borderWidth": [0, 12], "locus.trimIndicators.borderOpacity": [0, 1],
+};
+const fail = (path, message) => { throw new TypeError(`Invalid configuration: ${path} ${message}`); };
+
+function validateValue(value, fallback, path) {
+  // The tree model owns the colouring contract, including palette entries.
+  if (path.startsWith("tree.colouring.")) return;
+  if (fallback === null) {
+    if (/\.on[A-Z]/.test(path)) {
+      if (value !== null && typeof value !== "function") fail(path, "must be a function or null.");
+    } else if (value !== null && (typeof value !== "string" || !color(value))) fail(path, "must be a valid colour or null.");
+    return;
+  }
+  if (typeof value !== typeof fallback) fail(path, `must be ${typeof fallback}.`);
+  if (typeof fallback === "number") {
+    if (!Number.isFinite(value)) fail(path, "must be finite.");
+    if (!signed.has(path) && value < 0) fail(path, "must be non-negative.");
+    if ((positive.has(path) || /(?:fontSize|FontSize)$/.test(path)) && value <= 0) fail(path, "must be positive.");
+    if (["legend.columns", "tree.support.precision"].includes(path) && !Number.isInteger(value)) fail(path, "must be an integer.");
+    const range = ranges[path];
+    if (range && (value < range[0] || value > range[1])) fail(path, `must be between ${range[0]} and ${range[1]}.`);
+  } else if (typeof fallback === "string") {
+    if (path !== "tree.scaleBar.label" && !value.trim()) fail(path, "must not be empty.");
+    if (choices[path] && !choices[path].includes(value)) fail(path, `must be one of ${choices[path].join(", ")}.`);
+    if (path === "plot.renderer" && !isRendererMode(value)) fail(path, "must be svg, canvas or webgpu.");
+    if (path === "plot.background" && !color(value)) fail(path, "must be a valid colour.");
+    if (path === "tree.leafGuide.dash" && value.trim().split(/[\s,]+/).some((part) => !part || !Number.isFinite(Number(part)) || Number(part) < 0)) fail(path, "must contain non-negative dash lengths.");
   }
 }
 
-export default defaultConfig;
+function merge(target, patch, defaults, path = "config") {
+  if (!isPlainObject(patch)) fail(path, "must be a plain object.");
+  const result = { ...target };
+  for (const [key, value] of Object.entries(patch)) {
+    const name = path === "config" ? key : `${path}.${key}`;
+    if (!Object.hasOwn(defaults, key)) fail(name, "is not a supported setting.");
+    if (isPlainObject(defaults[key])) result[key] = merge(target[key], value, defaults[key], name);
+    else {
+      validateValue(value, defaults[key], name);
+      result[key] = clonePlainValue(value);
+    }
+  }
+  return result;
+}
+
+/** Prepare an owned, validated configuration before replacing live settings. */
+export function mergeConfig(current, patch) {
+  const candidate = merge(current, patch, defaultConfig);
+  validateTreeColouring(candidate.tree.colouring);
+  if (candidate.plot.minZoom > candidate.plot.maxZoom) fail("plot.minZoom", "must not exceed plot.maxZoom.");
+  const domain = candidate.colourBar.domain;
+  if (domain.minMode === "fixed" && domain.maxMode === "fixed" && domain.min > domain.max) fail("colourBar.domain.min", "must not exceed colourBar.domain.max.");
+  if (candidate.gene.shape.bodyHeight + candidate.gene.shape.tipHeight * 2 <= 0) fail("gene.shape", "must have positive total height.");
+  return candidate;
+}

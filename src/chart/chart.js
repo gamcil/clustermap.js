@@ -70,13 +70,12 @@ import {
   isWebGpuRenderer,
 } from "../renderers/mode.mjs";
 import { chartStateFromSnapshot, createChartStateSerializer } from "./snapshot.mjs";
-import { clonePlainValue } from "../utils/values.mjs";
+import { clonePlainValue, isPlainObject } from "../utils/values.mjs";
 
 let nextChartInstance = 0;
 const projectFormat = "clinker-project";
 const projectVersion = 1;
 const historyLimit = 100;
-const isPlainObject = (value) => Boolean(value) && value.constructor === Object;
 const previousConfigPatch = (config, patch) => Object.fromEntries(
   Object.entries(patch || {})
     .filter(([key]) => Object.hasOwn(config || {}, key))
@@ -482,10 +481,7 @@ export default function clusterMap() {
   }
 
   function zoomExtent() {
-    const minimum = Math.max(0, Number(runtime.config.plot.minZoom) || 0);
-    const configuredMaximum = Number(runtime.config.plot.maxZoom);
-    const maximum = Math.max(minimum, Number.isFinite(configuredMaximum) ? configuredMaximum : 8);
-    return [minimum, maximum];
+    return [runtime.config.plot.minZoom, runtime.config.plot.maxZoom];
   }
 
   function constrainZoom(scale) {
@@ -787,10 +783,7 @@ export default function clusterMap() {
     },
     legendText: (event, group) =>
       runtime.config.legend.onClickText ? runtime.config.legend.onClickText(event, group) : renameRecord(event, "groups", group),
-    legendMenu: (event, group) => {
-      const handler = runtime.config.legend.onAltClickText || retainedOverlay.showGroupMenu;
-      handler(event, group);
-    },
+    legendMenu: (event, group) => retainedOverlay.showGroupMenu(event, group),
   };
 
   const targetForEvent = (canvasNode, event) =>

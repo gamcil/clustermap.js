@@ -1,9 +1,13 @@
+export function isPlainObject(value) {
+  if (!value || typeof value !== "object") return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 /** Clone arrays and plain records while retaining primitive and class leaves. */
 export function clonePlainValue(value) {
   if (Array.isArray(value)) return value.map(clonePlainValue);
-  if (!value || typeof value !== "object") return value;
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) return value;
+  if (!isPlainObject(value)) return value;
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, clonePlainValue(child)]));
 }
 

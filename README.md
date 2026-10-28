@@ -372,7 +372,7 @@ otherwise noted. Data/project replacement requires a mounted chart.
 
 | Method | Behaviour |
 | --- | --- |
-| `config(options)` / `config()` | Merge settings and redraw / read current settings. |
+| `config(options)` / `config()` | Validate and merge settings, then redraw / read an independent settings snapshot. |
 | `data(data)` / `data()` | Replace data / read normalized data. Replacement clears history. |
 | `visibleData()` | Read the filtered data currently included in the plot. |
 | `remove({clusters, loci})` | Remove cluster/locus IDs and their contents from the plot, preserving source data. Undoable; removing a cluster's last locus also removes that cluster. |
@@ -399,6 +399,13 @@ Transient UI highlights can supply an ownership token:
 `chart.highlight(ids, { owner })`. Clearing with the same token only clears
 that owner's highlight; ordinary calls remain authoritative. The editor uses
 this to avoid clearing highlights subsequently set by the host app.
+
+Configuration updates reject unknown paths, invalid types, unsupported enum
+values and out-of-range numbers. An invalid update leaves the live chart
+unchanged. Input arrays, configuration reads and `config.change` payloads are
+copied; edit settings through `chart.config(...)` to update the chart and history.
+Colours accept named colours, hex, RGB or HSL values (or `null` for automatic figure colours), and
+callback settings accept a function or `null`.
 
 Chart data requires unique IDs within each record kind. IDs may be non-empty
 strings or finite numbers. State imports require `version: 1`, finite numeric

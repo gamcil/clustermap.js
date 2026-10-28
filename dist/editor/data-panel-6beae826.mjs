@@ -990,6 +990,10 @@ function linear() {
   return linearish(scale);
 }
 
+Object.freeze({
+  show: true, fontSize: 10, fontWeight: 600, borderWidth: 3, borderOpacity: 1,
+});
+
 const sequential = ["#f7fbff", "#08306b"];
 const categorical = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377", "#bbbbbb"];
 Object.freeze({ cellWidth: 32, cellHeight: 20, gap: 24,

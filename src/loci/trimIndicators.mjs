@@ -11,27 +11,16 @@ function featureText(count) {
   return `${count} ${count === 1 ? "feature" : "features"}`;
 }
 
-function boundedNumber(value, fallback, minimum, maximum) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
-}
+export const TRIM_INDICATOR_DEFAULTS = Object.freeze({
+  show: true, fontSize: 10, fontWeight: 600, borderWidth: 3, borderOpacity: 1,
+});
 
-/**
- * Shared text metrics for layout and renderers. The width estimate only
- * chooses collision lanes; the renderer remains the source of exact glyph
- * placement.
- */
+/** Shared typography for collision lanes and renderer text. */
 export function resolveTrimIndicatorStyle(style = {}) {
-  const fontSize = boundedNumber(style.fontSize, 10, 6, 48);
-  const fontWeight = boundedNumber(style.fontWeight, 600, 100, 900);
-  return {
-    fontSize,
-    fontWeight,
-    borderWidth: boundedNumber(style.borderWidth, 3, 0, 12),
-    borderOpacity: boundedNumber(style.borderOpacity, 1, 0, 1),
+  const { fontSize, fontWeight, borderWidth, borderOpacity } = { ...TRIM_INDICATOR_DEFAULTS, ...style };
+  return { fontSize, fontWeight, borderWidth, borderOpacity,
     lineHeight: Math.ceil(fontSize * 1.2),
-    characterWidth: fontSize * (fontWeight >= 600 ? 0.6 : 0.56),
-  };
+    characterWidth: fontSize * (fontWeight >= 600 ? 0.6 : 0.56) };
 }
 
 function indicatorBounds(locus, indicator, metrics) {

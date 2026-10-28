@@ -3,8 +3,8 @@ import { max as d3max, min as d3min } from "d3-array";
 import { quantize } from "d3-interpolate";
 import { scaleLinear, scaleOrdinal, scaleSequential } from "d3-scale";
 import { interpolateGreys, interpolateRainbow } from "d3-scale-chromatic";
-import { createDefaultConfig, updateConfig } from "./config.js";
-import { validateTreeColouring, validateTreePresentation } from "../tree/model.mjs";
+import { createDefaultConfig, mergeConfig } from "./config.js";
+import { validateTreePresentation } from "../tree/model.mjs";
 import { filterLinks, getGroupScaleValues } from "../links/groups.mjs";
 import {
   anchorGeneGroup,
@@ -30,7 +30,6 @@ import {
   patchScene,
   patchAnnotationScene,
 } from "../scene/layout.mjs";
-import { isRendererMode } from "../renderers/mode.mjs";
 import { figureConfig } from "../ui/theme.mjs";
 
 // This is deliberately one factory per chart, not a collection of tiny API
@@ -122,20 +121,7 @@ const lookup = {
 };
 
 function validateConfiguration(options, tree = null) {
-  validateTreeColouring(options?.tree?.colouring);
-  const candidate = createDefaultConfig();
-  updateConfig(candidate, config);
-  updateConfig(candidate, options);
-  if (typeof candidate.plot.showFigureFrame !== "boolean") throw new TypeError("plot.showFigureFrame must be a boolean.");
-  if (typeof candidate.annotations?.enabled !== "boolean") {
-    throw new TypeError("annotations.enabled must be a boolean.");
-  }
-  if (!isRendererMode(candidate.plot.renderer)) {
-    throw new TypeError(`Unknown plot renderer: ${candidate.plot.renderer}. Expected svg, canvas, or webgpu.`);
-  }
-  if (typeof candidate.tree.node?.show !== "boolean") throw new TypeError("tree.node.show must be a boolean.");
-  if (typeof candidate.cluster.hideLocusLabels !== "boolean") throw new TypeError("cluster.hideLocusLabels must be a boolean.");
-  if (!["left", "right"].includes(candidate.cluster.labelAlignment)) throw new TypeError("cluster.labelAlignment must be left or right.");
+  const candidate = mergeConfig(config, options);
   validateTreePresentation(tree, candidate.tree);
   return candidate;
 }
@@ -164,10 +150,8 @@ function updateIdentityScale(data) {
   const dataMin = identities.length ? d3min(identities) : 0;
   const dataMax = identities.length ? d3max(identities) : 1;
   const domain = config.colourBar.domain;
-  let min = domain.minMode === "data" ? dataMin : Number(domain.min);
-  let max = domain.maxMode === "data" ? dataMax : Number(domain.max);
-  min = Number.isFinite(min) ? Math.max(0, Math.min(1, min)) : 0;
-  max = Number.isFinite(max) ? Math.max(0, Math.min(1, max)) : 1;
+  let min = domain.minMode === "data" ? Math.max(0, Math.min(1, dataMin)) : domain.min;
+  let max = domain.maxMode === "data" ? Math.max(0, Math.min(1, dataMax)) : domain.max;
   if (min === max) {
     min = Math.max(0, min - 0.005);
     max = Math.min(1, max + 0.005);

@@ -479,29 +479,29 @@
   };
   const metricsCache = new WeakMap();
   const stylesCache = new WeakMap();
-  const fail$2 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
+  const fail$3 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
   const object$2 = (value) => value && typeof value === "object" && !Array.isArray(value);
   const own$1 = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
   function fields$1(value, allowed, where) {
-    if (!object$2(value)) fail$2(`${where} must be an object.`);
-    for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$2(`${where}.${key} is unsupported.`);
+    if (!object$2(value)) fail$3(`${where} must be an object.`);
+    for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$3(`${where}.${key} is unsupported.`);
   }
   function colour(value, where) {
-    if (typeof value !== "string" || !color(value)) fail$2(`${where} must be a valid colour.`);
+    if (typeof value !== "string" || !color(value)) fail$3(`${where} must be a valid colour.`);
   }
-  function positive(value, where) {
-    if (!Number.isFinite(value) || value <= 0) fail$2(`${where} must be finite and positive.`);
+  function positive$1(value, where) {
+    if (!Number.isFinite(value) || value <= 0) fail$3(`${where} must be finite and positive.`);
   }
   function validateTreeColouring(policy) {
     if (policy === undefined) return;
     fields$1(policy, ["mode", "cutHeight", "palette", "showCutLine"], "colouring");
-    if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$2("colouring.mode must be none or cutHeight.");
+    if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$3("colouring.mode must be none or cutHeight.");
     if (own$1(policy, "cutHeight") && policy.cutHeight !== "auto" && (!Number.isFinite(policy.cutHeight) || policy.cutHeight < 0)) {
-      fail$2('colouring.cutHeight must be "auto" or a finite non-negative number.');
+      fail$3('colouring.cutHeight must be "auto" or a finite non-negative number.');
     }
-    if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$2("colouring.showCutLine must be boolean.");
+    if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$3("colouring.showCutLine must be boolean.");
     if (own$1(policy, "palette")) {
-      if (!Array.isArray(policy.palette) || !policy.palette.length) fail$2("colouring.palette must be a non-empty colour array.");
+      if (!Array.isArray(policy.palette) || !policy.palette.length) fail$3("colouring.palette must be a non-empty colour array.");
       policy.palette.forEach((entry) => colour(entry, "colouring.palette"));
     }
   }
@@ -601,7 +601,7 @@
   function validateBranch(style, where) {
     fields$1(style, ["colour", "width"], where);
     if (own$1(style, "colour")) colour(style.colour, `${where}.colour`);
-    if (own$1(style, "width")) positive(style.width, `${where}.width`);
+    if (own$1(style, "width")) positive$1(style.width, `${where}.width`);
   }
 
   /** Validate optional data fields and the effective tree/config colouring policy. */
@@ -610,8 +610,8 @@
     if (!tree) return;
     if (tree.distance !== undefined) {
       fields$1(tree.distance, ["kind", "label"], "distance");
-      if (tree.distance.kind !== "mergeHeight") fail$2("distance.kind must be mergeHeight.");
-      if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$2("distance.label must be text.");
+      if (tree.distance.kind !== "mergeHeight") fail$3("distance.kind must be mergeHeight.");
+      if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$3("distance.label must be text.");
     }
     const presentation = tree.presentation;
     if (presentation !== undefined) {
@@ -620,33 +620,33 @@
       const nodes = treeMetrics(tree).nodes;
       for (const scope of ["subtrees", "nodes"]) {
         if (presentation[scope] === undefined) continue;
-        if (!object$2(presentation[scope])) fail$2(`presentation.${scope} must be a node-ID dictionary.`);
+        if (!object$2(presentation[scope])) fail$3(`presentation.${scope} must be a node-ID dictionary.`);
         for (const [uid, record] of Object.entries(presentation[scope])) {
           const node = nodes.get(uid);
-          if (!node) fail$2(`presentation.${scope} refers to unknown node '${uid}'.`);
+          if (!node) fail$3(`presentation.${scope} refers to unknown node '${uid}'.`);
           fields$1(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
-          if (scope === "subtrees" && !node.children) fail$2(`subtree '${uid}' must be an internal node.`);
+          if (scope === "subtrees" && !node.children) fail$3(`subtree '${uid}' must be an internal node.`);
           if (record.branch !== undefined) {
-            if (scope === "nodes" && uid === tree.root) fail$2("the display root has no incoming edge to style.");
+            if (scope === "nodes" && uid === tree.root) fail$3("the display root has no incoming edge to style.");
             validateBranch(record.branch, `${scope}.${uid}.branch`);
           }
           if (record.label !== undefined) {
-            if (!node.children) fail$2(`annotation '${uid}' must belong to an internal node.`);
+            if (!node.children) fail$3(`annotation '${uid}' must belong to an internal node.`);
             const label = record.label;
             fields$1(label, ["text", "colour", "fontSize", "fontWeight", "fontStyle"], `nodes.${uid}.label`);
-            if (own$1(label, "text") && typeof label.text !== "string") fail$2(`annotation '${uid}' text must be a string.`);
+            if (own$1(label, "text") && typeof label.text !== "string") fail$3(`annotation '${uid}' text must be a string.`);
             if (own$1(label, "colour")) colour(label.colour, `annotation '${uid}' colour`);
-            if (own$1(label, "fontSize")) positive(label.fontSize, `annotation '${uid}' fontSize`);
-            if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$2("annotation fontWeight must be 400 or 700.");
-            if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$2("annotation fontStyle must be normal or italic.");
+            if (own$1(label, "fontSize")) positive$1(label.fontSize, `annotation '${uid}' fontSize`);
+            if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$3("annotation fontWeight must be 400 or 700.");
+            if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$3("annotation fontStyle must be normal or italic.");
           }
         }
       }
     }
     const policy = { ...TREE_COLOURING_DEFAULTS, ...config.colouring, ...presentation?.colouring };
     if (policy.mode === "cutHeight") {
-      if (tree.distance?.kind !== "mergeHeight") fail$2("cutHeight colouring requires distance.kind = mergeHeight.");
-      if (!treeMetrics(tree).ultrametric) fail$2("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
+      if (tree.distance?.kind !== "mergeHeight") fail$3("cutHeight colouring requires distance.kind = mergeHeight.");
+      if (!treeMetrics(tree).ultrametric) fail$3("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
     }
   }
 
@@ -910,27 +910,16 @@
     return `${count} ${count === 1 ? "feature" : "features"}`;
   }
 
-  function boundedNumber(value, fallback, minimum, maximum) {
-    const number = Number(value);
-    return Number.isFinite(number) ? Math.max(minimum, Math.min(maximum, number)) : fallback;
-  }
+  const TRIM_INDICATOR_DEFAULTS = Object.freeze({
+    show: true, fontSize: 10, fontWeight: 600, borderWidth: 3, borderOpacity: 1,
+  });
 
-  /**
-   * Shared text metrics for layout and renderers. The width estimate only
-   * chooses collision lanes; the renderer remains the source of exact glyph
-   * placement.
-   */
+  /** Shared typography for collision lanes and renderer text. */
   function resolveTrimIndicatorStyle(style = {}) {
-    const fontSize = boundedNumber(style.fontSize, 10, 6, 48);
-    const fontWeight = boundedNumber(style.fontWeight, 600, 100, 900);
-    return {
-      fontSize,
-      fontWeight,
-      borderWidth: boundedNumber(style.borderWidth, 3, 0, 12),
-      borderOpacity: boundedNumber(style.borderOpacity, 1, 0, 1),
+    const { fontSize, fontWeight, borderWidth, borderOpacity } = { ...TRIM_INDICATOR_DEFAULTS, ...style };
+    return { fontSize, fontWeight, borderWidth, borderOpacity,
       lineHeight: Math.ceil(fontSize * 1.2),
-      characterWidth: fontSize * (fontWeight >= 600 ? 0.6 : 0.56),
-    };
+      characterWidth: fontSize * (fontWeight >= 600 ? 0.6 : 0.56) };
   }
 
   function indicatorBounds(locus, indicator, metrics) {
@@ -1776,7 +1765,7 @@
     const guide = {
       colour: config.tree.leafGuide?.colour || "#999",
       width: Number(config.tree.leafGuide?.width) || 1,
-      dash: String(config.tree.leafGuide?.dash || "4 3").split(/[ ,]+/).map(Number).filter(Number.isFinite),
+      dash: String(config.tree.leafGuide?.dash || "4 3").split(/[\s,]+/).map(Number).filter(Number.isFinite),
     };
     const support = {
       fontSize: Number(config.tree.support?.fontSize) || 9,
@@ -1832,8 +1821,6 @@
         ],
         label: { x: rootX + length / 2, y: y + height + 5, text: config.tree.scaleBar?.label || horizontal.scaleBarLabel },
       };
-      // SVG scale labels use points; Canvas uses pixels. Measure the larger
-      // size for a common envelope without changing either renderer's drawing.
       Object.assign(scaleBar.label, measureText(scaleBar.label.text, { ...scaleBar, fontSize: scaleBar.fontSize }));
     }
     let cutLine = null;
@@ -3605,12 +3592,16 @@
     return initInterpolator.apply(scale, arguments);
   }
 
+  function isPlainObject(value) {
+    if (!value || typeof value !== "object") return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  }
+
   /** Clone arrays and plain records while retaining primitive and class leaves. */
   function clonePlainValue(value) {
     if (Array.isArray(value)) return value.map(clonePlainValue);
-    if (!value || typeof value !== "object") return value;
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return value;
+    if (!isPlainObject(value)) return value;
     return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, clonePlainValue(child)]));
   }
 
@@ -8873,46 +8864,46 @@
     "groups", "markerWidth", "laneGap", "titleFontSize", "columnFontSize", "labelFontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
     "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour"]);
   const fields = new Set([...styleFields, "values"]);
-  const fail$1 = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
+  const fail$2 = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
 
   const isAnnotationOperation = (operation) => typeof operation?.type === "string" && operation.type.startsWith("annotationPanels.");
 
   function normalizeAnnotationOperation(data, operation) {
     const known = new Set((data.annotationPanels || []).map((panel) => panel.uid));
     if (operation.type === "annotationPanels.create") {
-      if (!operation.panel || typeof operation.panel.uid !== "string" || !operation.panel.uid.trim() || known.has(operation.panel.uid)) fail$1("create requires a new, non-empty panel uid.");
+      if (!operation.panel || typeof operation.panel.uid !== "string" || !operation.panel.uid.trim() || known.has(operation.panel.uid)) fail$2("create requires a new, non-empty panel uid.");
       const index = operation.index ?? known.size;
-      if (!Number.isInteger(index) || index < 0 || index > known.size) fail$1("index must be a valid panel insertion position.");
+      if (!Number.isInteger(index) || index < 0 || index > known.size) fail$2("index must be a valid panel insertion position.");
       return { type: operation.type, panel: structuredClone(operation.panel), index };
     }
     if (operation.type === "annotationPanels.reorder") {
       if (!Array.isArray(operation.ids) || operation.ids.length !== known.size || new Set(operation.ids).size !== known.size ||
-          operation.ids.some((uid) => !known.has(uid))) fail$1("reorder must contain every panel uid exactly once.");
+          operation.ids.some((uid) => !known.has(uid))) fail$2("reorder must contain every panel uid exactly once.");
       return { type: operation.type, ids: [...operation.ids] };
     }
     if (operation.type === "annotationPanels.delete") {
-      if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$1("delete requires existing panel IDs.");
+      if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$2("delete requires existing panel IDs.");
       return { type: operation.type, ids: [...new Set(operation.ids)] };
     }
     if (operation.type === "annotationPanels.updateRows") {
       const panel = data.annotationPanels?.find((panel) => panel.uid === operation.uid);
       if (!panel || panel.type === "groups" || !operation.values || typeof operation.values !== "object" ||
           Array.isArray(operation.values) || !Object.keys(operation.values).length ||
-          Object.values(operation.values).some((row) => row !== null && !Array.isArray(row))) fail$1("updateRows requires a matrix panel and row arrays (or null to remove a row).");
+          Object.values(operation.values).some((row) => row !== null && !Array.isArray(row))) fail$2("updateRows requires a matrix panel and row arrays (or null to remove a row).");
       const clusterIds = new Set(data.clusters.map((cluster) => cluster.uid));
-      if (Object.keys(operation.values).some((uid) => !clusterIds.has(uid))) fail$1("updateRows requires existing cluster IDs.");
+      if (Object.keys(operation.values).some((uid) => !clusterIds.has(uid))) fail$2("updateRows requires existing cluster IDs.");
       return { type: operation.type, uid: operation.uid, values: structuredClone(operation.values) };
     }
     if (operation.type === "annotationPanels.replaceStyle") {
       if (!known.has(operation.uid) || !operation.style || typeof operation.style !== "object" ||
-          Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !styleFields.has(key))) fail$1("replaceStyle requires an existing panel and supported style fields.");
+          Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !styleFields.has(key))) fail$2("replaceStyle requires an existing panel and supported style fields.");
       return { type: operation.type, uid: operation.uid, style: structuredClone(operation.style) };
     }
-    if (operation.type !== "annotationPanels.update") fail$1(`unsupported type '${operation.type}'.`);
-    if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$1("ids must reference existing panels.");
+    if (operation.type !== "annotationPanels.update") fail$2(`unsupported type '${operation.type}'.`);
+    if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$2("ids must reference existing panels.");
     const changes = operation.changes;
     if (!changes || typeof changes !== "object" || Array.isArray(changes) || !Object.keys(changes).length ||
-        Object.keys(changes).some((key) => !fields.has(key))) fail$1("changes contains unsupported fields.");
+        Object.keys(changes).some((key) => !fields.has(key))) fail$2("changes contains unsupported fields.");
     return { type: operation.type, ids: [...new Set(operation.ids)], changes: structuredClone(changes) };
   }
 
@@ -9061,41 +9052,41 @@
     }
   }
 
-  const fail = (message) => { throw new TypeError(`Invalid chart operation: ${message}`); };
+  const fail$1 = (message) => { throw new TypeError(`Invalid chart operation: ${message}`); };
   const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
   const object = (value) => value && typeof value === "object" && !Array.isArray(value);
   const types = new Set(["tree.presentation.update", "tree.presentation.reset", "tree.presentation.restore"]);
   const isTreeOperation = (operation) => types.has(operation?.type);
 
   function normalizeTreeOperation(tree, operation) {
-    if (!tree) fail("tree presentation edits require a loaded tree.");
+    if (!tree) fail$1("tree presentation edits require a loaded tree.");
     if (operation.type === "tree.presentation.restore") {
       return { type: operation.type, ...(own(operation, "presentation") ? { presentation: structuredClone(operation.presentation) } : {}) };
     }
     const { type, scope } = operation;
-    if (!["tree", "node", "subtree", "manual"].includes(scope)) fail("unknown tree presentation scope.");
-    if (scope === "manual" && type !== "tree.presentation.reset") fail("manual scope is only for resetting all manual styles.");
-    if (scope === "tree" && type === "tree.presentation.reset") fail("use manual scope to reset all manual styles; update colouring to reset its policy.");
+    if (!["tree", "node", "subtree", "manual"].includes(scope)) fail$1("unknown tree presentation scope.");
+    if (scope === "manual" && type !== "tree.presentation.reset") fail$1("manual scope is only for resetting all manual styles.");
+    if (scope === "tree" && type === "tree.presentation.reset") fail$1("use manual scope to reset all manual styles; update colouring to reset its policy.");
     let ids;
     if (["node", "subtree"].includes(scope)) {
-      if (!Array.isArray(operation.ids) || !operation.ids.length) fail(`${scope} scope requires node IDs.`);
+      if (!Array.isArray(operation.ids) || !operation.ids.length) fail$1(`${scope} scope requires node IDs.`);
       ids = [...new Set(operation.ids)];
       const nodes = treeMetrics(tree).nodes;
       for (const uid of ids) {
-        if (!nodes.has(uid)) fail(`unknown tree node '${uid}'.`);
-        if (scope === "subtree" && !nodes.get(uid).children) fail(`subtree '${uid}' is not internal.`);
+        if (!nodes.has(uid)) fail$1(`unknown tree node '${uid}'.`);
+        if (scope === "subtree" && !nodes.get(uid).children) fail$1(`subtree '${uid}' is not internal.`);
       }
-    } else if (operation.ids !== undefined) fail(`${scope} scope does not accept ids.`);
+    } else if (operation.ids !== undefined) fail$1(`${scope} scope does not accept ids.`);
     const result = { type, scope, ...(ids ? { ids } : {}) };
     if (type === "tree.presentation.update") {
-      if (!object(operation.changes) || !Object.keys(operation.changes).length) fail("tree presentation updates require changes.");
+      if (!object(operation.changes) || !Object.keys(operation.changes).length) fail$1("tree presentation updates require changes.");
       const allowed = scope === "tree" ? ["colouring"] : scope === "subtree" ? ["branch"] : ["branch", "label"];
-      if (Object.keys(operation.changes).some((key) => !allowed.includes(key))) fail("unsupported tree presentation update field.");
+      if (Object.keys(operation.changes).some((key) => !allowed.includes(key))) fail$1("unsupported tree presentation update field.");
       const fields = { branch: ["colour", "width"], label: ["text", "colour", "fontSize", "fontWeight", "fontStyle"], colouring: ["mode", "cutHeight", "palette", "showCutLine"] };
       for (const [key, value] of Object.entries(operation.changes)) {
         if (value === null) continue;
         if (!object(value) || Object.keys(value).some((field) => !fields[key].includes(field))) {
-          fail(`unsupported ${key} fields in tree presentation update.`);
+          fail$1(`unsupported ${key} fields in tree presentation update.`);
         }
       }
       result.changes = structuredClone(operation.changes);
@@ -12673,6 +12664,26 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     return c + "";
   }
 
+  const rendererModes = new Set(["svg", "canvas", "webgpu"]);
+
+  function isRendererMode(renderer) {
+    return rendererModes.has(renderer);
+  }
+
+  function isCanvasRenderer(renderer) {
+    return renderer === "canvas";
+  }
+
+  function isWebGpuRenderer(renderer) {
+    return renderer === "webgpu";
+  }
+
+  // Canvas and WebGPU share the retained scene, pointer interaction, minimap,
+  // and preview paths. SVG is intentionally separate because D3 owns its DOM.
+  function isRasterRenderer(renderer) {
+    return isCanvasRenderer(renderer) || isWebGpuRenderer(renderer);
+  }
+
   const defaultConfig = {
     // Optional row-aligned metadata panels. Synteny remains the default view.
     annotations: { enabled: false },
@@ -12684,7 +12695,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       node: { show: true },
       branch: { width: 1.5, colour: null },
       support: { show: true, fontSize: 9, precision: 1 },
-      scaleBar: { show: true },
+      scaleBar: { show: true, label: "" },
       leafGuide: { show: false, colour: null, width: 1, dash: "4 3" },
     },
     plot: {
@@ -12777,13 +12788,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       labelAlignment: "right",
     },
     locus: {
-      trimIndicators: {
-        show: true,
-        fontSize: 10,
-        fontWeight: 600,
-        borderWidth: 3,
-        borderOpacity: 1,
-      },
+      trimIndicators: TRIM_INDICATOR_DEFAULTS,
       trackBar: {
         colour: null,
         stroke: 1,
@@ -12820,32 +12825,80 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     return clonePlainValue(defaultConfig);
   }
 
-  function updateConfig(target, source) {
-    for (const [key, value] of Object.entries(source)) {
-      if (!Object.hasOwn(target, key)) continue;
-      if (value && value.constructor === Object) updateConfig(target[key], value);
-      else target[key] = clonePlainValue(value);
+  const choices = {
+    "legend.position": ["right", "bottom"],
+    "cluster.labelAlignment": ["left", "right"],
+    "colourBar.domain.minMode": ["fixed", "data"],
+    "colourBar.domain.maxMode": ["fixed", "data"],
+    "gene.label.anchor": ["start", "middle", "end"],
+    "gene.label.position": ["top", "middle", "bottom"],
+  };
+  const positive = new Set([
+    "tree.width", "tree.branch.width", "tree.leafGuide.width", "plot.scaleFactor", "plot.maxZoom",
+    "plot.minimap.width", "plot.minimap.height", "legend.columns", "legend.columnWidth",
+    "legend.entryHeight", "colourBar.width", "colourBar.height", "scaleBar.height", "scaleBar.basePair",
+  ]);
+  const signed = new Set(["gene.label.rotation", "gene.label.spacing", "legend.marginLeft", "legend.marginTop",
+    "colourBar.marginTop", "scaleBar.marginTop"]);
+  const ranges = {
+    "link.threshold": [0, 1], "link.label.position": [0, 1], "gene.label.start": [0, 1],
+    "colourBar.domain.min": [0, 1], "colourBar.domain.max": [0, 1],
+    "tree.support.precision": [0, 100],
+    "locus.trimIndicators.fontSize": [6, 48], "locus.trimIndicators.fontWeight": [100, 900],
+    "locus.trimIndicators.borderWidth": [0, 12], "locus.trimIndicators.borderOpacity": [0, 1],
+  };
+  const fail = (path, message) => { throw new TypeError(`Invalid configuration: ${path} ${message}`); };
+
+  function validateValue(value, fallback, path) {
+    // The tree model owns the colouring contract, including palette entries.
+    if (path.startsWith("tree.colouring.")) return;
+    if (fallback === null) {
+      if (/\.on[A-Z]/.test(path)) {
+        if (value !== null && typeof value !== "function") fail(path, "must be a function or null.");
+      } else if (value !== null && (typeof value !== "string" || !color(value))) fail(path, "must be a valid colour or null.");
+      return;
+    }
+    if (typeof value !== typeof fallback) fail(path, `must be ${typeof fallback}.`);
+    if (typeof fallback === "number") {
+      if (!Number.isFinite(value)) fail(path, "must be finite.");
+      if (!signed.has(path) && value < 0) fail(path, "must be non-negative.");
+      if ((positive.has(path) || /(?:fontSize|FontSize)$/.test(path)) && value <= 0) fail(path, "must be positive.");
+      if (["legend.columns", "tree.support.precision"].includes(path) && !Number.isInteger(value)) fail(path, "must be an integer.");
+      const range = ranges[path];
+      if (range && (value < range[0] || value > range[1])) fail(path, `must be between ${range[0]} and ${range[1]}.`);
+    } else if (typeof fallback === "string") {
+      if (path !== "tree.scaleBar.label" && !value.trim()) fail(path, "must not be empty.");
+      if (choices[path] && !choices[path].includes(value)) fail(path, `must be one of ${choices[path].join(", ")}.`);
+      if (path === "plot.renderer" && !isRendererMode(value)) fail(path, "must be svg, canvas or webgpu.");
+      if (path === "plot.background" && !color(value)) fail(path, "must be a valid colour.");
+      if (path === "tree.leafGuide.dash" && value.trim().split(/[\s,]+/).some((part) => !part || !Number.isFinite(Number(part)) || Number(part) < 0)) fail(path, "must contain non-negative dash lengths.");
     }
   }
 
-  const rendererModes = new Set(["svg", "canvas", "webgpu"]);
-
-  function isRendererMode(renderer) {
-    return rendererModes.has(renderer);
+  function merge(target, patch, defaults, path = "config") {
+    if (!isPlainObject(patch)) fail(path, "must be a plain object.");
+    const result = { ...target };
+    for (const [key, value] of Object.entries(patch)) {
+      const name = path === "config" ? key : `${path}.${key}`;
+      if (!Object.hasOwn(defaults, key)) fail(name, "is not a supported setting.");
+      if (isPlainObject(defaults[key])) result[key] = merge(target[key], value, defaults[key], name);
+      else {
+        validateValue(value, defaults[key], name);
+        result[key] = clonePlainValue(value);
+      }
+    }
+    return result;
   }
 
-  function isCanvasRenderer(renderer) {
-    return renderer === "canvas";
-  }
-
-  function isWebGpuRenderer(renderer) {
-    return renderer === "webgpu";
-  }
-
-  // Canvas and WebGPU share the retained scene, pointer interaction, minimap,
-  // and preview paths. SVG is intentionally separate because D3 owns its DOM.
-  function isRasterRenderer(renderer) {
-    return isCanvasRenderer(renderer) || isWebGpuRenderer(renderer);
+  /** Prepare an owned, validated configuration before replacing live settings. */
+  function mergeConfig(current, patch) {
+    const candidate = merge(current, patch, defaultConfig);
+    validateTreeColouring(candidate.tree.colouring);
+    if (candidate.plot.minZoom > candidate.plot.maxZoom) fail("plot.minZoom", "must not exceed plot.maxZoom.");
+    const domain = candidate.colourBar.domain;
+    if (domain.minMode === "fixed" && domain.maxMode === "fixed" && domain.min > domain.max) fail("colourBar.domain.min", "must not exceed colourBar.domain.max.");
+    if (candidate.gene.shape.bodyHeight + candidate.gene.shape.tipHeight * 2 <= 0) fail("gene.shape", "must have positive total height.");
+    return candidate;
   }
 
   // This is deliberately one factory per chart, not a collection of tiny API
@@ -12937,20 +12990,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   };
 
   function validateConfiguration(options, tree = null) {
-    validateTreeColouring(options?.tree?.colouring);
-    const candidate = createDefaultConfig();
-    updateConfig(candidate, config);
-    updateConfig(candidate, options);
-    if (typeof candidate.plot.showFigureFrame !== "boolean") throw new TypeError("plot.showFigureFrame must be a boolean.");
-    if (typeof candidate.annotations?.enabled !== "boolean") {
-      throw new TypeError("annotations.enabled must be a boolean.");
-    }
-    if (!isRendererMode(candidate.plot.renderer)) {
-      throw new TypeError(`Unknown plot renderer: ${candidate.plot.renderer}. Expected svg, canvas, or webgpu.`);
-    }
-    if (typeof candidate.tree.node?.show !== "boolean") throw new TypeError("tree.node.show must be a boolean.");
-    if (typeof candidate.cluster.hideLocusLabels !== "boolean") throw new TypeError("cluster.hideLocusLabels must be a boolean.");
-    if (!["left", "right"].includes(candidate.cluster.labelAlignment)) throw new TypeError("cluster.labelAlignment must be left or right.");
+    const candidate = mergeConfig(config, options);
     validateTreePresentation(tree, candidate.tree);
     return candidate;
   }
@@ -12979,10 +13019,8 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     const dataMin = identities.length ? min(identities) : 0;
     const dataMax = identities.length ? max(identities) : 1;
     const domain = config.colourBar.domain;
-    let min$1 = domain.minMode === "data" ? dataMin : Number(domain.min);
-    let max$1 = domain.maxMode === "data" ? dataMax : Number(domain.max);
-    min$1 = Number.isFinite(min$1) ? Math.max(0, Math.min(1, min$1)) : 0;
-    max$1 = Number.isFinite(max$1) ? Math.max(0, Math.min(1, max$1)) : 1;
+    let min$1 = domain.minMode === "data" ? Math.max(0, Math.min(1, dataMin)) : domain.min;
+    let max$1 = domain.maxMode === "data" ? Math.max(0, Math.min(1, dataMax)) : domain.max;
     if (min$1 === max$1) {
       min$1 = Math.max(0, min$1 - 0.005);
       max$1 = Math.min(1, max$1 + 0.005);
@@ -15319,7 +15357,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   const projectFormat = "clinker-project";
   const projectVersion = 1;
   const historyLimit = 100;
-  const isPlainObject = (value) => Boolean(value) && value.constructor === Object;
   const previousConfigPatch = (config, patch) => Object.fromEntries(
     Object.entries(patch || {})
       .filter(([key]) => Object.hasOwn(config || {}, key))
@@ -15725,10 +15762,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     }
 
     function zoomExtent() {
-      const minimum = Math.max(0, Number(runtime.config.plot.minZoom) || 0);
-      const configuredMaximum = Number(runtime.config.plot.maxZoom);
-      const maximum = Math.max(minimum, Number.isFinite(configuredMaximum) ? configuredMaximum : 8);
-      return [minimum, maximum];
+      return [runtime.config.plot.minZoom, runtime.config.plot.maxZoom];
     }
 
     function constrainZoom(scale) {
@@ -16030,10 +16064,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       },
       legendText: (event, group) =>
         runtime.config.legend.onClickText ? runtime.config.legend.onClickText(event, group) : renameRecord(event, "groups", group),
-      legendMenu: (event, group) => {
-        const handler = runtime.config.legend.onAltClickText || retainedOverlay.showGroupMenu;
-        handler(event, group);
-      },
+      legendMenu: (event, group) => retainedOverlay.showGroupMenu(event, group),
     };
 
     const targetForEvent = (canvasNode, event) =>

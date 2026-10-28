@@ -147,7 +147,7 @@ export function layoutTree({
   const guide = {
     colour: config.tree.leafGuide?.colour || "#999",
     width: Number(config.tree.leafGuide?.width) || 1,
-    dash: String(config.tree.leafGuide?.dash || "4 3").split(/[ ,]+/).map(Number).filter(Number.isFinite),
+    dash: String(config.tree.leafGuide?.dash || "4 3").split(/[\s,]+/).map(Number).filter(Number.isFinite),
   };
   const support = {
     fontSize: Number(config.tree.support?.fontSize) || 9,
@@ -203,8 +203,6 @@ export function layoutTree({
       ],
       label: { x: rootX + length / 2, y: y + height + 5, text: config.tree.scaleBar?.label || horizontal.scaleBarLabel },
     };
-    // SVG scale labels use points; Canvas uses pixels. Measure the larger
-    // size for a common envelope without changing either renderer's drawing.
     Object.assign(scaleBar.label, measureText(scaleBar.label.text, { ...scaleBar, fontSize: scaleBar.fontSize }));
   }
   let cutLine = null;
