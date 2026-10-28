@@ -28,7 +28,7 @@ import {
 import {
   buildScene,
   patchScene,
-  patchAnnotationScene,
+  patchPresentationScene,
 } from "../scene/layout.mjs";
 import { figureConfig } from "../ui/theme.mjs";
 
@@ -246,8 +246,8 @@ function clusterOrderForData(data) {
 }
 
 function updateScene(data, { sourceScene = null, changes = {}, synchronize = true } = {}) {
-  if (sourceScene && changes.annotationsOnly) {
-    currentScene = patchAnnotationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
+  if (sourceScene && changes.presentationOnly) {
+    currentScene = patchPresentationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
     return currentScene;
   }
   updateScales(data, { geometryOnly: Boolean(sourceScene) });

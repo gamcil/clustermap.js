@@ -603,11 +603,11 @@ export default function clusterMap() {
 
   function applyPatch(operations, { record = true, automaticGroups, notify = true } = {}) {
     const sourceScene = runtime.getScene();
-    const annotationsOnly = Array.isArray(operations) && operations.every(isAnnotationOperation);
+    const presentationOnly = Array.isArray(operations) && operations.every((op) => isAnnotationOperation(op) || isTreeOperation(op));
     sceneCommit = null;
     // Source edits may mutate currentData in place. Identity alone cannot
     // invalidate the cached biological defaults, including on undo/redo.
-    if (!annotationsOnly) stateSnapshots.reset();
+    if (!presentationOnly) stateSnapshots.reset();
     const groupsAutomaticBefore = groupsAreAutomatic();
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
     plotDataDirty = true;
@@ -616,11 +616,11 @@ export default function clusterMap() {
       currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
     }
     const groupsAutomaticAfter = groupsAreAutomatic();
-    if (!annotationsOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
+    if (!presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
       refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
     });
-    if (sourceScene && !restoringAutomatic && annotationsOnly) {
-      sceneCommit = { sourceScene, changes: { annotationsOnly: true } };
+    if (sourceScene && !restoringAutomatic && presentationOnly) {
+      sceneCommit = { sourceScene, changes: { presentationOnly: true } };
     }
     redraw({ animate: false });
     if (record) {
@@ -847,12 +847,12 @@ export default function clusterMap() {
     return paintSvg();
   }
 
-  function paintSvg({ annotationsOnly = false, previousScene = null, animate = false } = {}) {
+  function paintSvg({ presentationOnly = false, previousScene = null, animate = false } = {}) {
     const svg = container?.select("svg.clusterMap");
     if (!svg || svg.empty()) return;
     updateFigureSurface();
     return rendererLifecycle.paint("svg", { ...sceneFrame(runtime.getScene()),
-      plot: svg.select("g.clusterMapG"), data: plotData, annotationsOnly, previousScene, animate,
+      plot: svg.select("g.clusterMapG"), data: plotData, presentationOnly, previousScene, animate,
       annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
       transition: animate ? createTransition().duration(runtime.config.plot.transitionDuration) : null,
       ids: runtime.ids, interactions: rendererInteractions });
@@ -1127,7 +1127,7 @@ export default function clusterMap() {
     syncCameraZoom({ surface: canvas, zoom: canvasZoom, camera });
     applyCamera(svg.select("g.clusterMapViewport"));
 
-    const annotationsOnly = Boolean(committedScene?.changes.annotationsOnly);
+    const presentationOnly = Boolean(committedScene?.changes.presentationOnly);
     const scene = runtime.updateScene(data, { ...committedScene, synchronize });
 
     if (useRaster) {
@@ -1135,7 +1135,7 @@ export default function clusterMap() {
       scheduleMinimapBase(scene);
       animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene);
     } else {
-      paintSvg({ annotationsOnly, previousScene, animate: hasInitialView && animate });
+      paintSvg({ presentationOnly, previousScene, animate: hasInitialView && animate });
 
       if (!hasInitialView) fitInitialView(svg, scene);
     }
@@ -1324,6 +1324,8 @@ export default function clusterMap() {
       throw new TypeError("Only tree presentation operations can be previewed.");
     }
     cancelTreePresentationPreview();
+    const sourceScene = runtime.getScene();
+    if (sourceScene) sceneCommit = { sourceScene, changes: { presentationOnly: true } };
     if (operations) {
       const undo = inverseTreeOperation(tree);
       try { applyChartOperations(currentData, chartIndex, operations, runtime.config.tree); }

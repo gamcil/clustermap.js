@@ -617,13 +617,13 @@ function projectSceneAnnotations(definitions, clusters, bounds, chrome, options,
     figureBounds: figureBoundsForChrome(annotationBounds, chrome, options.measureText) };
 }
 
-/** Presentation/data edits to annotations leave synteny and its indexes intact. */
-export function patchAnnotationScene(scene, definitions, options) {
+/** Tree and annotation edits retain biological geometry and spatial indexes. */
+export function patchPresentationScene(scene, definitions, options) {
   const chrome = repositionChrome(scene.chrome, scene.bounds, scene.bounds);
   return { ...scene, chrome,
     ...projectSceneAnnotations(definitions, scene.clusters, scene.bounds, chrome,
       { ...options, rowOffset: options.shape.tipHeight + options.shape.bodyHeight / 2 }, scene),
-    changes: { annotationsOnly: true } };
+    changes: { presentationOnly: true } };
 }
 
 function placeLegendAfterAnnotations(chrome, panels, annotationBounds, measureText) {

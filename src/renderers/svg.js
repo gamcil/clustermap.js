@@ -23,7 +23,7 @@ export function renderSvg({
   plot,
   data,
   scene,
-  annotationsOnly = false,
+  presentationOnly = false,
   annotationViewport = null,
   preview = null,
   previousScene = null,
@@ -45,11 +45,14 @@ export function renderSvg({
   if (preview) return renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
     highlightGeneIds, highlightLocusIds, highlightClusterIds });
   previewStates.delete(plot.node());
-  if (annotationsOnly) {
+  const renderPresentation = () => {
     renderChrome({ plot, chrome: scene.chrome, ids, interactions });
-    renderSvgAnnotations(plot, scene, { viewport: annotationViewport });
-    return;
-  }
+    renderSvgAnnotations(plot, scene, { transition, animate, viewport: annotationViewport });
+    renderTree(plot, data.tree, scene, config, interactions, transition, animate, {
+      previousTree, previousScene: previousTreeScene,
+    });
+  };
+  if (presentationOnly) return renderPresentation();
   const linkGroup = plot
     .selectAll("g.links")
     .data([data])
@@ -289,12 +292,7 @@ export function renderSvg({
         })
     );
 
-  renderChrome({ plot, chrome: scene.chrome, ids, interactions });
-  renderSvgAnnotations(plot, scene, { transition, animate, viewport: annotationViewport });
-  renderTree(plot, data.tree, scene, config, interactions, transition, animate, {
-    previousTree,
-    previousScene: previousTreeScene,
-  });
+  renderPresentation();
 }
 
 // Apply renderer-neutral patches to retained SVG elements. Geometry, adjacency,

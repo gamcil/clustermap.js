@@ -1290,7 +1290,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
       }
       if (scene !== nextScene && nextScene.genes === scene?.genes && nextScene.links === scene?.links &&
           nextScene.loci === scene?.loci && nextScene.clusters === scene?.clusters) {
-        // Annotation-only edits retain all biological geometry and GPU buffers.
+        // Presentation edits retain biological geometry and GPU buffers.
         scene = nextScene;
       }
       if (scene !== nextScene) {

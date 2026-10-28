@@ -9,6 +9,31 @@ import { createChartIndex } from "../../src/data/index.mjs";
 import { createChartState, setLocusOffset } from "../../src/chart/state.mjs";
 import { createLocusOffsetsPreview } from "../../src/scene/preview.mjs";
 import { createLargeTestingData } from "../../fixtures/synthetic.mjs";
+import { readFile } from "node:fs/promises";
+import { applyChartOperations } from "../../src/data/operations.mjs";
+
+test("tree, annotation and mixed presentation edits retain geometry and spatial indexes", async () => {
+  const data = normalizeChartData(JSON.parse(await readFile(new URL("../../fixtures/heatmap.json", import.meta.url), "utf8")));
+  const runtime = createChartRuntime(), index = createChartIndex(data), state = createChartState(data);
+  runtime.configure({ annotations: { enabled: true } });
+  runtime.setChartIndex(index); runtime.setChartState(state);
+  const initial = runtime.updateScene(data);
+  let scene = initial;
+  const treeEdit = { type: "tree.presentation.update", scope: "subtree", ids: ["x"], changes: { collapsed: true } };
+  const annotationEdit = { type: "annotationPanels.update", ids: [data.annotationPanels[0].uid], changes: { title: "New title" } };
+  for (const operations of [[treeEdit], [annotationEdit], [treeEdit, annotationEdit]]) {
+    const result = applyChartOperations(data, index, operations);
+    scene = runtime.updateScene(data, { sourceScene: scene, changes: { presentationOnly: true } });
+    for (const key of ["genes", "links", "loci", "clusters", "index", "hitRegions", "bounds"]) {
+      assert.equal(scene[key], initial[key], `${key} is retained`);
+    }
+    assert.equal(scene.changes.presentationOnly, true);
+    assert.equal(scene.annotationPanels[0].definition, data.annotationPanels[0]);
+    applyChartOperations(data, index, result.inverse);
+    scene = runtime.updateScene(data, { sourceScene: scene, changes: { presentationOnly: true } });
+    assert.equal(scene.index, initial.index, "undo keeps the spatial indexes");
+  }
+});
 
 test("public configuration reads and subscriber snapshots are independently owned", async () => {
   const { default: clusterMap } = await import("../../src/chart/chart.js");

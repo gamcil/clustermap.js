@@ -46,9 +46,10 @@ export function createCanvasBackend({ render = renderCanvas,
   const biologyMatches = (request) => {
     if (!biology || !canRetainBiology(request)) return false;
     const previous = biology.request, size = dimensions(request);
-    return (previous.scene === request.scene || request.scene.changes?.annotationsOnly) &&
+    return (previous.scene === request.scene || request.scene.changes?.presentationOnly) &&
       previous.canvas === request.canvas && previous.config === request.config &&
       previous.scales === request.scales && previous.tree === request.tree &&
+      biology.treePresentation === request.tree?.presentation &&
       previous.pixelRatio === request.pixelRatio &&
       previous.hoverLocusUid === request.hoverLocusUid &&
       previous.suppressLocusHover === request.suppressLocusHover &&
@@ -69,6 +70,7 @@ export function createCanvasBackend({ render = renderCanvas,
       bitmap.width = canvas.width; bitmap.height = canvas.height;
       bitmap.getContext("2d").drawImage(canvas, 0, 0);
       biology = { request: { ...request, camera: { ...request.camera } },
+        treePresentation: request.tree?.presentation,
         highlights: highlightKeys.map((key) => new Set(request[key])),
         width: size.width, height: size.height, bitmap };
     } else {

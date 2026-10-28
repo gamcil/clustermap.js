@@ -155,10 +155,10 @@ test("accepting a scene patch delegates buffer reuse to the active renderer", as
   backend.paint({ ...request, scene });
   assert.deepEqual(adoptions, [[scene, sourceScene, { scales: request.scales, config: request.config }]]);
   assert.deepEqual(draws, [sourceScene, scene], "a rejected adoption still renders the new scene");
-  const annotations = { changes: { annotationsOnly: true } };
+  const annotations = { changes: { presentationOnly: true } };
   backend.setScene(annotations, { sourceScene: scene, scales: request.scales, config: request.config });
   backend.paint({ ...request, scene: annotations });
-  assert.equal(adoptions.length, 1, "annotation-only edits bypass biological buffer adoption");
+  assert.equal(adoptions.length, 1, "presentation-only edits bypass biological buffer adoption");
   assert.equal(draws.at(-1), annotations);
   backend.destroy();
 });

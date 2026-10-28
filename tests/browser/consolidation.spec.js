@@ -70,6 +70,32 @@ test("batch trim respects a pretrimmed member and remains one undoable edit", as
   expect(result.redone).toEqual(result.after);
 });
 
+test("SVG tree edits, previews and history leave biological DOM untouched", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const observer = new MutationObserver(() => {});
+    for (const node of document.querySelectorAll("g.clusters,g.links")) observer.observe(node,
+      { attributes: true, childList: true, characterData: true, subtree: true });
+    chart.patch([{ type: "tree.presentation.update", scope: "subtree", ids: ["pair"], changes: { collapsed: true } }]);
+    chart.undo(); chart.redo();
+    const before = chart.figureBounds();
+    chart.previewTreePresentation([{ type: "tree.presentation.update", scope: "node", ids: ["pair"],
+      changes: { label: { text: "A wide clade annotation ".repeat(8), fontSize: 32 } } }]);
+    const during = chart.figureBounds();
+    const hasPreview = Boolean(document.querySelector("text.tree-annotation"));
+    chart.previewTreePresentation(null);
+    const mutations = observer.takeRecords().length; observer.disconnect();
+    return { mutations, before, during, after: chart.figureBounds(), hasPreview,
+      triangles: document.querySelectorAll("polygon.tree-subtree").length,
+      annotations: document.querySelectorAll("text.tree-annotation").length };
+  });
+  expect(result.mutations).toBe(0);
+  expect(result.hasPreview).toBe(true);
+  expect(result.during.maxX - result.during.minX).toBeGreaterThan(result.before.maxX - result.before.minX);
+  expect(result.after).toEqual(result.before);
+  expect(result.triangles).toBe(1);
+  expect(result.annotations).toBe(0);
+});
+
 for (const renderer of ["svg", "canvas", "webgpu"]) {
   test(`${renderer}: subtree triangles persist, export and expand through the node menu`, async ({ page }) => {
     const point = await page.locator("circle.tree-node").nth(1).boundingBox();

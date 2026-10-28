@@ -4767,13 +4767,13 @@
       figureBounds: figureBoundsForChrome(annotationBounds, chrome, options.measureText) };
   }
 
-  /** Presentation/data edits to annotations leave synteny and its indexes intact. */
-  function patchAnnotationScene(scene, definitions, options) {
+  /** Tree and annotation edits retain biological geometry and spatial indexes. */
+  function patchPresentationScene(scene, definitions, options) {
     const chrome = repositionChrome(scene.chrome, scene.bounds, scene.bounds);
     return { ...scene, chrome,
       ...projectSceneAnnotations(definitions, scene.clusters, scene.bounds, chrome,
         { ...options, rowOffset: options.shape.tipHeight + options.shape.bodyHeight / 2 }, scene),
-      changes: { annotationsOnly: true } };
+      changes: { presentationOnly: true } };
   }
 
   function placeLegendAfterAnnotations(chrome, panels, annotationBounds, measureText) {
@@ -11273,7 +11273,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     plot,
     data,
     scene,
-    annotationsOnly = false,
+    presentationOnly = false,
     annotationViewport = null,
     preview = null,
     previousScene = null,
@@ -11295,11 +11295,14 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     if (preview) return renderPreview({ plot, data, scene, preview, config, scales, ids, interactions,
       highlightGeneIds, highlightLocusIds, highlightClusterIds });
     previewStates.delete(plot.node());
-    if (annotationsOnly) {
+    const renderPresentation = () => {
       renderChrome({ plot, chrome: scene.chrome, ids, interactions });
-      renderSvgAnnotations(plot, scene, { viewport: annotationViewport });
-      return;
-    }
+      renderSvgAnnotations(plot, scene, { transition, animate, viewport: annotationViewport });
+      renderSvgTree(plot, data.tree, scene, config, interactions, transition, animate, {
+        previousTree, previousScene: previousTreeScene,
+      });
+    };
+    if (presentationOnly) return renderPresentation();
     const linkGroup = plot
       .selectAll("g.links")
       .data([data])
@@ -11539,12 +11542,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
           })
       );
 
-    renderChrome({ plot, chrome: scene.chrome, ids, interactions });
-    renderSvgAnnotations(plot, scene, { transition, animate, viewport: annotationViewport });
-    renderSvgTree(plot, data.tree, scene, config, interactions, transition, animate, {
-      previousTree,
-      previousScene: previousTreeScene,
-    });
+    renderPresentation();
   }
 
   // Apply renderer-neutral patches to retained SVG elements. Geometry, adjacency,
@@ -13168,8 +13166,8 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   }
 
   function updateScene(data, { sourceScene = null, changes = {}, synchronize = true } = {}) {
-    if (sourceScene && changes.annotationsOnly) {
-      currentScene = patchAnnotationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
+    if (sourceScene && changes.presentationOnly) {
+      currentScene = patchPresentationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
       return currentScene;
     }
     updateScales(data, { geometryOnly: Boolean(sourceScene) });
@@ -13383,9 +13381,10 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     const biologyMatches = (request) => {
       if (!biology || !canRetainBiology(request)) return false;
       const previous = biology.request, size = dimensions(request);
-      return (previous.scene === request.scene || request.scene.changes?.annotationsOnly) &&
+      return (previous.scene === request.scene || request.scene.changes?.presentationOnly) &&
         previous.canvas === request.canvas && previous.config === request.config &&
         previous.scales === request.scales && previous.tree === request.tree &&
+        biology.treePresentation === request.tree?.presentation &&
         previous.pixelRatio === request.pixelRatio &&
         previous.hoverLocusUid === request.hoverLocusUid &&
         previous.suppressLocusHover === request.suppressLocusHover &&
@@ -13406,6 +13405,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
         bitmap.width = canvas.width; bitmap.height = canvas.height;
         bitmap.getContext("2d").drawImage(canvas, 0, 0);
         biology = { request: { ...request, camera: { ...request.camera } },
+          treePresentation: request.tree?.presentation,
           highlights: highlightKeys.map((key) => new Set(request[key])),
           width: size.width, height: size.height, bitmap };
       } else {
@@ -14773,7 +14773,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         }
         if (scene !== nextScene && nextScene.genes === scene?.genes && nextScene.links === scene?.links &&
             nextScene.loci === scene?.loci && nextScene.clusters === scene?.clusters) {
-          // Annotation-only edits retain all biological geometry and GPU buffers.
+          // Presentation edits retain biological geometry and GPU buffers.
           scene = nextScene;
         }
         if (scene !== nextScene) {
@@ -15026,7 +15026,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       setScene: (scene, { sourceScene, scales, config } = {}) => {
         pendingScene = scene;
         try {
-          if (sourceScene && !scene.changes?.annotationsOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
+          if (sourceScene && !scene.changes?.presentationOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
         } catch (error) { fail(error); }
       },
       paint: (request) => {
@@ -15923,11 +15923,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     function applyPatch(operations, { record = true, automaticGroups, notify = true } = {}) {
       const sourceScene = runtime.getScene();
-      const annotationsOnly = Array.isArray(operations) && operations.every(isAnnotationOperation);
+      const presentationOnly = Array.isArray(operations) && operations.every((op) => isAnnotationOperation(op) || isTreeOperation(op));
       sceneCommit = null;
       // Source edits may mutate currentData in place. Identity alone cannot
       // invalidate the cached biological defaults, including on undo/redo.
-      if (!annotationsOnly) stateSnapshots.reset();
+      if (!presentationOnly) stateSnapshots.reset();
       const groupsAutomaticBefore = groupsAreAutomatic();
       const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
       plotDataDirty = true;
@@ -15936,11 +15936,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
       }
       const groupsAutomaticAfter = groupsAreAutomatic();
-      if (!annotationsOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
+      if (!presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
         refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
       });
-      if (sourceScene && !restoringAutomatic && annotationsOnly) {
-        sceneCommit = { sourceScene, changes: { annotationsOnly: true } };
+      if (sourceScene && !restoringAutomatic && presentationOnly) {
+        sceneCommit = { sourceScene, changes: { presentationOnly: true } };
       }
       redraw({ animate: false });
       if (record) {
@@ -16167,12 +16167,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       return paintSvg();
     }
 
-    function paintSvg({ annotationsOnly = false, previousScene = null, animate = false } = {}) {
+    function paintSvg({ presentationOnly = false, previousScene = null, animate = false } = {}) {
       const svg = container?.select("svg.clusterMap");
       if (!svg || svg.empty()) return;
       updateFigureSurface();
       return rendererLifecycle.paint("svg", { ...sceneFrame(runtime.getScene()),
-        plot: svg.select("g.clusterMapG"), data: plotData, annotationsOnly, previousScene, animate,
+        plot: svg.select("g.clusterMapG"), data: plotData, presentationOnly, previousScene, animate,
         annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
         transition: animate ? transition().duration(runtime.config.plot.transitionDuration) : null,
         ids: runtime.ids, interactions: rendererInteractions });
@@ -16447,7 +16447,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       syncCameraZoom({ surface: canvas, zoom: canvasZoom, camera });
       applyCamera(svg.select("g.clusterMapViewport"));
 
-      const annotationsOnly = Boolean(committedScene?.changes.annotationsOnly);
+      const presentationOnly = Boolean(committedScene?.changes.presentationOnly);
       const scene = runtime.updateScene(data, { ...committedScene, synchronize });
 
       if (useRaster) {
@@ -16455,7 +16455,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         scheduleMinimapBase(scene);
         animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene);
       } else {
-        paintSvg({ annotationsOnly, previousScene, animate: hasInitialView && animate });
+        paintSvg({ presentationOnly, previousScene, animate: hasInitialView && animate });
 
         if (!hasInitialView) fitInitialView(svg, scene);
       }
@@ -16644,6 +16644,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         throw new TypeError("Only tree presentation operations can be previewed.");
       }
       cancelTreePresentationPreview();
+      const sourceScene = runtime.getScene();
+      if (sourceScene) sceneCommit = { sourceScene, changes: { presentationOnly: true } };
       if (operations) {
         const undo = inverseTreeOperation(tree);
         try { applyChartOperations(currentData, chartIndex, operations, runtime.config.tree); }

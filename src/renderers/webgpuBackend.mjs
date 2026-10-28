@@ -82,7 +82,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
     setScene: (scene, { sourceScene, scales, config } = {}) => {
       pendingScene = scene;
       try {
-        if (sourceScene && !scene.changes?.annotationsOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
+        if (sourceScene && !scene.changes?.presentationOnly) renderer?.adoptScene(scene, sourceScene, { scales, config });
       } catch (error) { fail(error); }
     },
     paint: (request) => {

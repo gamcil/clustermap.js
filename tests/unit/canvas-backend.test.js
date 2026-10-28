@@ -88,7 +88,7 @@ function annotationFixture() {
   request.scene = { ...request.scene, clusters: new Map(), annotationPanels: [{}] };
   backend.paint(request);
   return { ...setup, editAnnotations() {
-    request.scene = { ...request.scene, changes: { annotationsOnly: true } };
+    request.scene = { ...request.scene, changes: { presentationOnly: true } };
     return backend.paint(request);
   } };
 }
@@ -107,6 +107,19 @@ test("stable annotation scenes retain biology before the first edit", () => {
   assert.equal(renders.length, 4, "subsequent edits need only one annotation pass");
   assert.equal(canvases.length, 2, "reuse does not allocate another bitmap");
   assert.equal(images[1][0], canvases[1], "reuse restores the retained biology");
+});
+
+test("a tree presentation change invalidates the cached tree pixels", () => {
+  const { request, renders, editAnnotations } = annotationFixture();
+  request.tree = { presentation: {} };
+  editAnnotations();
+  const before = renders.length;
+  request.tree.presentation = { subtrees: { root: { collapsed: true } } };
+  editAnnotations();
+  assert.equal(renders.length, before + 2, "the old tree bitmap is replaced before painting annotations");
+  assert.ok(renders.at(-2).layers.includes("tree"));
+  editAnnotations();
+  assert.equal(renders.length, before + 3, "unchanged tree presentation still reuses the bitmap");
 });
 
 for (const change of ["camera", "dimensions", "pixelRatio", "config", "scales", "tree", "canvas",

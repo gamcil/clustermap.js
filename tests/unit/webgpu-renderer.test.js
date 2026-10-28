@@ -7,6 +7,7 @@ import { createChartIndex } from "../../src/data/index.mjs";
 import { createChartRuntime } from "../../src/chart/runtime.js";
 import { createClusterDragPreview, createLocusOffsetsPreview, createLocusFlipPreview } from "../../src/scene/preview.mjs";
 import { createLargeTestingData } from "../../fixtures/synthetic.mjs";
+import { applyChartOperations } from "../../src/data/operations.mjs";
 import { createChartState, setClusterOffset, setLocusOffset, setPreviewClusterOrder,
   commitPreviewClusterOrder, flipLocus, trimLocusToGeneBounds } from "../../src/chart/state.mjs";
 
@@ -62,6 +63,25 @@ async function gpuHarness(t, options) {
   t.after(() => renderer.destroy());
   return { renderer, buffers, writes, draws, context, events, loseDevice, getBindings: () => bindings };
 }
+
+test("tree presentation edits do not allocate or upload biological GPU geometry", async (t) => {
+  const { renderer, buffers, writes } = await gpuHarness(t);
+  const data = normalizeChartData(JSON.parse(await readFile(new URL("../../fixtures/heatmap.json", import.meta.url), "utf8")));
+  const runtime = createChartRuntime(), index = createChartIndex(data);
+  runtime.configure({ annotations: { enabled: false } });
+  runtime.setChartIndex(index); runtime.setChartState(createChartState(data));
+  let scene = runtime.updateScene(data);
+  const render = () => renderer.render({ nextScene: scene, scales: runtime.scales, config: runtime.renderConfig,
+    camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 });
+  render();
+  const count = buffers.length;
+  applyChartOperations(data, index, [{ type: "tree.presentation.update", scope: "subtree", ids: ["x"], changes: { collapsed: true } }]);
+  scene = runtime.updateScene(data, { sourceScene: scene, changes: { presentationOnly: true } });
+  writes.length = 0;
+  render();
+  assert.equal(buffers.length, count);
+  assert.equal(writes.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX).length, 0);
+});
 
 test("WebGPU reports device errors and releases its canvas on teardown", async (t) => {
   const errors = [];
