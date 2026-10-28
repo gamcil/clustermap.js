@@ -3,6 +3,7 @@ import { figureBoundsForChrome } from "./layout.mjs";
 import { annotationPanelsForFrame, annotationFigureBounds } from "../annotations/model.mjs";
 import { getLinkLabelPosition } from "../links/layout.mjs";
 import { resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
+import { locusContentBounds } from "../loci/layout.mjs";
 import {
   locusGeometryForPreview, clusterLabelOffsetForPreview, clusterLabelTextForPreview,
   clusterOffsetForPreview, geneVisibleForPreview, previewOffsetsForLocus,
@@ -85,11 +86,13 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
     structural = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
     for (const locus of scene.loci.values()) {
       const geometry = locusGeometryForPreview(preview, locus);
-      const { x = 0, y = 0 } = geometry.offsets;
-      structural.minX = Math.min(structural.minX, geometry.worldStart ?? locus.worldStart + x);
-      structural.maxX = Math.max(structural.maxX, geometry.worldEnd ?? locus.worldEnd + x);
-      structural.minY = Math.min(structural.minY, locus.bounds.minY + y);
-      structural.maxY = Math.max(structural.maxY, locus.bounds.maxY + y);
+      const content = locusContentBounds(locus, {
+        shape: config.gene.shape, trimIndicatorStyle: config.locus.trimIndicators,
+      }, geometry);
+      structural.minX = Math.min(structural.minX, content.minX);
+      structural.maxX = Math.max(structural.maxX, content.maxX);
+      structural.minY = Math.min(structural.minY, content.minY);
+      structural.maxY = Math.max(structural.maxY, content.maxY);
     }
   }
   const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome),

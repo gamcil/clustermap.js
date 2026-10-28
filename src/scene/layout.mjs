@@ -8,6 +8,7 @@ import {
   getLinkLabelPosition,
 } from "../links/layout.mjs";
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
+import { locusContentBounds } from "../loci/layout.mjs";
 import { arrangeTrimIndicators, createTrimIndicators, resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
 import { layoutAnnotationPanels, annotationFigureBounds, annotationChromeRightEdge, legendTopExtent } from "../annotations/model.mjs";
 
@@ -569,17 +570,10 @@ function boundsForLoci(loci) {
   } : null;
 }
 
-function sceneBounds(loci, { shape, trimIndicatorStyle = {} }) {
-  const { fontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
+function sceneBounds(loci, options) {
   let bounds = null;
   for (const locus of loci.values()) {
-    const maxY = Math.max(
-      locus.y + shape.tipHeight * 2 + shape.bodyHeight,
-      ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + fontSize + 1)
-    );
-    const next = {
-      minX: locus.worldStart, maxX: locus.worldEnd, minY: locus.y, maxY,
-    };
+    const next = locusContentBounds(locus, options);
     bounds = bounds ? extendBounds(bounds, next.minX, next.maxX, next.minY, next.maxY) : next;
   }
   return bounds;

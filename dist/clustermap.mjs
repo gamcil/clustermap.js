@@ -2083,6 +2083,43 @@ function queryPointOrdered(index, point) {
   );
 }
 
+/** Figure content excludes the hover region and trim handles. */
+function locusContentBounds(locus, { shape, trimIndicatorStyle = {} }, geometry = locus) {
+  const { x = 0, y = 0 } = geometry.offsets || {};
+  const { fontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
+  return {
+    minX: geometry.worldStart ?? locus.worldStart + x,
+    maxX: geometry.worldEnd ?? locus.worldEnd + x,
+    minY: locus.y + y,
+    maxY: Math.max(
+      locus.y + y + shape.tipHeight * 2 + shape.bodyHeight,
+      ...(geometry.trimIndicators || locus.trimIndicators || [])
+        .map((indicator) => locus.y + y + indicator.y + fontSize + 1)
+    ),
+  };
+}
+
+function xDistance(scaleX, start, end) {
+  return scaleX(end) - scaleX(start);
+}
+
+function getLocusScaleValues(clusters, { scaleX, locusOffset, spacing, locusState }) {
+  const domain = [], range = [];
+  for (const cluster of clusters) {
+    let value = 1, start, end;
+    for (const [index, locus] of cluster.loci.entries()) {
+      if (index > 0) value = range[range.length - 1] + end - start + spacing;
+      const offset = locusOffset(locus.uid) || 0;
+      const state = locusState ? locusState(locus) : locus;
+      start = scaleX(state.start ?? locus.start);
+      end = scaleX(state.end ?? locus.end);
+      domain.push(locus.uid);
+      range.push(value - start + offset);
+    }
+  }
+  return { domain, range };
+}
+
 function validateGroupPanel(panel, clusterIds, tree, fail) {
   if (!Array.isArray(panel.groups) || !panel.groups.length) fail("group panels require a non-empty groups array.");
   for (const key of ["markerWidth", "laneGap"]) {
@@ -4564,17 +4601,10 @@ function boundsForLoci(loci) {
   } : null;
 }
 
-function sceneBounds(loci, { shape, trimIndicatorStyle = {} }) {
-  const { fontSize } = resolveTrimIndicatorStyle(trimIndicatorStyle);
+function sceneBounds(loci, options) {
   let bounds = null;
   for (const locus of loci.values()) {
-    const maxY = Math.max(
-      locus.y + shape.tipHeight * 2 + shape.bodyHeight,
-      ...locus.trimIndicators.map((indicator) => locus.y + indicator.y + fontSize + 1)
-    );
-    const next = {
-      minX: locus.worldStart, maxX: locus.worldEnd, minY: locus.y, maxY,
-    };
+    const next = locusContentBounds(locus, options);
     bounds = bounds ? extendBounds(bounds, next.minX, next.maxX, next.minY, next.maxY) : next;
   }
   return bounds;
@@ -4891,11 +4921,13 @@ function measureFigureBounds(context, scene, config, tree = null, { preview = nu
     structural = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
     for (const locus of scene.loci.values()) {
       const geometry = locusGeometryForPreview(preview, locus);
-      const { x = 0, y = 0 } = geometry.offsets;
-      structural.minX = Math.min(structural.minX, geometry.worldStart ?? locus.worldStart + x);
-      structural.maxX = Math.max(structural.maxX, geometry.worldEnd ?? locus.worldEnd + x);
-      structural.minY = Math.min(structural.minY, locus.bounds.minY + y);
-      structural.maxY = Math.max(structural.maxY, locus.bounds.maxY + y);
+      const content = locusContentBounds(locus, {
+        shape: config.gene.shape, trimIndicatorStyle: config.locus.trimIndicators,
+      }, geometry);
+      structural.minX = Math.min(structural.minX, content.minX);
+      structural.maxX = Math.max(structural.maxX, content.maxX);
+      structural.minY = Math.min(structural.minY, content.minY);
+      structural.maxY = Math.max(structural.maxY, content.maxY);
     }
   }
   const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome),
@@ -12699,27 +12731,6 @@ function updateConfig(target, source) {
     if (value && value.constructor === Object) updateConfig(target[key], value);
     else target[key] = value;
   }
-}
-
-function xDistance(scaleX, start, end) {
-  return scaleX(end) - scaleX(start);
-}
-
-function getLocusScaleValues(clusters, { scaleX, locusOffset, spacing, locusState }) {
-  const domain = [], range = [];
-  for (const cluster of clusters) {
-    let value = 1, start, end;
-    for (const [index, locus] of cluster.loci.entries()) {
-      if (index > 0) value = range[range.length - 1] + end - start + spacing;
-      const offset = locusOffset(locus.uid) || 0;
-      const state = locusState ? locusState(locus) : locus;
-      start = scaleX(state.start ?? locus.start);
-      end = scaleX(state.end ?? locus.end);
-      domain.push(locus.uid);
-      range.push(value - start + offset);
-    }
-  }
-  return { domain, range };
 }
 
 const rendererModes = new Set(["svg", "canvas", "webgpu"]);
