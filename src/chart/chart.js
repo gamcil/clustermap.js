@@ -501,15 +501,19 @@ export default function clusterMap() {
   }
 
   function loadData(data) {
-    sceneCommit = null;
-    stateSnapshots.reset();
-    const prepared = normalizeChartData(data, runtime.config.tree);
+    installData(normalizeChartData(data, runtime.config.tree));
+  }
+
+  function installData(prepared, state = null) {
+    clearScenePreview();
+    stopRasterAnimation();
     cancelTreePresentationPreview();
+    sceneCommit = null;
     currentData = prepared;
     plotDataDirty = true;
     chartIndex = createChartIndex(currentData);
     refreshGroups();
-    chartState = createChartState(currentData, chartState);
+    chartState = state || createChartState(currentData, chartState);
     runtime.setChartIndex(chartIndex);
     runtime.setChartState(chartState);
     stateSnapshots.reset(currentData);
@@ -531,7 +535,13 @@ export default function clusterMap() {
   }
 
   function emitChange(change) {
-    for (const listener of changeListeners) listener({ ...change, data: currentData });
+    for (const listener of [...changeListeners]) {
+      try { listener({ ...change, data: currentData }); }
+      catch (error) {
+        if (globalThis.reportError) globalThis.reportError(error);
+        else console.error("ClusterMap change listener failed", error);
+      }
+    }
   }
 
   function historyStatus() {
@@ -549,11 +559,11 @@ export default function clusterMap() {
     if (emit) emitHistoryChange();
   }
 
-  function remember(change) {
+  function remember(change, emit = true) {
     history.push(change);
     if (history.length > historyLimit) history.splice(0, history.length - historyLimit);
     future.length = 0;
-    emitHistoryChange();
+    if (emit) emitHistoryChange();
   }
 
   // Pointer interactions update transient preview state continuously, but are
@@ -571,8 +581,9 @@ export default function clusterMap() {
     if (!before || !chartState || !currentData) return;
     const after = stateSnapshots.serialize(chartState, currentData);
     if (JSON.stringify(before) === JSON.stringify(after)) return;
+    remember({ kind: "state", undo: before, redo: after }, false);
     emitChange({ type: "state.change", state: after });
-    remember({ kind: "state", undo: before, redo: after });
+    emitHistoryChange();
   }
 
   function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
@@ -588,7 +599,7 @@ export default function clusterMap() {
     stateSnapshots.reset(currentData);
   }
 
-  function applyPatch(operations, { record = true, automaticGroups } = {}) {
+  function applyPatch(operations, { record = true, automaticGroups, notify = true } = {}) {
     const sourceScene = runtime.getScene();
     const annotationsOnly = Array.isArray(operations) && operations.every(isAnnotationOperation);
     sceneCommit = null;
@@ -610,7 +621,6 @@ export default function clusterMap() {
       sceneCommit = { sourceScene, changes: { annotationsOnly: true } };
     }
     redraw({ animate: false });
-    emitChange({ type: "data.apply", operations: result.operations });
     if (record) {
       remember({
         kind: "patch",
@@ -618,7 +628,11 @@ export default function clusterMap() {
         redo: result.operations,
         groupsAutomaticBefore,
         groupsAutomaticAfter,
-      });
+      }, false);
+    }
+    if (notify) {
+      emitChange({ type: "data.apply", operations: result.operations });
+      if (record) emitHistoryChange();
     }
     return result;
   }
@@ -632,7 +646,7 @@ export default function clusterMap() {
     return true;
   }
 
-  function setState(snapshot, { record = true } = {}) {
+  function setState(snapshot, { record = true, notify = true } = {}) {
     sceneCommit = null;
     pendingInteractionState = null;
     const before = chartState ? stateSnapshots.serialize(chartState, currentData) : null;
@@ -642,8 +656,12 @@ export default function clusterMap() {
     hasInitialView = true;
     redraw({ animate: false });
     const after = stateSnapshots.serialize(chartState, currentData);
-    emitChange({ type: "state.replace", state: after });
-    if (record) remember({ kind: "state", undo: before, redo: after });
+    if (record) remember({ kind: "state", undo: before, redo: after }, false);
+    if (notify) {
+      emitChange({ type: "state.replace", state: after });
+      if (record) emitHistoryChange();
+    }
+    return after;
   }
 
   function highlightedGeneIds() {
@@ -1234,8 +1252,9 @@ export default function clusterMap() {
     // mounting should have the same immediate effect as updating data, without
     // requiring consumers to re-bind the chart's normalized data themselves.
     if (container && currentData) redraw({ animate: false });
+    if (before) remember({ kind: "config", undo: before, redo: clonePlainValue(_) }, false);
     emitChange({ type: "config.change", config: runtime.config });
-    if (before) remember({ kind: "config", undo: before, redo: clonePlainValue(_) });
+    if (before) emitHistoryChange();
     return my;
   };
   my.data = function (data) {
@@ -1243,8 +1262,9 @@ export default function clusterMap() {
     if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
     cancelTreePresentationPreview();
     container.datum(data).call(my);
+    clearHistory(false);
     emitChange({ type: "data.replace" });
-    clearHistory();
+    emitHistoryChange();
     return my;
   };
   my.visibleData = () => plotData;
@@ -1298,16 +1318,21 @@ export default function clusterMap() {
     if (!snapshot.data || !snapshot.config) {
       throw new TypeError("A project snapshot requires data and config.");
     }
-    const prepared = normalizeChartData(snapshot.data);
+    if (!container) throw new Error("Cannot replace a project before the chart is mounted.");
+    const candidate = runtime.validateConfiguration(snapshot.config);
+    const prepared = normalizeChartData(snapshot.data, candidate.tree);
+    const state = snapshot.state ? chartStateFromSnapshot(prepared, snapshot.state) : createChartState(prepared);
     runtime.validateConfiguration(snapshot.config, prepared.tree);
-    if (snapshot.state) chartStateFromSnapshot(prepared, snapshot.state);
-    // Validate the incoming pair before changing either live data or settings.
     runtime.configure(snapshot.config, prepared.tree);
-    my.data(prepared);
-    if (container && currentData) redraw({ animate: false });
+    installData(prepared, state);
+    container.datum(prepared);
+    hasInitialView = Boolean(snapshot.state);
+    clearHistory(false);
+    redraw({ animate: false });
+    emitChange({ type: "data.replace" });
     emitChange({ type: "config.change", config: runtime.config });
-    if (snapshot.state) setState(snapshot.state, { record: false });
-    clearHistory();
+    if (snapshot.state) emitChange({ type: "state.replace", state: stateSnapshots.serialize(chartState, currentData) });
+    emitHistoryChange();
     return my;
   };
   // Do not name this `apply`: D3 invokes callable charts through
@@ -1348,19 +1373,23 @@ export default function clusterMap() {
   };
   function replayHistory(source, target, direction) {
     const cancelled = cancelTreePresentationPreview();
-    const change = source.pop();
+    const change = source.at(-1);
     if (!change) { if (cancelled) redraw({ animate: false }); return my; }
     const value = change[direction];
+    let event;
     if (change.kind === "patch") {
-      applyPatch(value, { record: false, automaticGroups: direction === "undo" ? change.groupsAutomaticBefore : change.groupsAutomaticAfter });
+      const result = applyPatch(value, { record: false, notify: false,
+        automaticGroups: direction === "undo" ? change.groupsAutomaticBefore : change.groupsAutomaticAfter });
+      event = { type: "data.apply", operations: result.operations };
     } else if (change.kind === "config") {
       runtime.configure(value, currentData?.tree);
       redraw({ animate: false });
-      emitChange({ type: "config.change", config: runtime.config });
+      event = { type: "config.change", config: runtime.config };
     } else if (change.kind === "state" && value) {
-      setState(value, { record: false });
+      event = { type: "state.replace", state: setState(value, { record: false, notify: false }) };
     }
-    target.push(change);
+    source.pop(); target.push(change);
+    if (event) emitChange(event);
     emitHistoryChange();
     return my;
   }
@@ -1422,8 +1451,9 @@ export default function clusterMap() {
     for (const locus of loci) changed = update(chartState, locus) || changed;
     if (!changed) return my;
     redraw({ animate });
+    remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) }, false);
     emitChange({ type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) });
-    remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) });
+    emitHistoryChange();
     return my;
   }
   /** Flip supplied loci, or the current selection, as one operation. */
