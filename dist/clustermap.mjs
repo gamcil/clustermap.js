@@ -15191,7 +15191,7 @@ function clusterMap() {
   const figureSurface = createFigureSurface();
   function updateFigureSurface() {
     if (container) figureSurface.update(container, runtime.getScene(), runtime.renderConfig,
-      plotData?.tree, getCamera(chartState), scenePreview?.type === "locus-trim" ? null : scenePreview);
+      plotData?.tree, getCamera(chartState), scenePreview);
   }
   let annotationOverlay = null;
   let themeMedia = null;
