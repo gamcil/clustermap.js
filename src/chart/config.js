@@ -153,7 +153,7 @@ export function updateConfig(target, source) {
   for (const [key, value] of Object.entries(source)) {
     if (!Object.hasOwn(target, key)) continue;
     if (value && value.constructor === Object) updateConfig(target[key], value);
-    else target[key] = value;
+    else target[key] = clonePlainValue(value);
   }
 }
 

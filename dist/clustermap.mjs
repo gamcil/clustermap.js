@@ -12818,7 +12818,7 @@ function updateConfig(target, source) {
   for (const [key, value] of Object.entries(source)) {
     if (!Object.hasOwn(target, key)) continue;
     if (value && value.constructor === Object) updateConfig(target[key], value);
-    else target[key] = value;
+    else target[key] = clonePlainValue(value);
   }
 }
 
@@ -12950,8 +12950,8 @@ function validateConfiguration(options, tree = null) {
 }
 
 function configure(options, tree = null) {
-  validateConfiguration(options, tree);
-  updateConfig(config, options);
+  const candidate = validateConfiguration(options, tree);
+  Object.assign(config, candidate);
   renderedConfig = null;
 }
 
@@ -15774,7 +15774,10 @@ function clusterMap() {
 
   function emitChange(change) {
     for (const listener of [...changeListeners]) {
-      try { listener({ ...change, data: currentData }); }
+      try {
+        listener({ ...change, data: currentData,
+          ...(change.config ? { config: clonePlainValue(change.config) } : {}) });
+      }
       catch (error) {
         if (globalThis.reportError) globalThis.reportError(error);
         else console.error("ClusterMap change listener failed", error);
@@ -16481,11 +16484,11 @@ function clusterMap() {
     return my;
   };
   my.config = function (_) {
-    if (!arguments.length) return runtime.config;
-    cancelTreePresentationPreview();
+    if (!arguments.length) return clonePlainValue(runtime.config);
     const before = currentData ? previousConfigPatch(runtime.config, _) : null;
-    sceneCommit = null;
     runtime.configure(_, currentData?.tree);
+    cancelTreePresentationPreview();
+    sceneCommit = null;
     // Configuration is a live part of the public chart API. Updating it after
     // mounting should have the same immediate effect as updating data, without
     // requiring consumers to re-bind the chart's normalized data themselves.

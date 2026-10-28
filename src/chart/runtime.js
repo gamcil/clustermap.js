@@ -141,8 +141,8 @@ function validateConfiguration(options, tree = null) {
 }
 
 function configure(options, tree = null) {
-  validateConfiguration(options, tree);
-  updateConfig(config, options);
+  const candidate = validateConfiguration(options, tree);
+  Object.assign(config, candidate);
   renderedConfig = null;
 }
 
