@@ -395,6 +395,11 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | `exportSvg({padding})` | Export the complete figure as an SVG string from any renderer. Padding defaults to 20. |
 | `destroy()` | Release chart-owned handlers, animations, rendering resources and DOM. |
 
+Chart data requires unique IDs within each record kind. IDs may be non-empty
+strings or finite numbers. State imports require `version: 1`, finite numeric
+coordinates, ordered ranges, and boolean flip flags. Trim boundaries use gene
+IDs rather than embedded gene records.
+
 Figure bounds include visible labels, annotations, legends, scales and the tree.
 They describe the latest computed layout, excluding drag previews, and do not
 change chart state. Measurements use Canvas text metrics; exact agreement with

@@ -1,6 +1,6 @@
 import { validateTreePresentation } from "../tree/model.mjs";
 import { validateAnnotationPanels } from "../annotations/model.mjs";
-import { clonePlainValue } from "../utils/values.mjs";
+import { clonePlainValue, isRecordId } from "../utils/values.mjs";
 
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned
@@ -32,7 +32,30 @@ function normalizeLocus(locus, clusterUid) {
   };
 }
 
+function validateRecordIds(data) {
+  const ids = new Map();
+  const records = (kind, values) => {
+    if (!Array.isArray(values)) throw new TypeError(`Invalid chart data: ${kind} must be an array.`);
+    const known = ids.get(kind) || new Set();
+    ids.set(kind, known);
+    for (const record of values) {
+      if (!record || !isRecordId(record.uid)) throw new TypeError(`Invalid chart data: ${kind} require non-empty string or finite numeric IDs.`);
+      if (known.has(record.uid)) throw new TypeError(`Invalid chart data: duplicate ${kind} ID '${record.uid}'.`);
+      known.add(record.uid);
+    }
+  };
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new TypeError("Chart data must be an object.");
+  records("clusters", data.clusters);
+  for (const cluster of data.clusters) {
+    records("loci", cluster.loci);
+    for (const locus of cluster.loci) records("genes", locus.genes);
+  }
+  records("links", data.links);
+  records("groups", data.groups ?? []);
+}
+
 export function normalizeChartData(data, treeConfig = {}) {
+  validateRecordIds(data);
   const source = clonePlainValue(data);
   if (source.tree != null) {
     validateTree(source.tree, source.clusters);

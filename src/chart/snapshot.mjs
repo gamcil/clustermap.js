@@ -1,12 +1,9 @@
+import { isRecordId } from "../utils/values.mjs";
 import { createChartState } from "./state.mjs";
 import { setTreeClusterOrder } from "../tree/model.mjs";
 
 const finiteNumber = (value) => Number.isFinite(value) ? value : null;
-const stateEntries = (value) => Array.isArray(value)
-  ? value.filter((entry) => Array.isArray(entry) && entry.length === 2 && entry[0] !== undefined)
-  : [];
-const recordStateEntries = (value) => stateEntries(value)
-  .filter(([, entry]) => entry && typeof entry === "object" && !Array.isArray(entry));
+const stateEntries = (value) => value ?? [];
 
 function offsetEntries(entries) {
   return [...entries].filter(([, value]) => Number.isFinite(value) && value !== 0);
@@ -117,18 +114,46 @@ export function createChartStateSerializer() {
   };
 }
 
-function boundaryGene(value, genes) {
-  // Early project exports stored the whole gene record. Accept those files as
-  // well as the current compact UID form.
-  const uid = value && typeof value === "object" ? value.uid : value;
-  return genes.get(uid) || null;
+function validateSnapshot(snapshot) {
+  const fail = (message) => { throw new TypeError(`Invalid chart state: ${message}`); };
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) fail("expected an object.");
+  if (snapshot.version !== 1) fail("unsupported version; expected version 1.");
+  const record = (value) => value && typeof value === "object" && !Array.isArray(value);
+  for (const field of ["excludedClusters", "excludedLoci", "clusterOrder"]) {
+    const values = snapshot[field];
+    if (values !== undefined && (!Array.isArray(values) || values.some((uid) => !isRecordId(uid)) || new Set(values).size !== values.length)) {
+      fail(`${field} must contain unique record IDs.`);
+    }
+  }
+  for (const field of ["clusterOffsets", "locusOffsets", "loci", "genes"]) {
+    const values = snapshot[field];
+    if (values === undefined) continue;
+    if (!Array.isArray(values)) fail(`${field} must be an array.`);
+    const ids = new Set();
+    for (const entry of values) {
+      if (!Array.isArray(entry) || entry.length !== 2 || !isRecordId(entry[0]) || ids.has(entry[0])) fail(`${field} requires unique [ID, value] entries.`);
+      ids.add(entry[0]);
+      const value = entry[1];
+      if (field.endsWith("Offsets")) {
+        if (!Number.isFinite(value)) fail(`${field} values must be finite numbers.`);
+        continue;
+      }
+      if (!record(value)) fail(`${field} values must be objects.`);
+      for (const key of ["start", "end"]) if (value[key] !== undefined && !Number.isFinite(value[key])) fail(`${field}.${key} must be finite.`);
+      if (value.start !== undefined && value.end !== undefined && value.start > value.end) fail(`${field} start must not exceed end.`);
+      if (field === "loci") {
+        if (value.flipped !== undefined && typeof value.flipped !== "boolean") fail("flipped must be a boolean.");
+        for (const key of ["trimLeft", "trimRight"]) if (value[key] != null && !isRecordId(value[key])) fail(`${key} must be a gene ID or null.`);
+      } else if (value.strand !== undefined && ![-1, 0, 1].includes(value.strand)) fail("strand must be -1, 0 or 1.");
+    }
+  }
+  if (snapshot.camera !== undefined && (!record(snapshot.camera) ||
+      ![snapshot.camera.x, snapshot.camera.y, snapshot.camera.k].every(Number.isFinite) || snapshot.camera.k <= 0)) fail("camera requires finite x/y and a positive scale.");
 }
 
 /** Restore a durable chart snapshot, ignoring records absent from this data. */
 export function chartStateFromSnapshot(data, snapshot) {
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-    throw new TypeError("Chart state must be an object.");
-  }
+  validateSnapshot(snapshot);
   const loci = data.clusters.flatMap((cluster) => cluster.loci);
   const genesByLocus = new Map(loci.map((locus) => [
     locus.uid,
@@ -143,23 +168,27 @@ export function chartStateFromSnapshot(data, snapshot) {
   });
   applyOffsets(snapshot.clusterOffsets, restored.clusterOffsets, restored.clusterOffsets);
   applyOffsets(snapshot.locusOffsets, restored.loci, restored.locusOffsets);
-  recordStateEntries(snapshot.loci).forEach(([uid, value]) => {
+  stateEntries(snapshot.loci).forEach(([uid, value]) => {
     const target = restored.loci.get(uid);
     if (!target) return;
     ["start", "end"].forEach((key) => {
       if (finiteNumber(value[key]) !== null) target[key] = value[key];
     });
-    target.trimLeft = boundaryGene(value.trimLeft, genesByLocus.get(uid));
-    target.trimRight = boundaryGene(value.trimRight, genesByLocus.get(uid));
-    if (value.flipped !== undefined) target.flipped = Boolean(value.flipped);
+    if (target.start > target.end) throw new TypeError("Invalid chart state: locus start must not exceed end.");
+    target.trimLeft = genesByLocus.get(uid).get(value.trimLeft) || null;
+    target.trimRight = genesByLocus.get(uid).get(value.trimRight) || null;
+    if (value.flipped !== undefined) target.flipped = value.flipped;
   });
-  recordStateEntries(snapshot.genes).forEach(([key, value]) => {
+  stateEntries(snapshot.genes).forEach(([key, value]) => {
     const target = restored.genes.get(key);
     if (!target) return;
     ["start", "end", "strand"].forEach((property) => {
       if (finiteNumber(value[property]) !== null) target[property] = value[property];
     });
   });
+  for (const gene of restored.genes.values()) {
+    if (gene.start > gene.end) throw new TypeError("Invalid chart state: gene start must not exceed end.");
+  }
   const camera = snapshot.camera || {};
   if (Array.isArray(snapshot.clusterOrder)) {
     const order = snapshot.clusterOrder.filter((uid) => restored.clusterOffsets.has(uid));

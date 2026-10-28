@@ -9,3 +9,5 @@ export function clonePlainValue(value) {
 
 export const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
   one.length === two.length && one.every((value, index) => value === two[index]);
+
+export const isRecordId = (value) => typeof value === "string" ? Boolean(value.trim()) : Number.isFinite(value);
