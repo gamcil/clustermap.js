@@ -79,6 +79,11 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
     host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
     const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
     button(host, "Rotate branches", () => rotate(uid));
+    const collapsed = input(host, "Collapse subtree", "checkbox", tree.presentation?.subtrees?.[uid]?.collapsed);
+    collapsed.onchange = () => {
+      if (!run(() => patch([{ type: "tree.presentation.update", scope: "subtree", ids: [uid],
+        changes: { collapsed: collapsed.checked || null } }]))) collapsed.checked = !collapsed.checked;
+    };
     const inheritedBranch = (scope) => {
       const collection = scope === "subtree" ? "subtrees" : "nodes";
       const records = tree.presentation?.[collection] || {};
@@ -143,7 +148,7 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
       renderNode();
       host.querySelector(".cm-tree-actions button")?.focus({ preventScroll: true });
     });
-    resetNode.title = "Reset this node's subtree style, incoming branch and label; keep descendant overrides and automatic colouring.";
+    resetNode.title = "Reset this node's subtree style, collapse, incoming branch and label; keep descendant overrides and automatic colouring.";
     onResize?.();
   }
   renderNode();

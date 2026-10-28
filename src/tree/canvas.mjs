@@ -41,6 +41,23 @@ export function drawCanvasTree(context, layout) {
     context.lineCap = lines[0].lineCap || "butt";
     traceLines(context, lines);
   }
+  for (const triangle of layout.triangles) {
+    context.save();
+    context.beginPath();
+    context.moveTo(triangle.x, triangle.y);
+    context.lineTo(triangle.x2, triangle.y1);
+    context.lineTo(triangle.x2, triangle.y2);
+    context.closePath();
+    context.fillStyle = context.strokeStyle = triangle.style.colour;
+    context.lineWidth = triangle.style.width;
+    context.lineJoin = "round";
+    const alpha = context.globalAlpha;
+    context.globalAlpha = alpha * 0.12;
+    context.fill();
+    context.globalAlpha = alpha;
+    context.stroke();
+    context.restore();
+  }
   context.lineCap = "butt";
   context.strokeStyle = layout.branch.colour;
   context.lineWidth = layout.branch.width;

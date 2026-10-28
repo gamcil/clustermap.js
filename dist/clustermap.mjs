@@ -668,8 +668,9 @@ function validateTreePresentation(tree, config = {}) {
       for (const [uid, record] of Object.entries(presentation[scope])) {
         const node = nodes.get(uid);
         if (!node) fail$3(`presentation.${scope} refers to unknown node '${uid}'.`);
-        fields$1(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
+        fields$1(record, scope === "subtrees" ? ["branch", "collapsed"] : ["branch", "label"], `${scope}.${uid}`);
         if (scope === "subtrees" && !node.children) fail$3(`subtree '${uid}' must be an internal node.`);
+        if (record.collapsed !== undefined && typeof record.collapsed !== "boolean") fail$3(`subtrees.${uid}.collapsed must be boolean.`);
         if (record.branch !== undefined) {
           if (scope === "nodes" && uid === tree.root) fail$3("the display root has no incoming edge to style.");
           validateBranch(record.branch, `${scope}.${uid}.branch`);
@@ -1768,12 +1769,34 @@ function layoutTree({
     ? treeNodeYPositions(previousTree, previousScene, leafY)
     : null;
   const presentation = resolveTreePresentation(tree, config.tree);
+  const hidden = new Set(), collapsed = new Map();
+  const treeNodes = treeMetrics(tree).nodes;
+  const collectLeaves = (uid, leaves) => {
+    hidden.add(uid);
+    const node = treeNodes.get(uid);
+    if (node.children) for (const child of node.children) collectLeaves(child, leaves);
+    else leaves.push(uid);
+  };
+  const visit = (uid) => {
+    const node = treeNodes.get(uid);
+    if (node.children && tree.presentation?.subtrees?.[uid]?.collapsed) {
+      const leaves = [];
+      for (const child of node.children) collectLeaves(child, leaves);
+      collapsed.set(uid, leaves);
+    } else for (const child of node.children || []) visit(child);
+  };
+  visit(tree.root);
   const branch = presentation.base;
-  const annotations = [...presentation.annotations].map(([uid, style]) => {
+  const annotations = [...presentation.annotations].filter(([uid]) => !hidden.has(uid)).map(([uid, style]) => {
     const font = { ...style, fontFamily: config.plot.fontFamily };
     return { uid, ...font, ...measureText(style.text, font), x: horizontal.xs.get(uid) + 6, y: ys.get(uid) + 6 };
   });
-  let proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
+  const leafTips = new Map(horizontal.xs);
+  for (const leaves of collapsed.values()) {
+    const edge = Math.max(...leaves.map((uid) => horizontal.xs.get(uid)));
+    for (const uid of leaves) leafTips.set(uid, edge);
+  }
+  let proposedX = treeLeafAnchorX(tree, labelStarts, width, leafTips);
   const labelLayout = clusterLabelLayout(config);
   const rows = [...scene.clusters.values()].map((cluster) => {
     const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
@@ -1811,15 +1834,26 @@ function layoutTree({
   const nodes = [];
   const guides = [];
   const supports = [];
+  const triangles = [];
   for (const node of tree.nodes) {
+    if (hidden.has(node.uid)) continue;
     const x = xs.get(node.uid);
     if (node.children?.length) {
       if (config.tree.node?.show !== false) nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
-      // Stems and horizontal edges are separate marks. Square stem caps fill
-      // the outer corners without extending leaf tips or changing distances.
-      if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children, style: presentation.stems.get(node.uid), lineCap: "square" });
-      for (const child of node.children) {
-        branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child), style: presentation.branches.get(child) });
+      const leaves = collapsed.get(node.uid);
+      if (leaves) {
+        const x2 = Math.max(...leaves.map((uid) => xs.get(uid)));
+        triangles.push({ uid: node.uid, x, x2, leaves, style: presentation.stems.get(node.uid) });
+        if (config.tree.leafGuide?.show) for (const uid of leaves) {
+          const end = labelStarts.get(treeNodes.get(uid).cluster) - labelClearance;
+          if (end - x2 > 1e-9) guides.push({ uid, nodeUid: uid, x1: x2, x2: end });
+        }
+      } else {
+        // Square stem caps close corners without extending leaf tips.
+        if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children, style: presentation.stems.get(node.uid), lineCap: "square" });
+        for (const child of node.children) {
+          branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child), style: presentation.branches.get(child) });
+        }
       }
     } else if (config.tree.leafGuide?.show && Number.isFinite(labelStarts.get(node.cluster))) {
       const end = labelStarts.get(node.cluster) - labelClearance;
@@ -1870,7 +1904,7 @@ function layoutTree({
   }
   return positionTreeLayout({
     background: config.figureStyle?.background || "white", foreground: config.figureStyle?.foreground || "black",
-    cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
+    cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, triangles, scaleBar,
     rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX, style: branch },
     ys, previousYs,
   }, ys);
@@ -1888,6 +1922,9 @@ function positionTreeLayout(layout, ys) {
       y2: Math.max(...stem.children.map((uid) => ys.get(uid))),
     })),
     nodes: layout.nodes.map((node) => ({ ...node, y: ys.get(node.uid) })),
+    triangles: layout.triangles.map((triangle) => ({ ...triangle, y: ys.get(triangle.uid),
+      y1: Math.min(...triangle.leaves.map((uid) => ys.get(uid))),
+      y2: Math.max(...triangle.leaves.map((uid) => ys.get(uid))) })),
     guides: layout.guides.map(line),
     supports: layout.supports.map((label) => ({ ...label, y: ys.get(label.uid) - 4 })),
     annotations: layout.annotations.map((label) => ({ ...label, y: ys.get(label.uid) + 6 })),
@@ -1902,6 +1939,11 @@ function positionTreeLayout(layout, ys) {
   };
   for (const mark of [frame.rootBranch, ...frame.branches, ...frame.stems]) includeLine(mark);
   for (const mark of frame.guides) includeLine(mark, frame.guide.width);
+  for (const triangle of frame.triangles) {
+    const half = triangle.style.width / 2;
+    points.push([triangle.x - half, Math.min(triangle.y, triangle.y1) - half],
+      [triangle.x2 + half, Math.max(triangle.y, triangle.y2) + half]);
+  }
   for (const node of frame.nodes) {
     const radius = node.radius + frame.branch.width / 2;
     points.push([node.x - radius, node.y - radius], [node.x + radius, node.y + radius]);
@@ -1940,6 +1982,14 @@ function hitTestTreeNode(layout, point) {
   for (const node of layout?.nodes || []) {
     if (Math.hypot(point.x - node.x, point.y - node.y) <= node.hitRadius) {
       return { action: "tree-node", nodeUid: node.uid };
+    }
+  }
+  for (const triangle of layout?.triangles || []) {
+    const ratio = (point.x - triangle.x) / (triangle.x2 - triangle.x);
+    if (ratio >= 0 && ratio <= 1 &&
+        point.y >= triangle.y + ratio * (triangle.y1 - triangle.y) &&
+        point.y <= triangle.y + ratio * (triangle.y2 - triangle.y)) {
+      return { action: "tree-node", nodeUid: triangle.uid };
     }
   }
   return null;
@@ -5168,15 +5218,17 @@ function visibleTree(tree, clusterIds, aliases = new Map()) {
     const styles = new Map(Object.entries(presentation.nodes || {}).filter(([uid]) => retained.has(uid)));
     const subtrees = new Map();
     const inherit = (uid) => {
-      const target = aliases.get(uid) ?? uid, branch = presentation.subtrees?.[uid]?.branch;
-      if (branch && retained.has(target)) {
-        subtrees.set(target, { branch: { ...subtrees.get(target)?.branch, ...branch } });
+      const target = aliases.get(uid) ?? uid, record = presentation.subtrees?.[uid];
+      if (record && retained.has(target)) {
+        const previous = subtrees.get(target);
+        subtrees.set(target, { ...previous, ...record,
+          ...(record.branch ? { branch: { ...previous?.branch, ...record.branch } } : {}) });
       }
       for (const child of nodes.get(uid).children || []) inherit(child);
     };
     inherit(tree.root);
     for (const [uid, style] of subtrees) if (!retained.get(uid).children) {
-      styles.set(uid, { ...styles.get(uid), branch: { ...style.branch, ...styles.get(uid)?.branch } });
+      if (style.branch) styles.set(uid, { ...styles.get(uid), branch: { ...style.branch, ...styles.get(uid)?.branch } });
       subtrees.delete(uid);
     }
     if (root.uid !== tree.root && styles.has(root.uid)) {
@@ -9057,11 +9109,15 @@ function normalizeTreeOperation(tree, operation) {
   const result = { type, scope, ...(ids ? { ids } : {}) };
   if (type === "tree.presentation.update") {
     if (!object(operation.changes) || !Object.keys(operation.changes).length) fail$1("tree presentation updates require changes.");
-    const allowed = scope === "tree" ? ["colouring"] : scope === "subtree" ? ["branch"] : ["branch", "label"];
+    const allowed = scope === "tree" ? ["colouring"] : scope === "subtree" ? ["branch", "collapsed"] : ["branch", "label"];
     if (Object.keys(operation.changes).some((key) => !allowed.includes(key))) fail$1("unsupported tree presentation update field.");
     const fields = { branch: ["colour", "width"], label: ["text", "colour", "fontSize", "fontWeight", "fontStyle"], colouring: ["mode", "cutHeight", "palette", "showCutLine"] };
     for (const [key, value] of Object.entries(operation.changes)) {
       if (value === null) continue;
+      if (key === "collapsed") {
+        if (typeof value !== "boolean") fail$1("collapsed must be boolean.");
+        continue;
+      }
       if (!object(value) || Object.keys(value).some((field) => !fields[key].includes(field))) {
         fail$1(`unsupported ${key} fields in tree presentation update.`);
       }
@@ -9796,6 +9852,11 @@ function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUi
     host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
     const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
     button(host, "Rotate branches", () => rotate(uid));
+    const collapsed = input(host, "Collapse subtree", "checkbox", tree.presentation?.subtrees?.[uid]?.collapsed);
+    collapsed.onchange = () => {
+      if (!run(() => patch([{ type: "tree.presentation.update", scope: "subtree", ids: [uid],
+        changes: { collapsed: collapsed.checked || null } }]))) collapsed.checked = !collapsed.checked;
+    };
     const inheritedBranch = (scope) => {
       const collection = scope === "subtree" ? "subtrees" : "nodes";
       const records = tree.presentation?.[collection] || {};
@@ -9860,7 +9921,7 @@ function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUi
       renderNode();
       host.querySelector(".cm-tree-actions button")?.focus({ preventScroll: true });
     });
-    resetNode.title = "Reset this node's subtree style, incoming branch and label; keep descendant overrides and automatic colouring.";
+    resetNode.title = "Reset this node's subtree style, collapse, incoming branch and label; keep descendant overrides and automatic colouring.";
     onResize?.();
   }
   renderNode();
@@ -10354,6 +10415,23 @@ function drawCanvasTree(context, layout) {
     context.lineWidth = lines[0].style.width;
     context.lineCap = lines[0].lineCap || "butt";
     traceLines(context, lines);
+  }
+  for (const triangle of layout.triangles) {
+    context.save();
+    context.beginPath();
+    context.moveTo(triangle.x, triangle.y);
+    context.lineTo(triangle.x2, triangle.y1);
+    context.lineTo(triangle.x2, triangle.y2);
+    context.closePath();
+    context.fillStyle = context.strokeStyle = triangle.style.colour;
+    context.lineWidth = triangle.style.width;
+    context.lineJoin = "round";
+    const alpha = context.globalAlpha;
+    context.globalAlpha = alpha * 0.12;
+    context.fill();
+    context.globalAlpha = alpha;
+    context.stroke();
+    context.restore();
   }
   context.lineCap = "butt";
   context.strokeStyle = layout.branch.colour;
@@ -11087,6 +11165,8 @@ function positionBranches(selection, lines) {
     .attr("d", (line) => `M${line.x1},${line.y1}H${line.x2}`);
 }
 
+const trianglePoints = (mark) => `${mark.x},${mark.y} ${mark.x2},${mark.y1} ${mark.x2},${mark.y2}`;
+
 /** SVG owns DOM joins and transitions; the shared layout supplies every frame. */
 function renderSvgTree(plot, tree, scene, config, interactions, transition, animate, motion = {}) {
   if (!tree || !config.tree?.show || !scene?.clusters.size) {
@@ -11126,10 +11206,7 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
     .attr("class", "tree-leaf-guide")
     .attr("stroke", layout.guide.colour).attr("stroke-width", layout.guide.width)
     .attr("stroke-dasharray", layout.guide.dash.join(" ")).attr("pointer-events", "none");
-  const nodes = group.selectAll("circle.tree-node").data(layout.nodes, (node) => node.uid).join("circle")
-    .attr("class", "tree-node").attr("r", (node) => node.radius)
-    .attr("fill", layout.background).attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width)
-    .attr("cursor", "pointer")
+  const interactive = (selection) => selection.attr("cursor", "pointer")
     .attr("tabindex", 0).attr("role", "button").attr("aria-label", (node) => `Tree node ${node.uid}: rotate children or open context menu`)
     .on("contextmenu", (event, node) => interactions.showTreeMenu?.(event, node.uid))
     .on("keydown", (event, node) => {
@@ -11137,6 +11214,12 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
       else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); interactions.rotateTreeNode?.(node.uid); }
     })
     .on("click", (event, node) => { event.stopPropagation(); interactions.rotateTreeNode?.(node.uid); });
+  const triangles = interactive(group.selectAll("polygon.tree-subtree").data(layout.triangles, (mark) => mark.uid).join("polygon")
+    .attr("class", "tree-subtree").attr("fill", (mark) => mark.style.colour).attr("fill-opacity", 0.12)
+    .attr("stroke", (mark) => mark.style.colour).attr("stroke-width", (mark) => mark.style.width).attr("stroke-linejoin", "round"));
+  const nodes = interactive(group.selectAll("circle.tree-node").data(layout.nodes, (node) => node.uid).join("circle")
+    .attr("class", "tree-node").attr("r", (node) => node.radius)
+    .attr("fill", layout.background).attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width));
   const supports = group.selectAll("text.tree-support").data(layout.supports, (label) => label.uid).join("text")
     .attr("class", "tree-support").attr("fill", layout.support.colour)
     .attr("font-size", `${layout.support.fontSize}px`).style("font-family", layout.support.fontFamily)
@@ -11164,6 +11247,7 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
     positionLines(stems, frame.stems);
     positionLines(guides, frame.guides);
     nodes.data(frame.nodes, (node) => node.uid).attr("cx", (node) => node.x).attr("cy", (node) => node.y);
+    triangles.data(frame.triangles, (mark) => mark.uid).attr("points", trianglePoints);
     annotations.data(frame.annotations, (label) => label.uid).attr("x", (label) => label.x).attr("y", (label) => label.y);
     supports.data(frame.supports, (label) => label.uid).attr("x", (label) => label.x).attr("y", (label) => label.y);
   };

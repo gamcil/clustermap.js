@@ -117,12 +117,34 @@ export function layoutTree({
     ? treeNodeYPositions(previousTree, previousScene, leafY)
     : null;
   const presentation = resolveTreePresentation(tree, config.tree);
+  const hidden = new Set(), collapsed = new Map();
+  const treeNodes = treeMetrics(tree).nodes;
+  const collectLeaves = (uid, leaves) => {
+    hidden.add(uid);
+    const node = treeNodes.get(uid);
+    if (node.children) for (const child of node.children) collectLeaves(child, leaves);
+    else leaves.push(uid);
+  };
+  const visit = (uid) => {
+    const node = treeNodes.get(uid);
+    if (node.children && tree.presentation?.subtrees?.[uid]?.collapsed) {
+      const leaves = [];
+      for (const child of node.children) collectLeaves(child, leaves);
+      collapsed.set(uid, leaves);
+    } else for (const child of node.children || []) visit(child);
+  };
+  visit(tree.root);
   const branch = presentation.base;
-  const annotations = [...presentation.annotations].map(([uid, style]) => {
+  const annotations = [...presentation.annotations].filter(([uid]) => !hidden.has(uid)).map(([uid, style]) => {
     const font = { ...style, fontFamily: config.plot.fontFamily };
     return { uid, ...font, ...measureText(style.text, font), x: horizontal.xs.get(uid) + 6, y: ys.get(uid) + 6 };
   });
-  let proposedX = treeLeafAnchorX(tree, labelStarts, width, horizontal.xs);
+  const leafTips = new Map(horizontal.xs);
+  for (const leaves of collapsed.values()) {
+    const edge = Math.max(...leaves.map((uid) => horizontal.xs.get(uid)));
+    for (const uid of leaves) leafTips.set(uid, edge);
+  }
+  let proposedX = treeLeafAnchorX(tree, labelStarts, width, leafTips);
   const labelLayout = clusterLabelLayout(config);
   const rows = [...scene.clusters.values()].map((cluster) => {
     const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
@@ -160,15 +182,26 @@ export function layoutTree({
   const nodes = [];
   const guides = [];
   const supports = [];
+  const triangles = [];
   for (const node of tree.nodes) {
+    if (hidden.has(node.uid)) continue;
     const x = xs.get(node.uid);
     if (node.children?.length) {
       if (config.tree.node?.show !== false) nodes.push({ uid: node.uid, x, radius: 4, hitRadius: 10 });
-      // Stems and horizontal edges are separate marks. Square stem caps fill
-      // the outer corners without extending leaf tips or changing distances.
-      if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children, style: presentation.stems.get(node.uid), lineCap: "square" });
-      for (const child of node.children) {
-        branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child), style: presentation.branches.get(child) });
+      const leaves = collapsed.get(node.uid);
+      if (leaves) {
+        const x2 = Math.max(...leaves.map((uid) => xs.get(uid)));
+        triangles.push({ uid: node.uid, x, x2, leaves, style: presentation.stems.get(node.uid) });
+        if (config.tree.leafGuide?.show) for (const uid of leaves) {
+          const end = labelStarts.get(treeNodes.get(uid).cluster) - labelClearance;
+          if (end - x2 > 1e-9) guides.push({ uid, nodeUid: uid, x1: x2, x2: end });
+        }
+      } else {
+        // Square stem caps close corners without extending leaf tips.
+        if (node.children.length > 1) stems.push({ uid: node.uid, x1: x, x2: x, children: node.children, style: presentation.stems.get(node.uid), lineCap: "square" });
+        for (const child of node.children) {
+          branches.push({ uid: `${node.uid}:${child}`, nodeUid: child, x1: x, x2: xs.get(child), style: presentation.branches.get(child) });
+        }
       }
     } else if (config.tree.leafGuide?.show && Number.isFinite(labelStarts.get(node.cluster))) {
       const end = labelStarts.get(node.cluster) - labelClearance;
@@ -219,7 +252,7 @@ export function layoutTree({
   }
   return positionTreeLayout({
     background: config.figureStyle?.background || "white", foreground: config.figureStyle?.foreground || "black",
-    cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, scaleBar,
+    cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, triangles, scaleBar,
     rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX, style: branch },
     ys, previousYs,
   }, ys);
@@ -237,6 +270,9 @@ function positionTreeLayout(layout, ys) {
       y2: Math.max(...stem.children.map((uid) => ys.get(uid))),
     })),
     nodes: layout.nodes.map((node) => ({ ...node, y: ys.get(node.uid) })),
+    triangles: layout.triangles.map((triangle) => ({ ...triangle, y: ys.get(triangle.uid),
+      y1: Math.min(...triangle.leaves.map((uid) => ys.get(uid))),
+      y2: Math.max(...triangle.leaves.map((uid) => ys.get(uid))) })),
     guides: layout.guides.map(line),
     supports: layout.supports.map((label) => ({ ...label, y: ys.get(label.uid) - 4 })),
     annotations: layout.annotations.map((label) => ({ ...label, y: ys.get(label.uid) + 6 })),
@@ -251,6 +287,11 @@ function positionTreeLayout(layout, ys) {
   };
   for (const mark of [frame.rootBranch, ...frame.branches, ...frame.stems]) includeLine(mark);
   for (const mark of frame.guides) includeLine(mark, frame.guide.width);
+  for (const triangle of frame.triangles) {
+    const half = triangle.style.width / 2;
+    points.push([triangle.x - half, Math.min(triangle.y, triangle.y1) - half],
+      [triangle.x2 + half, Math.max(triangle.y, triangle.y2) + half]);
+  }
   for (const node of frame.nodes) {
     const radius = node.radius + frame.branch.width / 2;
     points.push([node.x - radius, node.y - radius], [node.x + radius, node.y + radius]);
@@ -289,6 +330,14 @@ export function hitTestTreeNode(layout, point) {
   for (const node of layout?.nodes || []) {
     if (Math.hypot(point.x - node.x, point.y - node.y) <= node.hitRadius) {
       return { action: "tree-node", nodeUid: node.uid };
+    }
+  }
+  for (const triangle of layout?.triangles || []) {
+    const ratio = (point.x - triangle.x) / (triangle.x2 - triangle.x);
+    if (ratio >= 0 && ratio <= 1 &&
+        point.y >= triangle.y + ratio * (triangle.y1 - triangle.y) &&
+        point.y <= triangle.y + ratio * (triangle.y2 - triangle.y)) {
+      return { action: "tree-node", nodeUid: triangle.uid };
     }
   }
   return null;

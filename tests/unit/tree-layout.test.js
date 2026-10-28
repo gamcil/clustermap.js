@@ -34,6 +34,48 @@ function example() {
 
 const mark = (marks, uid) => marks.find((value) => value.uid === uid);
 
+test("collapsed clades replace descendant marks and keep label clearance and hit testing", () => {
+  const { tree, scene, build } = example();
+  tree.presentation = { subtrees: { pair: { collapsed: true, branch: { colour: "red", width: 3 } } },
+    nodes: { pair: { label: { text: "Clade" } } } };
+  const before = structuredClone(scene);
+  const layout = build();
+  const triangle = mark(layout.triangles, "pair");
+  assert.ok(triangle);
+  assert.equal(triangle.style.colour, "red");
+  assert.equal(triangle.y1, layout.ys.get("a"));
+  assert.equal(triangle.y2, layout.ys.get("b"));
+  assert.ok(triangle.x2 <= 260 - 100 - 16, "the entire base clears the shortest label anchor");
+  assert.equal(mark(layout.branches, "pair:a"), undefined);
+  assert.equal(mark(layout.stems, "pair"), undefined);
+  assert.ok(mark(layout.branches, "root:pair"), "the incoming branch remains");
+  assert.ok(mark(layout.annotations, "pair"));
+  assert.deepEqual(hitTestTreeNode(layout, { x: (triangle.x + triangle.x2) / 2, y: triangle.y }),
+    { action: "tree-node", nodeUid: "pair" });
+  assert.deepEqual(scene, before, "collapse leaves biological rows and labels untouched");
+});
+
+test("ancestor collapse retains nested settings and triangle spans follow interpolated rows", () => {
+  const { tree, scene, config, build, reorderedScene } = example();
+  tree.presentation = { subtrees: { root: { collapsed: true }, pair: { collapsed: true } },
+    nodes: { pair: { label: { text: "Hidden annotation" } } } };
+  const layout = build({ targetScene: reorderedScene(["c", "b", "a"]), previousTree: tree, previousScene: scene });
+  assert.deepEqual(layout.triangles.map(({ uid }) => uid), ["root"]);
+  assert.equal(layout.nodes.length, 1);
+  assert.equal(layout.branches.length, 0);
+  assert.equal(layout.annotations.length, 0);
+  const middle = interpolateTreeLayout(layout, 0.25), triangle = middle.triangles[0];
+  const ys = triangle.leaves.map((uid) => layout.previousYs.get(uid) * 0.75 + layout.ys.get(uid) * 0.25);
+  assert.equal(triangle.y1, Math.min(...ys));
+  assert.equal(triangle.y2, Math.max(...ys));
+  tree.presentation.subtrees.root.collapsed = false;
+  assert.deepEqual(build().triangles.map(({ uid }) => uid), ["pair"]);
+  const noNodes = build({ config: { ...config, tree: { ...config.tree, node: { show: false } } } });
+  const target = noNodes.triangles[0];
+  assert.deepEqual(hitTestTreeNode(noNodes, { x: (target.x + target.x2) / 2, y: target.y }),
+    { action: "tree-node", nodeUid: "pair" });
+});
+
 const measurementContext = () => ({
   save() {}, restore() {}, measureText: (text) => ({ width: text.length * 8 }),
 });

@@ -40,15 +40,17 @@ export function visibleTree(tree, clusterIds, aliases = new Map()) {
     const styles = new Map(Object.entries(presentation.nodes || {}).filter(([uid]) => retained.has(uid)));
     const subtrees = new Map();
     const inherit = (uid) => {
-      const target = aliases.get(uid) ?? uid, branch = presentation.subtrees?.[uid]?.branch;
-      if (branch && retained.has(target)) {
-        subtrees.set(target, { branch: { ...subtrees.get(target)?.branch, ...branch } });
+      const target = aliases.get(uid) ?? uid, record = presentation.subtrees?.[uid];
+      if (record && retained.has(target)) {
+        const previous = subtrees.get(target);
+        subtrees.set(target, { ...previous, ...record,
+          ...(record.branch ? { branch: { ...previous?.branch, ...record.branch } } : {}) });
       }
       for (const child of nodes.get(uid).children || []) inherit(child);
     };
     inherit(tree.root);
     for (const [uid, style] of subtrees) if (!retained.get(uid).children) {
-      styles.set(uid, { ...styles.get(uid), branch: { ...style.branch, ...styles.get(uid)?.branch } });
+      if (style.branch) styles.set(uid, { ...styles.get(uid), branch: { ...style.branch, ...styles.get(uid)?.branch } });
       subtrees.delete(uid);
     }
     if (root.uid !== tree.root && styles.has(root.uid)) {

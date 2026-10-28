@@ -332,6 +332,19 @@ chart.patch([{ type: "tree.presentation.reset", scope: "node", ids: ["node-1"] }
 chart.patch([{ type: "tree.presentation.reset", scope: "manual" }]);
 ```
 
+Replace a subtree's branches with a triangle through the node menu's
+**Collapse subtree** checkbox, or use:
+
+```js
+chart.patch([{ type: "tree.presentation.update", scope: "subtree", ids: ["node-1"],
+  changes: { collapsed: true } }]);
+```
+
+The triangle spans the descendant leaf rows and extends to their furthest tip.
+Cluster rows and labels remain visible. Set `collapsed: null` to expand it;
+collapse is saved in projects, included in SVG export, and supports undo/redo.
+Nested collapse settings are retained when an ancestor is collapsed or expanded.
+
 Updates deep-merge sparse fields. Patch-only null removes a field; empty records
 are pruned. Resetting a subtree removes only its own override, preserving child
 overrides. Resetting all manual styles preserves the colouring policy. A batch

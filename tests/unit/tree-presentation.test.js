@@ -89,6 +89,8 @@ for (const [description, presentation] of [
   ["unknown node", { subtrees: { missing: { branch: { colour: "red" } } } }],
   ["root incoming edge", { nodes: { root: { branch: { colour: "red" } } } }],
   ["zero width", { subtrees: { x: { branch: { width: 0 } } } }],
+  ["non-boolean collapse", { subtrees: { x: { collapsed: "true" } } }],
+  ["leaf collapse", { subtrees: { a: { collapsed: true } } }],
   ["leaf annotation", { nodes: { a: { label: { text: "tip" } } } }],
   ["unknown field", { nodes: { x: { unsupported: true } } }],
 ]) {
@@ -122,7 +124,7 @@ test("tree patches preserve absent fields through exact undo and redo without re
   const before = structuredClone(data);
   const result = applyChartOperations(data, index, [
     operation("tree", { colouring: { mode: "cutHeight", cutHeight: 3 } }),
-    operation("subtree", { branch: { width: 4 } }, ["x"]),
+    operation("subtree", { branch: { width: 4 }, collapsed: true }, ["x"]),
     operation("node", { label: { text: "<b>plain text</b>", fontWeight: 700 } }, ["x"]),
   ]);
   const after = structuredClone(data);
@@ -156,6 +158,9 @@ test("invalid mixed/tree batches are atomic, including unknown deletion fields",
   const { data, index } = editable();
   const before = structuredClone(data);
   for (const bad of [
+    operation("subtree", { collapsed: "true" }, ["x"]),
+    operation("subtree", { collapsed: true }, ["a"]),
+    operation("node", { collapsed: true }, ["x"]),
     operation("node", { branch: { colour: "invalid" } }, ["x"]),
     operation("subtree", { branch: { unsupported: null } }, ["x"]),
     operation("node", { label: { text: "no" } }, ["a"]),

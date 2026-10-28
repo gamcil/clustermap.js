@@ -34,6 +34,20 @@ test("tree pruning collapses unary chains, preserves distances and leaves the so
   assert.deepEqual(data, before);
 });
 
+test("tree pruning retains collapse on surviving clades and drops it on leaves", async () => {
+  const data = await fixture();
+  data.tree.presentation = { subtrees: { root: { collapsed: true }, x: { collapsed: true } } };
+  const ids = new Set(data.clusters.map(({ uid }) => uid));
+  const all = visibleTree(data.tree, ids);
+  assert.equal(all.presentation.subtrees.x.collapsed, true);
+  ids.delete("a");
+  const pruned = visibleTree(data.tree, ids);
+  assert.equal(pruned.presentation.subtrees.root.collapsed, true);
+  assert.equal(pruned.presentation.subtrees.b, undefined);
+  validateTree(pruned, data.clusters.filter(({ uid }) => ids.has(uid)));
+  assert.equal(data.tree.presentation.subtrees.x.collapsed, true);
+});
+
 test("plot exclusions filter contents, links, keys and clade markers without deleting source data", async () => {
   const data = await fixture();
   data.links = [{ uid: "ab", query: { uid: "gene-a" }, target: { uid: "gene-b" }, identity: 1 }];

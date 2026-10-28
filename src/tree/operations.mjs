@@ -28,11 +28,15 @@ export function normalizeTreeOperation(tree, operation) {
   const result = { type, scope, ...(ids ? { ids } : {}) };
   if (type === "tree.presentation.update") {
     if (!object(operation.changes) || !Object.keys(operation.changes).length) fail("tree presentation updates require changes.");
-    const allowed = scope === "tree" ? ["colouring"] : scope === "subtree" ? ["branch"] : ["branch", "label"];
+    const allowed = scope === "tree" ? ["colouring"] : scope === "subtree" ? ["branch", "collapsed"] : ["branch", "label"];
     if (Object.keys(operation.changes).some((key) => !allowed.includes(key))) fail("unsupported tree presentation update field.");
     const fields = { branch: ["colour", "width"], label: ["text", "colour", "fontSize", "fontWeight", "fontStyle"], colouring: ["mode", "cutHeight", "palette", "showCutLine"] };
     for (const [key, value] of Object.entries(operation.changes)) {
       if (value === null) continue;
+      if (key === "collapsed") {
+        if (typeof value !== "boolean") fail("collapsed must be boolean.");
+        continue;
+      }
       if (!object(value) || Object.keys(value).some((field) => !fields[key].includes(field))) {
         fail(`unsupported ${key} fields in tree presentation update.`);
       }

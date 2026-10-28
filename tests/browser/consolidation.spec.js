@@ -48,6 +48,71 @@ test("configuration snapshots and listener payloads cannot mutate live settings"
   expect(result).toEqual({ palette: ["red", "blue"], size: 15, unchanged: true });
 });
 
+test("batch trim respects a pretrimmed member and remains one undoable edit", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const state = chart.state();
+    const loci = new Map(state.loci);
+    loci.set("locus-a", { start: 2600, end: 4100, flipped: false, trimLeft: "a1", trimRight: "a1" });
+    state.loci = [...loci];
+    chart.state(state); chart.clearHistory();
+    const before = chart.state();
+    chart.trimLoci(["locus-a", "locus-b"]);
+    const after = chart.state();
+    chart.undo(); const undone = chart.state(), moreUndo = chart.canUndo();
+    chart.redo();
+    return { before, after, undone, moreUndo, redone: chart.state() };
+  });
+  const loci = new Map(result.after.loci);
+  expect(loci.get("locus-a")).toMatchObject({ start: 2600, end: 4100, trimLeft: "a1", trimRight: "a1" });
+  expect(loci.get("locus-b")).toMatchObject({ start: 100, end: 6600 });
+  expect(result.undone).toEqual(result.before);
+  expect(result.moreUndo).toBe(false);
+  expect(result.redone).toEqual(result.after);
+});
+
+for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: subtree triangles persist, export and expand through the node menu`, async ({ page }) => {
+    const point = await page.locator("circle.tree-node").nth(1).boundingBox();
+    await page.evaluate((renderer) => {
+      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+      chart.config({ plot: { renderer } }); chart.clearHistory();
+    }, renderer);
+    await page.mouse.click(point.x + point.width / 2, point.y + point.height / 2, { button: "right" });
+    const checkbox = page.getByRole("checkbox", { name: "Collapse subtree", exact: true });
+    await checkbox.check();
+    const inspect = () => page.evaluate(() => {
+      const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml");
+      return { triangles: svg.querySelectorAll("polygon.tree-subtree").length,
+        branches: svg.querySelectorAll("path.tree-branch").length,
+        clusters: svg.querySelectorAll("g.cluster").length };
+    });
+    expect(await inspect()).toEqual({ triangles: 1, branches: 2, clusters: 3 });
+    await page.evaluate(() => chart.undo());
+    expect((await inspect()).triangles).toBe(0);
+    await page.evaluate(() => { chart.redo(); chart.project(chart.project()); });
+    expect(await inspect()).toEqual({ triangles: 1, branches: 2, clusters: 3 });
+    const target = await page.evaluate(() => {
+      const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml");
+      const points = svg.querySelector("polygon.tree-subtree").getAttribute("points").split(/[ ,]+/).map(Number);
+      const camera = chart.state().camera;
+      return { x: camera.x + (points[0] * 0.4 + points[2] * 0.6) * camera.k,
+        y: camera.y + (points[1] * 0.4 + (points[3] + points[5]) * 0.3) * camera.k };
+    });
+    if (renderer !== "svg") {
+      const alpha = await page.locator(renderer === "canvas" ? "canvas.clusterMapCanvas" : "canvas.clusterMapWebGpuOverlay")
+        .evaluate((canvas, target) => {
+          const rect = canvas.getBoundingClientRect();
+          return canvas.getContext("2d").getImageData(Math.floor((target.x - rect.x) * canvas.width / rect.width),
+            Math.floor((target.y - rect.y) * canvas.height / rect.height), 1, 1).data[3];
+        }, target);
+      expect(alpha).toBeGreaterThan(0);
+    }
+    await page.mouse.click(target.x, target.y, { button: "right" });
+    await checkbox.uncheck();
+    expect(await inspect()).toEqual({ triangles: 0, branches: 4, clusters: 3 });
+  });
+}
+
 test("project notifications expose final state and listener errors preserve undo/redo", async ({ page }) => {
   const result = await page.evaluate(() => {
     const saved = chart.project();

@@ -14,6 +14,8 @@ function positionBranches(selection, lines) {
     .attr("d", (line) => `M${line.x1},${line.y1}H${line.x2}`);
 }
 
+const trianglePoints = (mark) => `${mark.x},${mark.y} ${mark.x2},${mark.y1} ${mark.x2},${mark.y2}`;
+
 /** SVG owns DOM joins and transitions; the shared layout supplies every frame. */
 export function renderSvgTree(plot, tree, scene, config, interactions, transition, animate, motion = {}) {
   if (!tree || !config.tree?.show || !scene?.clusters.size) {
@@ -53,10 +55,7 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     .attr("class", "tree-leaf-guide")
     .attr("stroke", layout.guide.colour).attr("stroke-width", layout.guide.width)
     .attr("stroke-dasharray", layout.guide.dash.join(" ")).attr("pointer-events", "none");
-  const nodes = group.selectAll("circle.tree-node").data(layout.nodes, (node) => node.uid).join("circle")
-    .attr("class", "tree-node").attr("r", (node) => node.radius)
-    .attr("fill", layout.background).attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width)
-    .attr("cursor", "pointer")
+  const interactive = (selection) => selection.attr("cursor", "pointer")
     .attr("tabindex", 0).attr("role", "button").attr("aria-label", (node) => `Tree node ${node.uid}: rotate children or open context menu`)
     .on("contextmenu", (event, node) => interactions.showTreeMenu?.(event, node.uid))
     .on("keydown", (event, node) => {
@@ -64,6 +63,12 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
       else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); interactions.rotateTreeNode?.(node.uid); }
     })
     .on("click", (event, node) => { event.stopPropagation(); interactions.rotateTreeNode?.(node.uid); });
+  const triangles = interactive(group.selectAll("polygon.tree-subtree").data(layout.triangles, (mark) => mark.uid).join("polygon")
+    .attr("class", "tree-subtree").attr("fill", (mark) => mark.style.colour).attr("fill-opacity", 0.12)
+    .attr("stroke", (mark) => mark.style.colour).attr("stroke-width", (mark) => mark.style.width).attr("stroke-linejoin", "round"));
+  const nodes = interactive(group.selectAll("circle.tree-node").data(layout.nodes, (node) => node.uid).join("circle")
+    .attr("class", "tree-node").attr("r", (node) => node.radius)
+    .attr("fill", layout.background).attr("stroke", layout.branch.colour).attr("stroke-width", layout.branch.width));
   const supports = group.selectAll("text.tree-support").data(layout.supports, (label) => label.uid).join("text")
     .attr("class", "tree-support").attr("fill", layout.support.colour)
     .attr("font-size", `${layout.support.fontSize}px`).style("font-family", layout.support.fontFamily)
@@ -91,6 +96,7 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     positionLines(stems, frame.stems);
     positionLines(guides, frame.guides);
     nodes.data(frame.nodes, (node) => node.uid).attr("cx", (node) => node.x).attr("cy", (node) => node.y);
+    triangles.data(frame.triangles, (mark) => mark.uid).attr("points", trianglePoints);
     annotations.data(frame.annotations, (label) => label.uid).attr("x", (label) => label.x).attr("y", (label) => label.y);
     supports.data(frame.supports, (label) => label.uid).attr("x", (label) => label.x).attr("y", (label) => label.y);
   };

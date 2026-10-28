@@ -95,8 +95,9 @@ function validateTreePresentation(tree, config = {}) {
       for (const [uid, record] of Object.entries(presentation[scope])) {
         const node = nodes.get(uid);
         if (!node) fail(`presentation.${scope} refers to unknown node '${uid}'.`);
-        fields(record, scope === "subtrees" ? ["branch"] : ["branch", "label"], `${scope}.${uid}`);
+        fields(record, scope === "subtrees" ? ["branch", "collapsed"] : ["branch", "label"], `${scope}.${uid}`);
         if (scope === "subtrees" && !node.children) fail(`subtree '${uid}' must be an internal node.`);
+        if (record.collapsed !== undefined && typeof record.collapsed !== "boolean") fail(`subtrees.${uid}.collapsed must be boolean.`);
         if (record.branch !== undefined) {
           if (scope === "nodes" && uid === tree.root) fail("the display root has no incoming edge to style.");
           validateBranch(record.branch, `${scope}.${uid}.branch`);

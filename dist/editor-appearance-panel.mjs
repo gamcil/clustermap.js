@@ -1,4 +1,4 @@
-import { d as defineAppearancePanel } from './editor/appearance-panel-53245b25.mjs';
+import { d as defineAppearancePanel } from './editor/appearance-panel-b4ed47ff.mjs';
 import './editor/search-field-595834d9.mjs';
 import './editor/theme-8bd47f2f.mjs';
 
