@@ -1,7 +1,7 @@
 import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle } from './editor/annotation-editor-20ae8582.mjs';
 import { c as createTemplate, m as mountComponent, a as controlStyles, u as upgradeProperty } from './editor/search-field-595834d9.mjs';
 import { a as applyEditorTheme, e as editorThemeStyles } from './editor/theme-8bd47f2f.mjs';
-import { d as defineAppearancePanel } from './editor/appearance-panel-4c067c3b.mjs';
+import { d as defineAppearancePanel } from './editor/appearance-panel-8c9e5dcb.mjs';
 import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-85ae6763.mjs';
 
 const toolbarTemplate = createTemplate("<strong></strong>\n<button type=\"button\" data-action=\"focus\">Focus</button>\n<button type=\"button\" data-action=\"flip\">Flip</button>\n<button type=\"button\" data-action=\"trim\">Trim</button>\n<clinker-action-menu label=\"Loci…\" data-loci-menu hidden>\n  <button type=\"button\" data-action=\"restore\">Restore full loci</button>\n</clinker-action-menu>\n<clinker-action-menu label=\"More…\" data-more-menu>\n  <button type=\"button\" data-action=\"edit\">Edit data…</button>\n  <button type=\"button\" data-action=\"remove\"></button>\n</clinker-action-menu>\n<button type=\"button\" data-action=\"clear\">Clear</button>\n");

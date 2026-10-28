@@ -133,6 +133,7 @@ function validateConfiguration(options, tree = null) {
     throw new TypeError(`Unknown plot renderer: ${candidate.plot.renderer}. Expected svg, canvas, or webgpu.`);
   }
   if (typeof candidate.tree.node?.show !== "boolean") throw new TypeError("tree.node.show must be a boolean.");
+  if (typeof candidate.cluster.hideLocusLabels !== "boolean") throw new TypeError("cluster.hideLocusLabels must be a boolean.");
   validateTreePresentation(tree, candidate.tree);
   return candidate;
 }
@@ -178,6 +179,7 @@ function updateIdentityScale(data) {
 // configuration addition cannot silently affect full builds but not retained
 // flip/anchor patches (or vice versa).
 function locusText(cluster) {
+  if (config.cluster.hideLocusLabels) return "";
   return formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates);
 }
 

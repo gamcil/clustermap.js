@@ -10376,7 +10376,7 @@ function clusterLabelHit(context, scene, point, config) {
       point.x >= anchorX - width &&
       point.x <= anchorX &&
       point.y >= cluster.y - config.cluster.nameFontSize &&
-      point.y <= cluster.y + config.cluster.lociFontSize + 12
+      point.y <= cluster.y + (cluster.info.locusText ? config.cluster.lociFontSize + 12 : 8)
     ) {
       return { action: "move-cluster", clusterUid: cluster.source.uid };
     }
@@ -12677,6 +12677,7 @@ const defaultConfig = {
   cluster: {
     nameFontSize: 12,
     lociFontSize: 10,
+    hideLocusLabels: false,
     hideLocusCoordinates: false,
     spacing: 40,
     alignLabels: true,
@@ -12854,6 +12855,7 @@ function validateConfiguration(options, tree = null) {
     throw new TypeError(`Unknown plot renderer: ${candidate.plot.renderer}. Expected svg, canvas, or webgpu.`);
   }
   if (typeof candidate.tree.node?.show !== "boolean") throw new TypeError("tree.node.show must be a boolean.");
+  if (typeof candidate.cluster.hideLocusLabels !== "boolean") throw new TypeError("cluster.hideLocusLabels must be a boolean.");
   validateTreePresentation(tree, candidate.tree);
   return candidate;
 }
@@ -12899,6 +12901,7 @@ function updateIdentityScale(data) {
 // configuration addition cannot silently affect full builds but not retained
 // flip/anchor patches (or vice versa).
 function locusText(cluster) {
+  if (config.cluster.hideLocusLabels) return "";
   return formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates);
 }
 

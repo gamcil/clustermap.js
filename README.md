@@ -99,6 +99,12 @@ them with `chart.config({ plot: { showFigureFrame: false } })`, or toggle
 remain visible, and figure bounds and SVG output are unchanged. Set the option
 back to `true` to restore the frame.
 
+Under Appearance → Clusters & loci, **Hide locus labels** removes the complete
+locus label line while keeping cluster names visible. Its API setting is
+`chart.config({ cluster: { hideLocusLabels: true } })` (default `false`).
+**Hide locus coordinates** remains independent: it keeps locus names and hides
+only their coordinate ranges when labels are visible.
+
 Gene/group colours, heatmap ramps, bar fills and manual styles remain unchanged.
 Neutral configuration colours (`gene.shape.stroke`, `locus.trackBar.colour`,
 `scaleBar.colour`, `tree.branch.colour`, `tree.leafGuide.colour`) default to

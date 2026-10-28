@@ -99,6 +99,7 @@ const defaultConfig = {
   cluster: {
     nameFontSize: 12,
     lociFontSize: 10,
+    hideLocusLabels: false,
     hideLocusCoordinates: false,
     spacing: 40,
     alignLabels: true,

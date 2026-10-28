@@ -61,7 +61,7 @@ function clusterLabelHit(context, scene, point, config) {
       point.x >= anchorX - width &&
       point.x <= anchorX &&
       point.y >= cluster.y - config.cluster.nameFontSize &&
-      point.y <= cluster.y + config.cluster.lociFontSize + 12
+      point.y <= cluster.y + (cluster.info.locusText ? config.cluster.lociFontSize + 12 : 8)
     ) {
       return { action: "move-cluster", clusterUid: cluster.source.uid };
     }
