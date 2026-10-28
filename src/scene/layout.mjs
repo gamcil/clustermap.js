@@ -10,7 +10,7 @@ import {
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
 import { locusContentBounds } from "../loci/layout.mjs";
 import { arrangeTrimIndicators, createTrimIndicators, resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
-import { layoutAnnotationPanels, annotationFigureBounds, annotationChromeRightEdge, legendTopExtent } from "../annotations/model.mjs";
+import { layoutAnnotationPanels, annotationFigureBounds, annotationChromeRightEdge, legendTopExtent, legendContentBounds } from "../annotations/model.mjs";
 
 function worldPolygon(points, x, y) {
   return points.map((point, index) => point + (index % 2 === 0 ? x : y));
@@ -76,26 +76,16 @@ function extendBounds(bounds, minX, maxX, minY, maxY) {
   };
 }
 
-// This deliberately excludes text-width measurement: Canvas supplies exact
-// glyph metrics while fitting, and SVG uses its native bounding box. The scene
-// still records the chrome's structural footprint for renderer-neutral camera
-// and minimap work.
-export function figureBoundsForChrome(bounds, chrome) {
+/** Measure rendered chrome content, preserving column spacing between entries. */
+export function figureBoundsForChrome(bounds, chrome, measureText = null) {
   if (!bounds || !chrome) return bounds;
   let figureBounds = { ...bounds };
   const { legend, scaleBar, colourBar } = chrome;
-  if (legend?.visible) {
-    for (const item of legend.items) {
-      const x = legend.position.x + item.x;
-      const y = legend.position.y + item.y;
-      figureBounds = extendBounds(
-        figureBounds,
-        x - item.radius,
-        x + legend.columnWidth,
-        y,
-        y + (legend.hasSubtitles ? legend.entryHeight : legend.fontSize)
-      );
-    }
+  if (legend?.visible && legend.items.length) {
+    const content = legendContentBounds(legend, measureText);
+    figureBounds = extendBounds(figureBounds,
+      legend.position.x + content.minX, legend.position.x + content.maxX,
+      legend.position.y + content.minY, legend.position.y + content.maxY);
   }
   if (scaleBar?.visible) {
     figureBounds = extendBounds(
@@ -643,7 +633,7 @@ function projectSceneAnnotations(definitions, clusters, bounds, chrome, options,
   const annotationBounds = annotationFigureBounds(bounds, annotationPanels, clusters);
   placeLegendAfterAnnotations(chrome, annotationPanels, annotationBounds, options.measureText);
   return { annotationPanelData, annotationPanels, annotationAnchorX, annotationChromeRight,
-    figureBounds: figureBoundsForChrome(annotationBounds, chrome) };
+    figureBounds: figureBoundsForChrome(annotationBounds, chrome, options.measureText) };
 }
 
 /** Presentation/data edits to annotations leave synteny and its indexes intact. */

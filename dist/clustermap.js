@@ -3741,19 +3741,32 @@
     return right;
   }
 
+  /** Visible legend footprint; column spacing is not trailing figure padding. */
+  function legendContentBounds(legend, measureText = null) {
+    const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+    const include = (minX, maxX, minY, maxY) => {
+      bounds.minX = Math.min(bounds.minX, minX); bounds.maxX = Math.max(bounds.maxX, maxX);
+      bounds.minY = Math.min(bounds.minY, minY); bounds.maxY = Math.max(bounds.maxY, maxY);
+    };
+    if (!legend.visible || !legend.items.length) return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+    for (const item of legend.items) {
+      include(item.x - item.radius, item.x + item.radius,
+        item.y + item.circleY - item.radius, item.y + item.circleY + item.radius);
+      const addText = (value, fontSize, y) => {
+        if (!value) return;
+        const text = textBounds(value, fontSize, legend.fontFamily, measureText, { baseline: "middle" });
+        include(item.x + item.textX + text.minX, item.x + item.textX + text.maxX,
+          item.y + y + text.minY, item.y + y + text.maxY);
+      };
+      addText(item.label, legend.fontSize, item.textY);
+      addText(item.subtitle, legend.subtitleFontSize, item.subtitleY);
+    }
+    return bounds;
+  }
+
   /** Top ink extent relative to a legend's origin, including tall text/subtitles. */
   function legendTopExtent(legend, measureText = null) {
-    let top = 0;
-    if (!legend.visible) return top;
-    for (const item of legend.items) {
-      const label = textBounds(item.label, legend.fontSize, legend.fontFamily, measureText, { baseline: "middle" });
-      top = Math.min(top, item.y + item.circleY - item.radius, item.y + item.textY + label.minY);
-      if (item.subtitle) {
-        const subtitle = textBounds(item.subtitle, legend.subtitleFontSize, legend.fontFamily, measureText, { baseline: "middle" });
-        top = Math.min(top, item.y + item.subtitleY + subtitle.minY);
-      }
-    }
-    return top;
+    return Math.min(0, legendContentBounds(legend, measureText).minY);
   }
 
   // Values are replaced at data boundaries and shared by presentation edits.
@@ -4150,26 +4163,16 @@
     };
   }
 
-  // This deliberately excludes text-width measurement: Canvas supplies exact
-  // glyph metrics while fitting, and SVG uses its native bounding box. The scene
-  // still records the chrome's structural footprint for renderer-neutral camera
-  // and minimap work.
-  function figureBoundsForChrome(bounds, chrome) {
+  /** Measure rendered chrome content, preserving column spacing between entries. */
+  function figureBoundsForChrome(bounds, chrome, measureText = null) {
     if (!bounds || !chrome) return bounds;
     let figureBounds = { ...bounds };
     const { legend, scaleBar, colourBar } = chrome;
-    if (legend?.visible) {
-      for (const item of legend.items) {
-        const x = legend.position.x + item.x;
-        const y = legend.position.y + item.y;
-        figureBounds = extendBounds(
-          figureBounds,
-          x - item.radius,
-          x + legend.columnWidth,
-          y,
-          y + (legend.hasSubtitles ? legend.entryHeight : legend.fontSize)
-        );
-      }
+    if (legend?.visible && legend.items.length) {
+      const content = legendContentBounds(legend, measureText);
+      figureBounds = extendBounds(figureBounds,
+        legend.position.x + content.minX, legend.position.x + content.maxX,
+        legend.position.y + content.minY, legend.position.y + content.maxY);
     }
     if (scaleBar?.visible) {
       figureBounds = extendBounds(
@@ -4717,7 +4720,7 @@
     const annotationBounds = annotationFigureBounds(bounds, annotationPanels, clusters);
     placeLegendAfterAnnotations(chrome, annotationPanels, annotationBounds, options.measureText);
     return { annotationPanelData, annotationPanels, annotationAnchorX, annotationChromeRight,
-      figureBounds: figureBoundsForChrome(annotationBounds, chrome) };
+      figureBounds: figureBoundsForChrome(annotationBounds, chrome, options.measureText) };
   }
 
   /** Presentation/data edits to annotations leave synteny and its indexes intact. */
@@ -4987,7 +4990,11 @@
         structural.maxY = Math.max(structural.maxY, content.maxY);
       }
     }
-    const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome),
+    const measureChromeText = (text, style) => measureCanvasText(context, scene, text, {
+      font: `${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`,
+      align: "left", baseline: style.textBaseline || "alphabetic",
+    });
+    const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome, measureChromeText),
       scene.annotationPanels || [], scene.clusters, panels) : scene.figureBounds || structural) };
     const include = (x, y) => {
       bounds.minX = Math.min(bounds.minX, x);
@@ -5072,18 +5079,11 @@
         { fontSize: item.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
           align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
     }
-    if (chrome?.legend.visible) {
+    if (chrome?.legend.visible && chrome.legend.items.length) {
       const legend = chrome.legend;
-      const subtitleSize = legend.subtitleFontSize || Math.max(10, legend.fontSize * 0.72);
-      for (const item of legend.items) {
-        const x = legend.position.x + item.x, y = legend.position.y + item.y + item.circleY;
-        include(x - item.radius, y - item.radius);
-        include(x + item.radius, y + item.radius);
-        includeText(item.label, legend.position.x + item.textX, legend.position.y + item.y + item.textY,
-          { fontSize: legend.fontSize, fontFamily: legend.fontFamily, baseline: "middle" });
-        includeText(item.subtitle, legend.position.x + item.textX, legend.position.y + item.y + item.subtitleY,
-          { fontSize: subtitleSize, fontFamily: legend.fontFamily, baseline: "middle" });
-      }
+      const content = legendContentBounds(legend, measureChromeText);
+      include(legend.position.x + content.minX, legend.position.y + content.minY);
+      include(legend.position.x + content.maxX, legend.position.y + content.maxY);
     }
     if (chrome?.scaleBar.visible) {
       const bar = chrome.scaleBar;

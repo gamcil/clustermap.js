@@ -132,19 +132,32 @@ export function annotationChromeRightEdge(chrome, measureText = null) {
   return right;
 }
 
+/** Visible legend footprint; column spacing is not trailing figure padding. */
+export function legendContentBounds(legend, measureText = null) {
+  const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  const include = (minX, maxX, minY, maxY) => {
+    bounds.minX = Math.min(bounds.minX, minX); bounds.maxX = Math.max(bounds.maxX, maxX);
+    bounds.minY = Math.min(bounds.minY, minY); bounds.maxY = Math.max(bounds.maxY, maxY);
+  };
+  if (!legend.visible || !legend.items.length) return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  for (const item of legend.items) {
+    include(item.x - item.radius, item.x + item.radius,
+      item.y + item.circleY - item.radius, item.y + item.circleY + item.radius);
+    const addText = (value, fontSize, y) => {
+      if (!value) return;
+      const text = textBounds(value, fontSize, legend.fontFamily, measureText, { baseline: "middle" });
+      include(item.x + item.textX + text.minX, item.x + item.textX + text.maxX,
+        item.y + y + text.minY, item.y + y + text.maxY);
+    };
+    addText(item.label, legend.fontSize, item.textY);
+    addText(item.subtitle, legend.subtitleFontSize, item.subtitleY);
+  }
+  return bounds;
+}
+
 /** Top ink extent relative to a legend's origin, including tall text/subtitles. */
 export function legendTopExtent(legend, measureText = null) {
-  let top = 0;
-  if (!legend.visible) return top;
-  for (const item of legend.items) {
-    const label = textBounds(item.label, legend.fontSize, legend.fontFamily, measureText, { baseline: "middle" });
-    top = Math.min(top, item.y + item.circleY - item.radius, item.y + item.textY + label.minY);
-    if (item.subtitle) {
-      const subtitle = textBounds(item.subtitle, legend.subtitleFontSize, legend.fontFamily, measureText, { baseline: "middle" });
-      top = Math.min(top, item.y + item.subtitleY + subtitle.minY);
-    }
-  }
-  return top;
+  return Math.min(0, legendContentBounds(legend, measureText).minY);
 }
 
 // Values are replaced at data boundaries and shared by presentation edits.

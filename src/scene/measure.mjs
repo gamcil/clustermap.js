@@ -1,6 +1,6 @@
 import { layoutTree } from "../tree/layout.mjs";
 import { figureBoundsForChrome } from "./layout.mjs";
-import { annotationPanelsForFrame, annotationFigureBounds } from "../annotations/model.mjs";
+import { annotationPanelsForFrame, annotationFigureBounds, legendContentBounds } from "../annotations/model.mjs";
 import { getLinkLabelPosition } from "../links/layout.mjs";
 import { resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
 import { locusContentBounds } from "../loci/layout.mjs";
@@ -96,7 +96,11 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
       structural.maxY = Math.max(structural.maxY, content.maxY);
     }
   }
-  const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome),
+  const measureChromeText = (text, style) => measureCanvasText(context, scene, text, {
+    font: `${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`,
+    align: "left", baseline: style.textBaseline || "alphabetic",
+  });
+  const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome, measureChromeText),
     scene.annotationPanels || [], scene.clusters, panels) : scene.figureBounds || structural) };
   const include = (x, y) => {
     bounds.minX = Math.min(bounds.minX, x);
@@ -181,18 +185,11 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
       { fontSize: item.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
         align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
   }
-  if (chrome?.legend.visible) {
+  if (chrome?.legend.visible && chrome.legend.items.length) {
     const legend = chrome.legend;
-    const subtitleSize = legend.subtitleFontSize || Math.max(10, legend.fontSize * 0.72);
-    for (const item of legend.items) {
-      const x = legend.position.x + item.x, y = legend.position.y + item.y + item.circleY;
-      include(x - item.radius, y - item.radius);
-      include(x + item.radius, y + item.radius);
-      includeText(item.label, legend.position.x + item.textX, legend.position.y + item.y + item.textY,
-        { fontSize: legend.fontSize, fontFamily: legend.fontFamily, baseline: "middle" });
-      includeText(item.subtitle, legend.position.x + item.textX, legend.position.y + item.y + item.subtitleY,
-        { fontSize: subtitleSize, fontFamily: legend.fontFamily, baseline: "middle" });
-    }
+    const content = legendContentBounds(legend, measureChromeText);
+    include(legend.position.x + content.minX, legend.position.y + content.minY);
+    include(legend.position.x + content.maxX, legend.position.y + content.maxY);
   }
   if (chrome?.scaleBar.visible) {
     const bar = chrome.scaleBar;
