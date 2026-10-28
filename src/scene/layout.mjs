@@ -1,4 +1,5 @@
 import { layoutClusterLabels } from "./clusterLabels.mjs";
+import { includeBounds } from "./bounds.mjs";
 import {
   getGeneLabelLayout,
   getGenePolygonCoordinates,
@@ -69,12 +70,7 @@ function legendPositionForBounds(bounds, legend) {
 }
 
 function extendBounds(bounds, minX, maxX, minY, maxY) {
-  return {
-    minX: Math.min(bounds.minX, minX),
-    maxX: Math.max(bounds.maxX, maxX),
-    minY: Math.min(bounds.minY, minY),
-    maxY: Math.max(bounds.maxY, maxY),
-  };
+  return includeBounds(bounds, { minX, maxX, minY, maxY });
 }
 
 /** Measure rendered chrome content, preserving column spacing between entries. */
@@ -556,20 +552,16 @@ function translateBounds(bounds, x, y = 0) {
 }
 
 function boundsForLoci(loci) {
-  const bounds = loci.map((locus) => locus.bounds).filter(Boolean);
-  return bounds.length ? {
-    minX: Math.min(...bounds.map((bounds) => bounds.minX)),
-    maxX: Math.max(...bounds.map((bounds) => bounds.maxX)),
-    minY: Math.min(...bounds.map((bounds) => bounds.minY)),
-    maxY: Math.max(...bounds.map((bounds) => bounds.maxY)),
-  } : null;
+  let bounds = null;
+  for (const locus of loci) bounds = includeBounds(bounds, locus.bounds);
+  return bounds;
 }
 
 function sceneBounds(loci, options) {
   let bounds = null;
   for (const locus of loci.values()) {
     const next = locusContentBounds(locus, options);
-    bounds = bounds ? extendBounds(bounds, next.minX, next.maxX, next.minY, next.maxY) : next;
+    bounds = includeBounds(bounds, next);
   }
   return bounds;
 }

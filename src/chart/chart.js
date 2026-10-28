@@ -1,4 +1,5 @@
 import { textFont } from "../scene/text.mjs";
+import { includeBounds } from "../scene/bounds.mjs";
 import { setTreeClusterOrder } from "../tree/model.mjs";
 import { createFigureSurface } from "../renderers/figure.mjs";
 import { visibleChartData } from "../data/visibility.mjs";
@@ -861,17 +862,7 @@ export default function clusterMap() {
     const scene = runtime.getScene();
     if (!container || !scene) return false;
     let bounds = null;
-    const include = (candidate) => {
-      if (!candidate) return;
-      if (!bounds) {
-        bounds = { ...candidate };
-        return;
-      }
-      bounds.minX = Math.min(bounds.minX, candidate.minX);
-      bounds.maxX = Math.max(bounds.maxX, candidate.maxX);
-      bounds.minY = Math.min(bounds.minY, candidate.minY);
-      bounds.maxY = Math.max(bounds.maxY, candidate.maxY);
-    };
+    const include = (candidate) => { bounds = includeBounds(bounds, candidate); };
     for (const [kind, ids] of Object.entries({ genes, loci, clusters })) {
       for (const uid of ids) include(scene[kind].get(uid)?.bounds);
     }

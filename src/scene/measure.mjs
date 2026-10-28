@@ -1,4 +1,5 @@
 import { layoutTree } from "../tree/layout.mjs";
+import { includeBounds } from "./bounds.mjs";
 import { figureBoundsForChrome } from "./layout.mjs";
 import { annotationPanelsForFrame, annotationFigureBounds, legendContentBounds } from "../annotations/model.mjs";
 import { getLinkLabelPosition } from "../links/layout.mjs";
@@ -88,10 +89,7 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
       const content = locusContentBounds(locus, {
         shape: config.gene.shape, trimIndicatorStyle: config.locus.trimIndicators,
       }, geometry);
-      structural.minX = Math.min(structural.minX, content.minX);
-      structural.maxX = Math.max(structural.maxX, content.maxX);
-      structural.minY = Math.min(structural.minY, content.minY);
-      structural.maxY = Math.max(structural.maxY, content.maxY);
+      includeBounds(structural, content);
     }
   }
   const measureChromeText = canvasTextMeasurer(context, scene);

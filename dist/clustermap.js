@@ -43,6 +43,17 @@
       minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)) };
   }
 
+  /** Expand an owned accumulator, copying the first extent when it is empty. */
+  function includeBounds(bounds, extent) {
+    if (!extent) return bounds;
+    if (!bounds) return { ...extent };
+    bounds.minX = Math.min(bounds.minX, extent.minX);
+    bounds.maxX = Math.max(bounds.maxX, extent.maxX);
+    bounds.minY = Math.min(bounds.minY, extent.minY);
+    bounds.maxY = Math.max(bounds.maxY, extent.maxY);
+    return bounds;
+  }
+
   function define(constructor, factory, prototype) {
     constructor.prototype = factory.prototype = prototype;
     prototype.constructor = constructor;
@@ -4060,11 +4071,7 @@
     if (!bounds || !panels.length) return bounds;
     const result = { ...bounds };
     for (const panel of frames || annotationPanelsForFrame({ annotationPanels: panels, clusters })) {
-      const area = annotationPanelBounds(panel);
-      result.minX = Math.min(result.minX, area.minX);
-      result.maxX = Math.max(result.maxX, area.maxX);
-      result.minY = Math.min(result.minY, area.minY);
-      result.maxY = Math.max(result.maxY, area.maxY);
+      includeBounds(result, annotationPanelBounds(panel));
     }
     return result;
   }
@@ -4163,12 +4170,7 @@
   }
 
   function extendBounds(bounds, minX, maxX, minY, maxY) {
-    return {
-      minX: Math.min(bounds.minX, minX),
-      maxX: Math.max(bounds.maxX, maxX),
-      minY: Math.min(bounds.minY, minY),
-      maxY: Math.max(bounds.maxY, maxY),
-    };
+    return includeBounds(bounds, { minX, maxX, minY, maxY });
   }
 
   /** Measure rendered chrome content, preserving column spacing between entries. */
@@ -4650,20 +4652,16 @@
   }
 
   function boundsForLoci(loci) {
-    const bounds = loci.map((locus) => locus.bounds).filter(Boolean);
-    return bounds.length ? {
-      minX: Math.min(...bounds.map((bounds) => bounds.minX)),
-      maxX: Math.max(...bounds.map((bounds) => bounds.maxX)),
-      minY: Math.min(...bounds.map((bounds) => bounds.minY)),
-      maxY: Math.max(...bounds.map((bounds) => bounds.maxY)),
-    } : null;
+    let bounds = null;
+    for (const locus of loci) bounds = includeBounds(bounds, locus.bounds);
+    return bounds;
   }
 
   function sceneBounds(loci, options) {
     let bounds = null;
     for (const locus of loci.values()) {
       const next = locusContentBounds(locus, options);
-      bounds = bounds ? extendBounds(bounds, next.minX, next.maxX, next.minY, next.maxY) : next;
+      bounds = includeBounds(bounds, next);
     }
     return bounds;
   }
@@ -4977,10 +4975,7 @@
         const content = locusContentBounds(locus, {
           shape: config.gene.shape, trimIndicatorStyle: config.locus.trimIndicators,
         }, geometry);
-        structural.minX = Math.min(structural.minX, content.minX);
-        structural.maxX = Math.max(structural.maxX, content.maxX);
-        structural.minY = Math.min(structural.minY, content.minY);
-        structural.maxY = Math.max(structural.maxY, content.maxY);
+        includeBounds(structural, content);
       }
     }
     const measureChromeText = canvasTextMeasurer(context, scene);
@@ -13263,13 +13258,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   function recordBounds(scene, records) {
     let result = null;
     for (const [type, ids] of Object.entries(records)) for (const uid of ids) {
-      const bounds = scene[type].get(uid)?.bounds;
-      if (!bounds) continue;
-      if (!result) result = { ...bounds };
-      else {
-        result.minX = Math.min(result.minX, bounds.minX); result.maxX = Math.max(result.maxX, bounds.maxX);
-        result.minY = Math.min(result.minY, bounds.minY); result.maxY = Math.max(result.maxY, bounds.maxY);
-      }
+      result = includeBounds(result, scene[type].get(uid)?.bounds);
     }
     return result;
   }
@@ -16105,17 +16094,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const scene = runtime.getScene();
       if (!container || !scene) return false;
       let bounds = null;
-      const include = (candidate) => {
-        if (!candidate) return;
-        if (!bounds) {
-          bounds = { ...candidate };
-          return;
-        }
-        bounds.minX = Math.min(bounds.minX, candidate.minX);
-        bounds.maxX = Math.max(bounds.maxX, candidate.maxX);
-        bounds.minY = Math.min(bounds.minY, candidate.minY);
-        bounds.maxY = Math.max(bounds.maxY, candidate.maxY);
-      };
+      const include = (candidate) => { bounds = includeBounds(bounds, candidate); };
       for (const [kind, ids] of Object.entries({ genes, loci, clusters })) {
         for (const uid of ids) include(scene[kind].get(uid)?.bounds);
       }

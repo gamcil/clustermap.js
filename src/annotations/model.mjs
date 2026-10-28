@@ -1,4 +1,5 @@
 import { textBounds } from "../scene/text.mjs";
+import { includeBounds } from "../scene/bounds.mjs";
 import { boundsInViewport } from "../scene/camera.mjs";
 import { validateGroupPanel, layoutGroupPanel, groupPanelMarks } from "./groups.mjs";
 import { color } from "d3-color";
@@ -429,11 +430,7 @@ export function annotationFigureBounds(bounds, panels, clusters, frames = null) 
   if (!bounds || !panels.length) return bounds;
   const result = { ...bounds };
   for (const panel of frames || annotationPanelsForFrame({ annotationPanels: panels, clusters })) {
-    const area = annotationPanelBounds(panel);
-    result.minX = Math.min(result.minX, area.minX);
-    result.maxX = Math.max(result.maxX, area.maxX);
-    result.minY = Math.min(result.minY, area.minY);
-    result.maxY = Math.max(result.maxY, area.maxY);
+    includeBounds(result, annotationPanelBounds(panel));
   }
   return result;
 }

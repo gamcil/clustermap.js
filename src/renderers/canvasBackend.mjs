@@ -1,4 +1,5 @@
 import { renderCanvas, CANVAS_LAYERS } from "./canvas.js";
+import { includeBounds } from "../scene/bounds.mjs";
 
 const annotationLayers = ["annotations", "annotationLabels", "chrome"];
 const biologyLayers = CANVAS_LAYERS.filter((layer) => !annotationLayers.includes(layer));
@@ -8,13 +9,7 @@ const noHighlights = Object.fromEntries(highlightKeys.map((key) => [key, null]))
 function recordBounds(scene, records) {
   let result = null;
   for (const [type, ids] of Object.entries(records)) for (const uid of ids) {
-    const bounds = scene[type].get(uid)?.bounds;
-    if (!bounds) continue;
-    if (!result) result = { ...bounds };
-    else {
-      result.minX = Math.min(result.minX, bounds.minX); result.maxX = Math.max(result.maxX, bounds.maxX);
-      result.minY = Math.min(result.minY, bounds.minY); result.maxY = Math.max(result.maxY, bounds.maxY);
-    }
+    result = includeBounds(result, scene[type].get(uid)?.bounds);
   }
   return result;
 }
