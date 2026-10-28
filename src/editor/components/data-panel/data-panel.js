@@ -58,7 +58,6 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   connectedCallback() {
-    defineSelectionBar(); defineViewSwitcher(); defineSearchField(); defineRecordActions(); defineRecordTable(); defineAnnotationEditor();
     this.classList.add("cm-ui", "cm-data-ui");
     if (!this.#table) this.#renderShell();
     this.#subscribe(); this.#syncTheme(); this.#refreshData();
@@ -89,9 +88,8 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.#unsubscribe = this.#chart.on("change", (change) => {
       if (["data.apply", "data.replace", "state.replace"].includes(change.type)) {
         if (this.#editing) return;
-        if (change.type === "state.replace") this.#syncTheme();
         this.#refreshData({ replace: change.type === "data.replace" });
-      } else if (change.type === "config.change" || change.type === "theme.change") this.#syncTheme();
+      } else if (change.type === "theme.change") this.#syncTheme();
     });
   }
 
@@ -396,5 +394,6 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 }
 
 export function defineDataPanel() {
+  defineSelectionBar(); defineViewSwitcher(); defineSearchField(); defineRecordActions(); defineRecordTable(); defineAnnotationEditor();
   if (!customElements.get("clinker-data-panel")) customElements.define("clinker-data-panel", ClinkerDataPanelElement);
 }

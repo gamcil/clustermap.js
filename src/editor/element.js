@@ -106,7 +106,6 @@ export class ClinkerEditorElement extends HTMLElementBase {
   }
 
   #renderShell() {
-    defineTabs(); defineDataPanel(); defineAppearancePanel();
     this.shadowRoot.querySelector("[data-editor-shell]")?.remove();
     this.shadowRoot.append(shellTemplate(this.ownerDocument));
     this.#dataPanel = this.shadowRoot.querySelector("clinker-data-panel");
@@ -116,7 +115,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
   #subscribe() {
     if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
     this.#unsubscribe = this.#chart.on("change", (change) => {
-      if (["config.change", "theme.change", "state.replace"].includes(change.type)) this.#syncTheme();
+      if (change.type === "theme.change") this.#syncTheme();
       if (change.type === "history.change") this.#renderHistory();
     });
   }
@@ -143,7 +142,7 @@ export class ClinkerEditorElement extends HTMLElementBase {
 
 export function defineClinkerEditor() {
   if (!globalThis.customElements) throw new Error("Custom elements are unavailable in this environment.");
-  defineDataPanel();
+  defineTabs(); defineDataPanel(); defineAppearancePanel();
   if (!customElements.get("clinker-editor")) customElements.define("clinker-editor", ClinkerEditorElement);
   return customElements.get("clinker-editor");
 }

@@ -85,10 +85,13 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
     this.#navigation++;
     this.#chart?.previewTreePresentation?.(null);
     this.#unsubscribe?.(); this.#unsubscribe = null;
-    this.#chart = value || null; this.#subscribe(); this.#render();
+    this.#chart = value || null;
+    applyEditorTheme(this, this.#chart);
+    this.#subscribe(); this.#render();
   }
   connectedCallback() {
     this.classList.add("cm-ui", "cm-data-ui");
+    applyEditorTheme(this, this.#chart);
     this.#subscribe(); this.#render();
   }
   disconnectedCallback() {
@@ -100,14 +103,14 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
   #subscribe() {
     if (this.#unsubscribe || !this.isConnected || !this.#chart?.on) return;
     this.#unsubscribe = this.#chart.on("change", (change) => {
-      if (["config.change", "theme.change", "data.replace", "state.replace"].includes(change.type) ||
+      if (change.type === "theme.change") applyEditorTheme(this, this.#chart);
+      else if (["config.change", "data.replace"].includes(change.type) ||
           (change.type === "data.apply" && change.operations?.some((op) => op.type.startsWith("tree.")))) this.#render();
     });
   }
   #render() {
     if (!this.isConnected) return;
     const config = this.#chart?.config?.();
-    applyEditorTheme(this, this.#chart);
     this.shadowRoot.querySelector(".toolbar").hidden = !config;
     this.shadowRoot.querySelector(".settings").hidden = !config;
     if (!config) { this.#config = null; this.#hasTree = false; this.#tree.state = { tree: null }; return; }
