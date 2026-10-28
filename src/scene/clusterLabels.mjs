@@ -1,3 +1,5 @@
+import { textDimensions } from "./text.mjs";
+
 /** Shared label positions for drawing, figure bounds and interaction. */
 export function clusterLabelLayout(config) {
   const nameSize = config.cluster.nameFontSize;
@@ -11,10 +13,8 @@ export function clusterLabelLayout(config) {
 
 /** Measure both lines once while projecting a left-aligned label block. */
 export function clusterLabelWidth(name, locusText, config, measureText) {
-  const width = (text, fontSize, fontWeight) => {
-    const metrics = measureText?.(text, { fontSize, fontWeight, fontFamily: config.plot.fontFamily });
-    return Math.max(metrics?.width ?? text.length * fontSize * 0.6, metrics?.actualBoundingBoxRight ?? 0);
-  };
+  const width = (text, fontSize, fontWeight) =>
+    textDimensions(text, { fontSize, fontWeight, fontFamily: config.plot.fontFamily }, measureText).width;
   return Math.max(width(name, config.cluster.nameFontSize, 700),
     width(locusText, config.cluster.lociFontSize, 400));
 }

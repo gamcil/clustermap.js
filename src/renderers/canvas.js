@@ -1,5 +1,5 @@
-import { measureCanvasText, measureTreeLayout } from "../scene/measure.mjs";
-import { clusterLabelLayout } from "../scene/clusterLabels.mjs";
+import { measureCanvasText, measureTreeLayout, canvasTextMeasurer } from "../scene/measure.mjs";
+import { clusterLabelLayout, clusterLabelWidth } from "../scene/clusterLabels.mjs";
 import { linkColours } from "../links/style.mjs";
 import { hitTest } from "../scene/hitTest.mjs";
 import { boundsInViewport, worldViewport, worldPoint } from "../scene/camera.mjs";
@@ -52,13 +52,10 @@ export function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = 
 
 function clusterLabelHit(context, scene, point, config) {
   const label = clusterLabelLayout(config);
+  const measureText = canvasTextMeasurer(context, scene);
   for (const cluster of [...scene.clusters.values()].reverse()) {
     const anchorX = cluster.x + cluster.info.x;
-    const nameFont = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
-    const locusFont = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
-    const nameWidth = measureCanvasText(context, scene, cluster.source.name || "", { font: nameFont, align: "left", baseline: "alphabetic" }).width;
-    const locusWidth = measureCanvasText(context, scene, cluster.info.locusText, { font: locusFont, align: "left", baseline: "alphabetic" }).width;
-    const width = Math.max(nameWidth, locusWidth);
+    const width = clusterLabelWidth(cluster.source.name || "", cluster.info.locusText, config, measureText);
     const left = cluster.info.anchor === "start" ? anchorX : anchorX - width;
     if (
       point.x >= left &&

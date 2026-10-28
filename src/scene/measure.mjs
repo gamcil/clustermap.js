@@ -4,7 +4,8 @@ import { annotationPanelsForFrame, annotationFigureBounds, legendContentBounds }
 import { getLinkLabelPosition } from "../links/layout.mjs";
 import { resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
 import { locusContentBounds } from "../loci/layout.mjs";
-import { clusterLabelLayout } from "./clusterLabels.mjs";
+import { textBounds, textDimensions, textFont } from "./text.mjs";
+import { clusterLabelLayout, clusterLabelWidth } from "./clusterLabels.mjs";
 import {
   locusGeometryForPreview, clusterLabelOffsetForPreview, clusterLabelTextForPreview,
   clusterOffsetForPreview, geneVisibleForPreview, previewOffsetsForLocus,
@@ -38,6 +39,12 @@ export function measureCanvasText(context, scene, text, {
   return metrics;
 }
 
+export function canvasTextMeasurer(context, scene) {
+  return (text, style) => measureCanvasText(context, scene, text, {
+    font: textFont(style), align: "left", baseline: style.textBaseline || "alphabetic",
+  });
+}
+
 /** Supply native text metrics to the shared tree layout. */
 export function measureTreeLayout(context, tree, scene, config, options = {}) {
   if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
@@ -53,20 +60,11 @@ export function measureTreeLayout(context, tree, scene, config, options = {}) {
     return cached.layout;
   }
   treeLayouts.delete(context);
-  const measure = (text, font) => measureCanvasText(context, scene, text,
-    { font, align: "left", baseline: "alphabetic" });
+  const measureText = canvasTextMeasurer(context, scene);
   const layout = layoutTree({
-    ...options,
-    tree, scene, config,
-    measureText: (text, style) => {
-      const metrics = measure(text, `${style.fontStyle || "normal"} ${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`);
-      const overhang = Math.max(0, metrics.actualBoundingBoxLeft || 0, (metrics.actualBoundingBoxRight || 0) - metrics.width);
-      return { width: metrics.width + overhang * 2, overhang, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
-    },
-    measureLabel: (cluster, locusText) => Math.max(
-      measure(cluster.source.name || "", `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`).width,
-      measure(locusText, `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`).width
-    ),
+    ...options, tree, scene, config,
+    measureText: (text, style) => textDimensions(text, style, measureText),
+    measureLabel: (cluster, locusText) => clusterLabelWidth(cluster.source.name || "", locusText, config, measureText),
   });
   if (settled) treeLayouts.set(context, { scene, tree, config, layout,
     textProperties: textProperties.map((name) => context[name]) });
@@ -96,10 +94,7 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
       structural.maxY = Math.max(structural.maxY, content.maxY);
     }
   }
-  const measureChromeText = (text, style) => measureCanvasText(context, scene, text, {
-    font: `${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`,
-    align: "left", baseline: style.textBaseline || "alphabetic",
-  });
+  const measureChromeText = canvasTextMeasurer(context, scene);
   const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome, measureChromeText),
     scene.annotationPanels || [], scene.clusters, panels) : scene.figureBounds || structural) };
   const include = (x, y) => {
@@ -111,21 +106,10 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
   const includeText = (text, x, y, { fontSize, fontFamily = config.plot.fontFamily,
     fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
     if (!text) return;
-    const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-    const metrics = measureCanvasText(context, scene, text, { font, align, baseline });
-    const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
-    const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
-    const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
-    const x2 = Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight : left + metrics.width;
-    const y1 = Number.isFinite(metrics.actualBoundingBoxAscent) ? -metrics.actualBoundingBoxAscent : top;
-    const y2 = Number.isFinite(metrics.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : top + fontSize * 1.25;
-    const radians = rotation * Math.PI / 180;
-    const cos = Math.cos(radians), sin = Math.sin(radians);
-    for (const [tx, ty] of [[x1, y1], [x1, y2], [x2, y1], [x2, y2]]) {
-      const px = x + tx * cos - ty * sin, py = y + tx * sin + ty * cos;
-      include(px - border / 2, py - border / 2);
-      include(px + border / 2, py + border / 2);
-    }
+    const anchor = ["right", "end"].includes(align) ? "end" : ["center", "middle"].includes(align) ? "middle" : "start";
+    const box = textBounds(text, { fontSize, fontFamily, fontWeight, anchor, baseline, rotation }, measureChromeText);
+    include(x + box.minX - border / 2, y + box.minY - border / 2);
+    include(x + box.maxX + border / 2, y + box.maxY + border / 2);
   };
 
   // Structural scene bounds already enclose loci, gene polygons and ribbons.

@@ -1,4 +1,7 @@
-import { layoutTree, interpolateTreeLayout } from "./layout.mjs";
+import { measureTreeLayout } from "../scene/measure.mjs";
+import { interpolateTreeLayout } from "./layout.mjs";
+
+const measurementContexts = new WeakMap();
 
 function positionLines(selection, lines) {
   selection.data(lines, (line) => line.uid)
@@ -13,28 +16,13 @@ function positionBranches(selection, lines) {
 
 /** SVG owns DOM joins and transitions; the shared layout supplies every frame. */
 export function renderSvgTree(plot, tree, scene, config, interactions, transition, animate, motion = {}) {
-  const labelWidths = new Map();
-  if (tree && config.tree?.show) {
-    for (const clusterGroup of plot.selectAll("g.cluster").nodes()) {
-      let width = 0;
-      for (const selector of ["text.clusterText", "text.locusText"]) {
-        try { width = Math.max(width, clusterGroup.querySelector(selector)?.getBBox().width || 0); }
-        catch { /* SVG text must be attached for measurement. */ }
-      }
-      labelWidths.set(clusterGroup.__data__.uid, width);
-    }
+  let context = measurementContexts.get(plot.node());
+  if (!context) {
+    context = plot.node().ownerDocument.createElement("canvas").getContext("2d");
+    measurementContexts.set(plot.node(), context);
   }
-  const layout = layoutTree({
-    tree, scene, config, preview: motion.preview,
-    measureText: (text, style) => {
-      const node = plot.append("text").text(text).attr("font-family", style.fontFamily)
-        .attr("font-size", style.fontSize).attr("font-weight", style.fontWeight).attr("font-style", style.fontStyle);
-      try { const box = node.node().getBBox(); return { width: box.width, height: Math.max(box.height, style.fontSize) }; }
-      finally { node.remove(); }
-    },
-    measureLabel: (cluster) => labelWidths.get(cluster.source.uid) || 0,
-    previousTree: motion.previousTree,
-    previousScene: motion.previousScene,
+  const layout = measureTreeLayout(context, tree, scene, config, {
+    preview: motion.preview, previousTree: motion.previousTree, previousScene: motion.previousScene,
     dragging: motion.preview ? motion.preview.type === "cluster-drag" : interactions.isDragging?.() || false,
   });
   const group = plot.selectAll("g.phylogenetic-tree").data(layout ? [layout] : []).join("g")
@@ -91,7 +79,6 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
   scale.selectAll("text").data((bar) => [bar.label]).join("text")
     .attr("x", (label) => label.x).attr("y", (label) => label.y)
     .attr("text-anchor", "middle").attr("dominant-baseline", "hanging")
-    // Match the existing SVG clustermap scale bar, whose font size uses pt.
     .attr("font-size", `${layout.scaleBar?.fontSize}px`).attr("font-family", layout.scaleBar?.fontFamily)
     .attr("fill", layout.foreground).text((label) => label.text);
   const paintFrame = (frame) => {

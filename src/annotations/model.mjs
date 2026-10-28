@@ -1,3 +1,4 @@
+import { textBounds } from "../scene/text.mjs";
 import { boundsInViewport } from "../scene/camera.mjs";
 import { validateGroupPanel, layoutGroupPanel, groupPanelMarks } from "./groups.mjs";
 import { color } from "d3-color";
@@ -98,34 +99,18 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
 const numberLabel = (value) => Number(value.toPrecision(3)).toString();
 const text = (value, x, y, extra = {}) => ({ text: String(value), x, y, anchor: "start", ...extra });
 
-function textBounds(value, fontSize, fontFamily, measureText,
-  { weight = 400, rotation = 0, anchor = "start", baseline = "alphabetic" } = {}) {
-  const metrics = measureText?.(String(value), { fontSize, fontFamily, fontWeight: weight, textBaseline: baseline });
-  const width = metrics?.width ?? String(value).length * fontSize * 0.6;
-  const shift = anchor === "end" ? -width : anchor === "middle" ? -width / 2 : 0;
-  const left = -(metrics?.actualBoundingBoxLeft ?? 0) + shift;
-  const right = (metrics?.actualBoundingBoxRight ?? width) + shift;
-  const top = -(metrics?.actualBoundingBoxAscent ?? fontSize * (baseline === "middle" ? 0.5 : 0.8));
-  const bottom = metrics?.actualBoundingBoxDescent ?? fontSize * (baseline === "middle" ? 0.5 : 0.2);
-  const angle = rotation * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
-  const points = [[left, top], [right, top], [left, bottom], [right, bottom]]
-    .map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
-  return { minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
-    minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)) };
-}
-
 /** Right edge of scale/identity decorations; gene legends are placed separately. */
 export function annotationChromeRightEdge(chrome, measureText = null) {
   let right = -Infinity;
   const bar = chrome?.scaleBar, identity = chrome?.colourBar;
   if (bar?.visible) {
-    const label = textBounds(bar.label, bar.fontSize, bar.fontFamily, measureText, { anchor: "middle" });
+    const label = textBounds(bar.label, { fontSize: bar.fontSize, fontFamily: bar.fontFamily, anchor: "middle" }, measureText);
     right = Math.max(right, bar.position.x + bar.length + (bar.strokeWidth || 0) / 2,
       bar.position.x + bar.length / 2 + label.maxX);
   }
   if (identity?.visible) {
-    const label = textBounds(identity.label, identity.fontSize, identity.fontFamily, measureText, { anchor: "middle" });
-    const start = textBounds(identity.startLabel, identity.fontSize, identity.fontFamily, measureText);
+    const label = textBounds(identity.label, { fontSize: identity.fontSize, fontFamily: identity.fontFamily, anchor: "middle" }, measureText);
+    const start = textBounds(identity.startLabel, { fontSize: identity.fontSize, fontFamily: identity.fontFamily }, measureText);
     right = Math.max(right, identity.position.x + identity.width + 0.5,
       identity.position.x + identity.width / 2 + label.maxX, identity.position.x + start.maxX);
   }
@@ -145,7 +130,7 @@ export function legendContentBounds(legend, measureText = null) {
       item.y + item.circleY - item.radius, item.y + item.circleY + item.radius);
     const addText = (value, fontSize, y) => {
       if (!value) return;
-      const text = textBounds(value, fontSize, legend.fontFamily, measureText, { baseline: "middle" });
+      const text = textBounds(value, { fontSize, fontFamily: legend.fontFamily, baseline: "middle" }, measureText);
       include(item.x + item.textX + text.minX, item.x + item.textX + text.maxX,
         item.y + y + text.minY, item.y + y + text.maxY);
     };
@@ -323,7 +308,8 @@ export function layoutAnnotationPanels(definitions, clusters, bounds,
     const columnFontSize = source.columnFontSize ?? ANNOTATION_DEFAULTS.columnFontSize;
     const labelFontSize = source.labelFontSize ?? ANNOTATION_DEFAULTS.labelFontSize;
     const cellHeight = source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight;
-    const measureBounds = (value, options = {}) => textBounds(value, options.fontSize ?? labelFontSize, fontFamily, measureText, options);
+    const measureBounds = (value, options = {}) => textBounds(value,
+      { ...options, fontSize: options.fontSize ?? labelFontSize, fontFamily, fontWeight: options.weight ?? 400 }, measureText);
     const geometry = source.type === "groups"
       ? layoutGroupPanel(source, clusters, { tree, measureBounds })
       : layoutMatrixPanel(source, clusters, { before, labelFontSize, columnFontSize, cellHeight, theme });

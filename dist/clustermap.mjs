@@ -1,3 +1,40 @@
+function textFont({ fontSize, fontFamily, fontWeight = 400, fontStyle = "normal" }) {
+  return `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
+}
+
+function measure(value, { fontSize, fontFamily, fontWeight = 400, fontStyle = "normal", baseline = "alphabetic" }, measureText) {
+  const text = String(value ?? "");
+  if (!text) return { width: 0, left: 0, right: 0, top: 0, bottom: 0 };
+  const metrics = measureText?.(text, { fontSize, fontFamily, fontWeight, fontStyle, textBaseline: baseline });
+  const width = metrics?.width ?? text.length * fontSize * 0.6;
+  const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize * 0.8;
+  return { width,
+    left: -(metrics?.actualBoundingBoxLeft ?? 0),
+    right: metrics?.actualBoundingBoxRight ?? width,
+    top: metrics?.actualBoundingBoxAscent !== undefined ? -metrics.actualBoundingBoxAscent : top,
+    bottom: metrics?.actualBoundingBoxDescent ?? top + fontSize,
+  };
+}
+
+/** Unrotated layout dimensions include glyph overhang and the advance width. */
+function textDimensions(value, style, measureText) {
+  const box = measure(value, style, measureText);
+  const overhang = Math.max(0, -box.left, box.right - box.width);
+  return { width: box.width + overhang * 2, overhang,
+    height: Math.max(style.fontSize, box.bottom - box.top) };
+}
+
+/** Ink bounds relative to the text anchor and baseline, in chart units. */
+function textBounds(value, style, measureText) {
+  const box = measure(value, style, measureText);
+  const shift = style.anchor === "end" ? -box.width : style.anchor === "middle" ? -box.width / 2 : 0;
+  const angle = (style.rotation || 0) * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
+  const points = [[box.left, box.top], [box.right, box.top], [box.left, box.bottom], [box.right, box.bottom]]
+    .map(([x, y]) => [(x + shift) * cos - y * sin, (x + shift) * sin + y * cos]);
+  return { minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
+    minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)) };
+}
+
 function define(constructor, factory, prototype) {
   constructor.prototype = factory.prototype = prototype;
   prototype.constructor = constructor;
@@ -1607,10 +1644,8 @@ function clusterLabelLayout(config) {
 
 /** Measure both lines once while projecting a left-aligned label block. */
 function clusterLabelWidth(name, locusText, config, measureText) {
-  const width = (text, fontSize, fontWeight) => {
-    const metrics = measureText?.(text, { fontSize, fontWeight, fontFamily: config.plot.fontFamily });
-    return Math.max(metrics?.width ?? text.length * fontSize * 0.6, metrics?.actualBoundingBoxRight ?? 0);
-  };
+  const width = (text, fontSize, fontWeight) =>
+    textDimensions(text, { fontSize, fontWeight, fontFamily: config.plot.fontFamily }, measureText).width;
   return Math.max(width(name, config.cluster.nameFontSize, 700),
     width(locusText, config.cluster.lociFontSize, 400));
 }
@@ -3696,34 +3731,18 @@ function validateAnnotationPanels(panels, clusters, { previousPanels = null, tre
 const numberLabel = (value) => Number(value.toPrecision(3)).toString();
 const text = (value, x, y, extra = {}) => ({ text: String(value), x, y, anchor: "start", ...extra });
 
-function textBounds(value, fontSize, fontFamily, measureText,
-  { weight = 400, rotation = 0, anchor = "start", baseline = "alphabetic" } = {}) {
-  const metrics = measureText?.(String(value), { fontSize, fontFamily, fontWeight: weight, textBaseline: baseline });
-  const width = metrics?.width ?? String(value).length * fontSize * 0.6;
-  const shift = anchor === "end" ? -width : anchor === "middle" ? -width / 2 : 0;
-  const left = -(metrics?.actualBoundingBoxLeft ?? 0) + shift;
-  const right = (metrics?.actualBoundingBoxRight ?? width) + shift;
-  const top = -(metrics?.actualBoundingBoxAscent ?? fontSize * (baseline === "middle" ? 0.5 : 0.8));
-  const bottom = metrics?.actualBoundingBoxDescent ?? fontSize * (baseline === "middle" ? 0.5 : 0.2);
-  const angle = rotation * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
-  const points = [[left, top], [right, top], [left, bottom], [right, bottom]]
-    .map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]);
-  return { minX: Math.min(...points.map(([x]) => x)), maxX: Math.max(...points.map(([x]) => x)),
-    minY: Math.min(...points.map(([, y]) => y)), maxY: Math.max(...points.map(([, y]) => y)) };
-}
-
 /** Right edge of scale/identity decorations; gene legends are placed separately. */
 function annotationChromeRightEdge(chrome, measureText = null) {
   let right = -Infinity;
   const bar = chrome?.scaleBar, identity = chrome?.colourBar;
   if (bar?.visible) {
-    const label = textBounds(bar.label, bar.fontSize, bar.fontFamily, measureText, { anchor: "middle" });
+    const label = textBounds(bar.label, { fontSize: bar.fontSize, fontFamily: bar.fontFamily, anchor: "middle" }, measureText);
     right = Math.max(right, bar.position.x + bar.length + (bar.strokeWidth || 0) / 2,
       bar.position.x + bar.length / 2 + label.maxX);
   }
   if (identity?.visible) {
-    const label = textBounds(identity.label, identity.fontSize, identity.fontFamily, measureText, { anchor: "middle" });
-    const start = textBounds(identity.startLabel, identity.fontSize, identity.fontFamily, measureText);
+    const label = textBounds(identity.label, { fontSize: identity.fontSize, fontFamily: identity.fontFamily, anchor: "middle" }, measureText);
+    const start = textBounds(identity.startLabel, { fontSize: identity.fontSize, fontFamily: identity.fontFamily }, measureText);
     right = Math.max(right, identity.position.x + identity.width + 0.5,
       identity.position.x + identity.width / 2 + label.maxX, identity.position.x + start.maxX);
   }
@@ -3743,7 +3762,7 @@ function legendContentBounds(legend, measureText = null) {
       item.y + item.circleY - item.radius, item.y + item.circleY + item.radius);
     const addText = (value, fontSize, y) => {
       if (!value) return;
-      const text = textBounds(value, fontSize, legend.fontFamily, measureText, { baseline: "middle" });
+      const text = textBounds(value, { fontSize, fontFamily: legend.fontFamily, baseline: "middle" }, measureText);
       include(item.x + item.textX + text.minX, item.x + item.textX + text.maxX,
         item.y + y + text.minY, item.y + y + text.maxY);
     };
@@ -3921,7 +3940,8 @@ function layoutAnnotationPanels(definitions, clusters, bounds,
     const columnFontSize = source.columnFontSize ?? ANNOTATION_DEFAULTS.columnFontSize;
     const labelFontSize = source.labelFontSize ?? ANNOTATION_DEFAULTS.labelFontSize;
     const cellHeight = source.cellHeight ?? ANNOTATION_DEFAULTS.cellHeight;
-    const measureBounds = (value, options = {}) => textBounds(value, options.fontSize ?? labelFontSize, fontFamily, measureText, options);
+    const measureBounds = (value, options = {}) => textBounds(value,
+      { ...options, fontSize: options.fontSize ?? labelFontSize, fontFamily, fontWeight: options.weight ?? 400 }, measureText);
     const geometry = source.type === "groups"
       ? layoutGroupPanel(source, clusters, { tree, measureBounds })
       : layoutMatrixPanel(source, clusters, { before, labelFontSize, columnFontSize, cellHeight, theme });
@@ -4921,6 +4941,12 @@ function measureCanvasText(context, scene, text, {
   return metrics;
 }
 
+function canvasTextMeasurer(context, scene) {
+  return (text, style) => measureCanvasText(context, scene, text, {
+    font: textFont(style), align: "left", baseline: style.textBaseline || "alphabetic",
+  });
+}
+
 /** Supply native text metrics to the shared tree layout. */
 function measureTreeLayout(context, tree, scene, config, options = {}) {
   if (!tree || !config.tree?.show || !scene?.clusters.size) return null;
@@ -4936,20 +4962,11 @@ function measureTreeLayout(context, tree, scene, config, options = {}) {
     return cached.layout;
   }
   treeLayouts.delete(context);
-  const measure = (text, font) => measureCanvasText(context, scene, text,
-    { font, align: "left", baseline: "alphabetic" });
+  const measureText = canvasTextMeasurer(context, scene);
   const layout = layoutTree({
-    ...options,
-    tree, scene, config,
-    measureText: (text, style) => {
-      const metrics = measure(text, `${style.fontStyle || "normal"} ${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`);
-      const overhang = Math.max(0, metrics.actualBoundingBoxLeft || 0, (metrics.actualBoundingBoxRight || 0) - metrics.width);
-      return { width: metrics.width + overhang * 2, overhang, height: Math.max(style.fontSize, (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) };
-    },
-    measureLabel: (cluster, locusText) => Math.max(
-      measure(cluster.source.name || "", `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`).width,
-      measure(locusText, `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`).width
-    ),
+    ...options, tree, scene, config,
+    measureText: (text, style) => textDimensions(text, style, measureText),
+    measureLabel: (cluster, locusText) => clusterLabelWidth(cluster.source.name || "", locusText, config, measureText),
   });
   if (settled) treeLayouts.set(context, { scene, tree, config, layout,
     textProperties: textProperties.map((name) => context[name]) });
@@ -4979,10 +4996,7 @@ function measureFigureBounds(context, scene, config, tree = null, { preview = nu
       structural.maxY = Math.max(structural.maxY, content.maxY);
     }
   }
-  const measureChromeText = (text, style) => measureCanvasText(context, scene, text, {
-    font: `${style.fontWeight || 400} ${style.fontSize}px ${style.fontFamily}`,
-    align: "left", baseline: style.textBaseline || "alphabetic",
-  });
+  const measureChromeText = canvasTextMeasurer(context, scene);
   const bounds = { ...(preview ? annotationFigureBounds(figureBoundsForChrome(structural, chrome, measureChromeText),
     scene.annotationPanels || [], scene.clusters, panels) : scene.figureBounds || structural) };
   const include = (x, y) => {
@@ -4994,21 +5008,10 @@ function measureFigureBounds(context, scene, config, tree = null, { preview = nu
   const includeText = (text, x, y, { fontSize, fontFamily = config.plot.fontFamily,
     fontWeight = 400, align = "left", baseline = "alphabetic", rotation = 0, border = 0 }) => {
     if (!text) return;
-    const font = `${fontWeight} ${fontSize}px ${fontFamily}`;
-    const metrics = measureCanvasText(context, scene, text, { font, align, baseline });
-    const left = align === "center" ? -metrics.width / 2 : ["right", "end"].includes(align) ? -metrics.width : 0;
-    const top = baseline === "top" ? 0 : baseline === "middle" ? -fontSize / 2 : -fontSize;
-    const x1 = Number.isFinite(metrics.actualBoundingBoxLeft) ? -metrics.actualBoundingBoxLeft : left;
-    const x2 = Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight : left + metrics.width;
-    const y1 = Number.isFinite(metrics.actualBoundingBoxAscent) ? -metrics.actualBoundingBoxAscent : top;
-    const y2 = Number.isFinite(metrics.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : top + fontSize * 1.25;
-    const radians = rotation * Math.PI / 180;
-    const cos = Math.cos(radians), sin = Math.sin(radians);
-    for (const [tx, ty] of [[x1, y1], [x1, y2], [x2, y1], [x2, y2]]) {
-      const px = x + tx * cos - ty * sin, py = y + tx * sin + ty * cos;
-      include(px - border / 2, py - border / 2);
-      include(px + border / 2, py + border / 2);
-    }
+    const anchor = ["right", "end"].includes(align) ? "end" : ["center", "middle"].includes(align) ? "middle" : "start";
+    const box = textBounds(text, { fontSize, fontFamily, fontWeight, anchor, baseline, rotation }, measureChromeText);
+    include(x + box.minX - border / 2, y + box.minY - border / 2);
+    include(x + box.maxX + border / 2, y + box.maxY + border / 2);
   };
 
   // Structural scene bounds already enclose loci, gene polygons and ribbons.
@@ -10437,13 +10440,10 @@ function canvasWorldViewport(canvas, camera, overscan = 20, dimensions = null) {
 
 function clusterLabelHit(context, scene, point, config) {
   const label = clusterLabelLayout(config);
+  const measureText = canvasTextMeasurer(context, scene);
   for (const cluster of [...scene.clusters.values()].reverse()) {
     const anchorX = cluster.x + cluster.info.x;
-    const nameFont = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
-    const locusFont = `${config.cluster.lociFontSize}px ${config.plot.fontFamily}`;
-    const nameWidth = measureCanvasText(context, scene, cluster.source.name || "", { font: nameFont, align: "left", baseline: "alphabetic" }).width;
-    const locusWidth = measureCanvasText(context, scene, cluster.info.locusText, { font: locusFont, align: "left", baseline: "alphabetic" }).width;
-    const width = Math.max(nameWidth, locusWidth);
+    const width = clusterLabelWidth(cluster.source.name || "", cluster.info.locusText, config, measureText);
     const left = cluster.info.anchor === "start" ? anchorX : anchorX - width;
     if (
       point.x >= left &&
@@ -11094,6 +11094,8 @@ function renderCanvas({
   return { width, height, pixelRatio };
 }
 
+const measurementContexts = new WeakMap();
+
 function positionLines(selection, lines) {
   selection.data(lines, (line) => line.uid)
     .attr("x1", (line) => line.x1).attr("y1", (line) => line.y1)
@@ -11107,28 +11109,13 @@ function positionBranches(selection, lines) {
 
 /** SVG owns DOM joins and transitions; the shared layout supplies every frame. */
 function renderSvgTree(plot, tree, scene, config, interactions, transition, animate, motion = {}) {
-  const labelWidths = new Map();
-  if (tree && config.tree?.show) {
-    for (const clusterGroup of plot.selectAll("g.cluster").nodes()) {
-      let width = 0;
-      for (const selector of ["text.clusterText", "text.locusText"]) {
-        try { width = Math.max(width, clusterGroup.querySelector(selector)?.getBBox().width || 0); }
-        catch { /* SVG text must be attached for measurement. */ }
-      }
-      labelWidths.set(clusterGroup.__data__.uid, width);
-    }
+  let context = measurementContexts.get(plot.node());
+  if (!context) {
+    context = plot.node().ownerDocument.createElement("canvas").getContext("2d");
+    measurementContexts.set(plot.node(), context);
   }
-  const layout = layoutTree({
-    tree, scene, config, preview: motion.preview,
-    measureText: (text, style) => {
-      const node = plot.append("text").text(text).attr("font-family", style.fontFamily)
-        .attr("font-size", style.fontSize).attr("font-weight", style.fontWeight).attr("font-style", style.fontStyle);
-      try { const box = node.node().getBBox(); return { width: box.width, height: Math.max(box.height, style.fontSize) }; }
-      finally { node.remove(); }
-    },
-    measureLabel: (cluster) => labelWidths.get(cluster.source.uid) || 0,
-    previousTree: motion.previousTree,
-    previousScene: motion.previousScene,
+  const layout = measureTreeLayout(context, tree, scene, config, {
+    preview: motion.preview, previousTree: motion.previousTree, previousScene: motion.previousScene,
     dragging: motion.preview ? motion.preview.type === "cluster-drag" : interactions.isDragging?.() || false,
   });
   const group = plot.selectAll("g.phylogenetic-tree").data(layout ? [layout] : []).join("g")
@@ -11185,7 +11172,6 @@ function renderSvgTree(plot, tree, scene, config, interactions, transition, anim
   scale.selectAll("text").data((bar) => [bar.label]).join("text")
     .attr("x", (label) => label.x).attr("y", (label) => label.y)
     .attr("text-anchor", "middle").attr("dominant-baseline", "hanging")
-    // Match the existing SVG clustermap scale bar, whose font size uses pt.
     .attr("font-size", `${layout.scaleBar?.fontSize}px`).attr("font-family", layout.scaleBar?.fontFamily)
     .attr("fill", layout.foreground).text((label) => label.text);
   const paintFrame = (frame) => {
@@ -12568,8 +12554,7 @@ function exportChartSvg({
   config = figureConfig(config);
   const namespace = "http://www.w3.org/2000/svg";
   const svgNode = documentRef.createElementNS(namespace, "svg");
-  // SVG text getBBox() is unreliable while the tree is detached. Attach it
-  // invisibly before rendering so tree/label spacing uses real text metrics.
+  // Attach invisibly for reliable native SVG export bounds.
   select(documentRef.body)
     .append(() => svgNode)
     .style("position", "fixed")
@@ -15447,12 +15432,12 @@ function clusterMap() {
   const stateSnapshots = createChartStateSerializer();
   let pendingInteractionState = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-`,
-    measureText: (text, { fontSize, fontFamily, fontWeight = 400, textBaseline = "alphabetic" }) => {
+    measureText: (text, { textBaseline = "alphabetic", ...style }) => {
       if (!container) return null;
       figureMeasurementContext ||= container.node().ownerDocument.createElement("canvas").getContext("2d");
       const context = figureMeasurementContext;
       context.save();
-      context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+      context.font = textFont(style);
       context.textAlign = "left"; context.textBaseline = textBaseline;
       const metrics = context.measureText(text);
       context.restore();

@@ -17,8 +17,7 @@ export function exportChartSvg({
   config = figureConfig(config);
   const namespace = "http://www.w3.org/2000/svg";
   const svgNode = documentRef.createElementNS(namespace, "svg");
-  // SVG text getBBox() is unreliable while the tree is detached. Attach it
-  // invisibly before rendering so tree/label spacing uses real text metrics.
+  // Attach invisibly for reliable native SVG export bounds.
   select(documentRef.body)
     .append(() => svgNode)
     .style("position", "fixed")
