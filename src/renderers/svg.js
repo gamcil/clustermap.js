@@ -372,6 +372,7 @@ function renderPreview({ plot, data, scene, preview, config, scales, ids, intera
 
 function updateClusters(selection, scene, { labelsOnly = false, preview = null, highlightClusterIds = new Set() } = {}) {
   const layout = (cluster) => scene.clusters.get(cluster.uid);
+  selection.selectAll("g.clusterInfo text").attr("text-anchor", (cluster) => layout(cluster).info.anchor || "end");
   selection.selectAll("g.clusterInfo").style("fill", (cluster) => highlightClusterIds.has(cluster.uid) ? "#1677ff" : null);
   if (!labelsOnly) {
     selection.attr("transform", (cluster) => {

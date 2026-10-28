@@ -8,3 +8,13 @@ export function clusterLabelLayout(config) {
   }
   return { nameY: 8, nameBaseline: "alphabetic", top: 8 - nameSize, bottom: 12 + config.cluster.lociFontSize };
 }
+
+/** Measure both lines once while projecting a left-aligned label block. */
+export function clusterLabelWidth(name, locusText, config, measureText) {
+  const width = (text, fontSize, fontWeight) => {
+    const metrics = measureText?.(text, { fontSize, fontWeight, fontFamily: config.plot.fontFamily });
+    return Math.max(metrics?.width ?? text.length * fontSize * 0.6, metrics?.actualBoundingBoxRight ?? 0);
+  };
+  return Math.max(width(name, config.cluster.nameFontSize, 700),
+    width(locusText, config.cluster.lociFontSize, 400));
+}

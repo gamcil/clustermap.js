@@ -59,9 +59,10 @@ function clusterLabelHit(context, scene, point, config) {
     const nameWidth = measureCanvasText(context, scene, cluster.source.name || "", { font: nameFont, align: "left", baseline: "alphabetic" }).width;
     const locusWidth = measureCanvasText(context, scene, cluster.info.locusText, { font: locusFont, align: "left", baseline: "alphabetic" }).width;
     const width = Math.max(nameWidth, locusWidth);
+    const left = cluster.info.anchor === "start" ? anchorX : anchorX - width;
     if (
-      point.x >= anchorX - width &&
-      point.x <= anchorX &&
+      point.x >= left &&
+      point.x <= left + width &&
       point.y >= cluster.y + label.top &&
       point.y <= cluster.y + label.bottom
     ) {
@@ -210,7 +211,7 @@ function drawClusterInfo(
   const anchorX = x + cluster.info.x + offsetX;
   const label = clusterLabelLayout(config);
   context.fillStyle = selected ? "#1677ff" : config.figureStyle?.foreground || "black";
-  context.textAlign = "end";
+  context.textAlign = cluster.info.anchor || "end";
   context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
   context.textBaseline = label.nameBaseline;
   context.fillText(cluster.source.name, anchorX, y + offsetY + label.nameY);

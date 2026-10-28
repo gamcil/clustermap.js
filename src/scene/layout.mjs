@@ -441,6 +441,8 @@ export function buildScene(
     linkVisible = () => true,
     clusterLabel = () => "",
     alignLabels = true,
+    labelAlignment = "right",
+    clusterLabelWidth = () => 0,
     trimIndicatorStyle = {},
     chrome = null,
     fontFamily = "sans-serif",
@@ -501,7 +503,9 @@ export function buildScene(
   const bounds = sceneBounds(loci, { shape, trimIndicatorStyle });
   for (const cluster of clusters.values()) {
     cluster.bounds = boundsForLoci(cluster.loci);
-    cluster.info = clusterInfo(cluster, bounds, { alignLabels, clusterLabel });
+  }
+  for (const [uid, info] of clusterInfos(clusters, bounds, { alignLabels, clusterLabel, labelAlignment, clusterLabelWidth })) {
+    clusters.get(uid).info = info;
   }
 
   for (const [order, source] of data.links.entries()) {
@@ -579,14 +583,23 @@ function sceneBounds(loci, options) {
   return bounds;
 }
 
-function clusterInfo(cluster, bounds, { alignLabels = true, clusterLabel = () => "" }) {
-  const start = cluster.loci.length
-    ? Math.min(...cluster.loci.map((locus) => locus.worldStart)) : cluster.x;
-  return {
-    x: (alignLabels && bounds ? bounds.minX : start) - cluster.x - 10,
-    y: 0,
-    locusText: clusterLabel(cluster.source),
-  };
+function clusterInfos(clusters, bounds, { alignLabels = true, clusterLabel = () => "",
+  labelAlignment = "right", clusterLabelWidth = () => 0 }) {
+  const left = labelAlignment === "left";
+  const infos = new Map([...clusters].map(([uid, cluster]) => {
+    const locusText = clusterLabel(cluster.source);
+    return [uid, { locusText, width: left ? clusterLabelWidth(cluster.source, locusText) : 0,
+      anchor: left ? "start" : "end", y: 0 }];
+  }));
+  const width = Math.max(0, ...[...infos.values()].map((info) => info.width));
+  for (const [uid, cluster] of clusters) {
+    const info = infos.get(uid);
+    const start = cluster.loci.length
+      ? Math.min(...cluster.loci.map((locus) => locus.worldStart)) : cluster.x;
+    info.x = (alignLabels && bounds ? bounds.minX : start) - cluster.x - 10 -
+      (left ? alignLabels ? width : info.width : 0);
+  }
+  return infos;
 }
 
 function updateSpatialIndex(index, changedEntries, entriesForRebuild) {
@@ -763,9 +776,10 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
     cluster.bounds = boundsForLoci(cluster.loci);
   }
   const bounds = sceneBounds(loci, options);
-  for (const [uid, cluster] of clusters) {
-    const info = clusterInfo(cluster, bounds, options);
-    if (info.x !== cluster.info.x || info.locusText !== cluster.info.locusText) {
+  for (const [uid, info] of clusterInfos(clusters, bounds, options)) {
+    const cluster = clusters.get(uid);
+    if (info.x !== cluster.info.x || info.locusText !== cluster.info.locusText ||
+        info.width !== cluster.info.width || info.anchor !== cluster.info.anchor) {
       clusters.set(uid, { ...cluster, info });
     }
   }

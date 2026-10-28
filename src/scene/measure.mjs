@@ -134,10 +134,11 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
   for (const cluster of scene.clusters.values()) {
     const x = cluster.x + cluster.info.x + clusterLabelOffsetForPreview(preview, cluster.source.uid);
     const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
+    const align = cluster.info.anchor === "start" ? "left" : "right";
     includeText(cluster.source.name, x, y + label.nameY,
-      { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right", baseline: label.nameBaseline });
+      { fontSize: config.cluster.nameFontSize, fontWeight: 700, align, baseline: label.nameBaseline });
     includeText(clusterLabelTextForPreview(preview, cluster.source.uid, cluster.info.locusText), x, y + 12,
-      { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
+      { fontSize: config.cluster.lociFontSize, align, baseline: "top" });
   }
   if (config.gene.label.show) {
     for (const gene of scene.genes.values()) {

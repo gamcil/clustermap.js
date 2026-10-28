@@ -62,13 +62,27 @@ export function annotationOffsetForPreview(scene, preview) {
     (scene.annotationAnchorX ?? scene.bounds.maxX);
 }
 
-function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClusters) {
+function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClusters, labelWidthFor = null) {
   let contentMaxX = -Infinity;
   for (const locus of scene.loci.values()) contentMaxX = Math.max(contentMaxX, endFor(locus));
+  const clusterLabelOffsets = clusterLabelOffsetsForStarts(scene, startFor, alignLabels, affectedClusters);
+  if (labelWidthFor && [...scene.clusters.values()].some((cluster) => cluster.info.anchor === "start")) {
+    const widths = [...scene.clusters.values()].map((cluster) => ({ cluster,
+      before: cluster.info.width,
+      after: fields.clusterLabelTexts?.has(cluster.source.uid)
+        ? labelWidthFor(cluster.source, fields.clusterLabelTexts.get(cluster.source.uid))
+        : cluster.info.width,
+    }));
+    const delta = Math.max(...widths.map((item) => item.after)) - Math.max(...widths.map((item) => item.before));
+    for (const { cluster, before, after } of widths) {
+      const uid = cluster.source.uid;
+      clusterLabelOffsets.set(uid, (clusterLabelOffsets.get(uid) || 0) - (alignLabels ? delta : after - before));
+    }
+  }
   return {
     ...fields,
     contentMaxX,
-    clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, affectedClusters),
+    clusterLabelOffsets,
     chrome: chromeForPreview(scene, contentMaxX),
   };
 }
@@ -104,7 +118,7 @@ export function createLocusTrimPreview(
   scene,
   locusUid,
   state,
-  { localXFor, scaleX, alignLabels, shape, trimIndicatorStyle = {}, clusterLabelText = null }
+  { localXFor, scaleX, alignLabels, shape, trimIndicatorStyle = {}, clusterLabelText = null, labelWidthFor = null }
 ) {
   const locus = scene.loci.get(locusUid);
   if (!locus) return null;
@@ -174,7 +188,7 @@ export function createLocusTrimPreview(
             clusterLabelText,
           ]]),
         }),
-  }, startFor, endFor, alignLabels);
+  }, startFor, endFor, alignLabels, undefined, labelWidthFor);
 }
 
 // Preview patches carry layout deltas rather than cloned scenes. These

@@ -103,6 +103,11 @@ Under Appearance → Clusters & loci, **Hide locus labels** removes the complete
 locus label line while keeping cluster names visible. Its API setting is
 `chart.config({ cluster: { hideLocusLabels: true } })` (default `false`).
 Cluster names are vertically centred on their gene rows when locus labels are hidden.
+**Label alignment** selects Right (default, against the genes) or Left (a flat
+edge facing the tree). Set `cluster.labelAlignment` to `"right"` or `"left"`.
+**Align cluster labels** (`cluster.alignLabels`) controls whether rows share a
+common label edge; disabling it positions each label block beside its own row.
+Left alignment reserves the widest label's width so labels stay clear of genes.
 **Hide locus coordinates** remains independent: it keeps locus names and hides
 only their coordinate ranges when labels are visible.
 

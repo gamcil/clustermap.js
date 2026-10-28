@@ -1,3 +1,4 @@
+import { clusterLabelWidth } from "../scene/clusterLabels.mjs";
 import { max as d3max, min as d3min } from "d3-array";
 import { quantize } from "d3-interpolate";
 import { scaleLinear, scaleOrdinal, scaleSequential } from "d3-scale";
@@ -134,6 +135,7 @@ function validateConfiguration(options, tree = null) {
   }
   if (typeof candidate.tree.node?.show !== "boolean") throw new TypeError("tree.node.show must be a boolean.");
   if (typeof candidate.cluster.hideLocusLabels !== "boolean") throw new TypeError("cluster.hideLocusLabels must be a boolean.");
+  if (!["left", "right"].includes(candidate.cluster.labelAlignment)) throw new TypeError("cluster.labelAlignment must be left or right.");
   validateTreePresentation(tree, candidate.tree);
   return candidate;
 }
@@ -183,6 +185,10 @@ function locusText(cluster) {
   return formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates);
 }
 
+function measureClusterLabel(cluster, text) {
+  return clusterLabelWidth(cluster.name || "", text, config, measureText);
+}
+
 function locusTextForCluster(uid) {
   const cluster = lookup.clusterData(uid);
   return cluster ? locusText(cluster) : "";
@@ -206,6 +212,8 @@ function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
     linkVisible: (link) => !allowedLinkIds || allowedLinkIds.has(link.uid),
     clusterLabel: locusText,
     alignLabels: config.cluster.alignLabels,
+    labelAlignment: config.cluster.labelAlignment,
+    clusterLabelWidth: measureClusterLabel,
     trimIndicatorStyle: config.locus.trimIndicators,
     fontFamily: config.plot.fontFamily,
     measureText,
@@ -403,6 +411,7 @@ return {
   lookup,
   ids,
   locusTextForCluster,
+  measureClusterLabel,
   setChartIndex,
   setChartState,
   scales,

@@ -102,7 +102,8 @@ export function layoutTree({
     const uid = cluster.source.uid;
     const text = clusterLabelTextForPreview(preview, uid, cluster.info.locusText || "");
     labelStarts.set(uid, cluster.x + cluster.info.x +
-      clusterLabelOffsetForPreview(preview, uid) - measureLabel(cluster, text));
+      clusterLabelOffsetForPreview(preview, uid) -
+      (cluster.info.anchor === "start" ? 0 : measureLabel(cluster, text)));
   }
   const width = Number(config.tree.width) || 100;
   const horizontal = treeHorizontalLayout(tree, width, width, config.tree.useBranchLengths !== false);

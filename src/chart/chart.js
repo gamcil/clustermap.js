@@ -329,6 +329,7 @@ export default function clusterMap() {
           shape: runtime.config.gene.shape,
           trimIndicatorStyle: runtime.config.locus.trimIndicators,
           clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
+          labelWidthFor: runtime.measureClusterLabel,
         });
         scheduleScenePaint();
         return result;

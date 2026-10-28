@@ -103,6 +103,7 @@ const defaultConfig = {
     hideLocusCoordinates: false,
     spacing: 40,
     alignLabels: true,
+    labelAlignment: "right",
   },
   locus: {
     trimIndicators: {

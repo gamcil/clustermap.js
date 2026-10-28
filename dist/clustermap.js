@@ -1081,13 +1081,27 @@
       (scene.annotationAnchorX ?? scene.bounds.maxX);
   }
 
-  function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClusters) {
+  function locusPreview(scene, fields, startFor, endFor, alignLabels, affectedClusters, labelWidthFor = null) {
     let contentMaxX = -Infinity;
     for (const locus of scene.loci.values()) contentMaxX = Math.max(contentMaxX, endFor(locus));
+    const clusterLabelOffsets = clusterLabelOffsetsForStarts(scene, startFor, alignLabels, affectedClusters);
+    if (labelWidthFor && [...scene.clusters.values()].some((cluster) => cluster.info.anchor === "start")) {
+      const widths = [...scene.clusters.values()].map((cluster) => ({ cluster,
+        before: cluster.info.width,
+        after: fields.clusterLabelTexts?.has(cluster.source.uid)
+          ? labelWidthFor(cluster.source, fields.clusterLabelTexts.get(cluster.source.uid))
+          : cluster.info.width,
+      }));
+      const delta = Math.max(...widths.map((item) => item.after)) - Math.max(...widths.map((item) => item.before));
+      for (const { cluster, before, after } of widths) {
+        const uid = cluster.source.uid;
+        clusterLabelOffsets.set(uid, (clusterLabelOffsets.get(uid) || 0) - (alignLabels ? delta : after - before));
+      }
+    }
     return {
       ...fields,
       contentMaxX,
-      clusterLabelOffsets: clusterLabelOffsetsForStarts(scene, startFor, alignLabels, affectedClusters),
+      clusterLabelOffsets,
       chrome: chromeForPreview(scene, contentMaxX),
     };
   }
@@ -1123,7 +1137,7 @@
     scene,
     locusUid,
     state,
-    { localXFor, scaleX, alignLabels, shape, trimIndicatorStyle = {}, clusterLabelText = null }
+    { localXFor, scaleX, alignLabels, shape, trimIndicatorStyle = {}, clusterLabelText = null, labelWidthFor = null }
   ) {
     const locus = scene.loci.get(locusUid);
     if (!locus) return null;
@@ -1193,7 +1207,7 @@
               clusterLabelText,
             ]]),
           }),
-    }, startFor, endFor, alignLabels);
+    }, startFor, endFor, alignLabels, undefined, labelWidthFor);
   }
 
   // Preview patches carry layout deltas rather than cloned scenes. These
@@ -1608,6 +1622,16 @@
     return { nameY: 8, nameBaseline: "alphabetic", top: 8 - nameSize, bottom: 12 + config.cluster.lociFontSize };
   }
 
+  /** Measure both lines once while projecting a left-aligned label block. */
+  function clusterLabelWidth(name, locusText, config, measureText) {
+    const width = (text, fontSize, fontWeight) => {
+      const metrics = measureText?.(text, { fontSize, fontWeight, fontFamily: config.plot.fontFamily });
+      return Math.max(metrics?.width ?? text.length * fontSize * 0.6, metrics?.actualBoundingBoxRight ?? 0);
+    };
+    return Math.max(width(name, config.cluster.nameFontSize, 700),
+      width(locusText, config.cluster.lociFontSize, 400));
+  }
+
   const leafXAnchors = new WeakMap();
 
   /** Keep the tree in its base position until a dragged label reaches a leaf. */
@@ -1707,7 +1731,8 @@
       const uid = cluster.source.uid;
       const text = clusterLabelTextForPreview(preview, uid, cluster.info.locusText || "");
       labelStarts.set(uid, cluster.x + cluster.info.x +
-        clusterLabelOffsetForPreview(preview, uid) - measureLabel(cluster, text));
+        clusterLabelOffsetForPreview(preview, uid) -
+        (cluster.info.anchor === "start" ? 0 : measureLabel(cluster, text)));
     }
     const width = Number(config.tree.width) || 100;
     const horizontal = treeHorizontalLayout(tree, width, width, config.tree.useBranchLengths !== false);
@@ -4490,6 +4515,8 @@
       linkVisible = () => true,
       clusterLabel = () => "",
       alignLabels = true,
+      labelAlignment = "right",
+      clusterLabelWidth = () => 0,
       trimIndicatorStyle = {},
       chrome = null,
       fontFamily = "sans-serif",
@@ -4550,7 +4577,9 @@
     const bounds = sceneBounds(loci, { shape, trimIndicatorStyle });
     for (const cluster of clusters.values()) {
       cluster.bounds = boundsForLoci(cluster.loci);
-      cluster.info = clusterInfo(cluster, bounds, { alignLabels, clusterLabel });
+    }
+    for (const [uid, info] of clusterInfos(clusters, bounds, { alignLabels, clusterLabel, labelAlignment, clusterLabelWidth })) {
+      clusters.get(uid).info = info;
     }
 
     for (const [order, source] of data.links.entries()) {
@@ -4628,14 +4657,23 @@
     return bounds;
   }
 
-  function clusterInfo(cluster, bounds, { alignLabels = true, clusterLabel = () => "" }) {
-    const start = cluster.loci.length
-      ? Math.min(...cluster.loci.map((locus) => locus.worldStart)) : cluster.x;
-    return {
-      x: (alignLabels && bounds ? bounds.minX : start) - cluster.x - 10,
-      y: 0,
-      locusText: clusterLabel(cluster.source),
-    };
+  function clusterInfos(clusters, bounds, { alignLabels = true, clusterLabel = () => "",
+    labelAlignment = "right", clusterLabelWidth = () => 0 }) {
+    const left = labelAlignment === "left";
+    const infos = new Map([...clusters].map(([uid, cluster]) => {
+      const locusText = clusterLabel(cluster.source);
+      return [uid, { locusText, width: left ? clusterLabelWidth(cluster.source, locusText) : 0,
+        anchor: left ? "start" : "end", y: 0 }];
+    }));
+    const width = Math.max(0, ...[...infos.values()].map((info) => info.width));
+    for (const [uid, cluster] of clusters) {
+      const info = infos.get(uid);
+      const start = cluster.loci.length
+        ? Math.min(...cluster.loci.map((locus) => locus.worldStart)) : cluster.x;
+      info.x = (alignLabels && bounds ? bounds.minX : start) - cluster.x - 10 -
+        (left ? alignLabels ? width : info.width : 0);
+    }
+    return infos;
   }
 
   function updateSpatialIndex(index, changedEntries, entriesForRebuild) {
@@ -4812,9 +4850,10 @@
       cluster.bounds = boundsForLoci(cluster.loci);
     }
     const bounds = sceneBounds(loci, options);
-    for (const [uid, cluster] of clusters) {
-      const info = clusterInfo(cluster, bounds, options);
-      if (info.x !== cluster.info.x || info.locusText !== cluster.info.locusText) {
+    for (const [uid, info] of clusterInfos(clusters, bounds, options)) {
+      const cluster = clusters.get(uid);
+      if (info.x !== cluster.info.x || info.locusText !== cluster.info.locusText ||
+          info.width !== cluster.info.width || info.anchor !== cluster.info.anchor) {
         clusters.set(uid, { ...cluster, info });
       }
     }
@@ -4986,10 +5025,11 @@
     for (const cluster of scene.clusters.values()) {
       const x = cluster.x + cluster.info.x + clusterLabelOffsetForPreview(preview, cluster.source.uid);
       const y = cluster.y + clusterOffsetForPreview(preview, cluster.source.uid);
+      const align = cluster.info.anchor === "start" ? "left" : "right";
       includeText(cluster.source.name, x, y + label.nameY,
-        { fontSize: config.cluster.nameFontSize, fontWeight: 700, align: "right", baseline: label.nameBaseline });
+        { fontSize: config.cluster.nameFontSize, fontWeight: 700, align, baseline: label.nameBaseline });
       includeText(clusterLabelTextForPreview(preview, cluster.source.uid, cluster.info.locusText), x, y + 12,
-        { fontSize: config.cluster.lociFontSize, align: "right", baseline: "top" });
+        { fontSize: config.cluster.lociFontSize, align, baseline: "top" });
     }
     if (config.gene.label.show) {
       for (const gene of scene.genes.values()) {
@@ -10392,9 +10432,10 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       const nameWidth = measureCanvasText(context, scene, cluster.source.name || "", { font: nameFont, align: "left", baseline: "alphabetic" }).width;
       const locusWidth = measureCanvasText(context, scene, cluster.info.locusText, { font: locusFont, align: "left", baseline: "alphabetic" }).width;
       const width = Math.max(nameWidth, locusWidth);
+      const left = cluster.info.anchor === "start" ? anchorX : anchorX - width;
       if (
-        point.x >= anchorX - width &&
-        point.x <= anchorX &&
+        point.x >= left &&
+        point.x <= left + width &&
         point.y >= cluster.y + label.top &&
         point.y <= cluster.y + label.bottom
       ) {
@@ -10543,7 +10584,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     const anchorX = x + cluster.info.x + offsetX;
     const label = clusterLabelLayout(config);
     context.fillStyle = selected ? "#1677ff" : config.figureStyle?.foreground || "black";
-    context.textAlign = "end";
+    context.textAlign = cluster.info.anchor || "end";
     context.font = `bold ${config.cluster.nameFontSize}px ${config.plot.fontFamily}`;
     context.textBaseline = label.nameBaseline;
     context.fillText(cluster.source.name, anchorX, y + offsetY + label.nameY);
@@ -11509,6 +11550,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 
   function updateClusters(selection, scene, { labelsOnly = false, preview = null, highlightClusterIds = new Set() } = {}) {
     const layout = (cluster) => scene.clusters.get(cluster.uid);
+    selection.selectAll("g.clusterInfo text").attr("text-anchor", (cluster) => layout(cluster).info.anchor || "end");
     selection.selectAll("g.clusterInfo").style("fill", (cluster) => highlightClusterIds.has(cluster.uid) ? "#1677ff" : null);
     if (!labelsOnly) {
       selection.attr("transform", (cluster) => {
@@ -12703,6 +12745,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       hideLocusCoordinates: false,
       spacing: 40,
       alignLabels: true,
+      labelAlignment: "right",
     },
     locus: {
       trimIndicators: {
@@ -12878,6 +12921,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     }
     if (typeof candidate.tree.node?.show !== "boolean") throw new TypeError("tree.node.show must be a boolean.");
     if (typeof candidate.cluster.hideLocusLabels !== "boolean") throw new TypeError("cluster.hideLocusLabels must be a boolean.");
+    if (!["left", "right"].includes(candidate.cluster.labelAlignment)) throw new TypeError("cluster.labelAlignment must be left or right.");
     validateTreePresentation(tree, candidate.tree);
     return candidate;
   }
@@ -12927,6 +12971,10 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     return formatLocusText(cluster.loci, chartState, config.cluster.hideLocusCoordinates);
   }
 
+  function measureClusterLabel(cluster, text) {
+    return clusterLabelWidth(cluster.name || "", text, config, measureText);
+  }
+
   function locusTextForCluster(uid) {
     const cluster = lookup.clusterData(uid);
     return cluster ? locusText(cluster) : "";
@@ -12950,6 +12998,8 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       linkVisible: (link) => !allowedLinkIds || allowedLinkIds.has(link.uid),
       clusterLabel: locusText,
       alignLabels: config.cluster.alignLabels,
+      labelAlignment: config.cluster.labelAlignment,
+      clusterLabelWidth: measureClusterLabel,
       trimIndicatorStyle: config.locus.trimIndicators,
       fontFamily: config.plot.fontFamily,
       measureText,
@@ -13147,6 +13197,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     lookup,
     ids,
     locusTextForCluster,
+    measureClusterLabel,
     setChartIndex,
     setChartState,
     scales,
@@ -15454,6 +15505,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
             shape: runtime.config.gene.shape,
             trimIndicatorStyle: runtime.config.locus.trimIndicators,
             clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
+            labelWidthFor: runtime.measureClusterLabel,
           });
           scheduleScenePaint();
           return result;
