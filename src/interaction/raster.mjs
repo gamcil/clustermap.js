@@ -1,4 +1,5 @@
 import { plotSelectionOptions } from "./controller.mjs";
+import { isControlEvent } from "./keyboard.mjs";
 
 function cursorForTarget(target) {
   if (!target) return "grab";
@@ -132,11 +133,7 @@ export function createRasterInteraction({
       const isActive = () =>
         activeSurface === surface || surface?.ownerDocument?.activeElement === surface;
       const keydown = (event) => {
-        if (event.code !== "Space") return;
-        // Window listeners see a shadow host as event.target. Respect the
-        // actual control so Space still toggles editor fields and menus.
-        const target = event.composedPath?.()[0] || event.target;
-        if (target?.closest?.("input, textarea, select, button, summary, a[href], [contenteditable='true']")) return;
+        if (event.code !== "Space" || event.defaultPrevented || isControlEvent(event)) return;
         spaceDown = true;
         if (!isActive()) return;
         panMode = true;

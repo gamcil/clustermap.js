@@ -12154,6 +12154,14 @@ function createRasterMinimap({
   };
 }
 
+const editable = "input, textarea, select, [contenteditable]:not([contenteditable='false'])";
+
+function eventMatches(event, selector) {
+  const path = event.composedPath?.() || [event.target];
+  return path.some((node) => node?.closest?.(selector) || node?.isContentEditable);
+}
+const isControlEvent = (event) => eventMatches(event, `${editable}, button, summary, a[href]`);
+
 function cursorForTarget(target) {
   if (!target) return "grab";
   if (target.action === "move-cluster") return "grab";
@@ -12286,11 +12294,7 @@ function createRasterInteraction({
       const isActive = () =>
         activeSurface === surface || surface?.ownerDocument?.activeElement === surface;
       const keydown = (event) => {
-        if (event.code !== "Space") return;
-        // Window listeners see a shadow host as event.target. Respect the
-        // actual control so Space still toggles editor fields and menus.
-        const target = event.composedPath?.()[0] || event.target;
-        if (target?.closest?.("input, textarea, select, button, summary, a[href], [contenteditable='true']")) return;
+        if (event.code !== "Space" || event.defaultPrevented || isControlEvent(event)) return;
         spaceDown = true;
         if (!isActive()) return;
         panMode = true;
@@ -16413,7 +16417,7 @@ function clusterMap() {
       };
       if (annotationOverlay) annotationOverlay.update(annotationUiContext);
       else if (!annotationUiLoad) {
-        annotationUiLoad = import('./annotationOverlay.mjs?v=7d2ffaa0267d').then(({ createAnnotationOverlay }) => {
+        annotationUiLoad = import('./annotationOverlay.mjs?v=2e0bf7e18ffa').then(({ createAnnotationOverlay }) => {
           if (!annotationUiContext) return;
           annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
             ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,

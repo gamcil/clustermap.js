@@ -3,6 +3,7 @@ import { createTemplate } from "../ui/controls.mjs";
 import { textAsset, installStyle } from "../ui/assets.mjs";
 import { defineActionMenu } from "./components/action-menu/action-menu.js";
 import { applyEditorTheme } from "./shared/theme.js";
+import { isEditingEvent } from "../interaction/keyboard.mjs";
 
 const toolbarTemplate = createTemplate(await textAsset(new URL("./components/plot-selection-toolbar/plot-selection-toolbar.html", import.meta.url)));
 const css = await textAsset(new URL("./components/plot-selection-toolbar/plot-selection-toolbar.css", import.meta.url));
@@ -61,7 +62,7 @@ export function mountPlotSelectionToolbar(chart, container, { editor = null } = 
   });
   const onKeyDown = (event) => {
     if (activeToolbar !== root || event.key !== "Escape" || event.defaultPrevented || !chart.selection().ids.length) return;
-    if (event.target.matches('input, textarea, select, [contenteditable="true"]')) return;
+    if (isEditingEvent(event)) return;
     event.preventDefault(); clear();
   };
   container.addEventListener("pointerdown", activate);
