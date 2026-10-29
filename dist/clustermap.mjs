@@ -5278,6 +5278,7 @@ function animate(duration, update, complete) {
   const startedAt = performance.now();
   let cancelled = false;
   const tick = (now) => {
+    if (cancelled) return;
     const elapsed = duration ? Math.min(1, (now - startedAt) / duration) : 1;
     update(elapsed < 0.5 ? 4 * elapsed * elapsed * elapsed : 1 - Math.pow(-2 * elapsed + 2, 3) / 2);
     if (cancelled) return;
@@ -5290,8 +5291,15 @@ function animate(duration, update, complete) {
 
 /** Allow a queued preview to paint before preparing its committed scene. */
 function afterPaint(action) {
-  let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(action); });
-  return () => cancelAnimationFrame(frame);
+  let cancelled = false;
+  let frame = requestAnimationFrame(() => {
+    if (cancelled) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      if (!cancelled) action();
+    });
+  });
+  return () => { cancelled = true; if (frame !== null) cancelAnimationFrame(frame); frame = null; };
 }
 
 var xhtml = "http://www.w3.org/1999/xhtml";
@@ -15461,13 +15469,10 @@ function clusterMap() {
   let chartState = null;
   let canvasHoverLocusUid = null;
   let rasterScene = null, rasterAnimation = null;
-  let treeAnimation = null;
   let scenePreview = null;
   let previewPaintFrame = null;
-  let cancelCanvasFlip = null;
-  let canvasPendingFlip = null;
-  let cancelSceneFlip = null;
-  let clusterCommitFrame = null;
+  let locusFlip = null;
+  let cancelClusterCommit = null;
   let sceneCommit = null;
   let rasterCanvas = null, overlayCanvas = null, minimapCanvas = null;
   let currentData = null;
@@ -15521,7 +15526,7 @@ function clusterMap() {
   const canvasBackend = createCanvasBackend();
   const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint });
   const rendererLifecycle = createRendererLifecycle({
-    svg: { paint: renderSvg },
+    svg: { paint: renderSvg, destroy: () => container?.selectAll("svg.clusterMap *").interrupt() },
     canvas: canvasBackend,
     webgpu: webgpuBackend,
   });
@@ -15560,10 +15565,8 @@ function clusterMap() {
       setDragging(chartState, dragging);
     },
     previewClusterDrag: (uid, position, order, positions = new Map([[uid, position]])) => {
-      if (clusterCommitFrame !== null) {
-        cancelAnimationFrame(clusterCommitFrame);
-        clusterCommitFrame = null;
-      }
+      cancelClusterCommit?.();
+      cancelClusterCommit = null;
       for (const [clusterUid, clusterPosition] of positions) {
         setPreviewClusterPosition(chartState, clusterUid, clusterPosition);
       }
@@ -15605,18 +15608,16 @@ function clusterMap() {
           rows,
         });
         scheduleScenePaint();
-        if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
-        clusterCommitFrame = requestAnimationFrame(() => {
-          clusterCommitFrame = requestAnimationFrame(() => {
-            clusterCommitFrame = null;
-            clearScenePreview();
-            redraw({ animate: false });
-          });
+        cancelClusterCommit?.();
+        cancelClusterCommit = afterPaint(() => {
+          cancelClusterCommit = null;
+          cancelSceneWork();
+          redraw({ animate: false });
         });
         commitInteractionState();
         return;
       }
-      clearScenePreview();
+      cancelSceneWork();
       redraw({ animate: false });
       commitInteractionState();
     },
@@ -15680,46 +15681,40 @@ function clusterMap() {
     cancelInteraction: () => { pendingInteractionState = null; },
     flipLocus: (locus) => {
       // Do not mutate the retained source underneath an in-flight flip.
-      if (cancelSceneFlip !== null) return;
+      if (locusFlip && locusFlip.renderer !== "canvas") return;
+      if (locusFlip) finishLocusFlip();
       beginInteractionState();
       flipLocus(chartState, locus);
       if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
         const sourceScene = rasterAnimation?.previousScene || rasterScene || runtime.getScene();
         stopRasterAnimation();
-        cancelCanvasFlip?.();
         const previewProgress = 0.12;
-        const pending = { locus, sourceScene, targetScene: null,
+        const pending = { locus, sourceScene, targetScene: null, renderer: "canvas", cancel: null,
           clusterLabelText: runtime.locusTextForCluster(locus.clusterUid) };
-        canvasPendingFlip = pending;
+        locusFlip = pending;
         scenePreview = createLocusFlipPreview(sourceScene, locus.uid, {
           progress: previewProgress,
           clusterLabelText: pending.clusterLabelText,
         });
         scheduleScenePaint();
         // Show the retained preview before preparing cached flip layers.
-        cancelCanvasFlip = afterPaint(() => startCanvasFlip(pending, previewProgress));
+        pending.cancel = afterPaint(() => startCanvasFlip(pending, previewProgress));
         return;
       }
       if (runtime.getScene()) {
         const useGpu = isWebGpuRenderer(runtime.config.plot.renderer);
         const sourceScene = runtime.getScene();
-        const pending = { locus, sourceScene, targetScene: null };
+        const pending = { locus, sourceScene, targetScene: null, renderer: runtime.config.plot.renderer, cancel: null };
+        locusFlip = pending;
         const duration = runtime.config.plot.transitionDuration;
         const finish = () => {
-          const targetScene = commitLocusFlip(pending);
-          if (useGpu) {
-            rasterScene = targetScene;
-            webgpuBackend.setScene(targetScene, { sourceScene, scales: runtime.scales, config: runtime.renderConfig });
-          }
-          scenePreview = null;
-          cancelSceneFlip = null;
-          scheduleScenePaint();
+          finishLocusFlip(pending);
         };
         if (!duration) {
           finish();
           return;
         }
-        cancelSceneFlip = animate(duration, (progress) => {
+        pending.cancel = animate(duration, (progress) => {
           scenePreview = createLocusFlipPreview(sourceScene, locus.uid, {
             progress,
             clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
@@ -15738,23 +15733,21 @@ function clusterMap() {
     const sourceScene = runtime.getScene();
     if (sourceScene) sceneCommit = { sourceScene, changes: { loci } };
     updateState();
-    clearScenePreview();
+    cancelSceneWork();
     redraw({ animate: false });
     commitInteractionState();
   }
 
-  function clearScenePreview() {
+  function cancelSceneWork() {
     if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
-    cancelCanvasFlip?.();
-    cancelSceneFlip?.();
-    if (clusterCommitFrame !== null) cancelAnimationFrame(clusterCommitFrame);
+    locusFlip?.cancel?.();
+    cancelClusterCommit?.();
+    stopRasterAnimation();
     scenePreview = null;
     canvasBackend.clearFlip();
     previewPaintFrame = null;
-    cancelCanvasFlip = null;
-    canvasPendingFlip = null;
-    cancelSceneFlip = null;
-    clusterCommitFrame = null;
+    locusFlip = null;
+    cancelClusterCommit = null;
   }
 
   function commitLocusFlip(pending) {
@@ -15767,36 +15760,42 @@ function clusterMap() {
     return pending.targetScene;
   }
 
-  function flushCanvasFlip() {
-    const pending = canvasPendingFlip;
-    if (!pending) return;
-    cancelCanvasFlip?.();
-    cancelCanvasFlip = null;
-    rasterScene = commitLocusFlip(pending);
+  function finishLocusFlip(pending = locusFlip) {
+    if (!pending || pending !== locusFlip) return;
+    pending.cancel?.();
+    pending.cancel = null;
+    const scene = commitLocusFlip(pending);
+    if (pending !== locusFlip) return;
+    if (isRasterRenderer(pending.renderer)) rasterScene = scene;
+    if (isWebGpuRenderer(pending.renderer)) webgpuBackend.setScene(scene, {
+      sourceScene: pending.sourceScene, scales: runtime.scales, config: runtime.renderConfig,
+    });
     scenePreview = null;
-    canvasPendingFlip = null;
+    locusFlip = null;
     canvasBackend.clearFlip();
+    scheduleScenePaint();
+    scheduleMinimapBase(scene);
   }
 
   function startCanvasFlip(pending, initialProgress) {
-    if (canvasPendingFlip !== pending) return;
-    cancelCanvasFlip = null;
+    if (locusFlip !== pending) return;
+    pending.cancel = null;
     commitLocusFlip(pending);
+    if (locusFlip !== pending) return;
     canvasBackend.prepareFlip(pending.locus.uid, pending.sourceScene);
     // Restore and repaint the affected canvas region before the browser can
     // present a frame. The base image stays offscreen; the visible plot stays
     // a single canvas throughout the animation.
     paintScene();
     const finish = () => {
-      flushCanvasFlip();
+      finishLocusFlip(pending);
       paintScene();
       scheduleScenePaint();
-      scheduleMinimapBase(pending.targetScene);
     };
     const duration = runtime.config.plot.transitionDuration;
     if (!duration) { finish(); return; }
-    cancelCanvasFlip = animate(duration, (progress) => {
-      if (canvasPendingFlip !== pending) return;
+    pending.cancel = animate(duration, (progress) => {
+      if (locusFlip !== pending) return;
       scenePreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
         progress: initialProgress + (1 - initialProgress) * progress,
         clusterLabelText: pending.clusterLabelText,
@@ -15836,8 +15835,7 @@ function clusterMap() {
   }
 
   function installData(prepared, state = null) {
-    clearScenePreview();
-    stopRasterAnimation();
+    cancelSceneWork();
     cancelTreePresentationPreview();
     sceneCommit = null;
     currentData = prepared;
@@ -15908,6 +15906,7 @@ function clusterMap() {
   // one logical edit when released. Keep the compact, exportable state before
   // the gesture and compare it after the committed layout has synchronized.
   function beginInteractionState() {
+    finishLocusFlip();
     if (!pendingInteractionState && chartState && currentData) {
       pendingInteractionState = stateSnapshots.serialize(chartState, currentData);
     }
@@ -15977,10 +15976,13 @@ function clusterMap() {
   }
 
   function setState(snapshot, { record = true, notify = true } = {}) {
+    if (record) finishLocusFlip();
+    const before = chartState ? stateSnapshots.serialize(chartState, currentData) : null;
+    const replacement = chartStateFromSnapshot(currentData, snapshot);
     sceneCommit = null;
     pendingInteractionState = null;
-    const before = chartState ? stateSnapshots.serialize(chartState, currentData) : null;
-    chartState = chartStateFromSnapshot(currentData, snapshot);
+    cancelSceneWork();
+    chartState = replacement;
     plotDataDirty = true;
     runtime.setChartState(chartState);
     hasInitialView = true;
@@ -16070,7 +16072,7 @@ function clusterMap() {
       const node = currentData.tree?.nodes.find((entry) => entry.uid === uid);
       if (!node?.children) return;
       beginInteractionState();
-      treeAnimation = {
+      const treeMotion = {
         previousTree: {
           ...plotData.tree,
           nodes: plotData.tree.nodes.map((entry) => ({
@@ -16079,14 +16081,13 @@ function clusterMap() {
           })),
         },
         previousScene: runtime.getScene(),
-        progress: 0,
       };
       sceneCommit = { sourceScene: runtime.getScene(), changes: {} };
       node.children.reverse();
       plotDataDirty = true;
       chartState = createChartState(currentData, chartState);
       runtime.setChartState(chartState);
-      redraw();
+      redraw({ treeMotion });
       commitInteractionState();
     },
     toggleLocusSelection: (locus, options) => selectPlotRecord("loci", locus.uid, options),
@@ -16152,13 +16153,14 @@ function clusterMap() {
   });
 
   function sceneFrame(scene) {
+    const treeMotion = rasterAnimation?.tree;
     return {
       scene, camera: getCamera(chartState), config: runtime.renderConfig,
       scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(), tree: plotData.tree,
       preview: scenePreview, hoverLocusUid: canvasHoverLocusUid,
       suppressLocusHover: scenePreview?.type === "locus-flip",
-      previousTree: treeAnimation?.previousTree, previousTreeScene: treeAnimation?.previousScene,
-      treeTargetScene: treeAnimation?.targetScene, treeProgress: treeAnimation?.progress ?? 1,
+      previousTree: treeMotion?.previousTree, previousTreeScene: treeMotion?.previousScene,
+      treeTargetScene: treeMotion?.targetScene, treeProgress: treeMotion ? rasterAnimation.progress : 1,
       highlightGeneIds: highlightedGeneIds(), highlightLinkIds, highlightLocusIds: selectedLoci(),
       highlightClusterIds: selectedClusterIds(),
     };
@@ -16172,12 +16174,13 @@ function clusterMap() {
     return paintSvg();
   }
 
-  function paintSvg({ presentationOnly = false, previousScene = null, animate = false } = {}) {
+  function paintSvg({ presentationOnly = false, previousScene = null, animate = false, treeMotion = null } = {}) {
     const svg = container?.select("svg.clusterMap");
     if (!svg || svg.empty()) return;
     updateFigureSurface();
     return rendererLifecycle.paint("svg", { ...sceneFrame(runtime.getScene()),
       plot: svg.select("g.clusterMapG"), data: plotData, presentationOnly, previousScene, animate,
+      previousTree: treeMotion?.previousTree, previousTreeScene: treeMotion?.previousScene,
       annotationViewport: hasInitialView ? worldViewport(getCamera(chartState), svg.node().getBoundingClientRect()) : null,
       transition: animate ? transition().duration(runtime.config.plot.transitionDuration) : null,
       ids: runtime.ids, interactions: rendererInteractions });
@@ -16225,7 +16228,7 @@ function clusterMap() {
   function paintRaster() {
     const renderer = runtime.config.plot.renderer;
     const animation = rasterAnimation?.renderer === "canvas" ? rasterAnimation : null;
-    const scene = canvasPendingFlip?.sourceScene || rasterScene || runtime.getScene();
+    const scene = (locusFlip?.renderer === "canvas" ? locusFlip.sourceScene : null) || rasterScene || runtime.getScene();
     if (!rasterCanvas || !scene) return null;
     updateFigureSurface();
     const result = rendererLifecycle.paint(renderer, { ...sceneFrame(scene),
@@ -16265,7 +16268,7 @@ function clusterMap() {
     rasterAnimation = null;
   }
 
-  function animateRaster(scene, animate$1, sourceScene) {
+  function animateRaster(scene, animate$1, sourceScene, treeMotion) {
     const renderer = runtime.config.plot.renderer;
     const useWebGpu = isWebGpuRenderer(renderer);
     const previousScene = useWebGpu ? rasterScene : rasterAnimation?.previousScene || rasterScene;
@@ -16273,18 +16276,16 @@ function clusterMap() {
     const duration = runtime.config.plot.transitionDuration;
     const finish = () => {
       rasterAnimation = null;
-      treeAnimation = null;
       rasterScene = scene;
       if (useWebGpu) webgpuBackend.setScene(scene, { sourceScene, scales: runtime.scales, config: runtime.renderConfig });
       paintScene();
     };
     if (!animate$1 || !previousScene || !duration) { finish(); return; }
-    if (treeAnimation) treeAnimation.targetScene = scene;
     if (!useWebGpu) rasterScene = scene;
-    rasterAnimation = { renderer, previousScene, progress: 0, cancel: null };
+    rasterAnimation = { renderer, previousScene, progress: 0, cancel: null,
+      tree: treeMotion ? { ...treeMotion, targetScene: scene } : null };
     rasterAnimation.cancel = animate(duration, (progress) => {
       rasterAnimation.progress = progress;
-      if (treeAnimation) treeAnimation.progress = progress;
       if (useWebGpu) rasterScene = interpolateScene(previousScene, scene, progress);
       paintScene();
     }, finish);
@@ -16309,8 +16310,9 @@ function clusterMap() {
     setCursor: (surface, cursor) => select(surface).style("cursor", cursor),
   };
 
-  function redraw({ animate = true, synchronize = true } = {}) {
+  function redraw({ animate = true, synchronize = true, treeMotion = null } = {}) {
     if (!currentData || !container) return;
+    finishLocusFlip();
     const fonts = container.node().ownerDocument.fonts;
     if (fontSet !== fonts) {
       fontSet?.removeEventListener("loadingdone", fontsChanged);
@@ -16352,7 +16354,7 @@ function clusterMap() {
     // The overview is a separate 2D canvas, so it works for both raster
     // backends. WebGPU owns only the main plot surface.
     const showMinimap = useRaster && minimapOptions.show;
-    if (!useCanvas) clearScenePreview();
+    if (!useCanvas) cancelSceneWork();
     if (!showMinimap) rasterMinimap.clear();
 
     const svgSurface = ensureSvgSurface({
@@ -16458,9 +16460,9 @@ function clusterMap() {
     if (useRaster) {
       if (!hasInitialView) fitInitialView(canvas, scene);
       scheduleMinimapBase(scene);
-      animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene);
+      animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene, treeMotion);
     } else {
-      paintSvg({ presentationOnly, previousScene, animate: hasInitialView && animate });
+      paintSvg({ presentationOnly, previousScene, animate: hasInitialView && animate, treeMotion });
 
       if (!hasInitialView) fitInitialView(svg, scene);
     }
@@ -16538,6 +16540,10 @@ function clusterMap() {
   };
   my.config = function (_) {
     if (!arguments.length) return clonePlainValue(runtime.config);
+    if (locusFlip) {
+      runtime.validateConfiguration(_, currentData?.tree);
+      finishLocusFlip();
+    }
     const before = currentData ? previousConfigPatch(runtime.config, _) : null;
     runtime.configure(_, currentData?.tree);
     cancelTreePresentationPreview();
@@ -16568,7 +16574,7 @@ function clusterMap() {
     };
     validate(clusters, chartIndex.clusterById, "cluster");
     validate(loci, chartIndex.locusById, "locus");
-    flushCanvasFlip();
+    finishLocusFlip();
     cancelTreePresentationPreview();
     const snapshot = stateSnapshots.serialize(chartState, currentData);
     snapshot.excludedClusters = [...new Set([...(snapshot.excludedClusters || []), ...clusters])];
@@ -16634,6 +16640,7 @@ function clusterMap() {
     if (!container || !currentData || !chartIndex) {
       throw new Error("Cannot patch chart data before the chart has rendered.");
     }
+    finishLocusFlip();
     cancelTreePresentationPreview();
     applyPatch(operations);
     return my;
@@ -16647,6 +16654,7 @@ function clusterMap() {
     if (operations && (!Array.isArray(operations) || operations.some((op) => !isTreeOperation(op)))) {
       throw new TypeError("Only tree presentation operations can be previewed.");
     }
+    finishLocusFlip();
     cancelTreePresentationPreview();
     const sourceScene = runtime.getScene();
     if (sourceScene) sceneCommit = { sourceScene, changes: { presentationOnly: true } };
@@ -16667,6 +16675,7 @@ function clusterMap() {
     return my;
   };
   function replayHistory(source, target, direction) {
+    finishLocusFlip();
     const cancelled = cancelTreePresentationPreview();
     const change = source.at(-1);
     if (!change) { if (cancelled) redraw({ animate: false }); return my; }
@@ -16742,12 +16751,12 @@ function clusterMap() {
     }
     const loci = [...new Set(ids || [])].map(locusForId).filter(Boolean);
     if (!loci.length) return my;
+    finishLocusFlip();
     const before = stateSnapshots.serialize(chartState, currentData);
-    flushCanvasFlip();
-    clearScenePreview();
     let changed = false;
     for (const locus of loci) changed = update(chartState, locus) || changed;
     if (!changed) return my;
+    cancelSceneWork();
     redraw({ animate });
     finishEdit({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) },
       { type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) });
@@ -16774,7 +16783,7 @@ function clusterMap() {
   /** Latest computed layout, excluding transient animation and drag geometry. */
   my.figureBounds = () => figureSurface.bounds(container?.node(), runtime.getScene(), runtime.renderConfig, plotData?.tree);
   my.exportSvg = ({ padding = 20 } = {}) => {
-    flushCanvasFlip();
+    finishLocusFlip();
     return exportChartSvg({
       data: plotData,
       scene: runtime.getScene(),
@@ -16799,8 +16808,7 @@ function clusterMap() {
     disposeRasterInteraction = () => {};
     retainedOverlay?.dispose();
     retainedOverlay = null;
-    clearScenePreview();
-    stopRasterAnimation();
+    cancelSceneWork();
     rasterMotion.dispose();
     rasterMinimap.clear();
     rendererLifecycle.destroy();
@@ -16828,7 +16836,7 @@ function clusterMap() {
     rasterScene = null;
     rasterCanvas = overlayCanvas = minimapCanvas = null;
     sceneCommit = null;
-    chartIndex = currentData = chartState = treeAnimation = null;
+    chartIndex = currentData = chartState = null;
     clearHistory(false);
     runtime.reset();
     highlightGeneIds.clear();

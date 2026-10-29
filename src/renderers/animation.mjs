@@ -3,6 +3,7 @@ export function animate(duration, update, complete) {
   const startedAt = performance.now();
   let cancelled = false;
   const tick = (now) => {
+    if (cancelled) return;
     const elapsed = duration ? Math.min(1, (now - startedAt) / duration) : 1;
     update(elapsed < 0.5 ? 4 * elapsed * elapsed * elapsed : 1 - Math.pow(-2 * elapsed + 2, 3) / 2);
     if (cancelled) return;
@@ -15,6 +16,13 @@ export function animate(duration, update, complete) {
 
 /** Allow a queued preview to paint before preparing its committed scene. */
 export function afterPaint(action) {
-  let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(action); });
-  return () => cancelAnimationFrame(frame);
+  let cancelled = false;
+  let frame = requestAnimationFrame(() => {
+    if (cancelled) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      if (!cancelled) action();
+    });
+  });
+  return () => { cancelled = true; if (frame !== null) cancelAnimationFrame(frame); frame = null; };
 }

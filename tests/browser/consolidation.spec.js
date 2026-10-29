@@ -69,6 +69,27 @@ test("plot selection and batch actions resolve numeric IDs consistently", async 
   expect(result.visible).toEqual([0, 2]);
 });
 
+test("project replacement cancels a deferred cluster commit", async ({ page }) => {
+  const first = await page.locator("g.clusterInfo").nth(0).boundingBox();
+  const second = await page.locator("g.clusterInfo").nth(1).boundingBox();
+  const saved = await page.evaluate(() => {
+    chart.config({ plot: { renderer: "canvas", transitionDuration: 0 } }); chart.clearHistory();
+    const saved = chart.project();
+    document.querySelector("canvas.clusterMapCanvas").addEventListener("pointerup", () => {
+      window.dragWasCommitted = chart.canUndo();
+      chart.project(saved);
+    }, { once: true });
+    return saved;
+  });
+  const x = first.x + first.width / 2;
+  await page.mouse.move(x, first.y + first.height / 2); await page.mouse.down();
+  await page.mouse.move(x, second.y + second.height / 2, { steps: 5 }); await page.mouse.up();
+  await waitForPaint(page);
+  expect(await page.evaluate(() => window.dragWasCommitted)).toBe(true);
+  expect(await page.evaluate(() => chart.state())).toEqual(saved.state);
+  expect(await page.evaluate(() => chart.canUndo())).toBe(false);
+});
+
 test("batch trim respects a pretrimmed member and remains one undoable edit", async ({ page }) => {
   const result = await page.evaluate(() => {
     const state = chart.state();
@@ -118,6 +139,82 @@ test("SVG tree edits, previews and history leave biological DOM untouched", asyn
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: flip completion and cancellation stay safe across interruptions`, async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const result = await page.evaluate(async (renderer) => {
+      const track = document.querySelector("g.locus line.trackBar").getBoundingClientRect();
+      const point = { x: track.x + track.width * 0.9, y: track.y + track.height / 2 };
+      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+      chart.config({ plot: { renderer, transitionDuration: 10000 } }); chart.clearHistory();
+      const figure = () => {
+        const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml");
+        const genes = [...svg.querySelectorAll("g.gene")].map((gene) =>
+          [gene.id, gene.querySelector("polygon.genePolygon").getAttribute("points")]).sort(([a], [b]) => a.localeCompare(b));
+        return JSON.stringify({ state: chart.state(), genes });
+      };
+      const saved = chart.project(), original = figure();
+      const startFlip = () => {
+        const surface = renderer === "svg" ? document.querySelector("g.locus") : document.querySelector("canvas.clusterMapCanvas");
+        surface.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, clientX: point.x, clientY: point.y }));
+      };
+      const settle = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      let detachedPaints = 0;
+      const clearRect = CanvasRenderingContext2D.prototype.clearRect;
+      CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+        if ((this.canvas.matches(".clusterMapCanvas,.clusterMapWebGpuOverlay")) && !this.canvas.isConnected) detachedPaints++;
+        return clearRect.apply(this, args);
+      };
+      try {
+        startFlip();
+        const exported = figure(), canUndoExport = chart.canUndo();
+        chart.undo(); const exportUndo = figure() === original;
+        startFlip(); chart.highlight(["a0"]); figure();
+        const highlightRecorded = chart.canUndo();
+        chart.highlight([]); chart.undo();
+        const highlightUndo = { recorded: highlightRecorded, restored: figure() === original };
+        startFlip(); chart.rotateTreeNode("pair");
+        chart.undo(); chart.undo();
+        const rotationUndo = { restored: figure() === original, undo: chart.canUndo() };
+        startFlip(); await settle();
+        chart.undo();
+        const undoDuring = { restored: figure() === original, undo: chart.canUndo(), redo: chart.canRedo() };
+        startFlip();
+        chart.config({ plot: { renderer: renderer === "svg" ? "canvas" : "svg" } });
+        chart.undo(); chart.undo();
+        const switchUndo = { restored: figure() === original, undo: chart.canUndo() };
+        startFlip();
+        const replacement = structuredClone(saved.state); replacement.clusterOrder = ["b", "a", "c"];
+        let flipOrder;
+        const stop = chart.on("change", (event) => {
+          if (event.type === "state.change") flipOrder = [...chart.data().tree.nodes.find((node) => node.uid === "pair").children];
+        });
+        chart.state(replacement); stop(); await settle();
+        const reordered = chart.state().clusterOrder.join() === "b,a,c";
+        chart.undo(); chart.undo();
+        const stateReplacement = reordered && flipOrder?.join() === "leaf-a,leaf-b" && figure() === original;
+        chart.clearHistory();
+        startFlip(); await settle();
+        chart.project(saved); await settle();
+        const reload = { restored: figure() === original, undo: chart.canUndo(), redo: chart.canRedo() };
+        startFlip(); await settle();
+        chart.data({ clusters: [], links: [], groups: [] }); await settle();
+        const dataReplacement = { clusters: chart.data().clusters.length, loci: chart.state().loci.length, undo: chart.canUndo() };
+        chart.project(saved);
+        startFlip(); await settle();
+        chart.destroy(); await settle();
+        return { flippedExport: exported !== original, canUndoExport, exportUndo, highlightUndo, rotationUndo, undoDuring, switchUndo, stateReplacement, reload, dataReplacement,
+          detachedPaints, destroyed: chart.state() === null };
+      } finally { CanvasRenderingContext2D.prototype.clearRect = clearRect; }
+    }, renderer);
+    expect(result).toEqual({ flippedExport: true, canUndoExport: true, exportUndo: true,
+      highlightUndo: { recorded: true, restored: true }, rotationUndo: { restored: true, undo: false },
+      undoDuring: { restored: true, undo: false, redo: true }, switchUndo: { restored: true, undo: false },
+      stateReplacement: true, reload: { restored: true, undo: false, redo: false },
+      dataReplacement: { clusters: 0, loci: 0, undo: false }, detachedPaints: 0, destroyed: true });
+    expect(errors).toEqual([]);
+  });
+
   test(`${renderer}: subtree triangles persist, export and expand through the node menu`, async ({ page }) => {
     const point = await page.locator("circle.tree-node").nth(1).boundingBox();
     await page.evaluate((renderer) => {
