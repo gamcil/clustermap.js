@@ -554,15 +554,21 @@ export default function clusterMap() {
     if (emit) emitHistoryChange();
   }
 
-  function finishEdit(change, event, { notify = true } = {}) {
-    if (change) {
+  function commitEdit(complete, { render = { animate: false }, notify = true, replay = null } = {}) {
+    if (render && container && currentData) redraw(render);
+    const { change = null, event } = complete();
+    if (replay) {
+      replay.target.push(replay.source.pop());
+    } else if (change) {
       history.push(change);
       if (history.length > historyLimit) history.splice(0, history.length - historyLimit);
       future.length = 0;
     }
-    if (!notify) return;
-    emitChange(event);
-    if (change) emitHistoryChange();
+    if (notify) {
+      emitChange(event);
+      if (change || replay) emitHistoryChange();
+    }
+    return event;
   }
 
   // Pointer interactions update transient preview state continuously, but are
@@ -581,7 +587,8 @@ export default function clusterMap() {
     if (!before || !chartState || !currentData) return;
     const after = stateSnapshots.serialize(chartState, currentData);
     if (JSON.stringify(before) === JSON.stringify(after)) return;
-    finishEdit({ kind: "state", undo: before, redo: after }, { type: "state.change", state: after });
+    commitEdit(() => ({ change: { kind: "state", undo: before, redo: after },
+      event: { type: "state.change", state: after } }), { render: false });
   }
 
   function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
@@ -624,16 +631,14 @@ export default function clusterMap() {
     if (sourceScene && !restoringAutomatic && presentationOnly) {
       sceneCommit = { sourceScene, changes: { presentationOnly: true } };
     }
-    redraw({ animate: false });
-    finishEdit(record ? {
+    return commitEdit(() => ({ change: record ? {
       kind: "patch",
       undo: result.inverse,
       redo: result.operations,
       groupsAutomaticBefore,
       groupsAutomaticAfter,
       ...(undoState ? { undoState, redoState: stateSnapshots.serialize(chartState, currentData) } : {}),
-    } : null, { type: "data.apply", operations: result.operations }, { notify });
-    return result;
+    } : null, event: { type: "data.apply", operations: result.operations } }), { notify });
   }
 
   let treePresentationPreview = null;
@@ -647,7 +652,7 @@ export default function clusterMap() {
 
   function setState(snapshot, { record = true, notify = true } = {}) {
     if (record) finishLocusFlip();
-    const before = chartState ? stateSnapshots.serialize(chartState, currentData) : null;
+    const before = record && chartState ? stateSnapshots.serialize(chartState, currentData) : null;
     const replacement = chartStateFromSnapshot(currentData, snapshot);
     sceneCommit = null;
     pendingInteractionState = null;
@@ -656,11 +661,26 @@ export default function clusterMap() {
     plotDataDirty = true;
     runtime.setChartState(chartState);
     hasInitialView = true;
-    redraw({ animate: false });
-    const after = stateSnapshots.serialize(chartState, currentData);
-    finishEdit(record ? { kind: "state", undo: before, redo: after } : null,
-      { type: "state.replace", state: after }, { notify });
-    return after;
+    return commitEdit(() => {
+      const after = stateSnapshots.serialize(chartState, currentData);
+      return { change: record ? { kind: "state", undo: before, redo: after } : null,
+        event: { type: "state.replace", state: after } };
+    }, { notify });
+  }
+
+  function applyConfiguration(options, { record = true, notify = true } = {}) {
+    if (locusFlip) {
+      runtime.validateConfiguration(options, currentData?.tree);
+      finishLocusFlip();
+    }
+    const before = record && currentData ? previousConfigPatch(runtime.config, options) : null;
+    runtime.configure(options, currentData?.tree);
+    cancelTreePresentationPreview();
+    sceneCommit = null;
+    return commitEdit(() => ({
+      change: before ? { kind: "config", undo: before, redo: clonePlainValue(options) } : null,
+      event: { type: "config.change", config: runtime.config },
+    }), { notify });
   }
 
   function highlightedGeneIds() {
@@ -1210,20 +1230,7 @@ export default function clusterMap() {
   };
   my.config = function (_) {
     if (!arguments.length) return clonePlainValue(runtime.config);
-    if (locusFlip) {
-      runtime.validateConfiguration(_, currentData?.tree);
-      finishLocusFlip();
-    }
-    const before = currentData ? previousConfigPatch(runtime.config, _) : null;
-    runtime.configure(_, currentData?.tree);
-    cancelTreePresentationPreview();
-    sceneCommit = null;
-    // Configuration is a live part of the public chart API. Updating it after
-    // mounting should have the same immediate effect as updating data, without
-    // requiring consumers to re-bind the chart's normalized data themselves.
-    if (container && currentData) redraw({ animate: false });
-    finishEdit(before ? { kind: "config", undo: before, redo: clonePlainValue(_) } : null,
-      { type: "config.change", config: runtime.config });
+    applyConfiguration(_);
     return my;
   };
   my.data = function (data) {
@@ -1355,20 +1362,15 @@ export default function clusterMap() {
     const value = change[direction];
     let event;
     if (change.kind === "patch") {
-      const result = applyPatch(value, { record: false, notify: false,
+      event = applyPatch(value, { record: false, notify: false,
         automaticGroups: direction === "undo" ? change.groupsAutomaticBefore : change.groupsAutomaticAfter,
         state: direction === "undo" ? change.undoState : change.redoState });
-      event = { type: "data.apply", operations: result.operations };
     } else if (change.kind === "config") {
-      runtime.configure(value, currentData?.tree);
-      redraw({ animate: false });
-      event = { type: "config.change", config: runtime.config };
+      event = applyConfiguration(value, { record: false, notify: false });
     } else if (change.kind === "state" && value) {
-      event = { type: "state.replace", state: setState(value, { record: false, notify: false }) };
+      event = setState(value, { record: false, notify: false });
     }
-    source.pop(); target.push(change);
-    if (event) emitChange(event);
-    emitHistoryChange();
+    commitEdit(() => ({ event }), { render: false, replay: { source, target } });
     return my;
   }
   my.undo = () => replayHistory(history, future, "undo");
@@ -1431,9 +1433,8 @@ export default function clusterMap() {
     for (const locus of loci) changed = update(chartState, locus) || changed;
     if (!changed) return my;
     cancelSceneWork();
-    redraw({ animate });
-    finishEdit({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) },
-      { type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) });
+    commitEdit(() => ({ change: { kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) },
+      event: { type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) } }), { render: { animate } });
     return my;
   }
   /** Flip supplied loci, or the current selection, as one operation. */

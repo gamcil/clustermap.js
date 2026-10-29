@@ -491,36 +491,42 @@ test("project notifications expose final state and listener errors preserve undo
   expect(result.name).toBe("Edited");
 });
 
-test("config, state and batch edits finish history before notifying listeners", async ({ page }) => {
+test("patch, config, state and batch commits expose final rendering and history to listeners", async ({ page }) => {
   const results = await page.evaluate(() => {
     const results = [], previous = window.reportError;
     const errors = [];
     window.reportError = (error) => errors.push(error.message);
     try {
-      for (const kind of ["config", "state", "batch"]) {
+      for (const kind of ["patch", "config", "state", "batch"]) {
         chart.clearHistory();
-        const before = JSON.stringify(chart.project()), events = [];
+        const before = JSON.stringify(chart.project()), beforeSvg = chart.exportSvg(), events = [], observed = [];
         const stop = chart.on("change", (event) => {
-          if (!["config.change", "state.replace", "loci.trim", "history.change"].includes(event.type)) return;
+          if (!["data.apply", "config.change", "state.replace", "loci.trim", "history.change"].includes(event.type)) return;
           events.push({ type: event.type, undo: chart.canUndo(), redo: chart.canRedo() });
+          observed.push({ project: JSON.stringify(chart.project()), svg: chart.exportSvg() });
           if (event.type !== "history.change") throw new Error("Consumer failed");
         });
-        if (kind === "config") chart.config({ cluster: { spacing: 73 } });
+        if (kind === "patch") chart.patch([{ type: "clusters.update", ids: ["a"], changes: { name: "Committed name" } }]);
+        else if (kind === "config") chart.config({ cluster: { spacing: 73 } });
         else if (kind === "state") {
           const state = chart.state(); state.camera.x += 17; chart.state(state);
         } else chart.trimLoci(["locus-a", "locus-b"]);
-        const after = JSON.stringify(chart.project());
+        const after = JSON.stringify(chart.project()), afterSvg = chart.exportSvg();
         chart.undo(); const restored = JSON.stringify(chart.project()) === before;
         chart.redo(); const replayed = JSON.stringify(chart.project()) === after;
-        stop(); results.push({ kind, events, restored, replayed });
+        stop(); results.push({ kind, events, restored, replayed, finalRendering: JSON.stringify(observed) === JSON.stringify([
+          { project: after, svg: afterSvg }, { project: after, svg: afterSvg },
+          { project: before, svg: beforeSvg }, { project: before, svg: beforeSvg },
+          { project: after, svg: afterSvg }, { project: after, svg: afterSvg },
+        ]) });
       }
     } finally { window.reportError = previous; }
     return { results, errors };
   });
-  expect(results.errors).toHaveLength(9);
-  for (const { kind, events, restored, replayed } of results.results) {
-    expect(restored).toBe(true); expect(replayed).toBe(true);
-    const type = kind === "config" ? "config.change" : "state.replace";
+  expect(results.errors).toHaveLength(12);
+  for (const { kind, events, restored, replayed, finalRendering } of results.results) {
+    expect(restored).toBe(true); expect(replayed).toBe(true); expect(finalRendering).toBe(true);
+    const type = kind === "patch" ? "data.apply" : kind === "config" ? "config.change" : "state.replace";
     expect(events).toEqual([
       { type: kind === "batch" ? "loci.trim" : type, undo: true, redo: false },
       { type: "history.change", undo: true, redo: false },
