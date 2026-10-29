@@ -220,6 +220,8 @@ export function createRasterInteraction({
           } else if (target?.action === "gene") {
             event.preventDefault();
             actions.geneMenu(event, target.geneUid);
+          } else if (target?.action === "move-cluster") {
+            actions.clusterTreeMenu?.(event, target.clusterUid);
           } else if (target?.action === "legend-text") {
             event.preventDefault();
             actions.legendMenu(event, target.group);

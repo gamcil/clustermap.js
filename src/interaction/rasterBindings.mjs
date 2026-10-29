@@ -26,6 +26,7 @@ export function createRasterInteractionBindings({
       geneClick: (event, geneUid) => interactions.onGeneClick?.(event, getGene(geneUid)),
       rotateTreeNode: (nodeUid) => interactions.rotateTreeNode?.(nodeUid),
       treeMenu: interactions.showTreeMenu,
+      clusterTreeMenu: interactions.showClusterTreeMenu,
       legendColour: interactions.legendColour,
       legendText: interactions.legendText,
       scaleBar: interactions.setScaleBarLength,

@@ -219,8 +219,39 @@ The tree is positioned as far right
 as possible while leaving a gap between every leaf tip and its cluster label.
 
 Tree geometry is shared across SVG, Canvas and WebGPU; static SVG exports
-include branches, support labels and annotations. Newick parsing, leaf matching,
-tree inference and rerooting are outside the library's scope.
+include branches, support labels and annotations. Newick parsing, leaf matching
+and tree inference belong to the host application.
+
+## Rerooting
+
+Right-click an internal node or a cluster label and choose **Root here**. The
+root is placed halfway along the incoming branch of the selected node or leaf;
+the selected subtree becomes the first child. **Reset rooting** is available
+in tree menus and the editor's tree appearance settings.
+
+```js
+chart.patch([{ type: "tree.reroot", nodeId: "node-2" }]);
+chart.patch([{ type: "tree.reroot.reset" }]);
+```
+
+Both actions support undo/redo. Reset restores the ordering before the first
+reroot while retaining node labels and manual styles. Node IDs and cluster
+associations remain stable. The original display root is retained, possibly as
+a unary node; repeated rerooting reuses one extra root node. Reset removes it.
+Known lengths preserve leaf-to-leaf distances; missing lengths stay unknown.
+Support follows its edge and appears once on a split edge, on the selected side.
+Incoming branch styles follow edges and initially cover both halves. When the
+halves are rejoined, the selected side's explicit style takes precedence.
+Collapsed subtrees expand if their descendant membership changes. Biological
+`rooted` metadata is unchanged. Merge-height trees and trees with an initial
+unary display root cannot be rerooted.
+
+The chart manages an optional `tree.rooting` record so reset survives project
+reload. Omit it when supplying a new tree. It contains `root` (original root
+UID), `node` (generated display root UID), `outgroup` (selected-side UID), and
+`children` (original internal-node child order as `[uid, childIds]` pairs).
+Imported baselines must match the current unrooted topology. Undo stores the
+previous tree, including presentation, and restores it exactly.
 
 ## Colouring and annotations
 

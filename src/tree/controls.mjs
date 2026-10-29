@@ -39,7 +39,7 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
     const { count, labels } = describe(uid);
     return uid === tree.root ? `All ${count} clusters` : `${labels.join(" + ")}${count > 2 ? ` + ${count - 2} more` : ""}`;
   };
-  const uid = nodesById.get(nodeUid)?.children ? nodeUid : nodesById.get(tree.root)?.children ? tree.root : null;
+  const uid = nodesById.has(nodeUid) ? nodeUid : tree.root;
   const host = element("div", container);
 
   const colourInput = (parent, title, value, fallback, onChange) => {
@@ -78,6 +78,14 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
     host.replaceChildren();
     host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
     const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
+    const root = button(host, "Root here", () => patch([{ type: "tree.reroot", nodeId: uid }]));
+    const unaryRoot = !tree.rooting && nodesById.get(tree.root).children?.length === 1;
+    root.disabled = uid === tree.root || tree.distance?.kind === "mergeHeight" || unaryRoot;
+    root.title = tree.distance?.kind === "mergeHeight" ? "Merge-height trees cannot be rerooted"
+      : unaryRoot ? "Trees with a unary display root cannot be rerooted" : "Root on the branch above this node";
+    const resetRoot = button(host, "Reset rooting", () => patch([{ type: "tree.reroot.reset" }]));
+    resetRoot.disabled = !tree.rooting;
+    if (!nodesById.get(uid).children) { onResize?.(); return; }
     button(host, "Rotate branches", () => rotate(uid));
     const collapsed = input(host, "Collapse subtree", "checkbox", tree.presentation?.subtrees?.[uid]?.collapsed);
     collapsed.onchange = () => {

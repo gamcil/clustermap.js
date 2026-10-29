@@ -184,6 +184,11 @@ export function invalidateTreePresentation(tree) {
   if (tree) stylesCache.delete(tree);
 }
 
+export function invalidateTreeTopology(tree) {
+  metricsCache.delete(tree);
+  stylesCache.delete(tree);
+}
+
 /** Resolve properties once per presentation/config revision, never per tween. */
 export function resolveTreePresentation(tree, config = {}) {
   const defaults = { ...TREE_COLOURING_DEFAULTS, ...config.colouring };

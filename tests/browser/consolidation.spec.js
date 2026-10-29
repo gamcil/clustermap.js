@@ -249,6 +249,58 @@ test("SVG tree edits, previews and history leave biological DOM untouched", asyn
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  for (const nodeId of ["pair", "leaf-a"]) {
+    test(`${renderer}: rooting at ${nodeId} rebuilds ordering, persists reset and supports history`, async ({ page }) => {
+      const result = await page.evaluate(({ renderer, nodeId }) => {
+        if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+        chart.config({ plot: { renderer } }); chart.clearHistory();
+        const original = chart.project(), originalSvg = chart.exportSvg();
+        chart.patch([{ type: "tree.reroot", nodeId }]);
+        const rooted = chart.project(), svg = chart.exportSvg();
+        const nodes = new Map(rooted.data.tree.nodes.map((node) => [node.uid, node]));
+        const order = (uid) => nodes.get(uid).children?.flatMap(order) || [nodes.get(uid).cluster];
+        const matchesOrder = JSON.stringify(order(rooted.data.tree.root)) === JSON.stringify(chart.state().clusterOrder);
+        chart.undo(); const undone = JSON.stringify(chart.project()) === JSON.stringify(original) && chart.exportSvg() === originalSvg;
+        chart.redo(); const redone = JSON.stringify(chart.project()) === JSON.stringify(rooted) && chart.exportSvg() === svg;
+        chart.project(JSON.parse(JSON.stringify(rooted)));
+        const loaded = chart.exportSvg() === svg;
+        chart.patch([{ type: "tree.reroot", nodeId: "leaf-c" }]);
+        const count = chart.data().tree.nodes.length;
+        chart.patch([{ type: "tree.reroot.reset" }]);
+        const reset = chart.project(); chart.undo(); const resetUndo = Boolean(chart.data().tree.rooting);
+        chart.redo();
+        return { rooted: rooted.data.tree.root !== original.data.tree.root, matchesOrder, undone, redone, loaded,
+          count, originalCount: original.data.tree.nodes.length, resetTree: reset.data.tree, originalTree: original.data.tree,
+          resetOrder: reset.state.clusterOrder, originalOrder: original.state.clusterOrder, resetUndo,
+          resetRedo: !chart.data().tree.rooting, resetSvg: chart.exportSvg() === originalSvg };
+      }, { renderer, nodeId });
+      expect(result.rooted).toBe(true); expect(result.matchesOrder).toBe(true); expect(result.undone).toBe(true);
+      expect(result.redone).toBe(true); expect(result.loaded).toBe(true);
+      expect(result.count).toBe(result.originalCount + 1);
+      expect(result.resetTree).toEqual(result.originalTree); expect(result.resetOrder).toEqual(result.originalOrder);
+      expect(result.resetUndo).toBe(true); expect(result.resetRedo).toBe(true); expect(result.resetSvg).toBe(true);
+    });
+  }
+
+  test(`${renderer}: leaf context menu roots the tree and editor resets rooting`, async ({ page }) => {
+    const label = await page.locator("text.clusterText").filter({ hasText: "Cluster a" }).boundingBox();
+    await page.evaluate(({ renderer, point }) => {
+      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+      chart.config({ plot: { renderer } });
+      const surface = renderer === "svg" ? [...document.querySelectorAll("text.clusterText")].find((node) => node.textContent === "Cluster a") : document.querySelector("canvas.clusterMapCanvas");
+      surface.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: point.x, clientY: point.y }));
+    }, { renderer, point: { x: label.x + label.width / 2, y: label.y + label.height / 2 } });
+    await page.getByRole("button", { name: "Root here", exact: true }).click();
+    expect(await page.evaluate(() => chart.data().tree.nodes.find((node) => node.uid === chart.data().tree.root).children[0])).toBe("leaf-a");
+    await page.evaluate(async () => {
+      await import("/dist/editor.mjs");
+      const editor = document.createElement("clinker-editor"); editor.chart = chart; document.body.append(editor);
+      editor.open({ tab: "appearance" }); await editor.openAppearance({ section: "tree" });
+    });
+    await page.getByRole("button", { name: "Reset rooting", exact: true }).click();
+    expect(await page.evaluate(() => ({ root: chart.data().tree.root, canReset: Boolean(chart.data().tree.rooting) }))).toEqual({ root: "root", canReset: false });
+  });
+
   test(`${renderer}: group history retains deleted gene memberships through edits and reload`, async ({ page }) => {
     const result = await page.evaluate((renderer) => {
       if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });

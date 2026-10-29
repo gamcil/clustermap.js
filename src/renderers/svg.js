@@ -93,7 +93,8 @@ export function renderSvg({
           .style("font-weight", "bold")
           .style("font-size", `${config.cluster.nameFontSize}px`)
           .style("font-family", config.plot.fontFamily)
-          .on("click", interactions.renameCluster);
+          .on("click", interactions.renameCluster)
+          .on("contextmenu", interactions.showClusterTreeMenu);
         info
           .append("text")
           .attr("class", "locusText")

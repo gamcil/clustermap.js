@@ -529,29 +529,29 @@
   };
   const metricsCache = new WeakMap();
   const stylesCache = new WeakMap();
-  const fail$3 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
+  const fail$4 = (message) => { throw new TypeError(`Invalid tree presentation: ${message}`); };
   const object$2 = (value) => value && typeof value === "object" && !Array.isArray(value);
   const own$1 = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
   function fields$1(value, allowed, where) {
-    if (!object$2(value)) fail$3(`${where} must be an object.`);
-    for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$3(`${where}.${key} is unsupported.`);
+    if (!object$2(value)) fail$4(`${where} must be an object.`);
+    for (const key of Object.keys(value)) if (!allowed.includes(key)) fail$4(`${where}.${key} is unsupported.`);
   }
   function colour(value, where) {
-    if (typeof value !== "string" || !color(value)) fail$3(`${where} must be a valid colour.`);
+    if (typeof value !== "string" || !color(value)) fail$4(`${where} must be a valid colour.`);
   }
   function positive$1(value, where) {
-    if (!Number.isFinite(value) || value <= 0) fail$3(`${where} must be finite and positive.`);
+    if (!Number.isFinite(value) || value <= 0) fail$4(`${where} must be finite and positive.`);
   }
   function validateTreeColouring(policy) {
     if (policy === undefined) return;
     fields$1(policy, ["mode", "cutHeight", "palette", "showCutLine"], "colouring");
-    if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$3("colouring.mode must be none or cutHeight.");
+    if (own$1(policy, "mode") && !["none", "cutHeight"].includes(policy.mode)) fail$4("colouring.mode must be none or cutHeight.");
     if (own$1(policy, "cutHeight") && policy.cutHeight !== "auto" && (!Number.isFinite(policy.cutHeight) || policy.cutHeight < 0)) {
-      fail$3('colouring.cutHeight must be "auto" or a finite non-negative number.');
+      fail$4('colouring.cutHeight must be "auto" or a finite non-negative number.');
     }
-    if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$3("colouring.showCutLine must be boolean.");
+    if (own$1(policy, "showCutLine") && typeof policy.showCutLine !== "boolean") fail$4("colouring.showCutLine must be boolean.");
     if (own$1(policy, "palette")) {
-      if (!Array.isArray(policy.palette) || !policy.palette.length) fail$3("colouring.palette must be a non-empty colour array.");
+      if (!Array.isArray(policy.palette) || !policy.palette.length) fail$4("colouring.palette must be a non-empty colour array.");
       policy.palette.forEach((entry) => colour(entry, "colouring.palette"));
     }
   }
@@ -660,8 +660,8 @@
     if (!tree) return;
     if (tree.distance !== undefined) {
       fields$1(tree.distance, ["kind", "label"], "distance");
-      if (tree.distance.kind !== "mergeHeight") fail$3("distance.kind must be mergeHeight.");
-      if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$3("distance.label must be text.");
+      if (tree.distance.kind !== "mergeHeight") fail$4("distance.kind must be mergeHeight.");
+      if (own$1(tree.distance, "label") && typeof tree.distance.label !== "string") fail$4("distance.label must be text.");
     }
     const presentation = tree.presentation;
     if (presentation !== undefined) {
@@ -670,39 +670,44 @@
       const nodes = treeMetrics(tree).nodes;
       for (const scope of ["subtrees", "nodes"]) {
         if (presentation[scope] === undefined) continue;
-        if (!object$2(presentation[scope])) fail$3(`presentation.${scope} must be a node-ID dictionary.`);
+        if (!object$2(presentation[scope])) fail$4(`presentation.${scope} must be a node-ID dictionary.`);
         for (const [uid, record] of Object.entries(presentation[scope])) {
           const node = nodes.get(uid);
-          if (!node) fail$3(`presentation.${scope} refers to unknown node '${uid}'.`);
+          if (!node) fail$4(`presentation.${scope} refers to unknown node '${uid}'.`);
           fields$1(record, scope === "subtrees" ? ["branch", "collapsed"] : ["branch", "label"], `${scope}.${uid}`);
-          if (scope === "subtrees" && !node.children) fail$3(`subtree '${uid}' must be an internal node.`);
-          if (record.collapsed !== undefined && typeof record.collapsed !== "boolean") fail$3(`subtrees.${uid}.collapsed must be boolean.`);
+          if (scope === "subtrees" && !node.children) fail$4(`subtree '${uid}' must be an internal node.`);
+          if (record.collapsed !== undefined && typeof record.collapsed !== "boolean") fail$4(`subtrees.${uid}.collapsed must be boolean.`);
           if (record.branch !== undefined) {
-            if (scope === "nodes" && uid === tree.root) fail$3("the display root has no incoming edge to style.");
+            if (scope === "nodes" && uid === tree.root) fail$4("the display root has no incoming edge to style.");
             validateBranch(record.branch, `${scope}.${uid}.branch`);
           }
           if (record.label !== undefined) {
-            if (!node.children) fail$3(`annotation '${uid}' must belong to an internal node.`);
+            if (!node.children) fail$4(`annotation '${uid}' must belong to an internal node.`);
             const label = record.label;
             fields$1(label, ["text", "colour", "fontSize", "fontWeight", "fontStyle"], `nodes.${uid}.label`);
-            if (own$1(label, "text") && typeof label.text !== "string") fail$3(`annotation '${uid}' text must be a string.`);
+            if (own$1(label, "text") && typeof label.text !== "string") fail$4(`annotation '${uid}' text must be a string.`);
             if (own$1(label, "colour")) colour(label.colour, `annotation '${uid}' colour`);
             if (own$1(label, "fontSize")) positive$1(label.fontSize, `annotation '${uid}' fontSize`);
-            if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$3("annotation fontWeight must be 400 or 700.");
-            if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$3("annotation fontStyle must be normal or italic.");
+            if (own$1(label, "fontWeight") && ![400, 700].includes(label.fontWeight)) fail$4("annotation fontWeight must be 400 or 700.");
+            if (own$1(label, "fontStyle") && !["normal", "italic"].includes(label.fontStyle)) fail$4("annotation fontStyle must be normal or italic.");
           }
         }
       }
     }
     const policy = { ...TREE_COLOURING_DEFAULTS, ...config.colouring, ...presentation?.colouring };
     if (policy.mode === "cutHeight") {
-      if (tree.distance?.kind !== "mergeHeight") fail$3("cutHeight colouring requires distance.kind = mergeHeight.");
-      if (!treeMetrics(tree).ultrametric) fail$3("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
+      if (tree.distance?.kind !== "mergeHeight") fail$4("cutHeight colouring requires distance.kind = mergeHeight.");
+      if (!treeMetrics(tree).ultrametric) fail$4("cutHeight colouring requires complete lengths and equal root-to-tip distances (absolute 1e-12 + relative 1e-9 tolerance).");
     }
   }
 
   function invalidateTreePresentation(tree) {
     if (tree) stylesCache.delete(tree);
+  }
+
+  function invalidateTreeTopology(tree) {
+    metricsCache.delete(tree);
+    stylesCache.delete(tree);
   }
 
   /** Resolve properties once per presentation/config revision, never per tween. */
@@ -8851,6 +8856,145 @@
     }
   }
 
+  const fail$3 = (message) => { throw new TypeError(`Invalid tree rooting: ${message}`); };
+
+  function graphFor(tree) {
+    const nodes = new Map(tree.nodes.map((node) => [node.uid, node]));
+    const parents = new Map(), edges = new Map(tree.nodes.map((node) => [node.uid, new Map()]));
+    for (const node of tree.nodes) for (const child of node.children || []) {
+      const record = nodes.get(child), edge = {};
+      for (const key of ["branchLength", "support"]) if (record[key] !== undefined) edge[key] = structuredClone(record[key]);
+      const branch = tree.presentation?.nodes?.[child]?.branch;
+      if (branch) edge.branch = structuredClone(branch);
+      edges.get(node.uid).set(child, edge); edges.get(child).set(node.uid, edge);
+      parents.set(child, node.uid);
+    }
+    for (const node of tree.nodes) {
+      const order = [...node.children || [], ...parents.has(node.uid) ? [parents.get(node.uid)] : []];
+      edges.set(node.uid, new Map(order.map((uid) => [uid, edges.get(node.uid).get(uid)])));
+    }
+    if (tree.rooting !== undefined) {
+      const baseline = tree.rooting;
+      if (!isPlainObject(baseline) || Object.keys(baseline).some((key) => !["root", "node", "outgroup", "children"].includes(key)) ||
+          baseline.node !== tree.root || typeof baseline.root !== "string" || baseline.root === baseline.node || !nodes.has(baseline.root) ||
+          !Array.isArray(baseline.children) || nodes.get(tree.root).children?.length !== 2 ||
+          !nodes.get(tree.root).children.includes(baseline.outgroup)) fail$3("invalid saved rooting baseline.");
+      const seen = new Set();
+      for (const entry of baseline.children) {
+        if (!Array.isArray(entry) || entry.length !== 2 || !nodes.has(entry[0]) || entry[0] === baseline.node || seen.has(entry[0]) ||
+            !Array.isArray(entry[1]) || !entry[1].length || entry[1].some((uid) => typeof uid !== "string" || uid === baseline.node || !nodes.has(uid))) {
+          fail$3("invalid original child ordering.");
+        }
+        seen.add(entry[0]);
+      }
+      const a = baseline.outgroup, b = nodes.get(tree.root).children.find((uid) => uid !== a);
+      const first = edges.get(tree.root).get(a), second = edges.get(tree.root).get(b);
+      const joined = { ...second, ...first };
+      delete joined.branchLength;
+      if (first.branchLength !== undefined && second.branchLength !== undefined) joined.branchLength = first.branchLength + second.branchLength;
+      for (const [uid, other] of [[a, b], [b, a]]) {
+        edges.set(uid, new Map([...edges.get(uid)].map(([key, edge]) => key === tree.root ? [other, joined] : [key, edge])));
+      }
+      nodes.delete(tree.root); edges.delete(tree.root);
+    }
+    return { nodes, edges };
+  }
+
+  function orient(tree, graph, root, ordering = null) {
+    const nodes = new Map([...graph.nodes].map(([uid, node]) => {
+      const copy = structuredClone(node);
+      delete copy.children; delete copy.branchLength; delete copy.support;
+      return [uid, copy];
+    }));
+    const records = new Map(Object.entries(tree.presentation?.nodes || {}).filter(([uid]) => nodes.has(uid))
+      .map(([uid, record]) => {
+        const copy = structuredClone(record); delete copy.branch;
+        return [uid, copy];
+      }));
+    const visited = new Set();
+    const visit = (uid, parent = null) => {
+      if (visited.has(uid)) fail$3("invalid original topology.");
+      visited.add(uid);
+      const node = nodes.get(uid), neighbours = [...graph.edges.get(uid).keys()].filter((key) => key !== parent);
+      const children = ordering ? ordering.get(uid) || [] : neighbours;
+      if (children.length !== neighbours.length || new Set(children).size !== children.length || children.some((key) => !neighbours.includes(key))) {
+        fail$3("saved rooting does not match the tree topology.");
+      }
+      if (children.length) {
+        if (node.cluster !== undefined) fail$3("a leaf cannot become an internal node.");
+        node.children = [...children];
+      } else if (node.cluster === undefined) fail$3("cannot reroot a tree with a unary display root.");
+      for (const child of children) {
+        const edge = graph.edges.get(uid).get(child), target = nodes.get(child);
+        for (const key of ["branchLength", "support"]) if (edge[key] !== undefined) target[key] = structuredClone(edge[key]);
+        if (edge.branch) records.set(child, { ...records.get(child), branch: structuredClone(edge.branch) });
+        visit(child, uid);
+      }
+    };
+    visit(root);
+    if (visited.size !== nodes.size) fail$3("the saved topology is incomplete.");
+    const result = { ...structuredClone(tree), root, nodes: [...nodes.values()] };
+    if (result.presentation) {
+      const entries = [...records].filter(([, record]) => Object.keys(record).length);
+      if (entries.length) result.presentation.nodes = Object.fromEntries(entries);
+      else delete result.presentation.nodes;
+      const previous = new Map(tree.nodes.map((node) => [node.uid, node]));
+      const leaves = (map, uid) => {
+        const node = map.get(uid);
+        return node?.children ? node.children.flatMap((child) => leaves(map, child)) : [uid];
+      };
+      for (const [uid, record] of Object.entries(result.presentation.subtrees || {})) {
+        if (!nodes.has(uid)) { delete result.presentation.subtrees[uid]; continue; }
+        if (!record.collapsed) continue;
+        const before = new Set(leaves(previous, uid)), after = leaves(nodes, uid);
+        if (before.size !== after.length || after.some((leaf) => !before.has(leaf))) {
+          delete record.collapsed;
+          if (!Object.keys(record).length) delete result.presentation.subtrees[uid];
+        }
+      }
+      if (result.presentation.subtrees && !Object.keys(result.presentation.subtrees).length) delete result.presentation.subtrees;
+      if (!Object.keys(result.presentation).length) delete result.presentation;
+    }
+    return result;
+  }
+
+  function resetTreeRoot(tree) {
+    if (tree.rooting === undefined) return structuredClone(tree);
+    const graph = graphFor(tree);
+    const result = orient(tree, graph, tree.rooting.root, new Map(tree.rooting.children));
+    delete result.rooting;
+    return result;
+  }
+
+  function rerootTree(tree, nodeId) {
+    if (tree.distance?.kind === "mergeHeight") fail$3("merge-height trees cannot be rerooted.");
+    if (nodeId === tree.root) fail$3("the selected node is already the root.");
+    const selected = tree.nodes.find((node) => node.uid === nodeId);
+    if (!selected) fail$3(`unknown node '${nodeId}'.`);
+    const parent = tree.nodes.find((node) => node.children?.includes(nodeId))?.uid;
+    const graph = graphFor(tree);
+    let root = tree.rooting?.node || "clustermap-root";
+    if (!tree.rooting) while (graph.nodes.has(root)) root += "-";
+    const other = parent === tree.rooting?.node
+      ? tree.nodes.find((node) => node.uid === tree.root).children.find((uid) => uid !== nodeId) : parent;
+    const edge = graph.edges.get(nodeId)?.get(other);
+    if (!edge) fail$3("the selected branch does not exist.");
+    const first = structuredClone(edge), second = structuredClone(edge);
+    delete second.support;
+    if (edge.branchLength !== undefined) {
+      first.branchLength = edge.branchLength / 2;
+      second.branchLength = edge.branchLength - first.branchLength;
+    }
+    graph.edges.get(nodeId).delete(other); graph.edges.get(other).delete(nodeId);
+    graph.edges.get(nodeId).set(root, first); graph.edges.get(other).set(root, second);
+    graph.nodes.set(root, tree.rooting ? tree.nodes.find((node) => node.uid === root) : { uid: root });
+    graph.edges.set(root, new Map([[nodeId, first], [other, second]]));
+    const result = orient(tree, graph, root);
+    result.rooting = { root: tree.rooting?.root || tree.root, node: root, outgroup: nodeId,
+      children: tree.rooting ? structuredClone(tree.rooting.children) : tree.nodes.filter((node) => node.children).map((node) => [node.uid, [...node.children]]) };
+    return result;
+  }
+
   // Chart data is JSON-like: it is also the format used for data/project export.
   // Clone plain values at the boundary so chart edits never mutate caller-owned
   // records, including nested link endpoints and user metadata.
@@ -9016,6 +9160,7 @@
     if (visited.size !== nodes.size) fail("all nodes must be reachable from the root.");
     if (seenClusters.size !== clusterIds.size) fail("every plotted cluster must be referenced by exactly one leaf.");
     validateTreePresentation(tree);
+    if (tree.rooting !== undefined) validateTree(resetTreeRoot(tree), clusters);
     return tree;
   }
 
@@ -9215,10 +9360,23 @@
   const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
   const object = (value) => value && typeof value === "object" && !Array.isArray(value);
   const types = new Set(["tree.presentation.update", "tree.presentation.reset", "tree.presentation.restore"]);
-  const isTreeOperation = (operation) => types.has(operation?.type);
+  const isTreePresentationOperation = (operation) => types.has(operation?.type);
+  const isTreeTopologyOperation = (operation) => ["tree.reroot", "tree.reroot.reset", "tree.restore"].includes(operation?.type);
+  const isTreeOperation = (operation) => isTreePresentationOperation(operation) || isTreeTopologyOperation(operation);
 
   function normalizeTreeOperation(tree, operation) {
-    if (!tree) fail$1("tree presentation edits require a loaded tree.");
+    if (!tree) fail$1("tree edits require a loaded tree.");
+    if (isTreeTopologyOperation(operation)) {
+      if (operation.type === "tree.reroot") {
+        if (typeof operation.nodeId !== "string" || !operation.nodeId.trim()) fail$1("rerooting requires a nodeId.");
+        return { type: operation.type, nodeId: operation.nodeId };
+      }
+      if (operation.type === "tree.restore") {
+        if (!object(operation.tree)) fail$1("tree.restore requires a tree.");
+        return { type: operation.type, tree: structuredClone(operation.tree) };
+      }
+      return { type: operation.type };
+    }
     if (operation.type === "tree.presentation.restore") {
       return { type: operation.type, ...(own(operation, "presentation") ? { presentation: structuredClone(operation.presentation) } : {}) };
     }
@@ -9272,6 +9430,14 @@
   }
 
   function applyTreeOperation(tree, operation) {
+    if (isTreeTopologyOperation(operation)) {
+      const next = operation.type === "tree.reroot" ? rerootTree(tree, operation.nodeId)
+        : operation.type === "tree.reroot.reset" ? resetTreeRoot(tree) : structuredClone(operation.tree);
+      for (const key of Object.keys(tree)) delete tree[key];
+      Object.assign(tree, next);
+      invalidateTreeTopology(tree);
+      return;
+    }
     if (operation.type === "tree.presentation.restore") {
       if (own(operation, "presentation")) tree.presentation = structuredClone(operation.presentation);
       else delete tree.presentation;
@@ -9301,15 +9467,18 @@
     invalidateTreePresentation(tree);
   }
 
-  function inverseTreeOperation(tree) {
+  function inverseTreeOperation(tree, operation = null) {
+    if (isTreeTopologyOperation(operation)) return { type: "tree.restore", tree: structuredClone(tree) };
     return { type: "tree.presentation.restore", ...(own(tree, "presentation") ? { presentation: structuredClone(tree.presentation) } : {}) };
   }
 
-  function validateTreeOperationBatch(tree, operations, config) {
+  function validateTreeOperationBatch(tree, operations, config, clusters) {
     if (!operations.some(isTreeOperation)) return;
-    const draft = { ...tree, ...(own(tree, "presentation") ? { presentation: structuredClone(tree.presentation) } : {}) };
+    const structural = operations.some(isTreeTopologyOperation);
+    const draft = structural ? structuredClone(tree) : { ...tree, ...(own(tree, "presentation") ? { presentation: structuredClone(tree.presentation) } : {}) };
     for (const operation of operations.filter(isTreeOperation)) {
       applyTreeOperation(draft, operation);
+      if (structural) validateTree(draft, clusters);
       validateTreePresentation(draft, config);
     }
   }
@@ -9330,7 +9499,9 @@
   // invalidate the biological indexes and automatic grouping.
   function operationEffects(operations) {
     let reindex = false, rebuildState = false;
-    for (const { type } of operations) {
+    for (const operation of operations) {
+      const { type } = operation;
+      if (isTreeTopologyOperation(operation)) rebuildState = true;
       if (type === "genes.delete" || type === "genes.restore") {
         reindex = "data"; rebuildState = true;
       } else if (type === "links.delete" || type === "links.restore") {
@@ -9678,7 +9849,7 @@
       }
       return validateOperation(operation, index, groupIds);
     });
-    validateTreeOperationBatch(data.tree, applied, treeConfig);
+    validateTreeOperationBatch(data.tree, applied, treeConfig, data.clusters);
     validateAnnotationChanges(data, annotationDraft.annotationPanels);
     const hasStructuralGroupEdit = applied.some((operation) => !["groups.update", "groups.restore"].includes(operation.type) && operation.type.startsWith("groups."));
     const inverse = [];
@@ -9689,7 +9860,7 @@
         continue;
       }
       if (isTreeOperation(operation)) {
-        inverse.unshift(inverseTreeOperation(data.tree));
+        inverse.unshift(inverseTreeOperation(data.tree, operation));
         applyTreeOperation(data.tree, operation);
         continue;
       }
@@ -9946,7 +10117,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       const { count, labels } = describe(uid);
       return uid === tree.root ? `All ${count} clusters` : `${labels.join(" + ")}${count > 2 ? ` + ${count - 2} more` : ""}`;
     };
-    const uid = nodesById.get(nodeUid)?.children ? nodeUid : nodesById.get(tree.root)?.children ? tree.root : null;
+    const uid = nodesById.has(nodeUid) ? nodeUid : tree.root;
     const host = element("div", container);
 
     const colourInput = (parent, title, value, fallback, onChange) => {
@@ -9985,6 +10156,14 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       host.replaceChildren();
       host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
       const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
+      const root = button(host, "Root here", () => patch([{ type: "tree.reroot", nodeId: uid }]));
+      const unaryRoot = !tree.rooting && nodesById.get(tree.root).children?.length === 1;
+      root.disabled = uid === tree.root || tree.distance?.kind === "mergeHeight" || unaryRoot;
+      root.title = tree.distance?.kind === "mergeHeight" ? "Merge-height trees cannot be rerooted"
+        : unaryRoot ? "Trees with a unary display root cannot be rerooted" : "Root on the branch above this node";
+      const resetRoot = button(host, "Reset rooting", () => patch([{ type: "tree.reroot.reset" }]));
+      resetRoot.disabled = !tree.rooting;
+      if (!nodesById.get(uid).children) { onResize?.(); return; }
       button(host, "Rotate branches", () => rotate(uid));
       const collapsed = input(host, "Collapse subtree", "checkbox", tree.presentation?.subtrees?.[uid]?.collapsed);
       collapsed.onchange = () => {
@@ -11471,7 +11650,8 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
             .style("font-weight", "bold")
             .style("font-size", `${config.cluster.nameFontSize}px`)
             .style("font-family", config.plot.fontFamily)
-            .on("click", interactions.renameCluster);
+            .on("click", interactions.renameCluster)
+            .on("contextmenu", interactions.showClusterTreeMenu);
           info
             .append("text")
             .attr("class", "locusText")
@@ -12558,6 +12738,8 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
             } else if (target?.action === "gene") {
               event.preventDefault();
               actions.geneMenu(event, target.geneUid);
+            } else if (target?.action === "move-cluster") {
+              actions.clusterTreeMenu?.(event, target.clusterUid);
             } else if (target?.action === "legend-text") {
               event.preventDefault();
               actions.legendMenu(event, target.group);
@@ -15326,6 +15508,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         geneClick: (event, geneUid) => interactions.onGeneClick?.(event, getGene(geneUid)),
         rotateTreeNode: (nodeUid) => interactions.rotateTreeNode?.(nodeUid),
         treeMenu: interactions.showTreeMenu,
+        clusterTreeMenu: interactions.showClusterTreeMenu,
         legendColour: interactions.legendColour,
         legendText: interactions.legendText,
         scaleBar: interactions.setScaleBarLength,
@@ -16041,7 +16224,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     function applyPatch(operations, { record = true, automaticGroups, notify = true, state = null } = {}) {
       const sourceScene = runtime.getScene();
-      const presentationOnly = Array.isArray(operations) && operations.every((op) => isAnnotationOperation(op) || isTreeOperation(op));
+      const presentationOnly = Array.isArray(operations) && operations.every((op) => isAnnotationOperation(op) || isTreePresentationOperation(op));
       sceneCommit = null;
       // Source edits may mutate currentData in place. Identity alone cannot
       // invalidate the cached biological defaults, including on undo/redo.
@@ -16223,6 +16406,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         (runtime.config.gene.shape.onClick || ((_, record) => anchorGene(record)))(event, gene);
       },
       showTreeMenu: (...args) => retainedOverlay?.showTreeMenu(...args),
+      showClusterTreeMenu: (event, cluster) => {
+        const leaf = plotData?.tree?.nodes.find((node) => node.cluster === (cluster.uid ?? cluster));
+        if (leaf) retainedOverlay?.showTreeMenu(event, leaf.uid);
+      },
       showGeneMenu: (...args) => retainedOverlay?.showGeneMenu(...args),
       showGroupMenu: (...args) => retainedOverlay?.showGroupMenu(...args),
       setScaleBarLength,
@@ -16540,7 +16727,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           actions: {
             redraw,
             treeControls: () => ({ tree: plotData.tree, clusters: plotData.clusters, config: runtime.renderConfig.tree,
-              patch: (ops) => updateFromTreeMenu(() => my.patch(ops)),
+              patch: (ops) => ops.some(isTreeTopologyOperation) ? my.patch(ops) : updateFromTreeMenu(() => my.patch(ops)),
               rotate: (uid) => updateFromTreeMenu(() => rendererInteractions.rotateTreeNode(uid)) }),
             updateGene: (gene, changes) => my.patch([
               { type: "genes.update", ids: [gene.uid], changes },
@@ -16766,7 +16953,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const tree = currentData?.tree;
       if (!operations && !treePresentationPreview) return my;
       if (!tree) throw new Error("Tree presentation preview requires a loaded tree.");
-      if (operations && (!Array.isArray(operations) || operations.some((op) => !isTreeOperation(op)))) {
+      if (operations && (!Array.isArray(operations) || operations.some((op) => !isTreePresentationOperation(op)))) {
         throw new TypeError("Only tree presentation operations can be previewed.");
       }
       finishLocusFlip();

@@ -27,6 +27,7 @@ class TreeAppearance extends HTMLElementBase {
     root.querySelector("select").onchange = (event) => this.#change({ palette: palettes[event.target.value] || this.#state.policy.palette });
     root.querySelector("[data-line]").onchange = (event) => this.#change({ showCutLine: event.target.checked });
     root.querySelector("[data-reset]").onclick = () => this.#emit("reset-styles");
+    root.querySelector("[data-reset-root]").onclick = () => this.#emit("reset-rooting");
     this.#slider.oninput = () => {
       this.#cancelled = false; this.#previewing = true; this.#height.value = this.#slider.value;
       if (!this.#emit("colouring-preview", { cutHeight: Number(this.#slider.value) })) this.#cancelPreview();
@@ -42,7 +43,7 @@ class TreeAppearance extends HTMLElementBase {
     let compatible = tree.distance?.kind === "mergeHeight";
     try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...policy, mode: "cutHeight" } } }, config); }
     catch { compatible = false; }
-    this.#state = { policy, height, compatible,
+    this.#state = { policy, height, compatible, canResetRoot: Boolean(tree.rooting),
       canReset: Boolean(Object.keys(tree.presentation?.nodes || {}).length || Object.keys(tree.presentation?.subtrees || {}).length) };
     this.#previewing = false; this.#sync();
   }
@@ -56,7 +57,7 @@ class TreeAppearance extends HTMLElementBase {
   }
   #sync() {
     if (!this.#state) return;
-    const { policy, height, compatible, canReset } = this.#state, root = this.shadowRoot;
+    const { policy, height, compatible, canReset, canResetRoot } = this.#state, root = this.shadowRoot;
     root.querySelector("fieldset").hidden = !compatible;
     root.querySelector("[data-enabled]").checked = policy.mode === "cutHeight";
     root.querySelector("[data-options]").hidden = policy.mode !== "cutHeight";
@@ -69,6 +70,7 @@ class TreeAppearance extends HTMLElementBase {
     root.querySelector("select").value = palette;
     root.querySelector("[data-line]").checked = policy.showCutLine;
     root.querySelector("[data-reset]").disabled = !canReset;
+    root.querySelector("[data-reset-root]").disabled = !canResetRoot;
   }
 }
 

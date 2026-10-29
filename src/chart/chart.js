@@ -36,7 +36,7 @@ import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,
 import { isAnnotationOperation } from "../annotations/operations.mjs";
 import { updateSvgAnnotationViewport } from "../annotations/render.mjs";
 import { applyChartOperations } from "../data/operations.mjs";
-import { isTreeOperation, inverseTreeOperation, applyTreeOperation } from "../tree/operations.mjs";
+import { isTreePresentationOperation, isTreeTopologyOperation, inverseTreeOperation, applyTreeOperation } from "../tree/operations.mjs";
 import { fitCameraForBounds, worldViewport, worldPoint } from "../scene/camera.mjs";
 import { applyTheme, resolveTheme } from "../ui/theme.mjs";
 import { validateUiAppearance } from "../ui/appearance.mjs";
@@ -582,7 +582,7 @@ export default function clusterMap() {
 
   function applyPatch(operations, { record = true, automaticGroups, notify = true, state = null } = {}) {
     const sourceScene = runtime.getScene();
-    const presentationOnly = Array.isArray(operations) && operations.every((op) => isAnnotationOperation(op) || isTreeOperation(op));
+    const presentationOnly = Array.isArray(operations) && operations.every((op) => isAnnotationOperation(op) || isTreePresentationOperation(op));
     sceneCommit = null;
     // Source edits may mutate currentData in place. Identity alone cannot
     // invalidate the cached biological defaults, including on undo/redo.
@@ -764,6 +764,10 @@ export default function clusterMap() {
       (runtime.config.gene.shape.onClick || ((_, record) => anchorGene(record)))(event, gene);
     },
     showTreeMenu: (...args) => retainedOverlay?.showTreeMenu(...args),
+    showClusterTreeMenu: (event, cluster) => {
+      const leaf = plotData?.tree?.nodes.find((node) => node.cluster === (cluster.uid ?? cluster));
+      if (leaf) retainedOverlay?.showTreeMenu(event, leaf.uid);
+    },
     showGeneMenu: (...args) => retainedOverlay?.showGeneMenu(...args),
     showGroupMenu: (...args) => retainedOverlay?.showGroupMenu(...args),
     setScaleBarLength,
@@ -1081,7 +1085,7 @@ export default function clusterMap() {
         actions: {
           redraw,
           treeControls: () => ({ tree: plotData.tree, clusters: plotData.clusters, config: runtime.renderConfig.tree,
-            patch: (ops) => updateFromTreeMenu(() => my.patch(ops)),
+            patch: (ops) => ops.some(isTreeTopologyOperation) ? my.patch(ops) : updateFromTreeMenu(() => my.patch(ops)),
             rotate: (uid) => updateFromTreeMenu(() => rendererInteractions.rotateTreeNode(uid)) }),
           updateGene: (gene, changes) => my.patch([
             { type: "genes.update", ids: [gene.uid], changes },
@@ -1307,7 +1311,7 @@ export default function clusterMap() {
     const tree = currentData?.tree;
     if (!operations && !treePresentationPreview) return my;
     if (!tree) throw new Error("Tree presentation preview requires a loaded tree.");
-    if (operations && (!Array.isArray(operations) || operations.some((op) => !isTreeOperation(op)))) {
+    if (operations && (!Array.isArray(operations) || operations.some((op) => !isTreePresentationOperation(op)))) {
       throw new TypeError("Only tree presentation operations can be previewed.");
     }
     finishLocusFlip();

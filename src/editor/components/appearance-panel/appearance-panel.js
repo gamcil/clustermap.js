@@ -38,6 +38,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
     this.#tree.addEventListener("colouring-change", (event) => { if (!runTreeEdit(() => this.#chart.patch(colouring(event.detail)))) event.preventDefault(); });
     this.#tree.addEventListener("colouring-preview", (event) => { if (!runPreview(() => this.#chart?.previewTreePresentation(event.detail ? colouring(event.detail) : null))) event.preventDefault(); });
     this.#tree.addEventListener("reset-styles", (event) => { if (!runTreeEdit(() => this.#chart.patch([{ type: "tree.presentation.reset", scope: "manual" }]))) event.preventDefault(); });
+    this.#tree.addEventListener("reset-rooting", (event) => { if (!runTreeEdit(() => this.#chart.patch([{ type: "tree.reroot.reset" }]))) event.preventDefault(); });
     this.#sections = [...root.querySelectorAll("fieldset")].map((box) => ({ box, key: box.dataset.appearanceSection, details: box.querySelector("details"),
       fields: [...box.querySelectorAll("[data-config]")].map((control) => ({ control, row: control.closest("label"), advanced: Boolean(control.closest("details")),
         search: `${box.querySelector("legend").textContent} ${control.getAttribute("aria-label")} ${control.dataset.config}`.toLowerCase() })) }));

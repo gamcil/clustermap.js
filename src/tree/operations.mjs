@@ -1,13 +1,28 @@
-import { invalidateTreePresentation, validateTreePresentation, treeMetrics } from "./model.mjs";
+import { invalidateTreePresentation, invalidateTreeTopology, validateTreePresentation, treeMetrics } from "./model.mjs";
+import { rerootTree, resetTreeRoot } from "./rooting.mjs";
+import { validateTree } from "../data/normalize.mjs";
 
 const fail = (message) => { throw new TypeError(`Invalid chart operation: ${message}`); };
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const object = (value) => value && typeof value === "object" && !Array.isArray(value);
 const types = new Set(["tree.presentation.update", "tree.presentation.reset", "tree.presentation.restore"]);
-export const isTreeOperation = (operation) => types.has(operation?.type);
+export const isTreePresentationOperation = (operation) => types.has(operation?.type);
+export const isTreeTopologyOperation = (operation) => ["tree.reroot", "tree.reroot.reset", "tree.restore"].includes(operation?.type);
+export const isTreeOperation = (operation) => isTreePresentationOperation(operation) || isTreeTopologyOperation(operation);
 
 export function normalizeTreeOperation(tree, operation) {
-  if (!tree) fail("tree presentation edits require a loaded tree.");
+  if (!tree) fail("tree edits require a loaded tree.");
+  if (isTreeTopologyOperation(operation)) {
+    if (operation.type === "tree.reroot") {
+      if (typeof operation.nodeId !== "string" || !operation.nodeId.trim()) fail("rerooting requires a nodeId.");
+      return { type: operation.type, nodeId: operation.nodeId };
+    }
+    if (operation.type === "tree.restore") {
+      if (!object(operation.tree)) fail("tree.restore requires a tree.");
+      return { type: operation.type, tree: structuredClone(operation.tree) };
+    }
+    return { type: operation.type };
+  }
   if (operation.type === "tree.presentation.restore") {
     return { type: operation.type, ...(own(operation, "presentation") ? { presentation: structuredClone(operation.presentation) } : {}) };
   }
@@ -61,6 +76,14 @@ function mergeSparse(previous, changes) {
 }
 
 export function applyTreeOperation(tree, operation) {
+  if (isTreeTopologyOperation(operation)) {
+    const next = operation.type === "tree.reroot" ? rerootTree(tree, operation.nodeId)
+      : operation.type === "tree.reroot.reset" ? resetTreeRoot(tree) : structuredClone(operation.tree);
+    for (const key of Object.keys(tree)) delete tree[key];
+    Object.assign(tree, next);
+    invalidateTreeTopology(tree);
+    return;
+  }
   if (operation.type === "tree.presentation.restore") {
     if (own(operation, "presentation")) tree.presentation = structuredClone(operation.presentation);
     else delete tree.presentation;
@@ -90,15 +113,18 @@ export function applyTreeOperation(tree, operation) {
   invalidateTreePresentation(tree);
 }
 
-export function inverseTreeOperation(tree) {
+export function inverseTreeOperation(tree, operation = null) {
+  if (isTreeTopologyOperation(operation)) return { type: "tree.restore", tree: structuredClone(tree) };
   return { type: "tree.presentation.restore", ...(own(tree, "presentation") ? { presentation: structuredClone(tree.presentation) } : {}) };
 }
 
-export function validateTreeOperationBatch(tree, operations, config) {
+export function validateTreeOperationBatch(tree, operations, config, clusters) {
   if (!operations.some(isTreeOperation)) return;
-  const draft = { ...tree, ...(own(tree, "presentation") ? { presentation: structuredClone(tree.presentation) } : {}) };
+  const structural = operations.some(isTreeTopologyOperation);
+  const draft = structural ? structuredClone(tree) : { ...tree, ...(own(tree, "presentation") ? { presentation: structuredClone(tree.presentation) } : {}) };
   for (const operation of operations.filter(isTreeOperation)) {
     applyTreeOperation(draft, operation);
+    if (structural) validateTree(draft, clusters);
     validateTreePresentation(draft, config);
   }
 }

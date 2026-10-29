@@ -1,4 +1,4 @@
-import { isTreeOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../tree/operations.mjs";
+import { isTreeOperation, isTreeTopologyOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../tree/operations.mjs";
 import { isAnnotationOperation, normalizeAnnotationOperation, applyAnnotationOperation,
   inverseAnnotationOperation, validateAnnotationChanges } from "../annotations/operations.mjs";
 import { isPlainObject, isRecordId } from "../utils/values.mjs";
@@ -20,7 +20,9 @@ const structuralGroupTypes = new Set(["groups.create", "groups.delete", "groups.
 // invalidate the biological indexes and automatic grouping.
 function operationEffects(operations) {
   let reindex = false, rebuildState = false;
-  for (const { type } of operations) {
+  for (const operation of operations) {
+    const { type } = operation;
+    if (isTreeTopologyOperation(operation)) rebuildState = true;
     if (type === "genes.delete" || type === "genes.restore") {
       reindex = "data"; rebuildState = true;
     } else if (type === "links.delete" || type === "links.restore") {
@@ -368,7 +370,7 @@ export function applyChartOperations(data, index, operations, treeConfig = {}) {
     }
     return validateOperation(operation, index, groupIds);
   });
-  validateTreeOperationBatch(data.tree, applied, treeConfig);
+  validateTreeOperationBatch(data.tree, applied, treeConfig, data.clusters);
   validateAnnotationChanges(data, annotationDraft.annotationPanels);
   const hasStructuralGroupEdit = applied.some((operation) => !["groups.update", "groups.restore"].includes(operation.type) && operation.type.startsWith("groups."));
   const inverse = [];
@@ -379,7 +381,7 @@ export function applyChartOperations(data, index, operations, treeConfig = {}) {
       continue;
     }
     if (isTreeOperation(operation)) {
-      inverse.unshift(inverseTreeOperation(data.tree));
+      inverse.unshift(inverseTreeOperation(data.tree, operation));
       applyTreeOperation(data.tree, operation);
       continue;
     }

@@ -2,6 +2,7 @@ import { validateTreePresentation } from "../tree/model.mjs";
 import { validateAnnotationPanels } from "../annotations/model.mjs";
 import { clonePlainValue, isPlainObject, isRecordId } from "../utils/values.mjs";
 import { validateRecordFields } from "./validation.mjs";
+import { resetTreeRoot } from "../tree/rooting.mjs";
 
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned
@@ -168,5 +169,6 @@ export function validateTree(tree, clusters) {
   if (visited.size !== nodes.size) fail("all nodes must be reachable from the root.");
   if (seenClusters.size !== clusterIds.size) fail("every plotted cluster must be referenced by exactly one leaf.");
   validateTreePresentation(tree);
+  if (tree.rooting !== undefined) validateTree(resetTreeRoot(tree), clusters);
   return tree;
 }
