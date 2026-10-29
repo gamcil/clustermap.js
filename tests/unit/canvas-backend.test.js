@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createCanvasBackend } from "../../src/renderers/canvasBackend.mjs";
 
-function fixture() {
+function fixture(options = {}) {
   const renders = [], images = [], frames = new Map(), canvases = [];
   let serial = 0;
   const context = Object.fromEntries(["setTransform", "clearRect", "save", "beginPath", "rect", "clip", "translate", "scale", "restore"]
@@ -22,6 +22,7 @@ function fixture() {
   const request = { canvas: document.createElement("canvas"), scene, camera: { x: 0, y: 0, k: 1 },
     config: { link: { asLine: true } }, pixelRatio: 2, tree: null, scales: {} };
   const backend = createCanvasBackend({
+    ...options,
     requestFrame: (action) => { frames.set(++serial, action); return serial; },
     cancelFrame: (id) => frames.delete(id),
     render(options) {
@@ -54,6 +55,69 @@ test("Canvas flip warming and playback share one layer cache", () => {
   assert.equal(canvases.length, 3);
   backend.clearFlip();
   assert.equal(backend.paint({ ...request, preview }), "painted", "cleared caches use ordinary scene rendering");
+});
+
+function playbackFixture() {
+  const deferred = [], animations = [], updates = [];
+  let prepared = 0, completed = 0;
+  const setup = fixture({
+    defer(action) {
+      const task = { action, cancelled: false }; deferred.push(task);
+      return () => { task.cancelled = true; };
+    },
+    animate(duration, update, complete) {
+      const task = { duration, update, complete, cancelled: false }; animations.push(task);
+      return () => { task.cancelled = true; };
+    },
+  });
+  setup.backend.paint(setup.request);
+  const start = (options = {}) => setup.backend.animateFlip("locus", setup.request.scene, {
+    duration: 100, onPrepare: () => { prepared++; }, onUpdate: (...args) => updates.push(args),
+    onComplete: () => { completed++; }, ...options,
+  });
+  return { ...setup, start, deferred, animations, updates, prepared: () => prepared, completed: () => completed };
+}
+
+test("Canvas playback presents a preview before preparing layers and paints animation frames immediately", () => {
+  const { start, deferred, animations, updates, prepared, completed, canvases } = playbackFixture();
+  start();
+  assert.deepEqual(updates, [[0.12, false]]);
+  assert.equal(prepared(), 0); assert.equal(canvases.length, 1);
+  deferred[0].action();
+  assert.equal(prepared(), 1); assert.equal(canvases.length, 3);
+  assert.deepEqual(updates[1], [0.12, true]);
+  assert.equal(animations[0].duration, 100);
+  animations[0].update(0.5);
+  assert.deepEqual(updates[2], [0.56, true]);
+  animations[0].complete(); animations[0].complete();
+  assert.equal(completed(), 1);
+});
+
+for (const phase of ["deferred", "playing"]) for (const action of ["cancel", "destroy", "replace"]) {
+  test(`Canvas playback ignores dequeued callbacks after ${action} while ${phase}`, () => {
+    const setup = playbackFixture(), { backend, start, deferred, animations, updates, prepared, completed } = setup;
+    const cancel = start();
+    if (phase === "playing") deferred[0].action();
+    const previous = animations[0];
+    if (action === "cancel") cancel();
+    else if (action === "destroy") backend.destroy();
+    else start();
+    const before = { updates: updates.length, prepared: prepared(), completed: completed(), canvases: setup.canvases.length };
+    deferred[0].action(); previous?.update(0.8); previous?.complete();
+    assert.deepEqual({ updates: updates.length, prepared: prepared(), completed: completed(), canvases: setup.canvases.length }, before);
+    assert.equal((previous || deferred[0]).cancelled, true);
+  });
+}
+
+test("Canvas playback handles zero duration and cancellation during scene preparation", () => {
+  const setup = playbackFixture();
+  setup.start({ duration: 0 }); setup.deferred[0].action();
+  assert.equal(setup.prepared(), 1); assert.equal(setup.completed(), 1); assert.equal(setup.animations.length, 0);
+  const before = setup.canvases.length, updates = setup.updates.length;
+  setup.start({ onPrepare: () => setup.backend.destroy() }); setup.deferred[1].action();
+  assert.equal(setup.canvases.length, before);
+  assert.equal(setup.updates.length, updates + 1, "cancelled preparation cannot paint another frame");
+  assert.equal(setup.completed(), 1);
 });
 
 for (const change of ["camera", "dimensions", "pixelRatio", "config", "scene", "tree", "canvas"]) {

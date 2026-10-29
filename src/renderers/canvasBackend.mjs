@@ -1,5 +1,6 @@
 import { renderCanvas, CANVAS_LAYERS } from "./canvas.js";
 import { includeBounds } from "../scene/bounds.mjs";
+import { animate as runAnimation, afterPaint } from "./animation.mjs";
 
 const annotationLayers = ["annotations", "annotationLabels", "chrome"];
 const biologyLayers = CANVAS_LAYERS.filter((layer) => !annotationLayers.includes(layer));
@@ -35,10 +36,11 @@ function flipRecords(scene, locusUid) {
     stationaryGenes: new Set([...genes].filter((uid) => !ownGenes.has(uid))) };
 }
 
-/** Own Canvas resources across paints; the chart supplies scenes and animation progress. */
+/** Own Canvas resources and bitmap playback; the chart supplies scenes. */
 export function createCanvasBackend({ render = renderCanvas,
-  requestFrame = globalThis.requestAnimationFrame, cancelFrame = globalThis.cancelAnimationFrame } = {}) {
-  let latest = null, cached = null, biology = null, warmFrame = null;
+  requestFrame = globalThis.requestAnimationFrame, cancelFrame = globalThis.cancelAnimationFrame,
+  defer = afterPaint, animate = runAnimation } = {}) {
+  let latest = null, cached = null, biology = null, warmFrame = null, playback = null;
   const dimensions = (request) => request.dimensions || request.canvas.getBoundingClientRect();
   const canRetainBiology = (request) => request.scene.annotationPanels?.length &&
     !request.preview && !request.previousScene && !request.previousTree &&
@@ -93,7 +95,12 @@ export function createCanvasBackend({ render = renderCanvas,
     if (warmFrame !== null) cancelFrame(warmFrame);
     warmFrame = null;
   };
-  const clearFlip = () => { cancelWarm(); cached = null; };
+  const clearFlipCache = () => { cancelWarm(); cached = null; };
+  const clearFlip = () => {
+    playback?.cancel?.();
+    playback = null;
+    clearFlipCache();
+  };
   const prepareFlip = (locusUid, scene = latest?.scene) => {
     cancelWarm();
     if (!latest?.canvas || !scene || matches(latest, scene, locusUid)) return;
@@ -148,6 +155,35 @@ export function createCanvasBackend({ render = renderCanvas,
   return {
     prepareFlip,
     clearFlip,
+    animateFlip(locusUid, scene, { duration, onPrepare, onUpdate, onComplete }) {
+      playback?.cancel?.();
+      const flip = { cancel: null };
+      playback = flip;
+      const cancel = () => { if (playback === flip) clearFlip(); };
+      const finish = () => {
+        if (playback !== flip) return;
+        playback = null;
+        clearFlipCache();
+        onComplete();
+      };
+      const initialProgress = 0.12;
+      onUpdate(initialProgress, false);
+      if (playback !== flip) return cancel;
+      flip.cancel = defer(() => {
+        if (playback !== flip) return;
+        flip.cancel = null;
+        onPrepare();
+        if (playback !== flip) return;
+        prepareFlip(locusUid, scene);
+        onUpdate(initialProgress, true);
+        if (playback !== flip) return;
+        if (!duration) { finish(); return; }
+        flip.cancel = animate(duration, (progress) => {
+          if (playback === flip) onUpdate(initialProgress + (1 - initialProgress) * progress, true);
+        }, finish);
+      });
+      return cancel;
+    },
     warmLocus(locusUid) {
       if (!locusUid || !latest || latest.preview?.type === "locus-flip") return;
       cancelWarm();
@@ -159,7 +195,7 @@ export function createCanvasBackend({ render = renderCanvas,
       const newScene = latest?.scene !== request.scene;
       latest = { ...request };
       if (!biologyMatches(request)) biology = null;
-      if (cached && !matches(latest, request.scene, cached.locusUid)) clearFlip();
+      if (cached && !matches(latest, request.scene, cached.locusUid)) clearFlipCache();
       if (cached && request.preview?.type === "locus-flip" && cached.locusUid === request.preview.locusUid) return paintFlip(latest);
       if (biology || newScene && canRetainBiology(request)) return paintAnnotations(latest, !biology);
       return render(latest);

@@ -13465,10 +13465,11 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       stationaryGenes: new Set([...genes].filter((uid) => !ownGenes.has(uid))) };
   }
 
-  /** Own Canvas resources across paints; the chart supplies scenes and animation progress. */
+  /** Own Canvas resources and bitmap playback; the chart supplies scenes. */
   function createCanvasBackend({ render = renderCanvas,
-    requestFrame = globalThis.requestAnimationFrame, cancelFrame = globalThis.cancelAnimationFrame } = {}) {
-    let latest = null, cached = null, biology = null, warmFrame = null;
+    requestFrame = globalThis.requestAnimationFrame, cancelFrame = globalThis.cancelAnimationFrame,
+    defer = afterPaint, animate: animate$1 = animate } = {}) {
+    let latest = null, cached = null, biology = null, warmFrame = null, playback = null;
     const dimensions = (request) => request.dimensions || request.canvas.getBoundingClientRect();
     const canRetainBiology = (request) => request.scene.annotationPanels?.length &&
       !request.preview && !request.previousScene && !request.previousTree &&
@@ -13523,7 +13524,12 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       if (warmFrame !== null) cancelFrame(warmFrame);
       warmFrame = null;
     };
-    const clearFlip = () => { cancelWarm(); cached = null; };
+    const clearFlipCache = () => { cancelWarm(); cached = null; };
+    const clearFlip = () => {
+      playback?.cancel?.();
+      playback = null;
+      clearFlipCache();
+    };
     const prepareFlip = (locusUid, scene = latest?.scene) => {
       cancelWarm();
       if (!latest?.canvas || !scene || matches(latest, scene, locusUid)) return;
@@ -13578,6 +13584,35 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     return {
       prepareFlip,
       clearFlip,
+      animateFlip(locusUid, scene, { duration, onPrepare, onUpdate, onComplete }) {
+        playback?.cancel?.();
+        const flip = { cancel: null };
+        playback = flip;
+        const cancel = () => { if (playback === flip) clearFlip(); };
+        const finish = () => {
+          if (playback !== flip) return;
+          playback = null;
+          clearFlipCache();
+          onComplete();
+        };
+        const initialProgress = 0.12;
+        onUpdate(initialProgress, false);
+        if (playback !== flip) return cancel;
+        flip.cancel = defer(() => {
+          if (playback !== flip) return;
+          flip.cancel = null;
+          onPrepare();
+          if (playback !== flip) return;
+          prepareFlip(locusUid, scene);
+          onUpdate(initialProgress, true);
+          if (playback !== flip) return;
+          if (!duration) { finish(); return; }
+          flip.cancel = animate$1(duration, (progress) => {
+            if (playback === flip) onUpdate(initialProgress + (1 - initialProgress) * progress, true);
+          }, finish);
+        });
+        return cancel;
+      },
       warmLocus(locusUid) {
         if (!locusUid || !latest || latest.preview?.type === "locus-flip") return;
         cancelWarm();
@@ -13589,7 +13624,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
         const newScene = latest?.scene !== request.scene;
         latest = { ...request };
         if (!biologyMatches(request)) biology = null;
-        if (cached && !matches(latest, request.scene, cached.locusUid)) clearFlip();
+        if (cached && !matches(latest, request.scene, cached.locusUid)) clearFlipCache();
         if (cached && request.preview?.type === "locus-flip" && cached.locusUid === request.preview.locusUid) return paintFlip(latest);
         if (biology || newScene && canRetainBiology(request)) return paintAnnotations(latest, !biology);
         return render(latest);
@@ -15764,17 +15799,21 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
           const sourceScene = rasterAnimation?.previousScene || rasterScene || runtime.getScene();
           stopRasterAnimation();
-          const previewProgress = 0.12;
           const pending = { locus, sourceScene, targetScene: null, renderer: "canvas", cancel: null,
             clusterLabelText: runtime.locusTextForCluster(locus.clusterUid) };
           locusFlip = pending;
-          scenePreview = createLocusFlipPreview(sourceScene, locus.uid, {
-            progress: previewProgress,
-            clusterLabelText: pending.clusterLabelText,
+          pending.cancel = canvasBackend.animateFlip(locus.uid, sourceScene, {
+            duration: runtime.config.plot.transitionDuration,
+            onPrepare: () => commitLocusFlip(pending),
+            onUpdate: (progress, immediate) => {
+              scenePreview = createLocusFlipPreview(sourceScene, locus.uid, {
+                progress, clusterLabelText: pending.clusterLabelText,
+              });
+              if (immediate) paintScene();
+              else scheduleScenePaint();
+            },
+            onComplete: () => { finishLocusFlip(pending); paintScene(); },
           });
-          scheduleScenePaint();
-          // Show the retained preview before preparing cached flip layers.
-          pending.cancel = afterPaint(() => startCanvasFlip(pending, previewProgress));
           return;
         }
         if (runtime.getScene()) {
@@ -15851,34 +15890,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       canvasBackend.clearFlip();
       scheduleScenePaint();
       scheduleMinimapBase(scene);
-    }
-
-    function startCanvasFlip(pending, initialProgress) {
-      if (locusFlip !== pending) return;
-      pending.cancel = null;
-      commitLocusFlip(pending);
-      if (locusFlip !== pending) return;
-      canvasBackend.prepareFlip(pending.locus.uid, pending.sourceScene);
-      // Restore and repaint the affected canvas region before the browser can
-      // present a frame. The base image stays offscreen; the visible plot stays
-      // a single canvas throughout the animation.
-      paintScene();
-      const finish = () => {
-        finishLocusFlip(pending);
-        paintScene();
-        scheduleScenePaint();
-      };
-      const duration = runtime.config.plot.transitionDuration;
-      if (!duration) { finish(); return; }
-      pending.cancel = animate(duration, (progress) => {
-        if (locusFlip !== pending) return;
-        scenePreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
-          progress: initialProgress + (1 - initialProgress) * progress,
-          clusterLabelText: pending.clusterLabelText,
-        });
-        // Paint the dirty region in this frame rather than one frame later.
-        paintScene();
-      }, finish);
     }
 
     function scheduleScenePaint() {

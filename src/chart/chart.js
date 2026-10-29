@@ -349,17 +349,21 @@ export default function clusterMap() {
       if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
         const sourceScene = rasterAnimation?.previousScene || rasterScene || runtime.getScene();
         stopRasterAnimation();
-        const previewProgress = 0.12;
         const pending = { locus, sourceScene, targetScene: null, renderer: "canvas", cancel: null,
           clusterLabelText: runtime.locusTextForCluster(locus.clusterUid) };
         locusFlip = pending;
-        scenePreview = createLocusFlipPreview(sourceScene, locus.uid, {
-          progress: previewProgress,
-          clusterLabelText: pending.clusterLabelText,
+        pending.cancel = canvasBackend.animateFlip(locus.uid, sourceScene, {
+          duration: runtime.config.plot.transitionDuration,
+          onPrepare: () => commitLocusFlip(pending),
+          onUpdate: (progress, immediate) => {
+            scenePreview = createLocusFlipPreview(sourceScene, locus.uid, {
+              progress, clusterLabelText: pending.clusterLabelText,
+            });
+            if (immediate) paintScene();
+            else scheduleScenePaint();
+          },
+          onComplete: () => { finishLocusFlip(pending); paintScene(); },
         });
-        scheduleScenePaint();
-        // Show the retained preview before preparing cached flip layers.
-        pending.cancel = afterPaint(() => startCanvasFlip(pending, previewProgress));
         return;
       }
       if (runtime.getScene()) {
@@ -436,34 +440,6 @@ export default function clusterMap() {
     canvasBackend.clearFlip();
     scheduleScenePaint();
     scheduleMinimapBase(scene);
-  }
-
-  function startCanvasFlip(pending, initialProgress) {
-    if (locusFlip !== pending) return;
-    pending.cancel = null;
-    commitLocusFlip(pending);
-    if (locusFlip !== pending) return;
-    canvasBackend.prepareFlip(pending.locus.uid, pending.sourceScene);
-    // Restore and repaint the affected canvas region before the browser can
-    // present a frame. The base image stays offscreen; the visible plot stays
-    // a single canvas throughout the animation.
-    paintScene();
-    const finish = () => {
-      finishLocusFlip(pending);
-      paintScene();
-      scheduleScenePaint();
-    };
-    const duration = runtime.config.plot.transitionDuration;
-    if (!duration) { finish(); return; }
-    pending.cancel = runAnimation(duration, (progress) => {
-      if (locusFlip !== pending) return;
-      scenePreview = createLocusFlipPreview(pending.sourceScene, pending.locus.uid, {
-        progress: initialProgress + (1 - initialProgress) * progress,
-        clusterLabelText: pending.clusterLabelText,
-      });
-      // Paint the dirty region in this frame rather than one frame later.
-      paintScene();
-    }, finish);
   }
 
   function scheduleScenePaint() {
