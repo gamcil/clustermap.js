@@ -9,6 +9,13 @@ function flipGeneState(state, length) {
   state.strand = state.strand === 1 ? -1 : 1;
 }
 
+function biologicalGeneState(locus, gene, flipped) {
+  const bio = gene.bio || gene, origin = (locus.bio || locus).start;
+  const state = { start: bio.start - origin, end: bio.end - origin, strand: bio.strand };
+  if (flipped) flipGeneState(state, locus.end - locus.start);
+  return state;
+}
+
 export function createChartState(data, previous = null) {
   const loci = previous?.loci || new Map();
   const genes = previous?.genes || new Map();
@@ -58,22 +65,10 @@ export function createChartState(data, previous = null) {
         });
       }
       for (const gene of locus.genes) {
-        const geneBio = gene.bio || {
-          start: gene.start,
-          end: gene.end,
-          strand: gene.strand,
-        };
-        const locusBio = locus.bio || { start: locus.start, end: locus.end };
         const key = gene.uid;
         geneKeys.add(key);
         if (!genes.has(key)) {
-          const display = {
-            start: geneBio.start - locusBio.start,
-            end: geneBio.end - locusBio.start,
-            strand: geneBio.strand,
-          };
-          if (loci.get(locus.uid).flipped) flipGeneState(display, locus.end - locus.start);
-          genes.set(key, display);
+          genes.set(key, biologicalGeneState(locus, gene, loci.get(locus.uid).flipped));
         }
       }
     }
@@ -180,6 +175,11 @@ export function getLocusState(chartState, locus) {
 
 export function getGeneState(chartState, gene) {
   return chartState.genes.get(gene.uid);
+}
+
+export function restoreScaledLocusGenes(chartState, locus) {
+  const { flipped } = getLocusState(chartState, locus);
+  for (const gene of locus.genes) Object.assign(getGeneState(chartState, gene), biologicalGeneState(locus, gene, flipped));
 }
 
 export function getDisplayGenes(chartState, genes, { scaleGenes = true } = {}) {

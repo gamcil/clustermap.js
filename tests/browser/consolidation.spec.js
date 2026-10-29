@@ -158,6 +158,33 @@ test("SVG tree edits, previews and history leave biological DOM untouched", asyn
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: scaling restores trimmed and excluded loci through history`, async ({ page }) => {
+    const result = await page.evaluate((renderer) => {
+      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+      chart.config({ plot: { renderer } });
+      chart.flipLoci(["locus-a"]); chart.trimLoci(["locus-a", "locus-b"]); chart.remove({ clusters: ["b"] });
+      chart.clearHistory();
+      const widths = () => {
+        const genes = new Map(chart.state().genes);
+        return chart.data().clusters.flatMap((cluster) => cluster.loci.flatMap((locus) => locus.genes.map((gene) => {
+          const state = genes.get(gene.uid) || gene.bio; return state.end - state.start;
+        })));
+      };
+      const original = widths(), trims = chart.state().loci, source = JSON.stringify(chart.data());
+      chart.config({ plot: { scaleGenes: false } }); const packed = widths();
+      chart.config({ plot: { scaleGenes: true } }); const scaled = widths();
+      chart.undo(); const undone = widths(); chart.redo(); const redone = widths();
+      chart.project(JSON.parse(JSON.stringify(chart.project())));
+      return { original, packed, scaled, undone, redone, loaded: widths(), trims, loadedTrims: chart.state().loci,
+        excluded: chart.state().excludedClusters, sourceUnchanged: JSON.stringify(chart.data()) === source };
+    }, renderer);
+    expect(result.packed).toEqual(result.original.map(() => 1000));
+    expect(result.scaled).toEqual(result.original); expect(result.redone).toEqual(result.original);
+    expect(result.undone).toEqual(result.packed); expect(result.loaded).toEqual(result.original);
+    expect(result.loadedTrims).toEqual(result.trims);
+    expect(result.excluded).toEqual(["b"]); expect(result.sourceUnchanged).toBe(true);
+  });
+
   for (const scaleGenes of [false, true]) {
     test(`${renderer}: flips and trim history preserve source order, scaleGenes=${scaleGenes}`, async ({ page }) => {
       const result = await page.evaluate(({ renderer, scaleGenes }) => {

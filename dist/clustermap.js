@@ -8311,6 +8311,13 @@
     state.strand = state.strand === 1 ? -1 : 1;
   }
 
+  function biologicalGeneState(locus, gene, flipped) {
+    const bio = gene.bio || gene, origin = (locus.bio || locus).start;
+    const state = { start: bio.start - origin, end: bio.end - origin, strand: bio.strand };
+    if (flipped) flipGeneState(state, locus.end - locus.start);
+    return state;
+  }
+
   function createChartState(data, previous = null) {
     const loci = previous?.loci || new Map();
     const genes = previous?.genes || new Map();
@@ -8360,22 +8367,10 @@
           });
         }
         for (const gene of locus.genes) {
-          const geneBio = gene.bio || {
-            start: gene.start,
-            end: gene.end,
-            strand: gene.strand,
-          };
-          const locusBio = locus.bio || { start: locus.start, end: locus.end };
           const key = gene.uid;
           geneKeys.add(key);
           if (!genes.has(key)) {
-            const display = {
-              start: geneBio.start - locusBio.start,
-              end: geneBio.end - locusBio.start,
-              strand: geneBio.strand,
-            };
-            if (loci.get(locus.uid).flipped) flipGeneState(display, locus.end - locus.start);
-            genes.set(key, display);
+            genes.set(key, biologicalGeneState(locus, gene, loci.get(locus.uid).flipped));
           }
         }
       }
@@ -8482,6 +8477,11 @@
 
   function getGeneState(chartState, gene) {
     return chartState.genes.get(gene.uid);
+  }
+
+  function restoreScaledLocusGenes(chartState, locus) {
+    const { flipped } = getLocusState(chartState, locus);
+    for (const gene of locus.genes) Object.assign(getGeneState(chartState, gene), biologicalGeneState(locus, gene, flipped));
   }
 
   function getDisplayGenes(chartState, genes, { scaleGenes = true } = {}) {
@@ -13015,6 +13015,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   }
 
   const config = createDefaultConfig();
+  let geneScaleMode = config.plot.scaleGenes;
   let renderedConfig = null;
   function renderConfig() {
     if (!renderedConfig) renderedConfig = figureConfig(config);
@@ -13047,6 +13048,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 
   function setChartState(state) {
     chartState = state;
+    geneScaleMode = config.plot.scaleGenes;
   }
 
   function locusState(locus) {
@@ -13188,13 +13190,21 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     return getClusterOrder(chartState).filter((uid) => ids.has(uid));
   }
 
-  function updateScene(data, { sourceScene = null, changes = {}, synchronize = true } = {}) {
+  function updateScene(data, { sourceScene = null, changes = {}, synchronize = true, sourceData = data } = {}) {
+    const modeChanged = geneScaleMode !== config.plot.scaleGenes;
+    if (modeChanged) {
+      sourceScene = null;
+      if (config.plot.scaleGenes) for (const cluster of sourceData.clusters) for (const locus of cluster.loci) {
+        restoreScaledLocusGenes(chartState, locus);
+      }
+    }
     if (sourceScene && changes.presentationOnly) {
       currentScene = patchPresentationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
       return currentScene;
     }
     updateScales(data, { geometryOnly: Boolean(sourceScene) });
-    if (synchronize) synchronizeLocusLayoutStates(data, sourceScene ? changes.loci || [] : null);
+    if (synchronize || modeChanged) synchronizeLocusLayoutStates(modeChanged ? sourceData : data, sourceScene ? changes.loci || [] : null);
+    geneScaleMode = config.plot.scaleGenes;
     if (!sourceScene) updateGroups(data.groups);
     const options = {
       ...sceneProjectionOptions({ tree: data.tree, clusterOrder: clusterOrderForData(data) }),
@@ -13331,6 +13341,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 
   function reset() {
     chartIndex = chartState = currentScene = allowedLinkIds = renderedConfig = null;
+    geneScaleMode = config.plot.scaleGenes;
     for (const scale of [scales.y, scales.group, scales.colour, scales.name, scales.offset, scales.locus]) {
       scale.domain([]).range([]);
     }
@@ -16459,7 +16470,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       applyCamera(svg.select("g.clusterMapViewport"));
 
       const presentationOnly = Boolean(committedScene?.changes.presentationOnly);
-      const scene = runtime.updateScene(data, { ...committedScene, synchronize });
+      const scene = runtime.updateScene(data, { ...committedScene, synchronize, sourceData: currentData });
 
       if (useRaster) {
         if (!hasInitialView) fitInitialView(canvas, scene);

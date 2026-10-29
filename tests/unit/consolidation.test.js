@@ -58,6 +58,35 @@ for (const scaleGenes of [false, true]) for (const flipped of [false, true]) {
   });
 }
 
+for (const flipped of [false, true]) for (const trimmed of [false, true]) {
+  test(`scaling round trips restore biology, flipped=${flipped}, trimmed=${trimmed}`, async () => {
+    const { flipLocus, getDisplayGenes, getGeneState } = await import("../../src/chart/state.mjs");
+    const data = normalizeChartData({ clusters: [{ uid: "cluster", loci: [{ uid: "locus", start: 100, end: 10100,
+      genes: [
+        { uid: "a", start: 200, end: 700, strand: 1 },
+        { uid: "b", start: 1900, end: 2600, strand: -1 },
+        { uid: "c", start: 4000, end: 4900, strand: 1 },
+      ] }] }], links: [], groups: [] });
+    const runtime = createChartRuntime(), state = createChartState(data), locus = data.clusters[0].loci[0];
+    runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state); runtime.updateScene(data);
+    if (flipped) { flipLocus(state, locus); runtime.updateScene(data); }
+    if (trimmed) {
+      state.loci.get(locus.uid).trimLeft = getDisplayGenes(state, locus.genes)[1];
+      runtime.updateScene(data);
+    }
+    const beforeGenes = locus.genes.map((gene) => ({ ...getGeneState(state, gene) }));
+    const beforeLocus = { ...state.loci.get(locus.uid) }, beforeOffset = state.locusOffsets.get(locus.uid);
+    runtime.configure({ plot: { scaleGenes: false } }); runtime.updateScene(data);
+    assert.deepEqual(locus.genes.map((gene) => {
+      const display = getGeneState(state, gene); return display.end - display.start;
+    }), [1000, 1000, 1000]);
+    runtime.configure({ plot: { scaleGenes: true } }); runtime.updateScene(data);
+    assert.deepEqual(locus.genes.map((gene) => getGeneState(state, gene)), beforeGenes);
+    assert.deepEqual(state.loci.get(locus.uid), beforeLocus);
+    assert.ok(Math.abs(state.locusOffsets.get(locus.uid) - beforeOffset) < 1e-10);
+  });
+}
+
 test("public configuration reads and subscriber snapshots are independently owned", async () => {
   const { default: clusterMap } = await import("../../src/chart/chart.js");
   const chart = clusterMap();

@@ -1116,7 +1116,7 @@ export default function clusterMap() {
     applyCamera(svg.select("g.clusterMapViewport"));
 
     const presentationOnly = Boolean(committedScene?.changes.presentationOnly);
-    const scene = runtime.updateScene(data, { ...committedScene, synchronize });
+    const scene = runtime.updateScene(data, { ...committedScene, synchronize, sourceData: currentData });
 
     if (useRaster) {
       if (!hasInitialView) fitInitialView(canvas, scene);

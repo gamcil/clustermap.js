@@ -18,6 +18,7 @@ import {
   getLocusState,
   initializeLocusOffsets,
   synchronizeLocusState,
+  restoreScaledLocusGenes,
   setClusterOffset,
   setLocusOffset,
 } from "./state.mjs";
@@ -72,6 +73,7 @@ function synchronizeLocusLayoutStates(data, locusIds = null) {
 }
 
 const config = createDefaultConfig();
+let geneScaleMode = config.plot.scaleGenes;
 let renderedConfig = null;
 function renderConfig() {
   if (!renderedConfig) renderedConfig = figureConfig(config);
@@ -104,6 +106,7 @@ function setChartIndex(index) {
 
 function setChartState(state) {
   chartState = state;
+  geneScaleMode = config.plot.scaleGenes;
 }
 
 function locusState(locus) {
@@ -245,13 +248,21 @@ function clusterOrderForData(data) {
   return getClusterOrder(chartState).filter((uid) => ids.has(uid));
 }
 
-function updateScene(data, { sourceScene = null, changes = {}, synchronize = true } = {}) {
+function updateScene(data, { sourceScene = null, changes = {}, synchronize = true, sourceData = data } = {}) {
+  const modeChanged = geneScaleMode !== config.plot.scaleGenes;
+  if (modeChanged) {
+    sourceScene = null;
+    if (config.plot.scaleGenes) for (const cluster of sourceData.clusters) for (const locus of cluster.loci) {
+      restoreScaledLocusGenes(chartState, locus);
+    }
+  }
   if (sourceScene && changes.presentationOnly) {
     currentScene = patchPresentationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
     return currentScene;
   }
   updateScales(data, { geometryOnly: Boolean(sourceScene) });
-  if (synchronize) synchronizeLocusLayoutStates(data, sourceScene ? changes.loci || [] : null);
+  if (synchronize || modeChanged) synchronizeLocusLayoutStates(modeChanged ? sourceData : data, sourceScene ? changes.loci || [] : null);
+  geneScaleMode = config.plot.scaleGenes;
   if (!sourceScene) updateGroups(data.groups);
   const options = {
     ...sceneProjectionOptions({ tree: data.tree, clusterOrder: clusterOrderForData(data) }),
@@ -388,6 +399,7 @@ function updateScales(data, { geometryOnly = false } = {}) {
 
 function reset() {
   chartIndex = chartState = currentScene = allowedLinkIds = renderedConfig = null;
+  geneScaleMode = config.plot.scaleGenes;
   for (const scale of [scales.y, scales.group, scales.colour, scales.name, scales.offset, scales.locus]) {
     scale.domain([]).range([]);
   }
