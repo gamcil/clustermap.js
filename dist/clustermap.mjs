@@ -8799,6 +8799,52 @@ function selectionRange(orderedIds, anchor, id, range = false) {
   };
 }
 
+function colors(specifier) {
+  var n = specifier.length / 6 | 0, colors = new Array(n), i = 0;
+  while (i < n) colors[i] = "#" + specifier.slice(i * 6, ++i * 6);
+  return colors;
+}
+
+var ramp = scheme => rgbBasis(scheme[scheme.length - 1]);
+
+var scheme = new Array(3).concat(
+  "f0f0f0bdbdbd636363",
+  "f7f7f7cccccc969696525252",
+  "f7f7f7cccccc969696636363252525",
+  "f7f7f7d9d9d9bdbdbd969696636363252525",
+  "f7f7f7d9d9d9bdbdbd969696737373525252252525",
+  "fffffff0f0f0d9d9d9bdbdbd969696737373525252252525",
+  "fffffff0f0f0d9d9d9bdbdbd969696737373525252252525000000"
+).map(colors);
+
+var interpolateGreys = ramp(scheme);
+
+cubehelixLong(cubehelix$1(-100, 0.75, 0.35), cubehelix$1(80, 1.50, 0.8));
+
+cubehelixLong(cubehelix$1(260, 0.75, 0.35), cubehelix$1(80, 1.50, 0.8));
+
+var c = cubehelix$1();
+
+function interpolateRainbow(t) {
+  if (t < 0 || t > 1) t -= Math.floor(t);
+  var ts = Math.abs(t - 0.5);
+  c.h = 360 * t - 100;
+  c.s = 1.5 - 1.5 * ts;
+  c.l = 0.8 - 0.9 * ts;
+  return c + "";
+}
+
+function validateRecordFields(record, fail) {
+  for (const field of ["name", "label", "subtitle"]) {
+    if (record[field] != null && typeof record[field] !== "string") fail(`${field} must be text or null`);
+  }
+  if (record.colour != null && (typeof record.colour !== "string" || !color(record.colour))) fail("colour must be a CSS colour or null");
+  if (record.hidden !== undefined && typeof record.hidden !== "boolean") fail("hidden must be boolean");
+  if (record.identity !== undefined && (!Number.isFinite(record.identity) || record.identity < 0 || record.identity > 1)) {
+    fail("identity must be a number from 0 to 1");
+  }
+}
+
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned
 // records, including nested link endpoints and user metadata.
@@ -8837,6 +8883,7 @@ function validateRecordIds(data) {
     ids.set(kind, known);
     for (const record of values) {
       if (!isPlainObject(record) || !isRecordId(record.uid)) throw new TypeError(`Invalid chart data: ${kind} require records with non-empty string or finite numeric IDs.`);
+      validateRecordFields(record, (message) => { throw new TypeError(`Invalid chart data: ${kind} '${record.uid}' ${message}.`); });
       if (known.has(record.uid)) throw new TypeError(`Invalid chart data: duplicate ${kind} ID '${record.uid}'.`);
       known.add(record.uid);
     }
@@ -8871,9 +8918,6 @@ function validateRecords(data) {
   for (const link of data.links) {
     for (const side of ["query", "target"]) {
       if (!isPlainObject(link[side]) || !isRecordId(link[side].uid)) fail(`link '${link.uid}' ${side} requires a gene ID`);
-    }
-    if (link.identity !== undefined && (!Number.isFinite(link.identity) || link.identity < 0 || link.identity > 1)) {
-      fail(`link '${link.uid}' identity must be a number from 0 to 1`);
     }
   }
   const members = new Set();
@@ -9331,20 +9375,14 @@ function validateUpdate(operation, index, groupIds) {
   const fields = fieldsForType[operation.type];
   if (!fields) return null;
   const ids = uniqueIds(operation.ids, operation.type);
-  if (!operation.changes || typeof operation.changes !== "object" || Array.isArray(operation.changes)) {
+  if (!isPlainObject(operation.changes)) {
     throw operationError(`${operation.type} requires a changes object`);
   }
   const changeKeys = Object.keys(operation.changes);
   if (!changeKeys.length || changeKeys.some((key) => !fields.has(key))) {
     throw operationError(`${operation.type} contains an unsupported field`);
   }
-  if (operation.type === "links.update" && "identity" in operation.changes) {
-    const identity = Number(operation.changes.identity);
-    if (!Number.isFinite(identity) || identity < 0 || identity > 1) {
-      throw operationError("links.update identity must be a number from 0 to 1");
-    }
-    operation = { ...operation, changes: { ...operation.changes, identity } };
-  }
+  validateRecordFields(operation.changes, (message) => { throw operationError(`${operation.type} ${message}`); });
   const records = recordsForOperation(index, operation.type);
   for (const uid of ids) {
     if (operation.type === "groups.update") requireKnownGroup(groupIds, uid, operation.type);
@@ -9388,8 +9426,9 @@ function validateStructuralGroupOperation(operation, index, groupIds) {
     }
     case "groups.create": {
       const group = operation.group;
-      if (!group || typeof group !== "object" || Array.isArray(group)) throw operationError("groups.create requires a group object");
-      if (group.uid === undefined || group.uid === null || group.uid === "") throw operationError("groups.create requires group.uid");
+      if (!isPlainObject(group)) throw operationError("groups.create requires a group object");
+      if (!isRecordId(group.uid)) throw operationError("groups.create requires a non-empty string or finite numeric group.uid");
+      validateRecordFields(group, (message) => { throw operationError(`groups.create ${message}`); });
       if (groupIds.has(group.uid)) throw operationError(`groups.create refers to existing group ${group.uid}`);
       const unsupported = Object.keys(group).filter((key) => !["uid", "label", "subtitle", "colour", "hidden"].includes(key));
       if (unsupported.length) throw operationError("groups.create contains an unsupported group field");
@@ -9401,7 +9440,7 @@ function validateStructuralGroupOperation(operation, index, groupIds) {
           ...(group.label !== undefined ? { label: group.label } : {}),
           ...(group.subtitle !== undefined ? { subtitle: group.subtitle } : {}),
           ...(group.colour !== undefined ? { colour: group.colour } : {}),
-          ...(group.hidden !== undefined ? { hidden: Boolean(group.hidden) } : {}),
+          ...(group.hidden !== undefined ? { hidden: group.hidden } : {}),
         },
         geneIds: operation.geneIds === undefined ? [] : validateOptionalGeneIds(index, operation.geneIds, operation.type),
       };
@@ -12752,41 +12791,6 @@ function exportChartSvg({
   } finally {
     svgNode.remove();
   }
-}
-
-function colors(specifier) {
-  var n = specifier.length / 6 | 0, colors = new Array(n), i = 0;
-  while (i < n) colors[i] = "#" + specifier.slice(i * 6, ++i * 6);
-  return colors;
-}
-
-var ramp = scheme => rgbBasis(scheme[scheme.length - 1]);
-
-var scheme = new Array(3).concat(
-  "f0f0f0bdbdbd636363",
-  "f7f7f7cccccc969696525252",
-  "f7f7f7cccccc969696636363252525",
-  "f7f7f7d9d9d9bdbdbd969696636363252525",
-  "f7f7f7d9d9d9bdbdbd969696737373525252252525",
-  "fffffff0f0f0d9d9d9bdbdbd969696737373525252252525",
-  "fffffff0f0f0d9d9d9bdbdbd969696737373525252252525000000"
-).map(colors);
-
-var interpolateGreys = ramp(scheme);
-
-cubehelixLong(cubehelix$1(-100, 0.75, 0.35), cubehelix$1(80, 1.50, 0.8));
-
-cubehelixLong(cubehelix$1(260, 0.75, 0.35), cubehelix$1(80, 1.50, 0.8));
-
-var c = cubehelix$1();
-
-function interpolateRainbow(t) {
-  if (t < 0 || t > 1) t -= Math.floor(t);
-  var ts = Math.abs(t - 0.5);
-  c.h = 360 * t - 100;
-  c.s = 1.5 - 1.5 * ts;
-  c.l = 0.8 - 0.9 * ts;
-  return c + "";
 }
 
 const rendererModes = new Set(["svg", "canvas", "webgpu"]);

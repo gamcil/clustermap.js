@@ -1,6 +1,8 @@
 import { isTreeOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../tree/operations.mjs";
 import { isAnnotationOperation, normalizeAnnotationOperation, applyAnnotationOperation,
   inverseAnnotationOperation, validateAnnotationChanges } from "../annotations/operations.mjs";
+import { isPlainObject, isRecordId } from "../utils/values.mjs";
+import { validateRecordFields } from "./validation.mjs";
 
 // Public editing operations deliberately distinguish presentation updates from
 // structural group edits. Group membership is exclusive: assigning a gene to
@@ -69,20 +71,14 @@ function validateUpdate(operation, index, groupIds) {
   const fields = fieldsForType[operation.type];
   if (!fields) return null;
   const ids = uniqueIds(operation.ids, operation.type);
-  if (!operation.changes || typeof operation.changes !== "object" || Array.isArray(operation.changes)) {
+  if (!isPlainObject(operation.changes)) {
     throw operationError(`${operation.type} requires a changes object`);
   }
   const changeKeys = Object.keys(operation.changes);
   if (!changeKeys.length || changeKeys.some((key) => !fields.has(key))) {
     throw operationError(`${operation.type} contains an unsupported field`);
   }
-  if (operation.type === "links.update" && "identity" in operation.changes) {
-    const identity = Number(operation.changes.identity);
-    if (!Number.isFinite(identity) || identity < 0 || identity > 1) {
-      throw operationError("links.update identity must be a number from 0 to 1");
-    }
-    operation = { ...operation, changes: { ...operation.changes, identity } };
-  }
+  validateRecordFields(operation.changes, (message) => { throw operationError(`${operation.type} ${message}`); });
   const records = recordsForOperation(index, operation.type);
   for (const uid of ids) {
     if (operation.type === "groups.update") requireKnownGroup(groupIds, uid, operation.type);
@@ -126,8 +122,9 @@ function validateStructuralGroupOperation(operation, index, groupIds) {
     }
     case "groups.create": {
       const group = operation.group;
-      if (!group || typeof group !== "object" || Array.isArray(group)) throw operationError("groups.create requires a group object");
-      if (group.uid === undefined || group.uid === null || group.uid === "") throw operationError("groups.create requires group.uid");
+      if (!isPlainObject(group)) throw operationError("groups.create requires a group object");
+      if (!isRecordId(group.uid)) throw operationError("groups.create requires a non-empty string or finite numeric group.uid");
+      validateRecordFields(group, (message) => { throw operationError(`groups.create ${message}`); });
       if (groupIds.has(group.uid)) throw operationError(`groups.create refers to existing group ${group.uid}`);
       const unsupported = Object.keys(group).filter((key) => !["uid", "label", "subtitle", "colour", "hidden"].includes(key));
       if (unsupported.length) throw operationError("groups.create contains an unsupported group field");
@@ -139,7 +136,7 @@ function validateStructuralGroupOperation(operation, index, groupIds) {
           ...(group.label !== undefined ? { label: group.label } : {}),
           ...(group.subtitle !== undefined ? { subtitle: group.subtitle } : {}),
           ...(group.colour !== undefined ? { colour: group.colour } : {}),
-          ...(group.hidden !== undefined ? { hidden: Boolean(group.hidden) } : {}),
+          ...(group.hidden !== undefined ? { hidden: group.hidden } : {}),
         },
         geneIds: operation.geneIds === undefined ? [] : validateOptionalGeneIds(index, operation.geneIds, operation.type),
       };

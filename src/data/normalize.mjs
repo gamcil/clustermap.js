@@ -1,6 +1,7 @@
 import { validateTreePresentation } from "../tree/model.mjs";
 import { validateAnnotationPanels } from "../annotations/model.mjs";
 import { clonePlainValue, isPlainObject, isRecordId } from "../utils/values.mjs";
+import { validateRecordFields } from "./validation.mjs";
 
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned
@@ -40,6 +41,7 @@ function validateRecordIds(data) {
     ids.set(kind, known);
     for (const record of values) {
       if (!isPlainObject(record) || !isRecordId(record.uid)) throw new TypeError(`Invalid chart data: ${kind} require records with non-empty string or finite numeric IDs.`);
+      validateRecordFields(record, (message) => { throw new TypeError(`Invalid chart data: ${kind} '${record.uid}' ${message}.`); });
       if (known.has(record.uid)) throw new TypeError(`Invalid chart data: duplicate ${kind} ID '${record.uid}'.`);
       known.add(record.uid);
     }
@@ -74,9 +76,6 @@ function validateRecords(data) {
   for (const link of data.links) {
     for (const side of ["query", "target"]) {
       if (!isPlainObject(link[side]) || !isRecordId(link[side].uid)) fail(`link '${link.uid}' ${side} requires a gene ID`);
-    }
-    if (link.identity !== undefined && (!Number.isFinite(link.identity) || link.identity < 0 || link.identity > 1)) {
-      fail(`link '${link.uid}' identity must be a number from 0 to 1`);
     }
   }
   const members = new Set();

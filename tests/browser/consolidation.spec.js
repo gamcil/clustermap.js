@@ -97,6 +97,32 @@ test("projects retain dangling links and memberships after deleting a gene", asy
   expect(result.members).toContain("a0");
 });
 
+test("rejected field edits preserve history and valid nullable fields round trip", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    chart.trimLoci(["locus-a"]);
+    const before = JSON.stringify(chart.project()), events = [];
+    const stop = chart.on("change", (event) => events.push(event.type));
+    let rejected = 0;
+    for (const op of [
+      { type: "groups.create", group: { uid: {} } },
+      { type: "groups.create", group: { uid: "new", hidden: "false" } },
+      { type: "genes.update", ids: ["a0"], changes: { colour: "bad" } },
+      { type: "clusters.update", ids: ["a"], changes: { name: {} } },
+    ]) {
+      try { chart.patch([{ type: "genes.update", ids: ["a0"], changes: { label: "Must not change" } }, op]); }
+      catch { rejected++; }
+    }
+    const unchanged = JSON.stringify(chart.project()) === before; stop();
+    chart.patch([{ type: "groups.create", group: { uid: "new", label: null, colour: null, hidden: false } }]);
+    const created = JSON.stringify(chart.project()); chart.undo();
+    const undone = JSON.stringify(chart.project()) === before; chart.redo();
+    const redone = JSON.stringify(chart.project()) === created;
+    chart.project(JSON.parse(created));
+    return { rejected, events, unchanged, undone, redone, reloaded: JSON.stringify(chart.project()) === created };
+  });
+  expect(result).toEqual({ rejected: 4, events: [], unchanged: true, undone: true, redone: true, reloaded: true });
+});
+
 test("plot selection and batch actions resolve numeric IDs consistently", async ({ page }) => {
   const result = await page.evaluate(() => {
     const data = structuredClone(chart.data());

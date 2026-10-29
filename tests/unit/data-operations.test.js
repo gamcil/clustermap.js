@@ -15,6 +15,55 @@ const data = {
   groups: [{ uid: "group-1", label: "Old label", genes: ["gene-1"], colour: "#000000" }],
 };
 
+test("imports and edits share record field validation and reject batches atomically", async () => {
+  const { createChartIndex } = await import("../../src/data/index.mjs");
+  const { normalizeChartData } = await import("../../src/data/normalize.mjs");
+  const { applyChartOperations } = await import("../../src/data/operations.mjs");
+  const cases = [
+    ["genes", "gene-1", { label: {} }], ["genes", "gene-1", { colour: "not a colour" }],
+    ["groups", "group-1", { hidden: "false" }], ["groups", "group-1", { subtitle: 42 }],
+    ["clusters", "cluster-1", { name: [] }], ["loci", "locus-1", { label: true }],
+    ...["0.5", null, Infinity, -0.1, 1.1].map((identity) => ["links", "link-1", { identity }]),
+  ];
+  for (const [kind, uid, changes] of cases) {
+    const raw = structuredClone(data);
+    raw.links = [{ uid: "link-1", query: { uid: "gene-1" }, target: { uid: "gene-1" }, identity: 0.5 }];
+    const chartData = normalizeChartData(raw), index = createChartIndex(chartData), before = structuredClone(chartData);
+    assert.throws(() => applyChartOperations(chartData, index, [
+      { type: "groups.update", ids: ["group-1"], changes: { label: "Must not change" } },
+      { type: `${kind}.update`, ids: [uid], changes },
+    ]), /Invalid chart operation/);
+    assert.deepEqual(chartData, before);
+    const record = { genes: index.geneById, groups: index.groupById, clusters: index.clusterById,
+      loci: index.locusById, links: index.linkById }[kind].get(uid);
+    Object.assign(record, changes);
+    assert.throws(() => normalizeChartData(chartData), /Invalid chart data/);
+  }
+});
+
+test("group creation validates IDs and presentation without coercion", async () => {
+  const { createChartIndex } = await import("../../src/data/index.mjs");
+  const { normalizeChartData } = await import("../../src/data/normalize.mjs");
+  const { applyChartOperations } = await import("../../src/data/operations.mjs");
+  const chartData = normalizeChartData(data), before = structuredClone(chartData);
+  for (const group of [
+    ...[null, "", "  ", false, {}, [], NaN, Infinity].map((uid) => ({ uid })),
+    { uid: "new", hidden: 1 }, { uid: "new", label: {} }, { uid: "new", colour: "bad" },
+  ]) {
+    assert.throws(() => applyChartOperations(chartData, createChartIndex(chartData), [{ type: "groups.create", group }]), /Invalid chart operation/);
+    assert.deepEqual(chartData, before);
+    assert.throws(() => normalizeChartData({ ...data, groups: [{ ...group, genes: [] }] }), /Invalid chart data/);
+  }
+  const edit = applyChartOperations(chartData, createChartIndex(chartData), [
+    { type: "groups.create", group: { uid: 0, label: null, colour: null, hidden: false } },
+    { type: "genes.update", ids: ["gene-1"], changes: { label: "A label", colour: "rebeccapurple" } },
+  ]);
+  assert.deepEqual(normalizeChartData(chartData), chartData);
+  applyChartOperations(chartData, createChartIndex(chartData), edit.inverse);
+  assert.deepEqual(normalizeChartData(chartData), chartData);
+  assert.equal(chartData.clusters[0].loci[0].genes[0].label, undefined);
+});
+
 test("chart operations update selected genes and groups atomically", async () => {
   const { createChartIndex } = await import("../../src/data/index.mjs");
   const { normalizeChartData } = await import("../../src/data/normalize.mjs");

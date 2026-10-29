@@ -62,6 +62,9 @@ rules. IDs are non-empty strings or finite numbers, unique within each record
 kind. Group memberships are exclusive. Links and memberships may reference
 absent genes, allowing deleted genes to be restored; dangling links stay hidden.
 Malformed data is rejected before replacing the active chart or project.
+Imports and edits share field rules: names and labels accept text or `null`,
+colours accept CSS colours or `null`, visibility flags are boolean, and link
+identity is a number from 0 to 1. Values are not coerced.
 
 ## Phylogenetic trees
 
