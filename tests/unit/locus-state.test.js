@@ -12,6 +12,22 @@ const createLocus = () => ({
   ],
 });
 
+test("flips preserve unknown strand and restore all strands after two flips", async () => {
+  const { createChartState, flipLocus, getGeneState, restoreScaledLocusGenes } = await import("../../src/chart/state.mjs");
+  const locus = { ...createLocus(), genes: [-1, 0, 1].map((strand, index) => ({ uid: `g${index}`,
+    locusUid: "locus", start: 100 + index * 2000, end: 1000 + index * 2000, strand })) };
+  const data = { clusters: [{ uid: "c", loci: [locus] }] }, state = createChartState(data);
+  const before = [...state.genes];
+  const original = structuredClone(before);
+  flipLocus(state, locus);
+  assert.deepEqual(locus.genes.map((gene) => getGeneState(state, gene).strand), [1, 0, -1]);
+  restoreScaledLocusGenes(state, locus);
+  assert.deepEqual(locus.genes.map((gene) => getGeneState(state, gene).strand), [1, 0, -1]);
+  flipLocus(state, locus);
+  assert.deepEqual([...state.genes], original);
+  assert.equal(Object.is(getGeneState(state, locus.genes[1]).strand, 0), true);
+});
+
 for (const scaleGenes of [false, true]) for (const flipped of [false, true]) {
   test(`deleting trim anchors retains surviving boundaries, scaleGenes=${scaleGenes}, flipped=${flipped}`, async () => {
     const { createChartState, flipLocus, synchronizeLocusState, trimLocusToGeneBounds } = await import("../../src/chart/state.mjs");

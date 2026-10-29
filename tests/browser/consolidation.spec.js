@@ -233,6 +233,29 @@ test("SVG tree edits, previews and history leave biological DOM untouched", asyn
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: unknown strands survive flips, scaling, history and projects`, async ({ page }) => {
+    const result = await page.evaluate((renderer) => {
+      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+      const data = structuredClone(chart.data()); data.clusters[0].loci[0].genes[1].strand = 0;
+      data.clusters[0].loci[0].genes[1].bio.strand = 0;
+      chart.project({ ...chart.project(), data, state: null }); chart.config({ plot: { renderer } }); chart.clearHistory();
+      const strands = () => {
+        const genes = new Map(chart.state().genes);
+        return chart.data().clusters[0].loci[0].genes.map((gene) => (genes.get(gene.uid) || gene.bio).strand);
+      };
+      const original = chart.exportSvg();
+      chart.flipLoci(["locus-a"]); const flipped = strands();
+      chart.config({ plot: { scaleGenes: false } }); chart.config({ plot: { scaleGenes: true } });
+      const scaled = strands();
+      chart.flipLoci(["locus-a"]); const twice = strands(), restoredFigure = original === chart.exportSvg();
+      chart.undo(); const undone = strands(); chart.redo(); const redone = strands();
+      chart.project(JSON.parse(JSON.stringify(chart.project())));
+      return { flipped, scaled, twice, restoredFigure, undone, redone, loaded: strands() };
+    }, renderer);
+    expect(result).toEqual({ flipped: [-1, 0, -1], scaled: [-1, 0, -1], twice: [1, 0, 1],
+      restoredFigure: true, undone: [-1, 0, -1], redone: [1, 0, 1], loaded: [1, 0, 1] });
+  });
+
   for (const scaleGenes of [false, true]) {
     test(`${renderer}: deleted trim anchors survive history and project reload, scaleGenes=${scaleGenes}`, async ({ page }) => {
       const result = await page.evaluate(({ renderer, scaleGenes }) => {

@@ -8302,7 +8302,7 @@ function removeMissing(records, allowed) {
 
 function flipGeneState(state, length) {
   [state.start, state.end] = [length - state.end, length - state.start];
-  state.strand = state.strand === 1 ? -1 : 1;
+  if (state.strand !== 0) state.strand = -state.strand;
 }
 
 function biologicalGeneState(locus, gene, flipped) {
