@@ -69,6 +69,25 @@ test("plot selection and batch actions resolve numeric IDs consistently", async 
   expect(result.visible).toEqual([0, 2]);
 });
 
+test("gene identities survive delimiter collisions and project round trips", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    chart.data({ clusters: [{ uid: "identity", loci: [
+      { uid: "a:b", start: 0, end: 100, genes: [{ uid: "c", start: 10, end: 20, strand: 1 }] },
+      { uid: "a", start: 0, end: 100, genes: [{ uid: "b:c", start: 30, end: 40, strand: -1 }] },
+      { uid: "numeric", start: 0, end: 100, genes: [{ uid: 0, start: 50, end: 60, strand: 1 }] },
+    ] }], links: [], groups: [] });
+    chart.flipLoci(["a:b", "numeric"]);
+    const snapshot = chart.state();
+    const project = chart.project(); chart.project(JSON.parse(JSON.stringify(project)));
+    return { version: snapshot.version, genes: snapshot.genes, restored: chart.state() };
+  });
+  expect(result.version).toBe(2);
+  expect(new Map(result.genes).get("c")).toEqual({ start: 80, end: 90, strand: -1 });
+  expect(new Map(result.genes).has("b:c")).toBe(false);
+  expect(new Map(result.genes).get(0)).toEqual({ start: 40, end: 50, strand: -1 });
+  expect(result.restored.genes).toEqual(result.genes);
+});
+
 test("project replacement cancels a deferred cluster commit", async ({ page }) => {
   const first = await page.locator("g.clusterInfo").nth(0).boundingBox();
   const second = await page.locator("g.clusterInfo").nth(1).boundingBox();
@@ -155,7 +174,7 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
         chart.undo(); const restoredGene = chart.exportSvg() === flipped;
         const snapshot = chart.state(), loci = new Map(snapshot.loci), genes = new Map(snapshot.genes);
         const locus = loci.get("locus-a");
-        locus.trimLeft = "a1"; locus.start = genes.get("locus-a:a1").start;
+        locus.trimLeft = "a1"; locus.start = genes.get("a1").start;
         chart.state(snapshot);
         const beforeTrim = JSON.stringify(chart.project());
         chart.trimLoci(["locus-a", "locus-b"]);

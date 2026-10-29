@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createDefaultConfig, mergeConfig } from "../../src/chart/config.js";
 import { createChartRuntime } from "../../src/chart/runtime.js";
 import { normalizeChartData } from "../../src/data/normalize.mjs";
-import { chartStateFromSnapshot } from "../../src/chart/snapshot.mjs";
+import { chartStateFromSnapshot, createChartStateSerializer } from "../../src/chart/snapshot.mjs";
 import { textBounds, textDimensions, textFont } from "../../src/scene/text.mjs";
 import { createChartIndex } from "../../src/data/index.mjs";
 import { createChartState, setLocusOffset } from "../../src/chart/state.mjs";
@@ -115,6 +115,24 @@ test("configuration merges own their inputs and reject invalid updates atomicall
 const input = () => ({ clusters: [{ uid: "a", loci: [{ uid: "locus", start: 0, end: 100,
   genes: [{ uid: "gene", start: 10, end: 30, strand: 1 }] }] }], links: [], groups: [] });
 
+test("gene state IDs remain independent across delimiter and numeric identifiers", () => {
+  const data = normalizeChartData({ clusters: [{ uid: "cluster", loci: [
+    { uid: "a:b", start: 0, end: 100, genes: [{ uid: "c", start: 10, end: 20, strand: 1 }] },
+    { uid: "a", start: 0, end: 100, genes: [{ uid: "b:c", start: 30, end: 40, strand: -1 }] },
+    { uid: "numeric", start: 0, end: 100, genes: [{ uid: 0, start: 50, end: 60, strand: 1 }] },
+  ] }], links: [], groups: [] });
+  const state = createChartState(data);
+  assert.equal(state.genes.size, 3);
+  state.genes.get("c").start = 5;
+  state.genes.get(0).end = 65;
+  assert.equal(state.genes.get("b:c").start, 30);
+  const serializer = createChartStateSerializer();
+  const snapshot = serializer.serialize(state, data);
+  assert.deepEqual(snapshot.genes.map(([uid]) => uid), ["c", 0]);
+  assert.deepEqual(serializer.serialize(chartStateFromSnapshot(data, JSON.parse(JSON.stringify(snapshot))), data), snapshot);
+  assert.throws(() => chartStateFromSnapshot(data, { ...snapshot, version: 1 }), /expected version 2/);
+});
+
 test("record IDs are unique within each kind, including across parent records", () => {
   for (const kind of ["clusters", "loci", "genes", "links", "groups"]) {
     const data = input();
@@ -131,16 +149,16 @@ test("record IDs are unique within each kind, including across parent records", 
 test("snapshots reject malformed values without modifying source data", () => {
   const data = normalizeChartData(input()), before = structuredClone(data);
   for (const snapshot of [
-    {}, { version: 2 }, { version: 1, camera: { x: 0, y: 0, k: 0 } },
-    { version: 1, loci: [["locus", { start: 50, end: 20 }]] },
-    { version: 1, loci: [["locus", { flipped: "false" }]] },
-    { version: 1, loci: [["locus", { trimLeft: { uid: "gene" } }]] },
-    { version: 1, locusOffsets: [["locus", Infinity]] },
+    {}, { version: 3 }, { version: 2, camera: { x: 0, y: 0, k: 0 } },
+    { version: 2, loci: [["locus", { start: 50, end: 20 }]] },
+    { version: 2, loci: [["locus", { flipped: "false" }]] },
+    { version: 2, loci: [["locus", { trimLeft: { uid: "gene" } }]] },
+    { version: 2, locusOffsets: [["locus", Infinity]] },
   ]) {
     assert.throws(() => chartStateFromSnapshot(data, snapshot), TypeError);
     assert.deepEqual(data, before);
   }
-  assert.equal(chartStateFromSnapshot(data, { version: 1, loci: [["locus", { trimLeft: "gene" }]] })
+  assert.equal(chartStateFromSnapshot(data, { version: 2, loci: [["locus", { trimLeft: "gene" }]] })
     .loci.get("locus").trimLeft.uid, "gene");
 });
 

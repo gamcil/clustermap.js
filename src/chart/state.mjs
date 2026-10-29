@@ -64,7 +64,7 @@ export function createChartState(data, previous = null) {
           strand: gene.strand,
         };
         const locusBio = locus.bio || { start: locus.start, end: locus.end };
-        const key = `${locus.uid}:${gene.uid}`;
+        const key = gene.uid;
         geneKeys.add(key);
         if (!genes.has(key)) {
           const display = {
@@ -179,7 +179,7 @@ export function getLocusState(chartState, locus) {
 }
 
 export function getGeneState(chartState, gene) {
-  return chartState.genes.get(`${gene.locusUid}:${gene.uid}`);
+  return chartState.genes.get(gene.uid);
 }
 
 export function getDisplayGenes(chartState, genes, { scaleGenes = true } = {}) {

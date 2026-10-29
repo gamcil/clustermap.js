@@ -8360,7 +8360,7 @@ function createChartState(data, previous = null) {
           strand: gene.strand,
         };
         const locusBio = locus.bio || { start: locus.start, end: locus.end };
-        const key = `${locus.uid}:${gene.uid}`;
+        const key = gene.uid;
         geneKeys.add(key);
         if (!genes.has(key)) {
           const display = {
@@ -8475,7 +8475,7 @@ function getLocusState(chartState, locus) {
 }
 
 function getGeneState(chartState, gene) {
-  return chartState.genes.get(`${gene.locusUid}:${gene.uid}`);
+  return chartState.genes.get(gene.uid);
 }
 
 function getDisplayGenes(chartState, genes, { scaleGenes = true } = {}) {
@@ -15219,6 +15219,7 @@ function createRasterInteractionBindings({
 
 const finiteNumber = (value) => Number.isFinite(value) ? value : null;
 const stateEntries = (value) => value ?? [];
+const snapshotVersion = 2;
 
 function offsetEntries(entries) {
   return [...entries].filter(([, value]) => Number.isFinite(value) && value !== 0);
@@ -15249,7 +15250,7 @@ function createSnapshotBaseline(data) {
       const locusBio = locus.bio || locus;
       for (const gene of locus.genes) {
         const geneBio = gene.bio || gene;
-        genes.set(`${locus.uid}:${gene.uid}`, {
+        genes.set(gene.uid, {
           start: geneBio.start - locusBio.start,
           end: geneBio.end - locusBio.start,
           strand: geneBio.strand,
@@ -15286,7 +15287,7 @@ function snapshotFromBaseline(state, data, baseline) {
     if (!sameState(value, baseline.genes.get(uid))) genes.push([uid, geneSnapshot(value)]);
   }
   return {
-    version: 1,
+    version: snapshotVersion,
     ...(state.excludedClusters.size ? { excludedClusters: [...state.excludedClusters] } : {}),
     ...(state.excludedLoci.size ? { excludedLoci: [...state.excludedLoci] } : {}),
     // Tree child order changes with edits. Keep its leaf order explicit so an
@@ -15327,7 +15328,7 @@ function createChartStateSerializer() {
 function validateSnapshot(snapshot) {
   const fail = (message) => { throw new TypeError(`Invalid chart state: ${message}`); };
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) fail("expected an object.");
-  if (snapshot.version !== 1) fail("unsupported version; expected version 1.");
+  if (snapshot.version !== snapshotVersion) fail(`unsupported version; expected version ${snapshotVersion}.`);
   const record = (value) => value && typeof value === "object" && !Array.isArray(value);
   for (const field of ["excludedClusters", "excludedLoci", "clusterOrder"]) {
     const values = snapshot[field];

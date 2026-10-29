@@ -408,7 +408,8 @@ Colours accept named colours, hex, RGB or HSL values (or `null` for automatic fi
 callback settings accept a function or `null`.
 
 Chart data requires unique IDs within each record kind. IDs may be non-empty
-strings or finite numbers. State imports require `version: 1`, finite numeric
+strings or finite numbers. State imports require `version: 2`; gene entries use
+the globally unique gene ID directly. Imports require finite numeric
 coordinates, ordered ranges, and boolean flip flags. Trim boundaries use gene
 IDs rather than embedded gene records.
 
