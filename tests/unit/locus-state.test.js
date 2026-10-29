@@ -12,6 +12,33 @@ const createLocus = () => ({
   ],
 });
 
+for (const scaleGenes of [false, true]) for (const flipped of [false, true]) {
+  test(`deleting trim anchors retains surviving boundaries, scaleGenes=${scaleGenes}, flipped=${flipped}`, async () => {
+    const { createChartState, flipLocus, synchronizeLocusState, trimLocusToGeneBounds } = await import("../../src/chart/state.mjs");
+    const { createChartIndex } = await import("../../src/data/index.mjs");
+    const { applyChartOperations } = await import("../../src/data/operations.mjs");
+    const locus = { ...createLocus(), genes: [0, 1, 2].map((index) => ({ uid: `g${index}`, locusUid: "locus",
+      start: 100 + index * 2000, end: 1000 + index * 2000, strand: 1 })) };
+    const data = { clusters: [{ uid: "c", loci: [locus] }], links: [], groups: [] };
+    let state = createChartState(data);
+    if (flipped) flipLocus(state, locus);
+    synchronizeLocusState(state, locus, scaleGenes);
+    trimLocusToGeneBounds(state, locus);
+    const original = state.loci.get(locus.uid), right = original.trimRight.uid;
+    applyChartOperations(data, createChartIndex(data), [{ type: "genes.delete", ids: [original.trimLeft.uid] }]);
+    state = createChartState(data, state);
+    synchronizeLocusState(state, locus, scaleGenes);
+    assert.equal(state.loci.get(locus.uid).trimLeft.uid, "g1");
+    assert.equal(state.loci.get(locus.uid).trimRight.uid, right);
+    assert.equal(original.trimLeft.uid, flipped ? "g2" : "g0", "preparing state leaves previous trims intact");
+    applyChartOperations(data, createChartIndex(data), [{ type: "genes.delete", ids: locus.genes.map(({ uid }) => uid) }]);
+    state = createChartState(data, state);
+    synchronizeLocusState(state, locus, scaleGenes);
+    assert.deepEqual(state.loci.get(locus.uid), { start: 0, end: scaleGenes ? 10000 : 0,
+      flipped, trimLeft: null, trimRight: null });
+  });
+}
+
 for (const flipped of [false, true]) {
   test(`batch trim preserves existing bounds, flipped=${flipped}`, async () => {
     const { createChartState, flipLocus, getGeneState, trimLocusToGeneBounds } = await import("../../src/chart/state.mjs");

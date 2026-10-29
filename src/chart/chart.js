@@ -597,7 +597,7 @@ export default function clusterMap() {
     stateSnapshots.reset(currentData);
   }
 
-  function applyPatch(operations, { record = true, automaticGroups, notify = true } = {}) {
+  function applyPatch(operations, { record = true, automaticGroups, notify = true, state = null } = {}) {
     const sourceScene = runtime.getScene();
     const presentationOnly = Array.isArray(operations) && operations.every((op) => isAnnotationOperation(op) || isTreeOperation(op));
     sceneCommit = null;
@@ -605,6 +605,8 @@ export default function clusterMap() {
     // invalidate the cached biological defaults, including on undo/redo.
     if (!presentationOnly) stateSnapshots.reset();
     const groupsAutomaticBefore = groupsAreAutomatic();
+    const undoState = record && Array.isArray(operations) && operations.some((op) => ["genes.delete", "genes.restore"].includes(op?.type))
+      ? stateSnapshots.serialize(chartState, currentData) : null;
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
     plotDataDirty = true;
     const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
@@ -615,6 +617,10 @@ export default function clusterMap() {
     if (!presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
       refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
     });
+    if (state) {
+      chartState = chartStateFromSnapshot(currentData, state);
+      runtime.setChartState(chartState);
+    }
     if (sourceScene && !restoringAutomatic && presentationOnly) {
       sceneCommit = { sourceScene, changes: { presentationOnly: true } };
     }
@@ -625,6 +631,7 @@ export default function clusterMap() {
       redo: result.operations,
       groupsAutomaticBefore,
       groupsAutomaticAfter,
+      ...(undoState ? { undoState, redoState: stateSnapshots.serialize(chartState, currentData) } : {}),
     } : null, { type: "data.apply", operations: result.operations }, { notify });
     return result;
   }
@@ -1349,7 +1356,8 @@ export default function clusterMap() {
     let event;
     if (change.kind === "patch") {
       const result = applyPatch(value, { record: false, notify: false,
-        automaticGroups: direction === "undo" ? change.groupsAutomaticBefore : change.groupsAutomaticAfter });
+        automaticGroups: direction === "undo" ? change.groupsAutomaticBefore : change.groupsAutomaticAfter,
+        state: direction === "undo" ? change.undoState : change.redoState });
       event = { type: "data.apply", operations: result.operations };
     } else if (change.kind === "config") {
       runtime.configure(value, currentData?.tree);

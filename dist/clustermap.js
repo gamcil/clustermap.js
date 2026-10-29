@@ -8318,6 +8318,24 @@
     return state;
   }
 
+  function reconcileLocusTrims(state, locus, genes) {
+    if (!state.trimLeft && !state.trimRight) return state;
+    const byId = new Map(locus.genes.map((gene) => [gene.uid, gene]));
+    const missingLeft = state.trimLeft && !byId.has(state.trimLeft.uid);
+    const missingRight = state.trimRight && !byId.has(state.trimRight.uid);
+    let left = null, right = null;
+    if (missingLeft || missingRight) for (const gene of locus.genes) {
+      const display = genes.get(gene.uid);
+      if (display.start < state.start || display.end > state.end) continue;
+      if (!left || display.start < genes.get(left.uid).start) left = gene;
+      if (!right || display.end > genes.get(right.uid).end) right = gene;
+    }
+    return { ...state,
+      trimLeft: missingLeft ? left : byId.get(state.trimLeft?.uid) || null,
+      trimRight: missingRight ? right : byId.get(state.trimRight?.uid) || null,
+    };
+  }
+
   function createChartState(data, previous = null) {
     const loci = new Map(previous?.loci);
     const genes = new Map(previous?.genes);
@@ -8370,6 +8388,7 @@
             genes.set(key, biologicalGeneState(locus, gene, loci.get(locus.uid).flipped));
           }
         }
+        loci.set(locus.uid, reconcileLocusTrims(loci.get(locus.uid), locus, genes));
       }
     }
     removeMissing(loci, locusIds);
@@ -15989,7 +16008,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       stateSnapshots.reset(currentData);
     }
 
-    function applyPatch(operations, { record = true, automaticGroups, notify = true } = {}) {
+    function applyPatch(operations, { record = true, automaticGroups, notify = true, state = null } = {}) {
       const sourceScene = runtime.getScene();
       const presentationOnly = Array.isArray(operations) && operations.every((op) => isAnnotationOperation(op) || isTreeOperation(op));
       sceneCommit = null;
@@ -15997,6 +16016,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       // invalidate the cached biological defaults, including on undo/redo.
       if (!presentationOnly) stateSnapshots.reset();
       const groupsAutomaticBefore = groupsAreAutomatic();
+      const undoState = record && Array.isArray(operations) && operations.some((op) => ["genes.delete", "genes.restore"].includes(op?.type))
+        ? stateSnapshots.serialize(chartState, currentData) : null;
       const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
       plotDataDirty = true;
       const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
@@ -16007,6 +16028,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (!presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
         refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
       });
+      if (state) {
+        chartState = chartStateFromSnapshot(currentData, state);
+        runtime.setChartState(chartState);
+      }
       if (sourceScene && !restoringAutomatic && presentationOnly) {
         sceneCommit = { sourceScene, changes: { presentationOnly: true } };
       }
@@ -16017,6 +16042,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         redo: result.operations,
         groupsAutomaticBefore,
         groupsAutomaticAfter,
+        ...(undoState ? { undoState, redoState: stateSnapshots.serialize(chartState, currentData) } : {}),
       } : null, { type: "data.apply", operations: result.operations }, { notify });
       return result;
     }
@@ -16741,7 +16767,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       let event;
       if (change.kind === "patch") {
         const result = applyPatch(value, { record: false, notify: false,
-          automaticGroups: direction === "undo" ? change.groupsAutomaticBefore : change.groupsAutomaticAfter });
+          automaticGroups: direction === "undo" ? change.groupsAutomaticBefore : change.groupsAutomaticAfter,
+          state: direction === "undo" ? change.undoState : change.redoState });
         event = { type: "data.apply", operations: result.operations };
       } else if (change.kind === "config") {
         runtime.configure(value, currentData?.tree);

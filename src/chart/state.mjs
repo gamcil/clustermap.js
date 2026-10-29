@@ -16,6 +16,24 @@ function biologicalGeneState(locus, gene, flipped) {
   return state;
 }
 
+function reconcileLocusTrims(state, locus, genes) {
+  if (!state.trimLeft && !state.trimRight) return state;
+  const byId = new Map(locus.genes.map((gene) => [gene.uid, gene]));
+  const missingLeft = state.trimLeft && !byId.has(state.trimLeft.uid);
+  const missingRight = state.trimRight && !byId.has(state.trimRight.uid);
+  let left = null, right = null;
+  if (missingLeft || missingRight) for (const gene of locus.genes) {
+    const display = genes.get(gene.uid);
+    if (display.start < state.start || display.end > state.end) continue;
+    if (!left || display.start < genes.get(left.uid).start) left = gene;
+    if (!right || display.end > genes.get(right.uid).end) right = gene;
+  }
+  return { ...state,
+    trimLeft: missingLeft ? left : byId.get(state.trimLeft?.uid) || null,
+    trimRight: missingRight ? right : byId.get(state.trimRight?.uid) || null,
+  };
+}
+
 export function createChartState(data, previous = null) {
   const loci = new Map(previous?.loci);
   const genes = new Map(previous?.genes);
@@ -68,6 +86,7 @@ export function createChartState(data, previous = null) {
           genes.set(key, biologicalGeneState(locus, gene, loci.get(locus.uid).flipped));
         }
       }
+      loci.set(locus.uid, reconcileLocusTrims(loci.get(locus.uid), locus, genes));
     }
   }
   removeMissing(loci, locusIds);

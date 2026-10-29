@@ -207,6 +207,30 @@ test("SVG tree edits, previews and history leave biological DOM untouched", asyn
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  for (const scaleGenes of [false, true]) {
+    test(`${renderer}: deleted trim anchors survive history and project reload, scaleGenes=${scaleGenes}`, async ({ page }) => {
+      const result = await page.evaluate(({ renderer, scaleGenes }) => {
+        if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+        chart.config({ plot: { renderer, scaleGenes } });
+        chart.flipLoci(["locus-a"]); chart.trimLoci(["locus-a"]);
+        const before = JSON.stringify(chart.project());
+        chart.patch([{ type: "genes.delete", ids: ["a2"] }]);
+        const deleted = JSON.stringify(chart.project());
+        const trim = new Map(chart.state().loci).get("locus-a");
+        chart.undo(); const undone = JSON.stringify(chart.project()) === before;
+        chart.redo(); const redone = JSON.stringify(chart.project()) === deleted;
+        const figure = chart.exportSvg(); chart.project(JSON.parse(deleted));
+        const reloaded = chart.exportSvg() === figure;
+        chart.patch([{ type: "genes.delete", ids: ["a0", "a1"] }]);
+        const empty = new Map(chart.state().loci).get("locus-a");
+        return { trim, undone, redone, reloaded, empty };
+      }, { renderer, scaleGenes });
+      expect(result.trim).toMatchObject({ trimLeft: "a1", trimRight: "a0" });
+      expect(result.undone).toBe(true); expect(result.redone).toBe(true); expect(result.reloaded).toBe(true);
+      expect(result.empty?.trimLeft ?? null).toBeNull(); expect(result.empty?.trimRight ?? null).toBeNull();
+    });
+  }
+
   test(`${renderer}: scaling restores trimmed and excluded loci through history`, async ({ page }) => {
     const result = await page.evaluate((renderer) => {
       if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
