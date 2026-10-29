@@ -15881,11 +15881,15 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (emit) emitHistoryChange();
     }
 
-    function remember(change, emit = true) {
-      history.push(change);
-      if (history.length > historyLimit) history.splice(0, history.length - historyLimit);
-      future.length = 0;
-      if (emit) emitHistoryChange();
+    function finishEdit(change, event, { notify = true } = {}) {
+      if (change) {
+        history.push(change);
+        if (history.length > historyLimit) history.splice(0, history.length - historyLimit);
+        future.length = 0;
+      }
+      if (!notify) return;
+      emitChange(event);
+      if (change) emitHistoryChange();
     }
 
     // Pointer interactions update transient preview state continuously, but are
@@ -15903,9 +15907,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (!before || !chartState || !currentData) return;
       const after = stateSnapshots.serialize(chartState, currentData);
       if (JSON.stringify(before) === JSON.stringify(after)) return;
-      remember({ kind: "state", undo: before, redo: after }, false);
-      emitChange({ type: "state.change", state: after });
-      emitHistoryChange();
+      finishEdit({ kind: "state", undo: before, redo: after }, { type: "state.change", state: after });
     }
 
     function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
@@ -15943,19 +15945,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         sceneCommit = { sourceScene, changes: { presentationOnly: true } };
       }
       redraw({ animate: false });
-      if (record) {
-        remember({
-          kind: "patch",
-          undo: result.inverse,
-          redo: result.operations,
-          groupsAutomaticBefore,
-          groupsAutomaticAfter,
-        }, false);
-      }
-      if (notify) {
-        emitChange({ type: "data.apply", operations: result.operations });
-        if (record) emitHistoryChange();
-      }
+      finishEdit(record ? {
+        kind: "patch",
+        undo: result.inverse,
+        redo: result.operations,
+        groupsAutomaticBefore,
+        groupsAutomaticAfter,
+      } : null, { type: "data.apply", operations: result.operations }, { notify });
       return result;
     }
 
@@ -15978,11 +15974,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       hasInitialView = true;
       redraw({ animate: false });
       const after = stateSnapshots.serialize(chartState, currentData);
-      if (record) remember({ kind: "state", undo: before, redo: after }, false);
-      if (notify) {
-        emitChange({ type: "state.replace", state: after });
-        if (record) emitHistoryChange();
-      }
+      finishEdit(record ? { kind: "state", undo: before, redo: after } : null,
+        { type: "state.replace", state: after }, { notify });
       return after;
     }
 
@@ -16541,9 +16534,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       // mounting should have the same immediate effect as updating data, without
       // requiring consumers to re-bind the chart's normalized data themselves.
       if (container && currentData) redraw({ animate: false });
-      if (before) remember({ kind: "config", undo: before, redo: clonePlainValue(_) }, false);
-      emitChange({ type: "config.change", config: runtime.config });
-      if (before) emitHistoryChange();
+      finishEdit(before ? { kind: "config", undo: before, redo: clonePlainValue(_) } : null,
+        { type: "config.change", config: runtime.config });
       return my;
     };
     my.data = function (data) {
@@ -16745,9 +16737,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       for (const locus of loci) changed = update(chartState, locus) || changed;
       if (!changed) return my;
       redraw({ animate });
-      remember({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) }, false);
-      emitChange({ type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) });
-      emitHistoryChange();
+      finishEdit({ kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) },
+        { type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) });
       return my;
     }
     /** Flip supplied loci, or the current selection, as one operation. */

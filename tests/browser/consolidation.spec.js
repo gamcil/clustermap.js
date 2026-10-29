@@ -172,6 +172,45 @@ test("project notifications expose final state and listener errors preserve undo
   expect(result.name).toBe("Edited");
 });
 
+test("config, state and batch edits finish history before notifying listeners", async ({ page }) => {
+  const results = await page.evaluate(() => {
+    const results = [], previous = window.reportError;
+    const errors = [];
+    window.reportError = (error) => errors.push(error.message);
+    try {
+      for (const kind of ["config", "state", "batch"]) {
+        chart.clearHistory();
+        const before = JSON.stringify(chart.project()), events = [];
+        const stop = chart.on("change", (event) => {
+          if (!["config.change", "state.replace", "loci.trim", "history.change"].includes(event.type)) return;
+          events.push({ type: event.type, undo: chart.canUndo(), redo: chart.canRedo() });
+          if (event.type !== "history.change") throw new Error("Consumer failed");
+        });
+        if (kind === "config") chart.config({ cluster: { spacing: 73 } });
+        else if (kind === "state") {
+          const state = chart.state(); state.camera.x += 17; chart.state(state);
+        } else chart.trimLoci(["locus-a", "locus-b"]);
+        const after = JSON.stringify(chart.project());
+        chart.undo(); const restored = JSON.stringify(chart.project()) === before;
+        chart.redo(); const replayed = JSON.stringify(chart.project()) === after;
+        stop(); results.push({ kind, events, restored, replayed });
+      }
+    } finally { window.reportError = previous; }
+    return { results, errors };
+  });
+  expect(results.errors).toHaveLength(9);
+  for (const { kind, events, restored, replayed } of results.results) {
+    expect(restored).toBe(true); expect(replayed).toBe(true);
+    const type = kind === "config" ? "config.change" : "state.replace";
+    expect(events).toEqual([
+      { type: kind === "batch" ? "loci.trim" : type, undo: true, redo: false },
+      { type: "history.change", undo: true, redo: false },
+      { type, undo: false, redo: true }, { type: "history.change", undo: false, redo: true },
+      { type, undo: true, redo: false }, { type: "history.change", undo: true, redo: false },
+    ]);
+  }
+});
+
 test("export excludes hidden decorations and figure bounds exclude trailing legend spacing", async ({ page }) => {
   const result = await page.evaluate(() => {
     chart.config({ legend: { show: true, position: "right", columns: 2, columnWidth: 500 } });
