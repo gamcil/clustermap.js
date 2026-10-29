@@ -2,6 +2,7 @@ import { color } from "d3-color";
 import { installDataEditorStyle } from "../editor/shared/styles.mjs";
 import { createControls, createActionRunner } from "../ui/controls.mjs";
 import { resolveTreePresentation, treeMetrics } from "./model.mjs";
+import { canRerootTree } from "./rooting.mjs";
 import { textAsset, installStyle } from "../ui/assets.mjs";
 
 const css = await textAsset(new URL("./controls.css", import.meta.url));
@@ -78,14 +79,13 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
     host.replaceChildren();
     host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
     const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
-    if (tree.distance?.kind === "mergeHeight") element("p", host, "Rerooting is unavailable for dendrograms.");
-    const root = button(host, "Root here", () => patch([{ type: "tree.reroot", nodeId: uid }]));
-    const unaryRoot = !tree.rooting && nodesById.get(tree.root).children?.length === 1;
-    root.disabled = uid === tree.root || tree.distance?.kind === "mergeHeight" || unaryRoot;
-    root.title = tree.distance?.kind === "mergeHeight" ? "Dendrograms cannot be rerooted"
-      : unaryRoot ? "Trees with a unary display root cannot be rerooted" : "Root on the branch above this node";
-    const resetRoot = button(host, "Reset rooting", () => patch([{ type: "tree.reroot.reset" }]));
-    resetRoot.disabled = !tree.rooting;
+    if (canRerootTree(tree)) {
+      const root = button(host, "Root here", () => patch([{ type: "tree.reroot", nodeId: uid }]));
+      root.disabled = uid === tree.root;
+      root.title = "Root on the branch above this node";
+      const resetRoot = button(host, "Reset rooting", () => patch([{ type: "tree.reroot.reset" }]));
+      resetRoot.disabled = !tree.rooting;
+    }
     if (!nodesById.get(uid).children) { onResize?.(); return; }
     button(host, "Rotate branches", () => rotate(uid));
     const collapsed = input(host, "Collapse subtree", "checkbox", tree.presentation?.subtrees?.[uid]?.collapsed);

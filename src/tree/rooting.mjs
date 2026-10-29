@@ -2,6 +2,11 @@ import { isPlainObject } from "../utils/values.mjs";
 
 const fail = (message) => { throw new TypeError(`Invalid tree rooting: ${message}`); };
 
+export function canRerootTree(tree) {
+  return Boolean(tree && tree.distance?.kind !== "mergeHeight" &&
+    (tree.rooting || tree.nodes.find((node) => node.uid === tree.root)?.children?.length > 1));
+}
+
 function joinedEdge(first, second) {
   const joined = { ...second, ...first };
   delete joined.branchLength;

@@ -1,5 +1,6 @@
 import { createTemplate, mountComponent } from "../../../ui/controls.mjs";
 import { TREE_COLOURING_DEFAULTS, resolveTreePresentation, validateTreePresentation } from "../../../tree/model.mjs";
+import { canRerootTree } from "../../../tree/rooting.mjs";
 import { textAsset } from "../../../ui/assets.mjs";
 
 const [markup, css] = await Promise.all([
@@ -43,7 +44,7 @@ class TreeAppearance extends HTMLElementBase {
     let compatible = tree.distance?.kind === "mergeHeight";
     try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...policy, mode: "cutHeight" } } }, config); }
     catch { compatible = false; }
-    this.#state = { policy, height, compatible, canResetRoot: Boolean(tree.rooting),
+    this.#state = { policy, height, compatible, canRoot: canRerootTree(tree), canResetRoot: Boolean(tree.rooting),
       canReset: Boolean(Object.keys(tree.presentation?.nodes || {}).length || Object.keys(tree.presentation?.subtrees || {}).length) };
     this.#previewing = false; this.#sync();
   }
@@ -57,7 +58,7 @@ class TreeAppearance extends HTMLElementBase {
   }
   #sync() {
     if (!this.#state) return;
-    const { policy, height, compatible, canReset, canResetRoot } = this.#state, root = this.shadowRoot;
+    const { policy, height, compatible, canReset, canRoot, canResetRoot } = this.#state, root = this.shadowRoot;
     root.querySelector("fieldset").hidden = !compatible;
     root.querySelector("[data-enabled]").checked = policy.mode === "cutHeight";
     root.querySelector("[data-options]").hidden = policy.mode !== "cutHeight";
@@ -71,6 +72,7 @@ class TreeAppearance extends HTMLElementBase {
     root.querySelector("[data-line]").checked = policy.showCutLine;
     root.querySelector("[data-reset]").disabled = !canReset;
     root.querySelector("[data-reset-root]").disabled = !canResetRoot;
+    root.querySelector("[data-reset-root]").hidden = !canRoot;
   }
 }
 

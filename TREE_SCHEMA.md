@@ -250,6 +250,7 @@ halves are rejoined, the selected side's explicit style takes precedence.
 Collapsed subtrees expand if their descendant membership changes. Biological
 `rooted` metadata is unchanged. Merge-height trees and trees with an initial
 unary display root cannot be rerooted.
+Rooting controls are shown only for compatible trees.
 
 The chart manages an optional `tree.rooting` record so reset survives project
 reload. Omit it when supplying a new tree. It contains `root` (original root

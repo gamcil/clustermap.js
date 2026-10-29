@@ -48,14 +48,15 @@ test("configuration snapshots and listener payloads cannot mutate live settings"
   expect(result).toEqual({ palette: ["red", "blue"], size: 15, unchanged: true });
 });
 
-test("merge-height fixtures explain why rerooting is disabled", async ({ page }) => {
+test("incompatible trees hide rooting controls in menus and the editor", async ({ page }) => {
   await page.evaluate(async () => {
     chart.data(await (await fetch("/fixtures/heatmap.json")).json());
     const node = document.querySelector("circle.tree-node");
     node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 100 }));
   });
-  await expect(page.getByRole("button", { name: "Root here", exact: true })).toBeDisabled();
-  await expect(page.getByText("Rerooting is unavailable for dendrograms.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Root here", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reset rooting", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Rerooting is unavailable for dendrograms.", { exact: true })).toHaveCount(0);
   const result = await page.evaluate(() => {
     const before = JSON.stringify(chart.project());
     try { chart.patch([{ type: "tree.reroot", nodeId: chart.data().tree.nodes.find((node) => node.uid !== chart.data().tree.root).uid }]); }
@@ -63,6 +64,24 @@ test("merge-height fixtures explain why rerooting is disabled", async ({ page })
     return JSON.stringify(chart.project()) === before;
   });
   expect(result).toBe(true);
+  await page.keyboard.press("Escape");
+  await page.evaluate(async () => {
+    await import("/dist/editor.mjs");
+    const editor = document.createElement("clinker-editor"); editor.chart = chart; document.body.append(editor);
+    await editor.openAppearance({ section: "tree" });
+  });
+  await expect(page.getByRole("button", { name: "Reset rooting", exact: true })).toHaveCount(0);
+  await page.evaluate(() => chart.data(structuredClone(input)));
+  await expect(page.getByRole("button", { name: "Reset rooting", exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const data = structuredClone(input);
+    data.tree.nodes.push({ uid: "unary", children: [data.tree.root] }); data.tree.root = "unary";
+    chart.data(data);
+    const node = document.querySelector("circle.tree-node");
+    node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 100 }));
+  });
+  await expect(page.getByRole("button", { name: "Root here", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reset rooting", exact: true })).toHaveCount(0);
 });
 
 test("invalid replacements preserve the mounted plot, configuration and history", async ({ page }) => {

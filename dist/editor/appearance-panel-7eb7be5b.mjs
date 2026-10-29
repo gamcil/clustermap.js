@@ -166,8 +166,13 @@ function resolveTreePresentation(tree, config = {}) {
   return value;
 }
 
+function canRerootTree(tree) {
+  return Boolean(tree && tree.distance?.kind !== "mergeHeight" &&
+    (tree.rooting || tree.nodes.find((node) => node.uid === tree.root)?.children?.length > 1));
+}
+
 const [markup$1, css$1] = await Promise.all([
-  "<fieldset hidden>\n  <legend>Clade colouring</legend>\n  <label><span>Colour clades</span><input type=\"checkbox\" data-enabled aria-label=\"Colour clades\"></label>\n  <div data-options hidden>\n    <label><span>Cut height</span><input type=\"number\" min=\"0\" step=\"any\" data-height aria-label=\"Cut height\"><button type=\"button\" data-auto title=\"Use automatic cut height (70%)\">Auto</button></label>\n    <input type=\"range\" min=\"0\" aria-label=\"Preview cut height\">\n    <label><span>Palette</span><select aria-label=\"Clade palette\"><option value=\"custom\" hidden>Custom</option><option value=\"muted\">Muted</option><option value=\"accessible\">Colorblind friendly</option></select></label>\n    <label><span>Show cut line</span><input type=\"checkbox\" data-line aria-label=\"Show cut line\"></label>\n  </div>\n</fieldset>\n<button type=\"button\" data-reset title=\"Clear manual tree styles and labels; keep automatic clade colouring.\" disabled>Reset all manual styles</button>\n<button type=\"button\" data-reset-root disabled>Reset rooting</button>\n<p role=\"status\" hidden></p>\n",
+  "<fieldset hidden>\n  <legend>Clade colouring</legend>\n  <label><span>Colour clades</span><input type=\"checkbox\" data-enabled aria-label=\"Colour clades\"></label>\n  <div data-options hidden>\n    <label><span>Cut height</span><input type=\"number\" min=\"0\" step=\"any\" data-height aria-label=\"Cut height\"><button type=\"button\" data-auto title=\"Use automatic cut height (70%)\">Auto</button></label>\n    <input type=\"range\" min=\"0\" aria-label=\"Preview cut height\">\n    <label><span>Palette</span><select aria-label=\"Clade palette\"><option value=\"custom\" hidden>Custom</option><option value=\"muted\">Muted</option><option value=\"accessible\">Colorblind friendly</option></select></label>\n    <label><span>Show cut line</span><input type=\"checkbox\" data-line aria-label=\"Show cut line\"></label>\n  </div>\n</fieldset>\n<button type=\"button\" data-reset title=\"Clear manual tree styles and labels; keep automatic clade colouring.\" disabled>Reset all manual styles</button>\n<button type=\"button\" data-reset-root hidden disabled>Reset rooting</button>\n<p role=\"status\" hidden></p>\n",
   ":host { display: block; min-width: 0; color: inherit; font: inherit; }\nfieldset { min-width: 0; margin: 0 0 10px; padding: 8px; border: 1px solid var(--cm-border,var(--_cm-border, #cbd3de)); border-radius: 6px; }\nlegend { padding: 0 4px; font-weight: 600; }\nlabel { display: flex; align-items: center; gap: 6px; margin: 6px 0; }\nlabel > span { flex: 1; min-width: 0; }\ninput[type=number] { width: 64px; min-width: 0; }\ninput[type=range] { width: 100%; }\nselect { width: 132px; min-width: 0; }\nbutton[aria-pressed=true] { font-weight: 600; }\np { color: var(--cm-danger,var(--_cm-danger, #b42318)); margin: 6px 0 0; }\n",
 ]);
 const template$1 = createTemplate(markup$1);
@@ -207,7 +212,7 @@ class TreeAppearance extends HTMLElementBase$1 {
     let compatible = tree.distance?.kind === "mergeHeight";
     try { validateTreePresentation({ ...tree, presentation: { ...tree.presentation, colouring: { ...policy, mode: "cutHeight" } } }, config); }
     catch { compatible = false; }
-    this.#state = { policy, height, compatible, canResetRoot: Boolean(tree.rooting),
+    this.#state = { policy, height, compatible, canRoot: canRerootTree(tree), canResetRoot: Boolean(tree.rooting),
       canReset: Boolean(Object.keys(tree.presentation?.nodes || {}).length || Object.keys(tree.presentation?.subtrees || {}).length) };
     this.#previewing = false; this.#sync();
   }
@@ -221,7 +226,7 @@ class TreeAppearance extends HTMLElementBase$1 {
   }
   #sync() {
     if (!this.#state) return;
-    const { policy, height, compatible, canReset, canResetRoot } = this.#state, root = this.shadowRoot;
+    const { policy, height, compatible, canReset, canRoot, canResetRoot } = this.#state, root = this.shadowRoot;
     root.querySelector("fieldset").hidden = !compatible;
     root.querySelector("[data-enabled]").checked = policy.mode === "cutHeight";
     root.querySelector("[data-options]").hidden = policy.mode !== "cutHeight";
@@ -235,6 +240,7 @@ class TreeAppearance extends HTMLElementBase$1 {
     root.querySelector("[data-line]").checked = policy.showCutLine;
     root.querySelector("[data-reset]").disabled = !canReset;
     root.querySelector("[data-reset-root]").disabled = !canResetRoot;
+    root.querySelector("[data-reset-root]").hidden = !canRoot;
   }
 }
 
