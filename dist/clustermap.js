@@ -1871,7 +1871,7 @@
         const end = labelStarts.get(node.cluster) - labelClearance;
         if (end - x > 1e-9) guides.push({ uid: node.uid, nodeUid: node.uid, x1: x, x2: end });
       }
-      if (node.uid !== tree.root && config.tree.support?.show && node.support) {
+      if (node.children && node.uid !== tree.root && config.tree.support?.show && node.support) {
         const text = Number(node.support.value).toFixed(config.tree.support.precision ?? 1);
         supports.push({
           uid: node.uid,

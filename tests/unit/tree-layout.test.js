@@ -34,6 +34,14 @@ function example() {
 
 const mark = (marks, uid) => marks.find((value) => value.uid === uid);
 
+test("support labels exclude terminal branches without removing their metadata", () => {
+  const { tree, build } = example();
+  tree.nodes.find((node) => node.uid === "c").support = { value: 96.4, scale: "percent", type: "bootstrap" };
+  const original = structuredClone(tree), layout = build();
+  assert.deepEqual(layout.supports.map(({ uid }) => uid), ["pair"]);
+  assert.deepEqual(tree, original);
+});
+
 test("the optional root stem shares branch styling, positioning and bounds", () => {
   const { tree, config, build } = example();
   config.tree.branch = { colour: "navy", width: 3 };

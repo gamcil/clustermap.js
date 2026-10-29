@@ -285,6 +285,29 @@ test("SVG tree edits, previews and history leave biological DOM untouched", asyn
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: rerooting hides terminal support labels and reset restores them`, async ({ page }) => {
+    const result = await page.evaluate(async (renderer) => {
+      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+      chart.data(await (await fetch("/fixtures/bua-genbank-tree.json")).json());
+      chart.config({ plot: { renderer }, tree: { support: { show: true } } }); chart.clearHistory();
+      const labels = () => [...new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml").querySelectorAll("text.tree-support")]
+        .map((node) => node.textContent).sort();
+      const original = labels();
+      chart.patch([{ type: "tree.reroot", nodeId: "aspergillus-pair-2" }]);
+      const rooted = labels(), terminal = chart.data().tree.nodes.find((node) => !node.children && node.support);
+      chart.undo(); const undone = labels(); chart.redo(); const redone = labels();
+      chart.project(JSON.parse(JSON.stringify(chart.project())));
+      const loaded = labels(), retained = chart.data().tree.nodes.find((node) => node.uid === terminal.uid).support.value;
+      chart.patch([{ type: "tree.reroot.reset" }]);
+      return { original, rooted, undone, redone, loaded, retained, terminal: terminal.support.value, reset: labels() };
+    }, renderer);
+    expect(result.original).toEqual(["87.5", "96.4", "98.2"]);
+    expect(result.rooted).toEqual(["87.5", "98.2"]);
+    expect(result.undone).toEqual(result.original); expect(result.reset).toEqual(result.original);
+    expect(result.redone).toEqual(result.rooted); expect(result.loaded).toEqual(result.rooted);
+    expect(result.terminal).toBe(96.4); expect(result.retained).toBe(96.4);
+  });
+
   test(`${renderer}: root stem control supports history, export, projects and rerooting`, async ({ page }) => {
     await page.evaluate(async (renderer) => {
       if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });

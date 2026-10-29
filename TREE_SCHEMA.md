@@ -212,7 +212,9 @@ without hiding branches, support values or annotations. It defaults to `true`.
 Tree rotation remains available through `chart.rotateTreeNode(uid)`.
 
 Support labels default to one decimal place and sit above and left of their
-supported node. Font family follows `config.plot.fontFamily`. The tree scale
+supported internal node. Terminal-branch support is retained in the data but
+not drawn; reset can restore its label when the branch becomes internal again.
+Font family follows `config.plot.fontFamily`. The tree scale
 bar inherits the main `config.scaleBar` styling and shares its vertical
 position; `config.tree.scaleBar.show` controls its visibility independently.
 Dashed leaf guides are hidden by default and stop at the normal 16-unit
