@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { normalizeChartData } from "../../src/data/normalize.mjs";
 import { createChartIndex } from "../../src/data/index.mjs";
 import { applyChartOperations } from "../../src/data/operations.mjs";
@@ -41,6 +42,8 @@ for (const nodeId of ["a", "b", "c", "p"]) {
     assert.equal(result.rooted, false);
     assert.equal(result.nodes.find(({ uid }) => uid === result.root).children[0], nodeId);
     assert.deepEqual(distances(result), distances(original));
+    assert.equal(result.nodes.some((node) => node.uid === original.root), false, "the former display root is suppressed");
+    assert.ok(result.nodes.every((node) => !node.children || node.children.length > 1), "rerooting introduces no unary node");
     assert.equal(result.nodes.filter(({ support }) => support).length, 1);
     assert.equal(result.nodes.find(({ uid }) => uid === result.root).support, undefined);
     assert.deepEqual(resetTreeRoot(result), original);
@@ -51,7 +54,7 @@ test("repeated rooting reuses one root and persists reset through JSON", () => {
   const data = normalizeChartData(input()), original = structuredClone(data.tree);
   for (const nodeId of ["a", "p", "c", "b", "a"]) {
     data.tree = rerootTree(data.tree, nodeId);
-    assert.equal(data.tree.nodes.length, original.nodes.length + 1);
+    assert.equal(data.tree.nodes.length, original.nodes.length);
     assert.deepEqual(distances(data.tree), distances(original));
     data.tree = normalizeChartData(JSON.parse(JSON.stringify(data))).tree;
   }
@@ -63,11 +66,11 @@ test("branch styles follow edges, node labels persist, and changed collapsed cla
   const data = input();
   data.tree.presentation = { nodes: { p: { branch: { colour: "red", width: 2 }, label: { text: "Clade" } } }, subtrees: { p: { collapsed: true } } };
   const rooted = rerootTree(normalizeChartData(data).tree, "a");
-  assert.deepEqual(rooted.presentation.nodes.r.branch, { colour: "red", width: 2 });
+  assert.deepEqual(rooted.presentation.nodes.c.branch, { colour: "red", width: 2 });
   assert.deepEqual(rooted.presentation.nodes.p.label, { text: "Clade" });
   assert.equal(rooted.presentation.subtrees?.p?.collapsed, undefined);
   rooted.nodes.find(({ uid }) => uid === "p").label = "Edited node name";
-  rooted.presentation.nodes.r.branch.colour = "blue";
+  rooted.presentation.nodes.c.branch.colour = "blue";
   const reset = resetTreeRoot(rooted);
   assert.equal(reset.nodes.find(({ uid }) => uid === "p").label, "Edited node name");
   assert.equal(reset.presentation.nodes.p.branch.colour, "blue");
@@ -94,6 +97,47 @@ test("multifurcations and zero-length branches survive rooting and reset", () =>
   normalizeChartData({ ...data, tree: rooted });
   assert.deepEqual(distances(rooted), distances(original));
   assert.deepEqual(resetTreeRoot(rooted), original);
+});
+
+test("annotated roots remain while unannotated roots restore their complete edge metadata", () => {
+  const data = input();
+  data.tree.nodes[4].support = { value: 0.8, scale: "proportion" };
+  data.tree.presentation = { nodes: { p: { branch: { colour: "red" } }, c: { branch: { colour: "blue" } } } };
+  const original = normalizeChartData(data).tree;
+  const rooted = rerootTree(original, "a");
+  const imported = normalizeChartData({ ...data, tree: JSON.parse(JSON.stringify(rooted)) }).tree;
+  assert.deepEqual(resetTreeRoot(imported), original);
+  assert.deepEqual(distances(imported), distances(original));
+  original.nodes[0].label = "Meaningful ancestral annotation";
+  const annotated = rerootTree(original, "a");
+  assert.equal(annotated.nodes.find((node) => node.uid === "r").label, "Meaningful ancestral annotation");
+  assert.equal(annotated.rooting.suppressed, undefined);
+  assert.deepEqual(resetTreeRoot(annotated), original);
+});
+
+test("a retained original root is suppressed on the next reroot", () => {
+  const original = normalizeChartData(input()).tree;
+  const tree = structuredClone(original); tree.nodes[0].label = "Keep temporarily";
+  const rooted = rerootTree(tree, "a");
+  delete rooted.nodes.find((node) => node.uid === "r").label;
+  for (const nodeId of ["b", "r"]) {
+    const next = rerootTree(rooted, nodeId);
+    assert.equal(next.nodes.some((node) => node.uid === "r"), false);
+    assert.deepEqual(distances(next), distances(original));
+    assert.deepEqual(resetTreeRoot(next), original);
+  }
+});
+
+test("the five-cluster Bua fixture has no redundant root after rerooting", async () => {
+  const data = normalizeChartData(JSON.parse(await readFile(new URL("../../fixtures/bua-genbank-tree.json", import.meta.url), "utf8")));
+  const original = structuredClone(data.tree), rooted = rerootTree(data.tree, "aspergillus-pair-1");
+  assert.equal(rooted.nodes.length, original.nodes.length);
+  assert.equal(rooted.nodes.some((node) => node.uid === original.root), false);
+  assert.ok(rooted.nodes.every((node) => !node.children || node.children.length > 1));
+  const before = distances(original), after = distances(rooted);
+  after.forEach((length, i) => assert.ok(Math.abs(length - before[i]) < 1e-12));
+  const imported = normalizeChartData({ ...data, tree: JSON.parse(JSON.stringify(rooted)) });
+  assert.deepEqual(resetTreeRoot(imported.tree), original);
 });
 
 test("structural tree edits rebuild state and undo topology exactly", () => {
@@ -125,6 +169,8 @@ test("invalid rooting and saved baselines are rejected atomically", () => {
   }
   const rooted = rerootTree(data.tree, "a"); rooted.rooting.children[0][1] = ["a", "c"];
   assert.throws(() => normalizeChartData({ ...data, tree: rooted }), /rooting/);
+  const malformed = rerootTree(data.tree, "a"); malformed.rooting.suppressed.edges[0][0] = "missing";
+  assert.throws(() => normalizeChartData({ ...data, tree: malformed }), /suppressed/);
   data.tree.distance = { kind: "mergeHeight" };
   assert.throws(() => rerootTree(data.tree, "a"), /merge-height/);
   const unary = input(); unary.tree.nodes.push({ uid: "unary", children: ["r"] }); unary.tree.root = "unary";

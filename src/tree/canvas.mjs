@@ -30,7 +30,7 @@ export function drawCanvasTree(context, layout) {
     context.fillText(cut.label.text, cut.label.x, cut.label.y);
   }
   const groups = new Map();
-  for (const mark of [layout.rootBranch, ...layout.stems, ...layout.branches]) {
+  for (const mark of [...layout.stems, ...layout.branches]) {
     const key = `${mark.style.colour}:${mark.style.width}:${mark.lineCap || "butt"}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(mark);

@@ -253,7 +253,7 @@ export function layoutTree({
   return positionTreeLayout({
     background: config.figureStyle?.background || "white", foreground: config.figureStyle?.foreground || "black",
     cutLine, annotations, branch, guide, support, branches, stems, nodes, guides, supports, triangles, scaleBar,
-    rootBranch: { uid: "root-stub", nodeUid: tree.root, x1: rootX - 28, x2: rootX, style: branch },
+    rootX,
     ys, previousYs,
   }, ys);
 }
@@ -262,7 +262,6 @@ function positionTreeLayout(layout, ys) {
   const line = (mark) => ({ ...mark, y1: ys.get(mark.nodeUid), y2: ys.get(mark.nodeUid) });
   const frame = {
     ...layout,
-    rootBranch: line(layout.rootBranch),
     branches: layout.branches.map(line),
     stems: layout.stems.map((stem) => ({
       ...stem,
@@ -285,7 +284,7 @@ function positionTreeLayout(layout, ys) {
     points.push([Math.min(mark.x1, mark.x2) - extendX, Math.min(mark.y1, mark.y2) - extendY],
       [Math.max(mark.x1, mark.x2) + extendX, Math.max(mark.y1, mark.y2) + extendY]);
   };
-  for (const mark of [frame.rootBranch, ...frame.branches, ...frame.stems]) includeLine(mark);
+  for (const mark of [...frame.branches, ...frame.stems]) includeLine(mark);
   for (const mark of frame.guides) includeLine(mark, frame.guide.width);
   for (const triangle of frame.triangles) {
     const half = triangle.style.width / 2;

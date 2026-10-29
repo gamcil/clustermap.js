@@ -48,6 +48,23 @@ test("configuration snapshots and listener payloads cannot mutate live settings"
   expect(result).toEqual({ palette: ["red", "blue"], size: 15, unchanged: true });
 });
 
+test("merge-height fixtures explain why rerooting is disabled", async ({ page }) => {
+  await page.evaluate(async () => {
+    chart.data(await (await fetch("/fixtures/heatmap.json")).json());
+    const node = document.querySelector("circle.tree-node");
+    node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 100 }));
+  });
+  await expect(page.getByRole("button", { name: "Root here", exact: true })).toBeDisabled();
+  await expect(page.getByText("Rerooting is unavailable for merge-height dendrograms.", { exact: true })).toBeVisible();
+  const result = await page.evaluate(() => {
+    const before = JSON.stringify(chart.project());
+    try { chart.patch([{ type: "tree.reroot", nodeId: chart.data().tree.nodes.find((node) => node.uid !== chart.data().tree.root).uid }]); }
+    catch {}
+    return JSON.stringify(chart.project()) === before;
+  });
+  expect(result).toBe(true);
+});
+
 test("invalid replacements preserve the mounted plot, configuration and history", async ({ page }) => {
   const result = await page.evaluate(() => {
     chart.trimLoci(["locus-a"]);
@@ -271,12 +288,15 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
         chart.redo();
         return { rooted: rooted.data.tree.root !== original.data.tree.root, matchesOrder, undone, redone, loaded,
           count, originalCount: original.data.tree.nodes.length, resetTree: reset.data.tree, originalTree: original.data.tree,
+          unaryNodes: rooted.data.tree.nodes.filter((node) => node.children?.length === 1).length,
+          hasStub: svg.includes("tree-root-stub"),
           resetOrder: reset.state.clusterOrder, originalOrder: original.state.clusterOrder, resetUndo,
           resetRedo: !chart.data().tree.rooting, resetSvg: chart.exportSvg() === originalSvg };
       }, { renderer, nodeId });
       expect(result.rooted).toBe(true); expect(result.matchesOrder).toBe(true); expect(result.undone).toBe(true);
       expect(result.redone).toBe(true); expect(result.loaded).toBe(true);
-      expect(result.count).toBe(result.originalCount + 1);
+      expect(result.count).toBe(result.originalCount);
+      expect(result.unaryNodes).toBe(0); expect(result.hasStub).toBe(false);
       expect(result.resetTree).toEqual(result.originalTree); expect(result.resetOrder).toEqual(result.originalOrder);
       expect(result.resetUndo).toBe(true); expect(result.resetRedo).toBe(true); expect(result.resetSvg).toBe(true);
     });

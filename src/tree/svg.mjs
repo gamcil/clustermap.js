@@ -48,7 +48,6 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     .attr("x", (line) => line.label.x).attr("y", (line) => line.label.y)
     .attr("font-size", (line) => `${line.label.fontSize}px`).attr("font-family", (line) => line.label.fontFamily)
     .attr("text-anchor", "middle").attr("fill", (line) => line.colour).text((line) => line.label.text);
-  const root = branchMarks("path", "tree-root-stub", [layout.rootBranch]);
   const branches = branchMarks("path", "tree-branch", layout.branches);
   const stems = branchMarks("line", "tree-stem", layout.stems);
   const guides = group.selectAll("line.tree-leaf-guide").data(layout.guides, (guide) => guide.uid).join("line")
@@ -91,7 +90,6 @@ export function renderSvgTree(plot, tree, scene, config, interactions, transitio
     .attr("font-size", `${layout.scaleBar?.fontSize}px`).attr("font-family", layout.scaleBar?.fontFamily)
     .attr("fill", layout.foreground).text((label) => label.text);
   const paintFrame = (frame) => {
-    positionBranches(root, [frame.rootBranch]);
     positionBranches(branches, frame.branches);
     positionLines(stems, frame.stems);
     positionLines(guides, frame.guides);

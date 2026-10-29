@@ -78,6 +78,7 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
     host.replaceChildren();
     host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
     const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
+    if (tree.distance?.kind === "mergeHeight") element("p", host, "Rerooting is unavailable for merge-height dendrograms.");
     const root = button(host, "Root here", () => patch([{ type: "tree.reroot", nodeId: uid }]));
     const unaryRoot = !tree.rooting && nodesById.get(tree.root).children?.length === 1;
     root.disabled = uid === tree.root || tree.distance?.kind === "mergeHeight" || unaryRoot;

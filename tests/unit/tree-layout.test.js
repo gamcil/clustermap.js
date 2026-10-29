@@ -89,7 +89,7 @@ test("settled tree drawing and hit testing share layout until its inputs change"
 
   const widerConfig = { ...config, tree: { ...config.tree, width: 320 } };
   const wider = measureTreeLayout(context, tree, scene, widerConfig);
-  assert.notEqual(wider.rootBranch.x1, first.rootBranch.x1, "styling updates replace cached positions");
+  assert.notEqual(wider.rootX, first.rootX, "styling updates replace cached positions");
   const reordered = measureTreeLayout(context, tree, reorderedScene(["c", "a", "b"]), widerConfig);
   assert.notEqual(mark(reordered.branches, "pair:a").y1, mark(wider.branches, "pair:a").y1, "scene updates move leaves");
   const nextTree = structuredClone(tree);
@@ -144,9 +144,9 @@ test("the first leaf/label collision positions a proportional tree, independent 
   assert.equal(mark(layout.guides, "a"), undefined, "the limiting leaf needs no guide");
   assert.equal(260 - 100 - a.x2, 16, "leaf tips retain the label clearance");
   assert.ok(c.x2 > c.x1);
-  assert.equal(c.x1 - layout.rootBranch.x2, 160, "configured width covers the longest root-to-tip path");
+  assert.equal(c.x1 - layout.rootX, 160, "configured width covers the longest root-to-tip path");
   const pair = mark(layout.nodes, "pair");
-  assert.ok(Math.abs((pair.x - layout.rootBranch.x2) / (c.x1 - layout.rootBranch.x2) - 0.25) < 1e-10);
+  assert.ok(Math.abs((pair.x - layout.rootX) / (c.x1 - layout.rootX) - 0.25) < 1e-10);
 });
 
 test("a leaf-pair flip collapses its stem without moving ancestor nodes", () => {
@@ -207,13 +207,13 @@ test("label changes and drag previews reposition the tree and guides through the
     clusterOffsets: new Map([["a", 20]]),
   };
   const dragged = build({ trackAnchor: true, preview });
-  assert.equal(dragged.rootBranch.x1, initial.rootBranch.x1 - 30);
+  assert.equal(dragged.rootX, initial.rootX - 30);
   assert.equal(mark(dragged.branches, "pair:a").x2, mark(initial.branches, "pair:a").x2 - 30);
   assert.equal(mark(dragged.branches, "pair:a").y1, mark(initial.branches, "pair:a").y1 + 20);
   preview.clusterLabelOffsets.set("a", -10);
-  assert.equal(build({ trackAnchor: true, preview }).rootBranch.x1, initial.rootBranch.x1 - 10);
+  assert.equal(build({ trackAnchor: true, preview }).rootX, initial.rootX - 10);
   const smallerLabel = build({ measureLabel: () => 50 });
-  assert.equal(smallerLabel.rootBranch.x1, initial.rootBranch.x1 + 50);
+  assert.equal(smallerLabel.rootX, initial.rootX + 50);
 });
 
 test("tree scales inherit clustermap styling and fall back to depth when lengths are incomplete", () => {
@@ -256,7 +256,7 @@ test("metric cut line follows true height and is hidden in cladogram mode or abo
   tree.nodes.find((node) => node.uid === "c").branchLength = 0.3;
   tree.presentation = { colouring: { mode: "cutHeight", cutHeight: 0.15, showCutLine: true } };
   const layout = build();
-  assert.ok(Math.abs(layout.cutLine.x1 - (layout.rootBranch.x2 + config.tree.width / 2)) < 1e-10);
+  assert.ok(Math.abs(layout.cutLine.x1 - (layout.rootX + config.tree.width / 2)) < 1e-10);
   assert.equal(layout.cutLine.label.text, "0.15");
   config.tree.useBranchLengths = false;
   assert.equal(build().cutLine, null);

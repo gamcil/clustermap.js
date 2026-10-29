@@ -235,9 +235,11 @@ chart.patch([{ type: "tree.reroot.reset" }]);
 ```
 
 Both actions support undo/redo. Reset restores the ordering before the first
-reroot while retaining node labels and manual styles. Node IDs and cluster
-associations remain stable. The original display root is retained, possibly as
-a unary node; repeated rerooting reuses one extra root node. Reset removes it.
+reroot while retaining node labels and manual styles. Leaf IDs and cluster
+associations remain stable. An unannotated degree-two display root is suppressed
+by joining its incident branches; reset restores it with its original edge data.
+Annotated and multifurcating roots remain. Repeated rerooting reuses one generated
+root node. There is no artificial incoming branch at the display root.
 Known lengths preserve leaf-to-leaf distances; missing lengths stay unknown.
 Support follows its edge and appears once on a split edge, on the selected side.
 Incoming branch styles follow edges and initially cover both halves. When the
@@ -250,6 +252,8 @@ The chart manages an optional `tree.rooting` record so reset survives project
 reload. Omit it when supplying a new tree. It contains `root` (original root
 UID), `node` (generated display root UID), `outgroup` (selected-side UID), and
 `children` (original internal-node child order as `[uid, childIds]` pairs).
+An optional `suppressed` record retains the removed root's `node`, array `index`,
+and two incident `edges` as `[neighbourUid, edgeData]` pairs for reset.
 Imported baselines must match the current unrooted topology. Undo stores the
 previous tree, including presentation, and restores it exactly.
 
