@@ -8319,17 +8319,17 @@
   }
 
   function createChartState(data, previous = null) {
-    const loci = previous?.loci || new Map();
-    const genes = previous?.genes || new Map();
-    const clusterOffsets = previous?.clusterOffsets || new Map();
-    const locusOffsets = previous?.locusOffsets || new Map();
+    const loci = new Map(previous?.loci);
+    const genes = new Map(previous?.genes);
+    const clusterOffsets = new Map(previous?.clusterOffsets);
+    const locusOffsets = new Map(previous?.locusOffsets);
     const camera = previous?.camera || { x: 0, y: 0, k: 1 };
     const dragging = previous?.dragging || false;
-    const preview = previous?.preview || {
-      clusterOrder: null,
-      clusterPositions: new Map(),
-      locusOffsets: new Map(),
-      loci: new Map(),
+    const preview = {
+      clusterOrder: previous?.preview?.clusterOrder ? [...previous.preview.clusterOrder] : null,
+      clusterPositions: new Map(previous?.preview?.clusterPositions),
+      locusOffsets: new Map(previous?.preview?.locusOffsets),
+      loci: new Map(previous?.preview?.loci),
     };
     const clusterIds = data.clusters.map((cluster) => cluster.uid);
     const clusterIdSet = new Set(clusterIds);
@@ -8348,9 +8348,6 @@
         ...clusterIds.filter((uid) => !previewOrderSet.has(uid)),
       ];
     }
-    if (!preview.locusOffsets) preview.locusOffsets = new Map();
-    if (!preview.loci) preview.loci = new Map();
-    if (!preview.clusterPositions) preview.clusterPositions = new Map();
     const locusIds = new Set();
     const geneKeys = new Set();
     for (const cluster of data.clusters) {
@@ -8826,12 +8823,12 @@
       const known = ids.get(kind) || new Set();
       ids.set(kind, known);
       for (const record of values) {
-        if (!record || !isRecordId(record.uid)) throw new TypeError(`Invalid chart data: ${kind} require non-empty string or finite numeric IDs.`);
+        if (!isPlainObject(record) || !isRecordId(record.uid)) throw new TypeError(`Invalid chart data: ${kind} require records with non-empty string or finite numeric IDs.`);
         if (known.has(record.uid)) throw new TypeError(`Invalid chart data: duplicate ${kind} ID '${record.uid}'.`);
         known.add(record.uid);
       }
     };
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new TypeError("Chart data must be an object.");
+    if (!isPlainObject(data)) throw new TypeError("Chart data must be an object.");
     records("clusters", data.clusters);
     for (const cluster of data.clusters) {
       records("loci", cluster.loci);
@@ -8841,8 +8838,49 @@
     records("groups", data.groups ?? []);
   }
 
+  function validateRecords(data) {
+    const fail = (message) => { throw new TypeError(`Invalid chart data: ${message}.`); };
+    const range = (record, description, gene = false) => {
+      if (!isPlainObject(record) || !Number.isFinite(record.start) || !Number.isFinite(record.end) || record.end < record.start) {
+        fail(`${description} requires finite start <= end`);
+      }
+      if (gene && ![-1, 0, 1].includes(record.strand)) fail(`${description} strand must be -1, 0 or 1`);
+    };
+    for (const cluster of data.clusters) for (const locus of cluster.loci) {
+      range(locus, `locus '${locus.uid}'`);
+      if (locus.offset !== undefined && !Number.isFinite(locus.offset)) fail(`locus '${locus.uid}' offset must be finite`);
+      if (locus.bio !== undefined) range(locus.bio, `locus '${locus.uid}' bio`);
+      for (const gene of locus.genes) {
+        range(gene, `gene '${gene.uid}'`, true);
+        if (gene.bio !== undefined) range(gene.bio, `gene '${gene.uid}' bio`, true);
+      }
+    }
+    for (const link of data.links) {
+      for (const side of ["query", "target"]) {
+        if (!isPlainObject(link[side]) || !isRecordId(link[side].uid)) fail(`link '${link.uid}' ${side} requires a gene ID`);
+      }
+      if (link.identity !== undefined && (!Number.isFinite(link.identity) || link.identity < 0 || link.identity > 1)) {
+        fail(`link '${link.uid}' identity must be a number from 0 to 1`);
+      }
+    }
+    const members = new Set();
+    for (const group of data.groups ?? []) {
+      if (!Array.isArray(group.genes)) fail(`group '${group.uid}' genes must be an array`);
+      for (const uid of group.genes) {
+        if (!isRecordId(uid)) fail(`group '${group.uid}' requires gene IDs`);
+        if (members.has(uid)) fail(`duplicate group membership for gene '${uid}'`);
+        members.add(uid);
+      }
+    }
+    if (data.config !== undefined) {
+      if (!isPlainObject(data.config)) fail("config must be an object");
+      if (data.config.updateGroups !== undefined && typeof data.config.updateGroups !== "boolean") fail("config.updateGroups must be boolean");
+    }
+  }
+
   function normalizeChartData(data, treeConfig = {}) {
     validateRecordIds(data);
+    validateRecords(data);
     const source = clonePlainValue(data);
     if (source.tree != null) {
       validateTree(source.tree, source.clusters);
@@ -15839,25 +15877,27 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
     function my(selection, options) {
       selection.each(function (data) {
+        const prepared = prepareData(normalizeChartData(data, runtime.config.tree));
         container = select(this).attr("width", "100%").attr("height", "100%");
-        loadData(data);
+        installData(prepared);
         redraw(options);
       });
     }
 
-    function loadData(data) {
-      installData(normalizeChartData(data, runtime.config.tree));
+    function prepareData(data, state = null) {
+      const index = createChartIndex(data);
+      refreshGroups(data, index);
+      return { data, index, state: state || createChartState(data, chartState) };
     }
 
-    function installData(prepared, state = null) {
+    function installData({ data, index, state }) {
       cancelSceneWork();
       cancelTreePresentationPreview();
       sceneCommit = null;
-      currentData = prepared;
+      currentData = data;
       plotDataDirty = true;
-      chartIndex = createChartIndex(currentData);
-      refreshGroups();
-      chartState = state || createChartState(currentData, chartState);
+      chartIndex = index;
+      chartState = state;
       runtime.setChartIndex(chartIndex);
       runtime.setChartState(chartState);
       stateSnapshots.reset(currentData);
@@ -15867,15 +15907,15 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       return data?.config?.updateGroups !== false;
     }
 
-    function refreshGroups(derive = groupsAreAutomatic()) {
+    function refreshGroups(data, index, derive = groupsAreAutomatic(data)) {
       if (derive) {
         // Deleted genes retain their link records; exclude dangling endpoints.
-        const links = currentData.links.filter((link) =>
-          chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
+        const links = data.links.filter((link) =>
+          index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)
         );
-        currentData.groups = createLinkGroups(links, currentData.groups);
-      } else currentData.groups ??= [];
-      chartIndex.groupById = new Map(currentData.groups.map((group) => [group.uid, group]));
+        data.groups = createLinkGroups(links, data.groups);
+      } else data.groups ??= [];
+      index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
     }
 
     function emitChange(change) {
@@ -15939,7 +15979,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
       if (effects.reindex === "data") chartIndex = createChartIndex(currentData);
       if (effects.reindex || refreshAutomatic) {
-        refreshGroups(groupsAreAutomatic() && (effects.reindex === "data" || refreshAutomatic));
+        refreshGroups(currentData, chartIndex, groupsAreAutomatic() && (effects.reindex === "data" || refreshAutomatic));
         runtime.setChartIndex(chartIndex);
       }
       if (effects.rebuildState) {
@@ -16574,8 +16614,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     my.data = function (data) {
       if (!arguments.length) return currentData;
       if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
-      cancelTreePresentationPreview();
-      container.datum(data).call(my);
+      const prepared = prepareData(normalizeChartData(data, runtime.config.tree));
+      installData(prepared);
+      container.datum(data);
+      redraw();
       clearHistory(false);
       emitChange({ type: "data.replace" });
       emitHistoryChange();
@@ -16637,8 +16679,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const prepared = normalizeChartData(snapshot.data, candidate.tree);
       const state = snapshot.state ? chartStateFromSnapshot(prepared, snapshot.state) : createChartState(prepared);
       runtime.validateConfiguration(snapshot.config, prepared.tree);
+      const replacement = prepareData(prepared, state);
       runtime.configure(snapshot.config, prepared.tree);
-      installData(prepared, state);
+      installData(replacement);
       container.datum(prepared);
       hasInitialView = Boolean(snapshot.state);
       clearHistory(false);

@@ -17,17 +17,17 @@ function biologicalGeneState(locus, gene, flipped) {
 }
 
 export function createChartState(data, previous = null) {
-  const loci = previous?.loci || new Map();
-  const genes = previous?.genes || new Map();
-  const clusterOffsets = previous?.clusterOffsets || new Map();
-  const locusOffsets = previous?.locusOffsets || new Map();
+  const loci = new Map(previous?.loci);
+  const genes = new Map(previous?.genes);
+  const clusterOffsets = new Map(previous?.clusterOffsets);
+  const locusOffsets = new Map(previous?.locusOffsets);
   const camera = previous?.camera || { x: 0, y: 0, k: 1 };
   const dragging = previous?.dragging || false;
-  const preview = previous?.preview || {
-    clusterOrder: null,
-    clusterPositions: new Map(),
-    locusOffsets: new Map(),
-    loci: new Map(),
+  const preview = {
+    clusterOrder: previous?.preview?.clusterOrder ? [...previous.preview.clusterOrder] : null,
+    clusterPositions: new Map(previous?.preview?.clusterPositions),
+    locusOffsets: new Map(previous?.preview?.locusOffsets),
+    loci: new Map(previous?.preview?.loci),
   };
   const clusterIds = data.clusters.map((cluster) => cluster.uid);
   const clusterIdSet = new Set(clusterIds);
@@ -46,9 +46,6 @@ export function createChartState(data, previous = null) {
       ...clusterIds.filter((uid) => !previewOrderSet.has(uid)),
     ];
   }
-  if (!preview.locusOffsets) preview.locusOffsets = new Map();
-  if (!preview.loci) preview.loci = new Map();
-  if (!preview.clusterPositions) preview.clusterPositions = new Map();
   const locusIds = new Set();
   const geneKeys = new Set();
   for (const cluster of data.clusters) {

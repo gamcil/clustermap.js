@@ -485,25 +485,27 @@ export default function clusterMap() {
 
   function my(selection, options) {
     selection.each(function (data) {
+      const prepared = prepareData(normalizeChartData(data, runtime.config.tree));
       container = select(this).attr("width", "100%").attr("height", "100%");
-      loadData(data);
+      installData(prepared);
       redraw(options);
     });
   }
 
-  function loadData(data) {
-    installData(normalizeChartData(data, runtime.config.tree));
+  function prepareData(data, state = null) {
+    const index = createChartIndex(data);
+    refreshGroups(data, index);
+    return { data, index, state: state || createChartState(data, chartState) };
   }
 
-  function installData(prepared, state = null) {
+  function installData({ data, index, state }) {
     cancelSceneWork();
     cancelTreePresentationPreview();
     sceneCommit = null;
-    currentData = prepared;
+    currentData = data;
     plotDataDirty = true;
-    chartIndex = createChartIndex(currentData);
-    refreshGroups();
-    chartState = state || createChartState(currentData, chartState);
+    chartIndex = index;
+    chartState = state;
     runtime.setChartIndex(chartIndex);
     runtime.setChartState(chartState);
     stateSnapshots.reset(currentData);
@@ -513,15 +515,15 @@ export default function clusterMap() {
     return data?.config?.updateGroups !== false;
   }
 
-  function refreshGroups(derive = groupsAreAutomatic()) {
+  function refreshGroups(data, index, derive = groupsAreAutomatic(data)) {
     if (derive) {
       // Deleted genes retain their link records; exclude dangling endpoints.
-      const links = currentData.links.filter((link) =>
-        chartIndex.geneById.has(link.query.uid) && chartIndex.geneById.has(link.target.uid)
+      const links = data.links.filter((link) =>
+        index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)
       );
-      currentData.groups = createLinkGroups(links, currentData.groups);
-    } else currentData.groups ??= [];
-    chartIndex.groupById = new Map(currentData.groups.map((group) => [group.uid, group]));
+      data.groups = createLinkGroups(links, data.groups);
+    } else data.groups ??= [];
+    index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
   }
 
   function emitChange(change) {
@@ -585,7 +587,7 @@ export default function clusterMap() {
   function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
     if (effects.reindex === "data") chartIndex = createChartIndex(currentData);
     if (effects.reindex || refreshAutomatic) {
-      refreshGroups(groupsAreAutomatic() && (effects.reindex === "data" || refreshAutomatic));
+      refreshGroups(currentData, chartIndex, groupsAreAutomatic() && (effects.reindex === "data" || refreshAutomatic));
       runtime.setChartIndex(chartIndex);
     }
     if (effects.rebuildState) {
@@ -1220,8 +1222,10 @@ export default function clusterMap() {
   my.data = function (data) {
     if (!arguments.length) return currentData;
     if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
-    cancelTreePresentationPreview();
-    container.datum(data).call(my);
+    const prepared = prepareData(normalizeChartData(data, runtime.config.tree));
+    installData(prepared);
+    container.datum(data);
+    redraw();
     clearHistory(false);
     emitChange({ type: "data.replace" });
     emitHistoryChange();
@@ -1283,8 +1287,9 @@ export default function clusterMap() {
     const prepared = normalizeChartData(snapshot.data, candidate.tree);
     const state = snapshot.state ? chartStateFromSnapshot(prepared, snapshot.state) : createChartState(prepared);
     runtime.validateConfiguration(snapshot.config, prepared.tree);
+    const replacement = prepareData(prepared, state);
     runtime.configure(snapshot.config, prepared.tree);
-    installData(prepared, state);
+    installData(replacement);
     container.datum(prepared);
     hasInitialView = Boolean(snapshot.state);
     clearHistory(false);

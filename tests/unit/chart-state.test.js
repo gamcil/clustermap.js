@@ -7,6 +7,22 @@ function dataFor(...clusterIds) {
   };
 }
 
+test("preparing replacement state does not prune the active state", async () => {
+  const { createChartState } = await import("../../src/chart/state.mjs");
+  const original = createChartState({ clusters: [{ uid: "a", loci: [{ uid: "l", start: 0, end: 100,
+    genes: [{ uid: "g", start: 10, end: 20, strand: 1 }] }] }] });
+  original.preview.clusterOrder = ["a"];
+  original.preview.clusterPositions.set("a", 20);
+  original.preview.locusOffsets.set("l", 5);
+  original.preview.loci.set("l", { ...original.loci.get("l"), start: 10 });
+  const before = structuredClone(original);
+  const replacement = createChartState(dataFor("b"), original);
+  assert.deepEqual(original, before);
+  assert.equal(replacement.genes.size, 0);
+  assert.deepEqual(replacement.preview.clusterOrder, ["b"]);
+  assert.equal(replacement.preview.clusterPositions.size, 0);
+});
+
 test("chart state persists cluster order across data refreshes", async () => {
   const { commitPreviewClusterOrder, createChartState, getClusterOrder, setPreviewClusterOrder } = await import(
     "../../src/chart/state.mjs"

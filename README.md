@@ -24,13 +24,14 @@ The clustermap chart expects data in the following format:
               "name":   <str: Gene name>,
               "start":  <int: Gene start position>,
               "end":    <int: Gene end position>,
-              "strand": <int: Gene strand (0 or 1)>,
+              "strand": <int: Gene strand (-1, 0 or 1)>,
             }
           ]}
       ]}
   ],
   "links": [
     {
+      "uid": <str: Unique link ID>,
       "query": {
       	"uid":  <str: Unique ID of query gene>,
       	"name": <str: Name of query gene>
@@ -39,7 +40,7 @@ The clustermap chart expects data in the following format:
       	"uid":  <str: Unique ID of target gene>,
       	"name": <str: Name of target gene>
       },
-      "identity": <float: Percent identity query-target alignment>
+      "identity": <float: Query-target identity from 0 to 1>
     }
   ],
   "groups": [
@@ -54,10 +55,13 @@ The clustermap chart expects data in the following format:
 }
 ```
 
-Gene coordinates must be relative to their containing locus. In other words, a
-locus with `start: 0` and `end: 50000` contains genes whose coordinates are in
-that same `0..50000` range. Importers may preserve original genomic
-coordinates separately in a `bio` field.
+Gene and locus coordinates use the same coordinate system. The chart projects
+them relative to the locus start and preserves biological coordinates in `bio`.
+Ranges must have finite `start <= end`; supplied `bio` ranges follow the same
+rules. IDs are non-empty strings or finite numbers, unique within each record
+kind. Group memberships are exclusive. Links and memberships may reference
+absent genes, allowing deleted genes to be restored; dangling links stay hidden.
+Malformed data is rejected before replacing the active chart or project.
 
 ## Phylogenetic trees
 

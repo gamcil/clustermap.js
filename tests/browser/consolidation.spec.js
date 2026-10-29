@@ -48,6 +48,55 @@ test("configuration snapshots and listener payloads cannot mutate live settings"
   expect(result).toEqual({ palette: ["red", "blue"], size: 15, unchanged: true });
 });
 
+test("invalid replacements preserve the mounted plot, configuration and history", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    chart.trimLoci(["locus-a"]);
+    chart.locusSelection(["locus-b"]);
+    const host = document.querySelector("#plot"), datum = d3.select(host).datum();
+    const before = JSON.stringify(chart.project()), figure = chart.exportSvg(), events = [];
+    const stop = chart.on("change", (event) => events.push(event.type));
+    let rejected = 0;
+    const failures = [];
+    const invalid = [
+      (data) => { data.links.push({ uid: "bad", query: null, target: { uid: "a0" } }); },
+      (data) => { data.clusters[0].loci[0].genes[0].start = NaN; },
+      (data) => { data.groups[0].genes.push(data.groups[1].genes[0]); },
+    ];
+    for (const mutate of invalid) for (const project of [false, true]) {
+      const candidate = chart.project(); mutate(candidate.data);
+      candidate.config.cluster.nameFontSize = 30;
+      try { project ? chart.project(candidate) : chart.data(candidate.data); }
+      catch { rejected++; }
+      if (JSON.stringify(chart.project()) !== before || chart.exportSvg() !== figure ||
+          d3.select(host).datum() !== datum || !chart.canUndo() || chart.canRedo() ||
+          JSON.stringify(chart.locusSelection()) !== '["locus-b"]') failures.push({ project });
+    }
+    stop();
+    chart.undo(); const undone = chart.state().loci.length === 0;
+    chart.redo(); const replayed = JSON.stringify(chart.project()) === before;
+    chart.patch([{ type: "genes.update", ids: ["a0"], changes: { label: "Still editable" } }]);
+    return { rejected, failures, events, undone, replayed, editable: chart.data().clusters[0].loci[0].genes[0].label };
+  });
+  expect(result).toEqual({ rejected: 6, failures: [], events: [], undone: true, replayed: true, editable: "Still editable" });
+});
+
+test("projects retain dangling links and memberships after deleting a gene", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const data = structuredClone(chart.data());
+    data.links = [{ uid: "ab", query: { uid: "a0" }, target: { uid: "b0" }, identity: 0.9 }];
+    chart.data(data);
+    chart.patch([{ type: "genes.delete", ids: ["a0"] }]);
+    const before = chart.exportSvg(), project = JSON.parse(JSON.stringify(chart.project()));
+    chart.project(project);
+    return { unchanged: before === chart.exportSvg(), links: chart.data().links,
+      members: chart.data().groups[0].genes, deleted: !chart.data().clusters[0].loci[0].genes.some(({ uid }) => uid === "a0") };
+  });
+  expect(result.unchanged).toBe(true);
+  expect(result.deleted).toBe(true);
+  expect(result.links).toHaveLength(1);
+  expect(result.members).toContain("a0");
+});
+
 test("plot selection and batch actions resolve numeric IDs consistently", async ({ page }) => {
   const result = await page.evaluate(() => {
     const data = structuredClone(chart.data());

@@ -1,6 +1,6 @@
 import { validateTreePresentation } from "../tree/model.mjs";
 import { validateAnnotationPanels } from "../annotations/model.mjs";
-import { clonePlainValue, isRecordId } from "../utils/values.mjs";
+import { clonePlainValue, isPlainObject, isRecordId } from "../utils/values.mjs";
 
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned
@@ -39,12 +39,12 @@ function validateRecordIds(data) {
     const known = ids.get(kind) || new Set();
     ids.set(kind, known);
     for (const record of values) {
-      if (!record || !isRecordId(record.uid)) throw new TypeError(`Invalid chart data: ${kind} require non-empty string or finite numeric IDs.`);
+      if (!isPlainObject(record) || !isRecordId(record.uid)) throw new TypeError(`Invalid chart data: ${kind} require records with non-empty string or finite numeric IDs.`);
       if (known.has(record.uid)) throw new TypeError(`Invalid chart data: duplicate ${kind} ID '${record.uid}'.`);
       known.add(record.uid);
     }
   };
-  if (!data || typeof data !== "object" || Array.isArray(data)) throw new TypeError("Chart data must be an object.");
+  if (!isPlainObject(data)) throw new TypeError("Chart data must be an object.");
   records("clusters", data.clusters);
   for (const cluster of data.clusters) {
     records("loci", cluster.loci);
@@ -54,8 +54,49 @@ function validateRecordIds(data) {
   records("groups", data.groups ?? []);
 }
 
+function validateRecords(data) {
+  const fail = (message) => { throw new TypeError(`Invalid chart data: ${message}.`); };
+  const range = (record, description, gene = false) => {
+    if (!isPlainObject(record) || !Number.isFinite(record.start) || !Number.isFinite(record.end) || record.end < record.start) {
+      fail(`${description} requires finite start <= end`);
+    }
+    if (gene && ![-1, 0, 1].includes(record.strand)) fail(`${description} strand must be -1, 0 or 1`);
+  };
+  for (const cluster of data.clusters) for (const locus of cluster.loci) {
+    range(locus, `locus '${locus.uid}'`);
+    if (locus.offset !== undefined && !Number.isFinite(locus.offset)) fail(`locus '${locus.uid}' offset must be finite`);
+    if (locus.bio !== undefined) range(locus.bio, `locus '${locus.uid}' bio`);
+    for (const gene of locus.genes) {
+      range(gene, `gene '${gene.uid}'`, true);
+      if (gene.bio !== undefined) range(gene.bio, `gene '${gene.uid}' bio`, true);
+    }
+  }
+  for (const link of data.links) {
+    for (const side of ["query", "target"]) {
+      if (!isPlainObject(link[side]) || !isRecordId(link[side].uid)) fail(`link '${link.uid}' ${side} requires a gene ID`);
+    }
+    if (link.identity !== undefined && (!Number.isFinite(link.identity) || link.identity < 0 || link.identity > 1)) {
+      fail(`link '${link.uid}' identity must be a number from 0 to 1`);
+    }
+  }
+  const members = new Set();
+  for (const group of data.groups ?? []) {
+    if (!Array.isArray(group.genes)) fail(`group '${group.uid}' genes must be an array`);
+    for (const uid of group.genes) {
+      if (!isRecordId(uid)) fail(`group '${group.uid}' requires gene IDs`);
+      if (members.has(uid)) fail(`duplicate group membership for gene '${uid}'`);
+      members.add(uid);
+    }
+  }
+  if (data.config !== undefined) {
+    if (!isPlainObject(data.config)) fail("config must be an object");
+    if (data.config.updateGroups !== undefined && typeof data.config.updateGroups !== "boolean") fail("config.updateGroups must be boolean");
+  }
+}
+
 export function normalizeChartData(data, treeConfig = {}) {
   validateRecordIds(data);
+  validateRecords(data);
   const source = clonePlainValue(data);
   if (source.tree != null) {
     validateTree(source.tree, source.clusters);
