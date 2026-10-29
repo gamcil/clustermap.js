@@ -178,6 +178,7 @@ export function layoutTree({
   };
   const rootX = xs.get(tree.root);
   const branches = [];
+  if (config.tree.rootStem?.show) branches.push({ uid: "root-stem", nodeUid: tree.root, x1: rootX - 28, x2: rootX, style: branch });
   const stems = [];
   const nodes = [];
   const guides = [];

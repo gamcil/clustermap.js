@@ -14,6 +14,7 @@ const defaultConfig = {
     width: 100,
     useBranchLengths: true,
     node: { show: true },
+    rootStem: { show: false },
     branch: { width: 1.5, colour: null },
     support: { show: true, fontSize: 9, precision: 1 },
     scaleBar: { show: true, label: "" },

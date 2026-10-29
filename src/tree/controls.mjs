@@ -78,11 +78,11 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
     host.replaceChildren();
     host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
     const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
-    if (tree.distance?.kind === "mergeHeight") element("p", host, "Rerooting is unavailable for merge-height dendrograms.");
+    if (tree.distance?.kind === "mergeHeight") element("p", host, "Rerooting is unavailable for dendrograms.");
     const root = button(host, "Root here", () => patch([{ type: "tree.reroot", nodeId: uid }]));
     const unaryRoot = !tree.rooting && nodesById.get(tree.root).children?.length === 1;
     root.disabled = uid === tree.root || tree.distance?.kind === "mergeHeight" || unaryRoot;
-    root.title = tree.distance?.kind === "mergeHeight" ? "Merge-height trees cannot be rerooted"
+    root.title = tree.distance?.kind === "mergeHeight" ? "Dendrograms cannot be rerooted"
       : unaryRoot ? "Trees with a unary display root cannot be rerooted" : "Root on the branch above this node";
     const resetRoot = button(host, "Reset rooting", () => patch([{ type: "tree.reroot.reset" }]));
     resetRoot.disabled = !tree.rooting;

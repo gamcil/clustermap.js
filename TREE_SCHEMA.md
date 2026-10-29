@@ -161,6 +161,8 @@ interface TreeConfig {
 
   /** Internal-node circles and their pointer/keyboard targets; default true. */
   node?: { show?: boolean };
+  /** Decorative root stem; default false, follows branch styling. */
+  rootStem?: { show?: boolean };
 
   branch?: {
     width?: number;
@@ -239,7 +241,8 @@ reroot while retaining node labels and manual styles. Leaf IDs and cluster
 associations remain stable. An unannotated degree-two display root is suppressed
 by joining its incident branches; reset restores it with its original edge data.
 Annotated and multifurcating roots remain. Repeated rerooting reuses one generated
-root node. There is no artificial incoming branch at the display root.
+root node. `tree.rootStem.show` optionally draws a fixed 28-unit decorative stem
+at the display root. It defaults to false and does not represent branch length.
 Known lengths preserve leaf-to-leaf distances; missing lengths stay unknown.
 Support follows its edge and appears once on a split edge, on the selected side.
 Incoming branch styles follow edges and initially cover both halves. When the

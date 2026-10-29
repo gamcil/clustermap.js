@@ -34,6 +34,24 @@ function example() {
 
 const mark = (marks, uid) => marks.find((value) => value.uid === uid);
 
+test("the optional root stem shares branch styling, positioning and bounds", () => {
+  const { tree, config, build } = example();
+  config.tree.branch = { colour: "navy", width: 3 };
+  config.tree.scaleBar = { show: false }; config.tree.support.show = false;
+  const original = structuredClone(tree), hidden = build();
+  assert.equal(mark(hidden.branches, "root-stem"), undefined);
+  config.tree.rootStem = { show: true };
+  const shown = build(), stem = mark(shown.branches, "root-stem");
+  assert.equal(stem.x1, shown.rootX - 28); assert.equal(stem.x2, shown.rootX);
+  assert.equal(stem.y1, shown.ys.get(tree.root)); assert.equal(stem.y2, stem.y1);
+  assert.deepEqual(stem.style, { colour: "navy", width: 3 });
+  assert.ok(shown.bounds.minX < hidden.bounds.minX);
+  assert.equal(shown.branches.length, hidden.branches.length + 1);
+  config.tree.rootStem.show = false;
+  assert.deepEqual(build(), hidden);
+  assert.deepEqual(tree, original);
+});
+
 test("collapsed clades replace descendant marks and keep label clearance and hit testing", () => {
   const { tree, scene, build } = example();
   tree.presentation = { subtrees: { pair: { collapsed: true, branch: { colour: "red", width: 3 } } },

@@ -55,7 +55,7 @@ test("merge-height fixtures explain why rerooting is disabled", async ({ page })
     node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 100, clientY: 100 }));
   });
   await expect(page.getByRole("button", { name: "Root here", exact: true })).toBeDisabled();
-  await expect(page.getByText("Rerooting is unavailable for merge-height dendrograms.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Rerooting is unavailable for dendrograms.", { exact: true })).toBeVisible();
   const result = await page.evaluate(() => {
     const before = JSON.stringify(chart.project());
     try { chart.patch([{ type: "tree.reroot", nodeId: chart.data().tree.nodes.find((node) => node.uid !== chart.data().tree.root).uid }]); }
@@ -266,6 +266,33 @@ test("SVG tree edits, previews and history leave biological DOM untouched", asyn
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: root stem control supports history, export, projects and rerooting`, async ({ page }) => {
+    await page.evaluate(async (renderer) => {
+      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+      chart.config({ plot: { renderer } }); chart.clearHistory();
+      await import("/dist/editor.mjs");
+      const editor = document.createElement("clinker-editor"); editor.chart = chart; document.body.append(editor);
+      await editor.openAppearance({ section: "tree" });
+      window.branchCount = () => new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml").querySelectorAll("path.tree-branch").length;
+      window.originalTree = JSON.stringify(chart.data().tree);
+    }, renderer);
+    const toggle = page.getByRole("checkbox", { name: "Show root stem", exact: true });
+    await expect(toggle).not.toBeChecked();
+    const before = await page.evaluate(() => branchCount());
+    await toggle.check();
+    expect(await page.evaluate(() => branchCount())).toBe(before + 1);
+    expect(await page.evaluate(() => JSON.stringify(chart.data().tree) === originalTree)).toBe(true);
+    await page.evaluate(() => chart.undo()); await expect(toggle).not.toBeChecked();
+    expect(await page.evaluate(() => branchCount())).toBe(before);
+    await page.evaluate(() => { chart.redo(); chart.project(JSON.parse(JSON.stringify(chart.project()))); });
+    await expect(toggle).toBeChecked();
+    expect(await page.evaluate(() => branchCount())).toBe(before + 1);
+    await page.evaluate(() => { chart.patch([{ type: "tree.reroot", nodeId: "pair" }]); });
+    expect(await page.evaluate(() => branchCount())).toBe(before + 1);
+    await toggle.uncheck();
+    expect(await page.evaluate(() => branchCount())).toBe(before);
+  });
+
   for (const nodeId of ["pair", "leaf-a"]) {
     test(`${renderer}: rooting at ${nodeId} rebuilds ordering, persists reset and supports history`, async ({ page }) => {
       const result = await page.evaluate(({ renderer, nodeId }) => {
