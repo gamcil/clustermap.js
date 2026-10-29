@@ -35,6 +35,29 @@ test("tree, annotation and mixed presentation edits retain geometry and spatial 
   }
 });
 
+for (const scaleGenes of [false, true]) for (const flipped of [false, true]) {
+  test(`gene restoration preserves display state, scaleGenes=${scaleGenes}, flipped=${flipped}`, async () => {
+    const { flipLocus, getGeneState, getDisplayGenes } = await import("../../src/chart/state.mjs");
+    const data = normalizeChartData({ clusters: [{ uid: "cluster", loci: [{ uid: "locus", start: 0, end: 10000,
+      genes: [1000, 4000, 7000].map((start, index) => ({ uid: `g${index}`, start, end: start + 500, strand: 1 })) }] }], links: [], groups: [] });
+    const runtime = createChartRuntime(); runtime.configure({ plot: { scaleGenes } });
+    let state = createChartState(data);
+    const update = () => { runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state); runtime.updateScene(data); };
+    update();
+    const locus = data.clusters[0].loci[0];
+    if (flipped) { flipLocus(state, locus); update(); }
+    const before = structuredClone(locus.genes);
+    const displayed = locus.genes.map((gene) => ({ ...getGeneState(state, gene) }));
+    const deletion = applyChartOperations(data, createChartIndex(data), [{ type: "genes.delete", ids: ["g1"] }]);
+    state = createChartState(data, state); update();
+    applyChartOperations(data, createChartIndex(data), deletion.inverse);
+    state = createChartState(data, state); update();
+    assert.deepEqual(getDisplayGenes(state, locus.genes).map(({ uid }) => uid), flipped ? ["g2", "g1", "g0"] : ["g0", "g1", "g2"]);
+    assert.deepEqual(locus.genes, before);
+    assert.deepEqual(locus.genes.map((gene) => getGeneState(state, gene)), displayed);
+  });
+}
+
 test("public configuration reads and subscriber snapshots are independently owned", async () => {
   const { default: clusterMap } = await import("../../src/chart/chart.js");
   const chart = clusterMap();

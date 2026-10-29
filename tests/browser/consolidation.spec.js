@@ -139,6 +139,39 @@ test("SVG tree edits, previews and history leave biological DOM untouched", asyn
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  for (const scaleGenes of [false, true]) {
+    test(`${renderer}: flips and trim history preserve source order, scaleGenes=${scaleGenes}`, async ({ page }) => {
+      const result = await page.evaluate(({ renderer, scaleGenes }) => {
+        if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+        chart.config({ plot: { renderer, scaleGenes, transitionDuration: 0 } }); chart.clearHistory();
+        const source = JSON.stringify(chart.data()), original = chart.exportSvg();
+        chart.flipLoci(["locus-a"]);
+        const flipped = chart.exportSvg(), sourceAfterFlip = JSON.stringify(chart.data()) === source;
+        const exportedOrder = [...new DOMParser().parseFromString(flipped, "image/svg+xml")
+          .querySelector("g.locus").querySelectorAll("g.gene")].map((node) => node.id.split("gene_")[1]);
+        chart.undo(); const undone = chart.exportSvg() === original;
+        chart.redo(); const redone = chart.exportSvg() === flipped;
+        chart.patch([{ type: "genes.delete", ids: ["a1"] }]);
+        chart.undo(); const restoredGene = chart.exportSvg() === flipped;
+        const snapshot = chart.state(), loci = new Map(snapshot.loci), genes = new Map(snapshot.genes);
+        const locus = loci.get("locus-a");
+        locus.trimLeft = "a1"; locus.start = genes.get("locus-a:a1").start;
+        chart.state(snapshot);
+        const beforeTrim = JSON.stringify(chart.project());
+        chart.trimLoci(["locus-a", "locus-b"]);
+        const trimmed = JSON.stringify(chart.project());
+        const keptTrim = new Map(chart.state().loci).get("locus-a").trimLeft === "a1";
+        chart.undo(); const trimUndo = JSON.stringify(chart.project()) === beforeTrim;
+        chart.redo(); const trimRedo = JSON.stringify(chart.project()) === trimmed;
+        const project = chart.project(); chart.project(project);
+        return { sourceAfterFlip, undone, redone, restoredGene, keptTrim, trimUndo, trimRedo,
+          sourceAfterReload: JSON.stringify(chart.data()) === source, exportedOrder };
+      }, { renderer, scaleGenes });
+      expect(result).toEqual({ sourceAfterFlip: true, undone: true, redone: true, restoredGene: true, keptTrim: true,
+        trimUndo: true, trimRedo: true, sourceAfterReload: true, exportedOrder: ["a0", "a1", "a2"] });
+    });
+  }
+
   test(`${renderer}: flip completion and cancellation stay safe across interruptions`, async ({ page }) => {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));

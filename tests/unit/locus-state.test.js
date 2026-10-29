@@ -37,15 +37,57 @@ for (const flipped of [false, true]) {
 }
 
 test("flipping a locus twice restores its gene state", async () => {
-  const { createChartState, flipLocus } = await import("../../src/chart/state.mjs");
+  const { createChartState, flipLocus, getDisplayGenes } = await import("../../src/chart/state.mjs");
   const locus = createLocus();
   const before = structuredClone(locus);
   const state = createChartState({ clusters: [{ loci: [locus] }] });
+  Object.freeze(locus.genes);
 
   flipLocus(state, locus);
+  assert.deepEqual(locus, before, "a single flip leaves source records and their order intact");
+  assert.deepEqual(getDisplayGenes(state, locus.genes).map(({ uid }) => uid), ["b", "a"]);
   flipLocus(state, locus);
 
   assert.deepEqual(locus, before);
+});
+
+for (const scaleGenes of [false, true]) {
+  test(`flips, trims and restored snapshots preserve source order, scaleGenes=${scaleGenes}`, async () => {
+    const { createChartState, flipLocus, getGeneState, getDisplayGenes, synchronizeLocusState, trimLocus } =
+      await import("../../src/chart/state.mjs");
+    const { serializeChartState, chartStateFromSnapshot } = await import("../../src/chart/snapshot.mjs");
+    const locus = { ...createLocus(), genes: [
+      { uid: "c", locusUid: "locus", start: 4500, end: 6000, strand: 1 },
+      { uid: "a", locusUid: "locus", start: 1000, end: 2000, strand: -1 },
+      { uid: "b", locusUid: "locus", start: 2500, end: 3000, strand: 1 },
+    ] };
+    const data = { clusters: [{ uid: "cluster", loci: [locus] }] }, before = structuredClone(data);
+    Object.freeze(locus.genes);
+    let state = createChartState(data);
+    synchronizeLocusState(state, locus, scaleGenes);
+    const initial = serializeChartState(state, data);
+    assert.deepEqual(getDisplayGenes(state, locus.genes).map(({ uid }) => uid), ["a", "b", "c"]);
+    flipLocus(state, locus); synchronizeLocusState(state, locus, scaleGenes);
+    assert.deepEqual(getDisplayGenes(state, locus.genes).map(({ uid }) => uid), ["c", "b", "a"]);
+    assert.equal(state.loci.get(locus.uid).end, scaleGenes ? 10000 : 3000);
+    trimLocus(state, locus, { edge: "left", position: getGeneState(state, locus.genes[2]).start,
+      coordinateFor: (value) => value, scaleGenes });
+    synchronizeLocusState(state, locus, scaleGenes);
+    const trimmed = serializeChartState(state, data);
+    state = chartStateFromSnapshot(data, trimmed); synchronizeLocusState(state, locus, scaleGenes);
+    assert.deepEqual(serializeChartState(state, data), trimmed);
+    state = chartStateFromSnapshot(data, initial); synchronizeLocusState(state, locus, scaleGenes);
+    assert.deepEqual(serializeChartState(state, data), initial);
+    assert.deepEqual(data, before);
+  });
+}
+
+test("an empty unscaled locus has no packed gene extent", async () => {
+  const { createChartState, synchronizeLocusState } = await import("../../src/chart/state.mjs");
+  const locus = { ...createLocus(), genes: [] };
+  const state = createChartState({ clusters: [{ loci: [locus] }] });
+  synchronizeLocusState(state, locus, false);
+  assert.equal(state.loci.get(locus.uid).end, 0);
 });
 
 test("synchronizing a trimmed locus updates gene and locus coordinates", async () => {
@@ -72,7 +114,7 @@ test("synchronizing a trimmed locus updates gene and locus coordinates", async (
 });
 
 test("flipping a trimmed locus synchronizes its bounds in display coordinates", async () => {
-  const { createChartState, flipLocus, getGeneState, synchronizeLocusState } = await import(
+  const { createChartState, flipLocus, getGeneState, getDisplayGenes, synchronizeLocusState } = await import(
     "../../src/chart/state.mjs"
   );
   const locus = createLocus();
@@ -91,13 +133,13 @@ test("flipping a trimmed locus synchronizes its bounds in display coordinates", 
   assert.equal(locusState.start, 3500);
   assert.equal(locusState.end, 10000);
   assert.deepEqual(
-    locus.genes.map((gene) => getGeneState(state, gene).start),
+    getDisplayGenes(state, locus.genes).map((gene) => getGeneState(state, gene).start),
     [3500, 6500, 9000]
   );
 });
 
 test("trimming a flipped locus retains the selected display-side genes", async () => {
-  const { createChartState, flipLocus, getGeneState, synchronizeLocusState } = await import(
+  const { createChartState, flipLocus, getGeneState, getDisplayGenes, synchronizeLocusState } = await import(
     "../../src/chart/state.mjs"
   );
   const locus = createLocus();
@@ -115,7 +157,7 @@ test("trimming a flipped locus retains the selected display-side genes", async (
   assert.equal(locusState.start, 0);
   assert.equal(locusState.end, 7500);
   assert.deepEqual(
-    locus.genes.map((gene) => getGeneState(state, gene).start),
+    getDisplayGenes(state, locus.genes).map((gene) => getGeneState(state, gene).start),
     [3500, 6500, 9000]
   );
 });

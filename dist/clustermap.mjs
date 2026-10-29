@@ -8300,6 +8300,11 @@ function removeMissing(records, allowed) {
   for (const uid of records.keys()) if (!allowed.has(uid)) records.delete(uid);
 }
 
+function flipGeneState(state, length) {
+  [state.start, state.end] = [length - state.end, length - state.start];
+  state.strand = state.strand === 1 ? -1 : 1;
+}
+
 function createChartState(data, previous = null) {
   const loci = previous?.loci || new Map();
   const genes = previous?.genes || new Map();
@@ -8358,11 +8363,13 @@ function createChartState(data, previous = null) {
         const key = `${locus.uid}:${gene.uid}`;
         geneKeys.add(key);
         if (!genes.has(key)) {
-          genes.set(key, {
+          const display = {
             start: geneBio.start - locusBio.start,
             end: geneBio.end - locusBio.start,
             strand: geneBio.strand,
-          });
+          };
+          if (loci.get(locus.uid).flipped) flipGeneState(display, locus.end - locus.start);
+          genes.set(key, display);
         }
       }
     }
@@ -8471,6 +8478,14 @@ function getGeneState(chartState, gene) {
   return chartState.genes.get(`${gene.locusUid}:${gene.uid}`);
 }
 
+function getDisplayGenes(chartState, genes, { scaleGenes = true } = {}) {
+  // Restored genes can have biological coordinates among already packed genes.
+  const startFor = scaleGenes ? (gene) => getGeneState(chartState, gene).start : (gene) => (gene.bio || gene).start;
+  const ordered = [...genes].sort((left, right) => startFor(left) - startFor(right));
+  if (!scaleGenes && chartState.loci.get(genes[0]?.locusUid)?.flipped) ordered.reverse();
+  return ordered;
+}
+
 function formatLocusText(loci, chartState, hideCoordinates) {
   return loci
     .map((locus) => {
@@ -8505,28 +8520,25 @@ function formatLocusText(loci, chartState, hideCoordinates) {
  * a renderer or a D3 scale.
  */
 function synchronizeLocusState(chartState, locus, scaleGenes) {
-  locus.genes.forEach((gene, index, genes) => {
-    const state = getGeneState(chartState, gene);
-    const length = scaleGenes ? state.end - state.start : 1000;
-    state.start = scaleGenes
-      ? state.start
-      : index > 0
-      ? getGeneState(chartState, genes[index - 1]).end
-      : 0;
-    state.end = state.start + length;
-  });
+  let fullEnd = locus.end;
+  if (!scaleGenes) {
+    fullEnd = 0;
+    for (const gene of getDisplayGenes(chartState, locus.genes, { scaleGenes: false })) {
+      const state = getGeneState(chartState, gene);
+      state.start = fullEnd;
+      fullEnd += 1000;
+      state.end = fullEnd;
+    }
+  }
 
   const state = getLocusState(chartState, locus);
   const oldStart = state.start;
-  const lastGene = locus.genes[locus.genes.length - 1];
   state.start = state.trimLeft
     ? getGeneState(chartState, state.trimLeft).start
     : 0;
   state.end = state.trimRight
     ? getGeneState(chartState, state.trimRight).end
-    : scaleGenes
-    ? locus.end
-    : lastGene.end;
+    : fullEnd;
 
   return { oldStart };
 }
@@ -8559,10 +8571,7 @@ function trimLocus(chartState, locus, {
   scaleGenes,
 }) {
   const state = getLocusState(chartState, locus);
-  const genes = [...locus.genes].sort(
-    (left, right) =>
-      getGeneState(chartState, left).start - getGeneState(chartState, right).start
-  );
+  const genes = getDisplayGenes(chartState, locus.genes, { scaleGenes });
 
   if (edge === "left") {
     const visible = genes.filter(
@@ -8598,13 +8607,10 @@ function trimLocus(chartState, locus, {
 /** Trim both flanks of a locus to its displayed outermost genes. */
 function trimLocusToGeneBounds(chartState, locus) {
   const state = chartState.loci.get(locus.uid);
-  const genes = locus.genes.filter((gene) => {
+  const genes = getDisplayGenes(chartState, locus.genes.filter((gene) => {
     const display = getGeneState(chartState, gene);
     return display.start >= state.start && display.end <= state.end;
-  }).sort(
-    (left, right) =>
-      getGeneState(chartState, left).start - getGeneState(chartState, right).start
-  );
+  }));
   if (!genes.length) return false;
   const first = genes[0];
   const last = genes.reduce((rightmost, gene) =>
@@ -8721,16 +8727,7 @@ function flipLocus(chartState, locus) {
     state.trimLeft,
   ];
 
-  locus.genes.forEach((gene) => {
-    const geneState = getGeneState(chartState, gene);
-    const start = geneState.start;
-    geneState.start = length - geneState.end;
-    geneState.end = length - start;
-    geneState.strand = geneState.strand === 1 ? -1 : 1;
-  });
-  locus.genes.sort(
-    (a, b) => getGeneState(chartState, a).start - getGeneState(chartState, b).start
-  );
+  for (const gene of locus.genes) flipGeneState(getGeneState(chartState, gene), length);
   return true;
 }
 
