@@ -14,6 +14,7 @@ const fieldsForType = {
   "clusters.update": new Set(["label", "name"]),
   "links.update": new Set(["label", "colour", "hidden", "identity"]),
 };
+const structuralGroupTypes = new Set(["groups.create", "groups.delete", "groups.merge", "groups.restore"]);
 
 // Group edits only replace the group lookup; gene/link structure edits also
 // invalidate the biological indexes and automatic grouping.
@@ -24,7 +25,7 @@ function operationEffects(operations) {
       reindex = "data"; rebuildState = true;
     } else if (type === "links.delete" || type === "links.restore") {
       reindex = "data";
-    } else if (!reindex && ["groups.create", "groups.delete", "groups.merge"].includes(type)) {
+    } else if (!reindex && structuralGroupTypes.has(type)) {
       reindex = "groups";
     }
   }
@@ -82,7 +83,7 @@ function validateUpdate(operation, index, groupIds) {
   const records = recordsForOperation(index, operation.type);
   for (const uid of ids) {
     if (operation.type === "groups.update") requireKnownGroup(groupIds, uid, operation.type);
-    if (!records.has(uid)) throw operationError(`${operation.type} refers to unknown ID ${uid}`);
+    else if (!records.has(uid)) throw operationError(`${operation.type} refers to unknown ID ${uid}`);
   }
   return { type: operation.type, ids, changes: { ...operation.changes } };
 }
@@ -148,6 +149,28 @@ function validateStructuralGroupOperation(operation, index, groupIds) {
 
 function validateOperation(operation, index, groupIds) {
   if (!operation || typeof operation !== "object") throw operationError("each operation must be an object");
+  // History restores retained memberships, including IDs of deleted genes.
+  if (operation.type === "groups.restore") {
+    if (!Array.isArray(operation.records) || !Array.isArray(operation.removeIds) || operation.removeIds.some((uid) => !isRecordId(uid))) {
+      throw operationError("groups.restore requires records and removeIds arrays");
+    }
+    const restored = new Set(), members = new Set();
+    for (const record of operation.records) {
+      const group = record?.group;
+      if (!Number.isInteger(record?.index) || record.index < 0 || !isPlainObject(group) || !isRecordId(group.uid) ||
+          !Array.isArray(group.genes) || group.genes.some((uid) => !isRecordId(uid))) throw operationError("groups.restore contains an invalid record");
+      validateRecordFields(group, (message) => { throw operationError(`groups.restore ${message}`); });
+      if (restored.has(group.uid)) throw operationError("groups.restore contains duplicate group IDs");
+      restored.add(group.uid);
+      for (const uid of group.genes) {
+        if (members.has(uid)) throw operationError("groups.restore contains duplicate memberships");
+        members.add(uid);
+      }
+    }
+    operation.removeIds.forEach((uid) => { requireKnownGroup(groupIds, uid, operation.type); groupIds.delete(uid); });
+    restored.forEach((uid) => groupIds.add(uid));
+    return structuredClone(operation);
+  }
   if (operation.type === "genes.delete") {
     return { type: operation.type, ids: validateGeneIds(index, operation.ids, operation.type) };
   }
@@ -250,6 +273,14 @@ function applyOperation(data, index, operation) {
       data.groups = data.groups.filter((group) => !ids.has(group.uid));
       return;
     }
+    case "groups.restore": {
+      const ids = new Set([...operation.removeIds, ...operation.records.map(({ group }) => group.uid)]);
+      data.groups = data.groups.filter((group) => !ids.has(group.uid));
+      for (const { index: position, group } of [...operation.records].sort((a, b) => a.index - b.index)) {
+        data.groups.splice(Math.min(position, data.groups.length), 0, structuredClone(group));
+      }
+      return;
+    }
     case "groups.merge": {
       const target = data.groups.find((group) => group.uid === operation.targetId);
       const sourceIds = new Set(operation.sourceIds);
@@ -266,13 +297,23 @@ function applyOperation(data, index, operation) {
   }
 }
 
-function publicGroup(group) {
-  return Object.fromEntries(["uid", "label", "subtitle", "colour", "hidden"]
-    .filter((key) => key in group)
-    .map((key) => [key, structuredClone(group[key])]));
-}
-
 function inverseOperation(data, index, operation) {
+  if (operation.type.startsWith("groups.") && !["groups.reorder", "groups.update"].includes(operation.type)) {
+    const affected = new Set(operation.ids || operation.removeIds || []);
+    if (operation.type === "groups.create") affected.add(operation.group.uid);
+    if (operation.type === "groups.assignGenes") affected.add(operation.groupId);
+    if (operation.type === "groups.merge") {
+      affected.add(operation.targetId);
+      operation.sourceIds.forEach((uid) => affected.add(uid));
+    }
+    if (operation.type === "groups.restore") operation.records.forEach(({ group }) => affected.add(group.uid));
+    const genes = new Set(operation.geneIds);
+    for (const group of data.groups) if (group.genes.some((uid) => genes.has(uid))) affected.add(group.uid);
+    const records = data.groups.flatMap((group, position) => affected.has(group.uid)
+      ? [{ index: position, group: structuredClone(group) }] : []);
+    const existing = new Set(records.map(({ group }) => group.uid));
+    return [{ type: "groups.restore", records, removeIds: [...affected].filter((uid) => !existing.has(uid)) }];
+  }
   const records = fieldsForType[operation.type] && recordsForOperation(index, operation.type);
   if (records) {
     const fields = Object.keys(operation.changes);
@@ -304,39 +345,6 @@ function inverseOperation(data, index, operation) {
   if (operation.type === "groups.reorder") {
     return [{ type: "groups.reorder", ids: data.groups.map((group) => group.uid) }];
   }
-  if (["groups.create", "groups.assignGenes", "groups.unassignGenes"].includes(operation.type)) {
-    const affected = new Set(operation.geneIds);
-    // Restore complete memberships so undo preserves member order as well.
-    const restore = data.groups.filter((group) => group.genes?.some((uid) => affected.has(uid)))
-      .map((group) => ({ type: "groups.assignGenes", groupId: group.uid, geneIds: [...group.genes] }));
-    return [
-      operation.type === "groups.create"
-        ? { type: "groups.delete", ids: [operation.group.uid] }
-        : { type: "groups.unassignGenes", geneIds: operation.geneIds },
-      ...restore,
-    ];
-  }
-  if (operation.type === "groups.delete") {
-    const removed = new Set(operation.ids);
-    const groups = data.groups.filter((group) => removed.has(group.uid));
-    return [
-      ...groups.map((group) => ({ type: "groups.create", group: publicGroup(group), geneIds: [...(group.genes || [])] })),
-      { type: "groups.reorder", ids: data.groups.map((group) => group.uid) },
-    ];
-  }
-  if (operation.type === "groups.merge") {
-    const sourceIds = new Set(operation.sourceIds);
-    const previous = data.groups.filter((group) => sourceIds.has(group.uid) || group.uid === operation.targetId);
-    const target = previous.find((group) => group.uid === operation.targetId);
-    const sources = previous.filter((group) => group.uid !== operation.targetId);
-    const geneIds = [...new Set(previous.flatMap((group) => group.genes || []))];
-    return [
-      ...(geneIds.length ? [{ type: "groups.unassignGenes", geneIds }] : []),
-      ...(target?.genes?.length ? [{ type: "groups.assignGenes", groupId: target.uid, geneIds: [...target.genes] }] : []),
-      ...sources.map((group) => ({ type: "groups.create", group: publicGroup(group), geneIds: [...(group.genes || [])] })),
-      { type: "groups.reorder", ids: data.groups.map((group) => group.uid) },
-    ];
-  }
   return [];
 }
 
@@ -362,7 +370,7 @@ export function applyChartOperations(data, index, operations, treeConfig = {}) {
   });
   validateTreeOperationBatch(data.tree, applied, treeConfig);
   validateAnnotationChanges(data, annotationDraft.annotationPanels);
-  const hasStructuralGroupEdit = applied.some((operation) => operation.type !== "groups.update" && operation.type.startsWith("groups."));
+  const hasStructuralGroupEdit = applied.some((operation) => !["groups.update", "groups.restore"].includes(operation.type) && operation.type.startsWith("groups."));
   const inverse = [];
   for (const operation of applied) {
     if (isAnnotationOperation(operation)) {
@@ -377,6 +385,7 @@ export function applyChartOperations(data, index, operations, treeConfig = {}) {
     }
     inverse.unshift(...inverseOperation(data, index, operation));
     applyOperation(data, index, operation);
+    if (structuralGroupTypes.has(operation.type)) index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
   }
   // Link-derived grouping is useful for an untouched chart, but a deliberate
   // membership edit makes the user's group assignments authoritative.
