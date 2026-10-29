@@ -28,7 +28,8 @@ import {
   restoreLocusBounds,
   trimLocusToGeneBounds,
 } from "./state.mjs";
-import { createChartIndex } from "../data/index.mjs";
+import { createChartIndex, recordForId } from "../data/index.mjs";
+import { selectionRange } from "../interaction/selection.mjs";
 import { normalizeChartData } from "../data/normalize.mjs";
 import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,
   annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell } from "../annotations/model.mjs";
@@ -673,32 +674,32 @@ export default function clusterMap() {
   function selectionIds(kind, ids) {
     const records = kind === "clusters" ? chartIndex?.clusterById : chartIndex?.locusById;
     if (!records) return new Set(ids);
-    return new Set([...ids].map((uid) => records.get(uid) ||
-      [...records.values()].find((record) => String(record.uid) === String(uid)))
-      .filter((record) => record && !chartState.excludedClusters.has(kind === "clusters" ? record.uid : record.clusterUid) &&
-        (kind === "clusters" || !chartState.excludedLoci.has(record.uid))).map((record) => record.uid));
+    const selected = new Set();
+    for (const uid of ids) {
+      const record = recordForId(records, uid);
+      if (record && !chartState.excludedClusters.has(kind === "clusters" ? record.uid : record.clusterUid) &&
+          (kind === "clusters" || !chartState.excludedLoci.has(record.uid))) selected.add(record.uid);
+    }
+    return selected;
   }
 
   function selectPlotRecord(kind, uid, { range = false, subtract = false } = {}) {
     const order = kind === "clusters" ? displayClusterOrder() : displayClusterOrder().flatMap((id) =>
       runtime.lookup.clusterData(id).loci.map((locus) => locus.uid));
-    const start = kind === plotSelection.kind ? order.indexOf(selectionAnchor) : -1;
-    const end = order.indexOf(uid);
+    const selected = selectionRange(order, kind === plotSelection.kind ? selectionAnchor : null, uid, range);
     const ids = new Set(plotSelection.kind === kind ? plotSelection.ids : []);
-    if (range && start >= 0 && end >= 0) {
-      for (const id of order.slice(Math.min(start, end), Math.max(start, end) + 1)) {
+    if (selected.ranged) {
+      for (const id of selected.ids) {
         if (subtract) ids.delete(id); else ids.add(id);
       }
     } else if (subtract || ids.has(uid)) ids.delete(uid);
     else ids.add(uid);
-    const anchor = range && start >= 0 ? selectionAnchor : uid;
     my.selection({ kind, ids });
-    if (ids.size) selectionAnchor = anchor;
+    if (ids.size) selectionAnchor = selected.anchor;
   }
 
   function locusForId(uid) {
-    return chartIndex?.locusById.get(uid) || [...(chartIndex?.locusById || [])]
-      .find(([key]) => String(key) === String(uid))?.[1];
+    return recordForId(chartIndex?.locusById, uid);
   }
 
   const chooseLegendColour = (group) => {

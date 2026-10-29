@@ -48,6 +48,27 @@ test("configuration snapshots and listener payloads cannot mutate live settings"
   expect(result).toEqual({ palette: ["red", "blue"], size: 15, unchanged: true });
 });
 
+test("plot selection and batch actions resolve numeric IDs consistently", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const data = structuredClone(chart.data());
+    data.clusters.forEach((cluster, index) => { cluster.loci[0].uid = index; });
+    chart.data(data);
+    chart.locusSelection(["0", "1", "missing"]);
+    const selected = chart.locusSelection();
+    chart.trimLoci(["0"]);
+    const trimmed = new Map(chart.state().loci).get(0);
+    chart.restoreLoci([0]);
+    const restored = new Map(chart.state().loci).get(0);
+    chart.remove({ loci: [1] });
+    chart.locusSelection(["0", "1", 1, "2"]);
+    return { selected, trimmed, restored, visible: chart.locusSelection() };
+  });
+  expect(result.selected).toEqual([0, 1]);
+  expect(result.trimmed).toMatchObject({ start: 100, end: 6600 });
+  expect(result.restored).toBeUndefined();
+  expect(result.visible).toEqual([0, 2]);
+});
+
 test("batch trim respects a pretrimmed member and remains one undoable edit", async ({ page }) => {
   const result = await page.evaluate(() => {
     const state = chart.state();

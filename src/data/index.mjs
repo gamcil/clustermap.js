@@ -31,3 +31,11 @@ export function createChartIndex(data) {
 
   return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId };
 }
+
+export function recordForId(records, uid) {
+  if (!records) return;
+  const exact = records.get(uid);
+  if (exact) return exact;
+  const text = String(uid);
+  for (const [key, record] of records) if (String(key) === text) return record;
+}

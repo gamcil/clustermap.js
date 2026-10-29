@@ -1,5 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { recordForId } from "../../src/data/index.mjs";
+
+test("record lookups preserve typed IDs before falling back to their text form", () => {
+  const zero = { uid: 0 }, numeric = { uid: 1 }, text = { uid: "1" };
+  const records = new Map([[0, zero], [1, numeric], ["1", text]]);
+  assert.equal(recordForId(records, 0), zero);
+  assert.equal(recordForId(records, "0"), zero);
+  assert.equal(recordForId(records, 1), numeric);
+  assert.equal(recordForId(records, "1"), text);
+  assert.equal(recordForId(records, "missing"), undefined);
+  assert.equal(recordForId(null, 0), undefined);
+});
 
 test("chart index maps hierarchy and links by stable identifiers", async () => {
   const { createChartIndex } = await import("../../src/data/index.mjs");

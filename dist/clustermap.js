@@ -8766,6 +8766,24 @@
     return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId };
   }
 
+  function recordForId(records, uid) {
+    if (!records) return;
+    const exact = records.get(uid);
+    if (exact) return exact;
+    const text = String(uid);
+    for (const [key, record] of records) if (String(key) === text) return record;
+  }
+
+  function selectionRange(orderedIds, anchor, id, range = false) {
+    const start = orderedIds.indexOf(anchor), end = orderedIds.indexOf(id);
+    const ranged = range && start >= 0 && end >= 0;
+    return {
+      ids: ranged ? orderedIds.slice(Math.min(start, end), Math.max(start, end) + 1) : [id],
+      anchor: range && start >= 0 ? anchor : id,
+      ranged,
+    };
+  }
+
   // Chart data is JSON-like: it is also the format used for data/project export.
   // Clone plain values at the boundary so chart edits never mutate caller-owned
   // records, including nested link endpoints and user metadata.
@@ -15993,32 +16011,32 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     function selectionIds(kind, ids) {
       const records = kind === "clusters" ? chartIndex?.clusterById : chartIndex?.locusById;
       if (!records) return new Set(ids);
-      return new Set([...ids].map((uid) => records.get(uid) ||
-        [...records.values()].find((record) => String(record.uid) === String(uid)))
-        .filter((record) => record && !chartState.excludedClusters.has(kind === "clusters" ? record.uid : record.clusterUid) &&
-          (kind === "clusters" || !chartState.excludedLoci.has(record.uid))).map((record) => record.uid));
+      const selected = new Set();
+      for (const uid of ids) {
+        const record = recordForId(records, uid);
+        if (record && !chartState.excludedClusters.has(kind === "clusters" ? record.uid : record.clusterUid) &&
+            (kind === "clusters" || !chartState.excludedLoci.has(record.uid))) selected.add(record.uid);
+      }
+      return selected;
     }
 
     function selectPlotRecord(kind, uid, { range = false, subtract = false } = {}) {
       const order = kind === "clusters" ? displayClusterOrder() : displayClusterOrder().flatMap((id) =>
         runtime.lookup.clusterData(id).loci.map((locus) => locus.uid));
-      const start = kind === plotSelection.kind ? order.indexOf(selectionAnchor) : -1;
-      const end = order.indexOf(uid);
+      const selected = selectionRange(order, kind === plotSelection.kind ? selectionAnchor : null, uid, range);
       const ids = new Set(plotSelection.kind === kind ? plotSelection.ids : []);
-      if (range && start >= 0 && end >= 0) {
-        for (const id of order.slice(Math.min(start, end), Math.max(start, end) + 1)) {
+      if (selected.ranged) {
+        for (const id of selected.ids) {
           if (subtract) ids.delete(id); else ids.add(id);
         }
       } else if (subtract || ids.has(uid)) ids.delete(uid);
       else ids.add(uid);
-      const anchor = range && start >= 0 ? selectionAnchor : uid;
       my.selection({ kind, ids });
-      if (ids.size) selectionAnchor = anchor;
+      if (ids.size) selectionAnchor = selected.anchor;
     }
 
     function locusForId(uid) {
-      return chartIndex?.locusById.get(uid) || [...(chartIndex?.locusById || [])]
-        .find(([key]) => String(key) === String(uid))?.[1];
+      return recordForId(chartIndex?.locusById, uid);
     }
 
     const chooseLegendColour = (group) => {
@@ -16462,7 +16480,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         };
         if (annotationOverlay) annotationOverlay.update(annotationUiContext);
         else if (!annotationUiLoad) {
-          annotationUiLoad = import('./annotationOverlay.mjs?v=2e0bf7e18ffa').then(({ createAnnotationOverlay }) => {
+          annotationUiLoad = import('./annotationOverlay.mjs?v=74acd828aaa6').then(({ createAnnotationOverlay }) => {
             if (!annotationUiContext) return;
             annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
               ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,
