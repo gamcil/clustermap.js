@@ -72,6 +72,8 @@ function createAnnotationControls({ getData, patch, document, panelUid, annotati
     for (const [field, label, fallback] of [...sizes, ["gap", "Panel gap", defaults.gap], ...fonts]) {
       input(advanced, label, field, panel[field] ?? fallback, "number", { min: ["gap", "cellGap"].includes(field) ? "0" : "0.1" });
     }
+    input(advanced, "Show y-axis line", "showYAxisLine", panel.showYAxisLine ?? false, "checkbox");
+    input(advanced, "Show y-axis grid lines", "showYGridLines", panel.showYGridLines ?? false, "checkbox");
     if (!groups) {
       input(advanced, "Border width", "cellBorderWidth", panel.cellBorderWidth ?? defaults.cellBorderWidth, "number", { min: "0" });
       input(advanced, "Border colour", "cellBorderColour", panel.cellBorderColour ?? defaults.cellBorderColour, "color");

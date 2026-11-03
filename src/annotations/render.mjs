@@ -36,14 +36,17 @@ export function renderSvgAnnotations(plot, scene, { preview = null, transition =
   moving(panels).attr("transform", (panel) => `translate(${panel.x},0)`);
   panels.each(function (panel) {
     const group = select(this);
+    const background = group.selectAll("g.annotationGrid").data([null]).join("g")
+      .attr("class", "annotationGrid").lower().selectAll("rect").data(panel.rects.filter((item) => item.background)).join("rect");
     const rows = group.selectAll("g.annotationRow").data(panel.rows, (row) => row.uid).join("g")
       .attr("class", "annotationRow");
     moving(rows).attr("transform", (row) => `translate(0,${row.y})`);
     const cells = rows.selectAll("rect").data((row) =>
       row.cells.slice(row.firstCell ?? 0, row.lastCell ?? row.cells.length).flatMap((cell) => cell.rects)).join("rect");
     const key = group.selectAll("g.annotationKey").data([null]).join("g")
-      .attr("class", "annotationKey").selectAll("rect").data(panel.rects).join("rect");
-    for (const rects of [cells, key]) moving(rects)
+      .attr("class", "annotationKey").selectAll("rect").data(panel.rects.filter((item) => !item.background)).join("rect");
+    for (const rects of [background, cells, key]) moving(rects)
+      .attr("class", (item) => item.kind ? `annotation-${item.kind}` : null)
       .attr("x", (item) => item.x).attr("y", (item) => item.y)
       .attr("width", (item) => item.width).attr("height", (item) => item.height).attr("fill", (item) => item.fill);
     const texts = group.selectAll("text").data(panel.texts).join("text")
@@ -63,6 +66,7 @@ export function drawCanvasAnnotations(context, scene, preview = null, { showGeom
       context.fillRect(item.x, item.y, item.width, item.height);
     };
     if (showGeometry) {
+      for (const item of panel.rects) if (item.background) rect(item);
       for (const row of panel.rows) {
         context.save(); context.translate(0, row.y);
         for (let i = row.firstCell ?? 0; i < (row.lastCell ?? row.cells.length); i++) {
@@ -70,7 +74,7 @@ export function drawCanvasAnnotations(context, scene, preview = null, { showGeom
         }
         context.restore();
       }
-      for (const item of panel.rects) rect(item);
+      for (const item of panel.rects) if (!item.background) rect(item);
     }
     for (const item of showLabels ? panel.texts : []) {
       context.save();

@@ -285,6 +285,42 @@ test("SVG tree edits, previews and history leave biological DOM untouched", asyn
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: annotation y-axis controls persist through history and export`, async ({ page }) => {
+    await page.evaluate(() => {
+      const data = structuredClone(chart.data());
+      data.annotationPanels = [{ uid: "axis-demo", type: "bar", title: "Axis demo", columns: ["Value"],
+        values: { a: [1], b: [2], c: [3] }, scale: { domain: [0, 4] }, showKey: false }];
+      chart.config({ annotations: { enabled: true } }); chart.data(data);
+    });
+    const cell = await page.locator("g.annotationRow rect").nth(1).boundingBox();
+    await page.evaluate((renderer) => {
+      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+      chart.config({ plot: { renderer } }); chart.clearHistory();
+    }, renderer);
+    await page.locator(".cm-annotation-frame:not(.cm-annotation-add)").waitFor({ state: "attached" });
+    await page.mouse.move(cell.x + cell.width / 2, cell.y + cell.height / 2);
+    await page.getByRole("button", { name: "Edit annotation panel Axis demo", exact: true }).click();
+    await page.locator(".cm-annotation-menu summary").filter({ hasText: "Advanced" }).click();
+    const axis = page.getByRole("checkbox", { name: "Show y-axis line", exact: true });
+    const grid = page.getByRole("checkbox", { name: "Show y-axis grid lines", exact: true });
+    await expect(axis).not.toBeChecked(); await expect(grid).not.toBeChecked();
+    await axis.check(); await grid.check();
+    const marks = () => page.evaluate(() => {
+      const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml");
+      return { axes: svg.querySelectorAll(".annotation-y-axis").length, grids: svg.querySelectorAll(".annotation-y-grid").length,
+        behind: svg.querySelector("g.annotationPanel").firstElementChild.classList.contains("annotationGrid") };
+    });
+    expect(await marks()).toEqual({ axes: 1, grids: 3, behind: true });
+    await page.evaluate(() => chart.undo());
+    await expect(axis).toBeChecked(); await expect(grid).not.toBeChecked();
+    expect(await marks()).toEqual({ axes: 1, grids: 0, behind: true });
+    await page.evaluate(() => chart.undo());
+    expect(await marks()).toEqual({ axes: 0, grids: 0, behind: true });
+    await page.evaluate(() => { chart.redo(); chart.redo(); chart.project(JSON.parse(JSON.stringify(chart.project()))); });
+    expect(await marks()).toEqual({ axes: 1, grids: 3, behind: true });
+    expect(await page.evaluate(() => chart.data().annotationPanels[0])).toMatchObject({ showYAxisLine: true, showYGridLines: true, showKey: false });
+  });
+
   test(`${renderer}: rerooting hides terminal support labels and reset restores them`, async ({ page }) => {
     const result = await page.evaluate(async (renderer) => {
       if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });

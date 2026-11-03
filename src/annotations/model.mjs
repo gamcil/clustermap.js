@@ -35,7 +35,7 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
     if (before === panel) continue;
     if (!["heatmap", "bar", "groups"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap, bar or groups.`);
     if (panel.title != null && typeof panel.title !== "string") fail("title must be text.");
-    for (const key of ["show", "showKey", "showColumnLabels"]) {
+    for (const key of ["show", "showKey", "showColumnLabels", "showYAxisLine", "showYGridLines"]) {
       if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
     }
     if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
@@ -327,10 +327,11 @@ export function layoutAnnotationPanels(definitions, clusters, bounds,
     }
     const panel = { ...geometry, uid: source.uid, definition: source, title, cellHeight, rowOffset,
       labelFontSize, fontFamily, textColour: theme?.foreground ?? "#333333", header, footer, key,
+      axisColour: theme?.muted ?? "#555555", gridColour: color(theme?.muted ?? "#555555").copy({ opacity: 0.25 }).formatRgb(),
       headingHeight, titleDescent };
     const texts = [...header, ...footer];
     panel.horizontalBounds = {
-      minX: Math.min(0, ...texts.map((item) => item.x + item.bounds.minX), ...key.map((item) => item.x)),
+      minX: Math.min(source.showYAxisLine ? -1 : 0, ...texts.map((item) => item.x + item.bounds.minX), ...key.map((item) => item.x)),
       maxX: Math.max(panel.width, ...texts.map((item) => item.x + item.bounds.maxX),
         ...key.map((item) => item.x + item.width)),
     };
@@ -413,10 +414,19 @@ function projectAnnotationFrame(scene, preview) {
     for (const row of rows) { minY = Math.min(minY, row.y); maxY = Math.max(maxY, row.y); }
     const top = minY - cellHeight / 2 - 10, bottom = maxY + cellHeight / 2 + 20;
     const groupMarks = panel.markerGroups ? groupPanelMarks(panel, rows) : null;
+    const decorations = [];
+    if (panel.definition.showYGridLines) for (const row of rows) {
+      decorations.push({ x: 0, y: row.y - 0.5, width: panel.width, height: 1,
+        fill: panel.gridColour, background: true, kind: "y-grid" });
+    }
+    if (panel.definition.showYAxisLine && rows.length) decorations.push({ x: -1, y: minY - panel.cellHeight / 2,
+      width: 1, height: (panel.definition.type === "bar" && panel.definition.showKey !== false ? bottom : maxY + panel.cellHeight / 2) - minY + panel.cellHeight / 2,
+      fill: panel.axisColour, kind: "y-axis" });
     return { ...panel, x: panel.x + dx, rows: groupMarks ? [] : rows,
       texts: [...(groupMarks?.texts ?? []), ...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
         ...panel.footer.map((item) => ({ ...item, y: item.y + bottom }))],
-      rects: groupMarks?.rects ?? panel.key.map((item, keyIndex) => ({ ...item, keyIndex, y: item.y + bottom })) };
+      rects: [...decorations, ...(groupMarks?.rects ?? panel.key.map((item) => ({ ...item, y: item.y + bottom })))]
+        .map((item, keyIndex) => ({ ...item, keyIndex })) };
   });
   let minY = Infinity, maxY = -Infinity;
   for (const frame of frames) {

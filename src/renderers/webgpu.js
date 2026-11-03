@@ -863,7 +863,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     // Keys follow the current bottom row. Only this small buffer changes
     // during a row drag; cells remain retained and use cluster transforms.
     const keyPreview = nextPreview?.type === "cluster-drag" ? nextPreview : null;
-    const groupRows = annotationPanels.some((panel) => panel.markerGroups) ? scene.clusters : null;
+    const groupRows = annotationPanels.some((panel) => panel.markerGroups || panel.definition.showYAxisLine || panel.definition.showYGridLines) ? scene.clusters : null;
     if (changed || annotationKeyPreview !== keyPreview || annotationGroupRows !== groupRows) {
       annotationGroupRows = groupRows;
       annotationKeyPreview = keyPreview;
@@ -882,9 +882,20 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     const bounds = scene.figureBounds;
     if (!nextPreview && bounds && viewport.minX <= bounds.minX && viewport.maxX >= bounds.maxX &&
         viewport.minY <= bounds.minY && viewport.maxY >= bounds.maxY) {
-      return { cells: annotationCount ? [[0, annotationCount]] : [], keys: annotationKeyCount ? [[0, annotationKeyCount]] : [] };
+      if (!scene.annotationPanels.some((panel) => panel.definition.showYGridLines)) {
+        return { background: [], cells: annotationCount ? [[0, annotationCount]] : [], keys: annotationKeyCount ? [[0, annotationKeyCount]] : [] };
+      }
+      const background = [], keys = [];
+      for (let i = 0; i < scene.annotationPanels.length; i++) {
+        const panel = scene.annotationPanels[i], first = annotationKeys.get(panel.uid);
+        const end = i + 1 < scene.annotationPanels.length ? annotationKeys.get(scene.annotationPanels[i + 1].uid) : annotationKeyCount;
+        const middle = first + (panel.definition.showYGridLines ? panel.rows.length : 0);
+        if (middle > first) background.push([first, middle]);
+        if (end > middle) keys.push([middle, end]);
+      }
+      return { background, cells: annotationCount ? [[0, annotationCount]] : [], keys };
     }
-    const cells = [], keys = [];
+    const cells = [], keys = [], background = [];
     for (const panel of annotationPanelsInViewport(scene, nextPreview, viewport, { labels: false })) {
       const rows = annotationRows.get(panel.uid);
       for (const row of panel.rows) {
@@ -892,7 +903,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         cells.push([offsets[row.firstCell], offsets[row.lastCell]]);
       }
       const base = annotationKeys.get(panel.uid);
-      for (const rect of panel.rects) keys.push([base + rect.keyIndex, base + rect.keyIndex + 1]);
+      for (const rect of panel.rects) (rect.background ? background : keys).push([base + rect.keyIndex, base + rect.keyIndex + 1]);
     }
     const merge = (ranges) => {
       ranges.sort((a, b) => a[0] - b[0]);
@@ -904,7 +915,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
       }
       return result;
     };
-    return { cells: merge(cells), keys: merge(keys) };
+    return { background: merge(background), cells: merge(cells), keys: merge(keys) };
   };
 
   const resizeStorageBuffer = (buffer, capacity, values) => {
@@ -1422,10 +1433,14 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
       }
       if (annotationCount || annotationKeyCount) {
         const ranges = annotationDrawRanges(nextPreview, worldViewport(camera, { width, height }));
-        if (ranges.cells.length || ranges.keys.length) {
+        if (ranges.background.length || ranges.cells.length || ranges.keys.length) {
           rectanglePipeline ||= device.createRenderPipeline(rectanglePipelineDescriptor);
           pass.setPipeline(rectanglePipeline);
           pass.setBindGroup(0, bindGroup);
+          if (ranges.background.length) {
+            pass.setVertexBuffer(0, annotationKeyBuffer);
+            for (const [first, end] of ranges.background) pass.draw(6, end - first, 0, first);
+          }
           if (ranges.cells.length) {
             pass.setVertexBuffer(0, annotationBuffer);
             for (const [first, end] of ranges.cells) pass.draw(6, end - first, 0, first);

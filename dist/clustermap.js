@@ -3731,7 +3731,7 @@
       if (before === panel) continue;
       if (!["heatmap", "bar", "groups"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap, bar or groups.`);
       if (panel.title != null && typeof panel.title !== "string") fail("title must be text.");
-      for (const key of ["show", "showKey", "showColumnLabels"]) {
+      for (const key of ["show", "showKey", "showColumnLabels", "showYAxisLine", "showYGridLines"]) {
         if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
       }
       if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
@@ -4023,10 +4023,11 @@
       }
       const panel = { ...geometry, uid: source.uid, definition: source, title, cellHeight, rowOffset,
         labelFontSize, fontFamily, textColour: theme?.foreground ?? "#333333", header, footer, key,
+        axisColour: theme?.muted ?? "#555555", gridColour: color(theme?.muted ?? "#555555").copy({ opacity: 0.25 }).formatRgb(),
         headingHeight, titleDescent };
       const texts = [...header, ...footer];
       panel.horizontalBounds = {
-        minX: Math.min(0, ...texts.map((item) => item.x + item.bounds.minX), ...key.map((item) => item.x)),
+        minX: Math.min(source.showYAxisLine ? -1 : 0, ...texts.map((item) => item.x + item.bounds.minX), ...key.map((item) => item.x)),
         maxX: Math.max(panel.width, ...texts.map((item) => item.x + item.bounds.maxX),
           ...key.map((item) => item.x + item.width)),
       };
@@ -4109,10 +4110,19 @@
       for (const row of rows) { minY = Math.min(minY, row.y); maxY = Math.max(maxY, row.y); }
       const top = minY - cellHeight / 2 - 10, bottom = maxY + cellHeight / 2 + 20;
       const groupMarks = panel.markerGroups ? groupPanelMarks(panel, rows) : null;
+      const decorations = [];
+      if (panel.definition.showYGridLines) for (const row of rows) {
+        decorations.push({ x: 0, y: row.y - 0.5, width: panel.width, height: 1,
+          fill: panel.gridColour, background: true, kind: "y-grid" });
+      }
+      if (panel.definition.showYAxisLine && rows.length) decorations.push({ x: -1, y: minY - panel.cellHeight / 2,
+        width: 1, height: (panel.definition.type === "bar" && panel.definition.showKey !== false ? bottom : maxY + panel.cellHeight / 2) - minY + panel.cellHeight / 2,
+        fill: panel.axisColour, kind: "y-axis" });
       return { ...panel, x: panel.x + dx, rows: groupMarks ? [] : rows,
         texts: [...(groupMarks?.texts ?? []), ...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
           ...panel.footer.map((item) => ({ ...item, y: item.y + bottom }))],
-        rects: groupMarks?.rects ?? panel.key.map((item, keyIndex) => ({ ...item, keyIndex, y: item.y + bottom })) };
+        rects: [...decorations, ...(groupMarks?.rects ?? panel.key.map((item) => ({ ...item, y: item.y + bottom })))]
+          .map((item, keyIndex) => ({ ...item, keyIndex })) };
     });
     let minY = Infinity, maxY = -Infinity;
     for (const frame of frames) {
@@ -9228,7 +9238,7 @@
 
   const styleFields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
     "groups", "markerWidth", "laneGap", "titleFontSize", "columnFontSize", "labelFontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
-    "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour"]);
+    "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour", "showYAxisLine", "showYGridLines"]);
   const fields = new Set([...styleFields, "values"]);
   const fail$2 = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
 
@@ -9367,14 +9377,17 @@
     moving(panels).attr("transform", (panel) => `translate(${panel.x},0)`);
     panels.each(function (panel) {
       const group = select(this);
+      const background = group.selectAll("g.annotationGrid").data([null]).join("g")
+        .attr("class", "annotationGrid").lower().selectAll("rect").data(panel.rects.filter((item) => item.background)).join("rect");
       const rows = group.selectAll("g.annotationRow").data(panel.rows, (row) => row.uid).join("g")
         .attr("class", "annotationRow");
       moving(rows).attr("transform", (row) => `translate(0,${row.y})`);
       const cells = rows.selectAll("rect").data((row) =>
         row.cells.slice(row.firstCell ?? 0, row.lastCell ?? row.cells.length).flatMap((cell) => cell.rects)).join("rect");
       const key = group.selectAll("g.annotationKey").data([null]).join("g")
-        .attr("class", "annotationKey").selectAll("rect").data(panel.rects).join("rect");
-      for (const rects of [cells, key]) moving(rects)
+        .attr("class", "annotationKey").selectAll("rect").data(panel.rects.filter((item) => !item.background)).join("rect");
+      for (const rects of [background, cells, key]) moving(rects)
+        .attr("class", (item) => item.kind ? `annotation-${item.kind}` : null)
         .attr("x", (item) => item.x).attr("y", (item) => item.y)
         .attr("width", (item) => item.width).attr("height", (item) => item.height).attr("fill", (item) => item.fill);
       const texts = group.selectAll("text").data(panel.texts).join("text")
@@ -9394,6 +9407,7 @@
         context.fillRect(item.x, item.y, item.width, item.height);
       };
       if (showGeometry) {
+        for (const item of panel.rects) if (item.background) rect(item);
         for (const row of panel.rows) {
           context.save(); context.translate(0, row.y);
           for (let i = row.firstCell ?? 0; i < (row.lastCell ?? row.cells.length); i++) {
@@ -9401,7 +9415,7 @@
           }
           context.restore();
         }
-        for (const item of panel.rects) rect(item);
+        for (const item of panel.rects) if (!item.background) rect(item);
       }
       for (const item of showLabels ? panel.texts : []) {
         context.save();
@@ -14728,7 +14742,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       // Keys follow the current bottom row. Only this small buffer changes
       // during a row drag; cells remain retained and use cluster transforms.
       const keyPreview = nextPreview?.type === "cluster-drag" ? nextPreview : null;
-      const groupRows = annotationPanels.some((panel) => panel.markerGroups) ? scene.clusters : null;
+      const groupRows = annotationPanels.some((panel) => panel.markerGroups || panel.definition.showYAxisLine || panel.definition.showYGridLines) ? scene.clusters : null;
       if (changed || annotationKeyPreview !== keyPreview || annotationGroupRows !== groupRows) {
         annotationGroupRows = groupRows;
         annotationKeyPreview = keyPreview;
@@ -14747,9 +14761,20 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const bounds = scene.figureBounds;
       if (!nextPreview && bounds && viewport.minX <= bounds.minX && viewport.maxX >= bounds.maxX &&
           viewport.minY <= bounds.minY && viewport.maxY >= bounds.maxY) {
-        return { cells: annotationCount ? [[0, annotationCount]] : [], keys: annotationKeyCount ? [[0, annotationKeyCount]] : [] };
+        if (!scene.annotationPanels.some((panel) => panel.definition.showYGridLines)) {
+          return { background: [], cells: annotationCount ? [[0, annotationCount]] : [], keys: annotationKeyCount ? [[0, annotationKeyCount]] : [] };
+        }
+        const background = [], keys = [];
+        for (let i = 0; i < scene.annotationPanels.length; i++) {
+          const panel = scene.annotationPanels[i], first = annotationKeys.get(panel.uid);
+          const end = i + 1 < scene.annotationPanels.length ? annotationKeys.get(scene.annotationPanels[i + 1].uid) : annotationKeyCount;
+          const middle = first + (panel.definition.showYGridLines ? panel.rows.length : 0);
+          if (middle > first) background.push([first, middle]);
+          if (end > middle) keys.push([middle, end]);
+        }
+        return { background, cells: annotationCount ? [[0, annotationCount]] : [], keys };
       }
-      const cells = [], keys = [];
+      const cells = [], keys = [], background = [];
       for (const panel of annotationPanelsInViewport(scene, nextPreview, viewport, { labels: false })) {
         const rows = annotationRows.get(panel.uid);
         for (const row of panel.rows) {
@@ -14757,7 +14782,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           cells.push([offsets[row.firstCell], offsets[row.lastCell]]);
         }
         const base = annotationKeys.get(panel.uid);
-        for (const rect of panel.rects) keys.push([base + rect.keyIndex, base + rect.keyIndex + 1]);
+        for (const rect of panel.rects) (rect.background ? background : keys).push([base + rect.keyIndex, base + rect.keyIndex + 1]);
       }
       const merge = (ranges) => {
         ranges.sort((a, b) => a[0] - b[0]);
@@ -14769,7 +14794,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         }
         return result;
       };
-      return { cells: merge(cells), keys: merge(keys) };
+      return { background: merge(background), cells: merge(cells), keys: merge(keys) };
     };
 
     const resizeStorageBuffer = (buffer, capacity, values) => {
@@ -15287,10 +15312,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         }
         if (annotationCount || annotationKeyCount) {
           const ranges = annotationDrawRanges(nextPreview, worldViewport(camera, { width, height }));
-          if (ranges.cells.length || ranges.keys.length) {
+          if (ranges.background.length || ranges.cells.length || ranges.keys.length) {
             rectanglePipeline ||= device.createRenderPipeline(rectanglePipelineDescriptor);
             pass.setPipeline(rectanglePipeline);
             pass.setBindGroup(0, bindGroup);
+            if (ranges.background.length) {
+              pass.setVertexBuffer(0, annotationKeyBuffer);
+              for (const [first, end] of ranges.background) pass.draw(6, end - first, 0, first);
+            }
             if (ranges.cells.length) {
               pass.setVertexBuffer(0, annotationBuffer);
               for (const [first, end] of ranges.cells) pass.draw(6, end - first, 0, first);
@@ -16849,7 +16878,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         };
         if (annotationOverlay) annotationOverlay.update(annotationUiContext);
         else if (!annotationUiLoad) {
-          annotationUiLoad = import('./annotationOverlay.mjs?v=74acd828aaa6').then(({ createAnnotationOverlay }) => {
+          annotationUiLoad = import('./annotationOverlay.mjs?v=6eded06bb8c1').then(({ createAnnotationOverlay }) => {
             if (!annotationUiContext) return;
             annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
               ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,

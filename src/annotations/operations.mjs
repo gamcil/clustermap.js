@@ -2,7 +2,7 @@ import { validateAnnotationPanels } from "./model.mjs";
 
 const styleFields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
   "groups", "markerWidth", "laneGap", "titleFontSize", "columnFontSize", "labelFontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
-  "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour"]);
+  "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour", "showYAxisLine", "showYGridLines"]);
 const fields = new Set([...styleFields, "values"]);
 const fail = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
 

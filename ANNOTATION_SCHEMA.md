@@ -78,6 +78,16 @@ fields are described [below](#group-markers).
 | `headingRotation` | Column heading rotation, from -90 to 0 degrees | Heatmap `-60`; bar `0` |
 | `showColumnLabels` | Whether column headings are drawn | `true` |
 | `showKey` | Whether the heatmap colour key or bar numeric axis is drawn | `true` |
+| `showYAxisLine` | Vertical line along the left edge of the panel's rows | `false` |
+| `showYGridLines` | Horizontal guides through cluster-row centres, behind data marks | `false` |
+
+Y-axis decorations are independent of `showKey` and available for all panel
+types under **Advanced** in the panel edit menu. They follow row movement and
+visibility. The axis uses the figure's muted colour; grid lines use a lighter
+version of that colour. Both use one world unit of thickness and are included
+in SVG exports. Bar-panel y axes meet the x axis when it is shown.
+Opaque heatmap cells cover the grid underneath them; guides
+remain visible through column gaps and beside shorter bars.
 
 Text sizes are independent: enlarging `titleFontSize` leaves column headings and
 axis/key labels unchanged. Layout and SVG export measure each text item using
