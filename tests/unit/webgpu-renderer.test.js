@@ -71,7 +71,7 @@ test("WebGPU draws annotation grids behind cells, culls them and updates row pos
     loci: [{ uid: `l-${uid}`, start: 0, end: 100, genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
     links: [], groups: [], annotationPanels: [{ uid: "bar", type: "bar", title: "", columns: ["Value"],
       values: { a: [1], b: [2], c: [3] }, scale: { domain: [0, 4] }, showKey: false, showColumnLabels: false,
-      showYAxisLine: true, showYGridLines: true }] });
+      showYAxisLine: true, showXGridLines: true }] });
   const runtime = createChartRuntime(), state = createChartState(data);
   runtime.configure({ annotations: { enabled: true } }); runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   let scene = runtime.updateScene(data);
@@ -81,17 +81,17 @@ test("WebGPU draws annotation grids behind cells, culls them and updates row pos
     return draws.filter((draw) => draw.entryPoint === "rectangleVertex");
   };
   const full = render();
-  assert.deepEqual(full.map((draw) => draw.args[1]), [3, 6, 1]);
+  assert.deepEqual(full.map((draw) => draw.args[1]), [5, 6, 1]);
   assert.equal(full[0].buffer, full[2].buffer); assert.notEqual(full[0].buffer, full[1].buffer);
   assert.equal(new Float32Array(full[0].buffer.data.buffer)[7], 0.25);
   const panel = annotationPanelsForFrame(scene)[0];
-  const partial = render({ x: -(panel.x + 50), y: -panel.rows[1].y + 0.5, k: 1 }, 10, 1);
+  const partial = render({ x: -(panel.x + 60), y: -panel.rows[1].y + 0.5, k: 1 }, 1, 1);
   assert.deepEqual(partial.map((draw) => draw.args[1]), [1, 2]);
-  assert.equal(partial[0].args[3], 1, "the visible grid uses its original key-buffer offset");
+  assert.equal(partial[0].args[3], 2, "the visible grid uses its original key-buffer offset");
   state.clusterOrder = ["c", "a", "b"]; scene = runtime.updateScene(data);
   const moved = render(), frame = annotationPanelsForFrame(scene)[0];
   const records = new Float32Array(moved[0].buffer.data.buffer);
-  frame.rects.filter((rect) => rect.kind === "y-grid").forEach((rect) => assert.equal(records[rect.keyIndex * 9 + 1], rect.y));
+  frame.rects.filter((rect) => rect.kind === "x-grid").forEach((rect) => assert.equal(records[rect.keyIndex * 9 + 1], rect.y));
 });
 
 test("tree presentation edits do not allocate or upload biological GPU geometry", async (t) => {

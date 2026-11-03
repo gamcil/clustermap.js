@@ -35,7 +35,7 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
     if (before === panel) continue;
     if (!["heatmap", "bar", "groups"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap, bar or groups.`);
     if (panel.title != null && typeof panel.title !== "string") fail("title must be text.");
-    for (const key of ["show", "showKey", "showColumnLabels", "showYAxisLine", "showYGridLines"]) {
+    for (const key of ["show", "showKey", "showColumnLabels", "showYAxisLine", "showXGridLines"]) {
       if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
     }
     if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
@@ -256,14 +256,17 @@ function layoutMatrixPanel(source, clusters, { before, labelFontSize, columnFont
   });
   const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
   const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation, fontSize: columnFontSize }));
+  const tickPositions = isBar ? position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40)))) : [];
+  if (isBar && !tickPositions.includes(0)) tickPositions.push(0);
+  tickPositions.sort((a, b) => a - b);
+  const gridX = isBar ? tickPositions.map((value) => Math.max(0, Math.min(width - 1, position(value) - 0.5)))
+    : source.columns.map((_, i) => (i + 0.5) * cellWidth - 0.5);
   const footer = [], key = [];
   if (source.showKey !== false && isBar) {
     key.push({ x: 0, y: 0, width, height: 1, fill: theme?.muted ?? "#555555" });
-    const ticks = position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40))));
-    if (!ticks.includes(0)) ticks.push(0);
-    for (const value of ticks.sort((a, b) => a - b)) {
+    for (const [i, value] of tickPositions.entries()) {
       const tickX = position(value);
-      key.push({ x: Math.max(0, Math.min(width - Math.min(1, width), tickX - 0.5)), y: 0,
+      key.push({ x: gridX[i], y: 0,
         width: Math.min(1, width), height: 5, fill: theme?.muted ?? "#555555" });
       footer.push(text(numberLabel(value), tickX, labelFontSize + 9,
         { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
@@ -278,7 +281,7 @@ function layoutMatrixPanel(source, clusters, { before, labelFontSize, columnFont
     footer.push(text(category, 15, i * (labelFontSize + 6) + 9));
   });
   for (const item of footer) item.fontSize = labelFontSize;
-  return { width, rows, header, footer, key, domain, missingColour };
+  return { width, rows, header, footer, key, domain, missingColour, gridX };
 }
 
 const panelLayoutInputs = new WeakMap();
@@ -331,7 +334,7 @@ export function layoutAnnotationPanels(definitions, clusters, bounds,
       headingHeight, titleDescent };
     const texts = [...header, ...footer];
     panel.horizontalBounds = {
-      minX: Math.min(source.showYAxisLine ? -1 : 0, ...texts.map((item) => item.x + item.bounds.minX), ...key.map((item) => item.x)),
+      minX: Math.min(0, ...texts.map((item) => item.x + item.bounds.minX), ...key.map((item) => item.x)),
       maxX: Math.max(panel.width, ...texts.map((item) => item.x + item.bounds.maxX),
         ...key.map((item) => item.x + item.width)),
     };
@@ -415,13 +418,15 @@ function projectAnnotationFrame(scene, preview) {
     const top = minY - cellHeight / 2 - 10, bottom = maxY + cellHeight / 2 + 20;
     const groupMarks = panel.markerGroups ? groupPanelMarks(panel, rows) : null;
     const decorations = [];
-    if (panel.definition.showYGridLines) for (const row of rows) {
-      decorations.push({ x: 0, y: row.y - 0.5, width: panel.width, height: 1,
-        fill: panel.gridColour, background: true, kind: "y-grid" });
+    const axisTop = minY - panel.cellHeight / 2;
+    const axisBottom = panel.definition.type === "bar" && panel.definition.showKey !== false
+      ? bottom + 1 : maxY + panel.cellHeight / 2;
+    if (rows.length && panel.definition.showXGridLines) for (const x of panel.gridX ?? []) {
+      decorations.push({ x, y: axisTop, width: 1, height: axisBottom - axisTop,
+        fill: panel.gridColour, background: true, kind: "x-grid" });
     }
-    if (panel.definition.showYAxisLine && rows.length) decorations.push({ x: -1, y: minY - panel.cellHeight / 2,
-      width: 1, height: (panel.definition.type === "bar" && panel.definition.showKey !== false ? bottom : maxY + panel.cellHeight / 2) - minY + panel.cellHeight / 2,
-      fill: panel.axisColour, kind: "y-axis" });
+    if (panel.definition.showYAxisLine && rows.length) decorations.push({ x: 0, y: axisTop,
+      width: 1, height: axisBottom - axisTop, fill: panel.axisColour, kind: "y-axis" });
     return { ...panel, x: panel.x + dx, rows: groupMarks ? [] : rows,
       texts: [...(groupMarks?.texts ?? []), ...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
         ...panel.footer.map((item) => ({ ...item, y: item.y + bottom }))],

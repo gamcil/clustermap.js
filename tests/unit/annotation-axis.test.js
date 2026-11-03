@@ -15,58 +15,73 @@ function fixture(type, settings = {}) {
 }
 
 for (const type of ["heatmap", "bar", "groups"]) {
-  test(`${type} y-axis decorations are optional, independently enabled and bounded`, () => {
+  test(`${type} axis decorations are optional, independently enabled and bounded`, () => {
     const hidden = fixture(type);
     assert.equal(annotationPanelsForFrame(hidden.scene)[0].rects.some((rect) => rect.kind), false);
     for (const [axis, grid] of [[true, false], [false, true], [true, true]]) {
-      const { definition, scene } = fixture(type, { showYAxisLine: axis, showYGridLines: grid });
+      const { definition, scene } = fixture(type, { showYAxisLine: axis, showXGridLines: grid });
       const before = structuredClone(definition), frame = annotationPanelsForFrame(scene)[0];
-      const lines = frame.rects.filter((rect) => rect.kind === "y-grid"), axes = frame.rects.filter((rect) => rect.kind === "y-axis");
-      assert.equal(axes.length, Number(axis)); assert.equal(lines.length, grid ? 3 : 0);
-      assert.deepEqual(lines.map((line) => line.y + 0.5), grid ? [20, 60, 100] : []);
-      assert.ok(lines.every((line) => line.background && line.width === frame.width));
+      const lines = frame.rects.filter((rect) => rect.kind === "x-grid"), axes = frame.rects.filter((rect) => rect.kind === "y-axis");
+      assert.equal(axes.length, Number(axis));
+      assert.deepEqual(lines.map((line) => line.x), grid ? frame.gridX ?? [] : []);
+      assert.ok(lines.every((line) => line.background && line.width === 1 && line.y === 10 && line.height === 100));
       if (axis) {
-        assert.deepEqual([axes[0].x, axes[0].y, axes[0].height], [-1, 10, 100]);
-        assert.ok(annotationPanelBounds(frame).minX <= frame.x - 1);
+        assert.deepEqual([axes[0].x, axes[0].y, axes[0].height], [0, 10, 100]);
+        assert.ok(annotationPanelBounds(frame).minX <= frame.x);
       }
       assert.deepEqual(definition, before);
       const visible = annotationPanelsInViewport(scene, null, { minX: frame.x - 1, maxX: frame.x + frame.width, minY: 55, maxY: 65 })[0];
-      assert.equal(visible.rects.filter((rect) => rect.kind === "y-grid").length, Number(grid));
+      assert.equal(visible.rects.filter((rect) => rect.kind === "x-grid").length, lines.length);
       assert.ok(visible.rects.every((rect) => frame.rects[rect.keyIndex] === rect));
       const moved = { ...scene, clusters: new Map([...scene.clusters].map(([uid, cluster]) => [uid, { ...cluster, y: cluster.y + 25 }])) };
-      assert.deepEqual(annotationPanelsForFrame(moved)[0].rects.filter((rect) => rect.kind === "y-grid").map((rect) => rect.y + 0.5), grid ? [45, 85, 125] : []);
+      assert.deepEqual(annotationPanelsForFrame(moved)[0].rects.filter((rect) => rect.kind === "x-grid").map((rect) => rect.y + 0.5), lines.map(() => 35.5));
       const preview = annotationPanelsForFrame(scene, { clusterOffsets: new Map([["b", 15]]) })[0];
-      assert.deepEqual(preview.rects.filter((rect) => rect.kind === "y-grid").map((rect) => rect.y + 0.5), grid ? [20, 75, 100] : []);
+      assert.deepEqual(preview.rects.filter((rect) => rect.kind === "x-grid").map((rect) => rect.y + 0.5), lines.map(() => 10.5));
     }
   });
 }
 
 test("Canvas draws grid lines behind data and the axis above data", () => {
-  const { scene } = fixture("bar", { showYAxisLine: true, showYGridLines: true }), fills = [];
+  const { scene } = fixture("bar", { showYAxisLine: true, showXGridLines: true }), fills = [];
   const context = { save() {}, restore() {}, translate() {}, rotate() {}, fillText() {}, fillRect(...args) { fills.push(args); } };
   drawCanvasAnnotations(context, scene);
   assert.equal(fills.length > 4, true);
-  assert.deepEqual(fills.slice(0, 3).map((rect) => rect[1]), [19.5, 59.5, 99.5]);
-  assert.deepEqual(fills.at(-1), [-1, 10, 1, 100]);
+  const frame = annotationPanelsForFrame(scene)[0];
+  assert.deepEqual(fills.slice(0, frame.gridX.length), frame.gridX.map((x) => [x, 10, 1, 100]));
+  assert.deepEqual(fills.at(-1), [0, 10, 1, 100]);
 });
 
 test("the bar y-axis joins the x-axis when it is shown", () => {
   const { scene } = fixture("bar", { showYAxisLine: true, showKey: true });
   const frame = annotationPanelsForFrame(scene)[0], axis = frame.rects.find((rect) => rect.kind === "y-axis");
   const xAxis = frame.rects.find((rect) => !rect.kind && rect.width === frame.width && rect.height === 1);
-  assert.equal(axis.y + axis.height, xAxis.y);
+  assert.equal(axis.x, xAxis.x);
+  assert.equal(axis.y + axis.height, xAxis.y + xAxis.height);
 });
 
 test("annotation axis settings validate and undo with the other panel styles", () => {
   const { definition } = fixture("heatmap");
   const data = { clusters: ["a", "b", "c"].map((uid) => ({ uid, loci: [] })), links: [], groups: [], annotationPanels: [definition] };
   const before = structuredClone(data.annotationPanels);
-  const edit = applyChartOperations(data, createChartIndex(data), [{ type: "annotationPanels.update", ids: ["panel"], changes: { showYAxisLine: true, showYGridLines: true } }]);
+  const edit = applyChartOperations(data, createChartIndex(data), [{ type: "annotationPanels.update", ids: ["panel"], changes: { showYAxisLine: true, showXGridLines: true } }]);
   assert.equal(data.annotationPanels[0].showYAxisLine, true);
   applyChartOperations(data, createChartIndex(data), edit.inverse);
   assert.deepEqual(data.annotationPanels, before);
-  for (const changes of [{ showYAxisLine: "true" }, { showYGridLines: 1 }]) {
+  for (const changes of [{ showYAxisLine: "true" }, { showXGridLines: 1 }]) {
     assert.throws(() => applyChartOperations(data, createChartIndex(data), [{ type: "annotationPanels.update", ids: ["panel"], changes }]), /must be a boolean/);
     assert.deepEqual(data.annotationPanels, before);
   }
+});
+
+test("bar grids match x-axis ticks and extend to the shared axis baseline", () => {
+  const { scene } = fixture("bar", { showXGridLines: true, showYAxisLine: true, showKey: true,
+    scale: { domain: [-2, 4] } });
+  const frame = annotationPanelsForFrame(scene)[0];
+  const grids = frame.rects.filter((rect) => rect.kind === "x-grid");
+  const ticks = frame.rects.filter((rect) => !rect.kind && rect.height === 5);
+  assert.deepEqual(grids.map((rect) => rect.x), ticks.map((rect) => rect.x));
+  const axis = frame.rects.find((rect) => rect.kind === "y-axis");
+  assert.ok(grids.every((rect) => rect.y === axis.y && rect.height === axis.height));
+  const hidden = fixture("bar", { showXGridLines: true, showKey: false, scale: { domain: [-2, 4] } });
+  assert.deepEqual(annotationPanelsForFrame(hidden.scene)[0].rects.filter((rect) => rect.kind === "x-grid").map((rect) => rect.x), grids.map((rect) => rect.x));
 });

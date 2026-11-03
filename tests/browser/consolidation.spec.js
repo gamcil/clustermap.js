@@ -302,23 +302,35 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
     await page.getByRole("button", { name: "Edit annotation panel Axis demo", exact: true }).click();
     await page.locator(".cm-annotation-menu summary").filter({ hasText: "Advanced" }).click();
     const axis = page.getByRole("checkbox", { name: "Show y-axis line", exact: true });
-    const grid = page.getByRole("checkbox", { name: "Show y-axis grid lines", exact: true });
+    const grid = page.getByRole("checkbox", { name: "Show x-axis grid lines", exact: true });
     await expect(axis).not.toBeChecked(); await expect(grid).not.toBeChecked();
     await axis.check(); await grid.check();
     const marks = () => page.evaluate(() => {
       const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml");
-      return { axes: svg.querySelectorAll(".annotation-y-axis").length, grids: svg.querySelectorAll(".annotation-y-grid").length,
+      return { axes: svg.querySelectorAll(".annotation-y-axis").length, grids: svg.querySelectorAll(".annotation-x-grid").length,
         behind: svg.querySelector("g.annotationPanel").firstElementChild.classList.contains("annotationGrid") };
     });
-    expect(await marks()).toEqual({ axes: 1, grids: 3, behind: true });
+    expect(await marks()).toEqual({ axes: 1, grids: 5, behind: true });
     await page.evaluate(() => chart.undo());
     await expect(axis).toBeChecked(); await expect(grid).not.toBeChecked();
     expect(await marks()).toEqual({ axes: 1, grids: 0, behind: true });
     await page.evaluate(() => chart.undo());
     expect(await marks()).toEqual({ axes: 0, grids: 0, behind: true });
     await page.evaluate(() => { chart.redo(); chart.redo(); chart.project(JSON.parse(JSON.stringify(chart.project()))); });
-    expect(await marks()).toEqual({ axes: 1, grids: 3, behind: true });
-    expect(await page.evaluate(() => chart.data().annotationPanels[0])).toMatchObject({ showYAxisLine: true, showYGridLines: true, showKey: false });
+    expect(await marks()).toEqual({ axes: 1, grids: 5, behind: true });
+    expect(await page.evaluate(() => chart.data().annotationPanels[0])).toMatchObject({ showYAxisLine: true, showXGridLines: true, showKey: false });
+    expect(await page.evaluate(() => {
+      const data = structuredClone(chart.data()); data.annotationPanels[0].showKey = true; chart.data(data);
+      const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml");
+      const axis = svg.querySelector(".annotation-y-axis");
+      const keys = [...svg.querySelectorAll(".annotationKey rect")];
+      const xAxis = keys.find((rect) => +rect.getAttribute("width") > 1 && +rect.getAttribute("height") === 1);
+      return { sameX: axis.getAttribute("x") === xAxis.getAttribute("x"),
+        sameBottom: +axis.getAttribute("y") + +axis.getAttribute("height") === +xAxis.getAttribute("y") + +xAxis.getAttribute("height"),
+        gridX: [...svg.querySelectorAll(".annotation-x-grid")].map((rect) => rect.getAttribute("x")),
+        tickX: keys.filter((rect) => +rect.getAttribute("height") === 5).map((rect) => rect.getAttribute("x")) };
+    })).toMatchObject({ sameX: true, sameBottom: true,
+      gridX: ["0", "29.5", "59.5", "89.5", "119"], tickX: ["0", "29.5", "59.5", "89.5", "119"] });
   });
 
   test(`${renderer}: rerooting hides terminal support labels and reset restores them`, async ({ page }) => {

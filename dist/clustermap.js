@@ -3731,7 +3731,7 @@
       if (before === panel) continue;
       if (!["heatmap", "bar", "groups"].includes(panel.type)) fail(`unsupported type for '${panel.uid}'; expected heatmap, bar or groups.`);
       if (panel.title != null && typeof panel.title !== "string") fail("title must be text.");
-      for (const key of ["show", "showKey", "showColumnLabels", "showYAxisLine", "showYGridLines"]) {
+      for (const key of ["show", "showKey", "showColumnLabels", "showYAxisLine", "showXGridLines"]) {
         if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
       }
       if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
@@ -3952,14 +3952,17 @@
     });
     const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
     const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation, fontSize: columnFontSize }));
+    const tickPositions = isBar ? position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40)))) : [];
+    if (isBar && !tickPositions.includes(0)) tickPositions.push(0);
+    tickPositions.sort((a, b) => a - b);
+    const gridX = isBar ? tickPositions.map((value) => Math.max(0, Math.min(width - 1, position(value) - 0.5)))
+      : source.columns.map((_, i) => (i + 0.5) * cellWidth - 0.5);
     const footer = [], key = [];
     if (source.showKey !== false && isBar) {
       key.push({ x: 0, y: 0, width, height: 1, fill: theme?.muted ?? "#555555" });
-      const ticks = position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40))));
-      if (!ticks.includes(0)) ticks.push(0);
-      for (const value of ticks.sort((a, b) => a - b)) {
+      for (const [i, value] of tickPositions.entries()) {
         const tickX = position(value);
-        key.push({ x: Math.max(0, Math.min(width - Math.min(1, width), tickX - 0.5)), y: 0,
+        key.push({ x: gridX[i], y: 0,
           width: Math.min(1, width), height: 5, fill: theme?.muted ?? "#555555" });
         footer.push(text(numberLabel(value), tickX, labelFontSize + 9,
           { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
@@ -3974,7 +3977,7 @@
       footer.push(text(category, 15, i * (labelFontSize + 6) + 9));
     });
     for (const item of footer) item.fontSize = labelFontSize;
-    return { width, rows, header, footer, key, domain, missingColour };
+    return { width, rows, header, footer, key, domain, missingColour, gridX };
   }
 
   const panelLayoutInputs = new WeakMap();
@@ -4027,7 +4030,7 @@
         headingHeight, titleDescent };
       const texts = [...header, ...footer];
       panel.horizontalBounds = {
-        minX: Math.min(source.showYAxisLine ? -1 : 0, ...texts.map((item) => item.x + item.bounds.minX), ...key.map((item) => item.x)),
+        minX: Math.min(0, ...texts.map((item) => item.x + item.bounds.minX), ...key.map((item) => item.x)),
         maxX: Math.max(panel.width, ...texts.map((item) => item.x + item.bounds.maxX),
           ...key.map((item) => item.x + item.width)),
       };
@@ -4111,13 +4114,15 @@
       const top = minY - cellHeight / 2 - 10, bottom = maxY + cellHeight / 2 + 20;
       const groupMarks = panel.markerGroups ? groupPanelMarks(panel, rows) : null;
       const decorations = [];
-      if (panel.definition.showYGridLines) for (const row of rows) {
-        decorations.push({ x: 0, y: row.y - 0.5, width: panel.width, height: 1,
-          fill: panel.gridColour, background: true, kind: "y-grid" });
+      const axisTop = minY - panel.cellHeight / 2;
+      const axisBottom = panel.definition.type === "bar" && panel.definition.showKey !== false
+        ? bottom + 1 : maxY + panel.cellHeight / 2;
+      if (rows.length && panel.definition.showXGridLines) for (const x of panel.gridX ?? []) {
+        decorations.push({ x, y: axisTop, width: 1, height: axisBottom - axisTop,
+          fill: panel.gridColour, background: true, kind: "x-grid" });
       }
-      if (panel.definition.showYAxisLine && rows.length) decorations.push({ x: -1, y: minY - panel.cellHeight / 2,
-        width: 1, height: (panel.definition.type === "bar" && panel.definition.showKey !== false ? bottom : maxY + panel.cellHeight / 2) - minY + panel.cellHeight / 2,
-        fill: panel.axisColour, kind: "y-axis" });
+      if (panel.definition.showYAxisLine && rows.length) decorations.push({ x: 0, y: axisTop,
+        width: 1, height: axisBottom - axisTop, fill: panel.axisColour, kind: "y-axis" });
       return { ...panel, x: panel.x + dx, rows: groupMarks ? [] : rows,
         texts: [...(groupMarks?.texts ?? []), ...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
           ...panel.footer.map((item) => ({ ...item, y: item.y + bottom }))],
@@ -9238,7 +9243,7 @@
 
   const styleFields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
     "groups", "markerWidth", "laneGap", "titleFontSize", "columnFontSize", "labelFontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
-    "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour", "showYAxisLine", "showYGridLines"]);
+    "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour", "showYAxisLine", "showXGridLines"]);
   const fields = new Set([...styleFields, "values"]);
   const fail$2 = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
 
@@ -14742,7 +14747,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       // Keys follow the current bottom row. Only this small buffer changes
       // during a row drag; cells remain retained and use cluster transforms.
       const keyPreview = nextPreview?.type === "cluster-drag" ? nextPreview : null;
-      const groupRows = annotationPanels.some((panel) => panel.markerGroups || panel.definition.showYAxisLine || panel.definition.showYGridLines) ? scene.clusters : null;
+      const groupRows = annotationPanels.some((panel) => panel.markerGroups || panel.definition.showYAxisLine || panel.definition.showXGridLines) ? scene.clusters : null;
       if (changed || annotationKeyPreview !== keyPreview || annotationGroupRows !== groupRows) {
         annotationGroupRows = groupRows;
         annotationKeyPreview = keyPreview;
@@ -14761,14 +14766,14 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const bounds = scene.figureBounds;
       if (!nextPreview && bounds && viewport.minX <= bounds.minX && viewport.maxX >= bounds.maxX &&
           viewport.minY <= bounds.minY && viewport.maxY >= bounds.maxY) {
-        if (!scene.annotationPanels.some((panel) => panel.definition.showYGridLines)) {
+        if (!scene.annotationPanels.some((panel) => panel.definition.showXGridLines)) {
           return { background: [], cells: annotationCount ? [[0, annotationCount]] : [], keys: annotationKeyCount ? [[0, annotationKeyCount]] : [] };
         }
         const background = [], keys = [];
         for (let i = 0; i < scene.annotationPanels.length; i++) {
           const panel = scene.annotationPanels[i], first = annotationKeys.get(panel.uid);
           const end = i + 1 < scene.annotationPanels.length ? annotationKeys.get(scene.annotationPanels[i + 1].uid) : annotationKeyCount;
-          const middle = first + (panel.definition.showYGridLines ? panel.rows.length : 0);
+          const middle = first + (panel.definition.showXGridLines ? panel.gridX?.length ?? 0 : 0);
           if (middle > first) background.push([first, middle]);
           if (end > middle) keys.push([middle, end]);
         }
@@ -16878,7 +16883,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         };
         if (annotationOverlay) annotationOverlay.update(annotationUiContext);
         else if (!annotationUiLoad) {
-          annotationUiLoad = import('./annotationOverlay.mjs?v=6eded06bb8c1').then(({ createAnnotationOverlay }) => {
+          annotationUiLoad = import('./annotationOverlay.mjs?v=f1324fc0a7c3').then(({ createAnnotationOverlay }) => {
             if (!annotationUiContext) return;
             annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
               ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,

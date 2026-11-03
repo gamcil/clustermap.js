@@ -863,7 +863,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     // Keys follow the current bottom row. Only this small buffer changes
     // during a row drag; cells remain retained and use cluster transforms.
     const keyPreview = nextPreview?.type === "cluster-drag" ? nextPreview : null;
-    const groupRows = annotationPanels.some((panel) => panel.markerGroups || panel.definition.showYAxisLine || panel.definition.showYGridLines) ? scene.clusters : null;
+    const groupRows = annotationPanels.some((panel) => panel.markerGroups || panel.definition.showYAxisLine || panel.definition.showXGridLines) ? scene.clusters : null;
     if (changed || annotationKeyPreview !== keyPreview || annotationGroupRows !== groupRows) {
       annotationGroupRows = groupRows;
       annotationKeyPreview = keyPreview;
@@ -882,14 +882,14 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     const bounds = scene.figureBounds;
     if (!nextPreview && bounds && viewport.minX <= bounds.minX && viewport.maxX >= bounds.maxX &&
         viewport.minY <= bounds.minY && viewport.maxY >= bounds.maxY) {
-      if (!scene.annotationPanels.some((panel) => panel.definition.showYGridLines)) {
+      if (!scene.annotationPanels.some((panel) => panel.definition.showXGridLines)) {
         return { background: [], cells: annotationCount ? [[0, annotationCount]] : [], keys: annotationKeyCount ? [[0, annotationKeyCount]] : [] };
       }
       const background = [], keys = [];
       for (let i = 0; i < scene.annotationPanels.length; i++) {
         const panel = scene.annotationPanels[i], first = annotationKeys.get(panel.uid);
         const end = i + 1 < scene.annotationPanels.length ? annotationKeys.get(scene.annotationPanels[i + 1].uid) : annotationKeyCount;
-        const middle = first + (panel.definition.showYGridLines ? panel.rows.length : 0);
+        const middle = first + (panel.definition.showXGridLines ? panel.gridX?.length ?? 0 : 0);
         if (middle > first) background.push([first, middle]);
         if (end > middle) keys.push([middle, end]);
       }
