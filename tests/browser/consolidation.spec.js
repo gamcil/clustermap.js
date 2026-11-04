@@ -284,7 +284,115 @@ test("SVG tree edits, previews and history leave biological DOM untouched", asyn
   expect(result.annotations).toBe(0);
 });
 
+test("mixed annotation selections preserve panel scales and reject invalid batch edits atomically", async ({ page }) => {
+  await page.evaluate(() => {
+    const data = structuredClone(chart.data());
+    const matrix = { title: "", columns: ["Value"], values: { a: [1], b: [2], c: [3] }, showKey: false };
+    data.annotationPanels = [
+      { ...matrix, uid: "heat-one", type: "heatmap", scale: { domain: [-2, 2], colours: ["#ffffff", "#ff0000"] } },
+      { ...matrix, uid: "heat-two", type: "heatmap", scale: { domain: [0, 10], colours: ["#ffffff", "#0000ff", "#000000"] } },
+      { ...matrix, uid: "bar", type: "bar", colour: "#123456" },
+      { uid: "markers", type: "groups", groups: [{ uid: "group", clusterIds: ["a", "b"] }] },
+    ];
+    chart.config({ annotations: { enabled: true } }); chart.data(data); chart.clearHistory();
+  });
+  const first = await page.locator("g.annotationRow rect").first().boundingBox();
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+  await page.getByRole("button", { name: "Edit annotation panel heat-one", exact: true }).click();
+  const menu = page.getByRole("dialog", { name: "Annotation panel settings", exact: true });
+  await menu.locator(".cm-annotation-selection summary").click();
+  await menu.getByRole("checkbox", { name: "Select annotation panel heat-two", exact: true }).check();
+  await menu.locator("summary").filter({ hasText: "Advanced" }).click();
+  await menu.getByLabel("Colour stop 1", { exact: true }).fill("#112233");
+  expect(await page.evaluate(() => chart.data().annotationPanels.slice(0, 2).map((panel) => panel.scale))).toEqual([
+    { domain: [-2, 2], colours: ["#112233", "#ff0000"] }, { domain: [0, 10], colours: ["#112233", "#0000ff", "#000000"] },
+  ]);
+  await page.evaluate(() => chart.undo());
+  await menu.getByLabel("Palette", { exact: true }).first().selectOption("Viridis");
+  expect(await page.evaluate(() => chart.data().annotationPanels.slice(0, 2).map((panel) => panel.scale.domain))).toEqual([[-2, 2], [0, 10]]);
+  await page.evaluate(() => chart.undo());
+  const before = await page.evaluate(() => chart.project());
+  await menu.getByLabel("Minimum", { exact: true }).fill("3");
+  await expect(menu.getByRole("alert")).toContainText("min < max");
+  expect(await page.evaluate(() => chart.project())).toEqual(before);
+  await page.evaluate(() => chart.patch([{ type: "annotationPanels.delete", ids: ["bar"] }]));
+  await expect(menu.getByRole("checkbox", { name: "Select annotation panel bar", exact: true })).toHaveCount(0);
+  await page.evaluate(() => chart.undo());
+  await expect(menu.getByRole("checkbox", { name: "Select annotation panel bar", exact: true })).toBeVisible();
+  await menu.getByRole("button", { name: "Select all panels", exact: true }).click();
+  await expect(menu.getByLabel("Title", { exact: true })).toHaveCount(0);
+  await expect(menu.getByLabel("Palette", { exact: true })).toHaveCount(0);
+  await expect(menu.getByLabel("Colour", { exact: true })).toHaveCount(0);
+  await expect(menu.getByLabel("Show x-axis grid lines", { exact: true })).toHaveCount(0);
+  await menu.locator("summary").filter({ hasText: "Advanced" }).click();
+  await menu.getByRole("checkbox", { name: "Show y-axis line", exact: true }).check();
+  expect(await page.evaluate(() => chart.data().annotationPanels.every((panel) => panel.showYAxisLine))).toBe(true);
+  await page.evaluate(() => chart.patch([{ type: "annotationPanels.delete", ids: ["heat-one"] }]));
+  await expect(menu.locator("header strong")).toHaveText("3 annotation panels");
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".cm-annotation-selected")).toHaveCount(0);
+});
+
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: annotation panels support shared batch edits, mixed values and atomic history`, async ({ page }) => {
+    await page.evaluate(() => {
+      const data = structuredClone(chart.data());
+      data.annotationPanels = ["one", "two", "three"].map((uid, i) => ({ uid, type: "bar", title: `Panel ${uid}`,
+        columns: ["Value"], values: { a: [1], b: [2], c: [3] }, scale: { domain: [0, i + 4] },
+        showKey: false, colour: ["#ff0000", "#0000ff", "#00ff00"][i], showYAxisLine: i === 0 }));
+      chart.config({ annotations: { enabled: true } }); chart.data(data); chart.clearHistory();
+    });
+    const boxes = await page.locator("g.annotationPanel").evaluateAll((nodes) => nodes.map((node) => {
+      const { x, y, width, height } = node.getBoundingClientRect(); return { x: x + width / 2, y: y + height / 2 };
+    }));
+    await page.evaluate((renderer) => {
+      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+      chart.config({ plot: { renderer } }); chart.clearHistory();
+    }, renderer);
+    await page.locator(".cm-annotation-frame:not(.cm-annotation-add)").waitFor({ state: "attached" });
+    const beforeCamera = await page.evaluate(() => chart.state().camera);
+    await page.mouse.move(boxes[0].x, boxes[0].y);
+    await page.keyboard.down("Meta"); await page.mouse.click(boxes[0].x, boxes[0].y); await page.keyboard.up("Meta");
+    await page.keyboard.down("Shift"); await page.mouse.click(boxes[1].x, boxes[1].y); await page.keyboard.up("Shift");
+    await expect(page.locator(".cm-annotation-selected:not([hidden])")).toHaveCount(2);
+    expect(await page.evaluate(() => chart.state().camera)).toEqual(beforeCamera);
+    await page.mouse.move(boxes[1].x + 1, boxes[1].y);
+    await page.getByRole("button", { name: "Edit 2 annotation panels", exact: true }).click();
+    const menu = page.getByRole("dialog", { name: "Annotation panel settings", exact: true });
+    await expect(menu.getByLabel("Title", { exact: true })).toHaveCount(0);
+    await expect(menu.getByRole("button", { name: "Edit data…", exact: true })).toHaveCount(0);
+    await expect(menu.getByLabel("Colour", { exact: true })).toHaveAttribute("data-mixed", "true");
+    await menu.locator("summary").filter({ hasText: "Advanced" }).click();
+    const axis = menu.getByRole("checkbox", { name: "Show y-axis line", exact: true });
+    await expect(axis).toHaveAttribute("aria-checked", "mixed");
+    await axis.check();
+    expect(await page.evaluate(() => chart.data().annotationPanels.map((panel) => panel.showYAxisLine))).toEqual([true, true, false]);
+    await page.evaluate(() => chart.undo());
+    await expect(axis).toHaveAttribute("aria-checked", "mixed");
+    expect(await page.evaluate(() => chart.canUndo())).toBe(false);
+    await menu.getByLabel("Colour", { exact: true }).fill("#123456");
+    expect(await page.evaluate(() => chart.data().annotationPanels.map((panel) => panel.colour))).toEqual(["#123456", "#123456", "#00ff00"]);
+    await page.evaluate(() => chart.undo());
+    expect(await page.evaluate(() => chart.data().annotationPanels.map((panel) => panel.colour))).toEqual(["#ff0000", "#0000ff", "#00ff00"]);
+    await menu.locator(".cm-annotation-selection summary").click();
+    await menu.getByRole("button", { name: "Select all panels", exact: true }).click();
+    await expect(menu.locator("header strong")).toHaveText("3 annotation panels");
+    await menu.locator("summary").filter({ hasText: "Advanced" }).click();
+    await menu.getByRole("checkbox", { name: "Show y-axis line", exact: true }).check();
+    expect(await page.evaluate(() => chart.data().annotationPanels.every((panel) => panel.showYAxisLine))).toBe(true);
+    await menu.getByRole("button", { name: "Hide", exact: true }).click();
+    expect(await page.evaluate(() => chart.data().annotationPanels.every((panel) => panel.show === false))).toBe(true);
+    await expect(menu.getByRole("button", { name: "Show", exact: true })).toBeVisible();
+    await page.evaluate(() => chart.undo());
+    await menu.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(menu).toBeHidden();
+    expect(await page.evaluate(() => chart.data().annotationPanels)).toEqual([]);
+    await page.evaluate(() => chart.undo());
+    expect(await page.evaluate(() => chart.data().annotationPanels.length)).toBe(3);
+  });
+
   test(`${renderer}: annotation y-axis controls persist through history and export`, async ({ page }) => {
     await page.evaluate(() => {
       const data = structuredClone(chart.data());

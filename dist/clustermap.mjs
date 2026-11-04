@@ -16877,7 +16877,7 @@ function clusterMap() {
       };
       if (annotationOverlay) annotationOverlay.update(annotationUiContext);
       else if (!annotationUiLoad) {
-        annotationUiLoad = import('./annotationOverlay.mjs?v=f1324fc0a7c3').then(({ createAnnotationOverlay }) => {
+        annotationUiLoad = import('./annotationOverlay.mjs?v=c95bb0e8ac57').then(({ createAnnotationOverlay }) => {
           if (!annotationUiContext) return;
           annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
             ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,

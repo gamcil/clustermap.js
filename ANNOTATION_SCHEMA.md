@@ -321,6 +321,13 @@ panel, including hidden panels. The in-plot menu keeps quick styling controls
 under **Advanced**. **Edit data…** opens the selected panel in the Data editor.
 When no editor handles that action, the same data editor opens in the plot menu.
 
+Use **Panels** in the in-plot menu to select multiple panels, or Ctrl/Cmd-click
+panels on the plot (Shift-click selects a range). **Edit** then shows only shared
+settings. Differing values are marked **Mixed**; changing a setting applies it to
+all selected panels in one undo step. Palette and range edits preserve each
+panel's other scale settings. Hide/show and remove also work on the selection;
+titles, data editing and reordering remain individual actions.
+
 The editor supports numeric/categorical matrices, category and column management,
 CSV/TSV or JSON replacement, group-marker membership, and panel ordering/visibility.
 Replacement tables use cluster IDs in the first column and data headings in the

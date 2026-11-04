@@ -5,6 +5,7 @@ import { defineAnnotationEditor } from "../editor/components/annotation-editor/a
 import { createAnnotationControls } from "./controls.mjs";
 import { defineAnnotationDataForm } from "../editor/components/annotation-data-form/annotation-data-form.js";
 import { createAnnotationPanel } from "./io.mjs";
+import { selectionRange } from "../interaction/selection.mjs";
 import { classifyControl } from "../ui/controls.mjs";
 
 const css = await textAsset(new URL("./overlay.css", import.meta.url));
@@ -33,7 +34,8 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
   const tooltip = element("div", "cm-ui annotation-tooltip"); tooltip.hidden = true;
   tooltip.setAttribute("role", "tooltip");
   let context = null, surfaces = [], hovered = null, menuState = null;
-  let tooltipKey = null;
+  let tooltipKey = null, selected = new Set(), selectionAnchor = null;
+  const selectionFrames = new Map();
   let panelAreas = [], addArea = null;
   let areaScene = null, areaPreview = null;
   const contains = (bounds, point) => point.x >= bounds.minX && point.x <= bounds.maxX && point.y >= bounds.minY && point.y <= bounds.maxY;
@@ -105,11 +107,11 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
     const bottom = Math.min(rect.bottom - 2, rect.top + camera.y + area.maxY * camera.k + 12, window.innerHeight);
     return right > left && bottom > top ? { left, top, right, bottom, width: right - left, height: bottom - top } : null;
   };
-  const showAddFrame = () => {
-    const rect = addScreenArea();
-    addFrame.hidden = !rect;
-    if (rect) Object.assign(addFrame.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+  const placeFrame = (node, rect) => {
+    node.hidden = !rect;
+    if (rect) Object.assign(node.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
   };
+  const showAddFrame = () => placeFrame(addFrame, addScreenArea());
   const addScreenArea = () => {
     if (!addArea || !surfaces[0]) return null;
     const surface = surfaces[0].getBoundingClientRect(), camera = context.getCamera();
@@ -128,16 +130,39 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
   const showFrame = (uid) => {
     const area = panelAreas.find((area) => area.uid === uid);
     const rect = area && surfaces[0] && screenArea(area.bounds, surfaces[0]);
-    frame.hidden = !rect;
+    placeFrame(frame, rect);
     if (!rect) return;
-    Object.assign(frame.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
-    edit.setAttribute("aria-label", `Edit annotation panel ${area.title || uid}`);
+    edit.setAttribute("aria-label", selected.has(uid) && selected.size > 1
+      ? `Edit ${selected.size} annotation panels` : `Edit annotation panel ${area.title || uid}`);
   };
   const openPanel = (uid, button) => {
     const panel = getPanels().find((panel) => panel.uid === uid);
     if (!panel) return;
-    const state = beginMenu("panel", panel.title || uid, button, uid);
-    state.controls = createAnnotationControls({ getData, patch, document, panelUid: uid, annotationApi,
+    if (!selected.has(uid)) { selected = new Set([uid]); selectionAnchor = uid; }
+    const ids = getPanels().filter((panel) => selected.has(panel.uid)).map((panel) => panel.uid);
+    const state = beginMenu("panel", ids.length > 1 ? `${ids.length} annotation panels` : panel.title || uid, button, uid);
+    state.ids = ids; state.panelOrder = getPanels().map((panel) => panel.uid);
+    if (getPanels().length > 1) {
+      const chooser = element("details", "cm-annotation-selection", menu);
+      element("summary", "", chooser).textContent = `Panels (${ids.length} selected)`;
+      const selectAll = element("button", "", chooser); selectAll.type = "button"; selectAll.textContent = "Select all panels";
+      const choose = (next, focusUid) => {
+        selected = new Set(next); selectionAnchor = focusUid; openPanel(next[0], button);
+        menu.querySelector(".cm-annotation-selection").open = true;
+        [...menu.querySelectorAll("[data-panel-select]")].find((input) => input.dataset.panelSelect === focusUid)?.focus({ preventScroll: true });
+      };
+      selectAll.onclick = () => choose(getPanels().map((panel) => panel.uid), uid);
+      for (const item of getPanels()) {
+        const label = element("label", "", chooser);
+        element("span", "", label).textContent = `${item.title || item.uid}${item.show === false ? " (hidden)" : ""}`;
+        const check = element("input", "", label); check.type = "checkbox";
+        check.dataset.panelSelect = item.uid; check.checked = selected.has(item.uid);
+        check.disabled = check.checked && ids.length === 1;
+        check.setAttribute("aria-label", `Select annotation panel ${item.title || item.uid}`);
+        check.onchange = () => choose(check.checked ? [...ids, item.uid] : ids.filter((id) => id !== item.uid), item.uid);
+      }
+    }
+    state.controls = createAnnotationControls({ getData, patch, document, panelUids: ids, annotationApi,
       onEditData: () => {
         if (editData?.(uid)) { close(); return; }
         const dataState = beginMenu("data", "Annotation data", edit, uid);
@@ -159,14 +184,14 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
       const button = element("button", "", actions); button.type = "button"; button.textContent = label; button.onclick = callback; return button;
     };
     state.actions = { left: action("←", () => movePanel(-1)), right: action("→", () => movePanel(1)),
-      visibility: action(panel.show === false ? "Show" : "Hide", () => patch([{ type: "annotationPanels.update", ids: [uid],
-        changes: { show: getPanels().find((item) => item.uid === uid).show === false } }])) };
+      visibility: action(panel.show === false ? "Show" : "Hide", () => patch([{ type: "annotationPanels.update", ids,
+        changes: { show: ids.every((id) => getPanels().find((item) => item.uid === id).show === false) } }])) };
     state.actions.left.setAttribute("aria-label", "Move panel left"); state.actions.left.title = "Move panel left";
     state.actions.right.setAttribute("aria-label", "Move panel right"); state.actions.right.title = "Move panel right";
-    action("Remove", () => patch([{ type: "annotationPanels.delete", ids: [uid] }]));
+    action("Remove", () => patch([{ type: "annotationPanels.delete", ids }]));
     refresh();
     positionMenu();
-    menu.querySelector("input, select")?.focus({ preventScroll: true });
+    state.controls.node.querySelector("input, select")?.focus({ preventScroll: true });
   };
   edit.onclick = () => { if (hovered) openPanel(hovered, edit); };
   add.onclick = () => {
@@ -207,15 +232,40 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
         maxY: panelAreas.length ? Math.max(...panelAreas.map((area) => area.bounds.maxY)) : bounds.maxY } : null;
     }
     const panels = getPanels();
-    if (menuState?.kind === "panel" && !panels.some((panel) => panel.uid === menuState.uid)) close();
+    if (menuState?.kind === "panel") {
+      const choices = [...menu.querySelectorAll("[data-panel-select]")];
+      for (const check of choices) {
+        const panel = panels.find((panel) => panel.uid === check.dataset.panelSelect);
+        if (panel) check.previousElementSibling.textContent = `${panel.title || panel.uid}${panel.show === false ? " (hidden)" : ""}`;
+      }
+    }
+    selected = new Set([...selected].filter((uid) => panels.some((panel) => panel.uid === uid)));
+    for (const [uid, outline] of selectionFrames) if (!selected.has(uid)) { outline.remove(); selectionFrames.delete(uid); }
+    for (const uid of selected) {
+      let outline = selectionFrames.get(uid);
+      if (!outline) { outline = element("div", "cm-ui cm-annotation-ui cm-annotation-selected"); selectionFrames.set(uid, outline); }
+      const area = panelAreas.find((area) => area.uid === uid);
+      const rect = area && surfaces[0] && screenArea(area.bounds, surfaces[0]);
+      placeFrame(outline, rect);
+    }
+    if (menuState?.kind === "panel" && (menuState.ids.some((uid) => !selected.has(uid)) ||
+        menuState.panelOrder.length !== panels.length || panels.some((panel, i) => panel.uid !== menuState.panelOrder[i]))) {
+      if (selected.size) {
+        const choosing = menu.querySelector(".cm-annotation-selection")?.open;
+        openPanel([...selected][0], menuState.opener);
+        if (choosing && menu.querySelector(".cm-annotation-selection")) menu.querySelector(".cm-annotation-selection").open = true;
+      } else close();
+    }
     const active = menuState?.kind === "panel" ? menuState.uid : null;
     if (active || hovered) showFrame(active || hovered);
     if (menuState?.kind === "add") showAddFrame();
     if (active) {
-      menu.querySelector("header strong").textContent = panels.find((panel) => panel.uid === active)?.title || active;
+      const ids = menuState.ids, batch = ids.length > 1;
+      menu.querySelector("header strong").textContent = batch ? `${ids.length} annotation panels` : panels.find((panel) => panel.uid === active)?.title || active;
+      menuState.actions.left.hidden = menuState.actions.right.hidden = batch;
       const index = panels.findIndex((panel) => panel.uid === active);
       menuState.actions.left.disabled = index <= 0; menuState.actions.right.disabled = index >= panels.length - 1;
-      menuState.actions.visibility.textContent = panels[index].show === false ? "Show" : "Hide";
+      menuState.actions.visibility.textContent = ids.every((uid) => panels.find((panel) => panel.uid === uid).show === false) ? "Show" : "Hide";
     }
     const hidden = panels.filter((panel) => panel.show === false);
     hiddenButton.hidden = !hidden.length || !surfaces[0];
@@ -258,21 +308,36 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
     const path = event.composedPath();
     if (menuState && !path.includes(menu) && !path.includes(frame) && !path.includes(addFrame) && event.target !== hiddenButton) close();
   };
-  const dismissForGesture = () => {
+  const dismissForGesture = (event) => {
+    if (event.type === "pointerdown" && !event.button && (event.ctrlKey || event.metaKey || event.shiftKey) && !context.isBusy()) {
+      refresh();
+      const point = worldPoint(event.currentTarget, event, context.getCamera());
+      const area = [...panelAreas].reverse().find((area) => contains(area.bounds, point));
+      if (area) {
+        const range = selectionRange(panelAreas.map((area) => area.uid), selectionAnchor, area.uid, event.shiftKey);
+        if (range.ranged) selected = new Set(range.ids);
+        else if (selected.has(area.uid)) selected.delete(area.uid); else selected.add(area.uid);
+        selectionAnchor = range.anchor;
+        event.preventDefault(); event.stopImmediatePropagation(); close(); hovered = area.uid; refresh();
+        return;
+      }
+    }
+    if (event.type === "pointerdown") { selected.clear(); selectionAnchor = null; }
     if (menu.contains(document.activeElement)) document.activeElement.blur();
-    close();
+    close(); refresh();
   };
   const escape = (event) => {
     if (event.key !== "Escape" || event.defaultPrevented) return;
-    if (!event.composedPath().includes(container) && !container.contains(document.activeElement)) return;
+    if (!menuState && !selected.size && !event.composedPath().includes(container) && !container.contains(document.activeElement)) return;
     const open = Boolean(menuState);
-    close(open);
+    if (!open) { selected.clear(); selectionAnchor = null; }
+    close(open); refresh();
     if (open) event.preventDefault();
   };
   const detach = () => {
     for (const surface of surfaces) {
       surface.removeEventListener("pointermove", move); surface.removeEventListener("pointerleave", leave);
-      surface.removeEventListener("pointerdown", dismissForGesture); surface.removeEventListener("wheel", dismissForGesture);
+      surface.removeEventListener("pointerdown", dismissForGesture, true); surface.removeEventListener("wheel", dismissForGesture);
     }
   };
   frame.addEventListener("pointerleave", leave);
@@ -290,7 +355,7 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
       context = next; surfaces = nextSurfaces;
       if (surfacesChanged) for (const surface of surfaces) {
         surface.addEventListener("pointermove", move); surface.addEventListener("pointerleave", leave);
-        surface.addEventListener("pointerdown", dismissForGesture); surface.addEventListener("wheel", dismissForGesture);
+        surface.addEventListener("pointerdown", dismissForGesture, true); surface.addEventListener("wheel", dismissForGesture);
       }
       hideTooltip();
       if (menuState?.editor) {
@@ -305,6 +370,7 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
       detach(); window.removeEventListener("click", outside); window.removeEventListener("keydown", escape);
       window.removeEventListener("resize", refresh); window.removeEventListener("scroll", refresh, true);
       frame.remove(); addFrame.remove(); menu.remove(); hiddenButton.remove(); tooltip.remove();
+      for (const outline of selectionFrames.values()) outline.remove();
     },
   };
 }
