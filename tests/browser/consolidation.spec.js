@@ -359,6 +359,10 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
     const beforeCamera = await page.evaluate(() => chart.state().camera);
     await page.mouse.move(boxes[0].x, boxes[0].y);
     await page.keyboard.down("Meta"); await page.mouse.click(boxes[0].x, boxes[0].y); await page.keyboard.up("Meta");
+    await page.keyboard.down("Shift"); await page.mouse.click(boxes[2].x, boxes[2].y); await page.keyboard.up("Shift");
+    await expect(page.locator(".cm-annotation-selected:not([hidden])")).toHaveCount(2);
+    await page.keyboard.down("Shift"); await page.mouse.click(boxes[2].x, boxes[2].y); await page.keyboard.up("Shift");
+    await expect(page.locator(".cm-annotation-selected:not([hidden])")).toHaveCount(1);
     await page.keyboard.down("Shift"); await page.mouse.click(boxes[1].x, boxes[1].y); await page.keyboard.up("Shift");
     await expect(page.locator(".cm-annotation-selected:not([hidden])")).toHaveCount(2);
     expect(await page.evaluate(() => chart.state().camera)).toEqual(beforeCamera);
