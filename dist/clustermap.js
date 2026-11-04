@@ -3968,7 +3968,7 @@
     if (isBar && !tickPositions.includes(0)) tickPositions.push(0);
     tickPositions.sort((a, b) => a - b);
     const gridX = isBar ? tickPositions.map((value) => Math.max(0, Math.min(width - 1, position(value) - 0.5)))
-      : source.columns.map((_, i) => (i + 0.5) * cellWidth - 0.5);
+      : [];
     const footer = [], key = [];
     if (source.showKey !== false && isBar) {
       key.push({ x: 0, y: 0, width, height: 1, fill: theme?.muted ?? "#555555" });
@@ -16895,7 +16895,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         };
         if (annotationOverlay) annotationOverlay.update(annotationUiContext);
         else if (!annotationUiLoad) {
-          annotationUiLoad = import('./annotationOverlay.mjs?v=97f6c95a0fac').then(({ createAnnotationOverlay }) => {
+          annotationUiLoad = import('./annotationOverlay.mjs?v=ba2aa5a26bce').then(({ createAnnotationOverlay }) => {
             if (!annotationUiContext) return;
             annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
               ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,

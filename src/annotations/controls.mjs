@@ -69,7 +69,7 @@ export function createAnnotationControls({ getData, patch, document, panelUids, 
       const spacing = input(advanced, "X-axis tick spacing", "tickStep", panel.tickStep ?? "", "number", { min: "0" });
       spacing.placeholder = "Auto"; spacing.title = "Leave empty for automatic tick spacing.";
     }
-    if (!groups) input(advanced, "Show x-axis grid lines", "showXGridLines", panel.showXGridLines ?? false, "checkbox");
+    if (bar) input(advanced, "Show x-axis grid lines", "showXGridLines", panel.showXGridLines ?? false, "checkbox");
     if (!groups) {
       input(advanced, "Border width", "cellBorderWidth", panel.cellBorderWidth ?? defaults.cellBorderWidth, "number", { min: "0" });
       input(advanced, "Border colour", "cellBorderColour", panel.cellBorderColour ?? defaults.cellBorderColour, "color");

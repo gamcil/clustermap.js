@@ -303,6 +303,8 @@ test("mixed annotation selections preserve panel scales and reject invalid batch
   await menu.locator(".cm-annotation-selection summary").click();
   await menu.getByRole("checkbox", { name: "Select annotation panel heat-two", exact: true }).check();
   await menu.locator("summary").filter({ hasText: "Advanced" }).click();
+  await expect(menu.getByLabel("Show x-axis grid lines", { exact: true })).toHaveCount(0);
+  await expect(menu.getByLabel("Border width", { exact: true })).toBeVisible();
   await menu.getByLabel("Colour stop 1", { exact: true }).fill("#112233");
   expect(await page.evaluate(() => chart.data().annotationPanels.slice(0, 2).map((panel) => panel.scale))).toEqual([
     { domain: [-2, 2], colours: ["#112233", "#ff0000"] }, { domain: [0, 10], colours: ["#112233", "#0000ff", "#000000"] },

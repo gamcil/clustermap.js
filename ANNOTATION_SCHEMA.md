@@ -80,19 +80,18 @@ fields are described [below](#group-markers).
 | `tickStep` | Bar x-axis tick interval in data units; null or omitted selects automatic spacing | Auto |
 | `showKey` | Whether the heatmap colour key or bar numeric axis is drawn | `true` |
 | `showYAxisLine` | Vertical line along the left edge of the panel's rows | `false` |
-| `showXGridLines` | Vertical guides at bar-axis ticks or heatmap column centres, behind data marks | `false` |
+| `showXGridLines` | Bar-panel vertical guides at x-axis ticks, behind data marks | `false` |
 
 Axis decorations are independent of `showKey` and available under **Advanced**
 in the panel edit menu. The y-axis line is available for all panel types;
-x-axis grids are available for bar and heatmap panels. They follow row movement
+x-axis grids are available for bar panels. They follow row movement
 and visibility. The axis uses the figure's muted colour; grid lines use a lighter
 version of that colour. Both use one world unit of thickness and are included
 in SVG exports. Bar-panel y axes meet the x axis when it is shown.
 For bars, **X-axis tick spacing** sets the interval between ticks and vertical
 grid lines. Leave it empty for automatic spacing. Custom intervals use multiples
 of `tickStep` within the domain and allow at most 1000 ticks per panel.
-Opaque heatmap cells cover the grid underneath them; guides
-remain visible between rows and beside shorter bars.
+For heatmap grids, use **Border width** and **Border colour** to outline cells.
 
 Text sizes are independent: enlarging `titleFontSize` leaves column headings and
 axis/key labels unchanged. Layout and SVG export measure each text item using
