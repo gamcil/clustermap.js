@@ -4133,7 +4133,7 @@
         decorations.push({ x, y: axisTop, width: 1, height: axisBottom - axisTop,
           fill: panel.gridColour, background: true, kind: "x-grid" });
       }
-      if (panel.definition.showYAxisLine && rows.length) decorations.push({ x: 0, y: axisTop,
+      if (panel.definition.type === "bar" && panel.definition.showYAxisLine && rows.length) decorations.push({ x: 0, y: axisTop,
         width: 1, height: axisBottom - axisTop, fill: panel.axisColour, kind: "y-axis" });
       return { ...panel, x: panel.x + dx, rows: groupMarks ? [] : rows,
         texts: [...(groupMarks?.texts ?? []), ...panel.header.map((item) => ({ ...item, y: (item.kind === "title" ? -titleOffset : item.y) + top })),
@@ -16895,7 +16895,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         };
         if (annotationOverlay) annotationOverlay.update(annotationUiContext);
         else if (!annotationUiLoad) {
-          annotationUiLoad = import('./annotationOverlay.mjs?v=ba2aa5a26bce').then(({ createAnnotationOverlay }) => {
+          annotationUiLoad = import('./annotationOverlay.mjs?v=69a601433638').then(({ createAnnotationOverlay }) => {
             if (!annotationUiContext) return;
             annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
               ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,

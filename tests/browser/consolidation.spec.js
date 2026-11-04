@@ -303,6 +303,7 @@ test("mixed annotation selections preserve panel scales and reject invalid batch
   await menu.locator(".cm-annotation-selection summary").click();
   await menu.getByRole("checkbox", { name: "Select annotation panel heat-two", exact: true }).check();
   await menu.locator("summary").filter({ hasText: "Advanced" }).click();
+  await expect(menu.getByLabel("Show y-axis line", { exact: true })).toHaveCount(0);
   await expect(menu.getByLabel("Show x-axis grid lines", { exact: true })).toHaveCount(0);
   await expect(menu.getByLabel("Border width", { exact: true })).toBeVisible();
   await menu.getByLabel("Colour stop 1", { exact: true }).fill("#112233");
@@ -325,10 +326,11 @@ test("mixed annotation selections preserve panel scales and reject invalid batch
   await expect(menu.getByLabel("Title", { exact: true })).toHaveCount(0);
   await expect(menu.getByLabel("Palette", { exact: true })).toHaveCount(0);
   await expect(menu.getByLabel("Colour", { exact: true })).toHaveCount(0);
+  await expect(menu.getByLabel("Show y-axis line", { exact: true })).toHaveCount(0);
   await expect(menu.getByLabel("Show x-axis grid lines", { exact: true })).toHaveCount(0);
   await menu.locator("summary").filter({ hasText: "Advanced" }).click();
-  await menu.getByRole("checkbox", { name: "Show y-axis line", exact: true }).check();
-  expect(await page.evaluate(() => chart.data().annotationPanels.every((panel) => panel.showYAxisLine))).toBe(true);
+  await menu.getByLabel("Title font size", { exact: true }).fill("12");
+  expect(await page.evaluate(() => chart.data().annotationPanels.every((panel) => panel.titleFontSize === 12))).toBe(true);
   await page.evaluate(() => chart.patch([{ type: "annotationPanels.delete", ids: ["heat-one"] }]));
   await expect(menu.locator("header strong")).toHaveText("3 annotation panels");
   await page.keyboard.press("Escape");

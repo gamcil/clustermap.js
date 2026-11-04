@@ -22,11 +22,11 @@ for (const type of ["heatmap", "bar", "groups"]) {
       const { definition, scene } = fixture(type, { showYAxisLine: axis, showXGridLines: grid });
       const before = structuredClone(definition), frame = annotationPanelsForFrame(scene)[0];
       const lines = frame.rects.filter((rect) => rect.kind === "x-grid"), axes = frame.rects.filter((rect) => rect.kind === "y-axis");
-      assert.equal(axes.length, Number(axis));
+      assert.equal(axes.length, Number(axis && type === "bar"));
       assert.deepEqual(lines.map((line) => line.x), grid ? frame.gridX ?? [] : []);
       if (type !== "bar") assert.equal(lines.length, 0);
       assert.ok(lines.every((line) => line.background && line.width === 1 && line.y === 10 && line.height === 100));
-      if (axis) {
+      if (axis && type === "bar") {
         assert.deepEqual([axes[0].x, axes[0].y, axes[0].height], [0, 10, 100]);
         assert.ok(annotationPanelBounds(frame).minX <= frame.x);
       }

@@ -79,12 +79,12 @@ fields are described [below](#group-markers).
 | `showColumnLabels` | Whether column headings are drawn | `true` |
 | `tickStep` | Bar x-axis tick interval in data units; null or omitted selects automatic spacing | Auto |
 | `showKey` | Whether the heatmap colour key or bar numeric axis is drawn | `true` |
-| `showYAxisLine` | Vertical line along the left edge of the panel's rows | `false` |
+| `showYAxisLine` | Bar-panel vertical line along the left edge of the rows | `false` |
 | `showXGridLines` | Bar-panel vertical guides at x-axis ticks, behind data marks | `false` |
 
 Axis decorations are independent of `showKey` and available under **Advanced**
-in the panel edit menu. The y-axis line is available for all panel types;
-x-axis grids are available for bar panels. They follow row movement
+in the panel edit menu. The y-axis line and x-axis grids are available for bar
+panels. They follow row movement
 and visibility. The axis uses the figure's muted colour; grid lines use a lighter
 version of that colour. Both use one world unit of thickness and are included
 in SVG exports. Bar-panel y axes meet the x axis when it is shown.
