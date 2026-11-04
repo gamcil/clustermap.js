@@ -361,6 +361,14 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
     await page.mouse.move(boxes[1].x + 1, boxes[1].y);
     await page.getByRole("button", { name: "Edit 2 annotation panels", exact: true }).click();
     const menu = page.getByRole("dialog", { name: "Annotation panel settings", exact: true });
+    expect(await page.evaluate(() => {
+      const menu = document.querySelector(".cm-annotation-menu"), outline = document.querySelector(".cm-annotation-selected");
+      const rect = outline.getBoundingClientRect(), left = menu.style.left, top = menu.style.top;
+      menu.style.left = `${rect.left}px`; menu.style.top = `${rect.top}px`; outline.style.pointerEvents = "auto";
+      const above = menu.contains(document.elementFromPoint(rect.left + 10, rect.top + 10));
+      menu.style.left = left; menu.style.top = top; outline.style.pointerEvents = "";
+      return above;
+    })).toBe(true);
     await expect(menu.getByLabel("Title", { exact: true })).toHaveCount(0);
     await expect(menu.getByRole("button", { name: "Edit data…", exact: true })).toHaveCount(0);
     await expect(menu.getByLabel("Colour", { exact: true })).toHaveAttribute("data-mixed", "true");
@@ -376,6 +384,9 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
     expect(await page.evaluate(() => chart.data().annotationPanels.map((panel) => panel.colour))).toEqual(["#123456", "#123456", "#00ff00"]);
     await page.evaluate(() => chart.undo());
     expect(await page.evaluate(() => chart.data().annotationPanels.map((panel) => panel.colour))).toEqual(["#ff0000", "#0000ff", "#00ff00"]);
+    await menu.getByLabel("X-axis tick spacing", { exact: true }).fill("2");
+    expect(await page.evaluate(() => chart.data().annotationPanels.map((panel) => panel.tickStep ?? null))).toEqual([2, 2, null]);
+    await page.evaluate(() => chart.undo());
     await menu.locator(".cm-annotation-selection summary").click();
     await menu.getByRole("button", { name: "Select all panels", exact: true }).click();
     await expect(menu.locator("header strong")).toHaveText("3 annotation panels");
@@ -439,6 +450,21 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
         tickX: keys.filter((rect) => +rect.getAttribute("height") === 5).map((rect) => rect.getAttribute("x")) };
     })).toMatchObject({ sameX: true, sameBottom: true,
       gridX: ["0", "29.5", "59.5", "89.5", "119"], tickX: ["0", "29.5", "59.5", "89.5", "119"] });
+    const spacing = page.getByLabel("X-axis tick spacing", { exact: true });
+    await expect(spacing).toHaveAttribute("placeholder", "Auto");
+    await spacing.fill("2");
+    expect(await page.evaluate(() => {
+      const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml");
+      return { ticks: [...svg.querySelectorAll("g.annotationPanel text")].map((node) => node.textContent).filter((value) => Number.isFinite(Number(value))),
+        grids: svg.querySelectorAll(".annotation-x-grid").length, step: chart.data().annotationPanels[0].tickStep };
+    })).toEqual({ ticks: ["0", "2", "4"], grids: 3, step: 2 });
+    await page.evaluate(() => chart.undo());
+    await expect(spacing).toHaveValue("");
+    await page.evaluate(() => { chart.redo(); chart.project(JSON.parse(JSON.stringify(chart.project()))); });
+    await expect(spacing).toHaveValue("2");
+    await spacing.fill("");
+    expect(await page.evaluate(() => chart.data().annotationPanels[0].tickStep)).toBeNull();
+    expect((await marks()).grids).toBe(5);
   });
 
   test(`${renderer}: rerooting hides terminal support labels and reset restores them`, async ({ page }) => {

@@ -38,6 +38,7 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
     for (const key of ["show", "showKey", "showColumnLabels", "showYAxisLine", "showXGridLines"]) {
       if (panel[key] !== undefined && typeof panel[key] !== "boolean") fail(`${key} must be a boolean.`);
     }
+    if (panel.tickStep != null && (!Number.isFinite(panel.tickStep) || panel.tickStep <= 0)) fail("tickStep must be positive, or null for automatic ticks.");
     if (panel.headingRotation !== undefined && (!Number.isFinite(panel.headingRotation) || panel.headingRotation < -90 || panel.headingRotation > 0)) fail("headingRotation must be between -90 and 0 degrees.");
     for (const key of ["cellWidth", "cellHeight", "titleFontSize", "columnFontSize", "labelFontSize", "width"]) {
       if (panel[key] !== undefined && (!Number.isFinite(panel[key]) || panel[key] <= 0)) fail(`${key} must be positive.`);
@@ -81,20 +82,31 @@ export function validateAnnotationPanels(panels, clusters, { previousPanels = nu
     const sameCategories = sameArray(oldScale.domain, scale.domain);
     const sameValueRules = before?.columns?.length === panel.columns.length &&
       (oldScale.type ?? "continuous") === type && (type !== "categorical" || sameCategories);
-    if (before?.values === panel.values && sameValueRules) continue;
-    clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
-    const categories = type === "categorical" && scale.domain ? new Set(scale.domain) : null;
-    for (const [uid, values] of Object.entries(panel.values)) {
-      if (!clusterIds.has(uid)) fail(`unknown cluster '${uid}'.`);
-      if (sameValueRules && before.values[uid] === values) continue;
-      if (!Array.isArray(values) || values.length !== panel.columns.length) fail(`row '${uid}' must have one value per column.`);
-      for (const value of values) {
-        if (value === null) continue;
-        if (type === "continuous" ? !Number.isFinite(value) : typeof value !== "string") fail(`invalid ${type} value in row '${uid}'.`);
-        if (categories && !categories.has(value)) fail(`category '${value}' is absent from scale.domain.`);
+    if (!(before?.values === panel.values && sameValueRules)) {
+      clusterIds ??= new Set(clusters.map((cluster) => cluster.uid));
+      const categories = type === "categorical" && scale.domain ? new Set(scale.domain) : null;
+      for (const [uid, values] of Object.entries(panel.values)) {
+        if (!clusterIds.has(uid)) fail(`unknown cluster '${uid}'.`);
+        if (sameValueRules && before.values[uid] === values) continue;
+        if (!Array.isArray(values) || values.length !== panel.columns.length) fail(`row '${uid}' must have one value per column.`);
+        for (const value of values) {
+          if (value === null) continue;
+          if (type === "continuous" ? !Number.isFinite(value) : typeof value !== "string") fail(`invalid ${type} value in row '${uid}'.`);
+          if (categories && !categories.has(value)) fail(`category '${value}' is absent from scale.domain.`);
+        }
       }
     }
+    if (panel.type === "bar" && panel.tickStep != null) barTicks(resolveAnnotationScale(panel).domain, panel.width ?? ANNOTATION_DEFAULTS.width, panel.tickStep);
   }
+}
+
+function barTicks(domain, width, step) {
+  if (step == null) return scaleLinear().domain(domain).ticks(Math.max(2, Math.min(6, Math.floor(width / 40))));
+  const [min, max] = domain.map((value) => value / step);
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(min), Math.abs(max)) * 4;
+  const first = Math.ceil(min - tolerance), count = Math.floor(max + tolerance) - first + 1;
+  if (!Number.isSafeInteger(count) || count > 1000) throw new TypeError("Invalid annotationPanels: tickStep is too small for this range (maximum 1000 ticks).");
+  return Array.from({ length: count }, (_, i) => Number(((first + i) * step).toPrecision(15)));
 }
 
 const numberLabel = (value) => Number(value.toPrecision(3)).toString();
@@ -256,7 +268,7 @@ function layoutMatrixPanel(source, clusters, { before, labelFontSize, columnFont
   });
   const rotation = source.headingRotation ?? (isBar ? 0 : ANNOTATION_DEFAULTS.headingRotation);
   const header = source.showColumnLabels === false ? [] : source.columns.map((column, i) => text(column, isBar ? 0 : (i + 0.5) * cellWidth, 0, { rotation, fontSize: columnFontSize }));
-  const tickPositions = isBar ? position.ticks(Math.max(2, Math.min(6, Math.floor(width / 40)))) : [];
+  const tickPositions = isBar ? barTicks(domain, width, source.tickStep) : [];
   if (isBar && !tickPositions.includes(0)) tickPositions.push(0);
   tickPositions.sort((a, b) => a - b);
   const gridX = isBar ? tickPositions.map((value) => Math.max(0, Math.min(width - 1, position(value) - 0.5)))
@@ -268,7 +280,7 @@ function layoutMatrixPanel(source, clusters, { before, labelFontSize, columnFont
       const tickX = position(value);
       key.push({ x: gridX[i], y: 0,
         width: Math.min(1, width), height: 5, fill: theme?.muted ?? "#555555" });
-      footer.push(text(numberLabel(value), tickX, labelFontSize + 9,
+      footer.push(text(source.tickStep == null ? numberLabel(value) : String(value), tickX, labelFontSize + 9,
         { anchor: tickX === 0 ? "start" : tickX === width ? "end" : "middle" }));
     }
   } else if (source.showKey !== false && type === "continuous") {

@@ -54,7 +54,7 @@ export function createAnnotationControls({ getData, patch, document, panelUids, 
     }
     if (!groups) input(node, bar ? "Show axis" : "Show legend", "showKey", panel.showKey !== false, "checkbox");
     const data = el("button", "Edit data…", node); data.type = "button"; data.onclick = () => onEditData?.();
-    const advanced = el("details", undefined, node); el("summary", "Advanced", advanced); advanced.open = open;
+    const advanced = el("details", undefined, node); el("summary", "Advanced", advanced);
     const sizes = groups ? [["markerWidth", "Bar thickness", 3], ["laneGap", "Lane gap", 12]]
       : bar ? [["width", "Panel width", defaults.width], ["cellHeight", "Bar height", defaults.cellHeight]]
         : [["cellWidth", "Cell width", defaults.cellWidth], ["cellHeight", "Cell height", defaults.cellHeight], ["cellGap", "Cell gap", defaults.cellGap]];
@@ -65,6 +65,10 @@ export function createAnnotationControls({ getData, patch, document, panelUids, 
       input(advanced, label, field, panel[field] ?? fallback, "number", { min: ["gap", "cellGap"].includes(field) ? "0" : "0.1" });
     }
     input(advanced, "Show y-axis line", "showYAxisLine", panel.showYAxisLine ?? false, "checkbox");
+    if (bar) {
+      const spacing = input(advanced, "X-axis tick spacing", "tickStep", panel.tickStep ?? "", "number", { min: "0" });
+      spacing.placeholder = "Auto"; spacing.title = "Leave empty for automatic tick spacing.";
+    }
     if (!groups) input(advanced, "Show x-axis grid lines", "showXGridLines", panel.showXGridLines ?? false, "checkbox");
     if (!groups) {
       input(advanced, "Border width", "cellBorderWidth", panel.cellBorderWidth ?? defaults.cellBorderWidth, "number", { min: "0" });
@@ -117,10 +121,10 @@ export function createAnnotationControls({ getData, patch, document, panelUids, 
     const control = event.target, field = control.dataset.annotationField;
     if (!field || (control.type === "text") !== (event.type === "change")) return;
     control.setCustomValidity("");
-    if (!control.checkValidity() || control.type === "number" && control.value === "") return;
+    if (!control.checkValidity() || control.type === "number" && control.value === "" && field !== "tickStep") return;
     const panels = current();
     if (!panels.length) return;
-    const value = control.type === "checkbox" ? control.checked : control.type === "number" ? control.valueAsNumber : control.value;
+    const value = control.type === "checkbox" ? control.checked : control.type === "number" ? (control.value === "" ? null : control.valueAsNumber) : control.value;
     let refresh = false;
     const operations = panels.map((panel) => {
       const resolved = panel.type === "groups" ? null : resolveAnnotationScale(panel);

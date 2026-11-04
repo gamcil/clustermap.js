@@ -92,6 +92,9 @@ test("WebGPU draws annotation grids behind cells, culls them and updates row pos
   const moved = render(), frame = annotationPanelsForFrame(scene)[0];
   const records = new Float32Array(moved[0].buffer.data.buffer);
   frame.rects.filter((rect) => rect.kind === "x-grid").forEach((rect) => assert.equal(records[rect.keyIndex * 9 + 1], rect.y));
+  const spaced = { ...data, annotationPanels: [{ ...data.annotationPanels[0], tickStep: 2 }] };
+  runtime.setChartIndex(createChartIndex(spaced)); scene = runtime.updateScene(spaced);
+  assert.deepEqual(render().map((draw) => draw.args[1]), [3, 6, 1]);
 });
 
 test("tree presentation edits do not allocate or upload biological GPU geometry", async (t) => {

@@ -85,3 +85,37 @@ test("bar grids match x-axis ticks and extend to the shared axis baseline", () =
   const hidden = fixture("bar", { showXGridLines: true, showKey: false, scale: { domain: [-2, 4] } });
   assert.deepEqual(annotationPanelsForFrame(hidden.scene)[0].rects.filter((rect) => rect.kind === "x-grid").map((rect) => rect.x), grids.map((rect) => rect.x));
 });
+
+test("custom bar tick spacing shares positions with grids and retains fractional labels", () => {
+  for (const [domain, tickStep, labels] of [
+    [[0, 100], 25, ["0", "25", "50", "75", "100"]],
+    [[-0.3, 0.3], 0.1, ["-0.3", "-0.2", "-0.1", "0", "0.1", "0.2", "0.3"]],
+    [[-0.25, 0.35], 0.1, ["-0.2", "-0.1", "0", "0.1", "0.2", "0.3"]],
+    [[0, 1000], 999.5, ["0", "999.5"]],
+  ]) {
+    const { definition, scene } = fixture("bar", { tickStep, scale: { domain }, showKey: true, showXGridLines: true });
+    const before = structuredClone(definition), frame = annotationPanelsForFrame(scene)[0];
+    assert.deepEqual(frame.texts.map((item) => item.text), labels);
+    const ticks = frame.rects.filter((rect) => !rect.kind && rect.height === 5);
+    assert.deepEqual(frame.rects.filter((rect) => rect.kind === "x-grid").map((rect) => rect.x), ticks.map((rect) => rect.x));
+    assert.deepEqual(definition, before);
+  }
+});
+
+test("bar tick spacing validates atomically and supports undo and automatic reset", () => {
+  const { definition } = fixture("bar", { scale: { domain: [0, 100] } });
+  const data = { clusters: ["a", "b", "c"].map((uid) => ({ uid, loci: [] })), links: [], groups: [], annotationPanels: [definition] };
+  const before = structuredClone(data.annotationPanels), index = createChartIndex(data);
+  for (const tickStep of [0, -1, "25", Infinity, 0.001]) {
+    assert.throws(() => applyChartOperations(data, index, [{ type: "annotationPanels.update", ids: ["panel"], changes: { tickStep } }]), /tickStep/);
+    assert.deepEqual(data.annotationPanels, before);
+  }
+  const edit = applyChartOperations(data, index, [{ type: "annotationPanels.update", ids: ["panel"], changes: { tickStep: 25 } }]);
+  assert.equal(data.annotationPanels[0].tickStep, 25);
+  applyChartOperations(data, index, [{ type: "annotationPanels.update", ids: ["panel"], changes: { tickStep: null } }]);
+  const automatic = fixture("bar", { showKey: true, scale: { domain: [0, 100] } });
+  const reset = fixture("bar", { showKey: true, scale: { domain: [0, 100] }, tickStep: data.annotationPanels[0].tickStep });
+  assert.deepEqual(annotationPanelsForFrame(reset.scene)[0].texts, annotationPanelsForFrame(automatic.scene)[0].texts);
+  applyChartOperations(data, index, edit.inverse);
+  assert.deepEqual(data.annotationPanels, before);
+});
