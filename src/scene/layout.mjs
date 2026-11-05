@@ -180,10 +180,12 @@ function buildChrome(bounds, genes, chrome) {
     : Number(chrome.legend.entryHeight) || 18;
   const totalHeight = entryHeight * rows;
   const step = rows > 1 ? totalHeight / (rows - 0.5) : totalHeight;
-  const radius = step / 4;
-  const symbolY = hasSubtitles ? entryHeight / 2 : radius;
+  const baseRadius = step / 4, radius = baseRadius * (chrome.legend.symbolScale ?? 1);
+  const borderWidth = chrome.legend.symbolBorderWidth ?? 0, borderPadding = borderWidth / 2;
+  const symbolY = hasSubtitles ? entryHeight / 2 : baseRadius;
   const halfWidth = chrome.legend.symbol === "arrow" ? radius * 1.5 : radius;
-  const symbolBounds = { minX: -halfWidth, maxX: halfWidth, minY: symbolY - radius, maxY: symbolY + radius };
+  const symbolBounds = { minX: -halfWidth - borderPadding, maxX: halfWidth + borderPadding,
+    minY: symbolY - radius - borderPadding, maxY: symbolY + radius + borderPadding };
   const symbol = chrome.legend.symbol === "square" ? { type: "polygon", bounds: symbolBounds,
     points: [-radius, symbolY - radius, radius, symbolY - radius, radius, symbolY + radius, -radius, symbolY + radius] }
     : chrome.legend.symbol === "arrow" ? { type: "polygon", bounds: symbolBounds,
@@ -191,6 +193,7 @@ function buildChrome(bounds, genes, chrome) {
         scaleX: (value) => value, shape: { bodyHeight: radius, tipHeight: radius / 2, tipLength: radius },
       }).map((value, i) => i % 2 ? value + symbolY - radius : value) }
     : { type: "circle", x: 0, y: symbolY, radius, bounds: symbolBounds };
+  symbol.strokeWidth = borderWidth; symbol.stroke = chrome.legend.symbolBorderColour;
   const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
   const legend = {
     symbol,
@@ -222,8 +225,8 @@ function buildChrome(bounds, genes, chrome) {
       colour: chrome.legend.colourForGroup(group.uid),
       x: column * columnWidth,
       y: row * step,
-      textX: halfWidth + 6,
-      textY: hasSubtitles ? entryHeight / 2 - subtitleFontSize * 0.42 : radius + 1,
+      textX: halfWidth + borderPadding + 6,
+      textY: hasSubtitles ? entryHeight / 2 - subtitleFontSize * 0.42 : baseRadius + 1,
       ...(group.subtitle ? { subtitle: group.subtitle, subtitleY: entryHeight / 2 + fontSize * 0.48 } : {}),
       };
     }),

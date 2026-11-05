@@ -69,6 +69,19 @@ function clusterLabelHit(context, scene, point, config) {
   return null;
 }
 
+function legendSymbolHit(scene, point) {
+  const legend = scene.chrome?.legend;
+  if (!legend?.visible || point.x < legend.position.x + legend.symbol.bounds.minX ||
+      point.y < legend.position.y + legend.symbol.bounds.minY) return null;
+  const { symbol } = legend, bounds = symbol.bounds;
+  for (let i = legend.items.length - 1; i >= 0; i--) {
+    const item = legend.items[i], x = point.x - legend.position.x - item.x, y = point.y - legend.position.y - item.y;
+    if (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y > bounds.maxY) continue;
+    if (containsRegion(symbol, { x, y })) return { action: "legend-colour", group: item.source };
+  }
+  return null;
+}
+
 function chromeHit(context, scene, point) {
   const chrome = scene.chrome;
   if (!chrome) return null;
@@ -81,10 +94,6 @@ function chromeHit(context, scene, point) {
     for (const item of [...legend.items].reverse()) {
       const x = legend.position.x + item.x;
       const y = legend.position.y + item.y;
-      if (containsRegion(legend.symbol, { x: point.x - x, y: point.y - y })) {
-        context.restore();
-        return { action: "legend-colour", group: item.source };
-      }
       const textX = x + item.textX;
       const labelWidth = measureCanvasText(context, scene, item.label).width;
       context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
@@ -127,7 +136,7 @@ function chromeHit(context, scene, point) {
 export function hitTestCanvas({ canvas, scene, camera, config, event, tree = null, treeDragging = false }) {
   const point = worldPoint(canvas, event, camera);
   const context = canvas.getContext("2d");
-  return hitTest(scene, point) || treeNodeHit(context, scene, point, config, tree, treeDragging) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
+  return legendSymbolHit(scene, point) || hitTest(scene, point) || treeNodeHit(context, scene, point, config, tree, treeDragging) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
 }
 
 function treeNodeHit(context, scene, point, config, tree, dragging = false) {
@@ -414,7 +423,12 @@ function drawLegend(context, legend) {
     if (legend.symbol.type === "circle") {
       context.beginPath(); context.arc(legend.symbol.x, legend.symbol.y, legend.symbol.radius, 0, 2 * Math.PI);
     } else polygon(context, legend.symbol.points);
-    context.fillStyle = item.colour; context.fill(); context.restore();
+    context.fillStyle = item.colour; context.fill();
+    if (legend.symbol.strokeWidth) {
+      context.lineJoin = "round"; context.lineWidth = legend.symbol.strokeWidth;
+      context.strokeStyle = legend.symbol.stroke; context.stroke();
+    }
+    context.restore();
     context.fillStyle = legend.textColour || "black";
     context.fillText(item.label, item.x + item.textX, item.y + item.textY);
     if (item.subtitle) {

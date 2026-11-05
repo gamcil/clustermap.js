@@ -4362,10 +4362,12 @@
       : Number(chrome.legend.entryHeight) || 18;
     const totalHeight = entryHeight * rows;
     const step = rows > 1 ? totalHeight / (rows - 0.5) : totalHeight;
-    const radius = step / 4;
-    const symbolY = hasSubtitles ? entryHeight / 2 : radius;
+    const baseRadius = step / 4, radius = baseRadius * (chrome.legend.symbolScale ?? 1);
+    const borderWidth = chrome.legend.symbolBorderWidth ?? 0, borderPadding = borderWidth / 2;
+    const symbolY = hasSubtitles ? entryHeight / 2 : baseRadius;
     const halfWidth = chrome.legend.symbol === "arrow" ? radius * 1.5 : radius;
-    const symbolBounds = { minX: -halfWidth, maxX: halfWidth, minY: symbolY - radius, maxY: symbolY + radius };
+    const symbolBounds = { minX: -halfWidth - borderPadding, maxX: halfWidth + borderPadding,
+      minY: symbolY - radius - borderPadding, maxY: symbolY + radius + borderPadding };
     const symbol = chrome.legend.symbol === "square" ? { type: "polygon", bounds: symbolBounds,
       points: [-radius, symbolY - radius, radius, symbolY - radius, radius, symbolY + radius, -radius, symbolY + radius] }
       : chrome.legend.symbol === "arrow" ? { type: "polygon", bounds: symbolBounds,
@@ -4373,6 +4375,7 @@
           scaleX: (value) => value, shape: { bodyHeight: radius, tipHeight: radius / 2, tipLength: radius },
         }).map((value, i) => i % 2 ? value + symbolY - radius : value) }
       : { type: "circle", x: 0, y: symbolY, radius, bounds: symbolBounds };
+    symbol.strokeWidth = borderWidth; symbol.stroke = chrome.legend.symbolBorderColour;
     const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
     const legend = {
       symbol,
@@ -4404,8 +4407,8 @@
         colour: chrome.legend.colourForGroup(group.uid),
         x: column * columnWidth,
         y: row * step,
-        textX: halfWidth + 6,
-        textY: hasSubtitles ? entryHeight / 2 - subtitleFontSize * 0.42 : radius + 1,
+        textX: halfWidth + borderPadding + 6,
+        textY: hasSubtitles ? entryHeight / 2 - subtitleFontSize * 0.42 : baseRadius + 1,
         ...(group.subtitle ? { subtitle: group.subtitle, subtitleY: entryHeight / 2 + fontSize * 0.48 } : {}),
         };
       }),
@@ -10071,6 +10074,7 @@ ${attribute("auto")} { --_cm-ui-scheme:light dark; }
         leafGuide: { ...config.tree?.leafGuide, colour: config.tree?.leafGuide?.colour ?? theme.guide } },
       gene: { ...config.gene, shape: { ...config.gene?.shape, stroke: config.gene?.shape?.stroke ?? theme.outline } },
       locus: { ...config.locus, trackBar: { ...config.locus?.trackBar, colour: config.locus?.trackBar?.colour ?? theme.outline } },
+      legend: { ...config.legend, symbolBorderColour: config.legend?.symbolBorderColour ?? theme.outline },
       scaleBar: { ...config.scaleBar, colour: config.scaleBar?.colour ?? theme.foreground },
     };
   }
@@ -10732,12 +10736,18 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     );
   }
 
-  function containsPolygon({ points }, point) {
+  function nearSegment(point, start, end, margin) {
+    const dx = end.x - start.x, dy = end.y - start.y, length = dx * dx + dy * dy;
+    const t = length ? Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / length)) : 0;
+    return Math.hypot(point.x - start.x - t * dx, point.y - start.y - t * dy) <= margin;
+  }
+
+  function containsPolygon({ points, strokeWidth = 0 }, point) {
     let inside = false;
     for (let index = 0, previous = points.length - 2; index < points.length; previous = index, index += 2) {
       const start = { x: points[previous], y: points[previous + 1] };
       const end = { x: points[index], y: points[index + 1] };
-      if (pointOnSegment(point, start, end)) return true;
+      if (pointOnSegment(point, start, end) || strokeWidth > 0 && nearSegment(point, start, end, strokeWidth / 2)) return true;
       const crosses = (start.y > point.y) !== (end.y > point.y);
       if (crosses && point.x < ((end.x - start.x) * (point.y - start.y)) / (end.y - start.y) + start.x) {
         inside = !inside;
@@ -10747,7 +10757,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   }
 
   function containsRegion(region, point) {
-    if (region.type === "circle") return Math.hypot(point.x - region.x, point.y - region.y) <= region.radius;
+    if (region.type === "circle") return Math.hypot(point.x - region.x, point.y - region.y) <= region.radius + (region.strokeWidth ?? 0) / 2;
     if (region.type === "rect") return containsRect(region, point);
     if (region.type === "polygon") return containsPolygon(region, point);
     return false;
@@ -10931,6 +10941,19 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     return null;
   }
 
+  function legendSymbolHit(scene, point) {
+    const legend = scene.chrome?.legend;
+    if (!legend?.visible || point.x < legend.position.x + legend.symbol.bounds.minX ||
+        point.y < legend.position.y + legend.symbol.bounds.minY) return null;
+    const { symbol } = legend, bounds = symbol.bounds;
+    for (let i = legend.items.length - 1; i >= 0; i--) {
+      const item = legend.items[i], x = point.x - legend.position.x - item.x, y = point.y - legend.position.y - item.y;
+      if (x < bounds.minX || x > bounds.maxX || y < bounds.minY || y > bounds.maxY) continue;
+      if (containsRegion(symbol, { x, y })) return { action: "legend-colour", group: item.source };
+    }
+    return null;
+  }
+
   function chromeHit(context, scene, point) {
     const chrome = scene.chrome;
     if (!chrome) return null;
@@ -10943,10 +10966,6 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       for (const item of [...legend.items].reverse()) {
         const x = legend.position.x + item.x;
         const y = legend.position.y + item.y;
-        if (containsRegion(legend.symbol, { x: point.x - x, y: point.y - y })) {
-          context.restore();
-          return { action: "legend-colour", group: item.source };
-        }
         const textX = x + item.textX;
         const labelWidth = measureCanvasText(context, scene, item.label).width;
         context.font = `${subtitleFontSize}px ${legend.fontFamily}`;
@@ -10989,7 +11008,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   function hitTestCanvas({ canvas, scene, camera, config, event, tree = null, treeDragging = false }) {
     const point = worldPoint(canvas, event, camera);
     const context = canvas.getContext("2d");
-    return hitTest(scene, point) || treeNodeHit(context, scene, point, config, tree, treeDragging) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
+    return legendSymbolHit(scene, point) || hitTest(scene, point) || treeNodeHit(context, scene, point, config, tree, treeDragging) || clusterLabelHit(context, scene, point, config) || chromeHit(context, scene, point);
   }
 
   function treeNodeHit(context, scene, point, config, tree, dragging = false) {
@@ -11276,7 +11295,12 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       if (legend.symbol.type === "circle") {
         context.beginPath(); context.arc(legend.symbol.x, legend.symbol.y, legend.symbol.radius, 0, 2 * Math.PI);
       } else polygon(context, legend.symbol.points);
-      context.fillStyle = item.colour; context.fill(); context.restore();
+      context.fillStyle = item.colour; context.fill();
+      if (legend.symbol.strokeWidth) {
+        context.lineJoin = "round"; context.lineWidth = legend.symbol.strokeWidth;
+        context.strokeStyle = legend.symbol.stroke; context.stroke();
+      }
+      context.restore();
       context.fillStyle = legend.textColour || "black";
       context.fillText(item.label, item.x + item.textX, item.y + item.textY);
       if (item.subtitle) {
@@ -12285,6 +12309,8 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       .attr("points", legend.symbol.points);
     for (const symbols of [circles, polygons]) symbols
       .attr("class", (item) => `legend-symbol group-${item.uid}`)
+      .attr("stroke", legend.symbol.strokeWidth ? legend.symbol.stroke : "none")
+      .attr("stroke-width", legend.symbol.strokeWidth).attr("stroke-linejoin", "round")
       .attr("fill", (item) => item.colour)
       .attr("cursor", "pointer")
       .on("click", (event, item) => interactions.legendColour(event, item.source));
@@ -13150,6 +13176,9 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     },
     legend: {
       symbol: "circle",
+      symbolScale: 1,
+      symbolBorderWidth: 0,
+      symbolBorderColour: null,
       columns: 1,
       columnWidth: 160,
       entryHeight: 18,
@@ -13265,7 +13294,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   const positive = new Set([
     "tree.width", "tree.branch.width", "tree.leafGuide.width", "plot.scaleFactor", "plot.maxZoom",
     "plot.minimap.width", "plot.minimap.height", "legend.columns", "legend.columnWidth",
-    "legend.entryHeight", "colourBar.width", "colourBar.height", "scaleBar.height", "scaleBar.basePair",
+    "legend.symbolScale", "legend.entryHeight", "colourBar.width", "colourBar.height", "scaleBar.height", "scaleBar.basePair",
   ]);
   const signed = new Set(["gene.label.rotation", "gene.label.spacing", "legend.marginLeft", "legend.marginTop",
     "colourBar.marginTop", "scaleBar.marginTop"]);

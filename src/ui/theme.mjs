@@ -19,6 +19,7 @@ export function figureConfig(config) {
       leafGuide: { ...config.tree?.leafGuide, colour: config.tree?.leafGuide?.colour ?? theme.guide } },
     gene: { ...config.gene, shape: { ...config.gene?.shape, stroke: config.gene?.shape?.stroke ?? theme.outline } },
     locus: { ...config.locus, trackBar: { ...config.locus?.trackBar, colour: config.locus?.trackBar?.colour ?? theme.outline } },
+    legend: { ...config.legend, symbolBorderColour: config.legend?.symbolBorderColour ?? theme.outline },
     scaleBar: { ...config.scaleBar, colour: config.scaleBar?.colour ?? theme.foreground },
   };
 }

@@ -628,6 +628,8 @@ function renderLegend({ plot, legend, interactions, transform }) {
     .attr("points", legend.symbol.points);
   for (const symbols of [circles, polygons]) symbols
     .attr("class", (item) => `legend-symbol group-${item.uid}`)
+    .attr("stroke", legend.symbol.strokeWidth ? legend.symbol.stroke : "none")
+    .attr("stroke-width", legend.symbol.strokeWidth).attr("stroke-linejoin", "round")
     .attr("fill", (item) => item.colour)
     .attr("cursor", "pointer")
     .on("click", (event, item) => interactions.legendColour(event, item.source));

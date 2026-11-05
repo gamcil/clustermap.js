@@ -383,6 +383,24 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
     await page.evaluate(() => chart.project(JSON.parse(JSON.stringify(chart.project()))));
     await expect(control).toHaveValue("arrow");
     expect(await symbols()).toEqual(Array(3).fill({ tag: "polygon", points: 14 }));
+    const legend = page.locator('clinker-appearance-panel').locator('fieldset[data-appearance-section="legend"]');
+    const scale = legend.getByLabel("Legend symbol scale", { exact: true });
+    await expect(scale).toBeHidden();
+    await legend.locator("summary").click();
+    await legend.getByLabel("Legend symbol border width", { exact: true }).fill("2");
+    await legend.getByLabel("Legend symbol border colour", { exact: true }).fill("#112233");
+    await scale.fill("1.5");
+    await scale.evaluate((node) => node.blur());
+    expect(await page.evaluate(() => {
+      const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml");
+      return { styles: [...svg.querySelectorAll(".legend-symbol")].map((node) => [node.getAttribute("stroke"), node.getAttribute("stroke-width"), node.getAttribute("stroke-linejoin")]),
+        scale: chart.config().legend.symbolScale, fontSize: chart.config().legend.fontSize };
+    })).toEqual({ styles: Array(3).fill(["#112233", "2", "round"]), scale: 1.5, fontSize: 14 });
+    await page.evaluate(() => chart.undo()); await expect(scale).toHaveValue("1");
+    await page.evaluate(() => { chart.redo(); chart.project(JSON.parse(JSON.stringify(chart.project()))); });
+    await expect(scale).toHaveValue("1.5");
+    await expect(legend.getByLabel("Legend symbol border width", { exact: true })).toHaveValue("2");
+    await expect(legend.getByLabel("Legend symbol border colour", { exact: true })).toHaveValue("#112233");
   });
 
   test(`${renderer}: annotation panels support shared batch edits, mixed values and atomic history`, async ({ page }) => {

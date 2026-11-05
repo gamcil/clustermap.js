@@ -8,12 +8,12 @@ import { containsRegion } from "../../src/scene/hitTest.mjs";
 import { legendContentBounds } from "../../src/annotations/model.mjs";
 import { renderCanvas, hitTestCanvas } from "../../src/renderers/canvas.js";
 
-function fixture(symbol) {
+function fixture(symbol, style = {}) {
   const data = normalizeChartData({ clusters: [{ uid: "a", name: "A", loci: [{ uid: "l", start: 0, end: 100,
     genes: [{ uid: "g", start: 10, end: 80, strand: 1 }] }] }], links: [],
     groups: [{ uid: "group", label: "Group", subtitle: "Subtitle", genes: ["g"], colour: "#123456" }] });
   const runtime = createChartRuntime();
-  runtime.configure({ legend: { symbol }, scaleBar: { show: false }, colourBar: { show: false } });
+  runtime.configure({ legend: { symbol, ...style }, scaleBar: { show: false }, colourBar: { show: false } });
   runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
   const scene = runtime.updateScene(data), calls = [];
   const context = new Proxy({ measureText: (text) => ({ width: String(text).length * 6 }) }, {
@@ -54,4 +54,36 @@ test("legend symbol configuration rejects unsupported shapes without changing th
   const { runtime } = fixture("circle"), before = runtime.config;
   assert.throws(() => runtime.configure({ legend: { symbol: "triangle" } }), /legend.symbol/);
   assert.deepEqual(runtime.config, before);
+});
+
+for (const shape of ["circle", "square", "arrow"]) test(`${shape} symbol borders and scaling expand paint bounds and click targets without moving text`, () => {
+  const base = fixture(shape).scene.chrome.legend;
+  const { runtime, scene, calls, canvas } = fixture(shape, { symbolScale: 2, symbolBorderWidth: 4, symbolBorderColour: "#abcdef" });
+  const legend = scene.chrome.legend, box = legend.symbol.bounds, before = base.symbol.bounds;
+  assert.equal(box.maxX - box.minX, (before.maxX - before.minX) * 2 + 4);
+  assert.equal(box.maxY - box.minY, (before.maxY - before.minY) * 2 + 4);
+  assert.equal(legend.items[0].textY, base.items[0].textY);
+  assert.equal(legend.fontSize, base.fontSize);
+  assert.ok(legend.items[0].textX >= box.maxX + 6);
+  const centerY = (box.minY + box.maxY) / 2;
+  const point = { x: box.minX + 0.5, y: centerY };
+  assert.ok(containsRegion(legend.symbol, point));
+  assert.equal(containsRegion(legend.symbol, { x: box.minX - 0.1, y: centerY }), false);
+  const hit = hitTestCanvas({ canvas, scene, camera: { x: 0, y: 0, k: 1 }, config: runtime.renderConfig,
+    event: { clientX: legend.position.x + point.x, clientY: legend.position.y + point.y } });
+  assert.equal(hit.action, "legend-colour");
+  renderCanvas({ canvas, scene, layers: ["chrome"], camera: { x: 0, y: 0, k: 1 }, config: runtime.renderConfig, scales: runtime.scales });
+  assert.equal(calls.filter(([method]) => method === "stroke").length, 1);
+  assert.equal(legend.symbol.stroke, "#abcdef");
+  const bounds = legendContentBounds(legend);
+  assert.ok(bounds.minX <= box.minX && bounds.minY <= box.minY && bounds.maxY >= box.maxY);
+});
+
+test("legend border and scale settings validate atomically and resolve default outline colour", () => {
+  const { runtime, scene } = fixture("circle"), before = runtime.config;
+  assert.equal(scene.chrome.legend.symbol.stroke, "#000000");
+  for (const patch of [{ symbolScale: 0 }, { symbolScale: NaN }, { symbolBorderWidth: -1 }, { symbolBorderColour: "bad-colour" }]) {
+    assert.throws(() => runtime.configure({ legend: patch }), /legend.symbol/);
+    assert.deepEqual(runtime.config, before);
+  }
 });

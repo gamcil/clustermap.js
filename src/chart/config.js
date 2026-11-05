@@ -45,6 +45,9 @@ const defaultConfig = {
   },
   legend: {
     symbol: "circle",
+    symbolScale: 1,
+    symbolBorderWidth: 0,
+    symbolBorderColour: null,
     columns: 1,
     columnWidth: 160,
     entryHeight: 18,
@@ -160,7 +163,7 @@ const choices = {
 const positive = new Set([
   "tree.width", "tree.branch.width", "tree.leafGuide.width", "plot.scaleFactor", "plot.maxZoom",
   "plot.minimap.width", "plot.minimap.height", "legend.columns", "legend.columnWidth",
-  "legend.entryHeight", "colourBar.width", "colourBar.height", "scaleBar.height", "scaleBar.basePair",
+  "legend.symbolScale", "legend.entryHeight", "colourBar.width", "colourBar.height", "scaleBar.height", "scaleBar.basePair",
 ]);
 const signed = new Set(["gene.label.rotation", "gene.label.spacing", "legend.marginLeft", "legend.marginTop",
   "colourBar.marginTop", "scaleBar.marginTop"]);

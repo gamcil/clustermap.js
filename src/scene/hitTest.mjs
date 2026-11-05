@@ -22,12 +22,18 @@ function pointOnSegment(point, start, end) {
   );
 }
 
-function containsPolygon({ points }, point) {
+function nearSegment(point, start, end, margin) {
+  const dx = end.x - start.x, dy = end.y - start.y, length = dx * dx + dy * dy;
+  const t = length ? Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / length)) : 0;
+  return Math.hypot(point.x - start.x - t * dx, point.y - start.y - t * dy) <= margin;
+}
+
+function containsPolygon({ points, strokeWidth = 0 }, point) {
   let inside = false;
   for (let index = 0, previous = points.length - 2; index < points.length; previous = index, index += 2) {
     const start = { x: points[previous], y: points[previous + 1] };
     const end = { x: points[index], y: points[index + 1] };
-    if (pointOnSegment(point, start, end)) return true;
+    if (pointOnSegment(point, start, end) || strokeWidth > 0 && nearSegment(point, start, end, strokeWidth / 2)) return true;
     const crosses = (start.y > point.y) !== (end.y > point.y);
     if (crosses && point.x < ((end.x - start.x) * (point.y - start.y)) / (end.y - start.y) + start.x) {
       inside = !inside;
@@ -37,7 +43,7 @@ function containsPolygon({ points }, point) {
 }
 
 export function containsRegion(region, point) {
-  if (region.type === "circle") return Math.hypot(point.x - region.x, point.y - region.y) <= region.radius;
+  if (region.type === "circle") return Math.hypot(point.x - region.x, point.y - region.y) <= region.radius + (region.strokeWidth ?? 0) / 2;
   if (region.type === "rect") return containsRect(region, point);
   if (region.type === "polygon") return containsPolygon(region, point);
   return false;

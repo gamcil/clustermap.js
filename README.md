@@ -69,7 +69,11 @@ identity is a number from 0 to 1. Values are not coerced.
 Legend symbols can be changed in **Appearance → Legend → Symbol**, or with
 `chart.config({ legend: { symbol: "arrow" } })`. Options are `"circle"` (default),
 `"square"` and `"arrow"`. All renderers and SVG export use the same symbol
-geometry. `legend.onClickSymbol(event, group)` overrides the colour-picker action.
+geometry. **Legend → Advanced** includes symbol border width/colour and scale.
+`legend.symbolBorderWidth` defaults to `0`, `legend.symbolBorderColour` to the
+figure outline colour, and `legend.symbolScale` to `1`. Bounds and label spacing
+include the border; scale changes the symbol without changing text size.
+`legend.onClickSymbol(event, group)` overrides the colour-picker action.
 
 ## Phylogenetic trees
 
