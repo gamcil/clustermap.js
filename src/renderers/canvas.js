@@ -1,7 +1,7 @@
 import { measureCanvasText, measureTreeLayout, canvasTextMeasurer } from "../scene/measure.mjs";
 import { clusterLabelLayout, clusterLabelWidth } from "../scene/clusterLabels.mjs";
 import { linkColours } from "../links/style.mjs";
-import { hitTest } from "../scene/hitTest.mjs";
+import { hitTest, containsRegion } from "../scene/hitTest.mjs";
 import { boundsInViewport, worldViewport, worldPoint } from "../scene/camera.mjs";
 import { figureConfig } from "../ui/theme.mjs";
 import { sceneRecordsInViewport } from "../scene/viewport.mjs";
@@ -81,9 +81,7 @@ function chromeHit(context, scene, point) {
     for (const item of [...legend.items].reverse()) {
       const x = legend.position.x + item.x;
       const y = legend.position.y + item.y;
-      const circleX = x;
-      const circleY = y + item.circleY;
-      if (Math.hypot(point.x - circleX, point.y - circleY) <= item.radius) {
+      if (containsRegion(legend.symbol, { x: point.x - x, y: point.y - y })) {
         context.restore();
         return { action: "legend-colour", group: item.source };
       }
@@ -412,10 +410,11 @@ function drawLegend(context, legend) {
   context.textAlign = "start";
   context.textBaseline = "middle";
   for (const item of legend.items) {
-    context.beginPath();
-    context.arc(item.x, item.y + item.circleY, item.radius, 0, 2 * Math.PI);
-    context.fillStyle = item.colour;
-    context.fill();
+    context.save(); context.translate(item.x, item.y);
+    if (legend.symbol.type === "circle") {
+      context.beginPath(); context.arc(legend.symbol.x, legend.symbol.y, legend.symbol.radius, 0, 2 * Math.PI);
+    } else polygon(context, legend.symbol.points);
+    context.fillStyle = item.colour; context.fill(); context.restore();
     context.fillStyle = legend.textColour || "black";
     context.fillText(item.label, item.x + item.textX, item.y + item.textY);
     if (item.subtitle) {

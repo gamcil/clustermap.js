@@ -36,7 +36,8 @@ function containsPolygon({ points }, point) {
   return inside;
 }
 
-function contains(region, point) {
+export function containsRegion(region, point) {
+  if (region.type === "circle") return Math.hypot(point.x - region.x, point.y - region.y) <= region.radius;
   if (region.type === "rect") return containsRect(region, point);
   if (region.type === "polygon") return containsPolygon(region, point);
   return false;
@@ -51,12 +52,12 @@ function contains(region, point) {
 export function hitTest(scene, point) {
   for (const uid of queryPointOrdered(scene.index.genes, point).reverse()) {
     const region = scene.hitRegions.genes.get(uid);
-    if (region && contains(region, point)) return region;
+    if (region && containsRegion(region, point)) return region;
   }
   for (const uid of queryPointOrdered(scene.index.hitLoci, point).reverse()) {
     const regions = scene.hitRegions.loci.get(uid);
     for (const region of [regions?.trimRight, regions?.trimLeft, regions?.move]) {
-      if (region && contains(region, point)) return region;
+      if (region && containsRegion(region, point)) return region;
     }
   }
   return null;

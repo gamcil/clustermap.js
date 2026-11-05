@@ -90306,7 +90306,7 @@
       "entryHeight": 18,
       "fontSize": 14,
       "subtitleFontSize": 10,
-      "onClickCircle": null,
+      "onClickSymbol": null,
       "onClickText": null,
       "onReveal": null,
       "position": "bottom",

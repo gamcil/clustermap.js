@@ -139,8 +139,8 @@ export function legendContentBounds(legend, measureText = null) {
   };
   if (!legend.visible || !legend.items.length) return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   for (const item of legend.items) {
-    include(item.x - item.radius, item.x + item.radius,
-      item.y + item.circleY - item.radius, item.y + item.circleY + item.radius);
+    const symbol = legend.symbol.bounds;
+    include(item.x + symbol.minX, item.x + symbol.maxX, item.y + symbol.minY, item.y + symbol.maxY);
     const addText = (value, fontSize, y) => {
       if (!value) return;
       const text = textBounds(value, { fontSize, fontFamily: legend.fontFamily, baseline: "middle" }, measureText);

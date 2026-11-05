@@ -773,8 +773,8 @@ export default function clusterMap() {
     setScaleBarLength,
     chooseLegendColour,
     legendColour: (event, group) => {
-      if (runtime.config.legend.onClickCircle) {
-        runtime.config.legend.onClickCircle(event, group);
+      if (runtime.config.legend.onClickSymbol) {
+        runtime.config.legend.onClickSymbol(event, group);
       } else {
         chooseLegendColour(group);
       }

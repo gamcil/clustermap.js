@@ -174,6 +174,7 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
     chrome: {
       legend: {
         visible: true,
+        symbol: { type: "circle", x: 0, y: 2, radius: 2, bounds: { minX: -2, maxX: 2, minY: 0, maxY: 4 } },
         position: { x: 0, y: 0 },
         fontSize: 10,
         fontFamily: "sans-serif",
@@ -184,8 +185,6 @@ test("canvas renderer draws world-space scene geometry through the camera", asyn
             colour: "purple",
             x: 0,
             y: 20,
-            radius: 2,
-            circleY: 2,
             textX: 5,
             textY: 4,
           },

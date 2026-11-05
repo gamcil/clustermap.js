@@ -297,8 +297,6 @@ test("scene derives world-space geometry without DOM state", async () => {
     colour: "purple",
     x: 0,
     y: 0,
-    radius: 4.5,
-    circleY: 4.5,
     textX: 10.5,
     textY: 5.5,
   });

@@ -608,7 +608,6 @@ function renderLegend({ plot, legend, interactions, transform }) {
     .data(legend.items, (item) => item.uid)
     .join((enter) => {
       const item = enter.append("g").attr("class", "element");
-      item.append("circle");
       item
         .append("text")
         .attr("class", "legend-label")
@@ -623,11 +622,12 @@ function renderLegend({ plot, legend, interactions, transform }) {
     });
 
   items.attr("transform", (item) => `translate(${item.x}, ${item.y})`);
-  items
-    .select("circle")
-    .attr("class", (item) => `group-${item.uid}`)
-    .attr("cy", (item) => item.circleY)
-    .attr("r", (item) => item.radius)
+  const circles = items.selectAll("circle.legend-symbol").data((item) => legend.symbol.type === "circle" ? [item] : []).join("circle").lower()
+    .attr("cx", legend.symbol.x).attr("cy", legend.symbol.y).attr("r", legend.symbol.radius);
+  const polygons = items.selectAll("polygon.legend-symbol").data((item) => legend.symbol.type === "polygon" ? [item] : []).join("polygon").lower()
+    .attr("points", legend.symbol.points);
+  for (const symbols of [circles, polygons]) symbols
+    .attr("class", (item) => `legend-symbol group-${item.uid}`)
     .attr("fill", (item) => item.colour)
     .attr("cursor", "pointer")
     .on("click", (event, item) => interactions.legendColour(event, item.source));

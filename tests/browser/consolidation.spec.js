@@ -340,6 +340,51 @@ test("mixed annotation selections preserve panel scales and reject invalid batch
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: legend symbols change in Appearance and preserve clicks, history and vector export`, async ({ page }) => {
+    await page.evaluate(async (renderer) => {
+      await import("/dist/editor-appearance-panel.mjs");
+      window.legendClicks = [];
+      chart.config({ legend: { show: true, onClickSymbol: (_, group) => legendClicks.push(group.uid) } });
+      const symbol = document.querySelector("g.legend .legend-symbol").getBoundingClientRect();
+      const surface = document.querySelector("#plot svg").getBoundingClientRect(), camera = chart.state().camera;
+      window.legendPoint = { x: (symbol.x + symbol.width / 2 - surface.left - camera.x) / camera.k,
+        y: (symbol.y + symbol.height / 2 - surface.top - camera.y) / camera.k };
+      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
+      chart.config({ plot: { renderer } }); chart.clearHistory();
+      const panel = document.createElement("clinker-appearance-panel"); panel.chart = chart;
+      panel.style.cssText = "position:fixed;left:0;top:0;width:320px;max-height:300px;overflow:auto;z-index:10;background:white";
+      document.body.append(panel);
+    }, renderer);
+    const control = page.getByLabel("Legend symbol", { exact: true });
+    await expect(control).toHaveValue("circle");
+    const symbols = () => page.evaluate(() => {
+      const svg = new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml");
+      return [...svg.querySelectorAll("g.legend .legend-symbol")].map((node) => ({ tag: node.tagName,
+        points: node.hasAttribute("points") ? node.getAttribute("points").split(",").length : 0 }));
+    });
+    let previous = "circle";
+    for (const shape of ["square", "arrow", "circle"]) {
+      await control.selectOption(shape);
+      expect(await symbols()).toEqual(Array(3).fill({ tag: shape === "circle" ? "circle" : "polygon",
+        points: shape === "arrow" ? 14 : shape === "square" ? 8 : 0 }));
+      const click = await page.evaluate(() => {
+        const surface = [...document.querySelectorAll("#plot canvas, #plot svg")].find((node) => node.getClientRects().length).getBoundingClientRect();
+        const camera = chart.state().camera;
+        return { x: surface.left + camera.x + legendPoint.x * camera.k, y: surface.top + camera.y + legendPoint.y * camera.k };
+      });
+      await page.mouse.click(click.x, click.y);
+      expect(await page.evaluate(() => legendClicks.at(-1))).toBe(0);
+      await page.evaluate(() => chart.undo()); await expect(control).toHaveValue(previous);
+      await page.evaluate(() => chart.redo()); await expect(control).toHaveValue(shape);
+      previous = shape;
+    }
+    expect(await page.evaluate(() => legendClicks)).toEqual([0, 0, 0]);
+    await control.selectOption("arrow");
+    await page.evaluate(() => chart.project(JSON.parse(JSON.stringify(chart.project()))));
+    await expect(control).toHaveValue("arrow");
+    expect(await symbols()).toEqual(Array(3).fill({ tag: "polygon", points: 14 }));
+  });
+
   test(`${renderer}: annotation panels support shared batch edits, mixed values and atomic history`, async ({ page }) => {
     await page.evaluate(() => {
       const data = structuredClone(chart.data());

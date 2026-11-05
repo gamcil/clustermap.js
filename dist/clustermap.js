@@ -3835,8 +3835,8 @@
     };
     if (!legend.visible || !legend.items.length) return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
     for (const item of legend.items) {
-      include(item.x - item.radius, item.x + item.radius,
-        item.y + item.circleY - item.radius, item.y + item.circleY + item.radius);
+      const symbol = legend.symbol.bounds;
+      include(item.x + symbol.minX, item.x + symbol.maxX, item.y + symbol.minY, item.y + symbol.maxY);
       const addText = (value, fontSize, y) => {
         if (!value) return;
         const text = textBounds(value, { fontSize, fontFamily: legend.fontFamily, baseline: "middle" }, measureText);
@@ -4363,8 +4363,19 @@
     const totalHeight = entryHeight * rows;
     const step = rows > 1 ? totalHeight / (rows - 0.5) : totalHeight;
     const radius = step / 4;
+    const symbolY = hasSubtitles ? entryHeight / 2 : radius;
+    const halfWidth = chrome.legend.symbol === "arrow" ? radius * 1.5 : radius;
+    const symbolBounds = { minX: -halfWidth, maxX: halfWidth, minY: symbolY - radius, maxY: symbolY + radius };
+    const symbol = chrome.legend.symbol === "square" ? { type: "polygon", bounds: symbolBounds,
+      points: [-radius, symbolY - radius, radius, symbolY - radius, radius, symbolY + radius, -radius, symbolY + radius] }
+      : chrome.legend.symbol === "arrow" ? { type: "polygon", bounds: symbolBounds,
+        points: getGenePolygonCoordinates({ start: -halfWidth, end: halfWidth, strand: 1 }, {
+          scaleX: (value) => value, shape: { bodyHeight: radius, tipHeight: radius / 2, tipLength: radius },
+        }).map((value, i) => i % 2 ? value + symbolY - radius : value) }
+      : { type: "circle", x: 0, y: symbolY, radius, bounds: symbolBounds };
     const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
     const legend = {
+      symbol,
       textColour: chrome.legend.textColour, subtitleColour: chrome.legend.subtitleColour,
       visible: chrome.legend.show,
       placement,
@@ -4393,9 +4404,7 @@
         colour: chrome.legend.colourForGroup(group.uid),
         x: column * columnWidth,
         y: row * step,
-        radius,
-        circleY: hasSubtitles ? entryHeight / 2 : radius,
-        textX: radius + 6,
+        textX: halfWidth + 6,
         textY: hasSubtitles ? entryHeight / 2 - subtitleFontSize * 0.42 : radius + 1,
         ...(group.subtitle ? { subtitle: group.subtitle, subtitleY: entryHeight / 2 + fontSize * 0.48 } : {}),
         };
@@ -10737,7 +10746,8 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     return inside;
   }
 
-  function contains(region, point) {
+  function containsRegion(region, point) {
+    if (region.type === "circle") return Math.hypot(point.x - region.x, point.y - region.y) <= region.radius;
     if (region.type === "rect") return containsRect(region, point);
     if (region.type === "polygon") return containsPolygon(region, point);
     return false;
@@ -10752,12 +10762,12 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   function hitTest(scene, point) {
     for (const uid of queryPointOrdered(scene.index.genes, point).reverse()) {
       const region = scene.hitRegions.genes.get(uid);
-      if (region && contains(region, point)) return region;
+      if (region && containsRegion(region, point)) return region;
     }
     for (const uid of queryPointOrdered(scene.index.hitLoci, point).reverse()) {
       const regions = scene.hitRegions.loci.get(uid);
       for (const region of [regions?.trimRight, regions?.trimLeft, regions?.move]) {
-        if (region && contains(region, point)) return region;
+        if (region && containsRegion(region, point)) return region;
       }
     }
     return null;
@@ -10933,9 +10943,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       for (const item of [...legend.items].reverse()) {
         const x = legend.position.x + item.x;
         const y = legend.position.y + item.y;
-        const circleX = x;
-        const circleY = y + item.circleY;
-        if (Math.hypot(point.x - circleX, point.y - circleY) <= item.radius) {
+        if (containsRegion(legend.symbol, { x: point.x - x, y: point.y - y })) {
           context.restore();
           return { action: "legend-colour", group: item.source };
         }
@@ -11264,10 +11272,11 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     context.textAlign = "start";
     context.textBaseline = "middle";
     for (const item of legend.items) {
-      context.beginPath();
-      context.arc(item.x, item.y + item.circleY, item.radius, 0, 2 * Math.PI);
-      context.fillStyle = item.colour;
-      context.fill();
+      context.save(); context.translate(item.x, item.y);
+      if (legend.symbol.type === "circle") {
+        context.beginPath(); context.arc(legend.symbol.x, legend.symbol.y, legend.symbol.radius, 0, 2 * Math.PI);
+      } else polygon(context, legend.symbol.points);
+      context.fillStyle = item.colour; context.fill(); context.restore();
       context.fillStyle = legend.textColour || "black";
       context.fillText(item.label, item.x + item.textX, item.y + item.textY);
       if (item.subtitle) {
@@ -12256,7 +12265,6 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       .data(legend.items, (item) => item.uid)
       .join((enter) => {
         const item = enter.append("g").attr("class", "element");
-        item.append("circle");
         item
           .append("text")
           .attr("class", "legend-label")
@@ -12271,11 +12279,12 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       });
 
     items.attr("transform", (item) => `translate(${item.x}, ${item.y})`);
-    items
-      .select("circle")
-      .attr("class", (item) => `group-${item.uid}`)
-      .attr("cy", (item) => item.circleY)
-      .attr("r", (item) => item.radius)
+    const circles = items.selectAll("circle.legend-symbol").data((item) => legend.symbol.type === "circle" ? [item] : []).join("circle").lower()
+      .attr("cx", legend.symbol.x).attr("cy", legend.symbol.y).attr("r", legend.symbol.radius);
+    const polygons = items.selectAll("polygon.legend-symbol").data((item) => legend.symbol.type === "polygon" ? [item] : []).join("polygon").lower()
+      .attr("points", legend.symbol.points);
+    for (const symbols of [circles, polygons]) symbols
+      .attr("class", (item) => `legend-symbol group-${item.uid}`)
       .attr("fill", (item) => item.colour)
       .attr("cursor", "pointer")
       .on("click", (event, item) => interactions.legendColour(event, item.source));
@@ -13140,12 +13149,13 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
         'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif',
     },
     legend: {
+      symbol: "circle",
       columns: 1,
       columnWidth: 160,
       entryHeight: 18,
       fontSize: 14,
       subtitleFontSize: 10,
-      onClickCircle: null,
+      onClickSymbol: null,
       onClickText: null,
       // Optional hook exposed as a deliberate action in the group context menu.
       // Consumers can use it to reveal a group in an adjacent inspector.
@@ -13244,6 +13254,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   }
 
   const choices = {
+    "legend.symbol": ["circle", "square", "arrow"],
     "legend.position": ["right", "bottom"],
     "cluster.labelAlignment": ["left", "right"],
     "colourBar.domain.minMode": ["fixed", "data"],
@@ -16522,8 +16533,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       setScaleBarLength,
       chooseLegendColour,
       legendColour: (event, group) => {
-        if (runtime.config.legend.onClickCircle) {
-          runtime.config.legend.onClickCircle(event, group);
+        if (runtime.config.legend.onClickSymbol) {
+          runtime.config.legend.onClickSymbol(event, group);
         } else {
           chooseLegendColour(group);
         }

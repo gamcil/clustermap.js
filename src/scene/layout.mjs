@@ -181,8 +181,19 @@ function buildChrome(bounds, genes, chrome) {
   const totalHeight = entryHeight * rows;
   const step = rows > 1 ? totalHeight / (rows - 0.5) : totalHeight;
   const radius = step / 4;
+  const symbolY = hasSubtitles ? entryHeight / 2 : radius;
+  const halfWidth = chrome.legend.symbol === "arrow" ? radius * 1.5 : radius;
+  const symbolBounds = { minX: -halfWidth, maxX: halfWidth, minY: symbolY - radius, maxY: symbolY + radius };
+  const symbol = chrome.legend.symbol === "square" ? { type: "polygon", bounds: symbolBounds,
+    points: [-radius, symbolY - radius, radius, symbolY - radius, radius, symbolY + radius, -radius, symbolY + radius] }
+    : chrome.legend.symbol === "arrow" ? { type: "polygon", bounds: symbolBounds,
+      points: getGenePolygonCoordinates({ start: -halfWidth, end: halfWidth, strand: 1 }, {
+        scaleX: (value) => value, shape: { bodyHeight: radius, tipHeight: radius / 2, tipLength: radius },
+      }).map((value, i) => i % 2 ? value + symbolY - radius : value) }
+    : { type: "circle", x: 0, y: symbolY, radius, bounds: symbolBounds };
   const placement = chrome.legend.placement === "bottom" ? "bottom" : "right";
   const legend = {
+    symbol,
     textColour: chrome.legend.textColour, subtitleColour: chrome.legend.subtitleColour,
     visible: chrome.legend.show,
     placement,
@@ -211,9 +222,7 @@ function buildChrome(bounds, genes, chrome) {
       colour: chrome.legend.colourForGroup(group.uid),
       x: column * columnWidth,
       y: row * step,
-      radius,
-      circleY: hasSubtitles ? entryHeight / 2 : radius,
-      textX: radius + 6,
+      textX: halfWidth + 6,
       textY: hasSubtitles ? entryHeight / 2 - subtitleFontSize * 0.42 : radius + 1,
       ...(group.subtitle ? { subtitle: group.subtitle, subtitleY: entryHeight / 2 + fontSize * 0.48 } : {}),
       };

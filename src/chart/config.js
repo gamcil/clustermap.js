@@ -44,12 +44,13 @@ const defaultConfig = {
       'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif',
   },
   legend: {
+    symbol: "circle",
     columns: 1,
     columnWidth: 160,
     entryHeight: 18,
     fontSize: 14,
     subtitleFontSize: 10,
-    onClickCircle: null,
+    onClickSymbol: null,
     onClickText: null,
     // Optional hook exposed as a deliberate action in the group context menu.
     // Consumers can use it to reveal a group in an adjacent inspector.
@@ -148,6 +149,7 @@ export function createDefaultConfig() {
 }
 
 const choices = {
+  "legend.symbol": ["circle", "square", "arrow"],
   "legend.position": ["right", "bottom"],
   "cluster.labelAlignment": ["left", "right"],
   "colourBar.domain.minMode": ["fixed", "data"],

@@ -66,6 +66,11 @@ Imports and edits share field rules: names and labels accept text or `null`,
 colours accept CSS colours or `null`, visibility flags are boolean, and link
 identity is a number from 0 to 1. Values are not coerced.
 
+Legend symbols can be changed in **Appearance → Legend → Symbol**, or with
+`chart.config({ legend: { symbol: "arrow" } })`. Options are `"circle"` (default),
+`"square"` and `"arrow"`. All renderers and SVG export use the same symbol
+geometry. `legend.onClickSymbol(event, group)` overrides the colour-picker action.
+
 ## Phylogenetic trees
 
 Optional `data.tree` supplies a display root and nodes whose leaves reference
