@@ -3,7 +3,7 @@
 ## Dependency
 
 The clustermap changes, including the expanded bounds API and built `dist`
-assets, are in commit `0d88d9267d72269754e2803aa72c4572833c34b1`.
+assets, are in commit `1cb03ce11116ce2696aedfc03ecfbc3e8523ec12`.
 The commit is local until pushed; a GitHub archive URL will work only once that
 commit is available remotely. Clinker's `web/package.json` currently pins
 `8cb76e06357190fddffc0116b3513a14d00f67c8`. Update the pin and lockfile to the
