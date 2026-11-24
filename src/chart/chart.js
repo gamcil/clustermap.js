@@ -1447,21 +1447,8 @@ export default function clusterMap() {
     let bounds = recordBounds(ids, { visibleOnly: true });
     const node = chartSurface(), scene = runtime.getScene();
     if (!node?.isConnected) return null;
-    for (const uid of ids.clusterLabels || []) {
-      bounds = includeBounds(bounds, figureSurface.clusterLabelBounds(container.node(), scene, runtime.renderConfig, uid));
-    }
-    if (ids.tree) bounds = includeBounds(bounds, figureSurface.treeBounds(container.node(), scene, runtime.renderConfig, plotData?.tree));
-    if (ids.treeNodes?.length) bounds = includeBounds(bounds, figureSurface.treeBounds(container.node(), scene, runtime.renderConfig, plotData?.tree, ids.treeNodes));
-    if (ids.treeBranches?.length || ids.treeStems?.length || ids.treeGuides?.length || ids.treeAnnotations?.length ||
-        ids.treeSupports?.length || ids.treeScaleBar || ids.treeCutLine) {
-      bounds = includeBounds(bounds, figureSurface.treeDetailBounds(container.node(), scene, runtime.renderConfig, plotData?.tree, ids));
-    }
     if (ids.figure) bounds = includeBounds(bounds, figureSurface.bounds(container.node(), scene, runtime.renderConfig, plotData?.tree));
-    if (ids.legend || ids.legendItems?.length || ids.legendSymbols?.length || ids.scaleBar || ids.colourBar || ids.annotations || ids.annotationPanels?.length ||
-        ids.annotationCells?.length || ids.annotationMarkers?.length || ids.trimIndicators?.length ||
-        ids.clusterLocusLabels?.length || ids.geneLabels?.length || ids.linkLabels?.length) {
-      bounds = includeBounds(bounds, figureSurface.decorationBounds(container.node(), scene, ids, runtime.renderConfig));
-    }
+    bounds = includeBounds(bounds, figureSurface.targetBounds(container.node(), scene, runtime.renderConfig, plotData?.tree, ids));
     if (!bounds) return null;
     const surface = node.getBoundingClientRect(), camera = getCamera(chartState);
     if (!surface.width || !surface.height || !camera) return null;

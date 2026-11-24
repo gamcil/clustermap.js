@@ -5040,35 +5040,23 @@
     return { minX: x + box.minX, maxX: x + box.maxX, minY: y + box.minY, maxY: y + box.maxY };
   }
 
-  /** Bounds of visible branches and their interactive nodes in committed coordinates. */
-  function measureTreeInteractionBounds(context, tree, scene, config, nodeIds = null) {
-    const layout = measureTreeLayout(context, tree, scene, config);
-    if (!layout) return null;
-    let bounds = null;
-    const include = (minX, minY, maxX, maxY) => {
-      bounds = includeBounds(bounds, { minX, minY, maxX, maxY });
-    };
-    for (const line of nodeIds ? [] : [...layout.branches, ...layout.stems]) {
-      const half = (line.style?.width || 1) / 2;
-      include(Math.min(line.x1, line.x2) - half, Math.min(line.y1, line.y2) - half,
-        Math.max(line.x1, line.x2) + half, Math.max(line.y1, line.y2) + half);
-    }
-    for (const node of layout.nodes) {
-      if (nodeIds && !nodeIds.includes(node.uid)) continue;
-      const radius = Math.max(node.hitRadius, node.radius + layout.branch.width / 2);
-      include(node.x - radius, node.y - radius, node.x + radius, node.y + radius);
-    }
-    for (const triangle of layout.triangles) {
-      if (nodeIds && !nodeIds.includes(triangle.uid)) continue;
-      const half = (triangle.style?.width || 1) / 2;
-      include(Math.min(triangle.x, triangle.x2) - half, Math.min(triangle.y, triangle.y1, triangle.y2) - half,
-        Math.max(triangle.x, triangle.x2) + half, Math.max(triangle.y, triangle.y1, triangle.y2) + half);
-    }
-    return bounds;
+  /** Gene text uses an SVG baseline offset that rotates with the label. */
+  function geneLabelBounds(gene, config, measureText, preview = null) {
+    const geometry = geneGeometryForPreview(preview, gene), offsets = previewOffsetsForLocus(preview, gene.locus);
+    const { x, y, rotation } = gene.label;
+    const dy = config.plot.renderer === "svg" ? ({ top: -.4, middle: .4, bottom: .8 }[config.gene.label.position] || 0) * config.gene.label.fontSize : 0;
+    const radians = rotation * Math.PI / 180;
+    const labelX = (geometry.labelX ?? gene.locus.x + x) + offsets.x - Math.sin(radians) * dy;
+    const labelY = gene.locus.y + y + offsets.y + Math.cos(radians) * dy;
+    const box = textBounds(gene.source.label || gene.source.name || gene.source.uid,
+      { fontSize: config.gene.label.fontSize, fontFamily: config.plot.fontFamily,
+        anchor: config.gene.label.anchor, rotation }, measureText);
+    return { minX: labelX + box.minX, maxX: labelX + box.maxX,
+      minY: labelY + box.minY, maxY: labelY + box.maxY };
   }
 
-  /** Optional individually addressable tree marks. */
-  function measureTreeDetailBounds(context, tree, scene, config, targets = {}) {
+  /** Bounds of requested visible tree marks in committed world coordinates. */
+  function measureTreeTargetBounds(context, tree, scene, config, targets = {}) {
     const layout = measureTreeLayout(context, tree, scene, config);
     if (!layout) return null;
     let bounds = null;
@@ -5078,8 +5066,17 @@
       include({ minX: Math.min(mark.x1, mark.x2) - half, maxX: Math.max(mark.x1, mark.x2) + half,
         minY: Math.min(mark.y1, mark.y2) - half, maxY: Math.max(mark.y1, mark.y2) + half });
     };
-    for (const branch of layout.branches) if ((targets.treeBranches || []).includes(branch.uid)) line(branch, branch.style.width);
-    for (const stem of layout.stems) if ((targets.treeStems || []).includes(stem.uid)) line(stem, stem.style.width);
+    for (const branch of layout.branches) if (targets.tree || (targets.treeBranches || []).includes(branch.uid)) line(branch, branch.style.width);
+    for (const stem of layout.stems) if (targets.tree || (targets.treeStems || []).includes(stem.uid)) line(stem, stem.style.width);
+    for (const node of layout.nodes) if (targets.tree || (targets.treeNodes || []).includes(node.uid)) {
+      const radius = Math.max(node.hitRadius, node.radius + layout.branch.width / 2);
+      include({ minX: node.x - radius, maxX: node.x + radius, minY: node.y - radius, maxY: node.y + radius });
+    }
+    for (const triangle of layout.triangles) if (targets.tree || (targets.treeNodes || []).includes(triangle.uid)) {
+      const half = (triangle.style?.width || 1) / 2;
+      include({ minX: Math.min(triangle.x, triangle.x2) - half, maxX: Math.max(triangle.x, triangle.x2) + half,
+        minY: Math.min(triangle.y, triangle.y1, triangle.y2) - half, maxY: Math.max(triangle.y, triangle.y1, triangle.y2) + half });
+    }
     for (const guide of layout.guides) if ((targets.treeGuides || []).includes(guide.uid)) line(guide, layout.guide.width);
     for (const label of layout.annotations) if ((targets.treeAnnotations || []).includes(label.uid)) {
       include({ minX: label.x - (label.overhang || 0), maxX: label.x + label.width,
@@ -5105,9 +5102,9 @@
   }
 
   /** Visible plot decorations in committed world coordinates. */
-  function measureDecorationBounds(context, scene, targets = {}, config = {}) {
+  function measureDecorationBounds(context, scene, targets = {}, config = {}, preview = null) {
     if (!scene) return null;
-    const measureText = canvasTextMeasurer(context, scene), chrome = scene.chrome;
+    const measureText = canvasTextMeasurer(context, scene), chrome = preview?.chrome || scene.chrome;
     let bounds = null;
     const include = (box) => { bounds = includeBounds(bounds, box); };
     const includeText = (text, x, y, style) => {
@@ -5116,14 +5113,14 @@
       include({ minX: x + box.minX, maxX: x + box.maxX, minY: y + box.minY, maxY: y + box.maxY });
     };
     const legend = chrome?.legend;
-    if (legend?.visible) {
+    if (legend?.visible && (targets.legend || targets.legendItems?.length || targets.legendSymbols?.length)) {
       const items = targets.legend ? legend.items : legend.items.filter((item) => (targets.legendItems || []).includes(item.uid));
       if (items.length) {
         const box = legendContentBounds({ ...legend, items }, measureText);
         include({ minX: legend.position.x + box.minX, maxX: legend.position.x + box.maxX,
           minY: legend.position.y + box.minY, maxY: legend.position.y + box.maxY });
       }
-      for (const item of legend.items) if ((targets.legendSymbols || []).includes(item.uid)) {
+      for (const item of targets.legendSymbols?.length ? legend.items : []) if (targets.legendSymbols.includes(item.uid)) {
         const box = legend.symbol.bounds;
         include({ minX: legend.position.x + item.x + box.minX, maxX: legend.position.x + item.x + box.maxX,
           minY: legend.position.y + item.y + box.minY, maxY: legend.position.y + item.y + box.maxY });
@@ -5147,7 +5144,8 @@
       includeText(colour.startLabel, colour.position.x, y, font);
       includeText(colour.endLabel, colour.position.x + colour.width, y, { ...font, anchor: "end" });
     }
-    for (const panel of annotationPanelsForFrame(scene)) {
+    const needsPanels = targets.annotations || targets.annotationPanels?.length || targets.annotationCells?.length || targets.annotationMarkers?.length;
+    for (const panel of needsPanels ? annotationPanelsForFrame(scene, preview) : []) {
       if (targets.annotations || (targets.annotationPanels || []).includes(panel.uid)) {
         const box = annotationPanelBounds(panel);
         if (Object.values(box).every(Number.isFinite)) include(box);
@@ -5182,13 +5180,7 @@
     for (const uid of targets.geneLabels || []) {
       const gene = scene.genes.get(uid);
       if (!gene?.visible || !config.gene.label.show) continue;
-      const { x, y, rotation } = gene.label;
-      const dy = config.plot.renderer === "svg" ? ({ top: -.4, middle: .4, bottom: .8 }[config.gene.label.position] || 0) * config.gene.label.fontSize : 0;
-      const radians = rotation * Math.PI / 180;
-      includeText(gene.source.label || gene.source.name || gene.source.uid,
-        gene.locus.x + x - Math.sin(radians) * dy, gene.locus.y + y + Math.cos(radians) * dy,
-        { fontSize: config.gene.label.fontSize, fontFamily: config.plot.fontFamily,
-          anchor: config.gene.label.anchor, rotation });
+      include(geneLabelBounds(gene, config, measureText));
     }
     for (const uid of targets.linkLabels || []) {
       const link = scene.links.get(uid);
@@ -5295,11 +5287,7 @@
     if (config.gene.label.show) {
       for (const gene of scene.genes.values()) {
         if (!geneVisibleForPreview(preview, gene)) continue;
-        const offsets = previewOffsetsForLocus(preview, gene.locus);
-        const geometry = geneGeometryForPreview(preview, gene);
-        includeText(gene.source.label || gene.source.name || gene.source.uid,
-          (geometry.labelX ?? gene.locus.x + gene.label.x) + offsets.x, gene.locus.y + gene.label.y + offsets.y,
-          { fontSize: config.gene.label.fontSize, align: config.gene.label.anchor === "middle" ? "center" : config.gene.label.anchor, rotation: gene.label.rotation });
+        includeBounds(bounds, geneLabelBounds(gene, config, measureChromeText, preview));
       }
     }
     if (config.link.show && config.link.label.show) {
@@ -5333,32 +5321,12 @@
         { fontSize: item.fontSize, fontFamily: panel.fontFamily, fontWeight: item.weight || 400,
           align: item.anchor === "end" ? "right" : item.anchor === "middle" ? "center" : "left", rotation: item.rotation || 0 });
     }
-    if (chrome?.legend.visible && chrome.legend.items.length) {
-      const legend = chrome.legend;
-      const content = legendContentBounds(legend, measureChromeText);
-      include(legend.position.x + content.minX, legend.position.y + content.minY);
-      include(legend.position.x + content.maxX, legend.position.y + content.maxY);
-    }
-    if (chrome?.scaleBar.visible) {
-      const bar = chrome.scaleBar;
-      const half = bar.strokeWidth / 2;
-      include(bar.position.x - half, bar.position.y - half);
-      include(bar.position.x + bar.length + half, bar.position.y + bar.height + half);
-      includeText(bar.label, bar.position.x + bar.length / 2, bar.position.y + bar.height + 5,
-        { fontSize: bar.fontSize, fontFamily: bar.fontFamily, align: "center", baseline: "top" });
-    }
-    if (chrome?.colourBar.visible) {
-      const bar = chrome.colourBar;
-      include(bar.position.x - 0.5, bar.position.y - 0.5);
-      include(bar.position.x + bar.width + 0.5, bar.position.y + bar.height + 0.5);
-      const font = { fontSize: bar.fontSize, fontFamily: bar.fontFamily, baseline: "top" };
-      const y = bar.position.y + bar.height + 5;
-      includeText(bar.label, bar.position.x + bar.width / 2, y, { ...font, align: "center" });
-      includeText(bar.startLabel, bar.position.x, y, font);
-      includeText(bar.endLabel, bar.position.x + bar.width, y, { ...font, align: "right" });
-    }
+    includeBounds(bounds, measureDecorationBounds(context, scene,
+      { legend: true, scaleBar: true, colourBar: true }, config, preview));
     return bounds;
   }
+
+  const recordTargets = new Set(["genes", "links", "loci", "clusters", "figure"]);
 
   /** One backdrop shared by all renderers; camera changes only update its transform. */
   function createFigureSurface() {
@@ -5415,21 +5383,19 @@
     }
 
     return { bounds, update, clear,
-      clusterLabelBounds(container, scene, config, uid) {
+      targetBounds(container, scene, config, tree, targets) {
+        if (!scene || !Object.entries(targets).some(([key, value]) =>
+          !recordTargets.has(key) && (value === true || Array.isArray(value) && value.length))) return null;
         const ctx = measurementContext(container);
-        return ctx && scene ? measureClusterNameBounds(ctx, scene, config, uid) : null;
-      },
-      treeBounds(container, scene, config, tree, nodeIds = null) {
-        const ctx = measurementContext(container);
-        return ctx && scene ? measureTreeInteractionBounds(ctx, tree, scene, config, nodeIds) : null;
-      },
-      treeDetailBounds(container, scene, config, tree, targets) {
-        const ctx = measurementContext(container);
-        return ctx && scene ? measureTreeDetailBounds(ctx, tree, scene, config, targets) : null;
-      },
-      decorationBounds(container, scene, targets, config) {
-        const ctx = measurementContext(container);
-        return ctx && scene ? measureDecorationBounds(ctx, scene, targets, config) : null;
+        if (!ctx) return null;
+        let result = null;
+        for (const uid of targets.clusterLabels || []) {
+          result = includeBounds(result, measureClusterNameBounds(ctx, scene, config, uid));
+        }
+        if (Object.keys(targets).some((key) => key.startsWith("tree") && (targets[key] === true || targets[key]?.length))) {
+          result = includeBounds(result, measureTreeTargetBounds(ctx, tree, scene, config, targets));
+        }
+        return includeBounds(result, measureDecorationBounds(ctx, scene, targets, config));
       } };
   }
 
@@ -17451,21 +17417,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       let bounds = recordBounds(ids, { visibleOnly: true });
       const node = chartSurface(), scene = runtime.getScene();
       if (!node?.isConnected) return null;
-      for (const uid of ids.clusterLabels || []) {
-        bounds = includeBounds(bounds, figureSurface.clusterLabelBounds(container.node(), scene, runtime.renderConfig, uid));
-      }
-      if (ids.tree) bounds = includeBounds(bounds, figureSurface.treeBounds(container.node(), scene, runtime.renderConfig, plotData?.tree));
-      if (ids.treeNodes?.length) bounds = includeBounds(bounds, figureSurface.treeBounds(container.node(), scene, runtime.renderConfig, plotData?.tree, ids.treeNodes));
-      if (ids.treeBranches?.length || ids.treeStems?.length || ids.treeGuides?.length || ids.treeAnnotations?.length ||
-          ids.treeSupports?.length || ids.treeScaleBar || ids.treeCutLine) {
-        bounds = includeBounds(bounds, figureSurface.treeDetailBounds(container.node(), scene, runtime.renderConfig, plotData?.tree, ids));
-      }
       if (ids.figure) bounds = includeBounds(bounds, figureSurface.bounds(container.node(), scene, runtime.renderConfig, plotData?.tree));
-      if (ids.legend || ids.legendItems?.length || ids.legendSymbols?.length || ids.scaleBar || ids.colourBar || ids.annotations || ids.annotationPanels?.length ||
-          ids.annotationCells?.length || ids.annotationMarkers?.length || ids.trimIndicators?.length ||
-          ids.clusterLocusLabels?.length || ids.geneLabels?.length || ids.linkLabels?.length) {
-        bounds = includeBounds(bounds, figureSurface.decorationBounds(container.node(), scene, ids, runtime.renderConfig));
-      }
+      bounds = includeBounds(bounds, figureSurface.targetBounds(container.node(), scene, runtime.renderConfig, plotData?.tree, ids));
       if (!bounds) return null;
       const surface = node.getBoundingClientRect(), camera = getCamera(chartState);
       if (!surface.width || !surface.height || !camera) return null;

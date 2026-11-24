@@ -186,11 +186,15 @@ test("screenBounds follows visible gene and link labels", async ({ page }) => {
     const geneText = [...document.querySelectorAll("text.geneLabel")].find((el) => el.textContent === "a0");
     const linkText = document.querySelector("text.geneLinkLabel");
     return { gene: chart.screenBounds({ geneLabels: ["a0"] }), link: chart.screenBounds({ linkLabels: ["link-ab"] }),
-      geneRect: rect(geneText), linkRect: rect(linkText) };
+      figure: chart.screenBounds({ figure: true }), geneRect: rect(geneText), linkRect: rect(linkText) };
   });
   for (const [kind, rendered] of [["gene", "geneRect"], ["link", "linkRect"]]) {
     expect(svg[kind], kind).not.toBeNull();
     for (const edge of ["left", "top", "right", "bottom"]) expect(Math.abs(svg[kind][edge] - svg[rendered][edge])).toBeLessThan(8);
+    expect(svg.figure.left).toBeLessThanOrEqual(svg[kind].left);
+    expect(svg.figure.top).toBeLessThanOrEqual(svg[kind].top);
+    expect(svg.figure.right).toBeGreaterThanOrEqual(svg[kind].right);
+    expect(svg.figure.bottom).toBeGreaterThanOrEqual(svg[kind].bottom);
   }
   for (const renderer of ["canvas", "webgpu"]) {
     await page.evaluate((renderer) => chart.config({ plot: { renderer } }), renderer);

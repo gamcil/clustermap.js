@@ -1,4 +1,7 @@
-import { measureFigureBounds, measureClusterNameBounds, measureTreeInteractionBounds, measureTreeDetailBounds, measureDecorationBounds } from "../scene/measure.mjs";
+import { includeBounds } from "../scene/bounds.mjs";
+import { measureFigureBounds, measureClusterNameBounds, measureTreeTargetBounds, measureDecorationBounds } from "../scene/measure.mjs";
+
+const recordTargets = new Set(["genes", "links", "loci", "clusters", "figure"]);
 
 /** One backdrop shared by all renderers; camera changes only update its transform. */
 export function createFigureSurface() {
@@ -55,20 +58,18 @@ export function createFigureSurface() {
   }
 
   return { bounds, update, clear,
-    clusterLabelBounds(container, scene, config, uid) {
+    targetBounds(container, scene, config, tree, targets) {
+      if (!scene || !Object.entries(targets).some(([key, value]) =>
+        !recordTargets.has(key) && (value === true || Array.isArray(value) && value.length))) return null;
       const ctx = measurementContext(container);
-      return ctx && scene ? measureClusterNameBounds(ctx, scene, config, uid) : null;
-    },
-    treeBounds(container, scene, config, tree, nodeIds = null) {
-      const ctx = measurementContext(container);
-      return ctx && scene ? measureTreeInteractionBounds(ctx, tree, scene, config, nodeIds) : null;
-    },
-    treeDetailBounds(container, scene, config, tree, targets) {
-      const ctx = measurementContext(container);
-      return ctx && scene ? measureTreeDetailBounds(ctx, tree, scene, config, targets) : null;
-    },
-    decorationBounds(container, scene, targets, config) {
-      const ctx = measurementContext(container);
-      return ctx && scene ? measureDecorationBounds(ctx, scene, targets, config) : null;
+      if (!ctx) return null;
+      let result = null;
+      for (const uid of targets.clusterLabels || []) {
+        result = includeBounds(result, measureClusterNameBounds(ctx, scene, config, uid));
+      }
+      if (Object.keys(targets).some((key) => key.startsWith("tree") && (targets[key] === true || targets[key]?.length))) {
+        result = includeBounds(result, measureTreeTargetBounds(ctx, tree, scene, config, targets));
+      }
+      return includeBounds(result, measureDecorationBounds(ctx, scene, targets, config));
     } };
 }
