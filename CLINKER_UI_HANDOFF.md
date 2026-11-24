@@ -2,8 +2,8 @@
 
 ## Dependency
 
-The clustermap changes are in commit
-`6501ff12d2d63c68dd0c457a1e9d5c968320e4a6` (including built `dist` assets).
+The clustermap changes, including the expanded bounds API and built `dist`
+assets, are in commit `0d88d9267d72269754e2803aa72c4572833c34b1`.
 The commit is local until pushed; a GitHub archive URL will work only once that
 commit is available remotely. Clinker's `web/package.json` currently pins
 `8cb76e06357190fddffc0116b3513a14d00f67c8`. Update the pin and lockfile to the
@@ -26,8 +26,7 @@ interactive nodes with `chart.screenBounds({ tree: true })`. Both use the same
 unclipped viewport coordinates and committed-layout contract as locus bounds.
 They return `null` for a missing or hidden target. Tree bounds exclude leaf
 guides, scale bars and annotations. A query may combine targets and returns
-their union. These additions follow the dependency commit named above; pin a
-later commit or release that contains them.
+their union. These additions are included in the dependency commit named above.
 
 Additional queries cover `{ legend: true }`, `{ legendItems: [groupUid] }`,
 `{ scaleBar: true }`, `{ colourBar: true }`, `{ annotations: true }`, and
