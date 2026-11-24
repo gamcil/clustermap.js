@@ -407,9 +407,19 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | `trimLoci(ids)` | Trim supplied/selected loci to their outermost displayed genes. |
 | `restoreLoci(ids)` | Restore full locus bounds while retaining flips and offsets. |
 | `focus({genes, links, loci, clusters})` | Frame supplied record IDs without changing selection. |
+| `screenBounds({genes, links, loci, clusters})` | Return the union of committed scene bounds as an unclipped viewport-relative rectangle in CSS pixels, or `null` if unavailable. Does not move the camera or change selection. |
 | `figureBounds()` | Read unpadded `{minX, minY, maxX, maxY}` in world coordinates; returns `null` before mounting or after destruction. |
 | `exportSvg({padding})` | Export the complete figure as an SVG string from any renderer. Padding defaults to 20. |
 | `destroy()` | Release chart-owned handlers, animations, rendering resources and DOM. |
+
+For a tour, a host can use `chart.visibleData()?.clusters[0]?.loci[0]?.uid` to
+choose the first visible locus and call `chart.screenBounds({ loci: [uid] })`.
+The result has `left`, `top`, `right`, `bottom`, `width`, and `height` fields in
+the coordinate space used by `getBoundingClientRect()`. It is not clipped to the
+plot; `chart.focus({ loci: [uid] })` can bring an off-screen target into view
+before querying. Bounds describe the latest committed layout, excluding live
+drag or animation previews. Query again after camera or layout changes. Missing
+records, an unmounted chart, or a zero-size surface return `null`.
 
 Transient UI highlights can supply an ownership token:
 `chart.highlight(ids, { owner })`. Clearing with the same token only clears

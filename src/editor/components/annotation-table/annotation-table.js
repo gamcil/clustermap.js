@@ -19,6 +19,8 @@ class AnnotationTable extends HTMLElementBase {
   #viewport;
   #panel;
   #domain = null;
+  #freeCategories = false;
+  #showIds = false;
   #filtered = [];
   #filter = "";
   #schema;
@@ -48,13 +50,14 @@ class AnnotationTable extends HTMLElementBase {
     });
   }
 
-  set state({ panel, clusters, domain = null, filter = "" }) {
+  set state({ panel, clusters, domain = null, filter = "", freeCategories = false, showIds = false }) {
     const changed = this.#panel?.uid !== panel.uid, filtered = this.#filter !== filter;
     if (changed) this.#selection.clear();
-    this.#panel = panel; this.#domain = domain; this.#filter = filter;
+    this.#panel = panel; this.#domain = domain; this.#filter = filter; this.#freeCategories = freeCategories; this.#showIds = showIds;
+    this.#batch.closest("clinker-action-menu").hidden = freeCategories;
     this.#selection.prune(new Set(clusters.map(({ uid }) => uid)));
     const scroll = changed || filtered ? 0 : this.#viewport.scrollTop;
-    const schema = JSON.stringify([panel.uid, panel.type, panel.columns, domain]);
+    const schema = JSON.stringify([panel.uid, panel.type, panel.columns, domain, freeCategories]);
     if (this.#schema !== schema) { this.#schema = schema; this.#build(); }
     const needle = filter.trim().toLowerCase();
     this.#filtered = clusters.filter(({ uid, name }) => `${name} ${uid}`.toLowerCase().includes(needle));
@@ -138,11 +141,12 @@ class AnnotationTable extends HTMLElementBase {
     name.onclick = (event) => select(!this.#selection.has(cluster.uid), event.shiftKey);
     this.#panel.columns.forEach((_, index) => {
       const cell = this.#element("cell"), field = cell.firstElementChild;
-      if (this.#domain === null) field.setAttribute("type", "number");
+      if (this.#freeCategories) field.setAttribute("type", "text");
+      else if (this.#domain === null) field.setAttribute("type", "number");
       else field.options = [["", "Missing"], ...this.#domain.map((name, i) => [String(i), name])];
       field.addEventListener("value-commit", (event) => {
         event.stopPropagation(); const value = event.detail.value;
-        if (!this.#setValues([cluster.uid], index, value === "" ? null : this.#domain === null ? Number(value) : this.#domain[Number(value)])) event.preventDefault();
+        if (!this.#setValues([cluster.uid], index, value === "" ? null : this.#freeCategories ? value : this.#domain === null ? Number(value) : this.#domain[Number(value)])) event.preventDefault();
       });
       row.append(cell);
     });
@@ -151,12 +155,13 @@ class AnnotationTable extends HTMLElementBase {
   }
 
   #updateRow(row, cluster) {
-    const label = cluster.name || cluster.uid, name = row.querySelector("th"); name.textContent = label; name.title = cluster.uid;
+    const label = cluster.name || cluster.uid, name = row.querySelector("th");
+    name.textContent = this.#showIds && label !== cluster.uid ? `${label} (${cluster.uid})` : label; name.title = cluster.uid;
     row.querySelector("input").setAttribute("aria-label", `Select ${label}`);
     [...row.querySelectorAll("clinker-editable-field")].forEach((field, index) => {
       const value = this.#panel.values[cluster.uid]?.[index] ?? null;
       field.setAttribute("label", `${label}: ${this.#panel.columns[index]}`);
-      field.value = this.#domain === null ? value : value === null ? "" : String(this.#domain.indexOf(value));
+      field.value = this.#freeCategories || this.#domain === null ? value : value === null ? "" : String(this.#domain.indexOf(value));
     });
     return row;
   }

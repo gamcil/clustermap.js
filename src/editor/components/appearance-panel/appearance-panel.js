@@ -78,6 +78,9 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
     if (navigation !== this.#navigation || !this.isConnected || !target.box.getClientRects().length) return false;
     const control = target.fields.find(({ control }) => !control.disabled)?.control;
     (control || target.box).scrollIntoView({ block: "nearest" });
+    target.box.classList.remove("cm-appearance-highlight");
+    void target.box.offsetWidth;
+    target.box.classList.add("cm-appearance-highlight");
     if (focus) control?.focus({ preventScroll: true });
     return true;
   }
@@ -135,6 +138,7 @@ export class ClinkerAppearancePanelElement extends HTMLElementBase {
     for (const { box, details, fields } of this.#sections) {
       for (const { control, row, search } of fields) {
         this.#syncField(control); row.hidden = Boolean(this.#filter && !search.includes(this.#filter));
+        row.classList.toggle("cm-appearance-match", Boolean(this.#filter && !row.hidden));
       }
       box.hidden = fields.every(({ row }) => row.hidden);
       if (!box.hidden) visible++;

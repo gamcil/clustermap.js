@@ -825,7 +825,7 @@ function worldViewport(camera, { width, height }, overscan = 20) {
  * Renderers may obtain the envelope differently (SVG can use getBBox while
  * raster renderers measure text), but camera policy stays shared: cap an
  * ordinary fit, optionally retain a readable scale for oversized figures,
- * and top-align whenever that scale crops the figure.
+ * and align each cropped axis to its start independently.
  */
 function fitCameraForBounds({
   bounds,
@@ -845,12 +845,14 @@ function fitCameraForBounds({
     (viewport.height - padding * 2) / height
   );
   const k = constrainScale(Math.max(fitScale, minimumReadableScale));
-  const cropped = k > fitScale;
+  const croppedX = width * k > viewport.width - padding * 2;
+  const croppedY = height * k > viewport.height - padding * 2;
+  const cropped = croppedX || croppedY;
   return {
-    x: cropped
+    x: croppedX
       ? padding - bounds.minX * k
       : (viewport.width - width * k) / 2 - bounds.minX * k,
-    y: cropped
+    y: croppedY
       ? padding - bounds.minY * k
       : (viewport.height - height * k) / 2 - bounds.minY * k,
     k,
@@ -10030,6 +10032,7 @@ const controlStyles = `
 :host([hidden]), :where(.cm-ui)[hidden], :where(:host,.cm-ui) [hidden] { display:none!important; }
 :where(:host,.cm-ui) :where(form) { margin:0; }
 :where(:host,.cm-ui) :where(.cm-button,.cm-field,.cm-disclosure) { box-sizing:border-box; font:inherit; color:inherit; }
+:where(:host,.cm-ui) :where(.cm-disclosure) { padding:8px 0 2px; font-weight:600; cursor:pointer; }
 :where(:host,.cm-ui) :where(.cm-button,.cm-field:not([type=color]):not([type=checkbox]):not([type=range])) {
   min-height:var(--cm-control-height,var(--_cm-control-height,30px));
   padding:var(--cm-control-padding,var(--_cm-control-padding,4px 8px));
@@ -10040,7 +10043,8 @@ const controlStyles = `
 :where(:host,.cm-ui) :where(.cm-field[type=color]) { width:30px; height:22px; padding:0; border:0; background:transparent; cursor:pointer; }
 :where(:host,.cm-ui) :where(.cm-button,.cm-disclosure,.cm-field[type=checkbox]) { cursor:pointer; }
 :where(:host,.cm-ui) :where(.cm-field)::placeholder { color:var(--cm-muted,var(--_cm-muted,#687586)); }
-:where(:host,.cm-ui) :where(:is(.cm-button,.cm-disclosure):hover:not(:disabled)) { border-color:var(--cm-accent,var(--_cm-accent,#78a9ed)); background:var(--cm-hover,var(--_cm-hover,#f4f8ff)); }
+:where(:host,.cm-ui) :where(.cm-button:hover:not(:disabled)) { border-color:var(--cm-accent,var(--_cm-accent,#78a9ed)); background:var(--cm-hover,var(--_cm-hover,#f4f8ff)); }
+:where(:host,.cm-ui) :where(.cm-disclosure:hover) { color:var(--cm-accent,var(--_cm-accent,#1677ff)); }
 :where(:host,.cm-ui) :where(.cm-button:disabled) { color:var(--cm-muted,var(--_cm-muted,#8993a1)); opacity:.45; cursor:default; }
 :where(:host,.cm-ui) :where(.cm-field:disabled) { color:var(--cm-muted,var(--_cm-muted,#8993a1)); opacity:.6; cursor:default; }
 :where(:host,.cm-ui) :where(:is(.cm-button,.cm-disclosure):focus-visible) { outline:2px solid var(--cm-focus-ring,var(--_cm-focus-ring,#1677ff)); outline-offset:2px; }
@@ -10048,13 +10052,14 @@ const controlStyles = `
 :where(:host,.cm-ui) :where(.cm-menu-item,clinker-action-menu > .cm-button) { border:0; border-radius:4px; background:transparent; text-align:left; }
 :where(:host,.cm-ui) :where(:is(.cm-menu-item,clinker-action-menu > .cm-button):hover:not(:disabled)) { background:var(--cm-hover,var(--_cm-hover,#e3ecf8)); }
 :where(:host,.cm-ui) :where(:is(.cm-menu-item,clinker-action-menu > .cm-button)[aria-pressed=true]) { background:var(--cm-selection,var(--_cm-selection,#d6e6fc)); }
+.cm-popover { box-sizing:border-box; padding:8px; border:1px solid var(--cm-border,var(--_cm-border,#cbd3de)); border-radius:4px; background:var(--cm-surface,var(--_cm-surface,#fff)); box-shadow:0 2px 8px rgba(0,0,0,.2); color:var(--cm-foreground,var(--_cm-foreground,#273444)); }
 `;
 
 // Light DOM needs an owned class scope; shadow component variants stay easy to override.
 const lightControlStyles = controlStyles.replaceAll(":where(:host,.cm-ui)", ".cm-ui");
 
 const css$1 = uiAppearanceStyles(":where(.cm-chart,.cm-ui)") + lightControlStyles +
-  ".cm-chart { background:var(--cm-background,var(--_cm-background)); }\n.cm-chart > :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { z-index:1; background:transparent; color-scheme:light; }\n.cm-chart > .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border,var(--_cm-border)); }\n.cm-chart > .clusterMapFigureDimensions { z-index:2; color:var(--cm-muted,var(--_cm-muted)); font:var(--cm-font,var(--_cm-font)); line-height:20px; white-space:nowrap; }\n.cm-chart > canvas.clusterMapMinimap { color-scheme:light; }\n\n.cm-chart > :is(svg.clusterMap,canvas.clusterMapCanvas) { position:relative; }\n.cm-chart > :is(canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { display:block; width:100%; height:100%; }\n.cm-chart > canvas.clusterMapCanvas { outline:none; cursor:grab; }\n.cm-chart > canvas.clusterMapWebGpuOverlay { position:absolute; inset:0; pointer-events:none; }\n.cm-chart > canvas.clusterMapMinimap { position:absolute; z-index:2; display:block; box-sizing:border-box; background:white; box-shadow:0 1px 4px rgba(0,0,0,.25); cursor:grab; touch-action:none; }\n.cm-chart > :is(.clusterMapFigureSurface,.clusterMapFigureDimensions) { position:absolute; left:0; top:0; pointer-events:none; }\n.cm-chart > .clusterMapFigureSurface { transform-origin:0 0; }\n.cm-chart > .clusterMapFigureSurface--frameless { outline:none; box-shadow:none; }\n.cm-chart > input.colourPicker { position:absolute; opacity:0; }\n.cm-chart > div.tooltip { position:absolute; pointer-events:none; z-index:4; box-sizing:border-box; padding:8px; background:var(--cm-surface,var(--_cm-surface)); border:1px solid var(--cm-border,var(--_cm-border)); border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.2); }\n";
+  ".cm-chart { background:var(--cm-background,var(--_cm-background)); }\n.cm-chart > :is(svg.clusterMap,canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { z-index:1; background:transparent; color-scheme:light; }\n.cm-chart > .clusterMapFigureSurface { z-index:0; box-shadow:0 2px 12px rgba(0,0,0,.2); outline:1px solid var(--cm-border,var(--_cm-border)); }\n.cm-chart > .clusterMapFigureDimensions { z-index:2; color:var(--cm-muted,var(--_cm-muted)); font:var(--cm-font,var(--_cm-font)); line-height:20px; white-space:nowrap; }\n.cm-chart > canvas.clusterMapMinimap { color-scheme:light; }\n\n.cm-chart > :is(svg.clusterMap,canvas.clusterMapCanvas) { position:relative; }\n.cm-chart > :is(canvas.clusterMapCanvas,canvas.clusterMapWebGpuOverlay) { display:block; width:100%; height:100%; }\n.cm-chart > canvas.clusterMapCanvas { outline:none; cursor:grab; }\n.cm-chart > canvas.clusterMapWebGpuOverlay { position:absolute; inset:0; pointer-events:none; }\n.cm-chart > canvas.clusterMapMinimap { position:absolute; z-index:2; display:block; box-sizing:border-box; background:white; box-shadow:0 1px 4px rgba(0,0,0,.25); cursor:grab; touch-action:none; }\n.cm-chart > :is(.clusterMapFigureSurface,.clusterMapFigureDimensions) { position:absolute; left:0; top:0; pointer-events:none; }\n.cm-chart > .clusterMapFigureSurface { transform-origin:0 0; }\n.cm-chart > .clusterMapFigureSurface--frameless { outline:none; box-shadow:none; }\n.cm-chart > input.colourPicker { position:absolute; opacity:0; }\n.cm-chart > div.tooltip { position:absolute; pointer-events:none; z-index:4; --_cm-control-height:26px; --_cm-control-padding:3px 7px; --_cm-control-radius:4px; }\n.cm-chart .tooltip-contents { display:flex; flex-direction:column; gap:6px; width:260px; max-width:calc(100vw - 40px); }\n.cm-chart .tooltip-contents :is(input:not([type=color]),select) { box-sizing:border-box; width:100%; }\n";
 
 /** Figure colours are independent of the interface/system theme. */
 function figureConfig(config) {
@@ -10087,7 +10092,6 @@ const DATA_ROW_HEIGHT = 34;
 
 const DATA_EDITOR_CSS = `
 ${uiAppearanceStyles(":where(.cm-ui)")}
-.cm-data-ui summary:hover { color:var(--cm-accent,var(--_cm-accent,#1677ff)); }
 .cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,var(--_cm-muted,#64748b)); line-height:1; }
 .cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,var(--_cm-hover,#e3ecf8)); color:var(--cm-accent,var(--_cm-accent,#1677ff)); }
 .cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
@@ -10182,7 +10186,7 @@ function createActionRunner(report) {
   };
 }
 
-const css = ".cm-tree-controls { --_cm-control-height:24px; --_cm-control-padding:2px 5px; --_cm-control-radius:4px; width:260px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font:inherit; font-size:12px; line-height:1.3; color:inherit; text-align:left; }\n.cm-tree-controls * { box-sizing:border-box; }\n.cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:4px; margin:4px 0; }\n.cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }\n.cm-tree-controls input[type=number] { width:52px; min-width:0; }\n.cm-tree-controls input[type=color] { width:24px; height:20px; }\n.cm-tree-controls input[type=checkbox] { width:12px; height:12px; margin:0; }\n.cm-tree-controls .cm-tree-heading { font-size:12px; font-weight:600; margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.cm-tree-controls .cm-tree-branch-row { display:grid; grid-template-columns:minmax(0,1fr) 24px 52px 22px; gap:5px; align-items:center; margin:5px 0; }\n.cm-tree-controls .cm-tree-reset { width:22px; min-height:22px; padding:0; }\n.cm-tree-controls .cm-tree-wide { display:block; }\n.cm-tree-controls .cm-tree-wide > span { display:block; margin-bottom:4px; }\n.cm-tree-controls .cm-tree-wide input { width:100%; }\n.cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:5px; }\n.cm-tree-controls .cm-tree-format .cm-tree-row { gap:3px; }\n.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid var(--cm-border,var(--_cm-border,#e5e9ef)); margin:6px 0; }\n.cm-tree-controls .cm-tree-actions { display:flex; gap:6px; margin-top:6px; }\n.cm-tree-controls [role=status]:empty { display:none; }\n.cm-tree-controls [role=status] { color:var(--cm-danger,var(--_cm-danger,#a13c46)); margin:6px 0 0; }\n";
+const css = ".cm-tree-controls { --_cm-control-height:26px; --_cm-control-padding:3px 7px; --_cm-control-radius:4px; width:280px; max-width:calc(100vw - 40px); max-height:75vh; overflow:auto; font:inherit; font-size:12px; line-height:1.4; color:inherit; text-align:left; }\n.cm-tree-controls * { box-sizing:border-box; }\n.cm-tree-controls .cm-tree-content { display:flex; flex-direction:column; align-items:stretch; gap:10px; }\n.cm-tree-controls .cm-tree-content > * { min-width:0; }\n.cm-tree-controls .cm-tree-primary { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }\n.cm-tree-controls .cm-tree-primary > .cm-tree-row { flex-basis:100%; margin-top:2px; }\n.cm-tree-controls .cm-tree-row { display:flex; align-items:center; gap:6px; margin:0; }\n.cm-tree-controls .cm-tree-row > span { flex:1; min-width:0; }\n.cm-tree-controls input[type=number] { width:52px; min-width:0; }\n.cm-tree-controls input[type=color] { width:24px; height:20px; }\n.cm-tree-controls input[type=checkbox] { width:12px; height:12px; margin:0; }\n.cm-tree-controls .cm-tree-heading { font-size:12px; font-weight:600; margin-bottom:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.cm-tree-controls details { border-top:1px solid var(--cm-border,var(--_cm-border,#e5e9ef)); }\n.cm-tree-controls details[open] { padding-bottom:2px; }\n.cm-tree-controls .cm-tree-branch-head, .cm-tree-controls .cm-tree-branch-row { display:grid; grid-template-columns:minmax(0,1fr) 32px 52px 26px; column-gap:8px; align-items:center; }\n.cm-tree-controls .cm-tree-branch-head { margin-top:7px; color:var(--cm-muted,var(--_cm-muted,#687586)); font-size:10px; }\n.cm-tree-controls .cm-tree-branch-row { margin-top:6px; }\n.cm-tree-controls .cm-tree-branch-row input[type=color] { justify-self:center; }\n.cm-tree-controls .cm-tree-reset { width:26px; min-height:26px; padding:0; }\n.cm-tree-controls .cm-tree-wide { display:block; }\n.cm-tree-controls .cm-tree-wide > span { display:block; margin:5px 0; }\n.cm-tree-controls .cm-tree-wide input { width:100%; }\n.cm-tree-controls .cm-tree-format { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:8px; }\n.cm-tree-controls .cm-tree-format .cm-tree-row { gap:4px; }\n.cm-tree-controls .cm-tree-separator { border:0; border-top:1px solid var(--cm-border,var(--_cm-border,#e5e9ef)); margin:6px 0; }\n.cm-tree-controls .cm-tree-actions { display:flex; gap:8px; padding-top:9px; border-top:1px solid var(--cm-border,var(--_cm-border,#e5e9ef)); }\n.cm-tree-controls [role=status]:empty { display:none; }\n.cm-tree-controls [role=status] { color:var(--cm-danger,var(--_cm-danger,#a13c46)); margin:6px 0 0; }\n";
 
 /** Controls for a single tree node and its subtree. */
 function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUid = null,
@@ -10218,7 +10222,7 @@ function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUi
     return uid === tree.root ? `All ${count} clusters` : `${labels.join(" + ")}${count > 2 ? ` + ${count - 2} more` : ""}`;
   };
   const uid = nodesById.has(nodeUid) ? nodeUid : tree.root;
-  const host = element("div", container);
+  const host = element("div", container, undefined, "cm-tree-content");
 
   const colourInput = (parent, title, value, fallback, onChange) => {
     const picker = element("input", parent); picker.type = "color";
@@ -10256,20 +10260,28 @@ function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUi
     host.replaceChildren();
     host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
     const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
+    const primary = element("div", host, undefined, "cm-tree-primary");
     if (canRerootTree(tree)) {
-      const root = button(host, "Root here", () => patch([{ type: "tree.reroot", nodeId: uid }]));
+      const root = button(primary, "Root here", () => patch([{ type: "tree.reroot", nodeId: uid }]));
       root.disabled = uid === tree.root;
       root.title = "Root on the branch above this node";
-      const resetRoot = button(host, "Reset rooting", () => patch([{ type: "tree.reroot.reset" }]));
+      const resetRoot = button(primary, "Reset rooting", () => patch([{ type: "tree.reroot.reset" }]));
       resetRoot.disabled = !tree.rooting;
     }
     if (!nodesById.get(uid).children) { onResize?.(); return; }
-    button(host, "Rotate branches", () => rotate(uid));
-    const collapsed = input(host, "Collapse subtree", "checkbox", tree.presentation?.subtrees?.[uid]?.collapsed);
+    button(primary, "Rotate branches", () => rotate(uid));
+    const collapsed = input(primary, "Collapse subtree", "checkbox", tree.presentation?.subtrees?.[uid]?.collapsed);
     collapsed.onchange = () => {
       if (!run(() => patch([{ type: "tree.presentation.update", scope: "subtree", ids: [uid],
         changes: { collapsed: collapsed.checked || null } }]))) collapsed.checked = !collapsed.checked;
     };
+    const styleDetails = element("details", host);
+    element("summary", styleDetails, "Style clade…");
+    styleDetails.ontoggle = () => onResize?.();
+    const styleColumns = element("div", styleDetails, undefined, "cm-tree-branch-head");
+    styleColumns.setAttribute("aria-hidden", "true");
+    element("span", styleColumns, ""); element("span", styleColumns, "Colour");
+    element("span", styleColumns, "Width"); element("span", styleColumns, "");
     const inheritedBranch = (scope) => {
       const collection = scope === "subtree" ? "subtrees" : "nodes";
       const records = tree.presentation?.[collection] || {};
@@ -10280,7 +10292,7 @@ function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUi
       return (scope === "subtree" ? inherited.stems : inherited.branches).get(uid) || inherited.base;
     };
     const branchControls = (scope, title, style, fallback) => {
-      const row = element("div", host, undefined, "cm-tree-branch-row");
+      const row = element("div", styleDetails, undefined, "cm-tree-branch-row");
       const name = element("span", row, title);
       name.title = scope === "subtree" ? "Branches within this clade, excluding its incoming branch." : "Only the horizontal branch entering this node.";
       const update = (branch) => patch([{ type: "tree.presentation.update", scope, ids: [uid], changes: { branch } }]);
@@ -10299,9 +10311,11 @@ function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUi
     branchControls("subtree", "Subtree", tree.presentation?.subtrees?.[uid]?.branch, inheritedBranch("subtree"));
     const record = tree.presentation?.nodes?.[uid] || {};
     if (uid !== tree.root) branchControls("node", "Incoming branch", record.branch, inheritedBranch("node"));
-    element("hr", host, undefined, "cm-tree-separator");
+    const labelDetails = element("details", host);
+    element("summary", labelDetails, "Label clade…");
+    labelDetails.ontoggle = () => onResize?.();
     const label = record.label || {};
-    const text = input(host, "Label", "text", label.text, { placeholder: "Clade label" });
+    const text = input(labelDetails, "Label", "text", label.text, { placeholder: "Clade label" });
     text.setAttribute("aria-label", "Annotation text"); text.parentElement.classList.add("cm-tree-wide");
     const updateLabel = (label) => patch([{ type: "tree.presentation.update", scope: "node", ids: [uid], changes: { label } }]);
     let previousText = text.value;
@@ -10309,7 +10323,7 @@ function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUi
       if (text.value === previousText) return;
       run(() => { updateLabel({ text: text.value || null }); previousText = text.value; });
     };
-    const formatting = element("div", host, undefined, "cm-tree-format");
+    const formatting = element("div", labelDetails, undefined, "cm-tree-format");
     const colour = colourInput(formatting, "Text colour", label.colour, "#333", (colour) => updateLabel({ colour }));
     const size = element("input", formatting); size.type = "number";
     Object.assign(size, { min: "1", step: "any", value: label.fontSize ?? "", placeholder: "10" });
@@ -10324,7 +10338,7 @@ function createTreeControls({ tree, config, patch, rotate, clusters = [], nodeUi
       text.value = ""; previousText = ""; colour.reset(); clearSize(); bold.checked = false; italic.checked = false;
     });
     const actions = element("div", host, undefined, "cm-tree-actions");
-    const resetNode = button(actions, "Reset", () => {
+    const resetNode = button(actions, "Reset node and clade settings", () => {
       if (tree.presentation?.subtrees?.[uid] || tree.presentation?.nodes?.[uid]) {
         patch([
           { type: "tree.presentation.reset", scope: "subtree", ids: [uid] },
@@ -10394,15 +10408,13 @@ function createHtmlOverlay({
   };
 
   const geneContents = (gene) => {
-    const div = create$1("div").attr("class", "tooltip-contents")
-      .style("display", "flex").style("flex-direction", "column")
-      .style("gap", "4px").style("width", "260px");
+    const div = create$1("div").attr("class", "tooltip-contents");
     div.append("label").attr("for", "gene-label-input").text("Edit label");
     const text = div.append("input").attr("id", "gene-label-input").attr("type", "text")
-      .attr("value", gene.label || gene.name || gene.uid).style("box-sizing", "border-box").style("width", "100%");
+      .attr("value", gene.label || gene.name || gene.uid);
     div.append("label").attr("for", "gene-qualifiers-input").text("Gene qualifiers");
     const select = div.append("select").attr("id", "gene-qualifiers-input").attr("multiple", true)
-      .attr("size", 4).style("box-sizing", "border-box").style("width", "100%");
+      .attr("size", 4);
     const names = gene.names || {};
     select.selectAll("option").data(Object.keys(names)).join("option")
       .text((key) => `${names[key]} [${key}]`).attr("value", (key) => names[key]);
@@ -10428,8 +10440,7 @@ function createHtmlOverlay({
   };
 
   const groupContents = (group) => {
-    const div = create$1("div").attr("class", "tooltip-contents")
-      .style("display", "flex").style("flex-direction", "column");
+    const div = create$1("div").attr("class", "tooltip-contents");
     div.append("label").text("Edit label");
     const text = div.append("input").attr("type", "text").attr("value", group.label || group.uid);
     div.append("label").text("Merge with...");
@@ -13004,7 +13015,7 @@ function ensureSvgSurface({
 
       enter
         .append("div")
-        .attr("class", "cm-ui tooltip")
+        .attr("class", "cm-ui cm-popover tooltip")
         .style("opacity", 0);
 
       const surface = enter
@@ -16639,9 +16650,9 @@ function clusterMap() {
       ids: runtime.ids, interactions: rendererInteractions });
   }
 
-  function focusCamera({ genes = [], links = [], loci = [], clusters = [] } = {}) {
+  function recordBounds({ genes = [], links = [], loci = [], clusters = [] } = {}) {
     const scene = runtime.getScene();
-    if (!container || !scene) return false;
+    if (!container || !scene) return null;
     let bounds = null;
     const include = (candidate) => { bounds = includeBounds(bounds, candidate); };
     for (const [kind, ids] of Object.entries({ genes, loci, clusters })) {
@@ -16660,8 +16671,17 @@ function clusterMap() {
       include(scene.genes.get(link?.query.uid)?.bounds);
       include(scene.genes.get(link?.target.uid)?.bounds);
     }
+    return bounds;
+  }
+
+  function chartSurface() {
+    return isRasterRenderer(runtime.config.plot.renderer) ? rasterCanvas : container?.select("svg.clusterMap").node();
+  }
+
+  function focusCamera(ids = {}) {
+    const bounds = recordBounds(ids);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
-    const node = useRaster ? rasterCanvas : container.select("svg.clusterMap").node();
+    const node = chartSurface();
     if (!bounds || !node) return false;
     const viewport = node.getBoundingClientRect();
     const camera = fitCameraForBounds({
@@ -16929,7 +16949,7 @@ function clusterMap() {
       };
       if (annotationOverlay) annotationOverlay.update(annotationUiContext);
       else if (!annotationUiLoad) {
-        annotationUiLoad = import('./annotationOverlay.mjs?v=d2197d71a5d8').then(({ createAnnotationOverlay }) => {
+        annotationUiLoad = import('./annotationOverlay.mjs?v=39e55232fbd9').then(({ createAnnotationOverlay }) => {
           if (!annotationUiContext) return;
           annotationOverlay = createAnnotationOverlay({ container: container.node(), annotationApi: {
             ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,
@@ -17211,6 +17231,18 @@ function clusterMap() {
     const isScoped = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
     focusCamera(isScoped ? ids : { genes: ids || [] });
     return my;
+  };
+  /** Current committed record bounds in viewport CSS pixels, without clipping. */
+  my.screenBounds = function (ids = {}) {
+    const bounds = recordBounds(ids), node = chartSurface();
+    if (!bounds || !node?.isConnected) return null;
+    const surface = node.getBoundingClientRect(), camera = getCamera(chartState);
+    if (!surface.width || !surface.height || !camera) return null;
+    const left = surface.left + camera.x + bounds.minX * camera.k;
+    const top = surface.top + camera.y + bounds.minY * camera.k;
+    const right = surface.left + camera.x + bounds.maxX * camera.k;
+    const bottom = surface.top + camera.y + bounds.maxY * camera.k;
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
   };
   my.on = (type, listener) => {
     if (type !== "change") throw new TypeError(`Unsupported chart event: ${type}`);

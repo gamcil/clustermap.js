@@ -48,6 +48,62 @@ test("configuration snapshots and listener payloads cannot mutate live settings"
   expect(result).toEqual({ palette: ["red", "blue"], size: 15, unchanged: true });
 });
 
+for (const theme of ["light", "dark"]) {
+  test(`${theme}: chart popovers share controls and surface styling`, async ({ page }) => {
+    await page.evaluate((theme) => {
+      chart.uiAppearance(theme);
+      const node = document.querySelector("polygon.genePolygon");
+      node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 }));
+    }, theme);
+    const tooltip = page.locator("#plot .tooltip");
+    await expect(tooltip.locator(".tooltip-contents .cm-field").first()).toBeVisible();
+    const gene = await tooltip.evaluate((node) => {
+      const css = getComputedStyle(node);
+      return { background: css.backgroundColor, border: css.borderColor, radius: css.borderRadius, padding: css.padding };
+    });
+    await page.evaluate(() => {
+      chart.config({ legend: { show: true } });
+      const node = document.querySelector("g.legend .legend-label");
+      node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 }));
+    });
+    await expect(tooltip.getByRole("button", { name: "Hide group" })).toBeVisible();
+    await expect(tooltip.locator(".tooltip-contents .cm-field").first()).toBeVisible();
+    const group = await tooltip.evaluate((node) => {
+      const css = getComputedStyle(node);
+      return { background: css.backgroundColor, border: css.borderColor, radius: css.borderRadius, padding: css.padding };
+    });
+    expect(group).toEqual(gene);
+    await page.evaluate(() => {
+      const node = document.querySelector("circle.tree-node");
+      node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 200, clientY: 200 }));
+    });
+    await expect(tooltip.locator(".cm-tree-controls .cm-disclosure").first()).toBeVisible();
+    await expect(tooltip).toHaveClass(/cm-popover/);
+    const tree = await tooltip.evaluate((node) => {
+      const css = getComputedStyle(node);
+      return { background: css.backgroundColor, border: css.borderColor, radius: css.borderRadius, padding: css.padding };
+    });
+    expect(tree).toEqual(gene);
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => {
+      const data = structuredClone(chart.data());
+      data.annotationPanels = [{ uid: "heat", type: "heatmap", title: "Heat", columns: ["Value"], values: { a: [1], b: [2], c: [3] } }];
+      chart.config({ annotations: { enabled: true } }); chart.data(data);
+    });
+    const cell = await page.locator("g.annotationRow rect").first().boundingBox();
+    await page.mouse.move(cell.x + cell.width / 2, cell.y + cell.height / 2);
+    await page.getByRole("button", { name: "Edit annotation panel Heat", exact: true }).click();
+    const menu = page.getByRole("dialog", { name: "Annotation panel settings" });
+    await expect(menu).toHaveClass(/cm-popover/);
+    const annotation = await menu.evaluate((node) => {
+      const css = getComputedStyle(node);
+      return { background: css.backgroundColor, border: css.borderColor, radius: css.borderRadius, padding: css.padding };
+    });
+    expect(annotation).toEqual(gene);
+    await expect(menu.locator("summary.cm-disclosure")).toHaveCount(1);
+  });
+}
+
 test("incompatible trees hide rooting controls in menus and the editor", async ({ page }) => {
   await page.evaluate(async () => {
     chart.data(await (await fetch("/fixtures/heatmap.json")).json());
@@ -300,6 +356,14 @@ test("mixed annotation selections preserve panel scales and reject invalid batch
   await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
   await page.getByRole("button", { name: "Edit annotation panel heat-one", exact: true }).click();
   const menu = page.getByRole("dialog", { name: "Annotation panel settings", exact: true });
+  const advanced = menu.locator("summary").filter({ hasText: "Advanced" });
+  await page.mouse.move(0, 0);
+  const normal = await advanced.evaluate((node) => getComputedStyle(node).color);
+  await advanced.hover();
+  await expect.poll(() => advanced.evaluate((node) => getComputedStyle(node).color)).not.toBe(normal);
+  await expect(advanced).toHaveClass(/cm-disclosure/);
+  await advanced.focus();
+  await expect(advanced).toBeFocused();
   await menu.locator(".cm-annotation-selection summary").click();
   await menu.getByRole("checkbox", { name: "Select annotation panel heat-two", exact: true }).check();
   await menu.locator("summary").filter({ hasText: "Advanced" }).click();

@@ -30,7 +30,7 @@
     <label><span>Show links</span><input type="checkbox" data-config="link.show" aria-label="Show links"></label>
     <label><span>Draw as lines</span><input type="checkbox" data-config="link.asLine" aria-label="Draw as lines"></label>
     <label><span>Best match only</span><input type="checkbox" data-config="link.bestOnly" aria-label="Best match only"></label>
-    <label><span>Minimum identity</span><input type="number" step="any" data-config="link.threshold" aria-label="Minimum identity"></label>
+    <label><span>Minimum identity</span><input type="number" step="any" data-config="link.threshold" aria-label="Minimum identity" aria-describedby="link-threshold-help"><small id="link-threshold-help" class="setting-help">Hide links below this identity.</small></label>
     <details data-appearance-section="links">
       <summary>Advanced</summary>
       <label><span>Straight links</span><input type="checkbox" data-config="link.straight" aria-label="Straight links"></label>
@@ -115,9 +115,9 @@
     <label><span>Base pairs</span><input type="number" step="any" data-config="scaleBar.basePair" aria-label="Base pairs"></label>
     <label><span>Show identity bar</span><input type="checkbox" data-config="colourBar.show" aria-label="Show identity bar"></label>
     <label><span>Minimum source</span><select data-config="colourBar.domain.minMode" aria-label="Minimum source"><option value="fixed">Custom value</option><option value="data">Lowest identity in data</option></select></label>
-    <label><span>Minimum identity</span><input type="number" step="any" data-config="colourBar.domain.min" aria-label="Minimum identity"></label>
+    <label><span>Minimum identity</span><input type="number" step="any" data-config="colourBar.domain.min" aria-label="Minimum identity" aria-describedby="colour-min-help"><small id="colour-min-help" class="setting-help">Set the low end of the colour scale; links are not filtered.</small></label>
     <label><span>Maximum source</span><select data-config="colourBar.domain.maxMode" aria-label="Maximum source"><option value="fixed">Custom value</option><option value="data">Highest identity in data</option></select></label>
-    <label><span>Maximum identity</span><input type="number" step="any" data-config="colourBar.domain.max" aria-label="Maximum identity"></label>
+    <label><span>Maximum identity</span><input type="number" step="any" data-config="colourBar.domain.max" aria-label="Maximum identity" aria-describedby="colour-max-help"><small id="colour-max-help" class="setting-help">Set the high end of the colour scale; links are not filtered.</small></label>
     <details data-appearance-section="scale-bars">
       <summary>Advanced</summary>
       <label><span>Height</span><input type="number" step="any" data-config="scaleBar.height" aria-label="Height"></label>

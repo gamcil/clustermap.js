@@ -24,6 +24,25 @@ export function mountPlotSelectionToolbar(chart, container, { editor = null } = 
   const button = (action) => root.querySelector(`[data-action="${action}"]`);
   const flip = button("flip"), trim = button("trim"), restore = button("restore");
   const lociMenu = root.querySelector("[data-loci-menu]"), moreMenu = root.querySelector("[data-more-menu]");
+  let observedMinimap = null;
+  const position = () => {
+    const minimap = container.querySelector("canvas.clusterMapMinimap");
+    if (minimap !== observedMinimap) {
+      if (observedMinimap) resizeObserver.unobserve(observedMinimap);
+      observedMinimap = minimap;
+      if (minimap) resizeObserver.observe(minimap);
+    }
+    const box = container.getBoundingClientRect(), toolbarBox = root.getBoundingClientRect();
+    const miniBox = minimap?.getBoundingClientRect();
+    const overlaps = !root.hidden && miniBox?.width && miniBox.height &&
+      toolbarBox.right + 8 > miniBox.left && miniBox.left < box.right;
+    const top = overlaps ? `${Math.max(12, miniBox.bottom - box.top + 8)}px` : "12px";
+    if (root.style.top !== top) root.style.top = top;
+  };
+  const resizeObserver = new ResizeObserver(position);
+  resizeObserver.observe(container); resizeObserver.observe(root);
+  const mutationObserver = new MutationObserver(position);
+  mutationObserver.observe(container, { childList: true });
   let clusterActions;
   const lociFor = ({ kind, ids }) => kind === "loci" ? ids :
     (chart.visibleData()?.clusters || []).filter((cluster) => ids.includes(cluster.uid)).flatMap((cluster) => cluster.loci.map((locus) => locus.uid));
@@ -42,6 +61,7 @@ export function mountPlotSelectionToolbar(chart, container, { editor = null } = 
       lociMenu.hidden = !clusters; clusterActions = clusters;
     }
     if (root.hidden) lociMenu.open = moreMenu.open = false;
+    position();
   };
   const clear = () => chart.selection({ kind: chart.selection().kind, ids: [] });
   const activate = () => { activeToolbar = root; };
@@ -70,12 +90,14 @@ export function mountPlotSelectionToolbar(chart, container, { editor = null } = 
   document.addEventListener("keydown", onKeyDown);
   const unsubscribe = chart.on("change", (change) => {
     if (["theme.change", "config.change"].includes(change.type)) applyEditorTheme(root, chart);
+    if (change.type === "config.change") position();
     if (["selection.change", "state.replace", "data.apply", "data.replace"].includes(change.type)) sync();
   });
   container.append(root);
   sync();
   return () => {
     unsubscribe();
+    resizeObserver.disconnect(); mutationObserver.disconnect();
     if (activeToolbar === root) activeToolbar = null;
     container.removeEventListener("pointerdown", activate);
     container.removeEventListener("focusin", activate);

@@ -856,9 +856,9 @@ export default function clusterMap() {
       ids: runtime.ids, interactions: rendererInteractions });
   }
 
-  function focusCamera({ genes = [], links = [], loci = [], clusters = [] } = {}) {
+  function recordBounds({ genes = [], links = [], loci = [], clusters = [] } = {}) {
     const scene = runtime.getScene();
-    if (!container || !scene) return false;
+    if (!container || !scene) return null;
     let bounds = null;
     const include = (candidate) => { bounds = includeBounds(bounds, candidate); };
     for (const [kind, ids] of Object.entries({ genes, loci, clusters })) {
@@ -877,8 +877,17 @@ export default function clusterMap() {
       include(scene.genes.get(link?.query.uid)?.bounds);
       include(scene.genes.get(link?.target.uid)?.bounds);
     }
+    return bounds;
+  }
+
+  function chartSurface() {
+    return isRasterRenderer(runtime.config.plot.renderer) ? rasterCanvas : container?.select("svg.clusterMap").node();
+  }
+
+  function focusCamera(ids = {}) {
+    const bounds = recordBounds(ids);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
-    const node = useRaster ? rasterCanvas : container.select("svg.clusterMap").node();
+    const node = chartSurface();
     if (!bounds || !node) return false;
     const viewport = node.getBoundingClientRect();
     const camera = fitCameraForBounds({
@@ -1428,6 +1437,18 @@ export default function clusterMap() {
     const isScoped = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
     focusCamera(isScoped ? ids : { genes: ids || [] });
     return my;
+  };
+  /** Current committed record bounds in viewport CSS pixels, without clipping. */
+  my.screenBounds = function (ids = {}) {
+    const bounds = recordBounds(ids), node = chartSurface();
+    if (!bounds || !node?.isConnected) return null;
+    const surface = node.getBoundingClientRect(), camera = getCamera(chartState);
+    if (!surface.width || !surface.height || !camera) return null;
+    const left = surface.left + camera.x + bounds.minX * camera.k;
+    const top = surface.top + camera.y + bounds.minY * camera.k;
+    const right = surface.left + camera.x + bounds.maxX * camera.k;
+    const bottom = surface.top + camera.y + bounds.maxY * camera.k;
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
   };
   my.on = (type, listener) => {
     if (type !== "change") throw new TypeError(`Unsupported chart event: ${type}`);

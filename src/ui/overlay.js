@@ -55,15 +55,13 @@ export function createHtmlOverlay({
   };
 
   const geneContents = (gene) => {
-    const div = create("div").attr("class", "tooltip-contents")
-      .style("display", "flex").style("flex-direction", "column")
-      .style("gap", "4px").style("width", "260px");
+    const div = create("div").attr("class", "tooltip-contents");
     div.append("label").attr("for", "gene-label-input").text("Edit label");
     const text = div.append("input").attr("id", "gene-label-input").attr("type", "text")
-      .attr("value", gene.label || gene.name || gene.uid).style("box-sizing", "border-box").style("width", "100%");
+      .attr("value", gene.label || gene.name || gene.uid);
     div.append("label").attr("for", "gene-qualifiers-input").text("Gene qualifiers");
     const select = div.append("select").attr("id", "gene-qualifiers-input").attr("multiple", true)
-      .attr("size", 4).style("box-sizing", "border-box").style("width", "100%");
+      .attr("size", 4);
     const names = gene.names || {};
     select.selectAll("option").data(Object.keys(names)).join("option")
       .text((key) => `${names[key]} [${key}]`).attr("value", (key) => names[key]);
@@ -89,8 +87,7 @@ export function createHtmlOverlay({
   };
 
   const groupContents = (group) => {
-    const div = create("div").attr("class", "tooltip-contents")
-      .style("display", "flex").style("flex-direction", "column");
+    const div = create("div").attr("class", "tooltip-contents");
     div.append("label").text("Edit label");
     const text = div.append("input").attr("type", "text").attr("value", group.label || group.uid);
     div.append("label").text("Merge with...");

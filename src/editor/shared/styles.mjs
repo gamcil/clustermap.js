@@ -5,7 +5,6 @@ import { uiAppearanceStyles } from "../../ui/appearance.mjs";
 
 export const DATA_EDITOR_CSS = `
 ${uiAppearanceStyles(":where(.cm-ui)")}
-.cm-data-ui summary:hover { color:var(--cm-accent,var(--_cm-accent,#1677ff)); }
 .cm-data-ui .cm-data-icon-button { display:inline-grid; place-items:center; width:var(--cm-icon-size,28px); min-width:var(--cm-icon-size,28px); min-height:var(--cm-icon-size,28px); padding:0; border:0; background:transparent; color:var(--cm-muted,var(--_cm-muted,#64748b)); line-height:1; }
 .cm-data-ui .cm-data-icon-button:hover:not(:disabled) { background:var(--cm-hover,var(--_cm-hover,#e3ecf8)); color:var(--cm-accent,var(--_cm-accent,#1677ff)); }
 .cm-data-icon-button svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }

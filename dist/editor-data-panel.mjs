@@ -1,6 +1,6 @@
-import { d as defineDataPanel } from './editor/data-panel-a0484e62.mjs';
-import './editor/annotation-editor-3c63735d.mjs';
-import './editor/search-field-595834d9.mjs';
-import './editor/theme-8bd47f2f.mjs';
+import { d as defineDataPanel } from './editor/data-panel-1ac0e2b2.mjs';
+import './editor/annotation-editor-b9c2111d.mjs';
+import './editor/search-field-8b97b3e8.mjs';
+import './editor/theme-70e7f5bd.mjs';
 
 if (globalThis.customElements) defineDataPanel();

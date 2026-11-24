@@ -365,6 +365,75 @@ test("panel creation, visibility, ordering and removal are reflected in history"
   expect(await panelData(page, uid)).toBeUndefined();
 });
 
+test("manual annotation creation uses cluster names and draft values", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await annotation(page);
+  await editor(page).getByRole("button", { name: "Add panel", exact: true }).click();
+  const form = editor(page).locator("clinker-annotation-data-form");
+  const first = await page.evaluate(() => chart.data().clusters[0]);
+  const rows = matrixRows(page);
+  await expect(rows.first()).toContainText(first.uid);
+  const field = rows.first().locator("clinker-editable-field").first();
+  await editField(field);
+  await field.locator("input").fill("4.5");
+  await field.locator("input").press("Enter");
+  await form.getByRole("button", { name: "Add panel", exact: true }).click();
+  expect((await page.evaluate(() => chart.data().annotationPanels.at(-1))).values[first.uid]).toEqual([4.5]);
+});
+
+test("manual categorical annotations accept new category names", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  await annotation(page);
+  await editor(page).getByRole("button", { name: "Add panel", exact: true }).click();
+  const form = editor(page).locator("clinker-annotation-data-form");
+  await form.getByRole("combobox", { name: "Values", exact: true }).selectOption("categorical");
+  const first = await page.evaluate(() => chart.data().clusters[0]);
+  const field = matrixRows(page).first().locator("clinker-editable-field").first();
+  await editField(field); await field.locator("input").fill("Present"); await field.locator("input").press("Enter");
+  await form.getByRole("button", { name: "Add panel", exact: true }).click();
+  const panel = await page.evaluate(() => chart.data().annotationPanels.at(-1));
+  expect(panel.values[first.uid]).toEqual(["Present"]);
+  expect(panel.scale.type).toBe("categorical");
+});
+
+test("screenBounds follows the camera and does not change chart state", async ({ page }) => {
+  await selectionFixture(page, "svg");
+  const result = await page.evaluate(() => {
+    const id = chart.visibleData().clusters[0].loci[0].uid;
+    const state = chart.state(), selection = chart.selection();
+    const before = chart.screenBounds({ loci: [id] });
+    const missing = chart.screenBounds({ loci: ["missing"] });
+    chart.focus({ loci: [id] });
+    const after = chart.screenBounds({ loci: [id] });
+    return { before, after, missing, selection, afterSelection: chart.selection(), state };
+  });
+  expect(result.before.width).toBeGreaterThan(0);
+  expect(result.missing).toBeNull();
+  expect(result.afterSelection).toEqual(result.selection);
+  expect(result.after).not.toEqual(result.before);
+  const canvas = await page.evaluate(() => {
+    chart.config({ plot: { renderer: "canvas" } });
+    const id = chart.visibleData().clusters[0].loci[0].uid;
+    return chart.screenBounds({ loci: [id] });
+  });
+  expect(canvas.left).toBeCloseTo(result.after.left, 1);
+  expect(canvas.top).toBeCloseTo(result.after.top, 1);
+  expect(canvas.width).toBeCloseTo(result.after.width, 1);
+});
+
+test("screenBounds targets a locus on WebGPU", async ({ page }) => {
+  await selectionFixture(page, "webgpu");
+  const result = await page.evaluate(() => {
+    const id = chart.visibleData().clusters[0].loci[0].uid;
+    const before = chart.screenBounds({ loci: [id] });
+    chart.focus({ loci: [id] });
+    return { before, after: chart.screenBounds({ loci: [id] }), renderer: chart.config().plot.renderer };
+  });
+  expect(result.renderer).toBe("webgpu");
+  expect(result.before.width).toBeGreaterThan(0);
+  expect(result.after).not.toEqual(result.before);
+});
+
 test("appearance component synchronizes config and preserves disclosure state through filtering", async ({ page }) => {
   await selectionFixture(page, "svg");
   await editor(page).getByRole("tab", { name: "Appearance", exact: true }).click();
@@ -1054,6 +1123,23 @@ async function selectAt(page, renderer, selector, modifiers = ["Shift"]) {
 }
 const plotToolbar = (page) => page.locator("#plot .cm-plot-selection-toolbar");
 const expectSelection = async (page, kind, ids) => expect.poll(() => page.evaluate(() => chart.selection())).toEqual({ kind, ids });
+
+test("selection toolbar and minimap remain separate in a narrow plot", async ({ page }) => {
+  await selectionFixture(page, "canvas");
+  await page.evaluate(() => {
+    document.querySelector("#plot").style.width = "380px";
+    chart.config({ plot: { minimap: { show: true, width: 200, height: 100, margin: 12 } } });
+    chart.locusSelection(["locus-a"]);
+  });
+  const toolbar = plotToolbar(page), minimap = page.locator("#plot canvas.clusterMapMinimap");
+  await expect(toolbar).toBeVisible(); await expect(minimap).toBeVisible();
+  await expect.poll(async () => {
+    const a = await toolbar.boundingBox(), b = await minimap.boundingBox();
+    return a.y >= b.y + b.height || a.x + a.width <= b.x;
+  }).toBe(true);
+  await toolbar.getByRole("button", { name: "Clear", exact: true }).click();
+  await expect(toolbar).toBeHidden();
+});
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
   test(`${renderer}: plot selection toggles, ranges and editor handoff`, async ({ page }) => {

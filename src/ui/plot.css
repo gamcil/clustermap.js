@@ -13,4 +13,6 @@
 .cm-chart > .clusterMapFigureSurface { transform-origin:0 0; }
 .cm-chart > .clusterMapFigureSurface--frameless { outline:none; box-shadow:none; }
 .cm-chart > input.colourPicker { position:absolute; opacity:0; }
-.cm-chart > div.tooltip { position:absolute; pointer-events:none; z-index:4; box-sizing:border-box; padding:8px; background:var(--cm-surface,var(--_cm-surface)); border:1px solid var(--cm-border,var(--_cm-border)); border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.2); }
+.cm-chart > div.tooltip { position:absolute; pointer-events:none; z-index:4; --_cm-control-height:26px; --_cm-control-padding:3px 7px; --_cm-control-radius:4px; }
+.cm-chart .tooltip-contents { display:flex; flex-direction:column; gap:6px; width:260px; max-width:calc(100vw - 40px); }
+.cm-chart .tooltip-contents :is(input:not([type=color]),select) { box-sizing:border-box; width:100%; }

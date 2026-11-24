@@ -41,7 +41,7 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
     return uid === tree.root ? `All ${count} clusters` : `${labels.join(" + ")}${count > 2 ? ` + ${count - 2} more` : ""}`;
   };
   const uid = nodesById.has(nodeUid) ? nodeUid : tree.root;
-  const host = element("div", container);
+  const host = element("div", container, undefined, "cm-tree-content");
 
   const colourInput = (parent, title, value, fallback, onChange) => {
     const picker = element("input", parent); picker.type = "color";
@@ -79,20 +79,28 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
     host.replaceChildren();
     host.setAttribute("role", "group"); host.setAttribute("aria-label", "Tree node settings");
     const heading = element("div", host, titleFor(uid), "cm-tree-heading"); heading.title = heading.textContent;
+    const primary = element("div", host, undefined, "cm-tree-primary");
     if (canRerootTree(tree)) {
-      const root = button(host, "Root here", () => patch([{ type: "tree.reroot", nodeId: uid }]));
+      const root = button(primary, "Root here", () => patch([{ type: "tree.reroot", nodeId: uid }]));
       root.disabled = uid === tree.root;
       root.title = "Root on the branch above this node";
-      const resetRoot = button(host, "Reset rooting", () => patch([{ type: "tree.reroot.reset" }]));
+      const resetRoot = button(primary, "Reset rooting", () => patch([{ type: "tree.reroot.reset" }]));
       resetRoot.disabled = !tree.rooting;
     }
     if (!nodesById.get(uid).children) { onResize?.(); return; }
-    button(host, "Rotate branches", () => rotate(uid));
-    const collapsed = input(host, "Collapse subtree", "checkbox", tree.presentation?.subtrees?.[uid]?.collapsed);
+    button(primary, "Rotate branches", () => rotate(uid));
+    const collapsed = input(primary, "Collapse subtree", "checkbox", tree.presentation?.subtrees?.[uid]?.collapsed);
     collapsed.onchange = () => {
       if (!run(() => patch([{ type: "tree.presentation.update", scope: "subtree", ids: [uid],
         changes: { collapsed: collapsed.checked || null } }]))) collapsed.checked = !collapsed.checked;
     };
+    const styleDetails = element("details", host);
+    element("summary", styleDetails, "Style clade…");
+    styleDetails.ontoggle = () => onResize?.();
+    const styleColumns = element("div", styleDetails, undefined, "cm-tree-branch-head");
+    styleColumns.setAttribute("aria-hidden", "true");
+    element("span", styleColumns, ""); element("span", styleColumns, "Colour");
+    element("span", styleColumns, "Width"); element("span", styleColumns, "");
     const inheritedBranch = (scope) => {
       const collection = scope === "subtree" ? "subtrees" : "nodes";
       const records = tree.presentation?.[collection] || {};
@@ -103,7 +111,7 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
       return (scope === "subtree" ? inherited.stems : inherited.branches).get(uid) || inherited.base;
     };
     const branchControls = (scope, title, style, fallback) => {
-      const row = element("div", host, undefined, "cm-tree-branch-row");
+      const row = element("div", styleDetails, undefined, "cm-tree-branch-row");
       const name = element("span", row, title);
       name.title = scope === "subtree" ? "Branches within this clade, excluding its incoming branch." : "Only the horizontal branch entering this node.";
       const update = (branch) => patch([{ type: "tree.presentation.update", scope, ids: [uid], changes: { branch } }]);
@@ -122,9 +130,11 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
     branchControls("subtree", "Subtree", tree.presentation?.subtrees?.[uid]?.branch, inheritedBranch("subtree"));
     const record = tree.presentation?.nodes?.[uid] || {};
     if (uid !== tree.root) branchControls("node", "Incoming branch", record.branch, inheritedBranch("node"));
-    element("hr", host, undefined, "cm-tree-separator");
+    const labelDetails = element("details", host);
+    element("summary", labelDetails, "Label clade…");
+    labelDetails.ontoggle = () => onResize?.();
     const label = record.label || {};
-    const text = input(host, "Label", "text", label.text, { placeholder: "Clade label" });
+    const text = input(labelDetails, "Label", "text", label.text, { placeholder: "Clade label" });
     text.setAttribute("aria-label", "Annotation text"); text.parentElement.classList.add("cm-tree-wide");
     const updateLabel = (label) => patch([{ type: "tree.presentation.update", scope: "node", ids: [uid], changes: { label } }]);
     let previousText = text.value;
@@ -132,7 +142,7 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
       if (text.value === previousText) return;
       run(() => { updateLabel({ text: text.value || null }); previousText = text.value; });
     };
-    const formatting = element("div", host, undefined, "cm-tree-format");
+    const formatting = element("div", labelDetails, undefined, "cm-tree-format");
     const colour = colourInput(formatting, "Text colour", label.colour, "#333", (colour) => updateLabel({ colour }));
     const size = element("input", formatting); size.type = "number";
     Object.assign(size, { min: "1", step: "any", value: label.fontSize ?? "", placeholder: "10" });
@@ -147,7 +157,7 @@ export function createTreeControls({ tree, config, patch, rotate, clusters = [],
       text.value = ""; previousText = ""; colour.reset(); clearSize(); bold.checked = false; italic.checked = false;
     });
     const actions = element("div", host, undefined, "cm-tree-actions");
-    const resetNode = button(actions, "Reset", () => {
+    const resetNode = button(actions, "Reset node and clade settings", () => {
       if (tree.presentation?.subtrees?.[uid] || tree.presentation?.nodes?.[uid]) {
         patch([
           { type: "tree.presentation.reset", scope: "subtree", ids: [uid] },

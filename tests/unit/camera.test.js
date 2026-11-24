@@ -34,3 +34,12 @@ test("camera fitting applies configured zoom constraints", async () => {
   assert.equal(camera.cropped, true);
   assert.deepEqual({ x: camera.x, y: camera.y }, { x: 20, y: 20 });
 });
+
+test("camera fitting centers each axis independently at the final scale", async () => {
+  const { fitCameraForBounds } = await import("../../src/scene/camera.mjs");
+  const viewport = { width: 400, height: 300 };
+  const wide = fitCameraForBounds({ bounds: { minX: 0, maxX: 1000, minY: 10, maxY: 110 }, viewport, minimumReadableScale: 1 });
+  assert.deepEqual({ x: wide.x, y: wide.y, cropped: wide.cropped }, { x: 20, y: 90, cropped: true });
+  const tall = fitCameraForBounds({ bounds: { minX: 10, maxX: 110, minY: 0, maxY: 1000 }, viewport, minimumReadableScale: 1 });
+  assert.deepEqual({ x: tall.x, y: tall.y, cropped: tall.cropped }, { x: 140, y: 20, cropped: true });
+});

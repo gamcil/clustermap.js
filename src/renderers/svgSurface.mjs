@@ -33,7 +33,7 @@ export function ensureSvgSurface({
 
       enter
         .append("div")
-        .attr("class", "cm-ui tooltip")
+        .attr("class", "cm-ui cm-popover tooltip")
         .style("opacity", 0);
 
       const surface = enter

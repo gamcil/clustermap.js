@@ -28,7 +28,7 @@ export function createAnnotationOverlay({ container, getData, patch, annotationA
   add.setAttribute("aria-label", "Add annotation panel"); add.setAttribute("aria-haspopup", "dialog");
   const hiddenButton = element("button", "cm-ui cm-data-ui cm-annotation-ui cm-annotation-hidden");
   hiddenButton.type = "button"; hiddenButton.hidden = true; hiddenButton.setAttribute("aria-haspopup", "dialog");
-  const menu = element("div", "cm-ui cm-data-ui cm-annotation-ui cm-annotation-menu"); menu.hidden = true;
+  const menu = element("div", "cm-ui cm-data-ui cm-popover cm-annotation-ui cm-annotation-menu"); menu.hidden = true;
   menu.setAttribute("role", "dialog"); menu.setAttribute("aria-label", "Annotation panel settings");
   const tooltip = element("div", "cm-ui annotation-tooltip"); tooltip.hidden = true;
   tooltip.setAttribute("role", "tooltip");

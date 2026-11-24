@@ -248,13 +248,13 @@ test("tree edits, history, projects, and static export through the public chart 
 
   const nodeCircle = page.locator("#plot circle.tree-node");
   await nodeCircle.first().dispatchEvent("contextmenu", { clientX: 200, clientY: 200 });
-  await page.getByRole("button", { name: "Reset", exact: true }).waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "Reset node and clade settings", exact: true }).waitFor({ state: "visible" });
   assert.deepEqual(await page.evaluate(() => testChart.project()), annotated, "right-click does not rotate or pan");
   await page.keyboard.press("Escape");
-  assert.equal(await page.getByRole("button", { name: "Reset", exact: true }).isVisible(), false);
+  assert.equal(await page.getByRole("button", { name: "Reset node and clade settings", exact: true }).isVisible(), false);
   assert.equal(await page.evaluate(() => document.activeElement.matches("circle.tree-node")), true);
   await page.keyboard.press("Shift+F10");
-  assert.equal(await page.getByRole("button", { name: "Reset", exact: true }).isVisible(), true);
+  assert.equal(await page.getByRole("button", { name: "Reset node and clade settings", exact: true }).isVisible(), true);
   await page.keyboard.press("Escape");
 
   const rootPoint = await nodeCircle.first().evaluate((node) => {
@@ -282,8 +282,9 @@ test("tree edits, history, projects, and static export through the public chart 
   assert.deepEqual(parity.svg.labels, [{ text: "<script>plain text</script>", size: "10", style: "italic" }]);
   const beforeRasterMenu = await page.evaluate(() => testChart.project());
   await page.mouse.click(rootPoint.x, rootPoint.y, { button: "right" });
-  await page.getByRole("button", { name: "Reset", exact: true }).waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "Reset node and clade settings", exact: true }).waitFor({ state: "visible" });
   assert.deepEqual(await page.evaluate(() => testChart.project()), beforeRasterMenu);
+  await page.getByText("Label clade…", { exact: true }).click();
   await page.getByLabel("Annotation text", { exact: true }).fill("Raster clade");
   assert.equal(await page.getByLabel("Annotation text", { exact: true }).inputValue(), "Raster clade", "Text editing keeps the node menu open");
   assert.equal(await page.evaluate(() => testChart.data().tree.presentation.nodes.root.label.text), "Raster clade");

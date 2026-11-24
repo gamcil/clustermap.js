@@ -30,6 +30,7 @@ class AnnotationEditor extends HTMLElementBase {
   #viewKey;
   #categories;
   #form;
+  #draft = null;
   #run = createActionRunner((message) => { this.#status.textContent = message; });
 
   connectedCallback() {
@@ -77,8 +78,15 @@ class AnnotationEditor extends HTMLElementBase {
     this.#search.addEventListener("input", () => this.#syncView());
     this.#toolbar.addEventListener("panel-change", (event) => this.select(event.detail.value));
     this.#toolbar.addEventListener("panel-action", (event) => this.#action(event.detail.action));
-    this.#body.addEventListener("columns-change", (event) => { if (this.#update(event.detail) === false) event.preventDefault(); });
+    this.#body.addEventListener("columns-change", (event) => {
+      if (this.#creating && event.target === this.#view) {
+        Object.assign(this.#draft, event.detail); this.#syncDraft();
+      } else if (this.#update(event.detail) === false) event.preventDefault();
+    });
     this.#body.addEventListener("rows-change", (event) => {
+      if (this.#creating && event.target === this.#view) {
+        Object.assign(this.#draft.values, event.detail.values); this.#syncDraft(); return;
+      }
       const panel = this.#current(), categorical = panel.scale?.type === "categorical", scale = this.#scale(panel);
       if (this.#commit([
         ...(categorical && !panel.scale?.domain ? [{ type: "annotationPanels.update", ids: [this.#selected],
@@ -97,6 +105,19 @@ class AnnotationEditor extends HTMLElementBase {
       if (this.#update(changes) === false) event.preventDefault();
     });
     this.#body.addEventListener("data-submit", (event) => { if (event.target === this.#form) this.#submit(event.detail); });
+    this.#body.addEventListener("draft-config-change", (event) => {
+      if (event.target !== this.#form || !this.#draft) return;
+      const oldScale = this.#draft.scale.type;
+      this.#draft.type = event.detail.type;
+      this.#draft.scale = { type: event.detail.scale };
+      if (oldScale !== event.detail.scale) this.#draft.values = {};
+      if (event.detail.type === "bar") {
+        this.#draft.columns = this.#draft.columns.slice(0, 1);
+        this.#draft.values = Object.fromEntries(Object.entries(this.#draft.values).map(([uid, values]) => [uid, values.slice(0, 1)]));
+      }
+      this.#view.hidden = event.detail.type === "groups";
+      this.#syncDraft();
+    });
     this.#body.addEventListener("data-cancel", (event) => { if (event.target === this.#form) this.#form.hidden = true; });
   }
   #action(action) {
@@ -119,7 +140,9 @@ class AnnotationEditor extends HTMLElementBase {
   #submit(detail) {
     try {
       if (this.#creating) {
-        const panel = createAnnotationPanel(detail, this.#panels());
+        const panel = detail.type === "groups" || detail.data.trim()
+          ? createAnnotationPanel(detail, this.#panels())
+          : createAnnotationPanel({ ...detail, data: JSON.stringify({ columns: this.#draft.columns, values: this.#draft.values }) }, this.#panels());
         this.#state.patch([{ type: "annotationPanels.create", panel }]); this.select(panel.uid); return;
       }
       const source = this.#current(), categorical = source.scale?.type === "categorical", changes = parseAnnotationTable(detail.data, categorical);
@@ -133,10 +156,16 @@ class AnnotationEditor extends HTMLElementBase {
     } catch (exception) { this.#form.error = exception.message; }
   }
   #syncView() {
+    if (this.#creating) { this.#syncDraft(); return; }
     if (!this.#view) return;
     const panel = this.#current(), clusters = this.#state.clusters;
     this.#view.state = panel.type === "groups" ? { groups: panel.groups, colour: panel.colour, clusters, tree: this.#state.data.tree }
       : { panel, clusters, filter: this.#search.value, domain: panel.scale?.type === "categorical" ? this.#scale(panel).domain : null };
+  }
+  #syncDraft() {
+    if (!this.#draft || !this.#view) return;
+    this.#view.state = { panel: this.#draft, clusters: this.#state.clusters,
+      freeCategories: this.#draft.scale.type === "categorical", showIds: true };
   }
   #render() {
     const panels = this.#panels();
@@ -149,7 +178,9 @@ class AnnotationEditor extends HTMLElementBase {
     if (key !== this.#viewKey) {
       this.#cancelEdit(); this.#body.replaceChildren(); this.#view = this.#categories = this.#form = null; this.#viewKey = key;
       if (this.#creating) {
-        this.#form = this.#element("creation"); this.#form.clusters = this.#state.clusters; this.#body.append(this.#form);
+        this.#draft = { uid: "__draft__", type: "heatmap", columns: ["Value"], values: {}, scale: { type: "continuous" } };
+        this.#form = this.#element("creation"); this.#form.setAttribute("draft", ""); this.#form.clusters = this.#state.clusters; this.#body.append(this.#form);
+        this.#view = this.#element("matrix"); this.#body.append(this.#view);
       } else if (!panel) this.#body.append(this.#element("empty"));
       else if (panel.type === "groups") {
         const region = this.#element("groups"); this.#body.append(region); this.#view = region.firstElementChild;
@@ -159,7 +190,7 @@ class AnnotationEditor extends HTMLElementBase {
       }
     }
     this.#syncView();
-    if (this.#view && panel.type !== "groups" && categorical && !this.#categories) {
+    if (!this.#creating && this.#view && panel?.type !== "groups" && categorical && !this.#categories) {
       this.#categories = this.#element("categories"); this.#view.prepend(this.#categories);
       this.#categories.palette = this.#palette;
     } else if (!categorical && this.#categories) {

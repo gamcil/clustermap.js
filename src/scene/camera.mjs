@@ -33,7 +33,7 @@ export function worldViewport(camera, { width, height }, overscan = 20) {
  * Renderers may obtain the envelope differently (SVG can use getBBox while
  * raster renderers measure text), but camera policy stays shared: cap an
  * ordinary fit, optionally retain a readable scale for oversized figures,
- * and top-align whenever that scale crops the figure.
+ * and align each cropped axis to its start independently.
  */
 export function fitCameraForBounds({
   bounds,
@@ -53,12 +53,14 @@ export function fitCameraForBounds({
     (viewport.height - padding * 2) / height
   );
   const k = constrainScale(Math.max(fitScale, minimumReadableScale));
-  const cropped = k > fitScale;
+  const croppedX = width * k > viewport.width - padding * 2;
+  const croppedY = height * k > viewport.height - padding * 2;
+  const cropped = croppedX || croppedY;
   return {
-    x: cropped
+    x: croppedX
       ? padding - bounds.minX * k
       : (viewport.width - width * k) / 2 - bounds.minX * k,
-    y: cropped
+    y: croppedY
       ? padding - bounds.minY * k
       : (viewport.height - height * k) / 2 - bounds.minY * k,
     k,

@@ -27,11 +27,6 @@ div {
   max-width: min(340px, 80vw);
   max-height: 50vh;
   overflow: auto;
-  padding: 10px;
-  border: 1px solid var(--cm-border,var(--_cm-border, #cbd3de));
-  border-radius: 8px;
-  background: var(--cm-surface,var(--_cm-surface, #fff));
-  box-shadow: 0 4px 16px #0002;
 }
 slot { display: contents; }
 ::slotted(button) { text-align: left; }

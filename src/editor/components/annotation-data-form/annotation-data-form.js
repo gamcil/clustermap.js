@@ -10,7 +10,7 @@ const template = createTemplate(markup);
 const HTMLElementBase = globalThis.HTMLElement || class {};
 
 class AnnotationDataForm extends HTMLElementBase {
-  static observedAttributes = ["mode"];
+  static observedAttributes = ["mode", "draft"];
   #form;
   #clusters = [];
 
@@ -18,7 +18,8 @@ class AnnotationDataForm extends HTMLElementBase {
     super();
     const root = mountComponent(this, template, css);
     this.#form = root.querySelector("form");
-    this.#field("type").onchange = () => { this.#sync(); this.#example(); };
+    this.#field("type").onchange = () => { this.#sync(); this.#example(); this.#emit("draft-config-change", this.value); };
+    this.#field("scale").onchange = () => this.#emit("draft-config-change", this.value);
     this.#form.onsubmit = (event) => { event.preventDefault(); this.error = ""; this.#emit("data-submit", this.value); };
     root.querySelector("[data-cancel]").onclick = () => this.#emit("data-cancel");
     this.#sync();
@@ -43,8 +44,11 @@ class AnnotationDataForm extends HTMLElementBase {
     if (type === "bar") this.#field("scale").value = "continuous";
     root.querySelector("[data-help]").textContent = type === "groups"
       ? "Define groups as JSON. Each needs a uid, a label, and either clusterIds or a tree nodeUid. Colours are optional."
-      : "Paste CSV or a tab-separated table. First column: cluster ID; remaining headings: data columns. Blank cells are missing. Bars use one data column. JSON {columns, values} is also accepted.";
+      : this.hasAttribute("draft") && !replace
+        ? "Enter values in the cluster table, or paste CSV, TSV or JSON. Bars use one data column."
+        : "Paste CSV or a tab-separated table. First column: cluster ID; remaining headings: data columns. Blank cells are missing. Bars use one data column. JSON {columns, values} is also accepted.";
     this.#field("data").rows = replace ? 5 : 8;
+    root.querySelector("[data-paste]").open = replace || type === "groups" || !this.hasAttribute("draft");
     this.#field("data").setAttribute("aria-label", replace ? "Replacement annotation data (CSV, TSV or JSON)" : "Data");
     root.querySelector('[type="submit"]').textContent = replace ? "Replace data" : "Add panel";
     root.querySelector("[data-cancel]").hidden = !replace;
@@ -53,7 +57,7 @@ class AnnotationDataForm extends HTMLElementBase {
     if (this.getAttribute("mode") === "replace") return;
     this.#field("data").value = this.#field("type").value === "groups"
       ? JSON.stringify({ groups: [{ uid: "group-1", label: "Example group", clusterIds: this.#clusters.slice(0, 2).map(({ uid }) => uid) }] }, null, 2)
-      : csvFormatRows([["cluster", "Value"], ...this.#clusters.map(({ uid }) => [uid, ""])]);
+      : this.hasAttribute("draft") ? "" : csvFormatRows([["cluster", "Value"], ...this.#clusters.map(({ uid }) => [uid, ""])]);
   }
 }
 

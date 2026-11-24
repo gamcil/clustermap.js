@@ -297,6 +297,10 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.#annotationEditor.hidden = !annotations;
     this.shadowRoot.querySelector("[data-record-toolbar]").hidden = annotations;
     this.shadowRoot.querySelector("[data-filter]").value = this.#filter;
+    this.shadowRoot.querySelector("[data-filter]").setAttribute("placeholder", {
+      groups: "Search group names or subtitles", genes: "Search genes, loci, clusters or groups",
+      links: "Search endpoint names or link labels",
+    }[this.#kind] || "Search records");
     this.shadowRoot.querySelector("[data-record-editor]").hidden = annotations;
     if (annotations) {
       this.#table?.reset();
