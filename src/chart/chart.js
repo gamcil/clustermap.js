@@ -856,16 +856,20 @@ export default function clusterMap() {
       ids: runtime.ids, interactions: rendererInteractions });
   }
 
-  function recordBounds({ genes = [], links = [], loci = [], clusters = [] } = {}) {
+  function recordBounds({ genes = [], links = [], loci = [], clusters = [] } = {}, { visibleOnly = false } = {}) {
     const scene = runtime.getScene();
     if (!container || !scene) return null;
     let bounds = null;
     const include = (candidate) => { bounds = includeBounds(bounds, candidate); };
     for (const [kind, ids] of Object.entries({ genes, loci, clusters })) {
-      for (const uid of ids) include(scene[kind].get(uid)?.bounds);
+      for (const uid of ids) {
+        const record = scene[kind].get(uid);
+        if (!visibleOnly || kind !== "genes" || record?.visible) include(record?.bounds);
+      }
     }
     for (const uid of links) {
       const rendered = scene.links.get(uid);
+      if (visibleOnly && (!runtime.renderConfig.link.show || !rendered?.visible)) continue;
       if (rendered?.bounds) {
         include(rendered.bounds);
         continue;
@@ -1440,8 +1444,25 @@ export default function clusterMap() {
   };
   /** Current committed record bounds in viewport CSS pixels, without clipping. */
   my.screenBounds = function (ids = {}) {
-    const bounds = recordBounds(ids), node = chartSurface();
-    if (!bounds || !node?.isConnected) return null;
+    let bounds = recordBounds(ids, { visibleOnly: true });
+    const node = chartSurface(), scene = runtime.getScene();
+    if (!node?.isConnected) return null;
+    for (const uid of ids.clusterLabels || []) {
+      bounds = includeBounds(bounds, figureSurface.clusterLabelBounds(container.node(), scene, runtime.renderConfig, uid));
+    }
+    if (ids.tree) bounds = includeBounds(bounds, figureSurface.treeBounds(container.node(), scene, runtime.renderConfig, plotData?.tree));
+    if (ids.treeNodes?.length) bounds = includeBounds(bounds, figureSurface.treeBounds(container.node(), scene, runtime.renderConfig, plotData?.tree, ids.treeNodes));
+    if (ids.treeBranches?.length || ids.treeStems?.length || ids.treeGuides?.length || ids.treeAnnotations?.length ||
+        ids.treeSupports?.length || ids.treeScaleBar || ids.treeCutLine) {
+      bounds = includeBounds(bounds, figureSurface.treeDetailBounds(container.node(), scene, runtime.renderConfig, plotData?.tree, ids));
+    }
+    if (ids.figure) bounds = includeBounds(bounds, figureSurface.bounds(container.node(), scene, runtime.renderConfig, plotData?.tree));
+    if (ids.legend || ids.legendItems?.length || ids.legendSymbols?.length || ids.scaleBar || ids.colourBar || ids.annotations || ids.annotationPanels?.length ||
+        ids.annotationCells?.length || ids.annotationMarkers?.length || ids.trimIndicators?.length ||
+        ids.clusterLocusLabels?.length || ids.geneLabels?.length || ids.linkLabels?.length) {
+      bounds = includeBounds(bounds, figureSurface.decorationBounds(container.node(), scene, ids, runtime.renderConfig));
+    }
+    if (!bounds) return null;
     const surface = node.getBoundingClientRect(), camera = getCamera(chartState);
     if (!surface.width || !surface.height || !camera) return null;
     const left = surface.left + camera.x + bounds.minX * camera.k;

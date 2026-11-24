@@ -407,7 +407,7 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | `trimLoci(ids)` | Trim supplied/selected loci to their outermost displayed genes. |
 | `restoreLoci(ids)` | Restore full locus bounds while retaining flips and offsets. |
 | `focus({genes, links, loci, clusters})` | Frame supplied record IDs without changing selection. |
-| `screenBounds({genes, links, loci, clusters})` | Return the union of committed scene bounds as an unclipped viewport-relative rectangle in CSS pixels, or `null` if unavailable. Does not move the camera or change selection. |
+| `screenBounds(targets)` | Return the union of requested visible scene bounds as an unclipped viewport-relative rectangle in CSS pixels, or `null` if unavailable. Does not move the camera or change selection. |
 | `figureBounds()` | Read unpadded `{minX, minY, maxX, maxY}` in world coordinates; returns `null` before mounting or after destruction. |
 | `exportSvg({padding})` | Export the complete figure as an SVG string from any renderer. Padding defaults to 20. |
 | `destroy()` | Release chart-owned handlers, animations, rendering resources and DOM. |
@@ -419,7 +419,32 @@ the coordinate space used by `getBoundingClientRect()`. It is not clipped to the
 plot; `chart.focus({ loci: [uid] })` can bring an off-screen target into view
 before querying. Bounds describe the latest committed layout, excluding live
 drag or animation previews. Query again after camera or layout changes. Missing
-records, an unmounted chart, or a zero-size surface return `null`.
+records, an unmounted chart, or a zero-size surface return `null`. Use
+`{ clusterLabels: [clusterUid] }` for the displayed cluster name and
+`{ tree: true }` for visible branches, collapsed subtrees and interactive tree
+nodes. Tree bounds exclude leaf guides, the scale bar and annotations. Hidden
+or missing trees and names return `null` if no other target is available.
+Other targets can be combined in one query:
+
+- `genes`, `links`, `loci` and `clusters`: arrays of record IDs. A cluster's
+  bounds cover its locus content; use `clusterLabels` for its name and
+  `clusterLocusLabels` for its displayed locus text.
+- `geneLabels`, `linkLabels` and `trimIndicators`: arrays of record IDs for
+  visible gene, link and locus text, respectively.
+- `legend: true`, `legendItems: [groupUid]`, `legendSymbols: [groupUid]`,
+  `scaleBar: true`, and `colourBar: true`.
+- `annotations: true`, `annotationPanels: [panelUid]`, `annotationCells:
+  [{ panelUid, clusterUid, columnIndex }]` for matrix cells, and
+  `annotationMarkers: [{ panelUid, groupUid }]` for group marker segments.
+- `treeNodes: [nodeUid]`, `treeBranches: [parentUid + ':' + childUid]`,
+  `treeStems`, `treeGuides`, `treeAnnotations` and `treeSupports` (arrays of
+  node IDs), `treeScaleBar: true`, and `treeCutLine: true`.
+- `figure: true` for the complete measured figure content.
+
+Hidden targets are excluded, and multiple requested targets return their union.
+Text bounds use the browser's font metrics and can differ slightly across
+renderers. UI overlays such as the minimap, editor, selection toolbar and
+tooltips are outside this scene API; use their DOM bounds when needed.
 
 Transient UI highlights can supply an ownership token:
 `chart.highlight(ids, { owner })`. Clearing with the same token only clears

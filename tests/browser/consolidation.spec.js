@@ -48,6 +48,161 @@ test("configuration snapshots and listener payloads cannot mutate live settings"
   expect(result).toEqual({ palette: ["red", "blue"], size: 15, unchanged: true });
 });
 
+test("screenBounds exposes committed cluster labels and tree across renderers", async ({ page }) => {
+  const read = () => page.evaluate(() => {
+    const label = chart.screenBounds({ clusterLabels: ["a"] });
+    const tree = chart.screenBounds({ tree: true });
+    const node = document.querySelector("g.cluster");
+    const text = node?.querySelector("text.clusterText")?.getBoundingClientRect();
+    const marks = [...document.querySelectorAll(".tree-node, .tree-branch, .tree-stem")].map((el) => {
+      const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    });
+    return { label, tree, text: text && { left: text.left, right: text.right, top: text.top, bottom: text.bottom }, marks };
+  });
+  const svg = await read();
+  expect(svg.label).not.toBeNull(); expect(svg.tree).not.toBeNull();
+  expect(await page.evaluate(() => chart.screenBounds({ treeNodes: ["pair"] }))).not.toBeNull();
+  expect(await page.evaluate(() => chart.screenBounds({ treeNodes: ["missing"] }))).toBeNull();
+  expect(await page.evaluate(() => chart.screenBounds({ treeBranches: ["root:pair"] }))).not.toBeNull();
+  expect(await page.evaluate(() => chart.screenBounds({ treeStems: ["root"] }))).not.toBeNull();
+  expect(await page.evaluate(() => chart.screenBounds({ treeScaleBar: true }))).not.toBeNull();
+  expect(svg.label.left).toBeCloseTo(svg.text.left, -1);
+  expect(svg.label.right).toBeCloseTo(svg.text.right, -1);
+  expect(svg.label.top).toBeGreaterThanOrEqual(svg.text.top - 5);
+  expect(svg.label.bottom).toBeLessThanOrEqual(svg.text.bottom + 5);
+  expect(svg.marks.length).toBeGreaterThan(0);
+  for (const mark of svg.marks) {
+    expect(mark.left).toBeGreaterThanOrEqual(svg.tree.left - 1);
+    expect(mark.right).toBeLessThanOrEqual(svg.tree.right + 1);
+    expect(mark.top).toBeGreaterThanOrEqual(svg.tree.top - 1);
+    expect(mark.bottom).toBeLessThanOrEqual(svg.tree.bottom + 1);
+  }
+  const result = await page.evaluate(() => {
+    const before = chart.project(), selection = chart.selection(), undo = chart.canUndo();
+    const missing = chart.screenBounds({ clusterLabels: ["missing"] });
+    const union = chart.screenBounds({ clusterLabels: ["a"], tree: true });
+    return { unchanged: JSON.stringify(before) === JSON.stringify(chart.project()), selection, afterSelection: chart.selection(), undo, afterUndo: chart.canUndo(), missing, union };
+  });
+  expect(result.unchanged).toBe(true); expect(result.selection).toEqual(result.afterSelection);
+  expect(result.undo).toBe(result.afterUndo); expect(result.missing).toBeNull();
+  expect(result.union.left).toBeLessThanOrEqual(Math.min(svg.tree.left, svg.label.left));
+  await page.evaluate(() => {
+    const snapshot = chart.state(); snapshot.camera = { x: 120, y: 100, k: 0.8 }; chart.state(snapshot);
+    chart.patch([{ type: "clusters.update", ids: ["a"], changes: { name: "A much longer cluster name" } }]);
+  });
+  const moved = await read();
+  expect(moved.label.width).toBeGreaterThan(svg.label.width);
+  expect(moved.tree).not.toEqual(svg.tree);
+  expect(moved.label.left).toBeCloseTo(moved.text.left, -1);
+  expect(moved.label.right).toBeCloseTo(moved.text.right, -1);
+  for (const mark of moved.marks) {
+    expect(mark.left).toBeGreaterThanOrEqual(moved.tree.left - 1);
+    expect(mark.right).toBeLessThanOrEqual(moved.tree.right + 1);
+    expect(mark.top).toBeGreaterThanOrEqual(moved.tree.top - 1);
+    expect(mark.bottom).toBeLessThanOrEqual(moved.tree.bottom + 1);
+  }
+  for (const renderer of ["canvas", "webgpu"]) {
+    const bounds = await page.evaluate((renderer) => {
+      chart.config({ plot: { renderer } });
+      return { label: chart.screenBounds({ clusterLabels: ["a"] }), tree: chart.screenBounds({ tree: true }) };
+    }, renderer);
+    for (const kind of ["label", "tree"]) {
+      for (const key of ["left", "top", "right", "bottom"]) expect(bounds[kind][key]).toBeCloseTo(moved[kind][key], 1);
+    }
+  }
+  const reordered = await page.evaluate(() => {
+    const state = chart.state(); state.clusterOrder = [...state.clusterOrder].reverse(); chart.state(state);
+    return chart.screenBounds({ clusterLabels: ["a"] });
+  });
+  expect(reordered.top).not.toBeCloseTo(moved.label.top, 1);
+  await page.evaluate(() => chart.config({ tree: { show: false } }));
+  expect(await page.evaluate(() => chart.screenBounds({ tree: true }))).toBeNull();
+  const offscreen = await page.evaluate(() => {
+    const state = chart.state(); state.camera.x = -10000; chart.state(state);
+    return chart.screenBounds({ clusterLabels: ["a"] });
+  });
+  expect(offscreen.right).toBeLessThan(0);
+  await page.evaluate(() => chart.remove({ clusters: ["a"] }));
+  expect(await page.evaluate(() => chart.screenBounds({ clusterLabels: ["a"] }))).toBeNull();
+});
+
+test("screenBounds includes visible decorations and annotation panels", async ({ page }) => {
+  await page.evaluate(() => {
+    const data = structuredClone(chart.data());
+    data.annotationPanels = [
+      { uid: "heat", type: "heatmap", title: "Heat", columns: ["Value"], values: { a: [1], b: [2], c: [3] } },
+      { uid: "hidden", type: "heatmap", title: "Hidden", show: false, columns: ["Value"], values: { a: [1] } },
+      { uid: "markers", type: "groups", title: "Groups", groups: [{ uid: "g", label: "Group", clusterIds: ["a", "b"] }] },
+    ];
+    chart.config({ annotations: { enabled: true }, legend: { show: true }, cluster: { hideLocusLabels: false },
+      scaleBar: { show: true }, colourBar: { show: true }, link: { show: true, groupColour: false } });
+    chart.data(data);
+  });
+  const inspect = () => page.evaluate(() => {
+    const query = (target) => chart.screenBounds(target);
+    const rect = (selector) => {
+      const el = document.querySelector(selector); if (!el) return null;
+      const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    };
+    return { legend: query({ legend: true }), entry: query({ legendItems: [0] }),
+      symbol: query({ legendSymbols: [0] }), scale: query({ scaleBar: true }), colour: query({ colourBar: true }),
+      panel: query({ annotationPanels: ["heat"] }), annotations: query({ annotations: true }),
+      cell: query({ annotationCells: [{ panelUid: "heat", clusterUid: "a", columnIndex: 0 }] }),
+      marker: query({ annotationMarkers: [{ panelUid: "markers", groupUid: "g" }] }),
+      locusLabel: query({ clusterLocusLabels: ["a"] }), figure: query({ figure: true }),
+      hidden: query({ annotationPanels: ["hidden"] }), missing: query({ legendItems: ["missing"] }),
+      legendRect: rect("g.legend"), scaleRect: rect("g.scaleBar"), colourRect: rect("g.colourBar") };
+  });
+  const svg = await inspect();
+  for (const key of ["legend", "entry", "symbol", "scale", "colour", "panel", "annotations", "cell", "marker", "locusLabel", "figure"]) expect(svg[key], key).not.toBeNull();
+  expect(svg.hidden).toBeNull(); expect(svg.missing).toBeNull();
+  expect(svg.annotations.left).toBeLessThanOrEqual(svg.panel.left);
+  expect(svg.annotations.right).toBeGreaterThanOrEqual(svg.marker.right);
+  for (const [kind, rendered] of [["legend", "legendRect"], ["scale", "scaleRect"], ["colour", "colourRect"]]) {
+    for (const edge of ["left", "top", "right", "bottom"]) expect(Math.abs(svg[kind][edge] - svg[rendered][edge])).toBeLessThan(10);
+  }
+  for (const renderer of ["canvas", "webgpu"]) {
+    await page.evaluate((renderer) => chart.config({ plot: { renderer } }), renderer);
+    const next = await inspect();
+    for (const kind of ["legend", "entry", "symbol", "scale", "colour", "panel", "cell", "marker", "locusLabel", "figure"]) {
+      for (const edge of ["left", "top", "right", "bottom"]) expect(next[kind][edge]).toBeCloseTo(svg[kind][edge], 1);
+    }
+  }
+  await page.evaluate(() => chart.config({ legend: { show: false }, scaleBar: { show: false },
+    colourBar: { show: false }, annotations: { enabled: false } }));
+  const hidden = await inspect();
+  for (const kind of ["legend", "entry", "symbol", "scale", "colour", "panel", "annotations", "cell", "marker"]) expect(hidden[kind], kind).toBeNull();
+});
+
+test("screenBounds follows visible gene and link labels", async ({ page }) => {
+  await page.evaluate(() => {
+    const data = structuredClone(chart.data());
+    data.links = [{ uid: "link-ab", query: { uid: "a0" }, target: { uid: "b0" }, identity: .9, label: "match" }];
+    chart.config({ gene: { label: { show: true, rotation: 25 } }, link: { show: true, label: { show: true } } });
+    chart.data(data);
+  });
+  const svg = await page.evaluate(() => {
+    const rect = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+    const geneText = [...document.querySelectorAll("text.geneLabel")].find((el) => el.textContent === "a0");
+    const linkText = document.querySelector("text.geneLinkLabel");
+    return { gene: chart.screenBounds({ geneLabels: ["a0"] }), link: chart.screenBounds({ linkLabels: ["link-ab"] }),
+      geneRect: rect(geneText), linkRect: rect(linkText) };
+  });
+  for (const [kind, rendered] of [["gene", "geneRect"], ["link", "linkRect"]]) {
+    expect(svg[kind], kind).not.toBeNull();
+    for (const edge of ["left", "top", "right", "bottom"]) expect(Math.abs(svg[kind][edge] - svg[rendered][edge])).toBeLessThan(8);
+  }
+  for (const renderer of ["canvas", "webgpu"]) {
+    await page.evaluate((renderer) => chart.config({ plot: { renderer } }), renderer);
+    expect(await page.evaluate(() => chart.screenBounds({ geneLabels: ["a0"] }))).not.toBeNull();
+    expect(await page.evaluate(() => chart.screenBounds({ linkLabels: ["link-ab"] }))).not.toBeNull();
+  }
+  await page.evaluate(() => chart.config({ gene: { label: { show: false } }, link: { show: false } }));
+  expect(await page.evaluate(() => chart.screenBounds({ geneLabels: ["a0"] }))).toBeNull();
+  expect(await page.evaluate(() => chart.screenBounds({ links: ["link-ab"] }))).toBeNull();
+  expect(await page.evaluate(() => chart.screenBounds({ linkLabels: ["link-ab"] }))).toBeNull();
+});
+
 for (const theme of ["light", "dark"]) {
   test(`${theme}: chart popovers share controls and surface styling`, async ({ page }) => {
     await page.evaluate((theme) => {

@@ -20,6 +20,21 @@ rectangle is the full unclipped, committed scene bounds. It does not move the
 camera or change selection and does not follow transient drag/animation previews.
 Read it again if the camera or layout changes.
 
+For the additional tour steps, query the displayed cluster name with
+`chart.screenBounds({ clusterLabels: [clusterUid] })` and the tree branches and
+interactive nodes with `chart.screenBounds({ tree: true })`. Both use the same
+unclipped viewport coordinates and committed-layout contract as locus bounds.
+They return `null` for a missing or hidden target. Tree bounds exclude leaf
+guides, scale bars and annotations. A query may combine targets and returns
+their union. These additions follow the dependency commit named above; pin a
+later commit or release that contains them.
+
+Additional queries cover `{ legend: true }`, `{ legendItems: [groupUid] }`,
+`{ scaleBar: true }`, `{ colourBar: true }`, `{ annotations: true }`, and
+`{ annotationPanels: [panelUid] }`. Hidden decorations return `null` when
+queried alone. Individual text, tree marks, legend symbols and annotation cells
+are also queryable. See the clustermap README for the target list and scope.
+
 In `web/src/viewer/tour.mjs`, the selection step currently targets `#plot`.
 Use the first locus of the first visible cluster, checking for empty data:
 

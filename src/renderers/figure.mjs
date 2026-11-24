@@ -1,15 +1,19 @@
-import { measureFigureBounds } from "../scene/measure.mjs";
+import { measureFigureBounds, measureClusterNameBounds, measureTreeInteractionBounds, measureTreeDetailBounds, measureDecorationBounds } from "../scene/measure.mjs";
 
 /** One backdrop shared by all renderers; camera changes only update its transform. */
 export function createFigureSurface() {
   let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
+  const measurementContext = (container) => {
+    if (!container) return null;
+    return context ||= container.ownerDocument.createElement("canvas").getContext("2d");
+  };
 
   function bounds(container, scene, config, tree, preview = null) {
     if (!container || !scene?.bounds) return null;
     // Reordering moves rows within the figure without changing its extent.
     if (preview?.type === "cluster-drag") preview = null;
     if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
-      context ||= container.ownerDocument.createElement("canvas").getContext("2d");
+      context = measurementContext(container);
       measuredBounds = measureFigureBounds(context, scene, config, tree, { preview });
       measuredScene = scene;
       measuredConfig = config;
@@ -50,5 +54,21 @@ export function createFigureSurface() {
     context = measuredScene = measuredConfig = measuredBounds = measuredPreview = null;
   }
 
-  return { bounds, update, clear };
+  return { bounds, update, clear,
+    clusterLabelBounds(container, scene, config, uid) {
+      const ctx = measurementContext(container);
+      return ctx && scene ? measureClusterNameBounds(ctx, scene, config, uid) : null;
+    },
+    treeBounds(container, scene, config, tree, nodeIds = null) {
+      const ctx = measurementContext(container);
+      return ctx && scene ? measureTreeInteractionBounds(ctx, tree, scene, config, nodeIds) : null;
+    },
+    treeDetailBounds(container, scene, config, tree, targets) {
+      const ctx = measurementContext(container);
+      return ctx && scene ? measureTreeDetailBounds(ctx, tree, scene, config, targets) : null;
+    },
+    decorationBounds(container, scene, targets, config) {
+      const ctx = measurementContext(container);
+      return ctx && scene ? measureDecorationBounds(ctx, scene, targets, config) : null;
+    } };
 }

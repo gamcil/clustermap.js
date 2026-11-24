@@ -1,7 +1,7 @@
 import { layoutTree } from "../tree/layout.mjs";
 import { includeBounds } from "./bounds.mjs";
 import { figureBoundsForChrome } from "./layout.mjs";
-import { annotationPanelsForFrame, annotationFigureBounds, legendContentBounds } from "../annotations/model.mjs";
+import { annotationPanelsForFrame, annotationPanelBounds, annotationFigureBounds, legendContentBounds } from "../annotations/model.mjs";
 import { getLinkLabelPosition } from "../links/layout.mjs";
 import { resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
 import { locusContentBounds } from "../loci/layout.mjs";
@@ -44,6 +44,190 @@ export function canvasTextMeasurer(context, scene) {
   return (text, style) => measureCanvasText(context, scene, text, {
     font: textFont(style), align: "left", baseline: style.textBaseline || "alphabetic",
   });
+}
+
+/** Ink bounds of a displayed cluster name in committed world coordinates. */
+export function measureClusterNameBounds(context, scene, config, uid) {
+  const cluster = scene?.clusters.get(uid), text = cluster?.source.name;
+  if (!cluster || !text) return null;
+  const label = clusterLabelLayout(config);
+  const box = textBounds(text, { fontSize: config.cluster.nameFontSize,
+    fontFamily: config.plot.fontFamily, fontWeight: 700,
+    anchor: cluster.info.anchor, baseline: label.nameBaseline }, canvasTextMeasurer(context, scene));
+  const x = cluster.x + cluster.info.x, y = cluster.y + label.nameY;
+  return { minX: x + box.minX, maxX: x + box.maxX, minY: y + box.minY, maxY: y + box.maxY };
+}
+
+/** Bounds of visible branches and their interactive nodes in committed coordinates. */
+export function measureTreeInteractionBounds(context, tree, scene, config, nodeIds = null) {
+  const layout = measureTreeLayout(context, tree, scene, config);
+  if (!layout) return null;
+  let bounds = null;
+  const include = (minX, minY, maxX, maxY) => {
+    bounds = includeBounds(bounds, { minX, minY, maxX, maxY });
+  };
+  for (const line of nodeIds ? [] : [...layout.branches, ...layout.stems]) {
+    const half = (line.style?.width || 1) / 2;
+    include(Math.min(line.x1, line.x2) - half, Math.min(line.y1, line.y2) - half,
+      Math.max(line.x1, line.x2) + half, Math.max(line.y1, line.y2) + half);
+  }
+  for (const node of layout.nodes) {
+    if (nodeIds && !nodeIds.includes(node.uid)) continue;
+    const radius = Math.max(node.hitRadius, node.radius + layout.branch.width / 2);
+    include(node.x - radius, node.y - radius, node.x + radius, node.y + radius);
+  }
+  for (const triangle of layout.triangles) {
+    if (nodeIds && !nodeIds.includes(triangle.uid)) continue;
+    const half = (triangle.style?.width || 1) / 2;
+    include(Math.min(triangle.x, triangle.x2) - half, Math.min(triangle.y, triangle.y1, triangle.y2) - half,
+      Math.max(triangle.x, triangle.x2) + half, Math.max(triangle.y, triangle.y1, triangle.y2) + half);
+  }
+  return bounds;
+}
+
+/** Optional individually addressable tree marks. */
+export function measureTreeDetailBounds(context, tree, scene, config, targets = {}) {
+  const layout = measureTreeLayout(context, tree, scene, config);
+  if (!layout) return null;
+  let bounds = null;
+  const include = (box) => { bounds = includeBounds(bounds, box); };
+  const line = (mark, width) => {
+    const half = (width || 1) / 2;
+    include({ minX: Math.min(mark.x1, mark.x2) - half, maxX: Math.max(mark.x1, mark.x2) + half,
+      minY: Math.min(mark.y1, mark.y2) - half, maxY: Math.max(mark.y1, mark.y2) + half });
+  };
+  for (const branch of layout.branches) if ((targets.treeBranches || []).includes(branch.uid)) line(branch, branch.style.width);
+  for (const stem of layout.stems) if ((targets.treeStems || []).includes(stem.uid)) line(stem, stem.style.width);
+  for (const guide of layout.guides) if ((targets.treeGuides || []).includes(guide.uid)) line(guide, layout.guide.width);
+  for (const label of layout.annotations) if ((targets.treeAnnotations || []).includes(label.uid)) {
+    include({ minX: label.x - (label.overhang || 0), maxX: label.x + label.width,
+      minY: label.y, maxY: label.y + label.height });
+  }
+  for (const label of layout.supports) if ((targets.treeSupports || []).includes(label.uid)) {
+    include({ minX: label.x - label.width, maxX: label.x + (label.overhang || 0),
+      minY: label.y - label.height, maxY: label.y });
+  }
+  if (targets.treeScaleBar && layout.scaleBar) {
+    for (const mark of layout.scaleBar.lines) line(mark, layout.scaleBar.strokeWidth);
+    const label = layout.scaleBar.label;
+    include({ minX: label.x - label.width / 2, maxX: label.x + label.width / 2,
+      minY: label.y, maxY: label.y + label.height });
+  }
+  if (targets.treeCutLine && layout.cutLine) {
+    line(layout.cutLine, layout.cutLine.width);
+    const label = layout.cutLine.label;
+    include({ minX: label.x - label.width / 2, maxX: label.x + label.width / 2,
+      minY: label.y - label.height, maxY: label.y });
+  }
+  return bounds;
+}
+
+/** Visible plot decorations in committed world coordinates. */
+export function measureDecorationBounds(context, scene, targets = {}, config = {}) {
+  if (!scene) return null;
+  const measureText = canvasTextMeasurer(context, scene), chrome = scene.chrome;
+  let bounds = null;
+  const include = (box) => { bounds = includeBounds(bounds, box); };
+  const includeText = (text, x, y, style) => {
+    if (!text) return;
+    const box = textBounds(text, style, measureText);
+    include({ minX: x + box.minX, maxX: x + box.maxX, minY: y + box.minY, maxY: y + box.maxY });
+  };
+  const legend = chrome?.legend;
+  if (legend?.visible) {
+    const items = targets.legend ? legend.items : legend.items.filter((item) => (targets.legendItems || []).includes(item.uid));
+    if (items.length) {
+      const box = legendContentBounds({ ...legend, items }, measureText);
+      include({ minX: legend.position.x + box.minX, maxX: legend.position.x + box.maxX,
+        minY: legend.position.y + box.minY, maxY: legend.position.y + box.maxY });
+    }
+    for (const item of legend.items) if ((targets.legendSymbols || []).includes(item.uid)) {
+      const box = legend.symbol.bounds;
+      include({ minX: legend.position.x + item.x + box.minX, maxX: legend.position.x + item.x + box.maxX,
+        minY: legend.position.y + item.y + box.minY, maxY: legend.position.y + item.y + box.maxY });
+    }
+  }
+  const scale = chrome?.scaleBar;
+  if (targets.scaleBar && scale?.visible) {
+    const half = scale.strokeWidth / 2;
+    include({ minX: scale.position.x - half, maxX: scale.position.x + scale.length + half,
+      minY: scale.position.y - half, maxY: scale.position.y + scale.height + half });
+    includeText(scale.label, scale.position.x + scale.length / 2, scale.position.y + scale.height + 5,
+      { fontSize: scale.fontSize, fontFamily: scale.fontFamily, anchor: "middle", baseline: "top" });
+  }
+  const colour = chrome?.colourBar;
+  if (targets.colourBar && colour?.visible) {
+    include({ minX: colour.position.x - .5, maxX: colour.position.x + colour.width + .5,
+      minY: colour.position.y - .5, maxY: colour.position.y + colour.height + .5 });
+    const font = { fontSize: colour.fontSize, fontFamily: colour.fontFamily, baseline: "top" };
+    const y = colour.position.y + colour.height + 5;
+    includeText(colour.label, colour.position.x + colour.width / 2, y, { ...font, anchor: "middle" });
+    includeText(colour.startLabel, colour.position.x, y, font);
+    includeText(colour.endLabel, colour.position.x + colour.width, y, { ...font, anchor: "end" });
+  }
+  for (const panel of annotationPanelsForFrame(scene)) {
+    if (targets.annotations || (targets.annotationPanels || []).includes(panel.uid)) {
+      const box = annotationPanelBounds(panel);
+      if (Object.values(box).every(Number.isFinite)) include(box);
+    }
+    for (const target of targets.annotationCells || []) {
+      if (target.panelUid !== panel.uid) continue;
+      const row = panel.rows.find((row) => row.uid === target.clusterUid);
+      const cell = row?.cells.find((cell) => cell.columnIndex === target.columnIndex);
+      if (cell) include({ minX: panel.x + cell.x, maxX: panel.x + cell.x + cell.width,
+        minY: row.y + cell.y, maxY: row.y + cell.y + cell.height });
+    }
+    for (const target of targets.annotationMarkers || []) {
+      if (target.panelUid !== panel.uid || !panel.markerGroups?.some((group) => group.uid === target.groupUid)) continue;
+      const segments = new Set([...scene.clusters.keys()].map((uid) => `${target.groupUid}:${uid}`));
+      for (const rect of panel.rects) if (segments.has(rect.uid)) {
+        include({ minX: panel.x + rect.x, maxX: panel.x + rect.x + rect.width,
+          minY: rect.y, maxY: rect.y + rect.height });
+      }
+      for (const text of panel.texts) if (segments.has(text.uid)) {
+        includeText(text.text, panel.x + text.x, text.y,
+          { fontSize: text.fontSize, fontFamily: panel.fontFamily, anchor: text.anchor });
+      }
+    }
+  }
+  for (const uid of targets.clusterLocusLabels || []) {
+    const cluster = scene.clusters.get(uid), text = cluster?.info.locusText;
+    if (!cluster || !text || config.cluster.hideLocusLabels) continue;
+    includeText(text, cluster.x + cluster.info.x, cluster.y + 12,
+      { fontSize: config.cluster.lociFontSize, fontFamily: config.plot.fontFamily,
+        anchor: cluster.info.anchor, baseline: "top" });
+  }
+  for (const uid of targets.geneLabels || []) {
+    const gene = scene.genes.get(uid);
+    if (!gene?.visible || !config.gene.label.show) continue;
+    const { x, y, rotation } = gene.label;
+    const dy = config.plot.renderer === "svg" ? ({ top: -.4, middle: .4, bottom: .8 }[config.gene.label.position] || 0) * config.gene.label.fontSize : 0;
+    const radians = rotation * Math.PI / 180;
+    includeText(gene.source.label || gene.source.name || gene.source.uid,
+      gene.locus.x + x - Math.sin(radians) * dy, gene.locus.y + y + Math.cos(radians) * dy,
+      { fontSize: config.gene.label.fontSize, fontFamily: config.plot.fontFamily,
+        anchor: config.gene.label.anchor, rotation });
+  }
+  for (const uid of targets.linkLabels || []) {
+    const link = scene.links.get(uid);
+    if (!link?.visible || !link.labelPosition || !config.link.show || !config.link.label.show) continue;
+    includeText(link.source.label ?? link.source.identity.toFixed(2), link.labelPosition.x, link.labelPosition.y,
+      { fontSize: config.link.label.fontSize, fontFamily: config.plot.fontFamily, anchor: "middle" });
+  }
+  if (config.locus.trimIndicators?.show !== false) {
+    const style = resolveTrimIndicatorStyle(config.locus.trimIndicators);
+    for (const uid of targets.trimIndicators || []) {
+      const locus = scene.loci.get(uid);
+      for (const indicator of locus?.trimIndicators || []) {
+        const box = textBounds(indicator.text, { fontSize: style.fontSize, fontWeight: style.fontWeight,
+          fontFamily: config.plot.fontFamily, anchor: indicator.anchor, baseline: "top" }, measureText);
+        const half = style.borderWidth / 2, x = locus.x + indicator.x, y = locus.y + indicator.y;
+        include({ minX: x + box.minX - half, maxX: x + box.maxX + half,
+          minY: y + box.minY - half, maxY: y + box.maxY + half });
+      }
+    }
+  }
+  return bounds;
 }
 
 /** Supply native text metrics to the shared tree layout. */
