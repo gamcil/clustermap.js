@@ -43,9 +43,15 @@ onINP((metric) => {
 const params = new URLSearchParams(location.search);
 const legacy = params.get("version") === "v1";
 const renderer = params.get("renderer") || "svg";
-const factory = legacy ? (await import("/baseline/src/chart/chart.js")).default
-  : (await import("/dist/clustermap.mjs")).ClusterMap;
-const api = legacy ? await import("/baseline/src/api.js") : null;
+let factory, api;
+try {
+  factory = legacy ? (await import("/baseline/src/clusterMap.js")).default
+    : (await import("/dist/clustermap.mjs")).ClusterMap;
+  api = legacy ? await import("/baseline/src/api.js") : null;
+} catch (error) {
+  window.benchmarkLoadError = error.stack || error.message;
+  throw error;
+}
 const view = views[params.get("view") || "standard"];
 const CAMERA = view.camera;
 const viewport = { width: innerWidth, height: innerHeight };
@@ -55,7 +61,7 @@ const STEP = 62;
 const config = {
   plot: { transitionDuration: 0, scaleFactor: 15, fontFamily: "Arial, sans-serif" },
   cluster: { spacing: 40, alignLabels: true },
-  gene: { label: { show: false } },
+  gene: { shape: { onClick: () => { window.geneClicks = (window.geneClicks || 0) + 1; } }, label: { show: false } },
   link: { show: true, threshold: 0, bestOnly: false, straight: true, label: { show: false } },
   legend: { show: false }, scaleBar: { show: false }, colourBar: { show: false },
 };
@@ -79,6 +85,51 @@ if (globalThis.GPUQueue) {
 // RAF cadence is a smoothness proxy, not a presentation or input-latency clock.
 const frameIntervals = [];
 let frameRequest = null, lastFrame = null;
+let latencyActive = false, latencyPending = [], latencySamples = [];
+let latencyRequest = null;
+let latencyEventTypes = null;
+for (const type of ["pointerdown", "pointermove", "pointerup", "wheel", "click", "dblclick"]) {
+  document.addEventListener(type, (event) => {
+    if (latencyActive && (!latencyEventTypes || latencyEventTypes.has(type))) {
+      latencyPending.push({ type, time: performance.now(), frameObserved: false });
+    }
+  }, true);
+}
+function startLatency(eventTypes = null) {
+  if (latencyRequest !== null) throw new Error("Input latency sampler already active");
+  latencyPending = [];
+  latencySamples = [];
+  latencyEventTypes = eventTypes ? new Set(eventTypes) : null;
+  latencyActive = true;
+  latencyRequest = requestAnimationFrame(sampleLatencyFrame);
+}
+async function stopLatency() {
+  // Wait until every input has been sampled on its second animation callback.
+  while (latencyPending.length) await new Promise(requestAnimationFrame);
+  latencyActive = false;
+  latencyEventTypes = null;
+  cancelAnimationFrame(latencyRequest);
+  latencyRequest = null;
+  return latencyResult();
+}
+function sampleLatencyFrame() {
+  // Use callback execution time, and wait one additional RAF so render work
+  // scheduled by input handlers has a chance to paint before we record latency.
+  const frameTime = performance.now();
+  const pending = latencyPending;
+  latencyPending = [];
+  for (const input of pending) {
+    if (input.frameObserved) latencySamples.push({ type: input.type, ms: frameTime - input.time });
+    else { input.frameObserved = true; latencyPending.push(input); }
+  }
+  if (latencyActive) latencyRequest = requestAnimationFrame(sampleLatencyFrame);
+}
+function latencyResult() {
+  const sorted = latencySamples.map(({ ms }) => ms).sort((a, b) => a - b);
+  const percentile = (p) => sorted.length ? sorted[Math.ceil(sorted.length * p) - 1] : null;
+  return { p50: percentile(.5), p95: percentile(.95), count: sorted.length,
+    samples: latencySamples };
+}
 function sampleFrame(now) {
   if (lastFrame !== null) frameIntervals.push(now - lastFrame);
   lastFrame = now;
@@ -132,15 +183,21 @@ function targets() {
     const label = group.querySelector(".clusterText").getBoundingClientRect();
     const track = group.querySelector(".trackBar").getBoundingClientRect();
     const handle = group.querySelector(".leftHandle").getBoundingClientRect();
+    const gene = group.querySelectorAll(".genePolygon")[4].getBoundingClientRect();
+    const geneTarget = { x: gene.x + gene.width / 2, y: gene.y + gene.height / 2 };
     return { label: { x: label.right - 25 * CAMERA.k, y: label.y + label.height / 2 },
       trimLeft: { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 },
-      locus: { x: track.x + 15 * CAMERA.k, y: track.y } }; // Track gap avoids gene anchoring.
+      locus: { x: track.x + 15 * CAMERA.k, y: track.y },
+      gene: geneTarget, flip: geneTarget }; // Keep locus movement on the track gap; flip on a gene avoids the drag overlay.
   }
   const current = state(), row = current.order.indexOf("large-cluster-2");
+  const geneTarget = { x: CAMERA.x + (16 + current.locusOffset - initialOffset + 4 * 18 + 5) * CAMERA.k,
+    y: CAMERA.y + (row * STEP + 11) * CAMERA.k };
   return { label: { x: CAMERA.x - 34 * CAMERA.k, y: CAMERA.y + (row * STEP + 4) * CAMERA.k },
     trimLeft: { x: CAMERA.x + (current.locusOffset + (current.locusStart - 1) * config.plot.scaleFactor / 1000 - 4) * CAMERA.k,
       y: CAMERA.y + (row * STEP + 11) * CAMERA.k },
-    locus: { x: CAMERA.x + (16 + current.locusOffset - initialOffset) * CAMERA.k, y: CAMERA.y + (row * STEP + 11) * CAMERA.k } };
+    locus: { x: CAMERA.x + (16 + current.locusOffset - initialOffset) * CAMERA.k, y: CAMERA.y + (row * STEP + 11) * CAMERA.k },
+    gene: geneTarget, flip: geneTarget };
 }
 function graphics() {
   if (hidden || document.hidden) throw new Error("Benchmark page was hidden");
@@ -171,7 +228,7 @@ async function settle() {
   return graphics();
 }
 window.benchmark = {
-  state, targets, graphics, settle, startFrames, stopFrames,
+  state, targets, graphics, settle, startFrames, stopFrames, startLatency, stopLatency,
   async mount() {
     const response = await fetch("/bench/data.json", { cache: "no-store" });
     if (!response.ok) throw new Error(`Fixture HTTP ${response.status}`);

@@ -7,9 +7,9 @@ export const views = {
     wheelSteps: 1, wheelDelta: 600, trimGenes: 20,
   },
   overview: {
-    viewport: { width: 1920, height: 1080 },
-    // All 100 rows (62 world units apart) and both synthetic gene widths fit here.
-    camera: { x: 330, y: 70, k: .15 },
+    viewport: { width: 1440, height: 900 },
+    // At this zoom all 100 rows and both synthetic gene widths fit in the shared viewport.
+    camera: { x: 330, y: 70, k: .13 },
     dragSteps: 72, panDistance: 360, locusDistance: 240, reorderIndex: 30,
     wheelSteps: 20, wheelDelta: 600, trimGenes: 20,
   },

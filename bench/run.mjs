@@ -14,7 +14,7 @@ const ROOT = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const BASELINE = "2f53e25a28d678294dbc050a22766861fc91f2b8"; // Last master revision.
 const args = process.argv.slice(2);
 const option = (name, fallback) => args.includes(name) ? args[args.indexOf(name) + 1] : fallback;
-const repeats = Number(option("--repeats", "3"));
+const repeats = Number(option("--repeats", "5"));
 const fixtureName = option("--fixture", "large");
 assert.ok(Object.hasOwn(SYNTHETIC_FIXTURES, fixtureName), "--fixture must be large or larger");
 const fixtureDimensions = SYNTHETIC_FIXTURES[fixtureName];
@@ -73,7 +73,7 @@ const order = Array.from({ length: repeats }, (_, i) => {
 async function workflow(page, renderer, view) {
   const snapshot = () => page.evaluate(() => benchmark.state());
   const settle = () => page.evaluate(() => benchmark.settle());
-  const initial = await snapshot(), checks = [];
+  const initial = await snapshot(), checks = [], latencies = [];
   const steps = smoke ? 6 : view.dragSteps;
   async function phase(name, action) {
     const mark = async (edge) => {
@@ -83,14 +83,22 @@ async function workflow(page, renderer, view) {
     try { return await action(); }
     finally { await mark("end"); }
   }
-  async function gesture(action) {
+  async function gesture(name, action, eventTypes) {
+    const measuredTypes = eventTypes || (name.startsWith("zoom-") ? ["wheel"]
+      : ["pointerdown", "pointermove", "pointerup"]);
+    await page.evaluate((types) => benchmark.startLatency(types), measuredTypes);
     await page.evaluate(() => benchmark.startFrames());
     try { await action(); }
-    finally { await page.evaluate(() => benchmark.stopFrames()); }
+    finally {
+      const result = await page.evaluate(() => benchmark.stopLatency());
+      assert.ok(result.count > 0, `No ${name} input latency samples recorded`);
+      latencies.push({ gesture: name, ...result });
+      await page.evaluate(() => benchmark.stopFrames());
+    }
   }
-  async function drag(from, to, dragSteps = steps) {
+  async function drag(name, from, to, dragSteps = steps) {
     await page.mouse.move(from.x, from.y);
-    await gesture(async () => {
+    await gesture(name, async () => {
       await page.mouse.down();
       await page.mouse.move(to.x, to.y, { steps: dragSteps });
       await page.evaluate(() => benchmark.graphics()); // Check resolution while dragging.
@@ -100,12 +108,12 @@ async function workflow(page, renderer, view) {
   }
   // Pan out and back, checking the intermediate camera so a no-op cannot pass.
   const edge = page.viewportSize().width - (view.panDistance > 0 ? 600 : 40);
-  await phase("pan-out", () => drag({ x: edge, y: 30 }, { x: edge + view.panDistance, y: 30 }));
+  await phase("pan-out", () => drag("pan-out", { x: edge, y: 30 }, { x: edge + view.panDistance, y: 30 }));
   assert.ok(Math.abs((await snapshot()).camera.x - initial.camera.x) > 100, "Pan did not move");
-  await phase("pan-back", () => drag({ x: edge + view.panDistance, y: 30 }, { x: edge, y: 30 }));
+  await phase("pan-back", () => drag("pan-back", { x: edge + view.panDistance, y: 30 }, { x: edge, y: 30 }));
   await page.mouse.move(edge, 30);
   async function zoom(direction) {
-    await gesture(async () => {
+    await gesture(direction > 0 ? "zoom-out" : "zoom-back", async () => {
       const count = smoke ? 1 : view.wheelSteps;
       for (let i = 0; i < count; i++) {
         await page.mouse.wheel(0, direction * view.wheelDelta / count);
@@ -121,11 +129,28 @@ async function workflow(page, renderer, view) {
   assert.ok(Math.abs(camera.k - initial.camera.k) < .01 && Math.hypot(camera.x - initial.camera.x, camera.y - initial.camera.y) < 2, "Camera did not return");
 
   let targets = await page.evaluate(() => benchmark.targets());
-  await phase("locus-drag", () => drag(targets.locus, { x: targets.locus.x + view.locusDistance, y: targets.locus.y }));
+  await phase("locus-hover", async () => {
+    await gesture("locus-hover", () => page.mouse.move(targets.locus.x, targets.locus.y), ["pointermove"]);
+  });
+  const clicksBefore = await page.evaluate(() => window.geneClicks || 0);
+  await phase("gene-click", async () => {
+    await gesture("gene-click", () => page.mouse.click(targets.gene.x, targets.gene.y), ["click"]);
+  });
+  assert.equal(await page.evaluate(() => window.geneClicks || 0), clicksBefore + 1, "Gene click did not reach the configured action");
+
+  await phase("locus-drag", () => drag("locus-drag", targets.locus, { x: targets.locus.x + view.locusDistance, y: targets.locus.y }));
   assert.ok(Math.abs((await snapshot()).locusOffset - initial.locusOffset - view.locusDistance / initial.camera.k) < 1, "Locus did not move");
   targets = await page.evaluate(() => benchmark.targets());
   await phase("locus-flip", async () => {
-    await page.mouse.dblclick(targets.locus.x, targets.locus.y);
+    // Position the pointer before timing. Moving from the cluster label to a
+    // gene can start the locus hover transition, which is measured separately.
+    await page.mouse.move(targets.flip.x, targets.flip.y);
+    await page.waitForTimeout(300);
+    await page.evaluate(() => benchmark.startLatency(["dblclick"]));
+    await page.mouse.dblclick(targets.flip.x, targets.flip.y);
+    const flipLatency = await page.evaluate(() => benchmark.stopLatency());
+    assert.equal(flipLatency.count, 1, "Flip did not produce exactly one double-click latency sample");
+    latencies.push({ gesture: "locus-flip", ...flipLatency });
     checks.push(await settle());
   });
   assert.notEqual((await snapshot()).flipped, initial.flipped, "Locus did not flip");
@@ -134,7 +159,7 @@ async function workflow(page, renderer, view) {
   // select the same boundary, just before the next visible gene.
   targets = await page.evaluate(() => benchmark.targets());
   const beforeTrim = await snapshot();
-  await phase("locus-trim", () => drag(targets.trimLeft, {
+  await phase("locus-trim", () => drag("locus-trim", targets.trimLeft, {
     x: targets.trimLeft.x + view.trimGenes * 18 * initial.camera.k,
     y: targets.trimLeft.y,
   }));
@@ -146,14 +171,14 @@ async function workflow(page, renderer, view) {
   targets = await page.evaluate(() => benchmark.targets());
   // v1 reorders by crossing rows. Retain normal sampling even in smoke mode
   // so the long overview drag cannot skip entire rows between pointer moves.
-  await phase("cluster-drag", () => drag(targets.label, { x: targets.label.x, y: targets.label.y + (view.reorderIndex - 2) * 62 * initial.camera.k }, view.dragSteps));
+  await phase("cluster-drag", () => drag("cluster-drag", targets.label, { x: targets.label.x, y: targets.label.y + (view.reorderIndex - 2) * 62 * initial.camera.k }, view.dragSteps));
   const expected = [...initial.order];
   expected.splice(view.reorderIndex, 0, ...expected.splice(2, 1));
   assert.deepEqual((await snapshot()).order, expected, "Unexpected cluster order");
   if (renderer === "webgpu") {
     assert.ok(checks.every((value, i) => value.gpuSubmissions > (checks[i - 1]?.gpuSubmissions ?? 0)), "Missing WebGPU submissions");
   }
-  return checks;
+  return { checks, latencies };
 }
 
 await mkdir(output, { recursive: true });
@@ -164,6 +189,7 @@ await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const browsers = {};
 const browserEnvironments = {};
 const rows = [];
+const gestureRows = [];
 try {
   browsers.default = await chromium.launch({ headless });
   if (deviceScaleFactor === null) {
@@ -182,7 +208,7 @@ try {
   }
   assert.ok(browserEnvironments.disabled.commandLine.includes("--disable-accelerated-2d-canvas"),
     "Canvas acceleration disable flag missing from browser process");
-  await writeFile(resolve(output, "metadata.json"), json({ formatVersion: 12, baseline: BASELINE,
+  await writeFile(resolve(output, "metadata.json"), json({ formatVersion: 28, baseline: BASELINE,
     currentCommit: git("rev-parse", "HEAD"), dirtyWorktree: git("status", "--porcelain"),
     browser: browsers.default.version(), browserEnvironments, playwright: JSON.parse(await readFile(resolve(ROOT, "node_modules/@playwright/test/package.json"))).version,
     d3Baseline: "6.7.0", webVitals: "5.1.0", cpu: os.cpus()[0]?.model, os: `${os.type()} ${os.release()}`,
@@ -201,7 +227,10 @@ try {
       page.on("pageerror", (error) => raw.errors.push(error.message));
       await page.goto(`http://127.0.0.1:${server.address().port}/bench/?version=${run.version}&renderer=${run.renderer}&view=${run.view}`);
       await page.bringToFront();
-      await page.waitForFunction(() => window.benchmarkReady);
+      await page.waitForFunction(() => window.benchmarkReady || window.benchmarkLoadError);
+      if (!await page.evaluate(() => window.benchmarkReady)) {
+        throw new Error(`Benchmark page failed to load: ${await page.evaluate(() => window.benchmarkLoadError)}`);
+      }
       raw.setup = await page.evaluate(() => benchmark.mount());
       let profiler, tracer;
       if (tracing) {
@@ -216,7 +245,7 @@ try {
         await profiler.send("Profiler.enable");
         await profiler.send("Profiler.start");
       }
-      raw.checks = await workflow(page, run.renderer, views[run.view]);
+      raw.workflow = await workflow(page, run.renderer, views[run.view]);
       if (profiling || tracing) raw.actionMarks = await page.evaluate(() =>
         performance.getEntriesByType("mark").filter((entry) => entry.name.startsWith("bench:")).map((entry) => entry.toJSON()));
       if (profiler) {
@@ -246,6 +275,13 @@ try {
       assert.ok(raw.result.frames.count > 0, "No gesture frame intervals recorded");
       row.frame_p95_ms = raw.result.frames.p95;
       row.frame_samples = raw.result.frames.count;
+      for (const gesture of raw.workflow.latencies) {
+        const sorted = gesture.samples.map(({ ms }) => ms).sort((a, b) => a - b);
+        gestureRows.push({ ...run, gesture: gesture.gesture,
+          input_frame_p50_ms: sorted.length ? sorted[Math.ceil(sorted.length * .5) - 1] : null,
+          input_frame_p95_ms: sorted.length ? sorted[Math.ceil(sorted.length * .95) - 1] : null,
+          input_frame_samples: sorted.length });
+      }
       if (args.includes("--screenshots")) {
         await page.screenshot({ path: resolve(output, `run-${String(index + 1).padStart(3, "0")}.png`) });
         await page.screenshot({ path: resolve(output, `run-${String(index + 1).padStart(3, "0")}-detail.png`),
@@ -258,18 +294,30 @@ try {
     const columns = ["implementation", "canvas_acceleration", "fixture", "version", "renderer", "view", "repeat", "status", "inp_ms", "frame_p95_ms", "frame_samples", "reason"];
     const cell = (value) => value == null ? "" : `"${String(value).replaceAll('"', '""')}"`;
     await writeFile(resolve(output, "runs.csv"), [columns.join(","), ...rows.map((r) => columns.map((c) => cell(r[c])).join(","))].join("\n") + "\n");
+    const gestureColumns = ["implementation", "canvas_acceleration", "fixture", "version", "renderer", "view", "repeat", "gesture", "input_frame_p50_ms", "input_frame_p95_ms", "input_frame_samples"];
+    await writeFile(resolve(output, "gestures.csv"), [gestureColumns.join(","),
+      ...gestureRows.map((r) => gestureColumns.map((c) => cell(r[c])).join(","))].join("\n") + "\n");
     console.log(`${index + 1}/${order.length} ${run.implementation}/${run.fixture}/${run.view}: ${row.status}${row.reason ? ` — ${row.reason}` : ` (${row.inp_ms} ms)`}`);
   }
-  console.table(selectedViews.flatMap((view) => implementations.map(({ implementation }) => {
-    const values = rows.filter((r) => r.implementation === implementation && r.view === view && r.status === "ok").map((r) => r.inp_ms).sort((a, b) => a - b);
-    const frames = rows.filter((r) => r.implementation === implementation && r.view === view && r.status === "ok")
-      .map((r) => r.frame_p95_ms).sort((a, b) => a - b);
-    const n = values.length;
-    return { fixture: fixtureName, view, implementation, valid: `${n}/${repeats}`,
-      median_ms: n ? (values[Math.floor((n - 1) / 2)] + values[Math.floor(n / 2)]) / 2 : null,
-      min_ms: values[0], max_ms: values.at(-1),
-      median_frame_p95_ms: n ? (frames[Math.floor((n - 1) / 2)] + frames[Math.floor(n / 2)]) / 2 : null };
-  })));
+  const summaryRows = selectedViews.flatMap((view) => implementations.map(({ implementation }) => {
+    const validRuns = rows.filter((r) => r.implementation === implementation && r.view === view && r.status === "ok");
+    const validRepeats = new Set(validRuns.map((r) => r.repeat));
+    const actionResponses = gestureRows.filter((r) => r.implementation === implementation && r.view === view && validRepeats.has(r.repeat))
+      .map((r) => r.input_frame_p95_ms).filter(Number.isFinite).sort((a, b) => a - b);
+    const inps = validRuns.map((r) => r.inp_ms).filter(Number.isFinite).sort((a, b) => a - b);
+    const frames = validRuns.map((r) => r.frame_p95_ms).filter(Number.isFinite).sort((a, b) => a - b);
+    const at = (values, p) => values.length ? values[Math.ceil(values.length * p) - 1] : null;
+    const middle = (values) => values.length ? (values[Math.floor((values.length - 1) / 2)] + values[Math.floor(values.length / 2)]) / 2 : null;
+    return { implementation, canvas_acceleration: implementations.find((i) => i.implementation === implementation).canvas_acceleration,
+      fixture: fixtureName, view, valid_runs: `${validRuns.length}/${repeats}`, gesture_samples: actionResponses.length,
+      all_interaction_response_p50_ms: at(actionResponses, .5), all_interaction_response_p95_ms: at(actionResponses, .95),
+      median_inp_ms: middle(inps), median_frame_p95_ms: middle(frames) };
+  }));
+  const summaryColumns = ["implementation", "canvas_acceleration", "fixture", "view", "valid_runs", "gesture_samples", "all_interaction_response_p50_ms", "all_interaction_response_p95_ms", "median_inp_ms", "median_frame_p95_ms"];
+  const summaryCell = (value) => value == null ? "" : `"${String(value).replaceAll('"', '""')}"`;
+  await writeFile(resolve(output, "summary.csv"), [summaryColumns.join(","),
+    ...summaryRows.map((r) => summaryColumns.map((c) => summaryCell(r[c])).join(","))].join("\n") + "\n");
+  console.table(summaryRows);
   console.log(`Results: ${output}`);
   if (rows.some((r) => r.status !== "ok")) process.exitCode = 1;
 } finally {
