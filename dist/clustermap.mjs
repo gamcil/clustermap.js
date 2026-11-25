@@ -4567,11 +4567,28 @@ function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, labe
   };
 }
 
+// Most links in a large GCF connect nonadjacent rows. Their geometry is
+// calculated on demand during a drag preview, so share the empty fields.
+class UndrawableLinkLayout {
+  constructor(source, order, allowed) {
+    this.source = source;
+    this.order = order;
+    this.allowed = allowed;
+  }
+}
+Object.assign(UndrawableLinkLayout.prototype, {
+  anchors: null, bounds: null, labelPosition: null, visible: false,
+});
+
 function createLinkLayout(source, order, {
   genes, areClustersAdjacent, scaleX, link, linkVisible = () => true,
 }) {
   const query = genes.get(source.query.uid);
   const target = genes.get(source.target.uid);
+  const allowed = linkVisible(source);
+  if (!query || !target || !areClustersAdjacent(query.display.clusterUid, target.display.clusterUid)) {
+    return new UndrawableLinkLayout(source, order, allowed);
+  }
   const anchorForGene = ({ display, locus }) => {
     const start = scaleX(display.start) + locus.x;
     const end = scaleX(display.end) + locus.x;
@@ -4579,9 +4596,7 @@ function createLinkLayout(source, order, {
       ? [start, end, locus.y + locus.track.y]
       : [end, start, locus.y + locus.track.y];
   };
-  const anchors = query && target && areClustersAdjacent(query.display.clusterUid, target.display.clusterUid)
-    ? orderLinkAnchors(anchorForGene(query), anchorForGene(target)) : null;
-  const allowed = linkVisible(source);
+  const anchors = orderLinkAnchors(anchorForGene(query), anchorForGene(target));
   return {
     source,
     order,
@@ -4769,13 +4784,15 @@ function buildScene(
       if (!linksByGene.has(uid)) linksByGene.set(uid, []);
       linksByGene.get(uid).push(source);
     }
-    const query = genes.get(source.query.uid);
-    const target = genes.get(source.target.uid);
-    if (!linkIndexes?.linksByClusterPair && query && target) {
-      const key = clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid);
-      const pairLinks = linksByClusterPair.get(key) || [];
-      pairLinks.push(source.uid);
-      linksByClusterPair.set(key, pairLinks);
+    if (!linkIndexes?.linksByClusterPair) {
+      const query = genes.get(source.query.uid);
+      const target = genes.get(source.target.uid);
+      if (query && target) {
+        const key = clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid);
+        const pairLinks = linksByClusterPair.get(key) || [];
+        pairLinks.push(source.uid);
+        linksByClusterPair.set(key, pairLinks);
+      }
     }
   }
 

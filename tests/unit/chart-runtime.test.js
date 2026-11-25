@@ -37,6 +37,9 @@ test("scene patches retain nonadjacent links and reveal them after row changes",
   runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   const initial = runtime.updateScene(data);
   assert.equal(initial.links.get("ac").visible, false);
+  assert.equal(initial.links.get("ac").anchors, null);
+  assert.equal(initial.links.get("ac").bounds, null);
+  assert.equal(initial.links.get("ac").labelPosition, null);
   setClusterOffset(state, "a", 10);
   const moved = runtime.updateScene(data, { sourceScene: initial, changes: { clusters: ["a"] } });
   assert.equal(moved.links.get("ac"), initial.links.get("ac"));
