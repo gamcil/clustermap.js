@@ -15610,7 +15610,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
 const overlayLayers = ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"];
 
 function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
-  paintOverlay = renderCanvas, paintFallback = renderCanvas } = {}) {
+  paintOverlay = renderCanvas, paintFallback = renderCanvas, onStatus = () => {} } = {}) {
   let renderer = null;
   let canvas = null;
   let initialization = null;
@@ -15618,6 +15618,12 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
   let pendingScene = null;
   let latestPaint = null;
   let generation = 0;
+  let status = { state: "idle", reason: null };
+  const setStatus = (state, reason = null) => {
+    if (status.state === state && status.reason === reason) return;
+    status = { state, reason };
+    onStatus({ ...status });
+  };
 
   const release = () => {
     generation += 1;
@@ -15638,6 +15644,7 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
     if (failedCanvas) failedCanvas.dataset.webgpu = error ? "error" : "unavailable";
     if (error) console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
     fallback();
+    setStatus("fallback", error ? String(error.message || error) : "WebGPU is unavailable.");
   };
   const draw = () => {
     if (!renderer || !latestPaint) return;
@@ -15660,6 +15667,7 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
     if (initialization) return;
 
     canvas = targetCanvas;
+    setStatus("initializing");
     const currentGeneration = ++generation;
     initialization = createRenderer(targetCanvas, { onError: (error) => {
       if (currentGeneration === generation && canvas === targetCanvas) fail(error);
@@ -15674,6 +15682,7 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
         if (renderer) {
           targetCanvas.dataset.webgpu = "active";
           draw();
+          if (renderer) setStatus("active");
           return;
         }
         fail();
@@ -15685,6 +15694,7 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
   };
 
   return {
+    status: () => ({ ...status }),
     setScene: (scene, { sourceScene, scales, config } = {}) => {
       pendingScene = scene;
       try {
@@ -15710,6 +15720,7 @@ function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
       release();
       pendingScene = null;
       latestPaint = null;
+      status = { state: "idle", reason: null };
     },
   };
 }
@@ -16168,7 +16179,9 @@ function clusterMap() {
     },
   });
   const canvasBackend = createCanvasBackend();
-  const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint });
+  const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint,
+    onStatus: () => { if (container && runtime.config.plot.renderer === "webgpu")
+      emitChange({ type: "renderer.change", renderer: my.rendererStatus() }); } });
   const rendererLifecycle = createRendererLifecycle({
     svg: { paint: renderSvg, destroy: () => container?.selectAll("svg.clusterMap *").interrupt() },
     canvas: canvasBackend,
@@ -17222,6 +17235,15 @@ function clusterMap() {
     return my;
   };
   my.visibleData = () => plotData;
+  /** Requested renderer and the actual WebGPU fallback state. */
+  my.rendererStatus = () => {
+    if (!container) return null;
+    const requested = runtime.config.plot.renderer;
+    if (requested !== "webgpu") return { requested, active: requested, state: "active", reason: null };
+    const { state, reason } = webgpuBackend.status();
+    return { requested, active: state === "active" ? "webgpu" : state === "fallback" ? "canvas" : null,
+      state, reason };
+  };
   /** Replace only the tree; biological data and chart indexes remain owned by the chart. */
   my.tree = function (tree) {
     if (!arguments.length) return currentData?.tree ? clonePlainValue(currentData.tree) : null;

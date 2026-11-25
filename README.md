@@ -392,6 +392,7 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | `data(data)` / `data()` | Replace data / read normalized data. Replacement clears history. |
 | `tree(tree)` / `tree()` | Replace or remove (`null`) the tree without replacing biological data. Replacement validates tree-linked annotations, adopts the tree leaf order, and clears history; removal retains the current row order. The getter returns a copy. |
 | `visibleData()` | Read the filtered data currently included in the plot. |
+| `rendererStatus()` | Read requested and active renderer, initialization/fallback state and fallback reason; returns `null` before mounting. WebGPU changes emit a `renderer.change` event. |
 | `remove({clusters, loci})` | Remove cluster/locus IDs and their contents from the plot, preserving source data. Undoable; removing a cluster's last locus also removes that cluster. |
 | `state(snapshot)` / `state()` | Restore / read JSON-safe layout and camera state. |
 | `camera({x, y, k})` / `camera()` | Set / read the camera without rebuilding the scene or changing history. Requires finite coordinates and a positive scale. |

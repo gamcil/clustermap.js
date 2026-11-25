@@ -15616,7 +15616,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   const overlayLayers = ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"];
 
   function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
-    paintOverlay = renderCanvas, paintFallback = renderCanvas } = {}) {
+    paintOverlay = renderCanvas, paintFallback = renderCanvas, onStatus = () => {} } = {}) {
     let renderer = null;
     let canvas = null;
     let initialization = null;
@@ -15624,6 +15624,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     let pendingScene = null;
     let latestPaint = null;
     let generation = 0;
+    let status = { state: "idle", reason: null };
+    const setStatus = (state, reason = null) => {
+      if (status.state === state && status.reason === reason) return;
+      status = { state, reason };
+      onStatus({ ...status });
+    };
 
     const release = () => {
       generation += 1;
@@ -15644,6 +15650,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (failedCanvas) failedCanvas.dataset.webgpu = error ? "error" : "unavailable";
       if (error) console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
       fallback();
+      setStatus("fallback", error ? String(error.message || error) : "WebGPU is unavailable.");
     };
     const draw = () => {
       if (!renderer || !latestPaint) return;
@@ -15666,6 +15673,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (initialization) return;
 
       canvas = targetCanvas;
+      setStatus("initializing");
       const currentGeneration = ++generation;
       initialization = createRenderer(targetCanvas, { onError: (error) => {
         if (currentGeneration === generation && canvas === targetCanvas) fail(error);
@@ -15680,6 +15688,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           if (renderer) {
             targetCanvas.dataset.webgpu = "active";
             draw();
+            if (renderer) setStatus("active");
             return;
           }
           fail();
@@ -15691,6 +15700,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     };
 
     return {
+      status: () => ({ ...status }),
       setScene: (scene, { sourceScene, scales, config } = {}) => {
         pendingScene = scene;
         try {
@@ -15716,6 +15726,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         release();
         pendingScene = null;
         latestPaint = null;
+        status = { state: "idle", reason: null };
       },
     };
   }
@@ -16174,7 +16185,9 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       },
     });
     const canvasBackend = createCanvasBackend();
-    const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint });
+    const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint,
+      onStatus: () => { if (container && runtime.config.plot.renderer === "webgpu")
+        emitChange({ type: "renderer.change", renderer: my.rendererStatus() }); } });
     const rendererLifecycle = createRendererLifecycle({
       svg: { paint: renderSvg, destroy: () => container?.selectAll("svg.clusterMap *").interrupt() },
       canvas: canvasBackend,
@@ -17228,6 +17241,15 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       return my;
     };
     my.visibleData = () => plotData;
+    /** Requested renderer and the actual WebGPU fallback state. */
+    my.rendererStatus = () => {
+      if (!container) return null;
+      const requested = runtime.config.plot.renderer;
+      if (requested !== "webgpu") return { requested, active: requested, state: "active", reason: null };
+      const { state, reason } = webgpuBackend.status();
+      return { requested, active: state === "active" ? "webgpu" : state === "fallback" ? "canvas" : null,
+        state, reason };
+    };
     /** Replace only the tree; biological data and chart indexes remain owned by the chart. */
     my.tree = function (tree) {
       if (!arguments.length) return currentData?.tree ? clonePlainValue(currentData.tree) : null;

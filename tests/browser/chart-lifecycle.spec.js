@@ -1,5 +1,21 @@
 import { test, expect } from "@playwright/test";
 
+test("renderer status exposes WebGPU fallback to the host", async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined }));
+  await page.goto("http://127.0.0.1:8080/demo/?test=1");
+  await page.waitForFunction(() => Boolean(window.__demoChart));
+  await page.evaluate(() => {
+    const chart = window.__demoChart;
+    window.__rendererEvents = [];
+    chart.on("change", (event) => { if (event.type === "renderer.change") window.__rendererEvents.push(event.renderer); });
+    chart.config({ plot: { renderer: "webgpu", transitionDuration: 0 } });
+  });
+  await expect.poll(() => page.evaluate(() => window.__demoChart.rendererStatus().state)).toBe("fallback");
+  const result = await page.evaluate(() => ({ status: window.__demoChart.rendererStatus(), events: window.__rendererEvents }));
+  expect(result.status).toEqual({ requested: "webgpu", active: "canvas", state: "fallback", reason: "WebGPU is unavailable." });
+  expect(result.events.map((event) => event.state)).toEqual(["initializing", "fallback"]);
+});
+
 test("tree replacement preserves biological data, validates atomically and clears history", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/demo/?fixture=burnettii&test=1");
   await page.waitForFunction(() => Boolean(window.__demoChart));

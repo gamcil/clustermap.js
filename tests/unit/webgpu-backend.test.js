@@ -72,6 +72,27 @@ test("WebGPU backend renders the newest scene after asynchronous initialization"
   assert.equal(draws[0].nextScene.uid, "latest");
 });
 
+test("WebGPU reports initialization, successful rendering and fallback", async (t) => {
+  const { createWebGpuBackend } = await import("../../src/renderers/webgpuBackend.mjs");
+  t.mock.method(console, "warn", () => {});
+  const statuses = [];
+  let onError;
+  const backend = createWebGpuBackend({ onStatus: (status) => statuses.push(status), paintOverlay() {}, paintFallback() {},
+    createRenderer: async (_canvas, options) => {
+      onError = options.onError;
+      return { render() {}, destroy() {} };
+    } });
+  backend.paint(paintRequest({ dataset: {} }, {}));
+  assert.deepEqual(backend.status(), { state: "initializing", reason: null });
+  await Promise.resolve();
+  assert.deepEqual(backend.status(), { state: "active", reason: null });
+  onError(new Error("device limit exceeded"));
+  assert.deepEqual(backend.status(), { state: "fallback", reason: "device limit exceeded" });
+  assert.deepEqual(statuses.map(({ state }) => state), ["initializing", "active", "fallback"]);
+  backend.destroy();
+  assert.deepEqual(backend.status(), { state: "idle", reason: null });
+});
+
 test("WebGPU coordinates its overlay and GPU pass from the same frame", async () => {
   const { createWebGpuBackend } = await import("../../src/renderers/webgpuBackend.mjs");
   const overlays = [], draws = [];

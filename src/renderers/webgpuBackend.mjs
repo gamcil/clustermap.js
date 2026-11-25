@@ -4,7 +4,7 @@ import { renderCanvas } from "./canvas.js";
 const overlayLayers = ["tree", "trimIndicators", "geneLabels", "linkLabels", "clusterLabels", "annotationLabels", "chrome"];
 
 export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
-  paintOverlay = renderCanvas, paintFallback = renderCanvas } = {}) {
+  paintOverlay = renderCanvas, paintFallback = renderCanvas, onStatus = () => {} } = {}) {
   let renderer = null;
   let canvas = null;
   let initialization = null;
@@ -12,6 +12,12 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
   let pendingScene = null;
   let latestPaint = null;
   let generation = 0;
+  let status = { state: "idle", reason: null };
+  const setStatus = (state, reason = null) => {
+    if (status.state === state && status.reason === reason) return;
+    status = { state, reason };
+    onStatus({ ...status });
+  };
 
   const release = () => {
     generation += 1;
@@ -32,6 +38,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
     if (failedCanvas) failedCanvas.dataset.webgpu = error ? "error" : "unavailable";
     if (error) console.warn("WebGPU renderer unavailable; falling back to Canvas 2D.", error);
     fallback();
+    setStatus("fallback", error ? String(error.message || error) : "WebGPU is unavailable.");
   };
   const draw = () => {
     if (!renderer || !latestPaint) return;
@@ -54,6 +61,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
     if (initialization) return;
 
     canvas = targetCanvas;
+    setStatus("initializing");
     const currentGeneration = ++generation;
     initialization = createRenderer(targetCanvas, { onError: (error) => {
       if (currentGeneration === generation && canvas === targetCanvas) fail(error);
@@ -68,6 +76,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
         if (renderer) {
           targetCanvas.dataset.webgpu = "active";
           draw();
+          if (renderer) setStatus("active");
           return;
         }
         fail();
@@ -79,6 +88,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
   };
 
   return {
+    status: () => ({ ...status }),
     setScene: (scene, { sourceScene, scales, config } = {}) => {
       pendingScene = scene;
       try {
@@ -104,6 +114,7 @@ export function createWebGpuBackend({ createRenderer = createWebGpuRenderer,
       release();
       pendingScene = null;
       latestPaint = null;
+      status = { state: "idle", reason: null };
     },
   };
 }

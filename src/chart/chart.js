@@ -185,7 +185,9 @@ export default function clusterMap() {
     },
   });
   const canvasBackend = createCanvasBackend();
-  const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint });
+  const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint,
+    onStatus: () => { if (container && runtime.config.plot.renderer === "webgpu")
+      emitChange({ type: "renderer.change", renderer: my.rendererStatus() }); } });
   const rendererLifecycle = createRendererLifecycle({
     svg: { paint: renderSvg, destroy: () => container?.selectAll("svg.clusterMap *").interrupt() },
     canvas: canvasBackend,
@@ -1239,6 +1241,15 @@ export default function clusterMap() {
     return my;
   };
   my.visibleData = () => plotData;
+  /** Requested renderer and the actual WebGPU fallback state. */
+  my.rendererStatus = () => {
+    if (!container) return null;
+    const requested = runtime.config.plot.renderer;
+    if (requested !== "webgpu") return { requested, active: requested, state: "active", reason: null };
+    const { state, reason } = webgpuBackend.status();
+    return { requested, active: state === "active" ? "webgpu" : state === "fallback" ? "canvas" : null,
+      state, reason };
+  };
   /** Replace only the tree; biological data and chart indexes remain owned by the chart. */
   my.tree = function (tree) {
     if (!arguments.length) return currentData?.tree ? clonePlainValue(currentData.tree) : null;
