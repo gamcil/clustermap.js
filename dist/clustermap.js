@@ -1110,6 +1110,44 @@
     return indicators;
   }
 
+  // Scene edits preserve the previous scene for animation. Copying a multi-million
+  // entry Map for a small edit is expensive, so share a stable base and replace
+  // only changed records. Periodically compact to bound retained overrides.
+  class PatchedLinkRecords {
+    constructor(base, changes) { this.base = base; this.changes = changes; }
+    get size() { return this.base.size; }
+    get(uid) { return this.changes.has(uid) ? this.changes.get(uid) : this.base.get(uid); }
+    has(uid) { return this.base.has(uid); }
+    *entries() {
+      for (const [uid, record] of this.base) yield [uid, this.changes.has(uid) ? this.changes.get(uid) : record];
+    }
+    *keys() { yield* this.base.keys(); }
+    *values() { for (const [, record] of this.entries()) yield record; }
+    [Symbol.iterator]() { return this.entries(); }
+  }
+
+  // An animation frame is transient and never patched again; layer its small
+  // changes over the target scene without copying its persistent edit overlay.
+  function overlayLinkRecords(records, changes) {
+    return changes.size ? new PatchedLinkRecords(records, changes) : records;
+  }
+
+  function patchLinkRecords(records, changes) {
+    if (!changes.size) return records;
+    const base = records instanceof PatchedLinkRecords ? records.base : records;
+    const combined = records instanceof PatchedLinkRecords ? new Map(records.changes) : new Map();
+    for (const [uid, record] of changes) {
+      if (!base.has(uid)) throw new TypeError("Link scene patches cannot add records.");
+      combined.set(uid, record);
+    }
+    if (combined.size > base.size / 4) {
+      const compacted = new Map(base);
+      for (const [uid, record] of combined) compacted.set(uid, record);
+      return compacted;
+    }
+    return new PatchedLinkRecords(base, combined);
+  }
+
   function clusterUidForLocus(locus) {
     return locus.cluster?.uid ?? locus.cluster?.source?.uid ?? locus.source.clusterUid;
   }
@@ -1645,19 +1683,26 @@
       });
     }
 
-    const links = new Map();
-    for (const [uid, link] of scene.links) {
+    const previousBounds = previous.index?.links?.boundsById;
+    const nextBounds = scene.index?.links?.boundsById;
+    // Only links with geometry at either endpoint can fade or move. Fall back
+    // to all records for external compact scenes without spatial indexes.
+    const candidates = previousBounds && nextBounds
+      ? new Set([...previousBounds.keys(), ...nextBounds.keys()]) : scene.links.keys();
+    const changedLinks = new Map();
+    for (const uid of candidates) {
+      const link = scene.links.get(uid);
+      if (!link) continue;
       const prior = previous.links.get(uid);
       // Invisible links cannot contribute to this transition. Preserve their
       // retained record for drag previews without allocating an interpolated
       // object and geometry on every animation frame.
       if (!prior?.visible && !link.visible) {
-        links.set(uid, link);
         continue;
       }
       const opacity = interpolateLinkOpacity(prior, link, amount);
       const anchors = interpolateLinkAnchors(previous, prior, scene, link, amount);
-      links.set(uid, {
+      changedLinks.set(uid, {
         ...link,
         // Retained scene link anchors are normalized upper-to-lower. During a
         // row swap that reverses which endpoint is upper, so interpolate in
@@ -1668,11 +1713,14 @@
         visible: opacity > 0 && Boolean(prior?.visible || link.visible),
       });
     }
+    const links = overlayLinkRecords(scene.links, changedLinks);
+    const animationLinkIds = previousBounds && nextBounds
+      ? [...changedLinks.keys()].sort((a, b) => scene.links.get(a).order - scene.links.get(b).order) : null;
 
     const priorPanels = new Map((previous.annotationPanels || []).map((panel) => [panel.uid, panel]));
     const annotationPanels = (scene.annotationPanels || []).map((panel) => ({ ...panel,
       x: interpolateNumber$1(priorPanels.get(panel.uid)?.x ?? panel.x, panel.x, amount) }));
-    return { ...scene, clusters, loci, genes, links, annotationPanels };
+    return { ...scene, clusters, loci, genes, links, annotationPanels, animationLinkIds };
   }
 
   const leafXAnchors = new WeakMap();
@@ -2200,6 +2248,19 @@
     );
   }
 
+  // Scene indexes are replaced, not mutated, when geometry changes. Cache the
+  // complete drawable set so an overview or full-scene paint need not enumerate
+  // every retained link on each frame.
+  const orderedIdsCache = new WeakMap();
+  function allIndexedIds(index) {
+    let ids = orderedIdsCache.get(index);
+    if (!ids) {
+      ids = [...index.boundsById.keys()].sort((a, b) => index.orderById.get(a) - index.orderById.get(b));
+      orderedIdsCache.set(index, ids);
+    }
+    return ids;
+  }
+
   function pointCandidates(index, point) {
     return [...queryViewport(index, {
       minX: point.x,
@@ -2222,38 +2283,6 @@
     return pointCandidates(index, point).sort(
       (left, right) => index.orderById.get(left) - index.orderById.get(right)
     );
-  }
-
-  // Scene edits preserve the previous scene for animation. Copying a multi-million
-  // entry Map for a small edit is expensive, so share a stable base and replace
-  // only changed records. Periodically compact to bound retained overrides.
-  class PatchedLinkRecords {
-    constructor(base, changes) { this.base = base; this.changes = changes; }
-    get size() { return this.base.size; }
-    get(uid) { return this.changes.has(uid) ? this.changes.get(uid) : this.base.get(uid); }
-    has(uid) { return this.base.has(uid); }
-    *entries() {
-      for (const [uid, record] of this.base) yield [uid, this.changes.has(uid) ? this.changes.get(uid) : record];
-    }
-    *keys() { yield* this.base.keys(); }
-    *values() { for (const [, record] of this.entries()) yield record; }
-    [Symbol.iterator]() { return this.entries(); }
-  }
-
-  function patchLinkRecords(records, changes) {
-    if (!changes.size) return records;
-    const base = records instanceof PatchedLinkRecords ? records.base : records;
-    const combined = records instanceof PatchedLinkRecords ? new Map(records.changes) : new Map();
-    for (const [uid, record] of changes) {
-      if (!base.has(uid)) throw new TypeError("Link scene patches cannot add records.");
-      combined.set(uid, record);
-    }
-    if (combined.size > base.size / 4) {
-      const compacted = new Map(base);
-      for (const [uid, record] of combined) compacted.set(uid, record);
-      return compacted;
-    }
-    return new PatchedLinkRecords(base, combined);
   }
 
   /** Figure content excludes the hover region and trim handles. */
@@ -11713,8 +11742,14 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
         })
       : null;
 
+    const linkIds = !(showLinks || showLinkLabels) ? null : !preview && previousScene && displayScene.animationLinkIds
+      ? displayScene.animationLinkIds
+      : !preview && (!previousScene || progress >= 1) && visible?.links == null && displayScene.index?.links?.boundsById
+        ? allIndexedIds(displayScene.index.links)
+        : visible?.links;
+
     for (const link of (showLinks || showLinkLabels)
-      ? previewRecords?.links || recordsFor(displayScene.links, visible?.links, "links")
+      ? previewRecords?.links || recordsFor(displayScene.links, linkIds, "links")
       : []) {
       const geometry = linkGeometryForPreview(displayScene, link, preview, config);
       const anchors = geometry.anchors;

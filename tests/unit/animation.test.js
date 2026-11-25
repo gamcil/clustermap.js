@@ -21,6 +21,28 @@ test("scene animation reuses links invisible at both endpoints while preserving 
   assert.equal(frame.links.get("leaving").visible, true);
 });
 
+test("indexed animation visits only links with endpoint geometry and keeps painter order", () => {
+  const anchors = [0, 1, 0, 0, 1, 10];
+  const records = new Map(Array.from({ length: 100 }, (_, uid) => [uid,
+    { source: { uid, query: { uid: "q" } }, order: uid, visible: false, anchors: null }]));
+  const oldLinks = new Map(records), newLinks = new Map(records);
+  oldLinks.set(2, { ...records.get(2), visible: true, anchors });
+  newLinks.set(8, { ...records.get(8), visible: true, anchors });
+  let reads = 0;
+  const target = { get: (uid) => { reads++; return newLinks.get(uid); }, keys: () => { throw new Error("scanned all links"); },
+    [Symbol.iterator]: () => newLinks[Symbol.iterator](), size: newLinks.size, has: (uid) => newLinks.has(uid) };
+  const empty = { loci: new Map(), clusters: new Map(), genes: new Map() };
+  const previous = { ...empty, links: oldLinks, index: { links: { boundsById: new Map([[2, {}]]) } } };
+  const next = { ...empty, links: target, index: { links: { boundsById: new Map([[8, {}]]) } } };
+  const frame = interpolateScene(previous, next, 0.5);
+  assert.ok(reads <= 4, "only candidate links are accessed");
+  assert.equal(frame.links.get(2).opacity, 0.5);
+  assert.equal(frame.links.get(8).opacity, 0.5);
+  assert.equal(frame.links.get(50), records.get(50));
+  assert.deepEqual(frame.animationLinkIds, [2, 8]);
+  assert.deepEqual([...frame.links].map(([uid]) => uid), [...records.keys()]);
+});
+
 test("cancelled animation work stays inert even after its callback was dequeued", (t) => {
   const frames = new Map();
   let serial = 0;

@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 test("sparse painter order tracks only bounded records and restores original order", async () => {
-  const { createSpatialIndex, patchSpatialIndex, queryViewportOrdered } = await import("../../src/scene/spatialIndex.mjs");
+  const { createSpatialIndex, patchSpatialIndex, queryViewportOrdered, allIndexedIds } = await import("../../src/scene/spatialIndex.mjs");
   const box = { minX: 0, maxX: 10, minY: 0, maxY: 10 };
   let index = createSpatialIndex([["first", null, 0], ["middle", box, 1], ["last", box, 2]], { sparseOrder: true });
   assert.equal(index.orderById.size, 2);
+  assert.deepEqual(allIndexedIds(index), ["middle", "last"]);
   index = patchSpatialIndex(index, [["first", box, 0], ["last", null, 2]]);
   assert.equal(index.orderById.size, 2);
+  assert.deepEqual(allIndexedIds(index), ["first", "middle"]);
   assert.deepEqual(queryViewportOrdered(index, box), ["first", "middle"]);
   index = patchSpatialIndex(index, [["last", box, 2]]);
   assert.deepEqual(queryViewportOrdered(index, box), ["first", "middle", "last"]);

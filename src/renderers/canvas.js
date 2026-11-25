@@ -5,6 +5,7 @@ import { hitTest, containsRegion } from "../scene/hitTest.mjs";
 import { boundsInViewport, worldViewport, worldPoint } from "../scene/camera.mjs";
 import { figureConfig } from "../ui/theme.mjs";
 import { sceneRecordsInViewport } from "../scene/viewport.mjs";
+import { allIndexedIds } from "../scene/spatialIndex.mjs";
 import {
   interpolateScene,
   clusterPreviewInViewport,
@@ -588,8 +589,14 @@ export function renderCanvas({
       })
     : null;
 
+  const linkIds = !(showLinks || showLinkLabels) ? null : !preview && previousScene && displayScene.animationLinkIds
+    ? displayScene.animationLinkIds
+    : !preview && (!previousScene || progress >= 1) && visible?.links == null && displayScene.index?.links?.boundsById
+      ? allIndexedIds(displayScene.index.links)
+      : visible?.links;
+
   for (const link of (showLinks || showLinkLabels)
-    ? previewRecords?.links || recordsFor(displayScene.links, visible?.links, "links")
+    ? previewRecords?.links || recordsFor(displayScene.links, linkIds, "links")
     : []) {
     const geometry = linkGeometryForPreview(displayScene, link, preview, config);
     const anchors = geometry.anchors;

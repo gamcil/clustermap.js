@@ -11,6 +11,23 @@ import { createChartRuntime } from "../../src/chart/runtime.js";
 import { createChartState, setLocusOffset } from "../../src/chart/state.mjs";
 import { createLocusOffsetsPreview } from "../../src/scene/preview.mjs";
 
+test("Canvas full-scene painting visits indexed links without scanning retained links", () => {
+  const calls = [];
+  const context = new Proxy({ measureText: () => ({ width: 10 }) }, {
+    get: (target, key) => key in target ? target[key] : (...args) => calls.push([key, ...args]),
+  });
+  const canvas = { width: 0, height: 0, getContext: () => context,
+    getBoundingClientRect: () => ({ width: 1000, height: 1000 }) };
+  const data = normalizeChartData(createLargeTestingData({ clusterCount: 3, genesPerCluster: 3 }));
+  const runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
+  const scene = runtime.updateScene(data), original = scene.links;
+  scene.links = { get: (uid) => original.get(uid), keys: () => { throw new Error("scanned retained links"); } };
+  renderCanvas({ canvas, scene, layers: ["links"], fullScene: true,
+    config: runtime.renderConfig, scales: runtime.scales, camera: { x: 0, y: 0, k: 1 } });
+  assert.ok(calls.some(([method]) => method === "bezierCurveTo"));
+});
+
 test("Canvas hides links and retains geometry and labels moved into view by a preview", () => {
   const calls = [];
   const context = new Proxy({ measureText: (text) => ({ width: String(text).length * 8 }) }, {

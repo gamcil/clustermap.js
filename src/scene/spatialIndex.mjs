@@ -142,6 +142,19 @@ export function queryViewportOrdered(index, viewport) {
   );
 }
 
+// Scene indexes are replaced, not mutated, when geometry changes. Cache the
+// complete drawable set so an overview or full-scene paint need not enumerate
+// every retained link on each frame.
+const orderedIdsCache = new WeakMap();
+export function allIndexedIds(index) {
+  let ids = orderedIdsCache.get(index);
+  if (!ids) {
+    ids = [...index.boundsById.keys()].sort((a, b) => index.orderById.get(a) - index.orderById.get(b));
+    orderedIdsCache.set(index, ids);
+  }
+  return ids;
+}
+
 /** Return IDs whose exact bounds contain a world-space point. */
 export function queryPoint(index, point) {
   const candidates = pointCandidates(index, point);

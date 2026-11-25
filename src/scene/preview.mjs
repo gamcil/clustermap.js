@@ -2,6 +2,7 @@ import { layoutClusterLabels } from "./clusterLabels.mjs";
 import { boundsInViewport } from "./camera.mjs";
 import { clusterPairKey, orderLinkAnchors, interpolateLinkAnchors, interpolateLinkOpacity } from "../links/layout.mjs";
 import { arrangeTrimIndicators, createTrimIndicators } from "../loci/trimIndicators.mjs";
+import { overlayLinkRecords } from "./linkRecords.mjs";
 
 function clusterUidForLocus(locus) {
   return locus.cluster?.uid ?? locus.cluster?.source?.uid ?? locus.source.clusterUid;
@@ -538,19 +539,26 @@ export function interpolateScene(previous, scene, amount) {
     });
   }
 
-  const links = new Map();
-  for (const [uid, link] of scene.links) {
+  const previousBounds = previous.index?.links?.boundsById;
+  const nextBounds = scene.index?.links?.boundsById;
+  // Only links with geometry at either endpoint can fade or move. Fall back
+  // to all records for external compact scenes without spatial indexes.
+  const candidates = previousBounds && nextBounds
+    ? new Set([...previousBounds.keys(), ...nextBounds.keys()]) : scene.links.keys();
+  const changedLinks = new Map();
+  for (const uid of candidates) {
+    const link = scene.links.get(uid);
+    if (!link) continue;
     const prior = previous.links.get(uid);
     // Invisible links cannot contribute to this transition. Preserve their
     // retained record for drag previews without allocating an interpolated
     // object and geometry on every animation frame.
     if (!prior?.visible && !link.visible) {
-      links.set(uid, link);
       continue;
     }
     const opacity = interpolateLinkOpacity(prior, link, amount);
     const anchors = interpolateLinkAnchors(previous, prior, scene, link, amount);
-    links.set(uid, {
+    changedLinks.set(uid, {
       ...link,
       // Retained scene link anchors are normalized upper-to-lower. During a
       // row swap that reverses which endpoint is upper, so interpolate in
@@ -561,9 +569,12 @@ export function interpolateScene(previous, scene, amount) {
       visible: opacity > 0 && Boolean(prior?.visible || link.visible),
     });
   }
+  const links = overlayLinkRecords(scene.links, changedLinks);
+  const animationLinkIds = previousBounds && nextBounds
+    ? [...changedLinks.keys()].sort((a, b) => scene.links.get(a).order - scene.links.get(b).order) : null;
 
   const priorPanels = new Map((previous.annotationPanels || []).map((panel) => [panel.uid, panel]));
   const annotationPanels = (scene.annotationPanels || []).map((panel) => ({ ...panel,
     x: interpolateNumber(priorPanels.get(panel.uid)?.x ?? panel.x, panel.x, amount) }));
-  return { ...scene, clusters, loci, genes, links, annotationPanels };
+  return { ...scene, clusters, loci, genes, links, annotationPanels, animationLinkIds };
 }

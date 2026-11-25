@@ -14,6 +14,12 @@ class PatchedLinkRecords {
   [Symbol.iterator]() { return this.entries(); }
 }
 
+// An animation frame is transient and never patched again; layer its small
+// changes over the target scene without copying its persistent edit overlay.
+export function overlayLinkRecords(records, changes) {
+  return changes.size ? new PatchedLinkRecords(records, changes) : records;
+}
+
 export function patchLinkRecords(records, changes) {
   if (!changes.size) return records;
   const base = records instanceof PatchedLinkRecords ? records.base : records;
