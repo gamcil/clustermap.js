@@ -4813,6 +4813,7 @@
       links,
       linksByClusterPair,
       linksByGene,
+      clusterOrder: clusterOrder ? [...clusterOrder] : null,
       bounds,
       ...annotations,
       index: {
@@ -5047,8 +5048,38 @@
     }
 
     const sources = new Map();
-    for (const uid of changedGenes) {
-      for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
+    const nextOrder = options.clusterOrder;
+    const translationOnly = scene.clusterOrder && nextOrder && scene.linksByClusterPair &&
+      [...changedLoci].every((uid) => {
+        const before = scene.loci.get(uid), after = loci.get(uid);
+        return before && after && before.localX === after.localX &&
+          before.state.start === after.state.start && before.state.end === after.state.end &&
+          before.state.flipped === after.state.flipped;
+      });
+    if (translationOnly) {
+      // Cluster translations are applied to retained GPU records through their
+      // row slots. Only old or new adjacent pairs need committed scene geometry;
+      // all other pairs remain available through the persistent pair index.
+      const pairs = new Set();
+      for (const order of [scene.clusterOrder, nextOrder]) {
+        const positions = new Map(order.map((uid, i) => [uid, i]));
+        for (const uid of requestedClusters) {
+          const position = positions.get(uid);
+          if (position === undefined) continue;
+          for (const neighbour of [order[position - 1], order[position + 1]]) {
+            if (neighbour !== undefined) pairs.add(clusterPairKey(uid, neighbour));
+          }
+        }
+      }
+      for (const pair of pairs) for (const uid of scene.linksByClusterPair.get(pair) || []) {
+        const source = scene.links.get(uid)?.source;
+        if (source) sources.set(uid, source);
+      }
+    } else {
+      // Local locus edits also update nonadjacent GPU records for later previews.
+      for (const uid of changedGenes) {
+        for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
+      }
     }
     const changedLinks = new Map();
     for (const source of sources.values()) {
@@ -5089,6 +5120,7 @@
       { ...options, rowOffset: geneMidpoint }, scene);
     return {
       ...scene, clusters, loci, genes, links, bounds, chrome, hitRegions, ...annotations,
+      clusterOrder: nextOrder ? [...nextOrder] : scene.clusterOrder,
       changes: { loci: changedLoci, genes: changedGenes, links: new Set(sources.keys()), clusters: requestedClusters },
       index: {
         genes: updateSpatialIndex(scene.index.genes, entries(genes, changedGenes), () => entries(genes, genes.keys())),

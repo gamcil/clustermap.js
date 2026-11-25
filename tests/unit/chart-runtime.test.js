@@ -40,6 +40,8 @@ test("scene patches retain nonadjacent links and reveal them after row changes",
   assert.equal(initial.links.get("ac").anchors, null);
   assert.equal(initial.links.get("ac").bounds, null);
   assert.equal(initial.links.get("ac").labelPosition, null);
+  const byGene = initial.linksByGene, get = byGene.get;
+  byGene.get = () => { throw new Error("row translations must use adjacent pair indexes"); };
   setClusterOffset(state, "a", 10);
   const moved = runtime.updateScene(data, { sourceScene: initial, changes: { clusters: ["a"] } });
   assert.equal(moved.links.get("ac"), initial.links.get("ac"));
@@ -48,6 +50,40 @@ test("scene patches retain nonadjacent links and reveal them after row changes",
   assert.equal(reordered.links.get("ac").visible, true);
   assert.ok(reordered.index.links.boundsById.has("ac"));
   assert.equal(initial.links.get("ac").visible, false);
+  byGene.get = get;
+});
+
+test("row translations and reorder patches match a full scene rebuild", async () => {
+  const [{ createChartRuntime }, { normalizeChartData }, { createChartIndex },
+    { createChartState, setClusterOffset }] = await Promise.all([
+    import("../../src/chart/runtime.js"), import("../../src/data/normalize.mjs"),
+    import("../../src/data/index.mjs"), import("../../src/chart/state.mjs"),
+  ]);
+  const ids = ["a", "b", "c", "d", "e"];
+  const links = [];
+  for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+    links.push({ uid: `${ids[i]}-${ids[j]}`, query: { uid: `g-${ids[i]}` },
+      target: { uid: `g-${ids[j]}` }, identity: 0.9 });
+  }
+  const data = normalizeChartData({ clusters: ids.map((uid) => ({ uid,
+    loci: [{ uid: `l-${uid}`, start: 0, end: 100,
+      genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
+    links, groups: [{ uid: "group", genes: ids.map((uid) => `g-${uid}`) }], config: { updateGroups: false } });
+  const runtime = createChartRuntime(), state = createChartState(data);
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
+  let scene = runtime.updateScene(data);
+  const compare = (patched, rebuilt) => {
+    assert.deepEqual([...patched.links].map(([uid, link]) => [uid, link.visible, link.anchors]),
+      [...rebuilt.links].map(([uid, link]) => [uid, link.visible, link.anchors]));
+    assert.deepEqual([...patched.index.links.boundsById.keys()].sort(), [...rebuilt.index.links.boundsById.keys()].sort());
+  };
+  setClusterOffset(state, "b", 25);
+  let patched = runtime.updateScene(data, { sourceScene: scene, changes: { clusters: ["b"] } });
+  compare(patched, runtime.updateScene(data));
+  scene = patched;
+  state.clusterOrder = ["e", "b", "a", "d", "c"];
+  patched = runtime.updateScene(data, { sourceScene: scene, changes: {} });
+  compare(patched, runtime.updateScene(data));
 });
 
 test("runtime applies best-only link visibility to the shared scene", async () => {
