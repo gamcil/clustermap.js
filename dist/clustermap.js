@@ -14710,16 +14710,24 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   }
 
   function buildLinkRecords(scene, scales, config, locusSlots, device) {
-    const values = [];
+    const keep = (link) => (link.allowed !== false || link.visible) &&
+      scene.genes.has(link.source.query.uid) && scene.genes.has(link.source.target.uid);
+    let count = 0;
+    for (const link of scene.links.values()) if (keep(link)) count++;
+    checkBufferSize(device, count * 16 * 4, "link records", true);
+    const values = new Float32Array(count * 16);
     const indexByUid = new Map();
     for (const link of scene.links.values()) {
+      // Filtering cannot change during a geometry-only drag or trim preview.
+      // Retain nonadjacent allowed links for row previews, and retain a visible
+      // transition record even if its target scene no longer permits it.
+      if (!keep(link)) continue;
       const record = linkRecordForGpu(scene, link, scales, config, locusSlots);
       if (!record) continue;
-      checkBufferSize(device, (values.length + record.length) * 4, "link records", true);
+      values.set(record, indexByUid.size * 16);
       indexByUid.set(link.source.uid, indexByUid.size);
-      values.push(...record);
     }
-    return { values: new Float32Array(values), indexByUid };
+    return { values, indexByUid };
   }
 
   function trackVertices(locus, config, preview = null, clusterSlot = 0) {
@@ -14777,6 +14785,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       locusSlots.set(uid, nextSlot++);
     }
     for (const link of scene.links.values()) {
+      if (link.allowed === false && !link.visible) continue;
       // Normally an invisible link has no reason to consume a GPU range. The
       // exception is a link hidden solely by a committed trim: it can reappear
       // during an expanding trim preview.
@@ -15323,7 +15332,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       }
       return rangesByField;
     };
-    const visibleLinkIndices = (ids = scene.links.keys()) => {
+    const visibleLinkIndices = (ids = scene.animationLinkIds ??
+      (scene.index?.links?.boundsById ? allIndexedIds(scene.index.links) : scene.links.keys())) => {
       const indices = [];
       for (const uid of ids) {
         const link = scene.links.get(uid);

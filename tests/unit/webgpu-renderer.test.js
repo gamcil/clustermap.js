@@ -76,8 +76,37 @@ test("WebGPU rejects oversized link storage before creating an invalid buffer", 
   const scene = runtime.updateScene(data);
   assert.throws(() => renderer.render({ nextScene: scene, scales: runtime.scales, config: runtime.renderConfig,
     camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 }),
-  /link records buffer requires 128 bytes, exceeding maxStorageBufferBindingSize 64/);
+  /link records buffer requires 256 bytes, exceeding maxStorageBufferBindingSize 64/);
   assert.equal(buffers.some((buffer) => (buffer.usage & GPUBufferUsage.STORAGE) && buffer.size > 64), false);
+});
+
+test("WebGPU excludes filtered links but retains allowed nonadjacent links for previews", async (t) => {
+  const { renderer, getBindings, draws } = await gpuHarness(t);
+  const data = normalizeChartData({ clusters: ["a", "b", "c"].map((uid) => ({ uid,
+    loci: [{ uid: `l-${uid}`, start: 0, end: 100,
+      genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
+    links: [{ uid: "allowed", query: { uid: "g-a" }, target: { uid: "g-c" }, identity: 0.9 },
+      { uid: "hidden", query: { uid: "g-a" }, target: { uid: "g-b" }, identity: 0.9, hidden: true },
+      { uid: "low", query: { uid: "g-a" }, target: { uid: "g-b" }, identity: 0.1 }],
+    groups: [{ uid: "group", genes: ["g-a", "g-b", "g-c"] }], config: { updateGroups: false } });
+  const runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
+  runtime.configure({ link: { threshold: 0.3, bestOnly: false } });
+  const scene = runtime.updateScene(data);
+  assert.equal(scene.links.get("allowed").allowed, true);
+  assert.equal(scene.links.get("allowed").visible, false);
+  assert.equal(scene.links.get("hidden").allowed, false);
+  assert.equal(scene.links.get("low").allowed, false);
+  renderer.render({ nextScene: scene, scales: runtime.scales, config: runtime.renderConfig,
+    camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 });
+  assert.equal(getBindings().find((entry) => entry.binding === 2).resource.buffer.size, 64,
+    "only the allowed nonadjacent link occupies a GPU record");
+  draws.length = 0;
+  const preview = createClusterDragPreview(scene, { clusterUid: "c", position: scene.clusters.get("b").y,
+    order: ["a", "c", "b"], rows: runtime.scales.y.range() });
+  renderer.render({ nextScene: scene, preview, scales: runtime.scales, config: runtime.renderConfig,
+    camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 });
+  assert.equal(draws.find((draw) => draw.entryPoint === "linkFillVertex")?.args[1], 1);
 });
 
 test("WebGPU draws annotation grids behind cells, culls them and updates row positions", async (t) => {
