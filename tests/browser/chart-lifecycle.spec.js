@@ -1,5 +1,28 @@
 import { test, expect } from "@playwright/test";
 
+for (const renderer of ["svg", "canvas"]) {
+  test(`tree replacement updates figure bounds before fitting with ${renderer}`, async ({ page }) => {
+    await page.goto(`http://127.0.0.1:8080/demo/?fixture=burnettii&test=1&renderer=${renderer}`);
+    await page.waitForFunction(() => Boolean(window.__demoChart));
+    const result = await page.evaluate(() => {
+      const chart = window.__demoChart, tree = chart.tree();
+      chart.tree(null);
+      chart.config({ plot: { minZoom: 0.01, transitionDuration: 0 } });
+      const without = chart.figureBounds();
+      chart.tree(tree).fitFigure({ minimumReadableScale: 0 });
+      const fitted = chart.figureBounds();
+      const surface = document.querySelector(".clusterMapFigureSurface");
+      const surfaceWidth = parseFloat(surface.style.width);
+      chart.config({ plot: { minZoom: 0.02 } });
+      return { without, fitted, afterRedraw: chart.figureBounds(), surfaceWidth,
+        refreshedSurfaceWidth: parseFloat(surface.style.width) };
+    });
+    expect(result.fitted.minX).toBeLessThan(result.without.minX);
+    expect(result.fitted.minX).toBeCloseTo(result.afterRedraw.minX, 8);
+    expect(result.surfaceWidth).toBeCloseTo(result.refreshedSurfaceWidth, 8);
+  });
+}
+
 test("renderer status exposes WebGPU fallback to the host", async ({ page }) => {
   await page.addInitScript(() => Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined }));
   await page.goto("http://127.0.0.1:8080/demo/?test=1");

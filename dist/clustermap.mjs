@@ -5430,7 +5430,7 @@ const recordTargets = new Set(["genes", "links", "loci", "clusters", "figure"]);
 
 /** One backdrop shared by all renderers; camera changes only update its transform. */
 function createFigureSurface() {
-  let context = null, measuredScene = null, measuredConfig = null, measuredBounds = null, measuredPreview = null;
+  let context = null, measuredScene = null, measuredConfig = null, measuredTree = null, measuredBounds = null, measuredPreview = null;
   const measurementContext = (container) => {
     if (!container) return null;
     return context ||= container.ownerDocument.createElement("canvas").getContext("2d");
@@ -5440,11 +5440,12 @@ function createFigureSurface() {
     if (!container || !scene?.bounds) return null;
     // Reordering moves rows within the figure without changing its extent.
     if (preview?.type === "cluster-drag") preview = null;
-    if (scene !== measuredScene || config !== measuredConfig || preview !== measuredPreview) {
+    if (scene !== measuredScene || config !== measuredConfig || tree !== measuredTree || preview !== measuredPreview) {
       context = measurementContext(container);
       measuredBounds = measureFigureBounds(context, scene, config, tree, { preview });
       measuredScene = scene;
       measuredConfig = config;
+      measuredTree = tree;
       measuredPreview = preview;
     }
     return { ...measuredBounds };
@@ -5479,7 +5480,7 @@ function createFigureSurface() {
   }
 
   function clear() {
-    context = measuredScene = measuredConfig = measuredBounds = measuredPreview = null;
+    context = measuredScene = measuredConfig = measuredTree = measuredBounds = measuredPreview = null;
   }
 
   return { bounds, update, clear,
