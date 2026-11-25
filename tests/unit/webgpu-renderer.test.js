@@ -14,7 +14,7 @@ import { createChartState, setClusterOffset, setLocusOffset, setPreviewClusterOr
 
 // Exercise retained geometry without requiring a platform GPU adapter. This
 // checks buffer contents/lifetimes; browser tests cover native initialization.
-async function gpuHarness(t, options) {
+async function gpuHarness(t, options, limits) {
   const buffers = [], writes = [], draws = [];
   let bindings, pipeline, vertexBuffer;
   const pass = {
@@ -24,6 +24,7 @@ async function gpuHarness(t, options) {
     end() {},
   };
   const device = {
+    limits,
     createShaderModule: () => ({ getCompilationInfo: async () => ({ messages: [] }) }),
     createBindGroupLayout: () => ({}), createPipelineLayout: () => ({}),
     createRenderPipeline: (descriptor) => descriptor,
@@ -64,6 +65,20 @@ async function gpuHarness(t, options) {
   t.after(() => renderer.destroy());
   return { renderer, buffers, writes, draws, context, events, loseDevice, getBindings: () => bindings };
 }
+
+test("WebGPU rejects oversized link storage before creating an invalid buffer", async (t) => {
+  const { renderer, buffers } = await gpuHarness(t, undefined,
+    { maxStorageBufferBindingSize: 64, maxBufferSize: 1000000 });
+  const data = normalizeChartData(createLargeTestingData({ clusterCount: 3, genesPerCluster: 2 }));
+  const runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data));
+  runtime.setChartState(createChartState(data));
+  const scene = runtime.updateScene(data);
+  assert.throws(() => renderer.render({ nextScene: scene, scales: runtime.scales, config: runtime.renderConfig,
+    camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 }),
+  /link records buffer requires 128 bytes, exceeding maxStorageBufferBindingSize 64/);
+  assert.equal(buffers.some((buffer) => (buffer.usage & GPUBufferUsage.STORAGE) && buffer.size > 64), false);
+});
 
 test("WebGPU draws annotation grids behind cells, culls them and updates row positions", async (t) => {
   const { renderer, draws } = await gpuHarness(t);

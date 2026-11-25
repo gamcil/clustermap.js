@@ -484,12 +484,13 @@ function linkRecordForGpu(scene, link, scales, config, locusSlots, clusterOffset
   ]);
 }
 
-function buildLinkRecords(scene, scales, config, locusSlots) {
+function buildLinkRecords(scene, scales, config, locusSlots, device) {
   const values = [];
   const indexByUid = new Map();
   for (const link of scene.links.values()) {
     const record = linkRecordForGpu(scene, link, scales, config, locusSlots);
     if (!record) continue;
+    checkBufferSize(device, (values.length + record.length) * 4, "link records", true);
     indexByUid.set(link.source.uid, indexByUid.size);
     values.push(...record);
   }
@@ -602,8 +603,19 @@ function isLocusTransformPreview(preview) {
   return ["locus-offsets", "locus-flip"].includes(preview?.type);
 }
 
+function checkBufferSize(device, size, label, storage = false) {
+  const limits = device.limits;
+  if (size > (limits?.maxBufferSize ?? Infinity)) {
+    throw new RangeError(`WebGPU ${label} buffer requires ${size} bytes, exceeding maxBufferSize ${limits.maxBufferSize}.`);
+  }
+  if (storage && size > (limits?.maxStorageBufferBindingSize ?? Infinity)) {
+    throw new RangeError(`WebGPU ${label} buffer requires ${size} bytes, exceeding maxStorageBufferBindingSize ${limits.maxStorageBufferBindingSize}.`);
+  }
+}
+
 function bufferFor(device, existing, data) {
   if (!data.byteLength) { existing?.destroy(); return null; }
+  checkBufferSize(device, data.byteLength, "geometry");
   if (!existing || existing.size < data.byteLength) {
     existing?.destroy();
     existing = device.createBuffer({
@@ -920,6 +932,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
 
   const resizeStorageBuffer = (buffer, capacity, values) => {
     if (values.byteLength <= capacity * 4) return { buffer, capacity, resized: false };
+    checkBufferSize(device, values.byteLength, "storage", true);
     buffer.destroy();
     return {
       buffer: device.createBuffer({
@@ -977,6 +990,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
   const updateClusterOffsets = (nextPreview) => {
     const size = geometry?.slotCount || 1;
     if (size > clusterOffsetCapacity) {
+      checkBufferSize(device, size * 8, "cluster offsets", true);
       clusterOffsetBuffer.destroy();
       clusterOffsetBuffer = device.createBuffer({
         size: size * 8,
@@ -1007,6 +1021,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
   const updateLocusTransforms = (nextPreview) => {
     const size = geometry?.slotCount || 1;
     if (size > locusTransformCapacity) {
+      checkBufferSize(device, size * 16, "locus transforms", true);
       locusTransformBuffer.destroy();
       locusTransformBuffer = device.createBuffer({
         size: size * 16,
@@ -1114,7 +1129,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     if (retainedClusterGeometry && nextPreview?.type === "locus-trim") {
       geometry = buildGeometry(scene, scales, config);
       uploadGeometry(geometry);
-      uploadLinkRecords(buildLinkRecords(scene, scales, config, geometry.locusSlots));
+      uploadLinkRecords(buildLinkRecords(scene, scales, config, geometry.locusSlots, device));
       resetRetainedClusterGeometry();
       updateClusterOffsets(null);
     }
@@ -1307,7 +1322,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
       if (scene !== nextScene) {
         geometry = buildGeometry(nextScene, scales, config);
         uploadGeometry(geometry);
-        uploadLinkRecords(buildLinkRecords(nextScene, scales, config, geometry.locusSlots));
+        uploadLinkRecords(buildLinkRecords(nextScene, scales, config, geometry.locusSlots, device));
         resetRetainedClusterGeometry();
         scene = nextScene;
         updateClusterOffsets(null);
