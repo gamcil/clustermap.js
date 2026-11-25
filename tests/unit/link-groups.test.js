@@ -141,3 +141,16 @@ test("identity threshold applies even when best-only filtering is disabled", asy
   });
   assert.deepEqual(filtered.map((item) => item.uid), ["at"]);
 });
+
+test("filtering preserves input order, records and equal-identity ties", async () => {
+  const { filterLinks } = await import("../../src/links/groups.mjs");
+  const genes = new Map([["a", { clusterUid: "one" }], ["b", { clusterUid: "two" }],
+    ["c", { clusterUid: "two" }]]);
+  const links = [link("first", "a", "b", 0.8), link("tie", "a", "c", 0.8),
+    { ...link("hidden", "a", "b", 1), hidden: true }, link("missing", "a", "absent", 1)];
+  const original = [...links];
+  const options = { groupForGene: () => 0, geneForUid: (uid) => genes.get(uid), threshold: 0, bestOnly: false };
+  assert.deepEqual(filterLinks(links, options), links.slice(0, 2));
+  assert.deepEqual(filterLinks(links, { ...options, bestOnly: true }), links.slice(0, 2));
+  assert.deepEqual(links, original);
+});

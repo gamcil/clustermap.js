@@ -150,12 +150,12 @@ export function filterLinks(
       groupForGene(link.query.uid) === null ||
       groupForGene(link.target.uid) === null
     ) continue;
-    passing.push({ link, query, target });
+    passing.push(link);
   }
   // Threshold decides visibility regardless of whether the optional
   // best-per-cluster-pair reduction is enabled. Colour scaling is deliberately
   // independent and is resolved by the shared identity scale.
-  if (!bestOnly) return passing.map(({ link }) => link);
+  if (!bestOnly) return passing;
 
   const pairKey = (left, right) => {
     const first = `${typeof left}:${String(left)}`;
@@ -163,9 +163,13 @@ export function filterLinks(
     return first < second ? `${first}|${second}` : `${second}|${first}`;
   };
   const linksByClusterPair = new Map();
-  const byIdentity = [...passing].sort((a, b) => b.link.identity - a.link.identity);
+  // Sort link references directly. Endpoint records can be looked up again
+  // after sorting, avoiding a short-lived wrapper object for every link.
+  passing.sort((a, b) => b.identity - a.identity);
 
-  for (const { link, query, target } of byIdentity) {
+  for (const link of passing) {
+    const query = geneForUid(link.query.uid);
+    const target = geneForUid(link.target.uid);
     const clusterPair = pairKey(
       query.clusterUid,
       target.clusterUid
