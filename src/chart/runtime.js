@@ -184,6 +184,7 @@ function locusTextForCluster(uid) {
 function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
   const config = renderConfig();
   return {
+    linkIndexes: chartIndex,
     scaleX: scales.x,
     locusOffset: scales.locus,
     getLocusState: locusState,

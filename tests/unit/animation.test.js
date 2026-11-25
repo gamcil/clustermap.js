@@ -1,6 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { animate, afterPaint } from "../../src/renderers/animation.mjs";
+import { interpolateScene } from "../../src/scene/preview.mjs";
+
+test("scene animation reuses links invisible at both endpoints while preserving fades", () => {
+  const anchors = [0, 1, 0, 0, 1, 10];
+  const invisible = { source: { uid: "hidden" }, visible: false, anchors: null };
+  const entering = { source: { uid: "entering", query: { uid: "q" } }, visible: true, anchors };
+  const leaving = { source: { uid: "leaving", query: { uid: "q" } }, visible: false, anchors: null };
+  const base = { loci: new Map(), clusters: new Map(), genes: new Map() };
+  const previous = { ...base, links: new Map([["hidden", { ...invisible }],
+    ["entering", { ...entering, visible: false, anchors: null }],
+    ["leaving", { ...leaving, visible: true, anchors }]]) };
+  const next = { ...base, links: new Map([["hidden", invisible], ["entering", entering], ["leaving", leaving]]) };
+  const frame = interpolateScene(previous, next, 0.5);
+  assert.equal(frame.links.get("hidden"), invisible);
+  assert.equal(frame.links.get("entering").opacity, 0.5);
+  assert.equal(frame.links.get("leaving").opacity, 0.5);
+  assert.equal(frame.links.get("entering").visible, true);
+  assert.equal(frame.links.get("leaving").visible, true);
+});
 
 test("cancelled animation work stays inert even after its callback was dequeued", (t) => {
   const frames = new Map();

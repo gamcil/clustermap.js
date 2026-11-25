@@ -22,6 +22,31 @@ test("runtime keeps default interaction callbacks declarative", async () => {
   assert.equal(runtime.config.plot.renderer, "canvas");
 });
 
+test("scene patches retain nonadjacent links and reveal them after row changes", async () => {
+  const [{ createChartRuntime }, { normalizeChartData }, { createChartIndex },
+    { createChartState, setClusterOffset }] = await Promise.all([
+    import("../../src/chart/runtime.js"), import("../../src/data/normalize.mjs"),
+    import("../../src/data/index.mjs"), import("../../src/chart/state.mjs"),
+  ]);
+  const data = normalizeChartData({ clusters: ["a", "b", "c"].map((uid) => ({ uid,
+    loci: [{ uid: `l-${uid}`, start: 0, end: 100,
+      genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
+    links: [{ uid: "ac", query: { uid: "g-a" }, target: { uid: "g-c" }, identity: 0.9 }],
+    groups: [{ uid: "group", genes: ["g-a", "g-c"] }], config: { updateGroups: false } });
+  const runtime = createChartRuntime(), state = createChartState(data);
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
+  const initial = runtime.updateScene(data);
+  assert.equal(initial.links.get("ac").visible, false);
+  setClusterOffset(state, "a", 10);
+  const moved = runtime.updateScene(data, { sourceScene: initial, changes: { clusters: ["a"] } });
+  assert.equal(moved.links.get("ac"), initial.links.get("ac"));
+  state.clusterOrder = ["a", "c", "b"];
+  const reordered = runtime.updateScene(data, { sourceScene: moved, changes: {} });
+  assert.equal(reordered.links.get("ac").visible, true);
+  assert.ok(reordered.index.links.boundsById.has("ac"));
+  assert.equal(initial.links.get("ac").visible, false);
+});
+
 test("runtime applies best-only link visibility to the shared scene", async () => {
   const [
     { createChartRuntime },
@@ -63,11 +88,14 @@ test("runtime applies best-only link visibility to the shared scene", async () =
     groups: [{ uid: "group", label: "Group", genes: ["query", "lower-target", "higher-target"] }],
   });
   const runtime = createChartRuntime();
-  runtime.setChartIndex(createChartIndex(data));
+  const index = createChartIndex(data);
+  runtime.setChartIndex(index);
   runtime.setChartState(createChartState(data));
   runtime.configure({ link: { bestOnly: true } });
 
   const scene = runtime.updateScene(data);
+  assert.equal(scene.linksByGene, index.linksByGeneId);
+  assert.equal(scene.linksByClusterPair, index.linksByClusterPair);
   assert.equal(scene.links.get("lower").allowed, false);
   assert.equal(scene.links.get("lower").visible, false);
   assert.equal(scene.links.get("higher").allowed, true);

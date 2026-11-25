@@ -43,16 +43,16 @@ function cellsForBounds(bounds, { cellWidth, cellHeight }) {
  */
 export function createSpatialIndex(
   records,
-  { cellWidth = DEFAULT_CELL_WIDTH, cellHeight = DEFAULT_CELL_HEIGHT } = {}
+  { cellWidth = DEFAULT_CELL_WIDTH, cellHeight = DEFAULT_CELL_HEIGHT, sparseOrder = false } = {}
 ) {
   const cells = new Map();
   const boundsById = new Map();
   const orderById = new Map();
   let order = 0;
-  for (const [id, bounds] of records) {
+  for (const [id, bounds, explicitOrder] of records) {
     // Retain painter order even for currently invisible records. A scene
     // patch may reveal their bounds later (e.g. a newly adjacent link).
-    orderById.set(id, order);
+    if (!sparseOrder || validBounds(bounds)) orderById.set(id, explicitOrder ?? order);
     order += 1;
     if (!validBounds(bounds)) continue;
     boundsById.set(id, bounds);
@@ -61,7 +61,7 @@ export function createSpatialIndex(
       cells.get(key).add(id);
     }
   }
-  return { cells, boundsById, orderById, cellWidth, cellHeight };
+  return { cells, boundsById, orderById, cellWidth, cellHeight, sparseOrder };
 }
 
 /**
@@ -73,6 +73,7 @@ export function patchSpatialIndex(index, entries) {
   if (!index || !entries?.length) return index;
   const cells = new Map(index.cells);
   const boundsById = new Map(index.boundsById);
+  const orderById = index.sparseOrder ? new Map(index.orderById) : index.orderById;
   const changedCells = new Set();
   const mutableCell = (key) => {
     if (!changedCells.has(key) || !cells.has(key)) {
@@ -82,7 +83,7 @@ export function patchSpatialIndex(index, entries) {
     return cells.get(key);
   };
 
-  for (const [id, bounds] of entries) {
+  for (const [id, bounds, order] of entries) {
     const oldBounds = boundsById.get(id);
     for (const key of cellsForBounds(oldBounds, index)) {
       const cell = mutableCell(key);
@@ -91,7 +92,12 @@ export function patchSpatialIndex(index, entries) {
     }
     if (!validBounds(bounds)) {
       boundsById.delete(id);
+      if (index.sparseOrder) orderById.delete(id);
       continue;
+    }
+    if (index.sparseOrder) {
+      if (!Number.isFinite(order)) throw new TypeError("Sparse spatial index entries require painter order.");
+      orderById.set(id, order);
     }
     boundsById.set(id, bounds);
     for (const key of cellsForBounds(bounds, index)) {
@@ -99,7 +105,7 @@ export function patchSpatialIndex(index, entries) {
       cell.add(id);
     }
   }
-  return { ...index, cells, boundsById };
+  return { ...index, cells, boundsById, orderById };
 }
 
 /** Return candidate IDs whose exact bounds intersect a world-space viewport. */

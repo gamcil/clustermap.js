@@ -43,3 +43,20 @@ test("chart index maps hierarchy and links by stable identifiers", async () => {
   assert.equal(geneA.locusUid, undefined);
   assert.equal(geneB.clusterUid, undefined);
 });
+
+test("link indexes retain input order, dangling endpoints and self links", async () => {
+  const [{ createChartIndex }, { clusterPairKey }] = await Promise.all([
+    import("../../src/data/index.mjs"), import("../../src/links/layout.mjs"),
+  ]);
+  const links = [
+    { uid: "cross", query: { uid: "a" }, target: { uid: "b" } },
+    { uid: "self", query: { uid: "a" }, target: { uid: "a" } },
+    { uid: "missing", query: { uid: "a" }, target: { uid: "missing" } },
+  ];
+  const data = { clusters: [{ uid: "one", loci: [{ uid: "l1", genes: [{ uid: "a" }] }] },
+    { uid: "two", loci: [{ uid: "l2", genes: [{ uid: "b" }] }] }], links };
+  const index = createChartIndex(data);
+  assert.deepEqual(index.linksByGeneId.get("a"), links);
+  assert.deepEqual(index.linksByClusterPair.get(clusterPairKey("one", "two")), ["cross"]);
+  assert.deepEqual(index.linksByClusterPair.get(clusterPairKey("one", "one")), ["self"]);
+});

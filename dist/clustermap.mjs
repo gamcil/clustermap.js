@@ -1642,6 +1642,13 @@ function interpolateScene(previous, scene, amount) {
   const links = new Map();
   for (const [uid, link] of scene.links) {
     const prior = previous.links.get(uid);
+    // Invisible links cannot contribute to this transition. Preserve their
+    // retained record for drag previews without allocating an interpolated
+    // object and geometry on every animation frame.
+    if (!prior?.visible && !link.visible) {
+      links.set(uid, link);
+      continue;
+    }
     const opacity = interpolateLinkOpacity(prior, link, amount);
     const anchors = interpolateLinkAnchors(previous, prior, scene, link, amount);
     links.set(uid, {
@@ -2088,16 +2095,16 @@ function cellsForBounds(bounds, { cellWidth, cellHeight }) {
  */
 function createSpatialIndex(
   records,
-  { cellWidth = DEFAULT_CELL_WIDTH, cellHeight = DEFAULT_CELL_HEIGHT } = {}
+  { cellWidth = DEFAULT_CELL_WIDTH, cellHeight = DEFAULT_CELL_HEIGHT, sparseOrder = false } = {}
 ) {
   const cells = new Map();
   const boundsById = new Map();
   const orderById = new Map();
   let order = 0;
-  for (const [id, bounds] of records) {
+  for (const [id, bounds, explicitOrder] of records) {
     // Retain painter order even for currently invisible records. A scene
     // patch may reveal their bounds later (e.g. a newly adjacent link).
-    orderById.set(id, order);
+    if (!sparseOrder || validBounds(bounds)) orderById.set(id, explicitOrder ?? order);
     order += 1;
     if (!validBounds(bounds)) continue;
     boundsById.set(id, bounds);
@@ -2106,7 +2113,7 @@ function createSpatialIndex(
       cells.get(key).add(id);
     }
   }
-  return { cells, boundsById, orderById, cellWidth, cellHeight };
+  return { cells, boundsById, orderById, cellWidth, cellHeight, sparseOrder };
 }
 
 /**
@@ -2118,6 +2125,7 @@ function patchSpatialIndex(index, entries) {
   if (!index || !entries?.length) return index;
   const cells = new Map(index.cells);
   const boundsById = new Map(index.boundsById);
+  const orderById = index.sparseOrder ? new Map(index.orderById) : index.orderById;
   const changedCells = new Set();
   const mutableCell = (key) => {
     if (!changedCells.has(key) || !cells.has(key)) {
@@ -2127,7 +2135,7 @@ function patchSpatialIndex(index, entries) {
     return cells.get(key);
   };
 
-  for (const [id, bounds] of entries) {
+  for (const [id, bounds, order] of entries) {
     const oldBounds = boundsById.get(id);
     for (const key of cellsForBounds(oldBounds, index)) {
       const cell = mutableCell(key);
@@ -2136,7 +2144,12 @@ function patchSpatialIndex(index, entries) {
     }
     if (!validBounds(bounds)) {
       boundsById.delete(id);
+      if (index.sparseOrder) orderById.delete(id);
       continue;
+    }
+    if (index.sparseOrder) {
+      if (!Number.isFinite(order)) throw new TypeError("Sparse spatial index entries require painter order.");
+      orderById.set(id, order);
     }
     boundsById.set(id, bounds);
     for (const key of cellsForBounds(bounds, index)) {
@@ -2144,7 +2157,7 @@ function patchSpatialIndex(index, entries) {
       cell.add(id);
     }
   }
-  return { ...index, cells, boundsById };
+  return { ...index, cells, boundsById, orderById };
 }
 
 /** Return candidate IDs whose exact bounds intersect a world-space viewport. */
@@ -2203,6 +2216,38 @@ function queryPointOrdered(index, point) {
   return pointCandidates(index, point).sort(
     (left, right) => index.orderById.get(left) - index.orderById.get(right)
   );
+}
+
+// Scene edits preserve the previous scene for animation. Copying a multi-million
+// entry Map for a small edit is expensive, so share a stable base and replace
+// only changed records. Periodically compact to bound retained overrides.
+class PatchedLinkRecords {
+  constructor(base, changes) { this.base = base; this.changes = changes; }
+  get size() { return this.base.size; }
+  get(uid) { return this.changes.has(uid) ? this.changes.get(uid) : this.base.get(uid); }
+  has(uid) { return this.base.has(uid); }
+  *entries() {
+    for (const [uid, record] of this.base) yield [uid, this.changes.has(uid) ? this.changes.get(uid) : record];
+  }
+  *keys() { yield* this.base.keys(); }
+  *values() { for (const [, record] of this.entries()) yield record; }
+  [Symbol.iterator]() { return this.entries(); }
+}
+
+function patchLinkRecords(records, changes) {
+  if (!changes.size) return records;
+  const base = records instanceof PatchedLinkRecords ? records.base : records;
+  const combined = records instanceof PatchedLinkRecords ? new Map(records.changes) : new Map();
+  for (const [uid, record] of changes) {
+    if (!base.has(uid)) throw new TypeError("Link scene patches cannot add records.");
+    combined.set(uid, record);
+  }
+  if (combined.size > base.size / 4) {
+    const compacted = new Map(base);
+    for (const [uid, record] of combined) compacted.set(uid, record);
+    return compacted;
+  }
+  return new PatchedLinkRecords(base, combined);
 }
 
 /** Figure content excludes the hover region and trim handles. */
@@ -4616,6 +4661,7 @@ function buildScene(
     label,
     link,
     linkVisible = () => true,
+    linkIndexes = null,
     clusterLabel = () => "",
     alignLabels = true,
     labelAlignment = "right",
@@ -4634,8 +4680,8 @@ function buildScene(
   const loci = new Map();
   const genes = new Map();
   const links = new Map();
-  const linksByClusterPair = new Map();
-  const linksByGene = new Map();
+  const linksByClusterPair = linkIndexes?.linksByClusterPair || new Map();
+  const linksByGene = linkIndexes?.linksByGeneId || new Map();
   areClustersAdjacent = adjacencyForOrder(clusterOrder, areClustersAdjacent);
   const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
 
@@ -4690,13 +4736,13 @@ function buildScene(
       genes, areClustersAdjacent, scaleX, link, linkVisible,
     });
     links.set(source.uid, linkLayout);
-    for (const uid of new Set([source.query.uid, source.target.uid])) {
+    if (!linkIndexes?.linksByGeneId) for (const uid of new Set([source.query.uid, source.target.uid])) {
       if (!linksByGene.has(uid)) linksByGene.set(uid, []);
       linksByGene.get(uid).push(source);
     }
     const query = genes.get(source.query.uid);
     const target = genes.get(source.target.uid);
-    if (query && target) {
+    if (!linkIndexes?.linksByClusterPair && query && target) {
       const key = clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid);
       const pairLinks = linksByClusterPair.get(key) || [];
       pairLinks.push(source.uid);
@@ -4720,7 +4766,9 @@ function buildScene(
     index: {
       genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
       loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
-      links: createSpatialIndex([...links].map(([uid, link]) => [uid, link.bounds])),
+      links: createSpatialIndex((function* () {
+        for (const [uid, link] of links) yield [uid, link.bounds, link.order];
+      })(), { sparseOrder: true }),
       hitLoci: createSpatialIndex(
         [...hitRegions.loci].map(([uid, regions]) => [
           uid,
@@ -4767,7 +4815,8 @@ function updateSpatialIndex(index, changedEntries, entriesForRebuild) {
   // Dense changes (e.g. a large reorder) are cheaper to rebuild than to patch
   // cell by cell. Construct the complete entry list only on that path.
   return changedEntries.length > (index?.boundsById.size || 0) / 4
-    ? createSpatialIndex(entriesForRebuild())
+    ? createSpatialIndex(entriesForRebuild(), { cellWidth: index?.cellWidth, cellHeight: index?.cellHeight,
+      sparseOrder: index?.sparseOrder })
     : patchSpatialIndex(index, changedEntries);
 }
 
@@ -4949,12 +4998,22 @@ function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = 
   for (const uid of changedGenes) {
     for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
   }
-  const links = new Map(scene.links);
+  const changedLinks = new Map();
   for (const source of sources.values()) {
-    const previous = links.get(source.uid);
-    if (previous) links.set(source.uid, createLinkLayout(source, previous.order, {
+    const previous = scene.links.get(source.uid);
+    const query = genes.get(source.query.uid), target = genes.get(source.target.uid);
+    // A link without anchors stays unchanged when its rows are still not
+    // adjacent; preview code computes its temporary anchors from the genes.
+    if (previous && !previous.anchors && (!query || !target ||
+        !options.areClustersAdjacent(query.display.clusterUid, target.display.clusterUid))) continue;
+    if (previous) changedLinks.set(source.uid, createLinkLayout(source, previous.order, {
       ...options, genes,
     }));
+  }
+  const links = patchLinkRecords(scene.links, changedLinks);
+  const changedLinkBounds = [];
+  for (const [uid, record] of changedLinks) {
+    if (scene.links.get(uid)?.bounds || record.bounds) changedLinkBounds.push([uid, record.bounds, record.order]);
   }
 
   const locusRegions = new Map(scene.hitRegions.loci);
@@ -4982,7 +5041,8 @@ function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = 
     index: {
       genes: updateSpatialIndex(scene.index.genes, entries(genes, changedGenes), () => entries(genes, genes.keys())),
       loci: updateSpatialIndex(scene.index.loci, entries(loci, changedLoci), () => entries(loci, loci.keys())),
-      links: updateSpatialIndex(scene.index.links, entries(links, sources.keys()), () => entries(links, links.keys())),
+      links: updateSpatialIndex(scene.index.links, changedLinkBounds,
+        function* () { for (const [uid, record] of links) yield [uid, record.bounds, record.order]; }),
       hitLoci: updateSpatialIndex(scene.index.hitLoci, entries(locusRegions, changedLoci, hitBounds),
         () => entries(locusRegions, locusRegions.keys(), hitBounds)),
     },
@@ -8972,7 +9032,6 @@ function appendToIndex(index, key, value) {
   if (values) values.push(value);
   else index.set(key, [value]);
 }
-
 function createChartIndex(data) {
   const clusterById = new Map();
   const locusById = new Map();
@@ -8980,25 +9039,34 @@ function createChartIndex(data) {
   const groupById = new Map();
   const linkById = new Map();
   const linksByGeneId = new Map();
+  const linksByClusterPair = new Map();
+  const clusterForGene = new Map();
 
   for (const cluster of data.clusters) {
     clusterById.set(cluster.uid, cluster);
 
     for (const locus of cluster.loci) {
       locusById.set(locus.uid, locus);
-      for (const gene of locus.genes) geneById.set(gene.uid, gene);
+      for (const gene of locus.genes) {
+        geneById.set(gene.uid, gene);
+        clusterForGene.set(gene.uid, cluster.uid);
+      }
     }
   }
 
   for (const link of data.links) {
     linkById.set(link.uid, link);
     appendToIndex(linksByGeneId, link.query.uid, link);
-    appendToIndex(linksByGeneId, link.target.uid, link);
+    if (link.target.uid !== link.query.uid) appendToIndex(linksByGeneId, link.target.uid, link);
+    if (clusterForGene.has(link.query.uid) && clusterForGene.has(link.target.uid)) {
+      appendToIndex(linksByClusterPair, clusterPairKey(clusterForGene.get(link.query.uid),
+        clusterForGene.get(link.target.uid)), link.uid);
+    }
   }
 
   for (const group of data.groups || []) groupById.set(group.uid, group);
 
-  return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId };
+  return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId, linksByClusterPair };
 }
 
 function recordForId(records, uid) {
@@ -13689,6 +13757,7 @@ function locusTextForCluster(uid) {
 function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
   const config = renderConfig();
   return {
+    linkIndexes: chartIndex,
     scaleX: scales.x,
     locusOffset: scales.locus,
     getLocusState: locusState,

@@ -1,9 +1,10 @@
+import { clusterPairKey } from "../links/layout.mjs";
+
 function appendToIndex(index, key, value) {
   const values = index.get(key);
   if (values) values.push(value);
   else index.set(key, [value]);
 }
-
 export function createChartIndex(data) {
   const clusterById = new Map();
   const locusById = new Map();
@@ -11,25 +12,34 @@ export function createChartIndex(data) {
   const groupById = new Map();
   const linkById = new Map();
   const linksByGeneId = new Map();
+  const linksByClusterPair = new Map();
+  const clusterForGene = new Map();
 
   for (const cluster of data.clusters) {
     clusterById.set(cluster.uid, cluster);
 
     for (const locus of cluster.loci) {
       locusById.set(locus.uid, locus);
-      for (const gene of locus.genes) geneById.set(gene.uid, gene);
+      for (const gene of locus.genes) {
+        geneById.set(gene.uid, gene);
+        clusterForGene.set(gene.uid, cluster.uid);
+      }
     }
   }
 
   for (const link of data.links) {
     linkById.set(link.uid, link);
     appendToIndex(linksByGeneId, link.query.uid, link);
-    appendToIndex(linksByGeneId, link.target.uid, link);
+    if (link.target.uid !== link.query.uid) appendToIndex(linksByGeneId, link.target.uid, link);
+    if (clusterForGene.has(link.query.uid) && clusterForGene.has(link.target.uid)) {
+      appendToIndex(linksByClusterPair, clusterPairKey(clusterForGene.get(link.query.uid),
+        clusterForGene.get(link.target.uid)), link.uid);
+    }
   }
 
   for (const group of data.groups || []) groupById.set(group.uid, group);
 
-  return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId };
+  return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId, linksByClusterPair };
 }
 
 export function recordForId(records, uid) {

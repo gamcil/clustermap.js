@@ -541,6 +541,13 @@ export function interpolateScene(previous, scene, amount) {
   const links = new Map();
   for (const [uid, link] of scene.links) {
     const prior = previous.links.get(uid);
+    // Invisible links cannot contribute to this transition. Preserve their
+    // retained record for drag previews without allocating an interpolated
+    // object and geometry on every animation frame.
+    if (!prior?.visible && !link.visible) {
+      links.set(uid, link);
+      continue;
+    }
     const opacity = interpolateLinkOpacity(prior, link, amount);
     const anchors = interpolateLinkAnchors(previous, prior, scene, link, amount);
     links.set(uid, {

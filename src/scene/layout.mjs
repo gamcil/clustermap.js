@@ -10,6 +10,7 @@ import {
   getLinkLabelPosition,
 } from "../links/layout.mjs";
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
+import { patchLinkRecords } from "./linkRecords.mjs";
 import { locusContentBounds } from "../loci/layout.mjs";
 import { arrangeTrimIndicators, createTrimIndicators, resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
 import { layoutAnnotationPanels, annotationFigureBounds, annotationChromeRightEdge, legendTopExtent, legendContentBounds } from "../annotations/model.mjs";
@@ -438,6 +439,7 @@ export function buildScene(
     label,
     link,
     linkVisible = () => true,
+    linkIndexes = null,
     clusterLabel = () => "",
     alignLabels = true,
     labelAlignment = "right",
@@ -456,8 +458,8 @@ export function buildScene(
   const loci = new Map();
   const genes = new Map();
   const links = new Map();
-  const linksByClusterPair = new Map();
-  const linksByGene = new Map();
+  const linksByClusterPair = linkIndexes?.linksByClusterPair || new Map();
+  const linksByGene = linkIndexes?.linksByGeneId || new Map();
   areClustersAdjacent = adjacencyForOrder(clusterOrder, areClustersAdjacent);
   const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
 
@@ -512,13 +514,13 @@ export function buildScene(
       genes, areClustersAdjacent, scaleX, link, linkVisible,
     });
     links.set(source.uid, linkLayout);
-    for (const uid of new Set([source.query.uid, source.target.uid])) {
+    if (!linkIndexes?.linksByGeneId) for (const uid of new Set([source.query.uid, source.target.uid])) {
       if (!linksByGene.has(uid)) linksByGene.set(uid, []);
       linksByGene.get(uid).push(source);
     }
     const query = genes.get(source.query.uid);
     const target = genes.get(source.target.uid);
-    if (query && target) {
+    if (!linkIndexes?.linksByClusterPair && query && target) {
       const key = clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid);
       const pairLinks = linksByClusterPair.get(key) || [];
       pairLinks.push(source.uid);
@@ -542,7 +544,9 @@ export function buildScene(
     index: {
       genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
       loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
-      links: createSpatialIndex([...links].map(([uid, link]) => [uid, link.bounds])),
+      links: createSpatialIndex((function* () {
+        for (const [uid, link] of links) yield [uid, link.bounds, link.order];
+      })(), { sparseOrder: true }),
       hitLoci: createSpatialIndex(
         [...hitRegions.loci].map(([uid, regions]) => [
           uid,
@@ -589,7 +593,8 @@ function updateSpatialIndex(index, changedEntries, entriesForRebuild) {
   // Dense changes (e.g. a large reorder) are cheaper to rebuild than to patch
   // cell by cell. Construct the complete entry list only on that path.
   return changedEntries.length > (index?.boundsById.size || 0) / 4
-    ? createSpatialIndex(entriesForRebuild())
+    ? createSpatialIndex(entriesForRebuild(), { cellWidth: index?.cellWidth, cellHeight: index?.cellHeight,
+      sparseOrder: index?.sparseOrder })
     : patchSpatialIndex(index, changedEntries);
 }
 
@@ -771,12 +776,22 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
   for (const uid of changedGenes) {
     for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
   }
-  const links = new Map(scene.links);
+  const changedLinks = new Map();
   for (const source of sources.values()) {
-    const previous = links.get(source.uid);
-    if (previous) links.set(source.uid, createLinkLayout(source, previous.order, {
+    const previous = scene.links.get(source.uid);
+    const query = genes.get(source.query.uid), target = genes.get(source.target.uid);
+    // A link without anchors stays unchanged when its rows are still not
+    // adjacent; preview code computes its temporary anchors from the genes.
+    if (previous && !previous.anchors && (!query || !target ||
+        !options.areClustersAdjacent(query.display.clusterUid, target.display.clusterUid))) continue;
+    if (previous) changedLinks.set(source.uid, createLinkLayout(source, previous.order, {
       ...options, genes,
     }));
+  }
+  const links = patchLinkRecords(scene.links, changedLinks);
+  const changedLinkBounds = [];
+  for (const [uid, record] of changedLinks) {
+    if (scene.links.get(uid)?.bounds || record.bounds) changedLinkBounds.push([uid, record.bounds, record.order]);
   }
 
   const locusRegions = new Map(scene.hitRegions.loci);
@@ -804,7 +819,8 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
     index: {
       genes: updateSpatialIndex(scene.index.genes, entries(genes, changedGenes), () => entries(genes, genes.keys())),
       loci: updateSpatialIndex(scene.index.loci, entries(loci, changedLoci), () => entries(loci, loci.keys())),
-      links: updateSpatialIndex(scene.index.links, entries(links, sources.keys()), () => entries(links, links.keys())),
+      links: updateSpatialIndex(scene.index.links, changedLinkBounds,
+        function* () { for (const [uid, record] of links) yield [uid, record.bounds, record.order]; }),
       hitLoci: updateSpatialIndex(scene.index.hitLoci, entries(locusRegions, changedLoci, hitBounds),
         () => entries(locusRegions, locusRegions.keys(), hitBounds)),
     },
