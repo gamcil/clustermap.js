@@ -1264,6 +1264,47 @@ export default function clusterMap() {
     setState(snapshot);
     return my;
   };
+  /** Move the camera without replacing layout state or changing history. */
+  my.camera = function (camera) {
+    if (!arguments.length) return chartState ? { ...getCamera(chartState) } : null;
+    if (!container || !chartState) throw new Error("Cannot set the camera before the chart has rendered.");
+    if (!camera || typeof camera !== "object" ||
+        ![camera.x, camera.y, camera.k].every(Number.isFinite) || camera.k <= 0) {
+      throw new TypeError("Camera requires finite x/y and a positive scale.");
+    }
+    const next = { x: camera.x, y: camera.y, k: camera.k };
+    const svg = container.select("svg.clusterMap");
+    const canvas = container.select("canvas.clusterMapCanvas");
+    // Each surface maintains its own D3 gesture transform. Synchronize both so
+    // switching renderer or starting the next gesture cannot restore an old view.
+    setCamera(chartState, next);
+    syncCameraZoom({ surface: svg, zoom, camera: next });
+    syncCameraZoom({ surface: canvas, zoom: canvasZoom, camera: next });
+    hasInitialView = true;
+    return my;
+  };
+  /** Frame the figure without changing layout or history. Padding is in world units. */
+  my.fitFigure = function ({ padding = 20, minimumReadableScale = null } = {}) {
+    if (!container || !chartState) throw new Error("Cannot fit the figure before the chart has rendered.");
+    if (!Number.isFinite(padding) || padding < 0 ||
+        (minimumReadableScale !== null && (!Number.isFinite(minimumReadableScale) || minimumReadableScale < 0))) {
+      throw new TypeError("Figure padding and minimum readable scale must be finite and nonnegative.");
+    }
+    const node = chartSurface();
+    const bounds = figureSurface.bounds(container.node(), runtime.getScene(), runtime.renderConfig, plotData?.tree);
+    if (!node || !bounds) return my;
+    const camera = fitCameraForBounds({
+      bounds: { minX: bounds.minX - padding, maxX: bounds.maxX + padding,
+        minY: bounds.minY - padding, maxY: bounds.maxY + padding },
+      viewport: node.getBoundingClientRect(),
+      padding: 0,
+      maximumFitScale: Infinity,
+      minimumReadableScale: minimumReadableScale ?? (isRasterRenderer(runtime.config.plot.renderer) ? 1 : 0),
+      constrainScale: constrainZoom,
+    });
+    if (camera) my.camera(camera);
+    return my;
+  };
   /** A portable data, appearance, and layout snapshot for project persistence. */
   my.project = function (snapshot) {
     if (!arguments.length) {

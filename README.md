@@ -393,6 +393,8 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | `visibleData()` | Read the filtered data currently included in the plot. |
 | `remove({clusters, loci})` | Remove cluster/locus IDs and their contents from the plot, preserving source data. Undoable; removing a cluster's last locus also removes that cluster. |
 | `state(snapshot)` / `state()` | Restore / read JSON-safe layout and camera state. |
+| `camera({x, y, k})` / `camera()` | Set / read the camera without rebuilding the scene or changing history. Requires finite coordinates and a positive scale. |
+| `fitFigure({padding, minimumReadableScale})` | Frame the figure without rebuilding the scene or changing history. Padding defaults to 20 world units; the minimum readable scale defaults to 1 for raster renderers and 0 for SVG. Set it to 0 to fit the entire figure when zoom limits permit. |
 | `project(project)` / `project()` | Restore / export `{format, version, data, config, state}`. Loading clears history; callbacks are omitted from JSON. |
 | `patch(operations)` | Validate and apply an atomic batch of edits as one undo step. |
 | `undo()` / `redo()` | Reverse / reapply edits, settings and completed plot manipulations. |
