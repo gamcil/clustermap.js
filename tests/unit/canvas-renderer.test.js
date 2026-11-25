@@ -28,6 +28,39 @@ test("Canvas full-scene painting visits indexed links without scanning retained 
   assert.ok(calls.some(([method]) => method === "bezierCurveTo"));
 });
 
+test("Canvas locus previews preserve links that a trim can reveal", () => {
+  const calls = [];
+  const context = new Proxy({ measureText: () => ({ width: 10 }) }, {
+    get: (target, key) => key in target ? target[key] : (...args) => calls.push([key, ...args]),
+  });
+  const canvas = { width: 0, height: 0, getContext: () => context,
+    getBoundingClientRect: () => ({ width: 1000, height: 1000 }) };
+  const data = normalizeChartData({ clusters: ["a", "b", "c"].map((uid) => ({ uid,
+    loci: [{ uid: `l-${uid}`, start: 0, end: 100,
+      genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
+    links: [{ uid: "nonadjacent", query: { uid: "g-a" }, target: { uid: "g-c" }, identity: 0.9 },
+      { uid: "adjacent", query: { uid: "g-b" }, target: { uid: "g-c" }, identity: 0.9 }],
+    groups: [{ uid: "group", genes: ["g-a", "g-b", "g-c"] }], config: { updateGroups: false } });
+  const runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
+  const scene = runtime.updateScene(data);
+  const previews = [{ type: "locus-offsets", locusOffsets: new Map([["l-a", 5]]) },
+    { type: "locus-flip", locusUid: "l-a", progress: 0.5, axes: new Map([["l-a", 5]]) },
+    { type: "locus-trim", locusUid: "l-a", locusOffsets: new Map(), geneVisibility: new Map() }];
+  const paint = (target, preview) => {
+    calls.length = 0;
+    renderCanvas({ canvas, scene: target, preview, layers: ["links"], fullScene: true,
+      config: runtime.renderConfig, scales: runtime.scales, camera: { x: 0, y: 0, k: 1 } });
+    return [...calls];
+  };
+  const unindexed = { ...scene, index: { ...scene.index, links: null } };
+  for (const preview of previews) {
+    const expected = paint(unindexed, preview);
+    assert.deepEqual(paint(scene, preview), expected, `${preview.type} matches the full link scan`);
+    assert.ok(expected.some(([method]) => method === "bezierCurveTo"));
+  }
+});
+
 test("Canvas hides links and retains geometry and labels moved into view by a preview", () => {
   const calls = [];
   const context = new Proxy({ measureText: (text) => ({ width: String(text).length * 8 }) }, {

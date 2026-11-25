@@ -1552,12 +1552,12 @@ function recordsForPreview(scene, preview, { includeClusters = false } = {}) {
   if (preview.type === "locus-flip") loci.add(preview.locusUid);
   if (preview.type === "locus-trim") {
     const trimmed = scene.loci.get(preview.locusUid);
-    const clusterUid = trimmed?.cluster.uid;
+    const clusterUid = trimmed?.cluster?.uid ?? trimmed?.source?.clusterUid;
     // getLocusScaleValues packs loci independently within each cluster. A
     // trim can therefore shift every sibling locus even when its individual
     // offset happens to be zero in a particular preview frame.
     for (const locus of scene.loci.values()) {
-      if (locus.cluster.uid === clusterUid) loci.add(locus.source.uid);
+      if ((locus.cluster?.uid ?? locus.source?.clusterUid) === clusterUid) loci.add(locus.source.uid);
     }
   }
   const genes = new Set();
@@ -11754,11 +11754,24 @@ function renderCanvas({
       })
     : null;
 
-  const linkIds = !(showLinks || showLinkLabels) ? null : !preview && previousScene && displayScene.animationLinkIds
+  let linkIds = !(showLinks || showLinkLabels) ? null : !preview && previousScene && displayScene.animationLinkIds
     ? displayScene.animationLinkIds
     : !preview && (!previousScene || progress >= 1) && visible?.links == null && displayScene.index?.links?.boundsById
       ? allIndexedIds(displayScene.index.links)
       : visible?.links;
+  if ((showLinks || showLinkLabels) && !previousScene && preview && !clusterPreview &&
+      displayScene.index?.links?.boundsById &&
+      ["locus-offsets", "locus-flip", "locus-trim"].includes(preview.type)) {
+    linkIds = allIndexedIds(displayScene.index.links);
+    if (preview.type === "locus-trim") {
+      const affected = recordsForPreview(displayScene, preview)?.links;
+      if (affected?.size) {
+        linkIds = [...new Set([...linkIds, ...affected])]
+          .filter((uid) => displayScene.links.has(uid))
+          .sort((a, b) => displayScene.links.get(a).order - displayScene.links.get(b).order);
+      }
+    }
+  }
 
   for (const link of (showLinks || showLinkLabels)
     ? previewRecords?.links || recordsFor(displayScene.links, linkIds, "links")

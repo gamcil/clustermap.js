@@ -11,6 +11,7 @@ import {
   clusterPreviewInViewport,
   geneGeometryForPreview,
   linkGeometryForPreview,
+  recordsForPreview,
   clusterLabelOffsetForPreview,
   clusterLabelTextForPreview,
   clusterOffsetForPreview,
@@ -589,11 +590,24 @@ export function renderCanvas({
       })
     : null;
 
-  const linkIds = !(showLinks || showLinkLabels) ? null : !preview && previousScene && displayScene.animationLinkIds
+  let linkIds = !(showLinks || showLinkLabels) ? null : !preview && previousScene && displayScene.animationLinkIds
     ? displayScene.animationLinkIds
     : !preview && (!previousScene || progress >= 1) && visible?.links == null && displayScene.index?.links?.boundsById
       ? allIndexedIds(displayScene.index.links)
       : visible?.links;
+  if ((showLinks || showLinkLabels) && !previousScene && preview && !clusterPreview &&
+      displayScene.index?.links?.boundsById &&
+      ["locus-offsets", "locus-flip", "locus-trim"].includes(preview.type)) {
+    linkIds = allIndexedIds(displayScene.index.links);
+    if (preview.type === "locus-trim") {
+      const affected = recordsForPreview(displayScene, preview)?.links;
+      if (affected?.size) {
+        linkIds = [...new Set([...linkIds, ...affected])]
+          .filter((uid) => displayScene.links.has(uid))
+          .sort((a, b) => displayScene.links.get(a).order - displayScene.links.get(b).order);
+      }
+    }
+  }
 
   for (const link of (showLinks || showLinkLabels)
     ? previewRecords?.links || recordsFor(displayScene.links, linkIds, "links")
