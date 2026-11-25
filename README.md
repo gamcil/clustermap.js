@@ -390,6 +390,7 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | --- | --- |
 | `config(options)` / `config()` | Validate and merge settings, then redraw / read an independent settings snapshot. |
 | `data(data)` / `data()` | Replace data / read normalized data. Replacement clears history. |
+| `tree(tree)` / `tree()` | Replace or remove (`null`) the tree without replacing biological data. Replacement validates tree-linked annotations, adopts the tree leaf order, and clears history; removal retains the current row order. The getter returns a copy. |
 | `visibleData()` | Read the filtered data currently included in the plot. |
 | `remove({clusters, loci})` | Remove cluster/locus IDs and their contents from the plot, preserving source data. Undoable; removing a cluster's last locus also removes that cluster. |
 | `state(snapshot)` / `state()` | Restore / read JSON-safe layout and camera state. |

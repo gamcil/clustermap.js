@@ -17209,6 +17209,33 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       return my;
     };
     my.visibleData = () => plotData;
+    /** Replace only the tree; biological data and chart indexes remain owned by the chart. */
+    my.tree = function (tree) {
+      if (!arguments.length) return currentData?.tree ? clonePlainValue(currentData.tree) : null;
+      if (!container || !currentData) throw new Error("Cannot replace the tree before the chart has rendered.");
+      const next = tree == null ? null : clonePlainValue(tree);
+      if (next) {
+        validateTree(next, currentData.clusters);
+        validateTreePresentation(next, runtime.config.tree);
+      }
+      validateAnnotationPanels(currentData.annotationPanels, currentData.clusters, { tree: next });
+      finishLocusFlip();
+      cancelTreePresentationPreview();
+      cancelSceneWork();
+      const sourceScene = runtime.getScene();
+      if (next) currentData.tree = next;
+      else delete currentData.tree;
+      if (next) chartState.clusterOrder = treeClusterOrder(next);
+      // With exclusions, regenerate the pruned tree and annotation aliases.
+      // Otherwise plotData is currentData and the biological indexes remain valid.
+      plotDataDirty = plotData !== currentData;
+      sceneCommit = sourceScene ? { sourceScene, changes: {} } : null;
+      redraw({ animate: false });
+      clearHistory(false);
+      emitChange({ type: "tree.replace" });
+      emitHistoryChange();
+      return my;
+    };
     my.remove = function ({ clusters = [], loci = [] } = {}) {
       if (!container || !chartState || !chartIndex) throw new Error("Cannot remove records before the chart has rendered.");
       const validate = (ids, records, kind) => {

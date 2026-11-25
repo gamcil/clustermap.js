@@ -1,5 +1,59 @@
 import { test, expect } from "@playwright/test";
 
+test("tree replacement preserves biological data, validates atomically and clears history", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/demo/?fixture=burnettii&test=1");
+  await page.waitForFunction(() => Boolean(window.__demoChart));
+  const result = await page.evaluate(() => {
+    const chart = window.__demoChart;
+    const data = chart.data();
+    const links = data.links, clusters = data.clusters, groups = data.groups;
+    const original = chart.tree();
+    const order = chart.state().clusterOrder;
+    chart.config({ plot: { transitionDuration: 0 } });
+    chart.tree(null);
+    const removed = !chart.data().tree && !chart.canUndo();
+    const retainedOrder = chart.state().clusterOrder;
+    const returned = chart.tree(original) === chart;
+    original.nodes[0].uid = "changed-by-caller";
+    const copy = chart.tree();
+    copy.nodes[0].uid = "changed-by-getter";
+    const preserved = chart.data() === data && data.links === links && data.clusters === clusters && data.groups === groups;
+    const restoredOrder = chart.state().clusterOrder;
+    let rejected = false;
+    try { chart.tree({ root: "missing", nodes: [] }); } catch (error) { rejected = error instanceof TypeError; }
+    return { removed, returned, retainedOrder, restoredOrder, order, preserved, rejected,
+      node: chart.tree().nodes[0].uid, history: chart.canUndo(), hasTree: Boolean(chart.project().data.tree) };
+  });
+  expect(result.removed).toBe(true);
+  expect(result.returned).toBe(true);
+  expect(result.retainedOrder).toEqual(result.order);
+  expect(result.restoredOrder).toEqual(result.order);
+  expect(result.preserved).toBe(true);
+  expect(result.rejected).toBe(true);
+  expect(result.node).not.toMatch(/changed-by/);
+  expect(result.history).toBe(false);
+  expect(result.hasTree).toBe(true);
+});
+
+test("tree replacement retains excluded rows and projects the visible tree", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/demo/?fixture=burnettii&test=1&renderer=canvas");
+  await page.waitForFunction(() => Boolean(window.__demoChart));
+  const result = await page.evaluate(() => {
+    const chart = window.__demoChart;
+    const tree = chart.tree();
+    const excluded = chart.data().clusters[0].uid;
+    chart.remove({ clusters: [excluded] });
+    chart.tree(null).tree(tree);
+    return { excluded, state: chart.state(), visible: chart.visibleData().clusters.map((cluster) => cluster.uid),
+      treeLeaves: chart.visibleData().tree.nodes.filter((node) => !node.children).map((node) => node.cluster),
+      fullTree: chart.tree().nodes.filter((node) => !node.children).map((node) => node.cluster) };
+  });
+  expect(result.state.excludedClusters).toContain(result.excluded);
+  expect(result.visible).not.toContain(result.excluded);
+  expect(result.treeLeaves).not.toContain(result.excluded);
+  expect(result.fullTree).toContain(result.excluded);
+});
+
 for (const renderer of ["svg", "canvas", "webgpu"]) {
   test(`fitFigure frames bounds without rebuilding with ${renderer}`, async ({ page }) => {
     await page.goto("http://127.0.0.1:8080/demo/?fixture=burnettii&test=1");
