@@ -243,3 +243,10 @@ scene construction, compact snapshot and best-match filtering. This is a repeata
 it does not measure the real GCF, browser peak memory, project saving or GPU
 memory. Add `--transfer` after the count to measure ownership transfer instead
 of copying the input columns. Use a fresh process for each comparison.
+
+Run `node bench/compact-browser.mjs 2592111 canvas firefox` for an end-to-end
+synthetic browser run at the same link count. It measures mount, best-match
+filtering, link edit/delete, row-order replacement and compact figure save/load,
+and reports renderer status. Use `webgpu` to test an available adapter; fallback
+is reported. `svg` is suitable for smaller counts. This is not the real GCF or
+a peak-memory measurement, and browser runs may take substantial time.
