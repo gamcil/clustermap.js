@@ -14924,6 +14924,35 @@ function sceneLinkCandidates(scene) {
   return [...ids].map((uid) => scene.links.get(uid)).filter(Boolean).sort((a, b) => a.order - b.order);
 }
 
+// A row-only transition can reuse gene and track vertices with the same
+// cluster transforms used by dragging. Reject any change in local geometry.
+function animationRowOffsets(base, frame) {
+  if (!base || !frame.changes || !frame.animationLinkIds || frame.annotationPanels?.length ||
+      base.clusters.size !== frame.clusters.size || base.loci.size !== frame.loci.size ||
+      base.genes.size !== frame.genes.size) return null;
+  const offsets = new Map();
+  for (const [uid, cluster] of frame.clusters) {
+    const before = base.clusters.get(uid);
+    if (!before || before.x !== cluster.x) return null;
+    offsets.set(uid, cluster.y - before.y);
+  }
+  for (const [uid, locus] of frame.loci) {
+    const before = base.loci.get(uid), dy = offsets.get(locus.cluster.uid);
+    if (!before || dy === undefined || locus.x !== before.x ||
+        Math.abs(locus.y - before.y - dy) > 1e-7 ||
+        locus.track.x1 !== before.track.x1 || locus.track.x2 !== before.track.x2 || locus.track.y !== before.track.y) return null;
+  }
+  for (const [uid, gene] of frame.genes) {
+    const before = base.genes.get(uid), dy = offsets.get(gene.locus.cluster.uid);
+    if (!before || dy === undefined || before.source !== gene.source || before.visible !== gene.visible ||
+        before.polygon.length !== gene.polygon.length) return null;
+    for (let i = 0; i < gene.polygon.length; i++) {
+      if (Math.abs(gene.polygon[i] - before.polygon[i] - (i % 2 ? dy : 0)) > 1e-7) return null;
+    }
+  }
+  return offsets;
+}
+
 function buildLinkRecords(scene, links, scales, config, locusSlots, device, offsetX, offsetY) {
   const retained = links.filter((link) => (link.allowed !== false || link.visible) &&
     scene.genes.has(link.source.query.uid) && scene.genes.has(link.source.target.uid));
@@ -15236,7 +15265,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
   let geneEdgeCount = 0;
   let scene = null;
   let preview = null;
-  let geometry = null;
+  let geometry = null, geometryConfig = null, animationBaseScene = null;
   let patchedRecords = null;
   let configured = false;
   let annotationBuffer = null, annotationKeyBuffer = null;
@@ -15769,6 +15798,33 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     return true;
   };
 
+  const adoptAnimationFrame = (frame, scales, config) => {
+    if (!geometry || preview || geometryConfig !== config) return false;
+    const base = animationBaseScene || scene;
+    const offsets = animationRowOffsets(base, frame);
+    if (!offsets) return false;
+    const links = frame.animationLinkIds.map((uid) => frame.links.get(uid)).filter((link) => link?.visible && link.anchors);
+    checkBufferSize(device, links.length * 64, "link records", true);
+    const values = new Float32Array(links.length * 16), indices = new Uint32Array(links.length);
+    let count = 0;
+    for (const link of links) {
+      const record = linkRecordForGpu(frame, link, scales, config, geometry.locusSlots);
+      if (!record) continue;
+      // Interpolated anchors already contain the exact fade-in/fade-out and
+      // crossing behavior; slot zero prevents a second row translation.
+      record.set(link.anchors.slice(0, 3), 0); record[3] = 0;
+      record.set(link.anchors.slice(3, 6), 4); record[7] = 0;
+      values.set(record, count * 16); indices[count] = count; count++;
+    }
+    uploadClusterPreviewRecords({ values: values.subarray(0, count * 16) });
+    uploadPreviewLinkIndices(indices.subarray(0, count));
+    updateClusterOffsets({ type: "cluster-drag", clusterOffsets: offsets });
+    animationBaseScene = base;
+    scene = frame;
+    previewLinksActive = true;
+    return true;
+  };
+
   let destroyed = false;
   const deviceError = (event) => {
     event.preventDefault?.();
@@ -15799,9 +15855,15 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         // Presentation edits retain biological geometry and GPU buffers.
         scene = nextScene;
       }
+      // A new interaction takes precedence over a retained animation frame.
+      if (animationBaseScene && nextPreview) { animationBaseScene = null; scene = null; }
+      const animatedFrame = Boolean(!nextPreview && (animationBaseScene && scene === nextScene ||
+        scene !== nextScene && nextScene.animationLinkIds && adoptAnimationFrame(nextScene, scales, config)));
       if (scene !== nextScene) {
+        animationBaseScene = null;
         usePreviewLinkRecords(false);
         geometry = buildGeometry(nextScene, scales, config);
+        geometryConfig = config;
         uploadGeometry(geometry);
         uploadLinkRecords(buildLinkRecords(nextScene, sceneLinkCandidates(nextScene), scales, config, geometry.locusSlots, device));
         resetRetainedClusterGeometry();
@@ -15840,7 +15902,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
       // Committed moves update those indexes, even when GPU vertices retain
       // their original coordinates and inherit the move through offsets.
       let cullViewport = null;
-      if (!nextPreview) {
+      if (!nextPreview && !animatedFrame) {
         const viewport = worldViewport(camera, { width, height });
         const bounds = scene.bounds;
         const containsScene = bounds && viewport.minX <= bounds.minX && viewport.maxX >= bounds.maxX &&
@@ -15862,7 +15924,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         ? visibleDrawRanges("loci", ["tracks"], visibleRecords.loci) : null;
       const geneDrawRanges = shouldCull
         ? visibleDrawRanges("genes", ["genes", "geneEdges"], visibleRecords.genes) : null;
-      if (previewLinksActive && !nextPreview && (shouldCull || linkIndicesCulled)) {
+      if (previewLinksActive && !nextPreview && !animatedFrame && (shouldCull || linkIndicesCulled)) {
         // Retained ribbons use an instance-index buffer instead of vertex
         // ranges. Restore the full list when the camera shows everything.
         uploadPreviewLinkIndices(visibleLinkIndices(visibleRecords?.links), shouldCull);

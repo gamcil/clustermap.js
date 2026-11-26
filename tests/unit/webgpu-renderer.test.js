@@ -5,7 +5,7 @@ import { createWebGpuRenderer } from "../../src/renderers/webgpu.js";
 import { normalizeChartData } from "../../src/data/normalize.mjs";
 import { createChartIndex } from "../../src/data/index.mjs";
 import { createChartRuntime } from "../../src/chart/runtime.js";
-import { createClusterDragPreview, createLocusOffsetsPreview, createLocusFlipPreview } from "../../src/scene/preview.mjs";
+import { createClusterDragPreview, createLocusOffsetsPreview, createLocusFlipPreview, interpolateScene } from "../../src/scene/preview.mjs";
 import { createLargeTestingData } from "../../fixtures/synthetic.mjs";
 import { annotationPanelsForFrame } from "../../src/annotations/model.mjs";
 import { applyChartOperations } from "../../src/data/operations.mjs";
@@ -377,4 +377,51 @@ test("WebGPU stores adjacent pairs under a low device limit and draws reordered 
   renderer.render({ ...options, preview });
   assert.equal(draws.find((draw) => draw.entryPoint === "linkFillVertex")?.args[1], 5);
   assert.equal(getBindings().find((entry) => entry.binding === 2).resource.buffer.size, 320);
+});
+
+
+test("WebGPU row animation reuses gene geometry and preserves interpolated link anchors and fades", async (t) => {
+  const { renderer, buffers, writes, draws, getBindings } = await gpuHarness(t);
+  const ids = ["a", "b", "c"];
+  const data = normalizeChartData({ clusters: ids.map((uid) => ({ uid, name: uid,
+    loci: [{ uid: `l-${uid}`, start: 0, end: 100, genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
+    links: [{ uid: "ab", query: { uid: "g-a" }, target: { uid: "g-b" }, identity: 0.9 },
+      { uid: "ac", query: { uid: "g-a" }, target: { uid: "g-c" }, identity: 0.9 }],
+    groups: [{ uid: "group", genes: ids.map((uid) => `g-${uid}`) }], config: { updateGroups: false } });
+  const runtime = createChartRuntime(), state = createChartState(data);
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
+  const before = runtime.updateScene(data);
+  state.clusterOrder = ["a", "c", "b"];
+  const after = runtime.updateScene(data, { sourceScene: before });
+  const options = { scales: runtime.scales, config: runtime.renderConfig,
+    camera: { x: 0, y: 0, k: 1 }, width: 1000, height: 1000, pixelRatio: 1 };
+  renderer.render({ ...options, nextScene: before });
+  const vertices = buffers.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX);
+  for (const progress of [0.25, 0.75]) {
+    const frame = interpolateScene(before, after, progress);
+    writes.length = draws.length = 0;
+    renderer.render({ ...options, nextScene: frame });
+    assert.deepEqual(buffers.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX), vertices);
+    assert.ok(!writes.some((buffer) => buffer.usage & GPUBufferUsage.VERTEX), "animation reuses gene and track vertices");
+    const records = new Float32Array(getBindings().find((entry) => entry.binding === 2).resource.buffer.data.buffer);
+    assert.equal(draws.find((draw) => draw.entryPoint === "linkFillVertex")?.args[1], 2);
+    // A camera repaint of the same frame must retain the animation records.
+    draws.length = 0;
+    renderer.render({ ...options, nextScene: frame, camera: { x: -100000, y: -100000, k: 1 } });
+    assert.equal(draws.find((draw) => draw.entryPoint === "linkFillVertex")?.args[1], 2);
+    for (const [i, uid] of frame.animationLinkIds.entries()) {
+      const link = frame.links.get(uid), start = i * 16;
+      assert.deepEqual([...records.slice(start, start + 3)], link.anchors.slice(0, 3).map(Math.fround));
+      assert.deepEqual([...records.slice(start + 4, start + 7)], link.anchors.slice(3, 6).map(Math.fround));
+      assert.ok(Math.abs(records[start + 11] - link.opacity) < 1e-6);
+    }
+  }
+  const changedGeometry = interpolateScene(before, after, 0.5);
+  changedGeometry.genes.get("g-a").polygon[0] += 3;
+  writes.length = 0;
+  renderer.render({ ...options, nextScene: changedGeometry });
+  assert.ok(writes.some((buffer) => buffer.usage & GPUBufferUsage.VERTEX),
+    "transitions with changed local gene geometry use the general path");
+  renderer.render({ ...options, nextScene: after });
+  assert.ok(draws.some((draw) => draw.entryPoint === "vertexMain"));
 });
