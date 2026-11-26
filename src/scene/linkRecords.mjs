@@ -14,6 +14,31 @@ class PatchedLinkRecords {
   [Symbol.iterator]() { return this.entries(); }
 }
 
+export class UndrawableLinkLayout {
+  constructor(source, order, allowed) { this.source = source; this.order = order; this.allowed = allowed; }
+}
+Object.assign(UndrawableLinkLayout.prototype, {
+  anchors: null, bounds: null, labelPosition: null, visible: false,
+});
+
+// Materialize geometry only for adjacent pairs. All retained links remain
+// addressable in input order, and previews can derive nonadjacent records.
+export class LazyLinkRecords {
+  constructor(index, geometry, allowed) { this.index = index; this.geometry = geometry; this.allowed = allowed; }
+  get size() { return this.index.size; }
+  has(uid) { return this.index.has(uid); }
+  get(uid) {
+    const existing = this.geometry.get(uid);
+    if (existing) return existing;
+    const source = this.index.get(uid);
+    return source ? new UndrawableLinkLayout(source, this.index.order(uid), this.allowed(source)) : undefined;
+  }
+  *keys() { yield* this.index.keys(); }
+  *values() { for (const uid of this.keys()) yield this.get(uid); }
+  *entries() { for (const uid of this.keys()) yield [uid, this.get(uid)]; }
+  [Symbol.iterator]() { return this.entries(); }
+}
+
 // An animation frame is transient and never patched again; layer its small
 // changes over the target scene without copying its persistent edit overlay.
 export function overlayLinkRecords(records, changes) {

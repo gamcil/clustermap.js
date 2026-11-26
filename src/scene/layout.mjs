@@ -10,7 +10,7 @@ import {
   getLinkLabelPosition,
 } from "../links/layout.mjs";
 import { createSpatialIndex, patchSpatialIndex } from "./spatialIndex.mjs";
-import { patchLinkRecords } from "./linkRecords.mjs";
+import { patchLinkRecords, LazyLinkRecords, UndrawableLinkLayout } from "./linkRecords.mjs";
 import { locusContentBounds } from "../loci/layout.mjs";
 import { arrangeTrimIndicators, createTrimIndicators, resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
 import { layoutAnnotationPanels, annotationFigureBounds, annotationChromeRightEdge, legendTopExtent, legendContentBounds } from "../annotations/model.mjs";
@@ -316,19 +316,6 @@ function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, labe
   };
 }
 
-// Most links in a large GCF connect nonadjacent rows. Their geometry is
-// calculated on demand during a drag preview, so share the empty fields.
-class UndrawableLinkLayout {
-  constructor(source, order, allowed) {
-    this.source = source;
-    this.order = order;
-    this.allowed = allowed;
-  }
-}
-Object.assign(UndrawableLinkLayout.prototype, {
-  anchors: null, bounds: null, labelPosition: null, visible: false,
-});
-
 function createLinkLayout(source, order, {
   genes, areClustersAdjacent, scaleX, link, linkVisible = () => true,
 }) {
@@ -472,7 +459,7 @@ export function buildScene(
   const clusters = new Map();
   const loci = new Map();
   const genes = new Map();
-  const links = new Map();
+  const geometryLinks = new Map();
   const linksByClusterPair = linkIndexes?.linksByClusterPair || new Map();
   const linksByGene = linkIndexes?.linksByGeneId || new Map();
   areClustersAdjacent = adjacencyForOrder(clusterOrder, areClustersAdjacent);
@@ -524,11 +511,20 @@ export function buildScene(
     clusters.get(uid).info = info;
   }
 
-  for (const [order, source] of data.links.entries()) {
+  const lazyLinks = Boolean(clusterOrder && linkIndexes?.linksByClusterPair && linkIndexes?.linkById?.order);
+  const sources = lazyLinks ? (function* () {
+    for (let i = 1; i < clusterOrder.length; i++) {
+      for (const uid of linksByClusterPair.get(clusterPairKey(clusterOrder[i - 1], clusterOrder[i])) || []) {
+        const source = linkIndexes.linkById.get(uid);
+        if (source) yield [linkIndexes.linkById.order(uid), source];
+      }
+    }
+  })() : data.links.entries();
+  for (const [order, source] of sources) {
     const linkLayout = createLinkLayout(source, order, {
       genes, areClustersAdjacent, scaleX, link, linkVisible,
     });
-    links.set(source.uid, linkLayout);
+    geometryLinks.set(source.uid, linkLayout);
     if (!linkIndexes?.linksByGeneId) for (const uid of new Set([source.query.uid, source.target.uid])) {
       if (!linksByGene.has(uid)) linksByGene.set(uid, []);
       linksByGene.get(uid).push(source);
@@ -544,6 +540,7 @@ export function buildScene(
       }
     }
   }
+  const links = lazyLinks ? new LazyLinkRecords(linkIndexes.linkById, geometryLinks, linkVisible) : geometryLinks;
 
   const hitRegions = buildHitRegions(loci, genes);
   const chromeLayout = buildChrome(bounds, genes, chrome);
@@ -563,7 +560,7 @@ export function buildScene(
       genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
       loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
       links: createSpatialIndex((function* () {
-        for (const [uid, link] of links) yield [uid, link.bounds, link.order];
+        for (const [uid, link] of geometryLinks) yield [uid, link.bounds, link.order];
       })(), { sparseOrder: true }),
       hitLoci: createSpatialIndex(
         [...hitRegions.loci].map(([uid, regions]) => [

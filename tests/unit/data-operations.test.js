@@ -349,6 +349,21 @@ test("link operations change or remove relationships without touching genes", as
   assert.equal(chartData.clusters[0].loci[0].genes.length, 2);
 });
 
+test("restoring links preserves earlier index order and lookups", async () => {
+  const [{ createChartIndex }, { normalizeChartData }, { applyChartOperations }] = await Promise.all([
+    import("../../src/data/index.mjs"), import("../../src/data/normalize.mjs"), import("../../src/data/operations.mjs"),
+  ]);
+  const raw = structuredClone(data);
+  raw.links = ["first", "second"].map((uid) => ({ uid, query: { uid: "gene-1" }, target: { uid: "gene-1" }, identity: 1 }));
+  const chartData = normalizeChartData(raw);
+  const deleted = applyChartOperations(chartData, createChartIndex(chartData), [{ type: "links.delete", ids: ["first"] }]);
+  const retained = createChartIndex(chartData), second = retained.linkById.get("second");
+  applyChartOperations(chartData, retained, deleted.inverse);
+  assert.deepEqual(chartData.links.map((link) => link.uid), ["first", "second"]);
+  assert.equal(retained.linkById.get("second"), second);
+  assert.equal(retained.linkById.order("second"), 0);
+});
+
 test("link identity rejects values outside the normalized percentage range", async () => {
   const { createChartIndex } = await import("../../src/data/index.mjs");
   const { normalizeChartData } = await import("../../src/data/normalize.mjs");

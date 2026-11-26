@@ -256,6 +256,8 @@ function applyOperation(data, index, operation) {
       return;
     }
     case "links.restore":
+      // Existing scenes retain the old array for link order and animation.
+      data.links = [...data.links];
       for (const { index: position, link } of operation.records) {
         data.links.splice(Math.min(position, data.links.length), 0, structuredClone(link));
       }

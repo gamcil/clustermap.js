@@ -187,6 +187,7 @@ function locusTextForCluster(uid) {
 
 function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
   const config = renderConfig();
+  const allowed = allowedLinkIds;
   return {
     linkIndexes: chartIndex,
     scaleX: scales.x,
@@ -201,7 +202,7 @@ function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
       threshold: config.link.threshold,
       labelPosition: config.link.label.position,
     },
-    linkVisible: (link) => !allowedLinkIds || allowedLinkIds.has(link.uid),
+    linkVisible: (link) => !allowed || allowed.has(link.uid),
     clusterLabel: locusText,
     alignLabels: config.cluster.alignLabels,
     labelAlignment: config.cluster.labelAlignment,
@@ -268,15 +269,8 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
   updateScales(data, { geometryOnly: Boolean(sourceScene) });
   if (synchronize || modeChanged) synchronizeLocusLayoutStates(modeChanged ? sourceData : data, sourceScene ? changes.loci || [] : null);
   geneScaleMode = config.plot.scaleGenes;
-  if (!sourceScene) updateGroups(data.groups);
-  const options = {
-    ...sceneProjectionOptions({ tree: data.tree, clusterOrder: clusterOrderForData(data) }),
-    scaleY: scales.y,
-    clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
-    clusterOffset: scales.offset,
-    chrome: sceneChromeOptions(data),
-  };
   if (!sourceScene) {
+    updateGroups(data.groups);
     const filteredLinks = filterLinks(data.links, {
       groupForGene: scales.group,
       geneForUid: lookup.geneData,
@@ -285,6 +279,15 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
     });
     allowedLinkIds = new Set();
     for (const link of filteredLinks) allowedLinkIds.add(link.uid);
+  }
+  const options = {
+    ...sceneProjectionOptions({ tree: data.tree, clusterOrder: clusterOrderForData(data) }),
+    scaleY: scales.y,
+    clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
+    clusterOffset: scales.offset,
+    chrome: sceneChromeOptions(data),
+  };
+  if (!sourceScene) {
     currentScene = buildScene(data, options);
   } else {
     const loci = new Set(changes.loci || []);

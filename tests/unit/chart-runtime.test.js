@@ -59,6 +59,7 @@ test("scene patches retain nonadjacent links and reveal them after row changes",
   runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   const initial = runtime.updateScene(data);
   assert.equal(initial.links.get("ac").visible, false);
+  assert.equal(initial.links.geometry.size, 0, "nonadjacent links have no retained scene layout");
   assert.equal(initial.links.get("ac").anchors, null);
   assert.equal(initial.links.get("ac").bounds, null);
   assert.equal(initial.links.get("ac").labelPosition, null);
@@ -66,13 +67,32 @@ test("scene patches retain nonadjacent links and reveal them after row changes",
   byGene.get = () => { throw new Error("row translations must use adjacent pair indexes"); };
   setClusterOffset(state, "a", 10);
   const moved = runtime.updateScene(data, { sourceScene: initial, changes: { clusters: ["a"] } });
-  assert.equal(moved.links.get("ac"), initial.links.get("ac"));
+  assert.deepEqual(moved.links.get("ac"), initial.links.get("ac"));
   state.clusterOrder = ["a", "c", "b"];
   const reordered = runtime.updateScene(data, { sourceScene: moved, changes: {} });
   assert.equal(reordered.links.get("ac").visible, true);
   assert.ok(reordered.index.links.boundsById.has("ac"));
   assert.equal(initial.links.get("ac").visible, false);
   byGene.get = get;
+});
+
+test("lazy link visibility is retained by the scene that created it", async () => {
+  const [{ createChartRuntime }, { normalizeChartData }, { createChartIndex }, { createChartState }] = await Promise.all([
+    import("../../src/chart/runtime.js"), import("../../src/data/normalize.mjs"),
+    import("../../src/data/index.mjs"), import("../../src/chart/state.mjs"),
+  ]);
+  const ids = ["a", "b", "c"];
+  const data = normalizeChartData({ clusters: ids.map((uid) => ({ uid,
+    loci: [{ uid: `l-${uid}`, start: 0, end: 100, genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
+    links: [{ uid: "ac", query: { uid: "g-a" }, target: { uid: "g-c" }, identity: 0.6 }],
+    groups: [{ uid: "group", genes: ids.map((uid) => `g-${uid}`) }], config: { updateGroups: false } });
+  const runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
+  const before = runtime.updateScene(data);
+  runtime.configure({ link: { threshold: 0.9 } });
+  const after = runtime.updateScene(data);
+  assert.equal(before.links.get("ac").allowed, true);
+  assert.equal(after.links.get("ac").allowed, false);
 });
 
 test("row translations and reorder patches match a full scene rebuild", async () => {

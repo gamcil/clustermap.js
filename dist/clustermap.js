@@ -1126,6 +1126,31 @@
     [Symbol.iterator]() { return this.entries(); }
   }
 
+  class UndrawableLinkLayout {
+    constructor(source, order, allowed) { this.source = source; this.order = order; this.allowed = allowed; }
+  }
+  Object.assign(UndrawableLinkLayout.prototype, {
+    anchors: null, bounds: null, labelPosition: null, visible: false,
+  });
+
+  // Materialize geometry only for adjacent pairs. All retained links remain
+  // addressable in input order, and previews can derive nonadjacent records.
+  class LazyLinkRecords {
+    constructor(index, geometry, allowed) { this.index = index; this.geometry = geometry; this.allowed = allowed; }
+    get size() { return this.index.size; }
+    has(uid) { return this.index.has(uid); }
+    get(uid) {
+      const existing = this.geometry.get(uid);
+      if (existing) return existing;
+      const source = this.index.get(uid);
+      return source ? new UndrawableLinkLayout(source, this.index.order(uid), this.allowed(source)) : undefined;
+    }
+    *keys() { yield* this.index.keys(); }
+    *values() { for (const uid of this.keys()) yield this.get(uid); }
+    *entries() { for (const uid of this.keys()) yield [uid, this.get(uid)]; }
+    [Symbol.iterator]() { return this.entries(); }
+  }
+
   // An animation frame is transient and never patched again; layer its small
   // changes over the target scene without copying its persistent edit overlay.
   function overlayLinkRecords(records, changes) {
@@ -4531,19 +4556,6 @@
     };
   }
 
-  // Most links in a large GCF connect nonadjacent rows. Their geometry is
-  // calculated on demand during a drag preview, so share the empty fields.
-  class UndrawableLinkLayout {
-    constructor(source, order, allowed) {
-      this.source = source;
-      this.order = order;
-      this.allowed = allowed;
-    }
-  }
-  Object.assign(UndrawableLinkLayout.prototype, {
-    anchors: null, bounds: null, labelPosition: null, visible: false,
-  });
-
   function createLinkLayout(source, order, {
     genes, areClustersAdjacent, scaleX, link, linkVisible = () => true,
   }) {
@@ -4687,7 +4699,7 @@
     const clusters = new Map();
     const loci = new Map();
     const genes = new Map();
-    const links = new Map();
+    const geometryLinks = new Map();
     const linksByClusterPair = linkIndexes?.linksByClusterPair || new Map();
     const linksByGene = linkIndexes?.linksByGeneId || new Map();
     areClustersAdjacent = adjacencyForOrder(clusterOrder, areClustersAdjacent);
@@ -4739,11 +4751,20 @@
       clusters.get(uid).info = info;
     }
 
-    for (const [order, source] of data.links.entries()) {
+    const lazyLinks = Boolean(clusterOrder && linkIndexes?.linksByClusterPair && linkIndexes?.linkById?.order);
+    const sources = lazyLinks ? (function* () {
+      for (let i = 1; i < clusterOrder.length; i++) {
+        for (const uid of linksByClusterPair.get(clusterPairKey(clusterOrder[i - 1], clusterOrder[i])) || []) {
+          const source = linkIndexes.linkById.get(uid);
+          if (source) yield [linkIndexes.linkById.order(uid), source];
+        }
+      }
+    })() : data.links.entries();
+    for (const [order, source] of sources) {
       const linkLayout = createLinkLayout(source, order, {
         genes, areClustersAdjacent, scaleX, link, linkVisible,
       });
-      links.set(source.uid, linkLayout);
+      geometryLinks.set(source.uid, linkLayout);
       if (!linkIndexes?.linksByGeneId) for (const uid of new Set([source.query.uid, source.target.uid])) {
         if (!linksByGene.has(uid)) linksByGene.set(uid, []);
         linksByGene.get(uid).push(source);
@@ -4759,6 +4780,7 @@
         }
       }
     }
+    const links = lazyLinks ? new LazyLinkRecords(linkIndexes.linkById, geometryLinks, linkVisible) : geometryLinks;
 
     const hitRegions = buildHitRegions(loci, genes);
     const chromeLayout = buildChrome(bounds, genes, chrome);
@@ -4778,7 +4800,7 @@
         genes: createSpatialIndex([...genes].map(([uid, gene]) => [uid, gene.bounds])),
         loci: createSpatialIndex([...loci].map(([uid, locus]) => [uid, locus.bounds])),
         links: createSpatialIndex((function* () {
-          for (const [uid, link] of links) yield [uid, link.bounds, link.order];
+          for (const [uid, link] of geometryLinks) yield [uid, link.bounds, link.order];
         })(), { sparseOrder: true }),
         hitLoci: createSpatialIndex(
           [...hitRegions.loci].map(([uid, regions]) => [
@@ -9094,12 +9116,30 @@
     if (values) values.push(value);
     else index.set(key, [value]);
   }
+
+  // One ID-to-position map serves editing lookups and scene painter order.
+  // The array is retained for this index's lifetime so old scenes remain stable.
+  class LinkIndex {
+    constructor(links) {
+      this.links = links;
+      this.positions = new Map();
+      for (let index = 0; index < links.length; index++) this.positions.set(links[index].uid, index);
+    }
+    get size() { return this.positions.size; }
+    has(uid) { return this.positions.has(uid); }
+    order(uid) { return this.positions.get(uid); }
+    get(uid) { const index = this.positions.get(uid); return index === undefined ? undefined : this.links[index]; }
+    *keys() { yield* this.positions.keys(); }
+    *values() { for (const index of this.positions.values()) yield this.links[index]; }
+    *entries() { for (const [uid, index] of this.positions) yield [uid, this.links[index]]; }
+    [Symbol.iterator]() { return this.entries(); }
+  }
   function createChartIndex(data) {
     const clusterById = new Map();
     const locusById = new Map();
     const geneById = new Map();
     const groupById = new Map();
-    const linkById = new Map();
+    const linkById = new LinkIndex(data.links);
     const linksByGeneId = new Map();
     const linksByClusterPair = new Map();
     const clusterForGene = new Map();
@@ -9117,7 +9157,6 @@
     }
 
     for (const link of data.links) {
-      linkById.set(link.uid, link);
       appendToIndex(linksByGeneId, link.query.uid, link);
       if (link.target.uid !== link.query.uid) appendToIndex(linksByGeneId, link.target.uid, link);
       if (clusterForGene.has(link.query.uid) && clusterForGene.has(link.target.uid)) {
@@ -10140,6 +10179,8 @@
         return;
       }
       case "links.restore":
+        // Existing scenes retain the old array for link order and animation.
+        data.links = [...data.links];
         for (const { index: position, link } of operation.records) {
           data.links.splice(Math.min(position, data.links.length), 0, structuredClone(link));
         }
@@ -13842,6 +13883,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 
   function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
     const config = renderConfig();
+    const allowed = allowedLinkIds;
     return {
       linkIndexes: chartIndex,
       scaleX: scales.x,
@@ -13856,7 +13898,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
         threshold: config.link.threshold,
         labelPosition: config.link.label.position,
       },
-      linkVisible: (link) => !allowedLinkIds || allowedLinkIds.has(link.uid),
+      linkVisible: (link) => !allowed || allowed.has(link.uid),
       clusterLabel: locusText,
       alignLabels: config.cluster.alignLabels,
       labelAlignment: config.cluster.labelAlignment,
@@ -13923,15 +13965,8 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     updateScales(data, { geometryOnly: Boolean(sourceScene) });
     if (synchronize || modeChanged) synchronizeLocusLayoutStates(modeChanged ? sourceData : data, sourceScene ? changes.loci || [] : null);
     geneScaleMode = config.plot.scaleGenes;
-    if (!sourceScene) updateGroups(data.groups);
-    const options = {
-      ...sceneProjectionOptions({ tree: data.tree, clusterOrder: clusterOrderForData(data) }),
-      scaleY: scales.y,
-      clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
-      clusterOffset: scales.offset,
-      chrome: sceneChromeOptions(data),
-    };
     if (!sourceScene) {
+      updateGroups(data.groups);
       const filteredLinks = filterLinks(data.links, {
         groupForGene: scales.group,
         geneForUid: lookup.geneData,
@@ -13940,6 +13975,15 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       });
       allowedLinkIds = new Set();
       for (const link of filteredLinks) allowedLinkIds.add(link.uid);
+    }
+    const options = {
+      ...sceneProjectionOptions({ tree: data.tree, clusterOrder: clusterOrderForData(data) }),
+      scaleY: scales.y,
+      clusterPosition: (uid) => getClusterPosition(chartState, uid, scales.y(uid)),
+      clusterOffset: scales.offset,
+      chrome: sceneChromeOptions(data),
+    };
+    if (!sourceScene) {
       currentScene = buildScene(data, options);
     } else {
       const loci = new Set(changes.loci || []);
