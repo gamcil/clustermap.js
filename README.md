@@ -397,7 +397,8 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | `state(snapshot)` / `state()` | Restore / read JSON-safe layout and camera state. |
 | `camera({x, y, k})` / `camera()` | Set / read the camera without rebuilding the scene or changing history. Requires finite coordinates and a positive scale. |
 | `fitFigure({padding, minimumReadableScale})` | Frame the figure without rebuilding the scene or changing history. Padding defaults to 20 world units; the minimum readable scale defaults to 1 for raster renderers and 0 for SVG. Set it to 0 to fit the entire figure when zoom limits permit. |
-| `project(project)` / `project()` | Restore / export `{format, version, data, config, state}`. Loading clears history; callbacks are omitted from JSON. |
+| `project(project)` / `project()` | Restore / export an independently owned `{format, version, data, config, state}` snapshot. Loading clears history; callbacks are omitted from JSON. |
+| `exportProjectBlob({extensions})` | Synchronously serialize a project to a JSON Blob without cloning the complete chart data. Optional top-level extension fields are included. |
 | `patch(operations)` | Validate and apply an atomic batch of edits as one undo step. |
 | `undo()` / `redo()` | Reverse / reapply edits, settings and completed plot manipulations. |
 | `canUndo()` / `canRedo()` | Read history availability. |
@@ -454,6 +455,27 @@ Transient UI highlights can supply an ownership token:
 `chart.highlight(ids, { owner })`. Clearing with the same token only clears
 that owner's highlight; ordinary calls remain authoritative. The editor uses
 this to avoid clearing highlights subsequently set by the host app.
+
+`exportProjectBlob({ extensions })` is intended for large project downloads. It
+serializes synchronously and returns an independent Blob, so later chart edits
+cannot change the exported bytes. The export contains the committed tree
+presentation even during a preview. Extensions may include host-owned data such
+as an analysis; chart-owned `format`, `version`, `data`, `config`, and `state`
+fields take precedence. Values must be JSON-like plain objects, arrays, and
+primitives; circular references, accessors, and class instances are rejected.
+The caller must not mutate supplied values or the chart during serialization.
+The Blob avoids a full figure clone, but its output and the host's own data
+still require memory. `project()` retains its independent-object semantics.
+For example, a host can include its own JSON-like analysis and tree metadata:
+
+```js
+const blob = chart.exportProjectBlob({
+  extensions: { analysis, ...treeMetadata },
+});
+```
+
+Hosts remain responsible for validating their extension fields and project
+format before export and for managing the resulting download.
 
 Treat the objects returned by `data()` and `visibleData()` as read-only. Direct
 mutation is unsupported: it bypasses validation, history, and cache invalidation.

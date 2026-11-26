@@ -22,6 +22,8 @@ test("chart factory exposes only the supported public methods", async () => {
     assert.equal(typeof chart.fitFigure, "function");
     assert.throws(() => chart.fitFigure(), /before the chart has rendered/);
     assert.equal(typeof chart.project, "function");
+    assert.equal(typeof chart.exportProjectBlob, "function");
+    assert.throws(() => chart.exportProjectBlob(), /before the chart has rendered/);
     assert.equal(typeof chart.patch, "function");
     assert.equal(typeof chart.previewTreePresentation, "function");
     assert.equal(typeof chart.rotateTreeNode, "function");

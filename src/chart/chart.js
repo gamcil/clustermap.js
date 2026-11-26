@@ -1,3 +1,4 @@
+import { projectBlob } from "./projectBlob.mjs";
 import { textFont } from "../scene/text.mjs";
 import { includeBounds } from "../scene/bounds.mjs";
 import { setTreeClusterOrder, treeClusterOrder, validateTreePresentation } from "../tree/model.mjs";
@@ -1392,6 +1393,26 @@ export default function clusterMap() {
     if (snapshot.state) emitChange({ type: "state.replace", state: stateSnapshots.serialize(chartState, currentData) });
     emitHistoryChange();
     return my;
+  };
+  /** Serialize a project without cloning its complete biological data. */
+  my.exportProjectBlob = function ({ extensions = {} } = {}) {
+    if (!currentData) throw new Error("Cannot export a project before the chart has rendered.");
+    if (!isPlainObject(extensions)) throw new TypeError("Project extensions must be a plain object.");
+    let data = currentData;
+    if (treePresentationPreview && currentData.tree) {
+      const tree = structuredClone(currentData.tree);
+      applyTreeOperation(tree, treePresentationPreview.undo);
+      data = { ...currentData, tree };
+    }
+    const fields = {};
+    for (const key of Object.keys(extensions)) {
+      const descriptor = Object.getOwnPropertyDescriptor(extensions, key);
+      if (!("value" in descriptor)) throw new TypeError("Project export does not support accessors.");
+      Object.defineProperty(fields, key, { value: descriptor.value, enumerable: true, configurable: true, writable: true });
+    }
+    return projectBlob({ ...fields, format: projectFormat, version: projectVersion, data,
+      config: serializableConfig(runtime.config),
+      state: chartState ? stateSnapshots.serialize(chartState, currentData) : null });
   };
   // Do not name this `apply`: D3 invokes callable charts through
   // Function.prototype.apply when mounting them.

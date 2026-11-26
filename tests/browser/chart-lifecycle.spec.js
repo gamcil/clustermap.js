@@ -272,3 +272,28 @@ test("tooltip dismissal stays isolated between chart instances", async ({ page }
 
   expect(opacities).toEqual(["0", "0"]);
 });
+
+test("project Blob exports the committed snapshot without retaining live data", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/demo/?fixture=burnettii&test=1");
+  await page.waitForFunction(() => Boolean(window.__demoChart));
+  const result = await page.evaluate(async () => {
+    const chart = window.__demoChart;
+    chart.config({ plot: { transitionDuration: 0 } });
+    const before = chart.project();
+    chart.previewTreePresentation([{ type: "tree.presentation.update", scope: "tree",
+      changes: { colouring: { cutHeight: 4 } } }]);
+    const activePreview = JSON.stringify(chart.tree());
+    const blob = chart.exportProjectBlob({ extensions: { analysis: { example: [1, 2] }, format: "ignored" } });
+    const previewStillActive = JSON.stringify(chart.tree()) === activePreview;
+    chart.previewTreePresentation(null);
+    chart.config({ cluster: { spacing: chart.config().cluster.spacing + 5 } });
+    const saved = JSON.parse(await blob.text());
+    const { analysis, ...figure } = saved;
+    chart.project(figure);
+    return { figure, before, analysis, previewStillActive, loaded: chart.project() };
+  });
+  expect(result.figure).toEqual(result.before);
+  expect(result.loaded).toEqual(result.before);
+  expect(result.analysis).toEqual({ example: [1, 2] });
+  expect(result.previewStillActive).toBe(true);
+});

@@ -4,6 +4,78 @@
   (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ClusterMap = {}));
 })(this, (function (exports) { 'use strict';
 
+  function isPlainObject(value) {
+    if (!value || typeof value !== "object") return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  }
+
+  /** Clone arrays and plain records while retaining primitive and class leaves. */
+  function clonePlainValue(value) {
+    if (Array.isArray(value)) return value.map(clonePlainValue);
+    if (!isPlainObject(value)) return value;
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, clonePlainValue(child)]));
+  }
+
+  const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
+    one.length === two.length && one.every((value, index) => value === two[index]);
+
+  const isRecordId = (value) => typeof value === "string" ? Boolean(value.trim()) : Number.isFinite(value);
+
+  // Serialize synchronously so the chart cannot change between chunks. The Blob
+  // owns its bytes; no chart-owned objects escape after this function returns.
+  function projectBlob(project, { chunkSize = 1024 * 1024 } = {}) {
+    const chunks = [], ancestors = new Set();
+    let fragments = [], length = 0;
+    const flush = () => { if (length) chunks.push(fragments.join("")); fragments = []; length = 0; };
+    const append = (part) => {
+      fragments.push(part); length += part.length;
+      if (length >= chunkSize) flush();
+    };
+    const write = (value, inArray = false) => {
+      if (value === null || typeof value !== "object") {
+        if (typeof value === "undefined" || typeof value === "function" || typeof value === "symbol") {
+          if (inArray) append("null");
+          return;
+        }
+        append(JSON.stringify(value));
+        return;
+      }
+      if (!Array.isArray(value) && !isPlainObject(value)) {
+        throw new TypeError("Project export requires JSON-like plain objects and arrays.");
+      }
+      if (ancestors.has(value)) throw new TypeError("Cannot serialize a circular project.");
+      ancestors.add(value);
+      if (Array.isArray(value)) {
+        append("[");
+        for (let i = 0; i < value.length; i++) {
+          if (i) append(",");
+          const descriptor = Object.getOwnPropertyDescriptor(value, i);
+          if (descriptor && !("value" in descriptor)) throw new TypeError("Project export does not support accessors.");
+          write(descriptor?.value, true);
+        }
+        append("]");
+      } else {
+        append("{");
+        let first = true;
+        for (const key of Object.keys(value)) {
+          const descriptor = Object.getOwnPropertyDescriptor(value, key);
+          if (!("value" in descriptor)) throw new TypeError("Project export does not support accessors.");
+          const child = descriptor.value;
+          if (child === undefined || typeof child === "function" || typeof child === "symbol") continue;
+          if (!first) append(",");
+          first = false;
+          append(JSON.stringify(key)); append(":"); write(child);
+        }
+        append("}");
+      }
+      ancestors.delete(value);
+    };
+    write(project);
+    flush();
+    return new Blob(chunks, { type: "application/json;charset=utf-8" });
+  }
+
   function textFont({ fontSize, fontFamily, fontWeight = 400, fontStyle = "normal" }) {
     return `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
   }
@@ -3744,24 +3816,6 @@
 
     return initInterpolator.apply(scale, arguments);
   }
-
-  function isPlainObject(value) {
-    if (!value || typeof value !== "object") return false;
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
-  }
-
-  /** Clone arrays and plain records while retaining primitive and class leaves. */
-  function clonePlainValue(value) {
-    if (Array.isArray(value)) return value.map(clonePlainValue);
-    if (!isPlainObject(value)) return value;
-    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, clonePlainValue(child)]));
-  }
-
-  const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArray(two) &&
-    one.length === two.length && one.every((value, index) => value === two[index]);
-
-  const isRecordId = (value) => typeof value === "string" ? Boolean(value.trim()) : Number.isFinite(value);
 
   const sequential = ["#f7fbff", "#08306b"];
   const categorical = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377", "#bbbbbb"];
@@ -17668,6 +17722,26 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (snapshot.state) emitChange({ type: "state.replace", state: stateSnapshots.serialize(chartState, currentData) });
       emitHistoryChange();
       return my;
+    };
+    /** Serialize a project without cloning its complete biological data. */
+    my.exportProjectBlob = function ({ extensions = {} } = {}) {
+      if (!currentData) throw new Error("Cannot export a project before the chart has rendered.");
+      if (!isPlainObject(extensions)) throw new TypeError("Project extensions must be a plain object.");
+      let data = currentData;
+      if (treePresentationPreview && currentData.tree) {
+        const tree = structuredClone(currentData.tree);
+        applyTreeOperation(tree, treePresentationPreview.undo);
+        data = { ...currentData, tree };
+      }
+      const fields = {};
+      for (const key of Object.keys(extensions)) {
+        const descriptor = Object.getOwnPropertyDescriptor(extensions, key);
+        if (!("value" in descriptor)) throw new TypeError("Project export does not support accessors.");
+        Object.defineProperty(fields, key, { value: descriptor.value, enumerable: true, configurable: true, writable: true });
+      }
+      return projectBlob({ ...fields, format: projectFormat, version: projectVersion, data,
+        config: serializableConfig(runtime.config),
+        state: chartState ? stateSnapshots.serialize(chartState, currentData) : null });
     };
     // Do not name this `apply`: D3 invokes callable charts through
     // Function.prototype.apply when mounting them.
