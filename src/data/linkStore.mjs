@@ -58,7 +58,8 @@ export class CompactLinkStore {
       return;
     }
     const { genes, query, target, identity, similarity } = input;
-    validateCompactColumns(input);
+    // Transferred columns have already been validated before ownership moved.
+    if (mode !== transferredColumns) validateCompactColumns({ genes, query, target, identity, similarity });
     this.#genes = Object.freeze([...genes]);
     this.#query = mode === transferredColumns ? query : query.slice();
     this.#target = mode === transferredColumns ? target : target.slice();
@@ -73,7 +74,7 @@ export class CompactLinkStore {
   // All views of the transferred buffers in the caller become detached.
   static fromTransferred(input) {
     const { genes, query, target, identity, similarity } = input || {};
-    validateCompactColumns(input);
+    validateCompactColumns({ genes, query, target, identity, similarity });
     const columns = [query, target, identity, similarity];
     if (columns.some((column) => !(column.buffer instanceof ArrayBuffer))) {
       throw new TypeError("Compact link transfer requires transferable ArrayBuffers.");

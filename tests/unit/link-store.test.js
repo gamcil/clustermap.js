@@ -245,6 +245,18 @@ test("compact columns can transfer ownership without copying and invalid input s
   assert.equal(invalid.query.byteLength, 16);
 });
 
+test("compact construction validates the same columns it uses", () => {
+  for (const transfer of [false, true]) {
+    const columns = input();
+    let reads = 0;
+    const supplied = { ...columns, get query() { reads++; return columns.query; } };
+    const store = transfer ? CompactLinkStore.fromTransferred(supplied) : new CompactLinkStore(supplied);
+    assert.equal(reads, 1);
+    assert.equal(store.size, 4);
+    assert.equal(columns.query.byteLength, transfer ? 0 : 16);
+  }
+});
+
 test("compact positions remain correct with large exclusions and shared edit views", () => {
   const count = 1000, genes = ["a", "b"];
   const store = new CompactLinkStore({ genes,
