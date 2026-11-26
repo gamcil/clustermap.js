@@ -7,7 +7,7 @@ import { clonePlainValue, isPlainObject } from "../utils/values.mjs";
 
 // Each leaf declares the earliest stage affected by changes to that setting.
 const field = (value, effect, validation = {}) => ({ value, effect, ...validation });
-const configSchema = {
+export const configSchema = {
   // Optional row-aligned metadata panels. Synteny remains the default view.
   annotations: { enabled: field(false, "geometry") },
   tree: {

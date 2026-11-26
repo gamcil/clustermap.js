@@ -459,6 +459,11 @@ test("appearance component synchronizes config and preserves disclosure state th
   await expect(panel.locator('[data-config="colourBar.domain.min"]')).toBeDisabled();
   await panel.locator('[data-config="colourBar.domain.minMode"]').selectOption("fixed");
   await expect(panel.locator('[data-config="colourBar.domain.min"]')).toBeEnabled();
+  const labelPosition = panel.locator('[data-config="gene.label.position"]');
+  await labelPosition.selectOption("middle");
+  expect(await page.evaluate(() => chart.config().gene.label.position)).toBe("middle");
+  await page.evaluate(() => chart.config({ gene: { label: { position: "top" } } }));
+  await expect(labelPosition).toHaveValue("top");
 });
 
 test("annotation form and group components commit edits and reversible removals", async ({ page }) => {
