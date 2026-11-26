@@ -48,6 +48,28 @@ paths address different backends; combining them just to reduce file count
 would not necessarily simplify the library. Future changes should state which
 rules or states they remove, and demonstrate behavior and large-data costs.
 
+### Test suite
+
+The suite had 369 unit tests and 642 collected Playwright cases before the
+latest pruning. The latter are 214 cases repeated across Chromium, Firefox and
+WebKit; some WebGPU cases skip when no adapter is available. The largest
+browser files cover gestures, editor workflows and cross-renderer integration.
+Keep this distinction visible when discussing test count or runtime.
+
+Recent implementation-shaped tests for the chart model, change-impact
+classifier and renderer-mode predicates duplicated existing operation and
+browser coverage and were removed. The public configuration ownership test
+now covers independent listeners in the browser instead of repeating most of
+the scenario in a unit test. Renderer conformance now tests the built bundle.
+Retain direct unit tests where they check a distinct invariant, especially
+bounded allocations and behavior difficult to observe in a browser.
+
+The full three-browser matrix remains in place. Reducing it would change
+coverage, so first measure its runtime and identify a small cross-browser
+workflow covering editor, chart interactions and export; run the remaining
+cases in a clearly named primary-browser suite. Avoid adding a separate test
+for every refactor or asserting a private controller's exact bookkeeping.
+
 ---
 
 Audit of the repository at `fac7e59` on 26 November 2026. The goal is to
