@@ -233,3 +233,12 @@ continues to render text from the shared scene and previews.
 
 Next: consider using instanced link records for ordinary rendering as well as
 interaction previews; profile enabled text before adding overlay caching.
+
+## Compact link-store baseline
+
+Run `node --expose-gc bench/compact-links.mjs 2592111` to exercise a synthetic
+compact table at the observed large-GCF link count. It reports stage durations
+and post-GC Node RSS, heap and array-buffer sizes for table creation, indexing,
+scene construction and best-match filtering. This is a repeatable CPU baseline;
+it does not measure the real GCF, browser peak memory, project saving or GPU
+memory. Use a fresh process for each comparison.

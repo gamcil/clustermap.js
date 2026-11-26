@@ -298,10 +298,11 @@ test("project Blob exports the committed snapshot without retaining live data", 
   expect(result.previewStillActive).toBe(true);
 });
 
-test("compact link input supports chart edits, undo, row removal and project export", async ({ page }) => {
+for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`compact link input supports chart edits, undo, row removal and project export with ${renderer}`, async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/demo/?test=1");
   await page.addScriptTag({ url: "/node_modules/d3/dist/d3.min.js" });
-  const result = await page.evaluate(async () => {
+  const result = await page.evaluate(async (renderer) => {
     const { ClusterMap, CompactLinkStore } = await import("/dist/clustermap.mjs");
     const host = document.createElement("div"); host.style.width = "800px"; host.style.height = "400px";
     document.body.append(host);
@@ -312,7 +313,7 @@ test("compact link input supports chart edits, undo, row removal and project exp
     const data = { clusters: ids.map((uid) => ({ uid, name: uid, loci: [{ uid: `l-${uid}`, start: 0, end: 100,
       genes: [{ uid, start: 10, end: 20, strand: 1 }] }] })), links,
       groups: [{ uid: "group", genes: ids }], config: { updateGroups: false } };
-    const chart = ClusterMap().config({ plot: { renderer: "canvas", transitionDuration: 0 } });
+    const chart = ClusterMap().config({ plot: { renderer, transitionDuration: 0 } });
     d3.select(host).datum(data).call(chart);
     const original = chart.data(), arrayView = Array.isArray(original.links), initial = original.links.map((link) => link.uid);
     chart.patch([{ type: "links.update", ids: ["link-0"], changes: { hidden: true } }]);
@@ -329,7 +330,7 @@ test("compact link input supports chart edits, undo, row removal and project exp
     const roundTrip = chart.project(); chart.destroy(); host.remove();
     return { arrayView, initial, edited, oldView: oldView ?? null, deleted, restored, undone: undone ?? null,
       visible, project, blob, roundTrip };
-  });
+  }, renderer);
   expect(result.arrayView).toBe(true);
   expect(result.initial).toEqual(["link-0", "link-1"]);
   expect(result.edited).toBe(true);
@@ -341,3 +342,4 @@ test("compact link input supports chart edits, undo, row removal and project exp
   expect(result.blob).toEqual(result.project);
   expect(result.roundTrip).toEqual(result.project);
 });
+}
