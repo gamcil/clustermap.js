@@ -87,20 +87,6 @@ for (const flipped of [false, true]) for (const trimmed of [false, true]) {
   });
 }
 
-test("public configuration reads and subscriber snapshots are independently owned", async () => {
-  const { default: clusterMap } = await import("../../src/chart/chart.js");
-  const chart = clusterMap();
-  const snapshot = chart.config(); snapshot.tree.colouring.palette[0] = "red";
-  assert.notEqual(chart.config().tree.colouring.palette[0], "red");
-  chart.on("change", (event) => { if (event.config) event.config.tree.colouring.palette[0] = "green"; });
-  let received;
-  chart.on("change", (event) => { if (event.config) received = event.config.tree.colouring.palette; });
-  const palette = ["red", "blue"];
-  chart.config({ tree: { colouring: { palette } } }); palette[0] = "yellow";
-  assert.deepEqual(chart.config().tree.colouring.palette, ["red", "blue"]);
-  assert.deepEqual(received, ["red", "blue"]);
-});
-
 for (const alignLabels of [false, true]) for (const labelAlignment of ["left", "right"]) {
   test(`${labelAlignment}, aligned=${alignLabels}: label previews agree with committed geometry`, () => {
     const data = normalizeChartData(createLargeTestingData({ clusterCount: 3, genesPerCluster: 3 }));

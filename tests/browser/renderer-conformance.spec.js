@@ -36,13 +36,13 @@ async function mountRenderer(page, renderer) {
   }
 
   await page.evaluate(async (selectedRenderer) => {
-    const [{ default: clusterMap }, data] = await Promise.all([
-      import("/src/chart/chart.js"),
+    const [{ ClusterMap }, data] = await Promise.all([
+      import("/dist/clustermap.mjs"),
       fetch("/fixtures/testing.json").then((response) => response.json()),
     ]);
     const host = document.querySelector(".chart-host");
     host.replaceChildren();
-    const chart = clusterMap().config({
+    const chart = ClusterMap().config({
       plot: { renderer: selectedRenderer, transitionDuration: 0 },
     });
     window.__rendererConformance = { chart };

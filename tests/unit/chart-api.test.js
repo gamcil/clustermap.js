@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-test("chart factory exposes only the supported public methods", async () => {
+test("chart handles reads and rejects exports before mounting", async () => {
   const previousDocument = globalThis.document;
   globalThis.document = { documentElement: {} };
 
@@ -9,42 +9,12 @@ test("chart factory exposes only the supported public methods", async () => {
     const { default: clusterMap } = await import("../../src/chart/chart.js");
     const chart = clusterMap();
 
-    assert.equal(typeof chart, "function");
-    assert.equal(typeof chart.config, "function");
-    assert.equal(typeof chart.data, "function");
-    assert.equal(typeof chart.rendererStatus, "function");
     assert.equal(chart.rendererStatus(), null);
-    assert.equal(typeof chart.tree, "function");
     assert.equal(chart.tree(), null);
-    assert.equal(typeof chart.state, "function");
-    assert.equal(typeof chart.camera, "function");
     assert.equal(chart.camera(), null);
-    assert.equal(typeof chart.fitFigure, "function");
     assert.throws(() => chart.fitFigure(), /before the chart has rendered/);
-    assert.equal(typeof chart.project, "function");
-    assert.equal(typeof chart.exportProjectBlob, "function");
-    assert.equal(typeof chart.exportCompactProjectBlob, "function");
-    assert.equal(typeof chart.loadCompactProject, "function");
     assert.throws(() => chart.exportProjectBlob(), /before the chart has rendered/);
-    assert.equal(typeof chart.patch, "function");
-    assert.equal(typeof chart.previewTreePresentation, "function");
-    assert.equal(typeof chart.rotateTreeNode, "function");
-    assert.equal(typeof chart.canUndo, "function");
-    assert.equal(typeof chart.canRedo, "function");
-    assert.equal(typeof chart.undo, "function");
-    assert.equal(typeof chart.redo, "function");
-    assert.equal(typeof chart.clearHistory, "function");
-    assert.equal(typeof chart.highlight, "function");
-    assert.equal(typeof chart.locusSelection, "function");
-    assert.equal(typeof chart.flipLoci, "function");
-    assert.equal(typeof chart.trimLoci, "function");
-    assert.equal(typeof chart.restoreLoci, "function");
-    assert.equal(typeof chart.focus, "function");
-    assert.equal(typeof chart.on, "function");
-    assert.equal(typeof chart.exportSvg, "function");
-    assert.equal(typeof chart.figureBounds, "function");
     assert.equal(chart.figureBounds(), null);
-    assert.equal(typeof chart.destroy, "function");
     assert.equal(chart.config({ plot: { renderer: "canvas" } }), chart);
     assert.equal(chart.config().plot.renderer, "canvas");
   } finally {

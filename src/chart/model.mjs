@@ -22,7 +22,7 @@ function refreshGroups(data, index, derive = automaticGroups(data)) {
 
 // Own committed data, indexes, snapshots and history. Rendering and transient
 // interaction state remain with the chart until their own boundaries exist.
-export function createChartModel({ historyLimit = 100 } = {}) {
+export function createChartModel() {
   let data = null, index = null;
   const snapshots = createChartStateSerializer(), history = [], future = [];
   const stacks = (direction) => direction === "undo" ? [history, future] : [future, history];
@@ -46,7 +46,7 @@ export function createChartModel({ historyLimit = 100 } = {}) {
     commit(change) {
       if (!change) return;
       history.push(change);
-      if (history.length > historyLimit) history.splice(0, history.length - historyLimit);
+      if (history.length > 100) history.shift();
       future.length = 0;
     },
     peek(direction) { return stacks(direction)[0].at(-1); },

@@ -39,13 +39,15 @@ test("configuration snapshots and listener payloads cannot mutate live settings"
     chart.config({ tree: { colouring: { palette } } }); palette[0] = "green";
     const snapshot = chart.config(); snapshot.tree.colouring.palette[0] = "yellow";
     chart.on("change", (event) => { if (event.config) event.config.cluster.nameFontSize = 99; });
+    let received;
+    chart.on("change", (event) => { if (event.config) received = event.config.cluster.nameFontSize; });
     chart.config({ cluster: { nameFontSize: 15 } });
     const before = chart.project();
     try { chart.config({ cluster: { nameFontSize: 0 } }); } catch {}
-    return { palette: chart.config().tree.colouring.palette, size: chart.config().cluster.nameFontSize,
+    return { palette: chart.config().tree.colouring.palette, size: chart.config().cluster.nameFontSize, received,
       unchanged: JSON.stringify(before) === JSON.stringify(chart.project()) };
   });
-  expect(result).toEqual({ palette: ["red", "blue"], size: 15, unchanged: true });
+  expect(result).toEqual({ palette: ["red", "blue"], size: 15, received: 15, unchanged: true });
 });
 
 test("screenBounds exposes committed cluster labels and tree across renderers", async ({ page }) => {
