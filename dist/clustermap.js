@@ -8680,7 +8680,9 @@
       return cached.layout;
     }
     treeLayouts.delete(context);
-    const measureText = canvasTextMeasurer(context, scene);
+    // Interpolated scenes are new objects each frame, while their text metrics
+    // belong to the stable target scene and remain valid across positions.
+    const measureText = canvasTextMeasurer(context, options.targetScene || scene);
     const layout = layoutTree({
       ...options, tree, scene, config,
       measureText: (text, style) => textDimensions(text, style, measureText),

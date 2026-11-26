@@ -106,6 +106,21 @@ const measurementContext = () => ({
   save() {}, restore() {}, measureText: (text) => ({ width: text.length * 8 }),
 });
 
+test("tree animations reuse text measurements without reusing geometry", () => {
+  const { tree, scene, config, reorderedScene } = example();
+  let reads = 0;
+  const context = { ...measurementContext(), measureText: (text) => { reads++; return { width: text.length * 8 }; } };
+  const first = measureTreeLayout(context, tree, reorderedScene(["a", "b", "c"]), config, { targetScene: scene });
+  const initialReads = reads;
+  const second = measureTreeLayout(context, tree, reorderedScene(["c", "a", "b"]), config, { targetScene: scene });
+  assert.ok(initialReads > 0);
+  assert.equal(reads, initialReads, "new animation frames reuse target-scene text metrics");
+  assert.notEqual(first, second, "tree layout still updates for each frame");
+  context.letterSpacing = "2px";
+  measureTreeLayout(context, tree, reorderedScene(["a", "b", "c"]), config, { targetScene: scene });
+  assert.ok(reads > initialReads, "changed text properties invalidate metrics");
+});
+
 test("settled tree drawing and hit testing share layout until its inputs change", () => {
   const { tree, scene, config, reorderedScene } = example();
   const context = measurementContext();
