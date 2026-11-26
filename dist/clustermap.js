@@ -9135,6 +9135,24 @@
       !(link.identity < threshold) && groupForGene(link.query.uid) !== null && groupForGene(link.target.uid) !== null;
   }
 
+  // Share selection and tie semantics without changing each storage strategy's
+  // result representation or ordering.
+  function bestLinkSelector(geneForUid) {
+    const pairs = new Map();
+    return (query, target, identity) => {
+      const left = geneForUid(query).clusterUid, right = geneForUid(target).clusterUid;
+      const first = `${typeof left}:${String(left)}`, second = `${typeof right}:${String(right)}`;
+      const pair = first < second ? `${first}|${second}` : `${second}|${first}`;
+      let best = pairs.get(pair);
+      if (!best) { best = new Map(); pairs.set(pair, best); }
+      const queryBest = best.get(query), targetBest = best.get(target);
+      if (queryBest > identity || targetBest > identity) return null;
+      best.set(query, Math.max(queryBest ?? -Infinity, identity));
+      best.set(target, Math.max(targetBest ?? -Infinity, identity));
+      return pair;
+    };
+  }
+
   function compactLinkVisibility(store, { groupForGene, geneForUid, bestOnly, threshold }) {
     const bits = new Uint8Array(Math.ceil(store.size / 8));
     const positions = bestOnly ? new Uint32Array(store.size) : null;
@@ -9150,21 +9168,11 @@
       // Typed-array sorting is stable, preserving the source order of ties.
       const passing = positions.subarray(0, count);
       passing.sort((a, b) => store.identityAt(b) - store.identityAt(a));
-      const pairs = new Map();
-      const key = (left, right) => {
-        const first = `${typeof left}:${String(left)}`, second = `${typeof right}:${String(right)}`;
-        return first < second ? `${first}|${second}` : `${second}|${first}`;
-      };
+      const select = bestLinkSelector(geneForUid);
       for (const position of passing) {
         const query = store.queryAt(position), target = store.targetAt(position), identity = store.identityAt(position);
-        const pair = key(geneForUid(query).clusterUid, geneForUid(target).clusterUid);
-        let best = pairs.get(pair);
-        if (!best) { best = new Map(); pairs.set(pair, best); }
-        const queryBest = best.get(query), targetBest = best.get(target);
-        if (queryBest > identity || targetBest > identity) continue;
+        if (select(query, target, identity) === null) continue;
         bits[position >>> 3] |= 1 << (position & 7);
-        best.set(query, Math.max(queryBest ?? -Infinity, identity));
-        best.set(target, Math.max(targetBest ?? -Infinity, identity));
       }
     }
     return { byteLength: bits.byteLength, has: (uid) => {
@@ -9215,40 +9223,23 @@
     // independent and is resolved by the shared identity scale.
     if (!bestOnly) return passing;
 
-    const pairKey = (left, right) => {
-      const first = `${typeof left}:${String(left)}`;
-      const second = `${typeof right}:${String(right)}`;
-      return first < second ? `${first}|${second}` : `${second}|${first}`;
-    };
     const linksByClusterPair = new Map();
+    const select = bestLinkSelector(geneForUid);
     // Sort link references directly. Endpoint records can be looked up again
     // after sorting, avoiding a short-lived wrapper object for every link.
     passing.sort((a, b) => b.identity - a.identity);
 
     for (const link of passing) {
-      const query = geneForUid(link.query.uid);
-      const target = geneForUid(link.target.uid);
-      const clusterPair = pairKey(
-        query.clusterUid,
-        target.clusterUid
-      );
-      const selected = linksByClusterPair.get(clusterPair) || {
-        links: [],
-        bestIdentityForGene: new Map(),
-      };
-      const queryBest = selected.bestIdentityForGene.get(link.query.uid);
-      const targetBest = selected.bestIdentityForGene.get(link.target.uid);
       // Equal-scoring links intentionally survive: only a strictly better link
       // that shares an endpoint supersedes this relationship.
-      if (queryBest > link.identity || targetBest > link.identity) continue;
-      selected.links.push(link);
-      selected.bestIdentityForGene.set(link.query.uid, Math.max(queryBest ?? -Infinity, link.identity));
-      selected.bestIdentityForGene.set(link.target.uid, Math.max(targetBest ?? -Infinity, link.identity));
+      const clusterPair = select(link.query.uid, link.target.uid, link.identity);
+      if (clusterPair === null) continue;
+      const selected = linksByClusterPair.get(clusterPair) || [];
+      selected.push(link);
       linksByClusterPair.set(clusterPair, selected);
     }
 
-    return [...linksByClusterPair.values()]
-      .flatMap(({ links: selected }) => selected);
+    return [...linksByClusterPair.values()].flat();
   }
 
   function removeMissing(records, allowed) {

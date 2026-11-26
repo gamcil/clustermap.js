@@ -243,6 +243,18 @@ test("compact best-match visibility matches object filtering without materializi
   assert.deepEqual([...store.keys()].filter((uid) => actual.has(uid)), [...store.keys()].filter((uid) => expected.has(uid)));
 });
 
+test("best-match selection agrees for ties, reversed pairs and lower scores", () => {
+  const store = new CompactLinkStore({ genes: ["a", "b", "c", "d"],
+    query: new Uint32Array([0, 2, 0, 0, 1]), target: new Uint32Array([2, 0, 3, 2, 3]),
+    identity: new Float32Array([1, 1, 1, 0.5, 0.5]), similarity: new Float32Array(5) });
+  const options = { bestOnly: true, threshold: 0, groupForGene: () => 0,
+    geneForUid: (uid) => ({ clusterUid: uid === "a" || uid === "b" ? "left" : "right" }) };
+  const expected = ["link-0", "link-1", "link-2"];
+  assert.deepEqual(filterLinks([...store.values()], options).map((link) => link.uid), expected);
+  const visible = createLinkVisibility(store, options, store);
+  assert.deepEqual([...store.keys()].filter((uid) => visible.has(uid)), expected);
+});
+
 test("compact link snapshots preserve sparse edits, deletions and undefined values", () => {
   const base = new CompactLinkStore(input());
   const edited = base.withUpdates([{ uid: "link-0", changes: { hidden: true, label: "chosen" } },
