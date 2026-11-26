@@ -1,3 +1,4 @@
+import { CompactLinkStore } from "./linkStore.mjs";
 import { treeMetrics } from "../tree/model.mjs";
 /** Prune absent leaves and collapse unary ancestors without changing source records. */
 export function visibleTree(tree, clusterIds, aliases = new Map()) {
@@ -78,8 +79,11 @@ export function visibleChartData(data, state) {
   const aliases = new Map();
   const tree = visibleTree(data.tree, clusterIds, aliases);
   const nodeIds = new Set(tree?.nodes.map((node) => node.uid));
+  const links = data.links instanceof CompactLinkStore
+    ? data.links.filterEndpoints(geneIds)
+    : data.links.filter((link) => geneIds.has(link.query.uid) && geneIds.has(link.target.uid));
   return { ...data, clusters, tree,
-    links: data.links.filter((link) => geneIds.has(link.query.uid) && geneIds.has(link.target.uid)),
+    links,
     groups: data.groups?.map((group) => ({ ...group, genes: group.genes?.filter((uid) => geneIds.has(uid)) })),
     annotationPanels: data.annotationPanels?.map((panel) => panel.type === "groups"
       ? { ...panel, groups: panel.groups.flatMap((group) => {

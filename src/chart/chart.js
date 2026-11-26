@@ -1,3 +1,4 @@
+import { CompactLinkStore } from "../data/linkStore.mjs";
 import { projectBlob } from "./projectBlob.mjs";
 import { textFont } from "../scene/text.mjs";
 import { includeBounds } from "../scene/bounds.mjs";
@@ -498,9 +499,11 @@ export default function clusterMap() {
   function refreshGroups(data, index, derive = groupsAreAutomatic(data)) {
     if (derive) {
       // Deleted genes retain their link records; exclude dangling endpoints.
-      const links = data.links.filter((link) =>
-        index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)
-      );
+      const links = data.links instanceof CompactLinkStore
+        ? (function* () { for (const link of data.links.values()) {
+            if (index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)) yield link;
+          } })()
+        : data.links.filter((link) => index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid));
       data.groups = createLinkGroups(links, data.groups);
     } else data.groups ??= [];
     index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
@@ -1354,7 +1357,11 @@ export default function clusterMap() {
   /** A portable data, appearance, and layout snapshot for project persistence. */
   my.project = function (snapshot) {
     if (!arguments.length) {
-      const data = structuredClone(currentData);
+      // The legacy object snapshot remains independently owned. A compact
+      // table expands only for this explicit API; Blob export streams it.
+      const data = currentData?.links instanceof CompactLinkStore
+        ? { ...structuredClone({ ...currentData, links: [] }), links: [...currentData.links.values()] }
+        : structuredClone(currentData);
       if (treePresentationPreview && data?.tree) applyTreeOperation(data.tree, treePresentationPreview.undo);
       return {
         format: projectFormat,

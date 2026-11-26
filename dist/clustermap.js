@@ -4704,7 +4704,7 @@
         throw new TypeError("Compact link columns must be equal-length Uint32/Float64 arrays.");
       }
       for (let i = 0; i < query.length; i++) {
-        if (query[i] >= genes.length || target[i] >= genes.length || !Number.isFinite(identity[i]) || !Number.isFinite(similarity[i])) {
+        if (query[i] >= genes.length || target[i] >= genes.length || !Number.isFinite(identity[i]) || identity[i] < 0 || identity[i] > 1 || !Number.isFinite(similarity[i])) {
           throw new TypeError(`Invalid compact link at position ${i}.`);
         }
       }
@@ -4779,6 +4779,14 @@
         removed.add(this.#physicalForUid(uid));
       }
       next.#deleted = [...removed].sort((a, b) => a - b);
+      return next;
+    }
+    filterEndpoints(geneIds) {
+      const next = new CompactLinkStore(this, sharedColumns), removed = [...this.#deleted];
+      for (let position = 0; position < this.size; position++) {
+        if (!geneIds.has(this.queryAt(position)) || !geneIds.has(this.targetAt(position))) removed.push(this.#physicalAt(position));
+      }
+      next.#deleted = removed.sort((a, b) => a - b);
       return next;
     }
     withRestored(records) {
@@ -8675,8 +8683,11 @@
     const aliases = new Map();
     const tree = visibleTree(data.tree, clusterIds, aliases);
     const nodeIds = new Set(tree?.nodes.map((node) => node.uid));
+    const links = data.links instanceof CompactLinkStore
+      ? data.links.filterEndpoints(geneIds)
+      : data.links.filter((link) => geneIds.has(link.query.uid) && geneIds.has(link.target.uid));
     return { ...data, clusters, tree,
-      links: data.links.filter((link) => geneIds.has(link.query.uid) && geneIds.has(link.target.uid)),
+      links,
       groups: data.groups?.map((group) => ({ ...group, genes: group.genes?.filter((uid) => geneIds.has(uid)) })),
       annotationPanels: data.annotationPanels?.map((panel) => panel.type === "groups"
         ? { ...panel, groups: panel.groups.flatMap((group) => {
@@ -9731,7 +9742,7 @@
       records("loci", cluster.loci);
       for (const locus of cluster.loci) records("genes", locus.genes);
     }
-    records("links", data.links);
+    if (!(data.links instanceof CompactLinkStore)) records("links", data.links);
     records("groups", data.groups ?? []);
   }
 
@@ -9752,7 +9763,7 @@
         if (gene.bio !== undefined) range(gene.bio, `gene '${gene.uid}' bio`, true);
       }
     }
-    for (const link of data.links) {
+    for (const link of data.links instanceof CompactLinkStore ? [] : data.links) {
       for (const side of ["query", "target"]) {
         if (!isPlainObject(link[side]) || !isRecordId(link[side].uid)) fail(`link '${link.uid}' ${side} requires a gene ID`);
       }
@@ -9787,7 +9798,7 @@
         ...cluster,
         loci: cluster.loci.map((locus) => normalizeLocus(locus, cluster.uid)),
       })),
-      links: [...source.links],
+      links: source.links instanceof CompactLinkStore ? source.links : [...source.links],
       groups: source.groups?.map((group) => ({
         ...group,
         genes: group.genes ? [...group.genes] : group.genes,
@@ -17147,9 +17158,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     function refreshGroups(data, index, derive = groupsAreAutomatic(data)) {
       if (derive) {
         // Deleted genes retain their link records; exclude dangling endpoints.
-        const links = data.links.filter((link) =>
-          index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)
-        );
+        const links = data.links instanceof CompactLinkStore
+          ? (function* () { for (const link of data.links.values()) {
+              if (index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)) yield link;
+            } })()
+          : data.links.filter((link) => index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid));
         data.groups = createLinkGroups(links, data.groups);
       } else data.groups ??= [];
       index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
@@ -18003,7 +18016,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     /** A portable data, appearance, and layout snapshot for project persistence. */
     my.project = function (snapshot) {
       if (!arguments.length) {
-        const data = structuredClone(currentData);
+        // The legacy object snapshot remains independently owned. A compact
+        // table expands only for this explicit API; Blob export streams it.
+        const data = currentData?.links instanceof CompactLinkStore
+          ? { ...structuredClone({ ...currentData, links: [] }), links: [...currentData.links.values()] }
+          : structuredClone(currentData);
         if (treePresentationPreview && data?.tree) applyTreeOperation(data.tree, treePresentationPreview.undo);
         return {
           format: projectFormat,

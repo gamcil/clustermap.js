@@ -1,3 +1,4 @@
+import { CompactLinkStore } from "./linkStore.mjs";
 import { validateTreePresentation } from "../tree/model.mjs";
 import { validateAnnotationPanels } from "../annotations/model.mjs";
 import { clonePlainValue, isPlainObject, isRecordId } from "../utils/values.mjs";
@@ -53,7 +54,7 @@ function validateRecordIds(data) {
     records("loci", cluster.loci);
     for (const locus of cluster.loci) records("genes", locus.genes);
   }
-  records("links", data.links);
+  if (!(data.links instanceof CompactLinkStore)) records("links", data.links);
   records("groups", data.groups ?? []);
 }
 
@@ -74,7 +75,7 @@ function validateRecords(data) {
       if (gene.bio !== undefined) range(gene.bio, `gene '${gene.uid}' bio`, true);
     }
   }
-  for (const link of data.links) {
+  for (const link of data.links instanceof CompactLinkStore ? [] : data.links) {
     for (const side of ["query", "target"]) {
       if (!isPlainObject(link[side]) || !isRecordId(link[side].uid)) fail(`link '${link.uid}' ${side} requires a gene ID`);
     }
@@ -109,7 +110,7 @@ export function normalizeChartData(data, treeConfig = {}) {
       ...cluster,
       loci: cluster.loci.map((locus) => normalizeLocus(locus, cluster.uid)),
     })),
-    links: [...source.links],
+    links: source.links instanceof CompactLinkStore ? source.links : [...source.links],
     groups: source.groups?.map((group) => ({
       ...group,
       genes: group.genes ? [...group.genes] : group.genes,

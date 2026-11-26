@@ -46,7 +46,7 @@ export class CompactLinkStore {
       throw new TypeError("Compact link columns must be equal-length Uint32/Float64 arrays.");
     }
     for (let i = 0; i < query.length; i++) {
-      if (query[i] >= genes.length || target[i] >= genes.length || !Number.isFinite(identity[i]) || !Number.isFinite(similarity[i])) {
+      if (query[i] >= genes.length || target[i] >= genes.length || !Number.isFinite(identity[i]) || identity[i] < 0 || identity[i] > 1 || !Number.isFinite(similarity[i])) {
         throw new TypeError(`Invalid compact link at position ${i}.`);
       }
     }
@@ -121,6 +121,14 @@ export class CompactLinkStore {
       removed.add(this.#physicalForUid(uid));
     }
     next.#deleted = [...removed].sort((a, b) => a - b);
+    return next;
+  }
+  filterEndpoints(geneIds) {
+    const next = new CompactLinkStore(this, sharedColumns), removed = [...this.#deleted];
+    for (let position = 0; position < this.size; position++) {
+      if (!geneIds.has(this.queryAt(position)) || !geneIds.has(this.targetAt(position))) removed.push(this.#physicalAt(position));
+    }
+    next.#deleted = removed.sort((a, b) => a - b);
     return next;
   }
   withRestored(records) {

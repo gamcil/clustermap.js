@@ -163,3 +163,21 @@ test("compact link delete and undo operations preserve edits and reject invalid 
   assert.equal(data.links, before);
   assert.equal(index.linkById.get("link-1").hidden, undefined);
 });
+
+test("normalization and visibility preserve compact storage and link ownership", async () => {
+  const [{ normalizeChartData }, { visibleChartData }, { createChartState }] = await Promise.all([
+    import("../../src/data/normalize.mjs"), import("../../src/data/visibility.mjs"), import("../../src/chart/state.mjs"),
+  ]);
+  const store = new CompactLinkStore(input());
+  const source = { clusters: ["a", "b", "c"].map((uid) => ({ uid,
+    loci: [{ uid: `l-${uid}`, start: 0, end: 100, genes: [{ uid, start: 10, end: 20, strand: 1 }] }] })),
+    links: store, groups: [], config: { updateGroups: false } };
+  const normalized = normalizeChartData(source);
+  assert.equal(normalized.links, store);
+  const state = createChartState(normalized);
+  state.excludedClusters.add("c");
+  const visible = visibleChartData(normalized, state);
+  assert.ok(visible.links instanceof CompactLinkStore);
+  assert.deepEqual([...visible.links.keys()], ["link-0", "link-2"]);
+  assert.equal(store.size, 4);
+});
