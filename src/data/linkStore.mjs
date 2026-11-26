@@ -94,6 +94,7 @@ export class CompactLinkStore {
     return changes && Object.hasOwn(changes, "identity") ? changes.identity : this.#identity[physical];
   }
   hiddenAt(position) { return this.#overrides.get(this.#physicalAt(position))?.hidden; }
+  labelAt(position) { return this.#overrides.get(this.#physicalAt(position))?.label; }
   getAt(position) {
     const physical = this.#physicalAt(position);
     if (physical === undefined) return undefined;
@@ -176,6 +177,7 @@ export function linkArrayView(store) {
   };
   view = new Proxy(array, {
     get(target, key, receiver) {
+      if (key === Symbol.for("clustermap.compactLinks")) return store;
       if (key === "length") return store.size;
       const index = indexOf(key);
       return index === null ? Reflect.get(target, key, receiver) : store.getAt(index);

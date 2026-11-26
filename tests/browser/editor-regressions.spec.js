@@ -1574,3 +1574,29 @@ test("demo mounts the editor and routes annotation requests explicitly", async (
   await expect(editor(page).getByRole("combobox", { name: "Annotation panel", exact: true })).toHaveValue(uid);
   await expect(page.locator("#btn-editor")).toHaveAttribute("aria-expanded", "true");
 });
+
+test("large compact link editor pages, filters and keeps selections across pages", async ({ page }) => {
+  await page.evaluate(async () => {
+    const { CompactLinkStore } = await import("/dist/clustermap.mjs");
+    const data = chart.data(), genes = data.clusters.flatMap((cluster) => cluster.loci.flatMap((locus) => locus.genes)).slice(0, 2);
+    const count = 1250;
+    const links = new CompactLinkStore({ genes: genes.map((gene) => gene.uid),
+      query: new Uint32Array(count), target: new Uint32Array(count).fill(1),
+      identity: new Float64Array(count).fill(0.9), similarity: new Float64Array(count).fill(0.95) });
+    chart.data({ ...data, links, config: { ...data.config, updateGroups: false } });
+  });
+  await view(page, "links");
+  const panel = editor(page);
+  await expect(panel.locator("[data-link-page-label]")).toContainText("Page 1 of 5");
+  await expect(panel.locator(".cm-editor__row--links").first()).toBeVisible();
+  await panel.locator('.cm-editor__row--links input[type="checkbox"]').first().check();
+  await panel.locator('[data-command="next-link-page"]').click();
+  await expect(panel.locator("[data-link-page-label]")).toContainText("Page 2 of 5");
+  await expect(panel.locator("clinker-selection-bar")).toContainText("1 link selected");
+  await panel.locator('[data-command="previous-link-page"]').click();
+  await expect(panel.locator('.cm-editor__row--links input[type="checkbox"]').first()).toBeChecked();
+  await page.evaluate(() => chart.patch([{ type: "links.update", ids: ["link-0"], changes: { label: "unique marker" } }]));
+  await panel.getByRole("searchbox", { name: "Filter records", exact: true }).fill("unique marker");
+  await expect(panel.locator("[data-link-page-label]")).toContainText("1 matching links");
+  await expect(panel.locator(".cm-editor__row--links")).toHaveCount(1);
+});

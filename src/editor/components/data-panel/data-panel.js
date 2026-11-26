@@ -41,6 +41,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   #selectionBar = null;
   #model = new DataPanelModel();
   #filter = "";
+  #linkPage = 0;
   #memberGroupId = null;
   #expanded = new Set();
   #sort = {
@@ -145,6 +146,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.shadowRoot.addEventListener("value-change", (event) => {
       if (event.target.matches("[data-kind-picker]")) {
         this.#kind = event.detail.value;
+        this.#linkPage = 0;
         if (this.#kind !== "genes") this.#memberGroupId = null;
         this.#selected.clear();
       } else if (event.target.matches("[data-gene-view]")) this.#geneView = event.detail.value;
@@ -168,6 +170,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     else if (action === "sort") {
       const current = this.#sort[this.#kind];
       this.#sort[this.#kind] = { key, direction: current?.key === key ? -current.direction : 1 };
+      this.#linkPage = 0;
       this.#table.scrollTo({ top: 0 }); this.#renderData();
     } else if (action === "toggle") {
       if (this.#expanded.has(key)) this.#expanded.delete(key); else this.#expanded.add(key);
@@ -181,6 +184,12 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #command(command, value) {
+    if (command === "previous-link-page" || command === "next-link-page") {
+      this.#linkPage += command === "previous-link-page" ? -1 : 1;
+      this.#table.scrollTo({ top: 0 });
+      this.#renderData();
+      return;
+    }
     if (command === "remove-loci" || command === "remove-clusters") {
       const kind = command === "remove-loci" ? "loci" : "clusters";
       this.#removeRecords(kind, this.#model.selectedParents(kind, this.#selected));
@@ -242,9 +251,9 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     if (replace) {
       this.#annotationEditor?.reset();
       this.#table?.reset();
-      this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null;
+      this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null; this.#linkPage = 0;
       this.#initializeExpanded();
-    } else this.#selected.prune(this.#model.recordIds(this.#kind), this.#view().byKey.keys());
+    } else this.#selected.prune(this.#model.existingIds(this.#kind, this.#selected), this.#view().byKey.keys());
     this.#renderData();
   }
 
@@ -274,11 +283,12 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
 
   #view(options = {}) {
     return this.#model.view({ kind: this.#kind, geneView: this.#geneView, filter: this.#filter,
-      memberGroupId: this.#memberGroupId, sort: this.#sort[this.#kind], expanded: this.#expanded, ...options });
+      memberGroupId: this.#memberGroupId, sort: this.#sort[this.#kind], page: this.#linkPage, expanded: this.#expanded, ...options });
   }
 
   #setDataFilter(text) {
     this.#filter = text.trim().toLowerCase();
+    this.#linkPage = 0;
     this.shadowRoot.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
     this.#renderData();
   }
@@ -318,7 +328,15 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     }
     const geneView = this.shadowRoot.querySelector("[data-gene-view]");
     const memberFilter = this.shadowRoot.querySelector("[data-member-filter]");
-    const { rows, ids, parentCount, memberGroup, hasCollapsed } = this.#view();
+    const { rows, ids, parentCount, memberGroup, hasCollapsed, paged, page, pageCount, total } = this.#view();
+    const pager = this.shadowRoot.querySelector("[data-link-pages]");
+    pager.hidden = !paged;
+    if (paged) {
+      this.#linkPage = page;
+      pager.querySelector("[data-link-page-label]").textContent = `Page ${page + 1} of ${pageCount} · ${total.toLocaleString()} matching links`;
+      pager.querySelector('[data-command="previous-link-page"]').disabled = page === 0;
+      pager.querySelector('[data-command="next-link-page"]').disabled = page + 1 >= pageCount;
+    }
     memberFilter.hidden = !memberGroup || this.#kind !== "genes";
     this.shadowRoot.querySelector("[data-record-tools]").hidden = memberFilter.hidden;
     if (memberGroup) this.shadowRoot.querySelector("[data-member-label]").textContent = memberGroup.label || memberGroup.name || memberGroup.uid;
@@ -334,7 +352,7 @@ export class ClinkerDataPanelElement extends HTMLElementBase {
     this.#table.state = { kind: this.#kind, geneView: this.#geneView, rows, selection: this.#selected, sort: this.#sort[this.#kind] };
     const summaryText = isTree
       ? `${parentCount.toLocaleString()} ${this.#geneView === "groups" ? "group" : "cluster/locus"} rows · ${ids.length.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
-      : `${rows.length.toLocaleString()} visible ${this.#kind}${memberGroup && this.#kind === "genes" ? " in selected group" : ""}${this.#filter ? " matching search" : ""}.`;
+      : `${rows.length.toLocaleString()} visible ${this.#kind}${paged ? " on this page" : ""}${memberGroup && this.#kind === "genes" ? " in selected group" : ""}${this.#filter ? " matching search" : ""}.`;
     this.#selectionBar.state = { selection: this.#selected, ids, summary: summaryText,
       noun: this.#kind.slice(0, -1), selectSuffix: isTree ? " genes" : "" };
     const parentRemoval = this.#kind === "genes" && this.#geneView === "tree" && this.#chart?.remove;

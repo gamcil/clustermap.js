@@ -1263,20 +1263,77 @@ function defineRecordTable() {
 }
 
 const emptyData = { clusters: [], groups: [], links: [] };
+const LINK_PAGE_SIZE = 250;
+const LINK_PAGE_THRESHOLD = 1000;
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const labelFor = (record, fallback = "") => record?.label || record?.name || fallback;
+
+// Stable bucket ordering keeps memory proportional to numeric positions and
+// distinct display values, rather than constructing a row object per link.
+function sortLinkPositions(positions, sort, value, compact) {
+  if (!sort || !positions.length) return positions;
+  // Legacy arrays may contain numeric IDs mixed with text labels. Preserve
+  // their exact comparator behavior without retaining projected row objects.
+  if (!compact) {
+    positions.sort((a, b) => {
+      const left = value(a, sort.key), right = value(b, sort.key);
+      return (typeof left === "number" && typeof right === "number"
+        ? left - right : collator.compare(String(left), String(right))) * sort.direction;
+    });
+    return positions;
+  }
+  const numeric = sort.key === "identity", ranks = new Map();
+  let bucketCount;
+  if (numeric) bucketCount = 1001;
+  else {
+    for (const position of positions) ranks.set(String(value(position, sort.key)), 0);
+    const values = [...ranks.keys()].sort(collator.compare);
+    let rank = -1, previous;
+    for (const current of values) {
+      if (previous === undefined || collator.compare(previous, current) !== 0) rank++;
+      ranks.set(current, rank); previous = current;
+    }
+    bucketCount = rank + 1;
+  }
+  const bucket = (position) => {
+    const rank = numeric ? Math.round(value(position, sort.key) * 10) : ranks.get(String(value(position, sort.key)));
+    return sort.direction < 0 ? bucketCount - 1 - rank : rank;
+  };
+  const counts = new Uint32Array(bucketCount);
+  for (const position of positions) counts[bucket(position)]++;
+  let offset = 0;
+  for (let i = 0; i < counts.length; i++) { const count = counts[i]; counts[i] = offset; offset += count; }
+  const sorted = new Uint32Array(positions.length);
+  for (const position of positions) { const index = bucket(position); sorted[counts[index]++] = position; }
+  return sorted;
+}
 
 /** Cached projections of chart data, independent of DOM and chart mutations. */
 class DataPanelModel {
   #data = null;
   #index = null;
   #view = null;
+  #linkIndex = null;
 
   get data() { return this.#data; }
-  set data(value) { this.#data = value; this.#index = this.#view = null; }
+  set data(value) { this.#data = value; this.#index = this.#view = this.#linkIndex = null; }
   groupId(value) { return this.#records().groupById.get(String(value))?.uid; }
   recordIds(kind) {
     return kind === "genes" ? this.#records().genes.map(({ gene }) => gene.uid)
       : (this.#data?.[kind] || []).map(({ uid }) => uid);
+  }
+
+  existingIds(kind, selected) {
+    if (kind !== "links") return this.recordIds(kind);
+    const wanted = new Set(selected), found = [];
+    if (!wanted.size) return found;
+    const links = this.#data?.links || [], compact = links[Symbol.for("clustermap.compactLinks")];
+    if (compact) return [...wanted].filter((uid) => compact.has(uid));
+    for (const link of links) if (wanted.delete(link.uid)) {
+      found.push(link.uid);
+      if (!wanted.size) break;
+    }
+    return found;
   }
 
   plotTarget(kind, ids) {
@@ -1296,13 +1353,56 @@ class DataPanelModel {
   }
 
   view(options) {
-    const key = JSON.stringify([options.kind, options.geneView, options.filter, options.memberGroupId, options.sort, [...options.expanded]]);
+    const key = JSON.stringify([options.kind, options.geneView, options.filter, options.memberGroupId, options.sort, options.page, [...options.expanded]]);
     if (this.#view?.key === key) return this.#view;
     const branches = [], memberGroup = this.#data?.groups.find((group) => group.uid === options.memberGroupId);
-    const rows = this.#computeRows({ ...options, branches, memberGroup });
+    const paged = options.kind === "links" && this.#data?.links.length > LINK_PAGE_THRESHOLD
+      ? this.#linkPage(options) : null;
+    const rows = paged ? paged.rows : this.#computeRows({ ...options, branches, memberGroup });
     const ids = [...new Set(rows.flatMap((row) => row.selectIds || (row.type === "gene" || !row.type ? [row.id] : [])))];
     return this.#view = { key, rows, ids, branches, memberGroup, hasCollapsed: branches.some((row) => !row.open), byKey: new Map(rows.map((row) => [row.key ?? row.id, row])),
-      parentCount: rows.filter((row) => row.type && row.type !== "gene").length };
+      parentCount: rows.filter((row) => row.type && row.type !== "gene").length, ...(paged || {}) };
+  }
+
+  #linkPage({ filter, sort, page = 0 }) {
+    const links = this.#data.links, compact = links[Symbol.for("clustermap.compactLinks")];
+    const { geneById: genes, groups } = this.#records();
+    const label = (uid) => labelFor(genes.get(uid), uid);
+    const group = (uid) => labelFor(groups.get(uid), "Ungrouped");
+    const value = (position, key) => {
+      const record = compact ? null : links[position];
+      const query = compact ? compact.queryAt(position) : record.query.uid;
+      const target = compact ? compact.targetAt(position) : record.target.uid;
+      if (key === "source") return label(query);
+      if (key === "target") return label(target);
+      if (key === "identity") return Math.round(((compact ? compact.identityAt(position) : record.identity) || 0) * 1000) / 10;
+      if (key === "groups") return `${group(query)} / ${group(target)}`;
+      if (key === "label") return (compact ? compact.labelAt(position) : record.label) || "";
+      return "";
+    };
+    const key = JSON.stringify([filter, sort]);
+    if (this.#linkIndex?.key !== key) {
+      const positions = new Uint32Array(links.length);
+      let count = 0;
+      for (let i = 0; i < links.length; i++) {
+        if (filter && ![value(i, "source"), value(i, "target"), value(i, "label")].join(" ").toLowerCase().includes(filter)) continue;
+        positions[count++] = i;
+      }
+      const matched = positions.subarray(0, count);
+      this.#linkIndex = { key, positions: sortLinkPositions(matched, sort, value, compact) };
+    }
+    const positions = this.#linkIndex.positions, total = positions.length;
+    const pageCount = Math.max(1, Math.ceil(total / LINK_PAGE_SIZE));
+    page = Math.min(Math.max(0, page), pageCount - 1);
+    const rows = [];
+    for (const position of positions.subarray(page * LINK_PAGE_SIZE, (page + 1) * LINK_PAGE_SIZE)) {
+      const link = compact ? compact.getAt(position) : links[position];
+      rows.push({ id: link.uid, source: label(link.query.uid), target: label(link.target.uid),
+        identity: Math.round((link.identity || 0) * 1000) / 10,
+        groups: `${group(link.query.uid)} / ${group(link.target.uid)}`,
+        label: link.label || "", hidden: Boolean(link.hidden), colour: link.colour });
+    }
+    return { rows, page, pageCount, total, paged: true };
   }
 
   #records() {
@@ -1565,8 +1665,8 @@ function defineRecordActions() {
 }
 
 const [markup, css] = await Promise.all([
-  "<div class=\"cm-ui cm-data-ui cm-data-layout\" part=\"content\">\n<clinker-view-switcher data-kind-picker label=\"Data type\" value=\"groups\">\n  <option value=\"groups\">Groups</option><option value=\"genes\">Genes</option>\n  <option value=\"links\">Links</option><option value=\"annotations\">Annotations</option>\n</clinker-view-switcher>\n<div part=\"toolbar\" data-record-toolbar class=\"cm-editor__toolbar cm-data-toolbar\">\n  <clinker-view-switcher data-gene-view label=\"Gene view\" value=\"tree\" hidden>\n    <option value=\"tree\">By locus</option><option value=\"groups\">By group</option><option value=\"list\">List</option>\n  </clinker-view-switcher>\n  <button type=\"button\" data-command=\"toggle-tree\" hidden>Expand visible</button>\n  <button type=\"button\" data-command=\"new-group\">Create group…</button>\n  <clinker-search-field data-filter label=\"Filter records\" placeholder=\"Search names, labels, loci, or clusters\"></clinker-search-field>\n</div>\n<clinker-annotation-editor embedded hidden></clinker-annotation-editor>\n<div data-record-editor class=\"cm-data-panel\">\n  <div data-record-tools class=\"cm-data-tools\" hidden>\n    <div class=\"cm-editor__member-filter\" data-member-filter hidden>\n      <span>Group: <strong data-member-label></strong></span>\n      <button type=\"button\" data-command=\"clear-member-filter\" aria-label=\"Clear group member filter\" title=\"Clear group member filter\">×</button>\n    </div>\n  </div>\n  <clinker-selection-bar part=\"selection\" class=\"cm-data-meta\"><div slot=\"actions\" class=\"cm-data-actions\"><clinker-record-actions></clinker-record-actions></div></clinker-selection-bar>\n  <clinker-record-table part=\"table\" class=\"cm-editor__table\"></clinker-record-table>\n</div>\n<div data-editor-error class=\"cm-data-error\" role=\"alert\" hidden></div>\n</div>\n",
-  ":host { display:flex; flex:1; min-width:0; min-height:0; }\n.cm-data-layout { display:grid; flex:1; min-width:0; min-height:0; grid-template-columns:auto minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; grid-template-areas:\"views tools\" \"content content\" \"error error\"; gap:8px; }\n.cm-data-layout > [data-kind-picker] { grid-area:views; align-self:center; }\n.cm-data-layout > [data-record-toolbar] { grid-area:tools; min-width:0; }\n.cm-data-layout > [data-record-editor] { grid-area:content; }\n.cm-data-layout > [data-editor-error] { grid-area:error; }\n.cm-editor__member-filter { display: flex; align-items: center; gap: 6px; color: var(--cm-muted,var(--_cm-muted,#526178)); font-size: 12px; }\n.cm-editor__member-filter button { display: grid; place-items: center; width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,var(--_cm-muted,#64748b)); font-size: 17px; line-height: 1; }\n@media (max-width:700px) {\n  .cm-data-layout { grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr) auto; grid-template-areas:\"views\" \"tools\" \"content\" \"error\"; }\n}\n",
+  "<div class=\"cm-ui cm-data-ui cm-data-layout\" part=\"content\">\n<clinker-view-switcher data-kind-picker label=\"Data type\" value=\"groups\">\n  <option value=\"groups\">Groups</option><option value=\"genes\">Genes</option>\n  <option value=\"links\">Links</option><option value=\"annotations\">Annotations</option>\n</clinker-view-switcher>\n<div part=\"toolbar\" data-record-toolbar class=\"cm-editor__toolbar cm-data-toolbar\">\n  <clinker-view-switcher data-gene-view label=\"Gene view\" value=\"tree\" hidden>\n    <option value=\"tree\">By locus</option><option value=\"groups\">By group</option><option value=\"list\">List</option>\n  </clinker-view-switcher>\n  <button type=\"button\" data-command=\"toggle-tree\" hidden>Expand visible</button>\n  <button type=\"button\" data-command=\"new-group\">Create group…</button>\n  <clinker-search-field data-filter label=\"Filter records\" placeholder=\"Search names, labels, loci, or clusters\"></clinker-search-field>\n</div>\n<clinker-annotation-editor embedded hidden></clinker-annotation-editor>\n<div data-record-editor class=\"cm-data-panel\">\n  <div data-record-tools class=\"cm-data-tools\" hidden>\n    <div class=\"cm-editor__member-filter\" data-member-filter hidden>\n      <span>Group: <strong data-member-label></strong></span>\n      <button type=\"button\" data-command=\"clear-member-filter\" aria-label=\"Clear group member filter\" title=\"Clear group member filter\">×</button>\n    </div>\n  </div>\n  <clinker-selection-bar part=\"selection\" class=\"cm-data-meta\"><div slot=\"actions\" class=\"cm-data-actions\"><clinker-record-actions></clinker-record-actions></div></clinker-selection-bar>\n  <div class=\"cm-link-pages\" data-link-pages hidden>\n    <button type=\"button\" data-command=\"previous-link-page\">Previous</button>\n    <span data-link-page-label></span>\n    <button type=\"button\" data-command=\"next-link-page\">Next</button>\n  </div>\n  <clinker-record-table part=\"table\" class=\"cm-editor__table\"></clinker-record-table>\n</div>\n<div data-editor-error class=\"cm-data-error\" role=\"alert\" hidden></div>\n</div>\n",
+  ":host { display:flex; flex:1; min-width:0; min-height:0; }\n.cm-data-layout { display:grid; flex:1; min-width:0; min-height:0; grid-template-columns:auto minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; grid-template-areas:\"views tools\" \"content content\" \"error error\"; gap:8px; }\n.cm-data-layout > [data-kind-picker] { grid-area:views; align-self:center; }\n.cm-data-layout > [data-record-toolbar] { grid-area:tools; min-width:0; }\n.cm-data-layout > [data-record-editor] { grid-area:content; }\n.cm-data-layout > [data-editor-error] { grid-area:error; }\n.cm-editor__member-filter { display: flex; align-items: center; gap: 6px; color: var(--cm-muted,var(--_cm-muted,#526178)); font-size: 12px; }\n.cm-editor__member-filter button { display: grid; place-items: center; width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--cm-muted,var(--_cm-muted,#64748b)); font-size: 17px; line-height: 1; }\n@media (max-width:700px) {\n  .cm-data-layout { grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr) auto; grid-template-areas:\"views\" \"tools\" \"content\" \"error\"; }\n}\n.cm-link-pages { display: flex; gap: 8px; align-items: center; padding: 4px 0; }\n.cm-link-pages[hidden] { display: none; }\n",
 ]);
 const template = createTemplate(markup);
 
@@ -1591,6 +1691,7 @@ class ClinkerDataPanelElement extends HTMLElementBase {
   #selectionBar = null;
   #model = new DataPanelModel();
   #filter = "";
+  #linkPage = 0;
   #memberGroupId = null;
   #expanded = new Set();
   #sort = {
@@ -1695,6 +1796,7 @@ class ClinkerDataPanelElement extends HTMLElementBase {
     this.shadowRoot.addEventListener("value-change", (event) => {
       if (event.target.matches("[data-kind-picker]")) {
         this.#kind = event.detail.value;
+        this.#linkPage = 0;
         if (this.#kind !== "genes") this.#memberGroupId = null;
         this.#selected.clear();
       } else if (event.target.matches("[data-gene-view]")) this.#geneView = event.detail.value;
@@ -1718,6 +1820,7 @@ class ClinkerDataPanelElement extends HTMLElementBase {
     else if (action === "sort") {
       const current = this.#sort[this.#kind];
       this.#sort[this.#kind] = { key, direction: current?.key === key ? -current.direction : 1 };
+      this.#linkPage = 0;
       this.#table.scrollTo({ top: 0 }); this.#renderData();
     } else if (action === "toggle") {
       if (this.#expanded.has(key)) this.#expanded.delete(key); else this.#expanded.add(key);
@@ -1731,6 +1834,12 @@ class ClinkerDataPanelElement extends HTMLElementBase {
   }
 
   #command(command, value) {
+    if (command === "previous-link-page" || command === "next-link-page") {
+      this.#linkPage += command === "previous-link-page" ? -1 : 1;
+      this.#table.scrollTo({ top: 0 });
+      this.#renderData();
+      return;
+    }
     if (command === "remove-loci" || command === "remove-clusters") {
       const kind = command === "remove-loci" ? "loci" : "clusters";
       this.#removeRecords(kind, this.#model.selectedParents(kind, this.#selected));
@@ -1792,9 +1901,9 @@ class ClinkerDataPanelElement extends HTMLElementBase {
     if (replace) {
       this.#annotationEditor?.reset();
       this.#table?.reset();
-      this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null;
+      this.#selected.clear(); this.#expanded.clear(); this.#memberGroupId = null; this.#linkPage = 0;
       this.#initializeExpanded();
-    } else this.#selected.prune(this.#model.recordIds(this.#kind), this.#view().byKey.keys());
+    } else this.#selected.prune(this.#model.existingIds(this.#kind, this.#selected), this.#view().byKey.keys());
     this.#renderData();
   }
 
@@ -1824,11 +1933,12 @@ class ClinkerDataPanelElement extends HTMLElementBase {
 
   #view(options = {}) {
     return this.#model.view({ kind: this.#kind, geneView: this.#geneView, filter: this.#filter,
-      memberGroupId: this.#memberGroupId, sort: this.#sort[this.#kind], expanded: this.#expanded, ...options });
+      memberGroupId: this.#memberGroupId, sort: this.#sort[this.#kind], page: this.#linkPage, expanded: this.#expanded, ...options });
   }
 
   #setDataFilter(text) {
     this.#filter = text.trim().toLowerCase();
+    this.#linkPage = 0;
     this.shadowRoot.querySelector(".cm-editor__table")?.scrollTo({ top: 0 });
     this.#renderData();
   }
@@ -1868,7 +1978,15 @@ class ClinkerDataPanelElement extends HTMLElementBase {
     }
     const geneView = this.shadowRoot.querySelector("[data-gene-view]");
     const memberFilter = this.shadowRoot.querySelector("[data-member-filter]");
-    const { rows, ids, parentCount, memberGroup, hasCollapsed } = this.#view();
+    const { rows, ids, parentCount, memberGroup, hasCollapsed, paged, page, pageCount, total } = this.#view();
+    const pager = this.shadowRoot.querySelector("[data-link-pages]");
+    pager.hidden = !paged;
+    if (paged) {
+      this.#linkPage = page;
+      pager.querySelector("[data-link-page-label]").textContent = `Page ${page + 1} of ${pageCount} · ${total.toLocaleString()} matching links`;
+      pager.querySelector('[data-command="previous-link-page"]').disabled = page === 0;
+      pager.querySelector('[data-command="next-link-page"]').disabled = page + 1 >= pageCount;
+    }
     memberFilter.hidden = !memberGroup || this.#kind !== "genes";
     this.shadowRoot.querySelector("[data-record-tools]").hidden = memberFilter.hidden;
     if (memberGroup) this.shadowRoot.querySelector("[data-member-label]").textContent = memberGroup.label || memberGroup.name || memberGroup.uid;
@@ -1884,7 +2002,7 @@ class ClinkerDataPanelElement extends HTMLElementBase {
     this.#table.state = { kind: this.#kind, geneView: this.#geneView, rows, selection: this.#selected, sort: this.#sort[this.#kind] };
     const summaryText = isTree
       ? `${parentCount.toLocaleString()} ${this.#geneView === "groups" ? "group" : "cluster/locus"} rows · ${ids.length.toLocaleString()} genes${this.#filter ? " matching search" : ""}.`
-      : `${rows.length.toLocaleString()} visible ${this.#kind}${memberGroup && this.#kind === "genes" ? " in selected group" : ""}${this.#filter ? " matching search" : ""}.`;
+      : `${rows.length.toLocaleString()} visible ${this.#kind}${paged ? " on this page" : ""}${memberGroup && this.#kind === "genes" ? " in selected group" : ""}${this.#filter ? " matching search" : ""}.`;
     this.#selectionBar.state = { selection: this.#selected, ids, summary: summaryText,
       noun: this.#kind.slice(0, -1), selectSuffix: isTree ? " genes" : "" };
     const parentRemoval = this.#kind === "genes" && this.#geneView === "tree" && this.#chart?.remove;

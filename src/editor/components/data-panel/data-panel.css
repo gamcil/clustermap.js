@@ -9,3 +9,5 @@
 @media (max-width:700px) {
   .cm-data-layout { grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr) auto; grid-template-areas:"views" "tools" "content" "error"; }
 }
+.cm-link-pages { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
+.cm-link-pages[hidden] { display: none; }

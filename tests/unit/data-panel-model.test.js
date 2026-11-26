@@ -63,3 +63,54 @@ test("plot targets preserve typed IDs and include selected groups outside the fi
   assert.deepEqual(model.plotTarget("genes", [1, 2]), { genes: [1, 2] });
   assert.deepEqual(model.plotTarget("links", [0]), { links: [0] });
 });
+
+test("large compact link views page sorted and filtered rows without expanding the link table", async () => {
+  const { CompactLinkStore, linkArrayView } = await import("../../src/data/linkStore.mjs");
+  const count = 1250, genes = ["a", "b", "c"];
+  const store = new CompactLinkStore({ genes,
+    query: Uint32Array.from({ length: count }, (_, i) => i % 3),
+    target: Uint32Array.from({ length: count }, (_, i) => (i + 1) % 3),
+    identity: Float64Array.from({ length: count }, (_, i) => (i % 10) / 10),
+    similarity: new Float64Array(count).fill(0.9) });
+  let reads = 0;
+  const get = store.getAt.bind(store);
+  store.getAt = (position) => { reads++; return get(position); };
+  const model = new DataPanelModel();
+  model.data = { clusters: [{ uid: "cluster", loci: [{ uid: "locus", genes: genes.map((uid) => ({ uid, label: `Gene ${uid}` })) }] }],
+    groups: [{ uid: "group", genes }], links: linkArrayView(store) };
+  const settings = options({ kind: "links", sort: { key: "identity", direction: -1 }, page: 0 });
+  const first = model.view(settings);
+  assert.equal(first.total, count);
+  assert.equal(first.rows.length, 250);
+  assert.equal(first.pageCount, 5);
+  assert.equal(first.rows[0].identity, 90);
+  assert.equal(reads, 250, "only the visible page is materialized");
+  const second = model.view({ ...settings, page: 1 });
+  assert.equal(second.rows.length, 250);
+  assert.equal(reads, 500, "changing pages reuses the sorted position index");
+  assert.equal(new Set([...first.ids, ...second.ids]).size, 500);
+  const filtered = model.view({ ...settings, filter: "gene a", page: 0 });
+  const expected = [...store.values()].filter((link) => [link.query.uid, link.target.uid].includes("a"));
+  assert.equal(filtered.total, expected.length);
+  assert.deepEqual(model.existingIds("links", ["link-1", "missing"]), ["link-1"]);
+});
+
+test("large link pages preserve existing global sort, tie and filter semantics", () => {
+  const genes = [{ uid: "a", label: "gene 10" }, { uid: "b", label: "Gene 2" }, { uid: "c", label: "gene 2" }];
+  const links = Array.from({ length: 1100 }, (_, i) => ({ uid: `link-${i}`,
+    query: { uid: genes[i % 3].uid }, target: { uid: genes[(i * 2 + 1) % 3].uid },
+    identity: (i % 9) / 10, label: i % 3 ? "alpha" : "Alpha" }));
+  const model = new DataPanelModel();
+  model.data = { clusters: [{ uid: "cluster", loci: [{ uid: "locus", genes }] }],
+    groups: [{ uid: "g", label: "Group", genes: genes.map((gene) => gene.uid) }], links };
+  const gene = new Map(genes.map((item) => [item.uid, item.label]));
+  const rows = links.map((link) => ({ id: link.uid, source: gene.get(link.query.uid), target: gene.get(link.target.uid),
+    identity: Math.round(link.identity * 1000) / 10, groups: "Group / Group", label: link.label }));
+  for (const key of ["source", "target", "identity", "groups", "label"]) for (const direction of [1, -1]) {
+    const expected = [...rows].sort((a, b) => (typeof a[key] === "number" ? a[key] - b[key] :
+      a[key].localeCompare(b[key], undefined, { numeric: true, sensitivity: "base" })) * direction);
+    const got = [];
+    for (let page = 0; page < 5; page++) got.push(...model.view(options({ kind: "links", page, sort: { key, direction } })).ids);
+    assert.deepEqual(got, expected.map((row) => row.id), `${key} direction ${direction}`);
+  }
+});

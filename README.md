@@ -507,7 +507,9 @@ such as `map`, `filter`, JSON serialization or `chart.project()` can still
 materialize many records. The views cannot be passed to `structuredClone`;
 use `chart.project()` for an owned object snapshot or `exportProjectBlob()`
 to serialize without expanding the full link table at once. Existing projects
-remain object-array based when reopened.
+remain object-array based when reopened. The data editor pages link sets larger
+than 1,000 records; its search and sort cover all links, and select-all applies
+to the current page.
 
 Treat the objects returned by `data()` and `visibleData()` as read-only. Direct
 mutation is unsupported: it bypasses validation, history, and cache invalidation.

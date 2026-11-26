@@ -1,18 +1,75 @@
 const emptyData = { clusters: [], groups: [], links: [] };
+const LINK_PAGE_SIZE = 250;
+const LINK_PAGE_THRESHOLD = 1000;
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const labelFor = (record, fallback = "") => record?.label || record?.name || fallback;
+
+// Stable bucket ordering keeps memory proportional to numeric positions and
+// distinct display values, rather than constructing a row object per link.
+function sortLinkPositions(positions, sort, value, compact) {
+  if (!sort || !positions.length) return positions;
+  // Legacy arrays may contain numeric IDs mixed with text labels. Preserve
+  // their exact comparator behavior without retaining projected row objects.
+  if (!compact) {
+    positions.sort((a, b) => {
+      const left = value(a, sort.key), right = value(b, sort.key);
+      return (typeof left === "number" && typeof right === "number"
+        ? left - right : collator.compare(String(left), String(right))) * sort.direction;
+    });
+    return positions;
+  }
+  const numeric = sort.key === "identity", ranks = new Map();
+  let bucketCount;
+  if (numeric) bucketCount = 1001;
+  else {
+    for (const position of positions) ranks.set(String(value(position, sort.key)), 0);
+    const values = [...ranks.keys()].sort(collator.compare);
+    let rank = -1, previous;
+    for (const current of values) {
+      if (previous === undefined || collator.compare(previous, current) !== 0) rank++;
+      ranks.set(current, rank); previous = current;
+    }
+    bucketCount = rank + 1;
+  }
+  const bucket = (position) => {
+    const rank = numeric ? Math.round(value(position, sort.key) * 10) : ranks.get(String(value(position, sort.key)));
+    return sort.direction < 0 ? bucketCount - 1 - rank : rank;
+  };
+  const counts = new Uint32Array(bucketCount);
+  for (const position of positions) counts[bucket(position)]++;
+  let offset = 0;
+  for (let i = 0; i < counts.length; i++) { const count = counts[i]; counts[i] = offset; offset += count; }
+  const sorted = new Uint32Array(positions.length);
+  for (const position of positions) { const index = bucket(position); sorted[counts[index]++] = position; }
+  return sorted;
+}
 
 /** Cached projections of chart data, independent of DOM and chart mutations. */
 export class DataPanelModel {
   #data = null;
   #index = null;
   #view = null;
+  #linkIndex = null;
 
   get data() { return this.#data; }
-  set data(value) { this.#data = value; this.#index = this.#view = null; }
+  set data(value) { this.#data = value; this.#index = this.#view = this.#linkIndex = null; }
   groupId(value) { return this.#records().groupById.get(String(value))?.uid; }
   recordIds(kind) {
     return kind === "genes" ? this.#records().genes.map(({ gene }) => gene.uid)
       : (this.#data?.[kind] || []).map(({ uid }) => uid);
+  }
+
+  existingIds(kind, selected) {
+    if (kind !== "links") return this.recordIds(kind);
+    const wanted = new Set(selected), found = [];
+    if (!wanted.size) return found;
+    const links = this.#data?.links || [], compact = links[Symbol.for("clustermap.compactLinks")];
+    if (compact) return [...wanted].filter((uid) => compact.has(uid));
+    for (const link of links) if (wanted.delete(link.uid)) {
+      found.push(link.uid);
+      if (!wanted.size) break;
+    }
+    return found;
   }
 
   plotTarget(kind, ids) {
@@ -32,13 +89,56 @@ export class DataPanelModel {
   }
 
   view(options) {
-    const key = JSON.stringify([options.kind, options.geneView, options.filter, options.memberGroupId, options.sort, [...options.expanded]]);
+    const key = JSON.stringify([options.kind, options.geneView, options.filter, options.memberGroupId, options.sort, options.page, [...options.expanded]]);
     if (this.#view?.key === key) return this.#view;
     const branches = [], memberGroup = this.#data?.groups.find((group) => group.uid === options.memberGroupId);
-    const rows = this.#computeRows({ ...options, branches, memberGroup });
+    const paged = options.kind === "links" && this.#data?.links.length > LINK_PAGE_THRESHOLD
+      ? this.#linkPage(options) : null;
+    const rows = paged ? paged.rows : this.#computeRows({ ...options, branches, memberGroup });
     const ids = [...new Set(rows.flatMap((row) => row.selectIds || (row.type === "gene" || !row.type ? [row.id] : [])))];
     return this.#view = { key, rows, ids, branches, memberGroup, hasCollapsed: branches.some((row) => !row.open), byKey: new Map(rows.map((row) => [row.key ?? row.id, row])),
-      parentCount: rows.filter((row) => row.type && row.type !== "gene").length };
+      parentCount: rows.filter((row) => row.type && row.type !== "gene").length, ...(paged || {}) };
+  }
+
+  #linkPage({ filter, sort, page = 0 }) {
+    const links = this.#data.links, compact = links[Symbol.for("clustermap.compactLinks")];
+    const { geneById: genes, groups } = this.#records();
+    const label = (uid) => labelFor(genes.get(uid), uid);
+    const group = (uid) => labelFor(groups.get(uid), "Ungrouped");
+    const value = (position, key) => {
+      const record = compact ? null : links[position];
+      const query = compact ? compact.queryAt(position) : record.query.uid;
+      const target = compact ? compact.targetAt(position) : record.target.uid;
+      if (key === "source") return label(query);
+      if (key === "target") return label(target);
+      if (key === "identity") return Math.round(((compact ? compact.identityAt(position) : record.identity) || 0) * 1000) / 10;
+      if (key === "groups") return `${group(query)} / ${group(target)}`;
+      if (key === "label") return (compact ? compact.labelAt(position) : record.label) || "";
+      return "";
+    };
+    const key = JSON.stringify([filter, sort]);
+    if (this.#linkIndex?.key !== key) {
+      const positions = new Uint32Array(links.length);
+      let count = 0;
+      for (let i = 0; i < links.length; i++) {
+        if (filter && ![value(i, "source"), value(i, "target"), value(i, "label")].join(" ").toLowerCase().includes(filter)) continue;
+        positions[count++] = i;
+      }
+      const matched = positions.subarray(0, count);
+      this.#linkIndex = { key, positions: sortLinkPositions(matched, sort, value, compact) };
+    }
+    const positions = this.#linkIndex.positions, total = positions.length;
+    const pageCount = Math.max(1, Math.ceil(total / LINK_PAGE_SIZE));
+    page = Math.min(Math.max(0, page), pageCount - 1);
+    const rows = [];
+    for (const position of positions.subarray(page * LINK_PAGE_SIZE, (page + 1) * LINK_PAGE_SIZE)) {
+      const link = compact ? compact.getAt(position) : links[position];
+      rows.push({ id: link.uid, source: label(link.query.uid), target: label(link.target.uid),
+        identity: Math.round((link.identity || 0) * 1000) / 10,
+        groups: `${group(link.query.uid)} / ${group(link.target.uid)}`,
+        label: link.label || "", hidden: Boolean(link.hidden), colour: link.colour });
+    }
+    return { rows, page, pageCount, total, paged: true };
   }
 
   #records() {
