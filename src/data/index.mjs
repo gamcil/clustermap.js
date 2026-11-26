@@ -1,4 +1,5 @@
 import { clusterPairKey } from "../links/layout.mjs";
+import { ArrayLinkStore, CompactLinkStore } from "./linkStore.mjs";
 
 function appendToIndex(index, key, value) {
   const values = index.get(key);
@@ -6,31 +7,46 @@ function appendToIndex(index, key, value) {
   else index.set(key, [value]);
 }
 
-// One ID-to-position map serves editing lookups and scene painter order.
-// The array is retained for this index's lifetime so old scenes remain stable.
-class LinkIndex {
-  constructor(links) {
-    this.links = links;
-    this.positions = new Map();
-    for (let index = 0; index < links.length; index++) this.positions.set(links[index].uid, index);
+// Store numeric positions rather than link objects or generated UID strings.
+// Materialize only a requested gene/pair's records in source order.
+function compactLinkIndexes(store, clusterForGene) {
+  const geneCounts = new Map(), pairCounts = new Map();
+  const increment = (map, key) => map.set(key, (map.get(key) || 0) + 1);
+  const pairFor = (query, target) => clusterForGene.has(query) && clusterForGene.has(target)
+    ? clusterPairKey(clusterForGene.get(query), clusterForGene.get(target)) : null;
+  for (let i = 0; i < store.size; i++) {
+    const query = store.queryAt(i), target = store.targetAt(i), pair = pairFor(query, target);
+    increment(geneCounts, query);
+    if (query !== target) increment(geneCounts, target);
+    if (pair !== null) increment(pairCounts, pair);
   }
-  get size() { return this.positions.size; }
-  has(uid) { return this.positions.has(uid); }
-  order(uid) { return this.positions.get(uid); }
-  get(uid) { const index = this.positions.get(uid); return index === undefined ? undefined : this.links[index]; }
-  *keys() { yield* this.positions.keys(); }
-  *values() { for (const index of this.positions.values()) yield this.links[index]; }
-  *entries() { for (const [uid, index] of this.positions) yield [uid, this.links[index]]; }
-  [Symbol.iterator]() { return this.entries(); }
+  const makeLists = (counts) => new Map([...counts].map(([key, count]) => [key, { values: new Uint32Array(count), next: 0 }]));
+  const genes = makeLists(geneCounts), pairs = makeLists(pairCounts);
+  const put = (map, key, position) => { const entry = map.get(key); entry.values[entry.next++] = position; };
+  for (let i = 0; i < store.size; i++) {
+    const query = store.queryAt(i), target = store.targetAt(i), pair = pairFor(query, target);
+    put(genes, query, i);
+    if (query !== target) put(genes, target, i);
+    if (pair !== null) put(pairs, pair, i);
+  }
+  const view = (map, resolve) => ({
+    get size() { return map.size; },
+    has: (key) => map.has(key),
+    get: (key) => { const entry = map.get(key); return entry && Array.from(entry.values, resolve); },
+    keys: () => map.keys(),
+  });
+  return { linksByGeneId: view(genes, (position) => store.getAt(position)),
+    linksByClusterPair: view(pairs, (position) => store.uidAt(position)) };
 }
+
 export function createChartIndex(data) {
   const clusterById = new Map();
   const locusById = new Map();
   const geneById = new Map();
   const groupById = new Map();
-  const linkById = new LinkIndex(data.links);
-  const linksByGeneId = new Map();
-  const linksByClusterPair = new Map();
+  const linkById = data.links instanceof CompactLinkStore ? data.links : new ArrayLinkStore(data.links);
+  let linksByGeneId = new Map();
+  let linksByClusterPair = new Map();
   const clusterForGene = new Map();
 
   for (const cluster of data.clusters) {
@@ -45,7 +61,9 @@ export function createChartIndex(data) {
     }
   }
 
-  for (const link of data.links) {
+  if (data.links instanceof CompactLinkStore) {
+    ({ linksByGeneId, linksByClusterPair } = compactLinkIndexes(data.links, clusterForGene));
+  } else for (const link of data.links) {
     appendToIndex(linksByGeneId, link.query.uid, link);
     if (link.target.uid !== link.query.uid) appendToIndex(linksByGeneId, link.target.uid, link);
     if (clusterForGene.has(link.query.uid) && clusterForGene.has(link.target.uid)) {

@@ -1,3 +1,4 @@
+import { CompactLinkStore } from "../data/linkStore.mjs";
 function connectedComponents(links) {
   const parent = new Map();
   const rank = new Map();
@@ -138,6 +139,7 @@ function linkPassesFilter(link, { groupForGene, geneForUid, threshold }) {
 // Retain one bit per source record, rather than a Set of millions of IDs.
 // The captured index makes old scenes independent of later data/index updates.
 export function createLinkVisibility(links, options, index) {
+  if (links instanceof CompactLinkStore) links = links.values();
   if (!index?.order) {
     const allowed = new Set(filterLinks(links, options).map((link) => link.uid));
     return { has: (uid) => allowed.has(uid) };
@@ -162,6 +164,7 @@ export function filterLinks(
   links,
   { groupForGene, geneForUid, bestOnly, threshold }
 ) {
+  if (links instanceof CompactLinkStore) links = links.values();
   const passing = [];
   const options = { groupForGene, geneForUid, threshold };
   for (const link of links) {

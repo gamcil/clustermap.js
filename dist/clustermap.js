@@ -8518,6 +8518,74 @@
     return zoom;
   }
 
+  // Link stores retain source order and provide stable ID-to-position lookup.
+  // Array stores retain record identity because editing currently mutates records.
+  class ArrayLinkStore {
+    constructor(links) {
+      this.links = links;
+      this.positions = new Map();
+      for (let position = 0; position < links.length; position++) this.positions.set(links[position].uid, position);
+    }
+    get size() { return this.positions.size; }
+    has(uid) { return this.positions.has(uid); }
+    order(uid) { return this.positions.get(uid); }
+    getAt(position) { return this.links[position]; }
+    uidAt(position) { return this.links[position]?.uid; }
+    get(uid) { const position = this.order(uid); return position === undefined ? undefined : this.getAt(position); }
+    *keys() { yield* this.positions.keys(); }
+    *values() { for (const uid of this.positions.keys()) yield this.get(uid); }
+    *entries() { for (const uid of this.positions.keys()) yield [uid, this.get(uid)]; }
+    [Symbol.iterator]() { return this.entries(); }
+  }
+
+  // Immutable columnar link table for canonical, ordered Clinker link IDs.
+  // Inputs are copied: callers can mutate their arrays without affecting a chart
+  // or an old scene. Arbitrary IDs and edited fields require an overlay, which is
+  // deliberately not part of this read-only base representation.
+  class CompactLinkStore {
+    #genes; #query; #target; #identity; #similarity;
+    constructor({ genes, query, target, identity, similarity }) {
+      if (!Array.isArray(genes) || !genes.every((uid) => typeof uid === "string" && uid.length)) {
+        throw new TypeError("Compact links require a gene ID dictionary.");
+      }
+      if (!(query instanceof Uint32Array) || !(target instanceof Uint32Array) ||
+          !(identity instanceof Float64Array) || !(similarity instanceof Float64Array) ||
+          query.length !== target.length || query.length !== identity.length || query.length !== similarity.length) {
+        throw new TypeError("Compact link columns must be equal-length Uint32/Float64 arrays.");
+      }
+      for (let i = 0; i < query.length; i++) {
+        if (query[i] >= genes.length || target[i] >= genes.length || !Number.isFinite(identity[i]) || !Number.isFinite(similarity[i])) {
+          throw new TypeError(`Invalid compact link at position ${i}.`);
+        }
+      }
+      this.#genes = Object.freeze([...genes]);
+      this.#query = query.slice(); this.#target = target.slice();
+      this.#identity = identity.slice(); this.#similarity = similarity.slice();
+    }
+    get size() { return this.#query.length; }
+    get byteLength() { return this.#query.byteLength + this.#target.byteLength + this.#identity.byteLength + this.#similarity.byteLength; }
+    order(uid) {
+      if (typeof uid !== "string" || !/^link-(0|[1-9]\d*)$/.test(uid)) return undefined;
+      const position = Number(uid.slice(5));
+      return Number.isSafeInteger(position) && position < this.size ? position : undefined;
+    }
+    has(uid) { return this.order(uid) !== undefined; }
+    uidAt(position) { return Number.isInteger(position) && position >= 0 && position < this.size ? `link-${position}` : undefined; }
+    queryAt(position) { return this.#genes[this.#query[position]]; }
+    targetAt(position) { return this.#genes[this.#target[position]]; }
+    getAt(position) {
+      const uid = this.uidAt(position);
+      if (uid === undefined) return undefined;
+      return { uid, query: { uid: this.queryAt(position) }, target: { uid: this.targetAt(position) },
+        identity: this.#identity[position], similarity: this.#similarity[position] };
+    }
+    get(uid) { const position = this.order(uid); return position === undefined ? undefined : this.getAt(position); }
+    *keys() { for (let i = 0; i < this.size; i++) yield this.uidAt(i); }
+    *values() { for (let i = 0; i < this.size; i++) yield this.getAt(i); }
+    *entries() { for (let i = 0; i < this.size; i++) { const link = this.getAt(i); yield [link.uid, link]; } }
+    [Symbol.iterator]() { return this.entries(); }
+  }
+
   function connectedComponents(links) {
     const parent = new Map();
     const rank = new Map();
@@ -8658,6 +8726,7 @@
   // Retain one bit per source record, rather than a Set of millions of IDs.
   // The captured index makes old scenes independent of later data/index updates.
   function createLinkVisibility(links, options, index) {
+    if (links instanceof CompactLinkStore) links = links.values();
     if (!index?.order) {
       const allowed = new Set(filterLinks(links, options).map((link) => link.uid));
       return { has: (uid) => allowed.has(uid) };
@@ -8682,6 +8751,7 @@
     links,
     { groupForGene, geneForUid, bestOnly, threshold }
   ) {
+    if (links instanceof CompactLinkStore) links = links.values();
     const passing = [];
     const options = { groupForGene, geneForUid, threshold };
     for (const link of links) {
@@ -9187,31 +9257,46 @@
     else index.set(key, [value]);
   }
 
-  // One ID-to-position map serves editing lookups and scene painter order.
-  // The array is retained for this index's lifetime so old scenes remain stable.
-  class LinkIndex {
-    constructor(links) {
-      this.links = links;
-      this.positions = new Map();
-      for (let index = 0; index < links.length; index++) this.positions.set(links[index].uid, index);
+  // Store numeric positions rather than link objects or generated UID strings.
+  // Materialize only a requested gene/pair's records in source order.
+  function compactLinkIndexes(store, clusterForGene) {
+    const geneCounts = new Map(), pairCounts = new Map();
+    const increment = (map, key) => map.set(key, (map.get(key) || 0) + 1);
+    const pairFor = (query, target) => clusterForGene.has(query) && clusterForGene.has(target)
+      ? clusterPairKey(clusterForGene.get(query), clusterForGene.get(target)) : null;
+    for (let i = 0; i < store.size; i++) {
+      const query = store.queryAt(i), target = store.targetAt(i), pair = pairFor(query, target);
+      increment(geneCounts, query);
+      if (query !== target) increment(geneCounts, target);
+      if (pair !== null) increment(pairCounts, pair);
     }
-    get size() { return this.positions.size; }
-    has(uid) { return this.positions.has(uid); }
-    order(uid) { return this.positions.get(uid); }
-    get(uid) { const index = this.positions.get(uid); return index === undefined ? undefined : this.links[index]; }
-    *keys() { yield* this.positions.keys(); }
-    *values() { for (const index of this.positions.values()) yield this.links[index]; }
-    *entries() { for (const [uid, index] of this.positions) yield [uid, this.links[index]]; }
-    [Symbol.iterator]() { return this.entries(); }
+    const makeLists = (counts) => new Map([...counts].map(([key, count]) => [key, { values: new Uint32Array(count), next: 0 }]));
+    const genes = makeLists(geneCounts), pairs = makeLists(pairCounts);
+    const put = (map, key, position) => { const entry = map.get(key); entry.values[entry.next++] = position; };
+    for (let i = 0; i < store.size; i++) {
+      const query = store.queryAt(i), target = store.targetAt(i), pair = pairFor(query, target);
+      put(genes, query, i);
+      if (query !== target) put(genes, target, i);
+      if (pair !== null) put(pairs, pair, i);
+    }
+    const view = (map, resolve) => ({
+      get size() { return map.size; },
+      has: (key) => map.has(key),
+      get: (key) => { const entry = map.get(key); return entry && Array.from(entry.values, resolve); },
+      keys: () => map.keys(),
+    });
+    return { linksByGeneId: view(genes, (position) => store.getAt(position)),
+      linksByClusterPair: view(pairs, (position) => store.uidAt(position)) };
   }
+
   function createChartIndex(data) {
     const clusterById = new Map();
     const locusById = new Map();
     const geneById = new Map();
     const groupById = new Map();
-    const linkById = new LinkIndex(data.links);
-    const linksByGeneId = new Map();
-    const linksByClusterPair = new Map();
+    const linkById = data.links instanceof CompactLinkStore ? data.links : new ArrayLinkStore(data.links);
+    let linksByGeneId = new Map();
+    let linksByClusterPair = new Map();
     const clusterForGene = new Map();
 
     for (const cluster of data.clusters) {
@@ -9226,7 +9311,9 @@
       }
     }
 
-    for (const link of data.links) {
+    if (data.links instanceof CompactLinkStore) {
+      ({ linksByGeneId, linksByClusterPair } = compactLinkIndexes(data.links, clusterForGene));
+    } else for (const link of data.links) {
       appendToIndex(linksByGeneId, link.query.uid, link);
       if (link.target.uid !== link.query.uid) appendToIndex(linksByGeneId, link.target.uid, link);
       if (clusterForGene.has(link.query.uid) && clusterForGene.has(link.target.uid)) {
@@ -13969,7 +14056,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     const domain = config.colourBar.domain;
     let dataMin = Infinity, dataMax = -Infinity;
     if (domain.minMode === "data" || domain.maxMode === "data") {
-      for (const link of data.links) {
+      for (const link of data.links instanceof CompactLinkStore ? data.links.values() : data.links) {
         const identity = Number(link.identity);
         if (!Number.isFinite(identity)) continue;
         dataMin = Math.min(dataMin, identity);

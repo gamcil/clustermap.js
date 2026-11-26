@@ -1,3 +1,4 @@
+import { CompactLinkStore } from "../data/linkStore.mjs";
 import { clusterLabelWidth } from "../scene/clusterLabels.mjs";
 import { quantize } from "d3-interpolate";
 import { scaleLinear, scaleOrdinal, scaleSequential } from "d3-scale";
@@ -155,7 +156,7 @@ function updateIdentityScale(data) {
   const domain = config.colourBar.domain;
   let dataMin = Infinity, dataMax = -Infinity;
   if (domain.minMode === "data" || domain.maxMode === "data") {
-    for (const link of data.links) {
+    for (const link of data.links instanceof CompactLinkStore ? data.links.values() : data.links) {
       const identity = Number(link.identity);
       if (!Number.isFinite(identity)) continue;
       dataMin = Math.min(dataMin, identity);
