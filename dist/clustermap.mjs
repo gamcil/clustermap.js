@@ -17532,11 +17532,15 @@ function clusterMap() {
     if (record) finishLocusFlip();
     const before = record && chartState ? stateSnapshots.serialize(chartState, currentData) : null;
     const replacement = chartStateFromSnapshot(currentData, snapshot);
-    sceneCommit = null;
+    // A layout-only replacement leaves the unfiltered data and link index
+    // unchanged. Excluded views still need rebuilding, including their tree.
+    const reuseVisibleData = !plotDataDirty && chartState && !chartState.excludedClusters.size &&
+      !chartState.excludedLoci.size && !replacement.excludedClusters.size && !replacement.excludedLoci.size;
+    sceneCommit = reuseVisibleData ? { changes: { reuseLinkFilter: true } } : null;
     pendingInteractionState = null;
     cancelSceneWork();
     chartState = replacement;
-    plotDataDirty = true;
+    if (!reuseVisibleData) plotDataDirty = true;
     runtime.setChartState(chartState);
     hasInitialView = true;
     return commitEdit(() => {

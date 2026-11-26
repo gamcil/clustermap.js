@@ -431,9 +431,17 @@ for (const renderer of ["svg", "canvas"]) {
         chart.config({ plot: { transitionDuration: 0 } });
         const rebuilt = chart.exportSvg();
         chart.restoreLoci(["l-a", "l-b"]);
+        const restored = chart.exportSvg();
+        chart.undo();
+        chart.redo();
+        const historyRestored = chart.exportSvg() === restored;
         const afterEdits = sorts;
         chart.config({ link: { threshold: 0.1 } });
-        return { patched, rebuilt, afterEdits, afterFilterChange: sorts,
+        const afterFilterChange = sorts;
+        chart.remove({ clusters: ["c"] });
+        const afterRemoval = sorts;
+        chart.undo();
+        return { patched, rebuilt, historyRestored, afterEdits, afterFilterChange, afterRemoval, afterRestore: sorts,
           strands: ids.map((uid) => flipped.get(uid)?.strand ?? 1) };
       } finally {
         Uint32Array.prototype.sort = sort;
@@ -441,9 +449,12 @@ for (const renderer of ["svg", "canvas"]) {
       }
     }, renderer);
     expect(result.patched).toEqual(result.rebuilt);
+    expect(result.historyRestored).toBe(true);
     expect(result.strands).toEqual([-1, -1, 1]);
     expect(result.afterEdits).toBe(0);
     expect(result.afterFilterChange).toBeGreaterThan(0);
+    expect(result.afterRemoval).toBeGreaterThan(result.afterFilterChange);
+    expect(result.afterRestore).toBeGreaterThan(result.afterRemoval);
   });
 }
 
