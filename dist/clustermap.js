@@ -17130,9 +17130,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     };
   }
 
-  // A presentation-only change can patch the retained source scene. Geometry
-  // changes may reuse its link filter when their impact explicitly permits it.
-  // Unknown changes must request refiltering rather than claiming reuse.
+  let nextChartInstance = 0;
+  const projectFormat = "clinker-project";
+  const compactFigureFormat = "clustermap-compact-figure";
+  const projectVersion = 1;
+  // Unknown changes must refilter rather than claim that a cache is reusable.
   function sceneCommitForImpact(sourceScene, impact) {
     if (!sourceScene) return null;
     if (impact.presentationOnly) return { sourceScene, changes: {
@@ -17140,11 +17142,6 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     } };
     return impact.refilterLinks === false ? { changes: { reuseLinkFilter: true } } : null;
   }
-
-  let nextChartInstance = 0;
-  const projectFormat = "clinker-project";
-  const compactFigureFormat = "clustermap-compact-figure";
-  const projectVersion = 1;
   const previousConfigPatch = (config, patch) => Object.fromEntries(
     Object.entries(patch || {})
       .filter(([key]) => Object.hasOwn(config || {}, key))
@@ -17568,12 +17565,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       }
     }
 
-    function historyStatus() {
-      return model.historyStatus();
-    }
-
     function emitHistoryChange() {
-      emitChange({ type: "history.change", ...historyStatus() });
+      emitChange({ type: "history.change", ...model.historyStatus() });
     }
 
     function clearHistory(emit = true) {
@@ -18385,6 +18378,18 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (camera) my.camera(camera);
       return my;
     };
+    // All export forms use committed tree presentation, even during a preview.
+    // Blob exports share source records; object snapshots own their data.
+    function projectContent(data, owned = false) {
+      if (treePresentationPreview && data?.tree) {
+        const tree = owned ? data.tree : structuredClone(data.tree);
+        applyTreeOperation(tree, treePresentationPreview.undo);
+        if (!owned) data = { ...data, tree };
+      }
+      return { data, config: serializableConfig(runtime.config),
+        state: chartState ? stateSnapshots.serialize(chartState, model.data) : null };
+    }
+
     /** A portable data, appearance, and layout snapshot for project persistence. */
     my.project = function (snapshot) {
       if (!arguments.length) {
@@ -18393,16 +18398,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         const data = model.data?.links instanceof CompactLinkStore
           ? { ...structuredClone({ ...model.data, links: [] }), links: [...model.data.links.values()] }
           : structuredClone(model.data);
-        if (treePresentationPreview && data?.tree) applyTreeOperation(data.tree, treePresentationPreview.undo);
         return {
           format: projectFormat,
           version: projectVersion,
-          data,
           // Projects are portable JSON, not executable application state.
           // Callback hooks are intentionally omitted and can be reattached by
           // the consumer after loading.
-          config: serializableConfig(runtime.config),
-          state: chartState ? stateSnapshots.serialize(chartState, model.data) : null,
+          ...projectContent(data, true),
         };
       }
       if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
@@ -18436,21 +18438,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     my.exportProjectBlob = function ({ extensions = {} } = {}) {
       if (!model.data) throw new Error("Cannot export a project before the chart has rendered.");
       if (!isPlainObject(extensions)) throw new TypeError("Project extensions must be a plain object.");
-      let data = model.data;
-      if (treePresentationPreview && model.data.tree) {
-        const tree = structuredClone(model.data.tree);
-        applyTreeOperation(tree, treePresentationPreview.undo);
-        data = { ...model.data, tree };
-      }
       const fields = {};
       for (const key of Object.keys(extensions)) {
         const descriptor = Object.getOwnPropertyDescriptor(extensions, key);
         if (!("value" in descriptor)) throw new TypeError("Project export does not support accessors.");
         Object.defineProperty(fields, key, { value: descriptor.value, enumerable: true, configurable: true, writable: true });
       }
-      return projectBlob({ ...fields, format: projectFormat, version: projectVersion, data,
-        config: serializableConfig(runtime.config),
-        state: chartState ? stateSnapshots.serialize(chartState, model.data) : null });
+      return projectBlob({ ...fields, format: projectFormat, version: projectVersion, ...projectContent(model.data) });
     };
     /** Serialize figure data and sparse link edits against a host-owned base. */
     my.exportCompactProjectBlob = function ({ base } = {}) {
@@ -18460,13 +18454,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         throw new TypeError("Compact figure export requires its original unedited link base.");
       }
       const { links: omitted, ...data } = model.data;
-      if (treePresentationPreview && data.tree) {
-        data.tree = structuredClone(data.tree);
-        applyTreeOperation(data.tree, treePresentationPreview.undo);
-      }
-      return projectBlob({ format: compactFigureFormat, version: 1, data,
-        config: serializableConfig(runtime.config),
-        state: chartState ? stateSnapshots.serialize(chartState, model.data) : null,
+      return projectBlob({ format: compactFigureFormat, version: 1, ...projectContent(data),
         linkEdits: links.snapshotEdits() });
     };
     /** Load a compact figure using the host's matching unedited base table. */
