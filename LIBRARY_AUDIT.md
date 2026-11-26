@@ -70,6 +70,16 @@ workflow covering editor, chart interactions and export; run the remaining
 cases in a clearly named primary-browser suite. Avoid adding a separate test
 for every refactor or asserting a private controller's exact bookkeeping.
 
+A single-worker Chromium run on 27 November collected 212 cases and completed
+in about 1.9 minutes: 201 passed and 11 skipped. Summed test durations were
+approximately 59 seconds for editor regressions, 19 seconds each for gesture
+and consolidation tests, 11 seconds for chart lifecycle, and 3 seconds for
+renderer conformance. This is one local measurement, not a CI benchmark. Two
+outdated flip tests were corrected, and a renderer-independent group-history
+scenario now runs once per browser instead of three times. Playwright now
+collects 636 cases across the three browsers. Diagnostic checkpoint screenshots
+are retained; they are not image-comparison assertions.
+
 ---
 
 Audit of the repository at `fac7e59` on 26 November 2026. The goal is to

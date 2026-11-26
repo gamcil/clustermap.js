@@ -564,6 +564,44 @@ test("mixed annotation selections preserve panel scales and reject invalid batch
   await expect(page.locator(".cm-annotation-selected")).toHaveCount(0);
 });
 
+// This checks project data and SVG export, not the active renderer.
+test("group history retains deleted gene memberships through edits and reload", async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const data = structuredClone(chart.data()); data.groups[0].metadata = { note: "Original group" };
+    chart.data(data);
+    const original = JSON.stringify(chart.project());
+    chart.patch([{ type: "genes.delete", ids: ["a0"] }]);
+    const deleted = JSON.stringify(chart.project()), figure = chart.exportSvg(), checks = [];
+    for (const operation of [
+      { type: "groups.delete", ids: [0] },
+      { type: "groups.merge", targetId: 1, sourceIds: [0] },
+      { type: "groups.assignGenes", groupId: 1, geneIds: ["b0"] },
+      { type: "groups.unassignGenes", geneIds: ["b0"] },
+      { type: "groups.create", group: { uid: "new", label: "New" }, geneIds: ["b0"] },
+      [
+        { type: "groups.update", ids: [0], changes: { label: "Temporary label" } },
+        { type: "groups.assignGenes", groupId: 1, geneIds: ["b0"] },
+        { type: "groups.delete", ids: [0] },
+      ],
+    ]) {
+      const operations = Array.isArray(operation) ? operation : [operation];
+      chart.patch(operations); const edited = JSON.stringify(chart.project());
+      chart.undo(); const undo = JSON.stringify(chart.project()) === deleted && chart.exportSvg() === figure;
+      chart.redo(); const redo = JSON.stringify(chart.project()) === edited;
+      chart.undo(); checks.push({ type: operations.map(({ type }) => type).join(", "), undo, redo });
+    }
+    chart.undo(); const geneUndo = JSON.stringify(chart.project()) === original && !chart.canUndo();
+    chart.redo(); const geneRedo = JSON.stringify(chart.project()) === deleted;
+    chart.project(JSON.parse(deleted));
+    chart.patch([{ type: "groups.delete", ids: [0] }]); chart.undo();
+    return { checks, geneUndo, geneRedo, reloaded: JSON.stringify(chart.project()) === deleted,
+      group: chart.data().groups[0] };
+  });
+  for (const check of result.checks) { expect(check.undo, check.type).toBe(true); expect(check.redo, check.type).toBe(true); }
+  expect(result.geneUndo).toBe(true); expect(result.geneRedo).toBe(true); expect(result.reloaded).toBe(true);
+  expect(result.group).toMatchObject({ uid: 0, genes: ["a0", "b0", "c0"], metadata: { note: "Original group" } });
+});
+
 for (const renderer of ["svg", "canvas", "webgpu"]) {
   test(`${renderer}: legend symbols change in Appearance and preserve clicks, history and vector export`, async ({ page }) => {
     await page.evaluate(async (renderer) => {
@@ -868,44 +906,6 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
     expect(await page.evaluate(() => ({ root: chart.data().tree.root, canReset: Boolean(chart.data().tree.rooting) }))).toEqual({ root: "root", canReset: false });
   });
 
-  test(`${renderer}: group history retains deleted gene memberships through edits and reload`, async ({ page }) => {
-    const result = await page.evaluate((renderer) => {
-      if (renderer === "webgpu") Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined });
-      chart.config({ plot: { renderer } });
-      const data = structuredClone(chart.data()); data.groups[0].metadata = { note: "Original group" };
-      chart.data(data);
-      const original = JSON.stringify(chart.project());
-      chart.patch([{ type: "genes.delete", ids: ["a0"] }]);
-      const deleted = JSON.stringify(chart.project()), figure = chart.exportSvg(), checks = [];
-      for (const operation of [
-        { type: "groups.delete", ids: [0] },
-        { type: "groups.merge", targetId: 1, sourceIds: [0] },
-        { type: "groups.assignGenes", groupId: 1, geneIds: ["b0"] },
-        { type: "groups.unassignGenes", geneIds: ["b0"] },
-        { type: "groups.create", group: { uid: "new", label: "New" }, geneIds: ["b0"] },
-        [
-          { type: "groups.update", ids: [0], changes: { label: "Temporary label" } },
-          { type: "groups.assignGenes", groupId: 1, geneIds: ["b0"] },
-          { type: "groups.delete", ids: [0] },
-        ],
-      ]) {
-        const operations = Array.isArray(operation) ? operation : [operation];
-        chart.patch(operations); const edited = JSON.stringify(chart.project());
-        chart.undo(); const undo = JSON.stringify(chart.project()) === deleted && chart.exportSvg() === figure;
-        chart.redo(); const redo = JSON.stringify(chart.project()) === edited;
-        chart.undo(); checks.push({ type: operations.map(({ type }) => type).join(", "), undo, redo });
-      }
-      chart.undo(); const geneUndo = JSON.stringify(chart.project()) === original && !chart.canUndo();
-      chart.redo(); const geneRedo = JSON.stringify(chart.project()) === deleted;
-      chart.project(JSON.parse(deleted));
-      chart.patch([{ type: "groups.delete", ids: [0] }]); chart.undo();
-      return { checks, geneUndo, geneRedo, reloaded: JSON.stringify(chart.project()) === deleted,
-        group: chart.data().groups[0] };
-    }, renderer);
-    for (const check of result.checks) { expect(check.undo, check.type).toBe(true); expect(check.redo, check.type).toBe(true); }
-    expect(result.geneUndo).toBe(true); expect(result.geneRedo).toBe(true); expect(result.reloaded).toBe(true);
-    expect(result.group).toMatchObject({ uid: 0, genes: ["a0", "b0", "c0"], metadata: { note: "Original group" } });
-  });
 
   test(`${renderer}: unknown strands survive flips, scaling, history and projects`, async ({ page }) => {
     const result = await page.evaluate((renderer) => {
