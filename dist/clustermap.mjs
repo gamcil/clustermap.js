@@ -4808,12 +4808,16 @@ class CompactLinkStore {
     let one = 0x811c9dc5, two = 0x9e3779b9;
     const add = (word) => { one = Math.imul(one ^ word, 0x01000193); two = Math.imul(two ^ word, 0x85ebca6b); };
     const bytes = new DataView(new ArrayBuffer(8));
+    // JSON serializes -0 as 0, so both must produce the same durable identity.
+    const addNumber = (value) => {
+      bytes.setFloat64(0, value === 0 ? 0 : value, true);
+      add(bytes.getUint32(0, true)); add(bytes.getUint32(4, true));
+    };
     add(this.#genes.length); add(this.#query.length);
     for (const uid of this.#genes) { add(uid.length); for (let i = 0; i < uid.length; i++) add(uid.charCodeAt(i)); }
     for (let i = 0; i < this.#query.length; i++) {
       add(this.#query[i]); add(this.#target[i]);
-      bytes.setFloat64(0, this.#identity[i], true); add(bytes.getUint32(0, true)); add(bytes.getUint32(4, true));
-      bytes.setFloat64(0, this.#similarity[i], true); add(bytes.getUint32(0, true)); add(bytes.getUint32(4, true));
+      addNumber(this.#identity[i]); addNumber(this.#similarity[i]);
     }
     return this.#fingerprint = `cl1-${(one >>> 0).toString(16).padStart(8, "0")}${(two >>> 0).toString(16).padStart(8, "0")}`;
   }

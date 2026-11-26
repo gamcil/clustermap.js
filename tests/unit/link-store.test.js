@@ -297,3 +297,17 @@ test("32-bit base scores preserve their exact values, fingerprints and full-prec
   assert.equal(columns.identity.byteLength, 0);
   assert.equal(transferred.fingerprint, widened.fingerprint);
 });
+
+test("compact snapshots survive JSON round trips of negative zero scores", () => {
+  for (const ScoreColumn of [Float32Array, Float64Array]) {
+    const columns = { genes: ["a"], query: new Uint32Array([0]), target: new Uint32Array([0]),
+      identity: new ScoreColumn([-0]), similarity: new ScoreColumn([-0]) };
+    const original = new CompactLinkStore(columns);
+    const json = JSON.parse(JSON.stringify({ identity: [...columns.identity], similarity: [...columns.similarity] }));
+    const restored = new CompactLinkStore({ ...columns, identity: new ScoreColumn(json.identity),
+      similarity: new ScoreColumn(json.similarity) });
+    const snapshot = original.withUpdates([{ uid: "link-0", changes: { hidden: true } }]).snapshotEdits();
+    assert.equal(original.fingerprint, restored.fingerprint);
+    assert.equal(restored.applyEdits(snapshot).getAt(0).hidden, true);
+  }
+});
