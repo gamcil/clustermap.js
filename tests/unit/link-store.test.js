@@ -270,6 +270,9 @@ test("32-bit base scores preserve their exact values, fingerprints and full-prec
   assert.equal(retained.byteLength, 16 * retained.size);
   assert.equal(retained.fingerprint, widened.fingerprint);
   assert.deepEqual([...retained.values()], [...widened.values()]);
+  assert.equal(CompactLinkStore.supportsFloat32Scores, true);
+  assert.equal(retained.geneCount, 4);
+  assert.equal(retained.geneAt(1), "b");
   assert.equal(retained.queryIndexAt(0), 0);
   assert.equal(retained.targetIndexAt(0), 1);
   assert.equal(retained.similarityAt(1), columns.similarity[1]);

@@ -45,6 +45,7 @@ function validateCompactColumns({ genes, query, target, identity, similarity } =
   }
 }
 export class CompactLinkStore {
+  static get supportsFloat32Scores() { return true; }
   #genes; #query; #target; #identity; #similarity; #overrides; #deleted; #fingerprint; #activePositions;
   constructor(input, mode = null) {
     if (mode === sharedColumns) {
@@ -82,6 +83,8 @@ export class CompactLinkStore {
     return new CompactLinkStore({ genes, ...moved }, transferredColumns);
   }
   get size() { return this.#query.length - this.#deleted.length; }
+  get geneCount() { return this.#genes.length; }
+  geneAt(position) { return this.#genes[position]; }
   get byteLength() { return this.#query.byteLength + this.#target.byteLength + this.#identity.byteLength + this.#similarity.byteLength; }
   #deletedBefore(position) {
     let low = 0, high = this.#deleted.length;
