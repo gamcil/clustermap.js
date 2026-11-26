@@ -267,14 +267,18 @@ export function createLocusFlipsPreview(scene, locusIds, { progress = 0, cluster
 export function createLocusFlipTransition(source, target, locusIds, { clusterLabelTexts = null } = {}) {
   const selected = new Set(locusIds || []), changes = target?.changes;
   if (!source || !selected.size || !changes?.clusters || !changes?.loci) return null;
+  // Translated retained geometry and newly projected geometry can differ by a
+  // few floating-point rounding units even when their layout is unchanged.
+  const samePosition = (a, b) => Number.isFinite(a) && Number.isFinite(b) &&
+    Math.abs(a - b) <= Number.EPSILON * 16 * Math.max(1, Math.abs(a), Math.abs(b));
   for (const uid of changes.clusters) {
     const before = source.clusters.get(uid), after = target.clusters.get(uid);
-    if (!before || !after || before.x !== after.x || before.y !== after.y) return null;
+    if (!before || !after || !samePosition(before.x, after.x) || !samePosition(before.y, after.y)) return null;
   }
   for (const uid of changes.loci) {
     const before = source.loci.get(uid), after = target.loci.get(uid);
-    if (!before || !after || before.x !== after.x || before.y !== after.y ||
-        before.worldStart !== after.worldStart || before.worldEnd !== after.worldEnd ||
+    if (!before || !after || !samePosition(before.x, after.x) || !samePosition(before.y, after.y) ||
+        !samePosition(before.worldStart, after.worldStart) || !samePosition(before.worldEnd, after.worldEnd) ||
         before.state.start !== after.state.start || before.state.end !== after.state.end ||
         (selected.has(uid) ? before.state.flipped === after.state.flipped : before.state.flipped !== after.state.flipped)) return null;
   }

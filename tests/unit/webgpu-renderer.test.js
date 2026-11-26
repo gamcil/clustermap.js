@@ -234,6 +234,9 @@ test("WebGPU animates multiple flipped loci using retained geometry", async (t) 
   const transition = createLocusFlipTransition(scene, target, ids);
   assert.ok(transition, "a batch flip uses the retained transform transition");
   const moved = new Map(target.loci), first = moved.get(ids[0]);
+  moved.set(ids[0], { ...first, worldEnd: first.worldEnd + Math.max(1, Math.abs(first.worldEnd)) * Number.EPSILON * 2 });
+  assert.ok(createLocusFlipTransition(scene, { ...target, loci: moved }, ids),
+    "rounding from a prior row translation does not force geometry rebuilding");
   moved.set(ids[0], { ...first, x: first.x + 1 });
   assert.equal(createLocusFlipTransition(scene, { ...target, loci: moved }, ids), null);
   const options = { nextScene: scene, scales: runtime.scales, config: runtime.renderConfig,
