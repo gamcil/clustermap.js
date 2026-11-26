@@ -19,3 +19,15 @@ test("project serialization rejects cycles, accessors and non-JSON objects", () 
   assert.throws(() => projectBlob({ value: new Date() }), /plain objects/);
   assert.throws(() => projectBlob({ value: 1n }), /BigInt/);
 });
+
+test("project serialization streams compact links in ordinary project format", async () => {
+  const { CompactLinkStore } = await import("../../src/data/linkStore.mjs");
+  const store = new CompactLinkStore({ genes: ["a", "b"], query: new Uint32Array([0, 1]),
+    target: new Uint32Array([1, 0]), identity: new Float64Array([0.9, 0.8]),
+    similarity: new Float64Array([1, 0.9]) })
+    .withUpdates([{ uid: "link-1", changes: { hidden: true, label: "edited" } }])
+    .withDeleted(["link-0"]);
+  const project = { data: { links: store } };
+  const blob = projectBlob(project, { chunkSize: 32 });
+  assert.deepEqual(JSON.parse(await blob.text()), { data: { links: [...store.values()] } });
+});

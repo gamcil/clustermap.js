@@ -1,4 +1,5 @@
 import { isPlainObject } from "../utils/values.mjs";
+import { CompactLinkStore } from "../data/linkStore.mjs";
 
 // Serialize synchronously so the chart cannot change between chunks. The Blob
 // owns its bytes; no chart-owned objects escape after this function returns.
@@ -17,6 +18,17 @@ export function projectBlob(project, { chunkSize = 1024 * 1024 } = {}) {
         return;
       }
       append(JSON.stringify(value));
+      return;
+    }
+    if (value instanceof CompactLinkStore) {
+      append("[");
+      let first = true;
+      for (const link of value.values()) {
+        if (!first) append(",");
+        first = false;
+        write(link, true);
+      }
+      append("]");
       return;
     }
     if (!Array.isArray(value) && !isPlainObject(value)) {
