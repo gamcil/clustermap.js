@@ -10824,6 +10824,9 @@ function inverseOperation(data, index, operation) {
       records: data.links.map((link, position) => removed.has(link.uid) && { index: position, link: structuredClone(link) }).filter(Boolean),
     }];
   }
+  if (operation.type === "links.restore") {
+    return [{ type: "links.delete", ids: operation.records.map(({ link }) => link.uid) }];
+  }
   if (operation.type === "groups.reorder") {
     return [{ type: "groups.reorder", ids: data.groups.map((group) => group.uid) }];
   }
@@ -10840,6 +10843,12 @@ function applyChartOperations(data, index, operations, treeConfig = {}) {
     throw operationError("operations must be a non-empty array");
   }
   const groupIds = new Set(index.groupById.keys());
+  // Track only IDs changed in this batch, rather than copying the potentially
+  // millions of entries in the link index.
+  const linkPresence = new Map();
+  const validationIndex = { ...index, linkById: {
+    has: (uid) => linkPresence.has(uid) ? linkPresence.get(uid) : index.linkById.has(uid),
+  } };
   const annotationDraft = { annotationPanels: data.annotationPanels, clusters: data.clusters };
   const applied = operations.map((operation) => {
     if (isTreeOperation(operation)) return normalizeTreeOperation(data.tree, operation);
@@ -10848,7 +10857,15 @@ function applyChartOperations(data, index, operations, treeConfig = {}) {
       applyAnnotationOperation(annotationDraft, normalized);
       return normalized;
     }
-    return validateOperation(operation, index, groupIds);
+    const normalized = validateOperation(operation, validationIndex, groupIds);
+    if (normalized.type === "links.delete") normalized.ids.forEach((uid) => linkPresence.set(uid, false));
+    if (normalized.type === "links.restore") for (const { link } of normalized.records) {
+      if (!isRecordId(link.uid) || validationIndex.linkById.has(link.uid)) {
+        throw operationError(`links.restore can only restore deleted links; invalid or existing ID ${link.uid}`);
+      }
+      linkPresence.set(link.uid, true);
+    }
+    return normalized;
   });
   validateTreeOperationBatch(data.tree, applied, treeConfig, data.clusters);
   validateAnnotationChanges(data, annotationDraft.annotationPanels);
@@ -10876,6 +10893,11 @@ function applyChartOperations(data, index, operations, treeConfig = {}) {
     }
     inverse.unshift(...inverseOperation(data, index, operation));
     applyOperation(data, index, operation);
+    // Retained scenes may still use the incoming index, so create a working
+    // index instead of mutating it after an array's structural edit.
+    if (!(data.links instanceof CompactLinkStore) && (operation.type === "links.delete" || operation.type === "links.restore")) {
+      index = createChartIndex(data);
+    }
     if (structuralGroupTypes.has(operation.type)) index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
   }
   // Link-derived grouping is useful for an untouched chart, but a deliberate

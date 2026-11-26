@@ -164,6 +164,34 @@ test("compact link delete and undo operations preserve edits and reject invalid 
   assert.equal(index.linkById.get("link-1").hidden, undefined);
 });
 
+test("array and compact link batches validate sequentially and round-trip", async () => {
+  const { applyChartOperations } = await import("../../src/data/operations.mjs");
+  for (const compact of [false, true]) {
+    const base = new CompactLinkStore(input());
+    const data = { clusters: [{ uid: "one", loci: [{ uid: "l1", genes: [{ uid: "a" }, { uid: "b" }, { uid: "c" }] }] }],
+      groups: [], links: compact ? base : [...base.values()] };
+    const read = () => compact ? [...data.links.values()] : structuredClone(data.links);
+    const apply = (ops) => applyChartOperations(data, createChartIndex(data), ops);
+    const before = read();
+    for (const second of [
+      { type: "links.update", ids: ["link-0"], changes: { label: "invalid" } },
+      { type: "links.delete", ids: ["link-0"] },
+    ]) {
+      assert.throws(() => apply([{ type: "links.delete", ids: ["link-0"] }, second]), /unknown/);
+      assert.deepEqual(read(), before);
+    }
+    const edit = apply([{ type: "links.delete", ids: ["link-0"] },
+      { type: "links.restore", records: [{ index: 0, link: before[0] }] },
+      { type: "links.update", ids: ["link-0"], changes: { label: "updated" } }]);
+    const after = read();
+    assert.equal(after[0].label, "updated");
+    const undo = apply(edit.inverse);
+    assert.deepEqual(read(), before);
+    apply(undo.inverse);
+    assert.deepEqual(read(), after);
+  }
+});
+
 test("normalization and visibility preserve compact storage and link ownership", async () => {
   const [{ normalizeChartData }, { visibleChartData }, { createChartState }] = await Promise.all([
     import("../../src/data/normalize.mjs"), import("../../src/data/visibility.mjs"), import("../../src/chart/state.mjs"),
