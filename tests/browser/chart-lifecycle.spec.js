@@ -504,3 +504,60 @@ test("batch flips display intermediate WebGPU fallback frames and commit the fin
   expect(frames.restoredStrands).toEqual([-1, -1]);
   expect(frames.cancelled).toEqual(frames.settled);
 });
+
+test("completed row alignment keeps retained WebGPU geometry", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__vertexWrites = 0;
+    const pass = { setPipeline() {}, setBindGroup() {}, setVertexBuffer() {}, draw() {}, end() {} };
+    const device = {
+      limits: { maxBufferSize: 100000000, maxStorageBufferBindingSize: 100000000 },
+      createShaderModule: () => ({ getCompilationInfo: async () => ({ messages: [] }) }),
+      createBindGroupLayout: () => ({}), createPipelineLayout: () => ({}), createRenderPipeline: (value) => value,
+      createBindGroup: () => ({}), createTexture: () => ({ createView: () => ({}), destroy() {} }),
+      createCommandEncoder: () => ({ beginRenderPass: () => pass, finish: () => ({}) }),
+      createBuffer: ({ size, usage }) => ({ size, usage, destroy() {} }),
+      queue: { submit() {}, writeBuffer(buffer) { if (buffer.usage & 32) window.__vertexWrites++; } },
+      addEventListener() {}, removeEventListener() {}, lost: new Promise(() => {}), destroy() {},
+    };
+    Object.defineProperty(navigator, "gpu", { configurable: true, value: {
+      requestAdapter: async () => ({ requestDevice: async () => device }), getPreferredCanvasFormat: () => "bgra8unorm",
+    } });
+    Object.defineProperty(window, "GPUShaderStage", { configurable: true, value: { VERTEX: 1 } });
+    Object.defineProperty(window, "GPUTextureUsage", { configurable: true, value: { RENDER_ATTACHMENT: 16 } });
+    Object.defineProperty(window, "GPUBufferUsage", { configurable: true, value: { COPY_DST: 8, VERTEX: 32, UNIFORM: 64, STORAGE: 128 } });
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (kind, ...args) {
+      return kind === "webgpu" ? { configure() {}, unconfigure() {}, getCurrentTexture: () => ({ createView: () => ({}) }) }
+        : getContext.call(this, kind, ...args);
+    };
+  });
+  await page.goto("http://127.0.0.1:8080/demo/?test=1");
+  await page.addScriptTag({ url: "/node_modules/d3/dist/d3.min.js" });
+  await page.evaluate(async () => {
+    const { ClusterMap } = await import("/dist/clustermap.mjs");
+    const host = document.createElement("div");
+    host.style.cssText = "position:fixed;left:0;top:0;z-index:9999;width:800px;height:400px";
+    document.body.append(host);
+    const data = { clusters: ["a", "b"].map((uid, i) => ({ uid, name: uid, loci: [{ uid: `l-${uid}`, start: 0, end: 100,
+      genes: [{ uid, start: i ? 50 : 10, end: i ? 70 : 30, strand: 1 }] }] })),
+      links: [{ uid: "link", query: { uid: "a" }, target: { uid: "b" }, identity: 0.9 }],
+      groups: [{ uid: "group", genes: ["a", "b"] }], config: { updateGroups: false } };
+    const chart = ClusterMap().config({ plot: { renderer: "webgpu", transitionDuration: 200, scaleFactor: 1000 } });
+    window.__alignmentChart = chart;
+    d3.select(host).datum(data).call(chart);
+    await document.fonts.ready;
+  });
+  await expect.poll(() => page.evaluate(() => window.__alignmentChart.rendererStatus().state)).toBe("active");
+  await page.waitForTimeout(300);
+  const point = await page.evaluate(() => {
+    window.__vertexWrites = 0;
+    const bounds = window.__alignmentChart.screenBounds({ genes: ["a"] });
+    return { x: (bounds.left + bounds.right) / 2, y: (bounds.top + bounds.bottom) / 2, bounds };
+  });
+  await page.mouse.click(point.x, point.y);
+  await page.waitForTimeout(600);
+  const result = await page.evaluate(() => ({ writes: window.__vertexWrites,
+    offsets: window.__alignmentChart.state().clusterOffsets }));
+  expect(result.offsets.length, JSON.stringify({ point, result })).toBeGreaterThan(0);
+  expect(result.writes).toBe(0);
+});

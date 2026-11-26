@@ -1003,6 +1003,9 @@ export default function clusterMap() {
     rasterAnimation = { renderer, previousScene, progress: 0, cancel: null,
       tree: treeMotion ? { ...treeMotion, targetScene: scene } : null };
     rasterAnimation.cancel = runAnimation(duration, (progress) => {
+      // Completion adopts the target scene and paints it in the same frame.
+      // Painting it here first discards the retained animation geometry.
+      if (progress >= 1) return;
       rasterAnimation.progress = progress;
       if (flipPreview) {
         scenePreview = rasterAnimation.flipPreview = locusFlipTransitionFrame(previousScene, flipPreview, progress, {
