@@ -364,6 +364,34 @@ test("restoring links preserves earlier index order and lookups", async () => {
   assert.equal(retained.linkById.order("second"), 0);
 });
 
+test("gene batches validate sequentially and restore usable undo and redo", async () => {
+  const [{ createChartIndex }, { normalizeChartData }, { applyChartOperations }] = await Promise.all([
+    import("../../src/data/index.mjs"), import("../../src/data/normalize.mjs"), import("../../src/data/operations.mjs"),
+  ]);
+  const chartData = normalizeChartData(structuredClone(data));
+  const apply = (operations) => applyChartOperations(chartData, createChartIndex(chartData), operations);
+  const before = structuredClone(chartData), gene = before.clusters[0].loci[0].genes[0];
+  for (const second of [
+    { type: "genes.update", ids: ["gene-1"], changes: { label: "invalid" } },
+    { type: "genes.delete", ids: ["gene-1"] },
+    { type: "groups.assignGenes", groupId: "group-1", geneIds: ["gene-1"] },
+  ]) {
+    assert.throws(() => apply([{ type: "genes.delete", ids: ["gene-1"] }, second]), /unknown/);
+    assert.deepEqual(chartData, before);
+  }
+  const edit = apply([{ type: "genes.delete", ids: ["gene-1"] },
+    { type: "genes.restore", records: [{ locusId: "locus-1", index: 0, gene }] },
+    { type: "genes.update", ids: ["gene-1"], changes: { label: "updated" } }]);
+  const after = structuredClone(chartData);
+  assert.equal(after.clusters[0].loci[0].genes[0].label, "updated");
+  const undo = apply(edit.inverse);
+  assert.deepEqual(chartData, before);
+  apply(undo.inverse);
+  assert.deepEqual(chartData, after);
+  assert.throws(() => apply([{ type: "genes.restore", records: [{ locusId: "locus-1", index: 0, gene }] }]), /restore deleted/);
+  assert.deepEqual(chartData, after);
+});
+
 test("link identity rejects values outside the normalized percentage range", async () => {
   const { createChartIndex } = await import("../../src/data/index.mjs");
   const { normalizeChartData } = await import("../../src/data/normalize.mjs");

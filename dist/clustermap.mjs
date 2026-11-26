@@ -10579,6 +10579,9 @@ function inverseOperation(data, index, operation) {
         .filter(Boolean))),
     }];
   }
+  if (operation.type === "genes.restore") {
+    return [{ type: "genes.delete", ids: operation.records.map(({ gene }) => gene.uid) }];
+  }
   if (operation.type === "links.delete") {
     if (data.links instanceof CompactLinkStore) {
       const records = operation.ids.map((uid) => ({ index: index.linkById.order(uid), link: index.linkById.get(uid) }))
@@ -10610,12 +10613,14 @@ function applyChartOperations(data, index, operations, treeConfig = {}) {
     throw operationError("operations must be a non-empty array");
   }
   const groupIds = new Set(index.groupById.keys());
-  // Track only IDs changed in this batch, rather than copying the potentially
-  // millions of entries in the link index.
-  const linkPresence = new Map();
-  const validationIndex = { ...index, linkById: {
-    has: (uid) => linkPresence.has(uid) ? linkPresence.get(uid) : index.linkById.has(uid),
-  } };
+  // Track only IDs changed in the batch, never copy the full link index.
+  const presence = (records) => {
+    const changed = new Map();
+    return { has: (uid) => changed.has(uid) ? changed.get(uid) : records.has(uid),
+      set: (uid, present) => changed.set(uid, present) };
+  };
+  const genePresence = presence(index.geneById), linkPresence = presence(index.linkById);
+  const validationIndex = { ...index, geneById: genePresence, linkById: linkPresence };
   const annotationDraft = { annotationPanels: data.annotationPanels, clusters: data.clusters };
   const applied = operations.map((operation) => {
     if (isTreeOperation(operation)) return normalizeTreeOperation(data.tree, operation);
@@ -10625,12 +10630,18 @@ function applyChartOperations(data, index, operations, treeConfig = {}) {
       return normalized;
     }
     const normalized = validateOperation(operation, validationIndex, groupIds);
-    if (normalized.type === "links.delete") normalized.ids.forEach((uid) => linkPresence.set(uid, false));
-    if (normalized.type === "links.restore") for (const { link } of normalized.records) {
-      if (!isRecordId(link.uid) || validationIndex.linkById.has(link.uid)) {
-        throw operationError(`links.restore can only restore deleted links; invalid or existing ID ${link.uid}`);
+    const [kind, action] = normalized.type.split(".");
+    const records = kind === "genes" ? genePresence : kind === "links" ? linkPresence : null;
+    if (records && action === "delete") normalized.ids.forEach((uid) => records.set(uid, false));
+    if (records && action === "restore") {
+      const key = kind === "genes" ? "gene" : "link";
+      for (const record of normalized.records) {
+        const uid = record[key].uid;
+        if (!isRecordId(uid) || records.has(uid)) {
+          throw operationError(`${kind}.restore can only restore deleted ${kind}; invalid or existing ID ${uid}`);
+        }
+        records.set(uid, true);
       }
-      linkPresence.set(link.uid, true);
     }
     return normalized;
   });
@@ -10660,6 +10671,11 @@ function applyChartOperations(data, index, operations, treeConfig = {}) {
     }
     inverse.unshift(...inverseOperation(data, index, operation));
     applyOperation(data, index, operation);
+    if (operation.type === "genes.delete" || operation.type === "genes.restore") {
+      // Subsequent edits need the new records; the link indexes are unchanged.
+      index = { ...index, geneById: new Map(data.clusters.flatMap((cluster) => cluster.loci
+        .flatMap((locus) => locus.genes.map((gene) => [gene.uid, gene])))) };
+    }
     // Retained scenes may still use the incoming index, so create a working
     // index instead of mutating it after an array's structural edit.
     if (!(data.links instanceof CompactLinkStore) && (operation.type === "links.delete" || operation.type === "links.restore")) {
