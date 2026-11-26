@@ -7,6 +7,7 @@ import { resolveTrimIndicatorStyle } from "../loci/trimIndicators.mjs";
 import { locusContentBounds } from "../loci/layout.mjs";
 import { textBounds, textDimensions, textFont } from "./text.mjs";
 import { clusterLabelLayout, clusterLabelWidth } from "./clusterLabels.mjs";
+import { allIndexedIds } from "./spatialIndex.mjs";
 import {
   locusGeometryForPreview, clusterLabelOffsetForPreview, clusterLabelTextForPreview,
   clusterOffsetForPreview, geneVisibleForPreview, previewOffsetsForLocus,
@@ -309,7 +310,11 @@ export function measureFigureBounds(context, scene, config, tree = null, { previ
     }
   }
   if (config.link.show && config.link.label.show) {
-    for (const link of scene.links.values()) {
+    const candidates = scene.index?.links?.boundsById
+      ? (function* () { for (const uid of allIndexedIds(scene.index.links)) yield scene.links.get(uid); })()
+      : scene.links.values();
+    for (const link of candidates) {
+      if (!link) continue;
       const geometry = linkGeometryForPreview(scene, link, preview, config);
       if (!geometry.visible || !link.labelPosition) continue;
       const anchors = geometry.anchors;

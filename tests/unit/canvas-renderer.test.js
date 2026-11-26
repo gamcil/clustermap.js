@@ -11,6 +11,21 @@ import { createChartRuntime } from "../../src/chart/runtime.js";
 import { createChartState, setLocusOffset } from "../../src/chart/state.mjs";
 import { createLocusOffsetsPreview } from "../../src/scene/preview.mjs";
 
+test("figure bounds measure link labels without scanning retained nonadjacent links", () => {
+  const context = { font: "", textAlign: "left", textBaseline: "alphabetic", save() {}, restore() {},
+    measureText: (text) => ({ width: String(text).length * 8 }) };
+  const data = normalizeChartData(createLargeTestingData({ clusterCount: 3, genesPerCluster: 3 }));
+  const runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
+  runtime.configure({ link: { label: { show: true } } });
+  const scene = runtime.updateScene(data);
+  const expected = measureFigureBounds(context, { ...scene, index: { ...scene.index, links: null } }, runtime.renderConfig);
+  const links = scene.links;
+  const bounded = { ...scene, links: { get: (uid) => links.get(uid),
+    values: () => { throw new Error("scanned retained links"); } } };
+  assert.deepEqual(measureFigureBounds(context, bounded, runtime.renderConfig), expected);
+});
+
 test("Canvas full-scene painting visits indexed links without scanning retained links", () => {
   const calls = [];
   const context = new Proxy({ measureText: () => ({ width: 10 }) }, {
