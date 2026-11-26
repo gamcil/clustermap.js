@@ -192,6 +192,30 @@ test("array and compact link batches validate sequentially and round-trip", asyn
   }
 });
 
+test("mixed structural batches keep indexes and undo consistent", async () => {
+  const { applyChartOperations } = await import("../../src/data/operations.mjs");
+  for (const compact of [false, true]) {
+    const base = new CompactLinkStore(input());
+    const data = { clusters: [{ uid: "one", loci: [{ uid: "l1", genes: [{ uid: "a" }, { uid: "b" }, { uid: "c" }] }] }],
+      groups: [], links: compact ? base : [...base.values()] };
+    const index = createChartIndex(data), before = [...base.values()];
+    const edit = applyChartOperations(data, index, [
+      { type: "genes.delete", ids: ["a"] },
+      { type: "links.delete", ids: ["link-0"] },
+      { type: "links.delete", ids: ["link-1"] },
+      { type: "links.update", ids: ["link-2"], changes: { label: "changed" } },
+    ]);
+    const updated = compact ? index : createChartIndex(data);
+    assert.equal(edit.indexPrepared, compact);
+    assert.equal(updated.geneById.has("a"), false);
+    assert.deepEqual([...updated.linkById.keys()], ["link-2", "link-3"]);
+    assert.equal(updated.linksByGeneId.get("b")[0].label, "changed");
+    applyChartOperations(data, updated, edit.inverse);
+    assert.deepEqual(JSON.parse(JSON.stringify(compact ? [...data.links.values()] : data.links)), before);
+    assert.deepEqual(data.clusters[0].loci[0].genes.map((gene) => gene.uid), ["a", "b", "c"]);
+  }
+});
+
 test("normalization and visibility preserve compact storage and link ownership", async () => {
   const [{ normalizeChartData }, { visibleChartData }, { createChartState }] = await Promise.all([
     import("../../src/data/normalize.mjs"), import("../../src/data/visibility.mjs"), import("../../src/chart/state.mjs"),

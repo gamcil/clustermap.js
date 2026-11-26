@@ -10489,7 +10489,6 @@
       case "links.delete": {
         if (data.links instanceof CompactLinkStore) {
           data.links = data.links.withDeleted(operation.ids);
-          Object.assign(index, createChartIndex(data));
           return;
         }
         const ids = new Set(operation.ids);
@@ -10499,7 +10498,6 @@
       case "links.restore":
         if (data.links instanceof CompactLinkStore) {
           data.links = data.links.withRestored(operation.records);
-          Object.assign(index, createChartIndex(data));
           return;
         }
         // Existing scenes retain the old array for link order and animation.
@@ -10618,6 +10616,7 @@
     if (!Array.isArray(operations) || !operations.length) {
       throw operationError("operations must be a non-empty array");
     }
+    const originalIndex = index;
     const groupIds = new Set(index.groupById.keys());
     // Track only IDs changed in the batch, never copy the full link index.
     const presence = (records) => {
@@ -10663,6 +10662,7 @@
       }
     }
     const hasStructuralGroupEdit = applied.some((operation) => !["groups.update", "groups.restore"].includes(operation.type) && operation.type.startsWith("groups."));
+    let compactLinksChanged = false;
     const inverse = [];
     for (const operation of applied) {
       if (isAnnotationOperation(operation)) {
@@ -10682,20 +10682,23 @@
         index = { ...index, geneById: new Map(data.clusters.flatMap((cluster) => cluster.loci
           .flatMap((locus) => locus.genes.map((gene) => [gene.uid, gene])))) };
       }
-      // Retained scenes may still use the incoming index, so create a working
-      // index instead of mutating it after an array's structural edit.
-      if (!(data.links instanceof CompactLinkStore) && (operation.type === "links.delete" || operation.type === "links.restore")) {
-        index = createChartIndex(data);
+      if (operation.type === "links.delete" || operation.type === "links.restore") {
+        // Later edits need current link order, but not the full adjacency index.
+        if (data.links instanceof CompactLinkStore) {
+          index.linkById = data.links;
+          compactLinksChanged = true;
+        } else index = { ...index, linkById: new ArrayLinkStore(data.links) };
       }
       if (structuralGroupTypes.has(operation.type)) index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
     }
     // Link-derived grouping is useful for an untouched chart, but a deliberate
     // membership edit makes the user's group assignments authoritative.
     if (hasStructuralGroupEdit) data.config = { ...(data.config || {}), updateGroups: false };
+    // Compact edits update the chart-owned index in place. Rebuild its full
+    // adjacency once after the transaction; retained views keep their old store.
+    if (compactLinksChanged) Object.assign(originalIndex, createChartIndex(data));
     return { data, operations: applied, inverse, effects: operationEffects(applied),
-      indexPrepared: data.links instanceof CompactLinkStore &&
-        applied.some((op) => op.type === "links.delete" || op.type === "links.restore") &&
-        !applied.some((op) => op.type === "genes.delete" || op.type === "genes.restore") };
+      indexPrepared: compactLinksChanged };
   }
 
   /** Rollup embeds these files; unbundled browser modules load them by URL. */
