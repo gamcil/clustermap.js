@@ -137,12 +137,18 @@ async function screenHasInkAt(page, point) {
 
 test("double-clicking a locus reverses its gene layout", async ({ page }, testInfo) => {
   await page.goto("http://127.0.0.1:8080/demo/?test=1");
+  await page.waitForFunction(() => Boolean(window.__demoChart));
+  await page.evaluate(() => window.__demoChart.config({ plot: { transitionDuration: 0 } }));
 
   const locus = page.locator("g.locus").first();
   await expect(locus).toBeVisible();
   const before = await captureCheckpoint(page, testInfo, "before-flip", () =>
     readLocusState(locus)
   );
+  const displayedOrder = () => locus.locator("g.genes > g.gene").evaluateAll((nodes) => nodes
+    .map((node) => ({ uid: d3.select(node).datum().uid, x: node.getBoundingClientRect().x }))
+    .sort((a, b) => a.x - b.x).map(({ uid }) => uid));
+  const beforeOrder = await displayedOrder();
 
   // The listener is on g.locus. A visible child receives the pointer event,
   // then bubbles it to that group.
@@ -155,7 +161,7 @@ test("double-clicking a locus reverses its gene layout", async ({ page }, testIn
     })
     .toEqual({
       flipped: !before.flipped,
-      genes: [...before.genes].reverse(),
+      genes: before.genes,
     });
 
   await captureCheckpoint(page, testInfo, "after-flip", () =>
@@ -163,14 +169,8 @@ test("double-clicking a locus reverses its gene layout", async ({ page }, testIn
   );
 
   await expect
-    .poll(() =>
-      locus
-        .locator("g.genes > g.gene")
-        .evaluateAll((nodes) =>
-          nodes.map((node) => node.id.slice(node.id.lastIndexOf("gene_")))
-        )
-    )
-    .toEqual([...before.genes].reverse().map((uid) => `gene_${uid}`));
+    .poll(displayedOrder)
+    .toEqual([...beforeOrder].reverse());
 });
 
 test("a direct locus flip is one undoable state change", async ({ page }) => {
@@ -262,18 +262,27 @@ test("editing a legend label uses the default controller action", async ({ page 
 
 test("flipping a locus twice restores its link paths", async ({ page }) => {
   await page.goto("http://127.0.0.1:8080/demo/?test=1");
+  await page.waitForFunction(() => Boolean(window.__demoChart));
+  await page.evaluate(() => window.__demoChart.config({ plot: { transitionDuration: 0 } }));
 
   const locus = page.locator("g.locus").first();
   await expect(locus).toBeVisible();
   await waitForPaint(page);
 
-  const beforePaths = await readLinkPaths(page);
+  // Link paths may start at either endpoint after a redraw. Compare their
+  // geometric control points rather than the path's winding or float spelling.
+  const geometry = async () => (await readLinkPaths(page)).map((path) => {
+    const values = (path.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi) || []).map(Number);
+    return Array.from({ length: values.length / 2 }, (_, i) =>
+      `${values[i * 2].toFixed(4)},${values[i * 2 + 1].toFixed(4)}`).sort();
+  });
+  const beforePaths = await geometry();
   await locus.dblclick({ position: { x: 20, y: 11 } });
   await waitForPaint(page);
   await locus.dblclick({ position: { x: 20, y: 11 } });
   await waitForPaint(page);
 
-  await expect.poll(() => readLinkPaths(page)).toEqual(beforePaths);
+  await expect.poll(geometry).toEqual(beforePaths);
 });
 
 test("dragging left end of locus trims it and hides gene", async ({ page }, testInfo) => {
