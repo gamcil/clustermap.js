@@ -58,6 +58,7 @@ import {
   createClusterDragPreview,
   createLocusFlipPreview,
   createLocusFlipTransition,
+  locusFlipTransitionFrame,
   createLocusOffsetsPreview,
   createLocusTrimPreview,
 } from "../scene/preview.mjs";
@@ -216,7 +217,7 @@ export default function clusterMap() {
         changes: { loci: [...flippedLoci], clusters: changes.map(({ clusterUid }) => clusterUid) },
       };
     }
-    redraw();
+    redraw({ flippedLoci: [...flippedLoci] });
     commitInteractionState();
     return result;
   };
@@ -1004,7 +1005,9 @@ export default function clusterMap() {
     rasterAnimation.cancel = runAnimation(duration, (progress) => {
       rasterAnimation.progress = progress;
       if (flipPreview) {
-        scenePreview = rasterAnimation.flipPreview = { ...flipPreview, progress };
+        scenePreview = rasterAnimation.flipPreview = locusFlipTransitionFrame(previousScene, flipPreview, progress, {
+          alignLabels: runtime.config.cluster.alignLabels, labelWidthFor: runtime.measureClusterLabel,
+        });
         rasterScene = previousScene;
       } else if (useWebGpu) rasterScene = interpolateScene(previousScene, scene, progress);
       paintScene();

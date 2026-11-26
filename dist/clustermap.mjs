@@ -5995,23 +5995,55 @@ function createLocusFlipsPreview(scene, locusIds, { progress = 0, clusterLabelTe
   };
 }
 
-// Shader flips are exact only when no row or locus translates or resizes.
+// A flip plus row/locus translations can share the retained source geometry.
 function createLocusFlipTransition(source, target, locusIds, { clusterLabelTexts = null } = {}) {
   const selected = new Set(locusIds || []), changes = target?.changes;
   if (!source || !selected.size || !changes?.clusters || !changes?.loci) return null;
+  if (source.clusterOrder?.length !== target.clusterOrder?.length ||
+      source.clusterOrder?.some((uid, index) => uid !== target.clusterOrder[index])) return null;
+  const clusterDeltas = new Map(), locusDeltas = new Map();
   for (const uid of changes.clusters) {
     const before = source.clusters.get(uid), after = target.clusters.get(uid);
-    if (!before || !after || !sameCoordinate(before.x, after.x) || !sameCoordinate(before.y, after.y)) return null;
+    if (!before || !after || !Number.isFinite(after.x - before.x) || !Number.isFinite(after.y - before.y)) return null;
+    if (!sameCoordinate(before.y, after.y)) clusterDeltas.set(uid, after.y - before.y);
   }
   for (const uid of changes.loci) {
     const before = source.loci.get(uid), after = target.loci.get(uid);
-    if (!before || !after || !sameCoordinate(before.x, after.x) || !sameCoordinate(before.y, after.y) ||
-        !sameCoordinate(before.worldStart, after.worldStart) || !sameCoordinate(before.worldEnd, after.worldEnd) ||
+    if (!before || !after) return null;
+    const dx = after.x - before.x, dy = clusterDeltas.get(before.cluster.uid) || 0;
+    if (!Number.isFinite(dx) || !sameCoordinate(after.y, before.y + dy) ||
+        !sameCoordinate(after.worldStart, before.worldStart + dx) || !sameCoordinate(after.worldEnd, before.worldEnd + dx) ||
         before.state.start !== after.state.start || before.state.end !== after.state.end ||
         (selected.has(uid) ? before.state.flipped === after.state.flipped : before.state.flipped !== after.state.flipped)) return null;
+    if (!sameCoordinate(before.x, after.x)) locusDeltas.set(uid, dx);
   }
   if ([...selected].some((uid) => !changes.loci.has(uid))) return null;
-  return createLocusFlipsPreview(source, selected, { clusterLabelTexts });
+  for (const uid of changes.genes || []) {
+    if (source.genes.get(uid)?.visible !== target.genes.get(uid)?.visible) return null;
+  }
+  for (const uid of changes.links || []) {
+    const before = source.links.get(uid), after = target.links.get(uid);
+    if (before?.visible !== after?.visible) return null;
+    if (before?.visible) for (const endpoint of [before.source.query.uid, before.source.target.uid]) {
+      const gene = source.genes.get(endpoint);
+      // An unstranded link endpoint keeps its ordering after a flip, unlike a
+      // reflected directional endpoint. Use the general transition for it.
+      if (selected.has(gene?.locus.source.uid) && gene.display.strand !== 1 && gene.display.strand !== -1) return null;
+    }
+  }
+  const preview = createLocusFlipsPreview(source, selected, { clusterLabelTexts });
+  return preview && { ...preview, clusterDeltas, locusDeltas };
+}
+
+function locusFlipTransitionFrame(scene, transition, progress, { alignLabels = false, labelWidthFor = null } = {}) {
+  if (!transition.locusDeltas.size && !transition.clusterDeltas.size) return { ...transition, progress };
+  const locusOffsets = new Map([...transition.locusDeltas].map(([uid, delta]) => [uid, delta * progress]));
+  const clusterOffsets = new Map([...transition.clusterDeltas].map(([uid, delta]) => [uid, delta * progress]));
+  const offset = (locus) => locusOffsets.get(locus.source.uid) || 0;
+  return locusPreview(scene, { ...transition, progress, locusOffsets, clusterOffsets }, {
+    startFor: (locus) => locus.worldStart + offset(locus), endFor: (locus) => locus.worldEnd + offset(locus),
+    alignLabels, labelWidthFor,
+  });
 }
 
 /** Describe temporary cluster rows without rebuilding a scene. */
@@ -6082,14 +6114,12 @@ function previewLinkAnchors(scene, link, preview) {
         maxX = Math.max(maxX, gene.polygon[index]);
       }
     }
-    minX += offsets.x;
-    maxX += offsets.x;
     const forward = gene.display.strand === 1;
     const axis = flipAxisForGene(preview, gene);
     if (axis === undefined) {
       return [
-        forward ? minX : maxX,
-        forward ? maxX : minX,
+        (forward ? minX : maxX) + offsets.x,
+        (forward ? maxX : minX) + offsets.x,
         gene.locus.y + gene.locus.track.y + offsets.y,
       ];
     }
@@ -6099,8 +6129,8 @@ function previewLinkAnchors(scene, link, preview) {
     const from = forward ? [minX, maxX] : [maxX, minX];
     const to = forward ? [targetMax, targetMin] : [targetMin, targetMax];
     return [
-      from[0] + (to[0] - from[0]) * progress,
-      from[1] + (to[1] - from[1]) * progress,
+      from[0] + (to[0] - from[0]) * progress + offsets.x,
+      from[1] + (to[1] - from[1]) * progress + offsets.x,
       gene.locus.y + gene.locus.track.y + offsets.y,
     ];
   };
@@ -6114,7 +6144,9 @@ function linkGeometryForPreview(scene, link, preview, config) {
     const target = scene.genes.get(link.source.target.uid);
     const affected = preview.type === "cluster-drag" ||
       preview.axes?.has(query?.locus?.source?.uid) ||
-      preview.axes?.has(target?.locus?.source?.uid);
+      preview.axes?.has(target?.locus?.source?.uid) ||
+      preview.locusOffsets?.has(query?.locus?.source?.uid) ||
+      preview.locusOffsets?.has(target?.locus?.source?.uid) || Boolean(preview.clusterOffsets?.size);
     return { visible, anchors: visible && affected ? previewLinkAnchors(scene, link, preview) : link.anchors };
   }
   const anchors = link.anchors;
@@ -6169,7 +6201,13 @@ function recordsForPreview(scene, preview, { includeClusters = false } = {}) {
   if (preview.type === "locus-offsets") {
     for (const locusUid of preview.locusOffsets.keys()) loci.add(locusUid);
   }
-  if (preview.type === "locus-flip") for (const uid of preview.axes.keys()) loci.add(uid);
+  if (preview.type === "locus-flip") {
+    for (const uid of preview.axes.keys()) loci.add(uid);
+    for (const uid of preview.locusOffsets?.keys() || []) loci.add(uid);
+    if (preview.clusterOffsets?.size) for (const locus of scene.loci.values()) {
+      if (preview.clusterOffsets.has(locus.cluster.uid)) loci.add(locus.source.uid);
+    }
+  }
   if (preview.type === "locus-trim") {
     const trimmed = scene.loci.get(preview.locusUid);
     const clusterUid = trimmed?.cluster?.uid ?? trimmed?.source?.clusterUid;
@@ -15811,7 +15849,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     }
     // Keys follow the current bottom row. Only this small buffer changes
     // during a row drag; cells remain retained and use cluster transforms.
-    const keyPreview = nextPreview?.type === "cluster-drag" ? nextPreview : null;
+    const keyPreview = nextPreview?.type === "cluster-drag" || nextPreview?.clusterOffsets?.size ? nextPreview : null;
     const groupRows = annotationPanels.some((panel) => panel.markerGroups || panel.definition.showYAxisLine || panel.definition.showXGridLines) ? scene.clusters : null;
     if (changed || annotationKeyPreview !== keyPreview || annotationGroupRows !== groupRows) {
       annotationGroupRows = groupRows;
@@ -15958,7 +15996,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     }
     const offsets = new Float32Array(clusterOffsetCapacity * 2);
     offsets.set(clusterBaseOffsets);
-    if (nextPreview?.type === "cluster-drag") {
+    if (nextPreview?.type === "cluster-drag" || (nextPreview?.type === "locus-flip" && nextPreview.clusterOffsets)) {
       for (const [uid, offset] of nextPreview.clusterOffsets) {
         const slot = geometry?.clusterSlots?.get(uid);
         if (slot !== undefined) offsets[slot * 2 + 1] += offset;
@@ -15995,8 +16033,8 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     const transforms = new Float32Array(locusTransformCapacity * 4);
     for (let slot = 0; slot < locusTransformCapacity; slot++) transforms[slot * 4 + 2] = 1;
     if (isLocusTransformPreview(nextPreview)) {
-      const ids = nextPreview.type === "locus-offsets"
-        ? nextPreview.locusOffsets.keys() : nextPreview.axes.keys();
+      const ids = nextPreview.type === "locus-offsets" ? nextPreview.locusOffsets.keys()
+        : new Set([...nextPreview.axes.keys(), ...(nextPreview.locusOffsets?.keys() || [])]);
       for (const uid of ids) {
         const slot = geometry.locusSlots.get(uid);
         if (slot === undefined) continue;
@@ -17112,7 +17150,7 @@ function clusterMap() {
         changes: { loci: [...flippedLoci], clusters: changes.map(({ clusterUid }) => clusterUid) },
       };
     }
-    redraw();
+    redraw({ flippedLoci: [...flippedLoci] });
     commitInteractionState();
     return result;
   };
@@ -17900,7 +17938,9 @@ function clusterMap() {
     rasterAnimation.cancel = animate(duration, (progress) => {
       rasterAnimation.progress = progress;
       if (flipPreview) {
-        scenePreview = rasterAnimation.flipPreview = { ...flipPreview, progress };
+        scenePreview = rasterAnimation.flipPreview = locusFlipTransitionFrame(previousScene, flipPreview, progress, {
+          alignLabels: runtime.config.cluster.alignLabels, labelWidthFor: runtime.measureClusterLabel,
+        });
         rasterScene = previousScene;
       } else if (useWebGpu) rasterScene = interpolateScene(previousScene, scene, progress);
       paintScene();

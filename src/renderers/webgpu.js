@@ -922,7 +922,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     }
     // Keys follow the current bottom row. Only this small buffer changes
     // during a row drag; cells remain retained and use cluster transforms.
-    const keyPreview = nextPreview?.type === "cluster-drag" ? nextPreview : null;
+    const keyPreview = nextPreview?.type === "cluster-drag" || nextPreview?.clusterOffsets?.size ? nextPreview : null;
     const groupRows = annotationPanels.some((panel) => panel.markerGroups || panel.definition.showYAxisLine || panel.definition.showXGridLines) ? scene.clusters : null;
     if (changed || annotationKeyPreview !== keyPreview || annotationGroupRows !== groupRows) {
       annotationGroupRows = groupRows;
@@ -1069,7 +1069,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     }
     const offsets = new Float32Array(clusterOffsetCapacity * 2);
     offsets.set(clusterBaseOffsets);
-    if (nextPreview?.type === "cluster-drag") {
+    if (nextPreview?.type === "cluster-drag" || (nextPreview?.type === "locus-flip" && nextPreview.clusterOffsets)) {
       for (const [uid, offset] of nextPreview.clusterOffsets) {
         const slot = geometry?.clusterSlots?.get(uid);
         if (slot !== undefined) offsets[slot * 2 + 1] += offset;
@@ -1106,8 +1106,8 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     const transforms = new Float32Array(locusTransformCapacity * 4);
     for (let slot = 0; slot < locusTransformCapacity; slot++) transforms[slot * 4 + 2] = 1;
     if (isLocusTransformPreview(nextPreview)) {
-      const ids = nextPreview.type === "locus-offsets"
-        ? nextPreview.locusOffsets.keys() : nextPreview.axes.keys();
+      const ids = nextPreview.type === "locus-offsets" ? nextPreview.locusOffsets.keys()
+        : new Set([...nextPreview.axes.keys(), ...(nextPreview.locusOffsets?.keys() || [])]);
       for (const uid of ids) {
         const slot = geometry.locusSlots.get(uid);
         if (slot === undefined) continue;

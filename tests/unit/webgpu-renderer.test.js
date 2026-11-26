@@ -5,9 +5,10 @@ import { createWebGpuRenderer } from "../../src/renderers/webgpu.js";
 import { normalizeChartData } from "../../src/data/normalize.mjs";
 import { createChartIndex } from "../../src/data/index.mjs";
 import { createChartRuntime } from "../../src/chart/runtime.js";
-import { createClusterDragPreview, createLocusOffsetsPreview, createLocusFlipPreview, createLocusFlipTransition, interpolateScene } from "../../src/scene/preview.mjs";
+import { createClusterDragPreview, createLocusOffsetsPreview, createLocusFlipPreview, createLocusFlipTransition,
+  locusFlipTransitionFrame, linkGeometryForPreview, interpolateScene } from "../../src/scene/preview.mjs";
 import { createLargeTestingData } from "../../fixtures/synthetic.mjs";
-import { annotationPanelsForFrame } from "../../src/annotations/model.mjs";
+import { annotationOffsetForPreview, annotationPanelsForFrame } from "../../src/annotations/model.mjs";
 import { applyChartOperations } from "../../src/data/operations.mjs";
 import { createChartState, setClusterOffset, setLocusOffset, setPreviewClusterOrder,
   commitPreviewClusterOrder, flipLocus, trimLocusToGeneBounds } from "../../src/chart/state.mjs";
@@ -277,20 +278,38 @@ test("WebGPU hides links without hiding genes and releases emptied geometry", as
 
 test("WebGPU animates multiple flipped loci using retained geometry", async (t) => {
   const { renderer, buffers, writes, getBindings } = await gpuHarness(t);
-  const data = normalizeChartData(createLargeTestingData({ clusterCount: 3, genesPerCluster: 3 }));
+  const raw = createLargeTestingData({ clusterCount: 3, genesPerCluster: 3 });
+  for (const cluster of raw.clusters) for (const locus of cluster.loci) for (const gene of locus.genes) {
+    if (gene.strand === 0) gene.strand = 1;
+  }
+  raw.annotationPanels = [{ uid: "bar", type: "bar", columns: ["Value"],
+    values: Object.fromEntries(raw.clusters.map((cluster, index) => [cluster.uid, [index + 1]])),
+    scale: { domain: [0, 4] }, showKey: false }];
+  const data = normalizeChartData(raw);
   const state = createChartState(data), runtime = createChartRuntime();
+  runtime.configure({ annotations: { enabled: true } });
   runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   const scene = runtime.updateScene(data), ids = data.clusters.slice(0, 2).map((cluster) => cluster.loci[0].uid);
   for (const cluster of data.clusters.slice(0, 2)) flipLocus(state, cluster.loci[0]);
+  setClusterOffset(state, data.clusters[0].uid, 25.125);
+  setClusterOffset(state, data.clusters[2].uid, -15.5);
   const target = runtime.updateScene(data, { sourceScene: scene, changes: { loci: ids } });
   const transition = createLocusFlipTransition(scene, target, ids);
-  assert.ok(transition, "a batch flip uses the retained transform transition");
+  assert.ok(transition, "a batch flip with row translations uses the retained transform transition");
   const moved = new Map(target.loci), first = moved.get(ids[0]);
   moved.set(ids[0], { ...first, worldEnd: first.worldEnd + Math.max(1, Math.abs(first.worldEnd)) * Number.EPSILON * 2 });
   assert.ok(createLocusFlipTransition(scene, { ...target, loci: moved }, ids),
     "rounding from a prior row translation does not force geometry rebuilding");
   moved.set(ids[0], { ...first, x: first.x + 1 });
   assert.equal(createLocusFlipTransition(scene, { ...target, loci: moved }, ids), null);
+  const linked = [...target.changes.links].map((uid) => scene.links.get(uid)).find((link) => link?.visible &&
+    [link.source.query.uid, link.source.target.uid].some((uid) => ids.includes(scene.genes.get(uid)?.locus.source.uid)));
+  assert.ok(linked);
+  const endpoint = [linked.source.query.uid, linked.source.target.uid].find((uid) => ids.includes(scene.genes.get(uid)?.locus.source.uid));
+  const genes = new Map(scene.genes), oldGene = genes.get(endpoint);
+  genes.set(endpoint, { ...oldGene, display: { ...oldGene.display, strand: 0 } });
+  assert.equal(createLocusFlipTransition({ ...scene, genes }, target, ids), null,
+    "unstranded link endpoints use the general transition");
   const options = { nextScene: scene, scales: runtime.scales, config: runtime.renderConfig,
     camera: { x: 0, y: 0, k: 1 }, width: 1500, height: 400, pixelRatio: 1 };
   renderer.render(options);
@@ -298,15 +317,28 @@ test("WebGPU animates multiple flipped loci using retained geometry", async (t) 
   const transform = () => new Float32Array(getBindings().find((entry) => entry.binding === 4).resource.buffer.data.buffer);
   for (const progress of [0.25, 0.5, 0.75]) {
     writes.length = 0;
-    renderer.render({ ...options, preview: { ...transition, progress } });
+    const preview = locusFlipTransitionFrame(scene, transition, progress);
+    renderer.render({ ...options, preview });
     const scales = [];
     for (let i = 2; i < transform().length; i += 4) scales.push(transform()[i]);
     assert.equal(scales.filter((scale) => scale === 1 - 2 * progress).length, 2);
+    assert.ok([...transform()].some((value, index) => index % 4 === 0 && value === Math.fround(25.125 * progress)));
+    assert.ok([...transform()].some((value, index) => index % 4 === 0 && value === Math.fround(-15.5 * progress)));
     assert.ok(!writes.some((buffer) => buffer.usage & GPUBufferUsage.VERTEX));
     assert.deepEqual(buffers.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX), geometry);
   }
   renderer.render(options);
   assert.ok([...transform()].filter((_, index) => index % 4 === 2).every((scale) => scale === 1));
+  const finalPreview = locusFlipTransitionFrame(scene, transition, 1);
+  assert.ok(Math.abs(scene.annotationPanels[0].x + annotationOffsetForPreview(scene, finalPreview) -
+    target.annotationPanels[0].x) < 1e-7, "annotation panels track the changed figure bounds");
+  for (const uid of target.changes.links) {
+    const expected = target.links.get(uid), original = scene.links.get(uid);
+    if (!expected?.visible || !original?.visible) continue;
+    const actual = linkGeometryForPreview(scene, original, finalPreview, runtime.renderConfig).anchors;
+    actual.forEach((value, i) => assert.ok(Math.abs(value - expected.anchors[i]) < 1e-7,
+      `${uid} anchor ${i}: ${actual} versus ${expected.anchors}`));
+  }
   assert.equal(renderer.adoptScene(target, scene, options), true);
   renderer.render({ ...options, nextScene: target });
   assert.deepEqual(buffers.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX), geometry);
