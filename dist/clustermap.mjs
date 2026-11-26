@@ -15387,7 +15387,7 @@ function sceneLinkCandidates(scene) {
 // A row translation can reuse gene and track vertices with the same cluster
 // transforms used by dragging. Reject any change in local geometry.
 function animationRowOffsets(base, frame) {
-  if (!base || !frame.changes || !frame.animationLinkIds || frame.annotationPanels?.length ||
+  if (!base || !frame.changes || !frame.animationLinkIds ||
       base.clusters.size !== frame.clusters.size || base.loci.size !== frame.loci.size ||
       base.genes.size !== frame.genes.size) return null;
   const offsets = new Map();
@@ -15751,7 +15751,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         if (row.uid !== oldRow.uid || row.cells.length !== oldRow.cells.length) return false;
         const offsets = annotationRows.get(panel.uid).get(row.uid);
         const slot = geometry.clusterSlots.get(row.uid);
-        const y = scene.clusters.get(row.uid).y + panel.rowOffset - clusterBaseOffsets[slot * 2 + 1];
+        const y = (animationBaseScene || scene).clusters.get(row.uid).y + panel.rowOffset - clusterBaseOffsets[slot * 2 + 1];
         for (let k = 0; k < row.cells.length; k++) {
           const rects = row.cells[k].rects, oldRects = oldRow.cells[k].rects;
           if (rects.length !== oldRects.length) return false;
@@ -15798,7 +15798,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
           const slot = geometry.clusterSlots.get(row.uid);
           // Retained gene geometry may still use an earlier row order. Remove
           // that baseline from new cell instances before the GPU adds it back.
-          const y = scene.clusters.get(row.uid).y + panel.rowOffset - clusterBaseOffsets[slot * 2 + 1];
+          const y = (animationBaseScene || scene).clusters.get(row.uid).y + panel.rowOffset - clusterBaseOffsets[slot * 2 + 1];
           for (const cell of row.cells) {
             offsets.push(values.length / 9);
             for (const rect of cell.rects) appendRectangle(values, rect, panel.x, y, slot);
@@ -16163,6 +16163,15 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
 
   // Retain translated geometry; only re-upload loci whose local geometry changed.
   const adoptScene = (nextScene, sourceScene, { scales, config }) => {
+    // Animation frames retain the source vertices and apply temporary row
+    // transforms. Adopt from that source when the transition completes.
+    if (animationBaseScene && animationBaseScene === sourceScene && scene !== sourceScene) {
+      scene = sourceScene;
+      animationBaseScene = null;
+      usePreviewLinkRecords(false);
+      updateClusterOffsets(null);
+      updateLocusTransforms(null);
+    }
     if (!geometry || scene !== sourceScene || !nextScene.changes) return false;
     const loci = [], offsets = [], affectedGenes = new Set();
     for (const uid of nextScene.changes.clusters) {

@@ -152,6 +152,58 @@ test("WebGPU draws annotation grids behind cells, culls them and updates row pos
   assert.deepEqual(render().map((draw) => draw.args[1]), [3, 6, 1]);
 });
 
+test("WebGPU retains biological geometry and positions annotations during row animation", async (t) => {
+  const { renderer, draws, writes, getBindings } = await gpuHarness(t);
+  const ids = ["a", "b", "c"];
+  const data = normalizeChartData({ clusters: ids.map((uid) => ({ uid, name: uid,
+    loci: [{ uid: `l-${uid}`, start: 0, end: 100, genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
+    links: [{ uid: "ab", query: { uid: "g-a" }, target: { uid: "g-b" }, identity: 0.9 }],
+    groups: [{ uid: "group", genes: ids.map((uid) => `g-${uid}`) }], config: { updateGroups: false },
+    annotationPanels: [{ uid: "bar", type: "bar", title: "", columns: ["Value"],
+      values: { a: [1], b: [2], c: [3] }, scale: { domain: [0, 4] }, showKey: false,
+      showColumnLabels: false, showYAxisLine: true, showXGridLines: true }] });
+  const runtime = createChartRuntime(), state = createChartState(data);
+  runtime.configure({ annotations: { enabled: true } });
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
+  const before = runtime.updateScene(data);
+  state.clusterOrder = ["c", "a", "b"];
+  setClusterOffset(state, "a", 25.125);
+  const after = runtime.updateScene(data, { sourceScene: before });
+  const options = { scales: runtime.scales, config: runtime.renderConfig,
+    camera: { x: 2000, y: 2000, k: 1 }, width: 10000, height: 10000, pixelRatio: 1 };
+  renderer.render({ ...options, nextScene: before });
+  const biological = new Set(draws.filter((draw) => ["vertexMain", "strokeVertex"].includes(draw.entryPoint)).map((draw) => draw.buffer));
+  for (const progress of [0.25, 0.5, 0.75]) {
+    const frame = interpolateScene(before, after, progress);
+    draws.length = writes.length = 0;
+    renderer.render({ ...options, nextScene: frame });
+    assert.ok(!writes.some((buffer) => biological.has(buffer)), "biological geometry remains on the GPU");
+    const rectangleDraws = draws.filter((draw) => draw.entryPoint === "rectangleVertex");
+    const cells = rectangleDraws.find((draw) => draw.args[1] === 6);
+    assert.ok(cells);
+    const records = new Float32Array(cells.buffer.data.buffer);
+    const offsets = new Float32Array(getBindings().find((entry) => entry.binding === 1).resource.buffer.data.buffer);
+    const panel = frame.annotationPanels[0]; let i = 0;
+    for (const row of panel.rows) for (const cell of row.cells) for (const rect of cell.rects) {
+      const slot = records[i * 9 + 8];
+      assert.ok(Math.abs(records[i * 9] - (panel.x + rect.x)) < 1e-4);
+      assert.ok(Math.abs(records[i * 9 + 1] + offsets[slot * 2 + 1] -
+        (frame.clusters.get(row.uid).y + panel.rowOffset + rect.y)) < 1e-4);
+      i++;
+    }
+    const decorations = annotationPanelsForFrame(frame)[0].rects;
+    const keyRecords = new Float32Array(rectangleDraws[0].buffer.data.buffer);
+    for (const rect of decorations.filter((item) => item.kind === "x-grid")) {
+      assert.ok(Math.abs(keyRecords[rect.keyIndex * 9 + 1] - rect.y) < 1e-4);
+      assert.ok(Math.abs(keyRecords[rect.keyIndex * 9 + 3] - rect.height) < 1e-4);
+    }
+  }
+  writes.length = 0;
+  assert.equal(renderer.adoptScene(after, before, options), true);
+  renderer.render({ ...options, nextScene: after });
+  assert.ok(!writes.some((buffer) => biological.has(buffer)), "completion retains biological geometry");
+});
+
 test("tree presentation edits do not allocate or upload biological GPU geometry", async (t) => {
   const { renderer, buffers, writes } = await gpuHarness(t);
   const data = normalizeChartData(JSON.parse(await readFile(new URL("../../fixtures/heatmap.json", import.meta.url), "utf8")));
@@ -463,6 +515,10 @@ test("WebGPU row translations reuse gene geometry and preserve interpolated link
   renderer.render({ ...options, nextScene: roundedFrame });
   assert.ok(!writes.some((buffer) => buffer.usage & GPUBufferUsage.VERTEX),
     "rounding differences retain translated geometry");
+  writes.length = 0;
+  assert.equal(renderer.adoptScene(after, before, options), true, "the completed transition adopts its retained source");
+  renderer.render({ ...options, nextScene: after });
+  assert.ok(!writes.some((buffer) => vertices.includes(buffer)), "completion retains the biological buffers");
   const changedGeometry = interpolateScene(before, after, 0.5);
   changedGeometry.genes.get("g-a").polygon[0] += 3;
   writes.length = 0;
