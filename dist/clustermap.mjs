@@ -4741,6 +4741,11 @@ class CompactLinkStore {
   uidAt(position) { const physical = this.#physicalAt(position); return physical === undefined ? undefined : `link-${physical}`; }
   queryAt(position) { const physical = this.#physicalAt(position); return this.#genes[this.#query[physical]]; }
   targetAt(position) { const physical = this.#physicalAt(position); return this.#genes[this.#target[physical]]; }
+  identityAt(position) {
+    const physical = this.#physicalAt(position), changes = this.#overrides.get(physical);
+    return changes && Object.hasOwn(changes, "identity") ? changes.identity : this.#identity[physical];
+  }
+  hiddenAt(position) { return this.#overrides.get(this.#physicalAt(position))?.hidden; }
   getAt(position) {
     const physical = this.#physicalAt(position);
     if (physical === undefined) return undefined;
@@ -8898,9 +8903,48 @@ function linkPassesFilter(link, { groupForGene, geneForUid, threshold }) {
     !(link.identity < threshold) && groupForGene(link.query.uid) !== null && groupForGene(link.target.uid) !== null;
 }
 
+function compactLinkVisibility(store, { groupForGene, geneForUid, bestOnly, threshold }) {
+  const bits = new Uint8Array(Math.ceil(store.size / 8));
+  const positions = bestOnly ? new Uint32Array(store.size) : null;
+  let count = 0;
+  for (let i = 0; i < store.size; i++) {
+    const query = store.queryAt(i), target = store.targetAt(i);
+    if (store.hiddenAt(i) || !geneForUid(query) || !geneForUid(target) || store.identityAt(i) < threshold ||
+        groupForGene(query) === null || groupForGene(target) === null) continue;
+    if (positions) positions[count++] = i;
+    else bits[i >>> 3] |= 1 << (i & 7);
+  }
+  if (positions) {
+    // Typed-array sorting is stable, preserving the source order of ties.
+    const passing = positions.subarray(0, count);
+    passing.sort((a, b) => store.identityAt(b) - store.identityAt(a));
+    const pairs = new Map();
+    const key = (left, right) => {
+      const first = `${typeof left}:${String(left)}`, second = `${typeof right}:${String(right)}`;
+      return first < second ? `${first}|${second}` : `${second}|${first}`;
+    };
+    for (const position of passing) {
+      const query = store.queryAt(position), target = store.targetAt(position), identity = store.identityAt(position);
+      const pair = key(geneForUid(query).clusterUid, geneForUid(target).clusterUid);
+      let best = pairs.get(pair);
+      if (!best) { best = new Map(); pairs.set(pair, best); }
+      const queryBest = best.get(query), targetBest = best.get(target);
+      if (queryBest > identity || targetBest > identity) continue;
+      bits[position >>> 3] |= 1 << (position & 7);
+      best.set(query, Math.max(queryBest ?? -Infinity, identity));
+      best.set(target, Math.max(targetBest ?? -Infinity, identity));
+    }
+  }
+  return { byteLength: bits.byteLength, has: (uid) => {
+    const position = store.order(uid);
+    return position !== undefined && Boolean(bits[position >>> 3] & (1 << (position & 7)));
+  } };
+}
+
 // Retain one bit per source record, rather than a Set of millions of IDs.
 // The captured index makes old scenes independent of later data/index updates.
 function createLinkVisibility(links, options, index) {
+  if (links instanceof CompactLinkStore && links === index) return compactLinkVisibility(links, options);
   if (links instanceof CompactLinkStore) links = links.values();
   if (!index?.order) {
     const allowed = new Set(filterLinks(links, options).map((link) => link.uid));

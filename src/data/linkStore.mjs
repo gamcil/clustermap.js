@@ -89,6 +89,11 @@ export class CompactLinkStore {
   uidAt(position) { const physical = this.#physicalAt(position); return physical === undefined ? undefined : `link-${physical}`; }
   queryAt(position) { const physical = this.#physicalAt(position); return this.#genes[this.#query[physical]]; }
   targetAt(position) { const physical = this.#physicalAt(position); return this.#genes[this.#target[physical]]; }
+  identityAt(position) {
+    const physical = this.#physicalAt(position), changes = this.#overrides.get(physical);
+    return changes && Object.hasOwn(changes, "identity") ? changes.identity : this.#identity[physical];
+  }
+  hiddenAt(position) { return this.#overrides.get(this.#physicalAt(position))?.hidden; }
   getAt(position) {
     const physical = this.#physicalAt(position);
     if (physical === undefined) return undefined;

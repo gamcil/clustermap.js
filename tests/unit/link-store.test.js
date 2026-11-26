@@ -196,3 +196,21 @@ test("compact read views behave like read-only arrays and materialize on access"
   assert.throws(() => view.push({}), /read-only/);
   assert.equal(linkArrayView(store), view);
 });
+
+test("compact best-match visibility matches object filtering without materializing links", () => {
+  const genes = ["a", "b", "c", "d", "missing"], count = 300;
+  const store = new CompactLinkStore({ genes,
+    query: Uint32Array.from({ length: count }, (_, i) => (i * 13) % genes.length),
+    target: Uint32Array.from({ length: count }, (_, i) => (i * 7 + 1) % genes.length),
+    identity: Float64Array.from({ length: count }, (_, i) => (i % 6) / 5),
+    similarity: new Float64Array(count).fill(0.9) })
+    .withUpdates([{ uid: "link-3", changes: { hidden: true } }, { uid: "link-7", changes: { identity: 0.73 } }])
+    .withDeleted(["link-2", "link-21"]);
+  const options = { bestOnly: true, threshold: 0.2,
+    groupForGene: (uid) => uid === "d" ? null : 0,
+    geneForUid: (uid) => uid === "missing" ? undefined : { clusterUid: uid === "a" || uid === "b" ? "left" : "right" } };
+  const expected = new Set(filterLinks([...store.values()], options).map((link) => link.uid));
+  store.getAt = () => { throw new Error("best-match filtering materialized a link"); };
+  const actual = createLinkVisibility(store, options, store);
+  assert.deepEqual([...store.keys()].filter((uid) => actual.has(uid)), [...store.keys()].filter((uid) => expected.has(uid)));
+});
