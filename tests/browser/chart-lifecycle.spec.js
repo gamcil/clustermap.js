@@ -391,11 +391,14 @@ test("compact link column ownership can be transferred in the browser", async ({
   const result = await page.evaluate(async () => {
     const { CompactLinkStore } = await import("/dist/clustermap.mjs");
     const columns = { genes: ["a", "b"], query: new Uint32Array([0]), target: new Uint32Array([1]),
-      identity: new Float64Array([0.9]), similarity: new Float64Array([1]) };
+      identity: new Float32Array([0.9]), similarity: new Float32Array([1]) };
     const store = CompactLinkStore.fromTransferred(columns);
-    return { queryBytes: columns.query.byteLength, identityBytes: columns.identity.byteLength, link: store.get("link-0") };
+    return { queryBytes: columns.query.byteLength, identityBytes: columns.identity.byteLength, link: store.get("link-0"),
+      queryIndex: store.queryIndexAt(0), similarity: store.similarityAt(0) };
   });
   expect(result.queryBytes).toBe(0);
   expect(result.identityBytes).toBe(0);
   expect(result.link.query.uid).toBe("a");
+  expect(result.queryIndex).toBe(0);
+  expect(result.similarity).toBe(1);
 });

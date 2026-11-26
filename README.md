@@ -496,7 +496,10 @@ d3.select(element).datum({ ...data, links }).call(chart);
 ```
 
 All four columns must have the same length; endpoint indexes must refer to the
-string ID dictionary. Each link's ID is `link-N`, where `N` is its original
+string ID dictionary. Scores can be `Float32Array` or `Float64Array`; use
+32-bit columns only when their input scores are already 32-bit values, since
+conversion would otherwise round them. Edited identities retain JavaScript
+number precision regardless of the base-column type. Each link's ID is `link-N`, where `N` is its original
 column position. The constructor copies its inputs and validates the table, so
 the same store can safely be shared by a host and multiple charts. For lower
 construction peak memory, `CompactLinkStore.fromTransferred(columns)` takes

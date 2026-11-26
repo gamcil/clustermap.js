@@ -1,4 +1,4 @@
-// Run with: node --expose-gc bench/compact-links.mjs [link-count] [--transfer]
+// Run with: node --expose-gc bench/compact-links.mjs [link-count] [--transfer] [--float32]
 // Synthetic CPU/memory baseline; does not represent browser or GPU memory.
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
@@ -23,7 +23,8 @@ const clusters = Array.from({ length: 100 }, (_, cluster) => ({ uid: `cluster-${
   loci: [{ uid: `locus-${cluster}`, start: 0, end: 1000, genes: genes.slice(cluster * 10, cluster * 10 + 10)
     .map((uid, i) => ({ uid, start: i * 50, end: i * 50 + 30, strand: 1 })) }] }));
 let start = performance.now();
-let query = new Uint32Array(count), target = new Uint32Array(count), identity = new Float64Array(count), similarity = new Float64Array(count);
+const ScoreColumn = process.argv.includes("--float32") ? Float32Array : Float64Array;
+let query = new Uint32Array(count), target = new Uint32Array(count), identity = new ScoreColumn(count), similarity = new ScoreColumn(count);
 for (let i = 0; i < count; i++) {
   query[i] = i % geneCount; target[i] = (i * 37 + 1) % geneCount;
   identity[i] = 0.5 + (i % 5) / 10; similarity[i] = 0.95;

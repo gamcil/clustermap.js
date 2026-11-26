@@ -261,3 +261,24 @@ test("compact positions remain correct with large exclusions and shared edit vie
   assert.equal(filtered.getAt(499).hidden, undefined);
   assert.equal(store.size, count);
 });
+
+test("32-bit base scores preserve their exact values, fingerprints and full-precision edits", () => {
+  const original = input();
+  const columns = { ...original, identity: Float32Array.from(original.identity), similarity: Float32Array.from(original.similarity) };
+  const retained = new CompactLinkStore(columns);
+  const widened = new CompactLinkStore({ ...columns, identity: Float64Array.from(columns.identity), similarity: Float64Array.from(columns.similarity) });
+  assert.equal(retained.byteLength, 16 * retained.size);
+  assert.equal(retained.fingerprint, widened.fingerprint);
+  assert.deepEqual([...retained.values()], [...widened.values()]);
+  assert.equal(retained.queryIndexAt(0), 0);
+  assert.equal(retained.targetIndexAt(0), 1);
+  assert.equal(retained.similarityAt(1), columns.similarity[1]);
+  assert.equal(retained.queryIndexAt(99), undefined);
+  const edited = retained.withUpdates([{ uid: "link-0", changes: { identity: 0.912345678901234 } }]);
+  assert.equal(edited.identityAt(0), 0.912345678901234);
+  const restored = widened.applyEdits(JSON.parse(JSON.stringify(edited.snapshotEdits())));
+  assert.equal(restored.identityAt(0), 0.912345678901234);
+  const transferred = CompactLinkStore.fromTransferred(columns);
+  assert.equal(columns.identity.byteLength, 0);
+  assert.equal(transferred.fingerprint, widened.fingerprint);
+});

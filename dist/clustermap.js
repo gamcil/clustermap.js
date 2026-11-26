@@ -4690,9 +4690,10 @@
       throw new TypeError("Compact links require a gene ID dictionary.");
     }
     if (!(query instanceof Uint32Array) || !(target instanceof Uint32Array) ||
-        !(identity instanceof Float64Array) || !(similarity instanceof Float64Array) ||
+        !(identity instanceof Float64Array || identity instanceof Float32Array) ||
+        !(similarity instanceof Float64Array || similarity instanceof Float32Array) ||
         query.length !== target.length || query.length !== identity.length || query.length !== similarity.length) {
-      throw new TypeError("Compact link columns must be equal-length Uint32/Float64 arrays.");
+      throw new TypeError("Compact link columns must be equal-length Uint32 and Float32/Float64 arrays.");
     }
     for (let i = 0; i < query.length; i++) {
       if (query[i] >= genes.length || target[i] >= genes.length || !Number.isFinite(identity[i]) ||
@@ -4783,8 +4784,11 @@
     }
     has(uid) { return this.order(uid) !== undefined; }
     uidAt(position) { const physical = this.#physicalAt(position); return physical === undefined ? undefined : `link-${physical}`; }
-    queryAt(position) { const physical = this.#physicalAt(position); return this.#genes[this.#query[physical]]; }
-    targetAt(position) { const physical = this.#physicalAt(position); return this.#genes[this.#target[physical]]; }
+    queryIndexAt(position) { const physical = this.#physicalAt(position); return this.#query[physical]; }
+    targetIndexAt(position) { const physical = this.#physicalAt(position); return this.#target[physical]; }
+    queryAt(position) { return this.#genes[this.queryIndexAt(position)]; }
+    targetAt(position) { return this.#genes[this.targetIndexAt(position)]; }
+    similarityAt(position) { return this.#similarity[this.#physicalAt(position)]; }
     identityAt(position) {
       const physical = this.#physicalAt(position), changes = this.#overrides.get(physical);
       return changes && Object.hasOwn(changes, "identity") ? changes.identity : this.#identity[physical];

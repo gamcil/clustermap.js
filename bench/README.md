@@ -242,7 +242,8 @@ and post-GC Node RSS, heap and array-buffer sizes for table creation, indexing,
 scene construction, compact snapshot and best-match filtering. This is a repeatable CPU baseline;
 it does not measure the real GCF, browser peak memory, project saving or GPU
 memory. Add `--transfer` after the count to measure ownership transfer instead
-of copying the input columns. Use a fresh process for each comparison.
+of copying the input columns; add `--float32` to measure 32-bit score columns.
+Use a fresh process for each comparison.
 
 Run `node bench/compact-browser.mjs 2592111 canvas firefox` for an end-to-end
 synthetic browser run at the same link count. It measures mount, best-match
