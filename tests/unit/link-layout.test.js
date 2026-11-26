@@ -1,6 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+test("link endpoints project genes and biological spans through locus flips and trims", async () => {
+  const { projectLinkEndpoint } = await import("../../src/links/layout.mjs");
+  const locus = { source: { uid: "l", start: 0, end: 100, bio: { start: 1000, end: 1100 } },
+    cluster: { uid: "c" }, x: 10, y: 30, track: { y: 5 }, state: { start: 0, end: 100, flipped: false } };
+  const gene = { locus, visible: true, display: { start: 20, end: 30, strand: -1 } };
+  const options = { genes: new Map([["g", gene]]), loci: new Map([["l", locus]]), scaleX: (x) => x };
+  assert.deepEqual(projectLinkEndpoint({ uid: "g" }, options).anchors, [40, 30, 35]);
+  const span = { kind: "span", locusId: "l", start: 1020, end: 1040 };
+  assert.deepEqual(projectLinkEndpoint(span, options).anchors, [30, 50, 35]);
+  locus.state.flipped = true;
+  assert.deepEqual(projectLinkEndpoint(span, options).anchors, [90, 70, 35]);
+  locus.state.start = 70;
+  assert.equal(projectLinkEndpoint(span, options).visible, false);
+  assert.equal(projectLinkEndpoint(span, { ...options, scaleGenes: false }), null);
+});
+
 test("link anchors retain endpoint orientation when ordered by row", async () => {
   const { orderLinkAnchors, getLinkLabelPosition } = await import("../../src/links/layout.mjs");
   const anchors = orderLinkAnchors([35, 45, 42], [25, 15, 12]);

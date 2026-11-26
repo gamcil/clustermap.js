@@ -2,6 +2,27 @@ export function clusterPairKey(left, right) {
   return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
 }
 
+/** Project a biological endpoint into the displayed locus coordinate system. */
+export function projectLinkEndpoint(endpoint, { genes, loci, scaleX, scaleGenes = true }) {
+  if (endpoint.kind !== "span") {
+    const gene = genes.get(endpoint.geneId ?? endpoint.uid);
+    if (!gene) return null;
+    const { display, locus } = gene;
+    const start = scaleX(display.start) + locus.x, end = scaleX(display.end) + locus.x;
+    return { locus, visible: gene.visible,
+      anchors: display.strand === 1 ? [start, end, locus.y + locus.track.y] : [end, start, locus.y + locus.track.y] };
+  }
+  const locus = loci?.get(endpoint.locusId);
+  if (!locus || !scaleGenes) return null;
+  const origin = (locus.source.bio || locus.source).start;
+  let start = endpoint.start - origin, end = endpoint.end - origin;
+  if (locus.state.flipped) [start, end] = [locus.source.end - end, locus.source.end - start];
+  const visible = start >= locus.state.start && end <= locus.state.end;
+  const left = scaleX(start) + locus.x, right = scaleX(end) + locus.x;
+  return { locus, visible, anchors: locus.state.flipped
+    ? [right, left, locus.y + locus.track.y] : [left, right, locus.y + locus.track.y] };
+}
+
 /** Keep each gene's directional endpoints together, with the upper row first. */
 export function orderLinkAnchors(query, target) {
   return query[2] > target[2] ? [...target, ...query] : [...query, ...target];

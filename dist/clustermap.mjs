@@ -5444,6 +5444,27 @@ function clusterPairKey(left, right) {
   return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
 }
 
+/** Project a biological endpoint into the displayed locus coordinate system. */
+function projectLinkEndpoint(endpoint, { genes, loci, scaleX, scaleGenes = true }) {
+  if (endpoint.kind !== "span") {
+    const gene = genes.get(endpoint.geneId ?? endpoint.uid);
+    if (!gene) return null;
+    const { display, locus } = gene;
+    const start = scaleX(display.start) + locus.x, end = scaleX(display.end) + locus.x;
+    return { locus, visible: gene.visible,
+      anchors: display.strand === 1 ? [start, end, locus.y + locus.track.y] : [end, start, locus.y + locus.track.y] };
+  }
+  const locus = loci?.get(endpoint.locusId);
+  if (!locus || !scaleGenes) return null;
+  const origin = (locus.source.bio || locus.source).start;
+  let start = endpoint.start - origin, end = endpoint.end - origin;
+  if (locus.state.flipped) [start, end] = [locus.source.end - end, locus.source.end - start];
+  const visible = start >= locus.state.start && end <= locus.state.end;
+  const left = scaleX(start) + locus.x, right = scaleX(end) + locus.x;
+  return { locus, visible, anchors: locus.state.flipped
+    ? [right, left, locus.y + locus.track.y] : [left, right, locus.y + locus.track.y] };
+}
+
 /** Keep each gene's directional endpoints together, with the upper row first. */
 function orderLinkAnchors(query, target) {
   return query[2] > target[2] ? [...target, ...query] : [...query, ...target];
@@ -7880,22 +7901,17 @@ function createGeneLayout(gene, locusLayout, { scaleX, getGeneState, shape, labe
 }
 
 function createLinkLayout(source, order, {
-  genes, areClustersAdjacent, scaleX, link, linkVisible = () => true,
+  genes, loci, areClustersAdjacent, scaleX, scaleGenes = true, link, linkVisible = () => true,
 }) {
-  const query = genes.get(source.query.uid);
-  const target = genes.get(source.target.uid);
+  const query = projectLinkEndpoint(source.query, { genes, loci, scaleX, scaleGenes });
+  const target = projectLinkEndpoint(source.target, { genes, loci, scaleX, scaleGenes });
   const allowed = linkVisible(source);
-  if (!query || !target || !areClustersAdjacent(query.display.clusterUid, target.display.clusterUid)) {
+  if (!query || !target || !areClustersAdjacent(query.locus.cluster.uid, target.locus.cluster.uid)) {
     return new UndrawableLinkLayout(source, order, allowed);
   }
-  const anchorForGene = ({ display, locus }) => {
-    const start = scaleX(display.start) + locus.x;
-    const end = scaleX(display.end) + locus.x;
-    return display.strand === 1
-      ? [start, end, locus.y + locus.track.y]
-      : [end, start, locus.y + locus.track.y];
-  };
-  const anchors = orderLinkAnchors(anchorForGene(query), anchorForGene(target));
+  const targetAnchors = source.orientation === -1 && source.target.kind === "span"
+    ? [target.anchors[1], target.anchors[0], target.anchors[2]] : target.anchors;
+  const anchors = orderLinkAnchors(query.anchors, targetAnchors);
   return {
     source,
     order,
@@ -7991,6 +8007,7 @@ function buildScene(
   data,
   {
     scaleX,
+    scaleGenes = true,
     scaleY,
     clusterPosition = scaleY,
     clusterOffset,
@@ -8085,7 +8102,7 @@ function buildScene(
   })() : data.links.entries();
   for (const [order, source] of sources) {
     const linkLayout = createLinkLayout(source, order, {
-      genes, areClustersAdjacent, scaleX, link, linkVisible,
+      genes, loci, areClustersAdjacent, scaleX, scaleGenes, link, linkVisible,
     });
     geometryLinks.set(source.uid, linkLayout);
     if (!linkIndexes?.linksByGeneId) for (const uid of new Set([source.query.uid, source.target.uid])) {
@@ -8392,7 +8409,7 @@ function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = 
     if (previous && !previous.anchors && (!query || !target ||
         !options.areClustersAdjacent(query.display.clusterUid, target.display.clusterUid))) continue;
     if (previous) changedLinks.set(source.uid, createLinkLayout(source, previous.order, {
-      ...options, genes,
+      ...options, genes, loci,
     }));
   }
   const links = patchLinkRecords(scene.links, changedLinks);
@@ -14541,6 +14558,7 @@ function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
   return {
     linkIndexes: chartIndex,
     scaleX: scales.x,
+    scaleGenes: config.plot.scaleGenes,
     locusOffset: scales.locus,
     getLocusState: locusState,
     getGeneState: (gene) => getGeneState(chartState, gene),

@@ -198,6 +198,7 @@ function sceneProjectionOptions({ clusterOrder = null, tree = null } = {}) {
   return {
     linkIndexes: chartIndex,
     scaleX: scales.x,
+    scaleGenes: config.plot.scaleGenes,
     locusOffset: scales.locus,
     getLocusState: locusState,
     getGeneState: (gene) => getGeneState(chartState, gene),
