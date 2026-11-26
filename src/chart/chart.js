@@ -35,9 +35,8 @@ import { selectionRange } from "../interaction/selection.mjs";
 import { normalizeChartData, validateTree } from "../data/normalize.mjs";
 import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,
   annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell, validateAnnotationPanels } from "../annotations/model.mjs";
-import { isAnnotationOperation } from "../annotations/operations.mjs";
 import { updateSvgAnnotationViewport } from "../annotations/render.mjs";
-import { applyChartOperations } from "../data/operations.mjs";
+import { applyChartOperations, operationEffects } from "../data/operations.mjs";
 import { isTreePresentationOperation, isTreeTopologyOperation, inverseTreeOperation, applyTreeOperation } from "../tree/operations.mjs";
 import { fitCameraForBounds, worldViewport, worldPoint } from "../scene/camera.mjs";
 import { applyTheme, resolveTheme } from "../ui/theme.mjs";
@@ -79,6 +78,7 @@ import {
 } from "../renderers/mode.mjs";
 import { chartStateFromSnapshot, createChartStateSerializer } from "./snapshot.mjs";
 import { configurationEffects } from "./config.js";
+import { sceneCommitForImpact } from "./changeImpact.mjs";
 import { clonePlainValue, isPlainObject } from "../utils/values.mjs";
 
 let nextChartInstance = 0;
@@ -600,37 +600,31 @@ export default function clusterMap() {
 
   function applyPatch(operations, { record = true, automaticGroups, notify = true, state = null } = {}) {
     const sourceScene = runtime.getScene();
-    const presentationOnly = Array.isArray(operations) && operations.every((op) => isAnnotationOperation(op) || isTreePresentationOperation(op));
+    const impact = operationEffects(operations);
     sceneCommit = null;
     // Source edits may mutate currentData in place. Identity alone cannot
     // invalidate the cached biological defaults, including on undo/redo.
-    if (!presentationOnly) stateSnapshots.reset();
+    if (!impact.presentationOnly) stateSnapshots.reset();
     const groupsAutomaticBefore = groupsAreAutomatic();
-    const undoState = record && Array.isArray(operations) && operations.some((op) => ["genes.delete", "genes.restore"].includes(op?.type))
+    const undoState = record && impact.captureState
       ? stateSnapshots.serialize(chartState, currentData) : null;
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
-    if (!presentationOnly || automaticGroups !== undefined) runtime.invalidateLinkFilter();
+    if (result.effects.refilterLinks || automaticGroups !== undefined) runtime.invalidateLinkFilter();
     plotDataDirty = true;
     const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
     if (restoringAutomatic) {
       currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
     }
     const groupsAutomaticAfter = groupsAreAutomatic();
-    if (!presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
+    if (!result.effects.presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
       refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
-      // Compact link deletion/restoration already rebuilds the shared index
-      // while applying the batch. A gene edit also changes that index.
-      indexPrepared: currentData.links instanceof CompactLinkStore &&
-        result.operations.some((op) => op.type === "links.delete" || op.type === "links.restore") &&
-        !result.operations.some((op) => op.type === "genes.delete" || op.type === "genes.restore"),
+      indexPrepared: result.indexPrepared,
     });
     if (state) {
       chartState = chartStateFromSnapshot(currentData, state);
       runtime.setChartState(chartState);
     }
-    if (sourceScene && !restoringAutomatic && presentationOnly) {
-      sceneCommit = { sourceScene, changes: { presentationOnly: true } };
-    }
+    if (!restoringAutomatic) sceneCommit = sceneCommitForImpact(sourceScene, result.effects);
     return commitEdit(() => ({ change: record ? {
       kind: "patch",
       undo: result.inverse,
@@ -683,9 +677,7 @@ export default function clusterMap() {
     runtime.configure(options, currentData?.tree);
     const effects = configurationEffects(previousEffective, runtime.config);
     cancelTreePresentationPreview();
-    sceneCommit = sourceScene && effects.presentationOnly ? { sourceScene, changes: {
-      presentationOnly: true, clusterLabels: effects.clusterLabels,
-    } } : sourceScene && !effects.refilterLinks ? { changes: { reuseLinkFilter: true } } : null;
+    sceneCommit = sceneCommitForImpact(sourceScene, effects);
     return commitEdit(() => ({
       change: before ? { kind: "config", undo: before, redo: clonePlainValue(options) } : null,
       event: { type: "config.change", config: runtime.config },

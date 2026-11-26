@@ -146,7 +146,7 @@ test("structural tree edits rebuild state and undo topology exactly", () => {
   const apply = (ops) => applyChartOperations(data, createChartIndex(data), ops);
   const edit = apply([{ type: "tree.reroot", nodeId: "b" }]);
   const rooted = structuredClone(data);
-  assert.deepEqual(edit.effects, { reindex: false, rebuildState: true });
+  assert.deepEqual(edit.effects, { presentationOnly: false, refilterLinks: true, reindex: false, rebuildState: true, captureState: false });
   assert.equal(treeMetrics(data.tree).parents.get("b"), data.tree.root);
   apply(edit.inverse); assert.deepEqual(data, original);
   apply(edit.operations); assert.deepEqual(data, rooted);

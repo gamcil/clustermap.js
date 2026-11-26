@@ -10156,112 +10156,6 @@ function validateTree(tree, clusters) {
   return tree;
 }
 
-const styleFields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
-  "groups", "markerWidth", "laneGap", "titleFontSize", "columnFontSize", "labelFontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
-  "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour", "showYAxisLine", "showXGridLines", "tickStep"]);
-const fields = new Set([...styleFields, "values"]);
-const fail$2 = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
-
-const isAnnotationOperation = (operation) => typeof operation?.type === "string" && operation.type.startsWith("annotationPanels.");
-
-function normalizeAnnotationOperation(data, operation) {
-  const known = new Set((data.annotationPanels || []).map((panel) => panel.uid));
-  if (operation.type === "annotationPanels.create") {
-    if (!operation.panel || typeof operation.panel.uid !== "string" || !operation.panel.uid.trim() || known.has(operation.panel.uid)) fail$2("create requires a new, non-empty panel uid.");
-    const index = operation.index ?? known.size;
-    if (!Number.isInteger(index) || index < 0 || index > known.size) fail$2("index must be a valid panel insertion position.");
-    return { type: operation.type, panel: structuredClone(operation.panel), index };
-  }
-  if (operation.type === "annotationPanels.reorder") {
-    if (!Array.isArray(operation.ids) || operation.ids.length !== known.size || new Set(operation.ids).size !== known.size ||
-        operation.ids.some((uid) => !known.has(uid))) fail$2("reorder must contain every panel uid exactly once.");
-    return { type: operation.type, ids: [...operation.ids] };
-  }
-  if (operation.type === "annotationPanels.delete") {
-    if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$2("delete requires existing panel IDs.");
-    return { type: operation.type, ids: [...new Set(operation.ids)] };
-  }
-  if (operation.type === "annotationPanels.updateRows") {
-    const panel = data.annotationPanels?.find((panel) => panel.uid === operation.uid);
-    if (!panel || panel.type === "groups" || !operation.values || typeof operation.values !== "object" ||
-        Array.isArray(operation.values) || !Object.keys(operation.values).length ||
-        Object.values(operation.values).some((row) => row !== null && !Array.isArray(row))) fail$2("updateRows requires a matrix panel and row arrays (or null to remove a row).");
-    const clusterIds = new Set(data.clusters.map((cluster) => cluster.uid));
-    if (Object.keys(operation.values).some((uid) => !clusterIds.has(uid))) fail$2("updateRows requires existing cluster IDs.");
-    return { type: operation.type, uid: operation.uid, values: structuredClone(operation.values) };
-  }
-  if (operation.type === "annotationPanels.replaceStyle") {
-    if (!known.has(operation.uid) || !operation.style || typeof operation.style !== "object" ||
-        Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !styleFields.has(key))) fail$2("replaceStyle requires an existing panel and supported style fields.");
-    return { type: operation.type, uid: operation.uid, style: structuredClone(operation.style) };
-  }
-  if (operation.type !== "annotationPanels.update") fail$2(`unsupported type '${operation.type}'.`);
-  if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$2("ids must reference existing panels.");
-  const changes = operation.changes;
-  if (!changes || typeof changes !== "object" || Array.isArray(changes) || !Object.keys(changes).length ||
-      Object.keys(changes).some((key) => !fields.has(key))) fail$2("changes contains unsupported fields.");
-  return { type: operation.type, ids: [...new Set(operation.ids)], changes: structuredClone(changes) };
-}
-
-function applyAnnotationOperation(data, operation) {
-  const panels = data.annotationPanels || [];
-  if (operation.type === "annotationPanels.create") {
-    data.annotationPanels = [...panels];
-    data.annotationPanels.splice(operation.index, 0, structuredClone(operation.panel));
-    return;
-  }
-  if (operation.type === "annotationPanels.delete") {
-    data.annotationPanels = panels.filter((panel) => !operation.ids.includes(panel.uid));
-    return;
-  }
-  if (operation.type === "annotationPanels.reorder") {
-    const byId = new Map(panels.map((panel) => [panel.uid, panel]));
-    data.annotationPanels = operation.ids.map((uid) => byId.get(uid));
-    return;
-  }
-  if (operation.type === "annotationPanels.updateRows") {
-    data.annotationPanels = panels.map((panel) => {
-      if (panel.uid !== operation.uid) return panel;
-      const values = { ...panel.values, ...structuredClone(operation.values) };
-      for (const [uid, row] of Object.entries(operation.values)) if (row === null) delete values[uid];
-      return { ...panel, values };
-    });
-    return;
-  }
-  data.annotationPanels = panels.map((panel) => operation.type === "annotationPanels.replaceStyle"
-    ? panel.uid === operation.uid ? {
-      ...Object.fromEntries(Object.entries(panel).filter(([key]) => !styleFields.has(key))),
-      ...structuredClone(operation.style),
-    } : panel
-    : operation.ids.includes(panel.uid) ? { ...panel, ...structuredClone(operation.changes) } : panel);
-}
-
-function inverseAnnotationOperation(data, operation) {
-  if (operation.type === "annotationPanels.create") return [{ type: "annotationPanels.delete", ids: [operation.panel.uid] }];
-  if (operation.type === "annotationPanels.reorder") return [{ type: operation.type, ids: (data.annotationPanels || []).map((panel) => panel.uid) }];
-  if (operation.type === "annotationPanels.delete") return data.annotationPanels.flatMap((panel, index) =>
-    operation.ids.includes(panel.uid) ? [{ type: "annotationPanels.create", panel: structuredClone(panel), index }] : []);
-  if (operation.type === "annotationPanels.updateRows") {
-    const panel = data.annotationPanels.find((panel) => panel.uid === operation.uid);
-    return [{ type: operation.type, uid: panel.uid, values: structuredClone(Object.fromEntries(
-      Object.keys(operation.values).map((uid) => [uid, Object.hasOwn(panel.values, uid) ? panel.values[uid] : null]))) }];
-  }
-  const ids = operation.type === "annotationPanels.replaceStyle" ? [operation.uid] : operation.ids;
-  return data.annotationPanels.filter((panel) => ids.includes(panel.uid))
-    .flatMap((panel) => [
-      { type: "annotationPanels.replaceStyle", uid: panel.uid,
-        style: structuredClone(Object.fromEntries(Object.entries(panel).filter(([key]) => styleFields.has(key)))) },
-      ...(operation.type === "annotationPanels.update" && Object.hasOwn(operation.changes, "values")
-        ? [{ type: "annotationPanels.update", ids: [panel.uid], changes: { values: structuredClone(panel.values) } }] : []),
-    ]);
-}
-
-// The operation normalizer has already built this private candidate array.
-function validateAnnotationChanges(data, panels) {
-  if (panels === data.annotationPanels) return;
-  validateAnnotationPanels(panels, data.clusters, { previousPanels: data.annotationPanels, tree: data.tree });
-}
-
 const svgViews = new WeakMap();
 
 const sameView = (one, two) => one.length === two.length && one.every((panel, i) => {
@@ -10352,7 +10246,7 @@ function drawCanvasAnnotations(context, scene, preview = null, { showGeometry = 
   }
 }
 
-const fail$1 = (message) => { throw new TypeError(`Invalid chart operation: ${message}`); };
+const fail$2 = (message) => { throw new TypeError(`Invalid chart operation: ${message}`); };
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const object = (value) => value && typeof value === "object" && !Array.isArray(value);
 const types = new Set(["tree.presentation.update", "tree.presentation.reset", "tree.presentation.restore"]);
@@ -10361,14 +10255,14 @@ const isTreeTopologyOperation = (operation) => ["tree.reroot", "tree.reroot.rese
 const isTreeOperation = (operation) => isTreePresentationOperation(operation) || isTreeTopologyOperation(operation);
 
 function normalizeTreeOperation(tree, operation) {
-  if (!tree) fail$1("tree edits require a loaded tree.");
+  if (!tree) fail$2("tree edits require a loaded tree.");
   if (isTreeTopologyOperation(operation)) {
     if (operation.type === "tree.reroot") {
-      if (typeof operation.nodeId !== "string" || !operation.nodeId.trim()) fail$1("rerooting requires a nodeId.");
+      if (typeof operation.nodeId !== "string" || !operation.nodeId.trim()) fail$2("rerooting requires a nodeId.");
       return { type: operation.type, nodeId: operation.nodeId };
     }
     if (operation.type === "tree.restore") {
-      if (!object(operation.tree)) fail$1("tree.restore requires a tree.");
+      if (!object(operation.tree)) fail$2("tree.restore requires a tree.");
       return { type: operation.type, tree: structuredClone(operation.tree) };
     }
     return { type: operation.type };
@@ -10377,33 +10271,33 @@ function normalizeTreeOperation(tree, operation) {
     return { type: operation.type, ...(own(operation, "presentation") ? { presentation: structuredClone(operation.presentation) } : {}) };
   }
   const { type, scope } = operation;
-  if (!["tree", "node", "subtree", "manual"].includes(scope)) fail$1("unknown tree presentation scope.");
-  if (scope === "manual" && type !== "tree.presentation.reset") fail$1("manual scope is only for resetting all manual styles.");
-  if (scope === "tree" && type === "tree.presentation.reset") fail$1("use manual scope to reset all manual styles; update colouring to reset its policy.");
+  if (!["tree", "node", "subtree", "manual"].includes(scope)) fail$2("unknown tree presentation scope.");
+  if (scope === "manual" && type !== "tree.presentation.reset") fail$2("manual scope is only for resetting all manual styles.");
+  if (scope === "tree" && type === "tree.presentation.reset") fail$2("use manual scope to reset all manual styles; update colouring to reset its policy.");
   let ids;
   if (["node", "subtree"].includes(scope)) {
-    if (!Array.isArray(operation.ids) || !operation.ids.length) fail$1(`${scope} scope requires node IDs.`);
+    if (!Array.isArray(operation.ids) || !operation.ids.length) fail$2(`${scope} scope requires node IDs.`);
     ids = [...new Set(operation.ids)];
     const nodes = treeMetrics(tree).nodes;
     for (const uid of ids) {
-      if (!nodes.has(uid)) fail$1(`unknown tree node '${uid}'.`);
-      if (scope === "subtree" && !nodes.get(uid).children) fail$1(`subtree '${uid}' is not internal.`);
+      if (!nodes.has(uid)) fail$2(`unknown tree node '${uid}'.`);
+      if (scope === "subtree" && !nodes.get(uid).children) fail$2(`subtree '${uid}' is not internal.`);
     }
-  } else if (operation.ids !== undefined) fail$1(`${scope} scope does not accept ids.`);
+  } else if (operation.ids !== undefined) fail$2(`${scope} scope does not accept ids.`);
   const result = { type, scope, ...(ids ? { ids } : {}) };
   if (type === "tree.presentation.update") {
-    if (!object(operation.changes) || !Object.keys(operation.changes).length) fail$1("tree presentation updates require changes.");
+    if (!object(operation.changes) || !Object.keys(operation.changes).length) fail$2("tree presentation updates require changes.");
     const allowed = scope === "tree" ? ["colouring"] : scope === "subtree" ? ["branch", "collapsed"] : ["branch", "label"];
-    if (Object.keys(operation.changes).some((key) => !allowed.includes(key))) fail$1("unsupported tree presentation update field.");
+    if (Object.keys(operation.changes).some((key) => !allowed.includes(key))) fail$2("unsupported tree presentation update field.");
     const fields = { branch: ["colour", "width"], label: ["text", "colour", "fontSize", "fontWeight", "fontStyle"], colouring: ["mode", "cutHeight", "palette", "showCutLine"] };
     for (const [key, value] of Object.entries(operation.changes)) {
       if (value === null) continue;
       if (key === "collapsed") {
-        if (typeof value !== "boolean") fail$1("collapsed must be boolean.");
+        if (typeof value !== "boolean") fail$2("collapsed must be boolean.");
         continue;
       }
       if (!object(value) || Object.keys(value).some((field) => !fields[key].includes(field))) {
-        fail$1(`unsupported ${key} fields in tree presentation update.`);
+        fail$2(`unsupported ${key} fields in tree presentation update.`);
       }
     }
     result.changes = structuredClone(operation.changes);
@@ -10479,6 +10373,112 @@ function validateTreeOperationBatch(tree, operations, config, clusters) {
   }
 }
 
+const styleFields = new Set(["show", "title", "columns", "scale", "cellWidth", "cellHeight", "gap",
+  "groups", "markerWidth", "laneGap", "titleFontSize", "columnFontSize", "labelFontSize", "missingColour", "headingRotation", "showColumnLabels", "showKey",
+  "cellGap", "cellBorderWidth", "cellBorderColour", "width", "colour", "showYAxisLine", "showXGridLines", "tickStep"]);
+const fields = new Set([...styleFields, "values"]);
+const fail$1 = (message) => { throw new TypeError(`Invalid annotation operation: ${message}`); };
+
+const isAnnotationOperation = (operation) => typeof operation?.type === "string" && operation.type.startsWith("annotationPanels.");
+
+function normalizeAnnotationOperation(data, operation) {
+  const known = new Set((data.annotationPanels || []).map((panel) => panel.uid));
+  if (operation.type === "annotationPanels.create") {
+    if (!operation.panel || typeof operation.panel.uid !== "string" || !operation.panel.uid.trim() || known.has(operation.panel.uid)) fail$1("create requires a new, non-empty panel uid.");
+    const index = operation.index ?? known.size;
+    if (!Number.isInteger(index) || index < 0 || index > known.size) fail$1("index must be a valid panel insertion position.");
+    return { type: operation.type, panel: structuredClone(operation.panel), index };
+  }
+  if (operation.type === "annotationPanels.reorder") {
+    if (!Array.isArray(operation.ids) || operation.ids.length !== known.size || new Set(operation.ids).size !== known.size ||
+        operation.ids.some((uid) => !known.has(uid))) fail$1("reorder must contain every panel uid exactly once.");
+    return { type: operation.type, ids: [...operation.ids] };
+  }
+  if (operation.type === "annotationPanels.delete") {
+    if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$1("delete requires existing panel IDs.");
+    return { type: operation.type, ids: [...new Set(operation.ids)] };
+  }
+  if (operation.type === "annotationPanels.updateRows") {
+    const panel = data.annotationPanels?.find((panel) => panel.uid === operation.uid);
+    if (!panel || panel.type === "groups" || !operation.values || typeof operation.values !== "object" ||
+        Array.isArray(operation.values) || !Object.keys(operation.values).length ||
+        Object.values(operation.values).some((row) => row !== null && !Array.isArray(row))) fail$1("updateRows requires a matrix panel and row arrays (or null to remove a row).");
+    const clusterIds = new Set(data.clusters.map((cluster) => cluster.uid));
+    if (Object.keys(operation.values).some((uid) => !clusterIds.has(uid))) fail$1("updateRows requires existing cluster IDs.");
+    return { type: operation.type, uid: operation.uid, values: structuredClone(operation.values) };
+  }
+  if (operation.type === "annotationPanels.replaceStyle") {
+    if (!known.has(operation.uid) || !operation.style || typeof operation.style !== "object" ||
+        Array.isArray(operation.style) || Object.keys(operation.style).some((key) => !styleFields.has(key))) fail$1("replaceStyle requires an existing panel and supported style fields.");
+    return { type: operation.type, uid: operation.uid, style: structuredClone(operation.style) };
+  }
+  if (operation.type !== "annotationPanels.update") fail$1(`unsupported type '${operation.type}'.`);
+  if (!Array.isArray(operation.ids) || !operation.ids.length || operation.ids.some((uid) => !known.has(uid))) fail$1("ids must reference existing panels.");
+  const changes = operation.changes;
+  if (!changes || typeof changes !== "object" || Array.isArray(changes) || !Object.keys(changes).length ||
+      Object.keys(changes).some((key) => !fields.has(key))) fail$1("changes contains unsupported fields.");
+  return { type: operation.type, ids: [...new Set(operation.ids)], changes: structuredClone(changes) };
+}
+
+function applyAnnotationOperation(data, operation) {
+  const panels = data.annotationPanels || [];
+  if (operation.type === "annotationPanels.create") {
+    data.annotationPanels = [...panels];
+    data.annotationPanels.splice(operation.index, 0, structuredClone(operation.panel));
+    return;
+  }
+  if (operation.type === "annotationPanels.delete") {
+    data.annotationPanels = panels.filter((panel) => !operation.ids.includes(panel.uid));
+    return;
+  }
+  if (operation.type === "annotationPanels.reorder") {
+    const byId = new Map(panels.map((panel) => [panel.uid, panel]));
+    data.annotationPanels = operation.ids.map((uid) => byId.get(uid));
+    return;
+  }
+  if (operation.type === "annotationPanels.updateRows") {
+    data.annotationPanels = panels.map((panel) => {
+      if (panel.uid !== operation.uid) return panel;
+      const values = { ...panel.values, ...structuredClone(operation.values) };
+      for (const [uid, row] of Object.entries(operation.values)) if (row === null) delete values[uid];
+      return { ...panel, values };
+    });
+    return;
+  }
+  data.annotationPanels = panels.map((panel) => operation.type === "annotationPanels.replaceStyle"
+    ? panel.uid === operation.uid ? {
+      ...Object.fromEntries(Object.entries(panel).filter(([key]) => !styleFields.has(key))),
+      ...structuredClone(operation.style),
+    } : panel
+    : operation.ids.includes(panel.uid) ? { ...panel, ...structuredClone(operation.changes) } : panel);
+}
+
+function inverseAnnotationOperation(data, operation) {
+  if (operation.type === "annotationPanels.create") return [{ type: "annotationPanels.delete", ids: [operation.panel.uid] }];
+  if (operation.type === "annotationPanels.reorder") return [{ type: operation.type, ids: (data.annotationPanels || []).map((panel) => panel.uid) }];
+  if (operation.type === "annotationPanels.delete") return data.annotationPanels.flatMap((panel, index) =>
+    operation.ids.includes(panel.uid) ? [{ type: "annotationPanels.create", panel: structuredClone(panel), index }] : []);
+  if (operation.type === "annotationPanels.updateRows") {
+    const panel = data.annotationPanels.find((panel) => panel.uid === operation.uid);
+    return [{ type: operation.type, uid: panel.uid, values: structuredClone(Object.fromEntries(
+      Object.keys(operation.values).map((uid) => [uid, Object.hasOwn(panel.values, uid) ? panel.values[uid] : null]))) }];
+  }
+  const ids = operation.type === "annotationPanels.replaceStyle" ? [operation.uid] : operation.ids;
+  return data.annotationPanels.filter((panel) => ids.includes(panel.uid))
+    .flatMap((panel) => [
+      { type: "annotationPanels.replaceStyle", uid: panel.uid,
+        style: structuredClone(Object.fromEntries(Object.entries(panel).filter(([key]) => styleFields.has(key)))) },
+      ...(operation.type === "annotationPanels.update" && Object.hasOwn(operation.changes, "values")
+        ? [{ type: "annotationPanels.update", ids: [panel.uid], changes: { values: structuredClone(panel.values) } }] : []),
+    ]);
+}
+
+// The operation normalizer has already built this private candidate array.
+function validateAnnotationChanges(data, panels) {
+  if (panels === data.annotationPanels) return;
+  validateAnnotationPanels(panels, data.clusters, { previousPanels: data.annotationPanels, tree: data.tree });
+}
+
 // Public editing operations deliberately distinguish presentation updates from
 // structural group edits. Group membership is exclusive: assigning a gene to
 // one group removes it from every other group.
@@ -10494,19 +10494,21 @@ const structuralGroupTypes = new Set(["groups.create", "groups.delete", "groups.
 // Group edits only replace the group lookup; gene/link structure edits also
 // invalidate the biological indexes and automatic grouping.
 function operationEffects(operations) {
-  let reindex = false, rebuildState = false;
-  for (const operation of operations) {
-    const { type } = operation;
+  let reindex = false, rebuildState = false, captureState = false;
+  const presentationOnly = Array.isArray(operations) && operations.every((operation) =>
+    isAnnotationOperation(operation) || isTreePresentationOperation(operation));
+  for (const operation of Array.isArray(operations) ? operations : []) {
+    const type = operation?.type;
     if (isTreeTopologyOperation(operation)) rebuildState = true;
     if (type === "genes.delete" || type === "genes.restore") {
-      reindex = "data"; rebuildState = true;
+      reindex = "data"; rebuildState = true; captureState = true;
     } else if (type === "links.delete" || type === "links.restore") {
       reindex = "data";
     } else if (!reindex && structuralGroupTypes.has(type)) {
       reindex = "groups";
     }
   }
-  return { reindex, rebuildState };
+  return { presentationOnly, refilterLinks: !presentationOnly, reindex, rebuildState, captureState };
 }
 
 function operationError(message) {
@@ -10921,7 +10923,10 @@ function applyChartOperations(data, index, operations, treeConfig = {}) {
   // Link-derived grouping is useful for an untouched chart, but a deliberate
   // membership edit makes the user's group assignments authoritative.
   if (hasStructuralGroupEdit) data.config = { ...(data.config || {}), updateGroups: false };
-  return { data, operations: applied, inverse, effects: operationEffects(applied) };
+  return { data, operations: applied, inverse, effects: operationEffects(applied),
+    indexPrepared: data.links instanceof CompactLinkStore &&
+      applied.some((op) => op.type === "links.delete" || op.type === "links.restore") &&
+      !applied.some((op) => op.type === "genes.delete" || op.type === "genes.restore") };
 }
 
 /** Rollup embeds these files; unbundled browser modules load them by URL. */
@@ -17070,6 +17075,17 @@ function chartStateFromSnapshot(data, snapshot) {
   return restored;
 }
 
+// A presentation-only change can patch the retained source scene. Geometry
+// changes may reuse its link filter when their impact explicitly permits it.
+// Unknown changes must request refiltering rather than claiming reuse.
+function sceneCommitForImpact(sourceScene, impact) {
+  if (!sourceScene) return null;
+  if (impact.presentationOnly) return { sourceScene, changes: {
+    presentationOnly: true, ...(impact.clusterLabels ? { clusterLabels: true } : {}),
+  } };
+  return impact.refilterLinks === false ? { changes: { reuseLinkFilter: true } } : null;
+}
+
 let nextChartInstance = 0;
 const projectFormat = "clinker-project";
 const compactFigureFormat = "clustermap-compact-figure";
@@ -17589,37 +17605,31 @@ function clusterMap() {
 
   function applyPatch(operations, { record = true, automaticGroups, notify = true, state = null } = {}) {
     const sourceScene = runtime.getScene();
-    const presentationOnly = Array.isArray(operations) && operations.every((op) => isAnnotationOperation(op) || isTreePresentationOperation(op));
+    const impact = operationEffects(operations);
     sceneCommit = null;
     // Source edits may mutate currentData in place. Identity alone cannot
     // invalidate the cached biological defaults, including on undo/redo.
-    if (!presentationOnly) stateSnapshots.reset();
+    if (!impact.presentationOnly) stateSnapshots.reset();
     const groupsAutomaticBefore = groupsAreAutomatic();
-    const undoState = record && Array.isArray(operations) && operations.some((op) => ["genes.delete", "genes.restore"].includes(op?.type))
+    const undoState = record && impact.captureState
       ? stateSnapshots.serialize(chartState, currentData) : null;
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
-    if (!presentationOnly || automaticGroups !== undefined) runtime.invalidateLinkFilter();
+    if (result.effects.refilterLinks || automaticGroups !== undefined) runtime.invalidateLinkFilter();
     plotDataDirty = true;
     const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
     if (restoringAutomatic) {
       currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
     }
     const groupsAutomaticAfter = groupsAreAutomatic();
-    if (!presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
+    if (!result.effects.presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
       refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
-      // Compact link deletion/restoration already rebuilds the shared index
-      // while applying the batch. A gene edit also changes that index.
-      indexPrepared: currentData.links instanceof CompactLinkStore &&
-        result.operations.some((op) => op.type === "links.delete" || op.type === "links.restore") &&
-        !result.operations.some((op) => op.type === "genes.delete" || op.type === "genes.restore"),
+      indexPrepared: result.indexPrepared,
     });
     if (state) {
       chartState = chartStateFromSnapshot(currentData, state);
       runtime.setChartState(chartState);
     }
-    if (sourceScene && !restoringAutomatic && presentationOnly) {
-      sceneCommit = { sourceScene, changes: { presentationOnly: true } };
-    }
+    if (!restoringAutomatic) sceneCommit = sceneCommitForImpact(sourceScene, result.effects);
     return commitEdit(() => ({ change: record ? {
       kind: "patch",
       undo: result.inverse,
@@ -17672,9 +17682,7 @@ function clusterMap() {
     runtime.configure(options, currentData?.tree);
     const effects = configurationEffects(previousEffective, runtime.config);
     cancelTreePresentationPreview();
-    sceneCommit = sourceScene && effects.presentationOnly ? { sourceScene, changes: {
-      presentationOnly: true, clusterLabels: effects.clusterLabels,
-    } } : sourceScene && !effects.refilterLinks ? { changes: { reuseLinkFilter: true } } : null;
+    sceneCommit = sceneCommitForImpact(sourceScene, effects);
     return commitEdit(() => ({
       change: before ? { kind: "config", undo: before, redo: clonePlainValue(options) } : null,
       event: { type: "config.change", config: runtime.config },

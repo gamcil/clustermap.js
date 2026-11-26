@@ -175,7 +175,7 @@ test("chart operations update selected genes and groups atomically", async () =>
   assert.equal(chartData.clusters[0].loci[0].name, "Neighbourhood");
   assert.equal(chartData.clusters[0].label, "Reference genome");
   assert.deepEqual(result.operations.map(({ type }) => type), ["genes.update", "groups.update", "loci.update", "clusters.update"]);
-  assert.deepEqual(result.effects, { reindex: false, rebuildState: false });
+  assert.deepEqual(result.effects, { presentationOnly: false, refilterLinks: true, reindex: false, rebuildState: false, captureState: false });
 });
 
 test("chart operations reject an invalid batch without partial changes", async () => {
@@ -250,7 +250,7 @@ test("groups can be created without assigning genes", async () => {
     label: "Empty group",
     genes: [],
   });
-  assert.deepEqual(result.effects, { reindex: "groups", rebuildState: false });
+  assert.deepEqual(result.effects, { presentationOnly: false, refilterLinks: true, reindex: "groups", rebuildState: false, captureState: false });
 });
 
 test("groups can be reordered without changing their membership", async () => {
@@ -271,7 +271,7 @@ test("groups can be reordered without changing their membership", async () => {
     ["group-1", ["gene-1"]],
   ]);
   assert.deepEqual(result.operations, [{ type: "groups.reorder", ids: ["group-2", "group-1"] }]);
-  assert.deepEqual(result.effects, { reindex: false, rebuildState: false });
+  assert.deepEqual(result.effects, { presentationOnly: false, refilterLinks: true, reindex: false, rebuildState: false, captureState: false });
   assert.equal(chartData.config.updateGroups, false);
   assert.throws(() => applyChartOperations(chartData, createChartIndex(chartData), [{
     type: "groups.reorder",
@@ -300,7 +300,7 @@ test("deleting a gene preserves its link records", async () => {
   }]);
 
   assert.deepEqual(chartData.clusters[0].loci[0].genes.map((gene) => gene.uid), ["gene-2"]);
-  assert.deepEqual(result.effects, { reindex: "data", rebuildState: true });
+  assert.deepEqual(result.effects, { presentationOnly: false, refilterLinks: true, reindex: "data", rebuildState: true, captureState: true });
   assert.equal(chartData.links.length, 1, "the relationship remains in editable data");
   const index = createChartIndex(chartData);
   assert.deepEqual(filterLinks(chartData.links, {
@@ -345,7 +345,7 @@ test("link operations change or remove relationships without touching genes", as
     ids: ["link-1"],
   }]);
   assert.deepEqual(chartData.links, []);
-  assert.deepEqual(deleted.effects, { reindex: "data", rebuildState: false });
+  assert.deepEqual(deleted.effects, { presentationOnly: false, refilterLinks: true, reindex: "data", rebuildState: false, captureState: false });
   assert.equal(chartData.clusters[0].loci[0].genes.length, 2);
 });
 

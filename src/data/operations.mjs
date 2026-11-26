@@ -1,6 +1,6 @@
 import { CompactLinkStore } from "./linkStore.mjs";
 import { createChartIndex } from "./index.mjs";
-import { isTreeOperation, isTreeTopologyOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../tree/operations.mjs";
+import { isTreeOperation, isTreePresentationOperation, isTreeTopologyOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../tree/operations.mjs";
 import { isAnnotationOperation, normalizeAnnotationOperation, applyAnnotationOperation,
   inverseAnnotationOperation, validateAnnotationChanges } from "../annotations/operations.mjs";
 import { isPlainObject, isRecordId } from "../utils/values.mjs";
@@ -20,20 +20,22 @@ const structuralGroupTypes = new Set(["groups.create", "groups.delete", "groups.
 
 // Group edits only replace the group lookup; gene/link structure edits also
 // invalidate the biological indexes and automatic grouping.
-function operationEffects(operations) {
-  let reindex = false, rebuildState = false;
-  for (const operation of operations) {
-    const { type } = operation;
+export function operationEffects(operations) {
+  let reindex = false, rebuildState = false, captureState = false;
+  const presentationOnly = Array.isArray(operations) && operations.every((operation) =>
+    isAnnotationOperation(operation) || isTreePresentationOperation(operation));
+  for (const operation of Array.isArray(operations) ? operations : []) {
+    const type = operation?.type;
     if (isTreeTopologyOperation(operation)) rebuildState = true;
     if (type === "genes.delete" || type === "genes.restore") {
-      reindex = "data"; rebuildState = true;
+      reindex = "data"; rebuildState = true; captureState = true;
     } else if (type === "links.delete" || type === "links.restore") {
       reindex = "data";
     } else if (!reindex && structuralGroupTypes.has(type)) {
       reindex = "groups";
     }
   }
-  return { reindex, rebuildState };
+  return { presentationOnly, refilterLinks: !presentationOnly, reindex, rebuildState, captureState };
 }
 
 function operationError(message) {
@@ -448,5 +450,8 @@ export function applyChartOperations(data, index, operations, treeConfig = {}) {
   // Link-derived grouping is useful for an untouched chart, but a deliberate
   // membership edit makes the user's group assignments authoritative.
   if (hasStructuralGroupEdit) data.config = { ...(data.config || {}), updateGroups: false };
-  return { data, operations: applied, inverse, effects: operationEffects(applied) };
+  return { data, operations: applied, inverse, effects: operationEffects(applied),
+    indexPrepared: data.links instanceof CompactLinkStore &&
+      applied.some((op) => op.type === "links.delete" || op.type === "links.restore") &&
+      !applied.some((op) => op.type === "genes.delete" || op.type === "genes.restore") };
 }
