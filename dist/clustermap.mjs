@@ -12158,9 +12158,8 @@ function renderCanvas({
 
   // Animation and locus previews move geometry away from indexed bounds.
   // Use all candidates then; cluster drags have a preview-aware query below.
-  const viewport = previousScene || fullScene
-    ? null
-    : canvasWorldViewport(canvas, camera, 20, dimensions);
+  const labelViewport = fullScene ? null : canvasWorldViewport(canvas, camera, 20, dimensions);
+  const viewport = previousScene ? null : labelViewport;
   const clusterPreview = preview?.type === "cluster-drag";
   const visible = !preview && viewport && displayScene.index
     ? sceneRecordsInViewport(displayScene, viewport, {
@@ -12245,14 +12244,15 @@ function renderCanvas({
     : [];
   // Labels can be visible even when their loci are outside the viewport.
   // Cull by their own vertical position, including live cluster drag offsets.
-  const labelClusters = show("clusterLabels")
+  const labelClusters = show("clusterLabels") &&
+    Math.max(config.cluster.nameFontSize, config.cluster.lociFontSize) * camera.k * pixelRatio >= 0.5
     ? recordsFor(displayScene.clusters, null, "clusters", { ignoreOmit: true })
     : [];
   const clusterLabel = clusterLabelLayout(config);
   for (const cluster of labelClusters) {
     const offsetY = clusterOffsetForPreview(preview, cluster.source.uid);
-    if (viewport && (cluster.y + offsetY + clusterLabel.top > viewport.maxY ||
-        cluster.y + offsetY + Math.max(clusterLabel.bottom, 12 + config.cluster.lociFontSize) < viewport.minY)) continue;
+    if (labelViewport && (cluster.y + offsetY + clusterLabel.top > labelViewport.maxY ||
+        cluster.y + offsetY + Math.max(clusterLabel.bottom, 12 + config.cluster.lociFontSize) < labelViewport.minY)) continue;
     drawClusterInfo(context, cluster, config, {
       selected: highlightClusterIds?.has(cluster.source.uid),
       x: clusterLabelOffsetForPreview(preview, cluster.source.uid),

@@ -599,7 +599,17 @@ test("Canvas culls offscreen cluster labels while preserving dragged and full-sc
   const visible = paint();
   assert.ok(visible.includes(first.source.name));
   assert.ok(!visible.includes(last.source.name));
+  assert.ok(!paint({ previousScene: scene, progress: 0.5 }).includes(last.source.name),
+    "animation does not paint offscreen labels");
+  const animatedSource = { ...scene, clusters: new Map(scene.clusters) };
+  animatedSource.clusters.set(last.source.uid, { ...last, y: 2 * first.y - last.y });
+  assert.ok(paint({ previousScene: animatedSource, progress: 0.5 }).includes(last.source.name),
+    "a label moving through the viewport remains visible");
   assert.ok(paint({ fullScene: true }).includes(last.source.name));
   assert.ok(paint({ preview: { type: "cluster-drag", clusterOffsets: new Map([[last.source.uid, first.y - last.y]]) } })
     .includes(last.source.name));
+  assert.equal(paint({ fullScene: true, camera: { x: 0, y: 0, k: 0.001 }, pixelRatio: 1 }).length, 0,
+    "subpixel labels are not drawn even for a full-scene overview");
+  assert.ok(paint({ fullScene: true, camera: { x: 0, y: 0, k: 0.1 }, pixelRatio: 1 }).length > 0,
+    "readable labels remain available at larger scales");
 });
