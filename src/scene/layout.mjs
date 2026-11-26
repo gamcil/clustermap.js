@@ -6,6 +6,8 @@ import {
 } from "../genes/layout.mjs";
 import {
   clusterPairKey,
+  endpointGeneId,
+  endpointLocus,
   projectLinkEndpoint,
   orderLinkAnchors,
   getLinkLabelPosition,
@@ -522,15 +524,16 @@ export function buildScene(
       genes, loci, areClustersAdjacent, scaleX, scaleGenes, link, linkVisible,
     });
     geometryLinks.set(source.uid, linkLayout);
-    if (!linkIndexes?.linksByGeneId) for (const uid of new Set([source.query.uid, source.target.uid])) {
+    if (!linkIndexes?.linksByGeneId) for (const uid of new Set([endpointGeneId(source.query), endpointGeneId(source.target)])) {
+      if (uid === undefined) continue;
       if (!linksByGene.has(uid)) linksByGene.set(uid, []);
       linksByGene.get(uid).push(source);
     }
     if (!linkIndexes?.linksByClusterPair) {
-      const query = genes.get(source.query.uid);
-      const target = genes.get(source.target.uid);
+      const query = endpointLocus(source.query, { genes, loci });
+      const target = endpointLocus(source.target, { genes, loci });
       if (query && target) {
-        const key = clusterPairKey(query.locus.cluster.uid, target.locus.cluster.uid);
+        const key = clusterPairKey(query.cluster.uid, target.cluster.uid);
         const pairLinks = linksByClusterPair.get(key) || [];
         pairLinks.push(source.uid);
         linksByClusterPair.set(key, pairLinks);
@@ -820,11 +823,11 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
   const changedLinks = new Map();
   for (const source of sources.values()) {
     const previous = scene.links.get(source.uid);
-    const query = genes.get(source.query.uid), target = genes.get(source.target.uid);
+    const query = endpointLocus(source.query, { genes, loci }), target = endpointLocus(source.target, { genes, loci });
     // A link without anchors stays unchanged when its rows are still not
     // adjacent; preview code computes its temporary anchors from the genes.
     if (previous && !previous.anchors && (!query || !target ||
-        !options.areClustersAdjacent(query.display.clusterUid, target.display.clusterUid))) continue;
+        !options.areClustersAdjacent(query.cluster.uid, target.cluster.uid))) continue;
     if (previous) changedLinks.set(source.uid, createLinkLayout(source, previous.order, {
       ...options, genes, loci,
     }));

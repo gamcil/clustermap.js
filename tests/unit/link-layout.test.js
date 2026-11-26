@@ -24,6 +24,16 @@ test("link anchors retain endpoint orientation when ordered by row", async () =>
   assert.deepEqual(getLinkLabelPosition(anchors, 0.5), { x: 30, y: 27 });
 });
 
+test("span endpoint interpolation follows the same end across a row swap", async () => {
+  const { interpolateLinkAnchors } = await import("../../src/links/layout.mjs");
+  const source = { query: { kind: "span", locusId: "a", start: 0, end: 10 },
+    target: { kind: "span", locusId: "b", start: 0, end: 10 } };
+  const previous = { loci: new Map([["a", { y: 0 }], ["b", { y: 20 }]]), genes: new Map() };
+  const next = { loci: new Map([["a", { y: 20 }], ["b", { y: 0 }]]), genes: new Map() };
+  assert.deepEqual(interpolateLinkAnchors(previous, { source, anchors: [1, 2, 0, 7, 8, 20] },
+    next, { source, anchors: [7, 8, 0, 1, 2, 20] }, 0.5), [1, 2, 10, 7, 8, 10]);
+});
+
 test("link layout produces paths for ribbons and lines", async () => {
   const { getLinkPath, sampleLinkGeometry, traceLinkPath } = await import("../../src/links/layout.mjs");
   const anchors = [10, 20, 5, 30, 40, 25];

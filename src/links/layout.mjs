@@ -6,6 +6,10 @@ export function endpointGeneId(endpoint) {
   return endpoint.kind === "span" ? undefined : endpoint.geneId ?? endpoint.uid;
 }
 
+export function endpointLocus(endpoint, { genes, loci }) {
+  return endpoint.kind === "span" ? loci?.get(endpoint.locusId) : genes.get(endpointGeneId(endpoint))?.locus;
+}
+
 /** Project a biological endpoint into the displayed locus coordinate system. */
 export function projectLinkEndpoint(endpoint, { genes, loci, scaleX, scaleGenes = true }) {
   if (endpoint.kind !== "span") {
@@ -42,8 +46,7 @@ export function interpolateLinkOpacity(previous, next, amount, enabled = true) {
 export function interpolateLinkAnchors(previousScene, previous, nextScene, next, amount) {
   const inQueryOrder = (scene, link) => {
     if (!link?.anchors) return null;
-    const query = scene?.genes.get(link.source.query.uid);
-    const queryY = query?.locus?.y;
+    const queryY = scene && endpointLocus(link.source.query, scene)?.y;
     if (!Number.isFinite(queryY)) return link.anchors;
     const anchors = link.anchors;
     const queryFirst = Math.abs(anchors[2] - queryY) <= Math.abs(anchors[5] - queryY);
