@@ -650,12 +650,19 @@ function projectSceneAnnotations(definitions, clusters, bounds, chrome, options,
 }
 
 /** Tree and annotation edits retain biological geometry and spatial indexes. */
-export function patchPresentationScene(scene, definitions, options) {
+export function patchPresentationScene(scene, definitions, options, { refreshClusterLabels = false } = {}) {
+  let clusters = scene.clusters;
+  if (refreshClusterLabels) {
+    clusters = new Map(scene.clusters);
+    for (const [uid, info] of clusterInfos(clusters, scene.bounds, options)) {
+      clusters.set(uid, { ...clusters.get(uid), info });
+    }
+  }
   const chrome = repositionChrome(scene.chrome, scene.bounds, scene.bounds);
-  return { ...scene, chrome,
-    ...projectSceneAnnotations(definitions, scene.clusters, scene.bounds, chrome,
+  return { ...scene, clusters, chrome,
+    ...projectSceneAnnotations(definitions, clusters, scene.bounds, chrome,
       { ...options, rowOffset: options.shape.tipHeight + options.shape.bodyHeight / 2 }, scene),
-    changes: { presentationOnly: true } };
+    changes: { presentationOnly: true, clusterLabels: refreshClusterLabels } };
 }
 
 function placeLegendAfterAnnotations(chrome, panels, annotationBounds, measureText) {
@@ -789,17 +796,9 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
 
   const sources = new Map();
   const nextOrder = options.clusterOrder;
-  const translationOnly = scene.clusterOrder && nextOrder && scene.linksByClusterPair &&
-    [...changedLoci].every((uid) => {
-      const before = scene.loci.get(uid), after = loci.get(uid);
-      return before && after && before.localX === after.localX &&
-        before.state.start === after.state.start && before.state.end === after.state.end &&
-        before.state.flipped === after.state.flipped;
-    });
-  if (translationOnly) {
-    // Cluster translations are applied to retained GPU records through their
-    // row slots. Only old or new adjacent pairs need committed scene geometry;
-    // all other pairs remain available through the persistent pair index.
+  if (scene.clusterOrder && nextOrder && scene.linksByClusterPair) {
+    // Only old or new adjacent pairs need committed scene geometry. GPU
+    // updates collect their own nonadjacent incident links for later previews.
     const pairs = new Set();
     for (const order of [scene.clusterOrder, nextOrder]) {
       const positions = new Map(order.map((uid, i) => [uid, i]));
@@ -816,7 +815,7 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
       if (source) sources.set(uid, source);
     }
   } else {
-    // Local locus edits also update nonadjacent GPU records for later previews.
+    // Compact external scenes may not supply a pair index or row order.
     for (const uid of changedGenes) {
       for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
     }

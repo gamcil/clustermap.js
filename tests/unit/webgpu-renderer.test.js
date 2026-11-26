@@ -89,10 +89,10 @@ test("WebGPU excludes filtered links but retains allowed nonadjacent links for p
       { uid: "hidden", query: { uid: "g-a" }, target: { uid: "g-b" }, identity: 0.9, hidden: true },
       { uid: "low", query: { uid: "g-a" }, target: { uid: "g-b" }, identity: 0.1 }],
     groups: [{ uid: "group", genes: ["g-a", "g-b", "g-c"] }], config: { updateGroups: false } });
-  const runtime = createChartRuntime();
-  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
+  const runtime = createChartRuntime(), state = createChartState(data);
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   runtime.configure({ link: { threshold: 0.3, bestOnly: false } });
-  const scene = runtime.updateScene(data);
+  let scene = runtime.updateScene(data);
   assert.equal(scene.links.get("allowed").allowed, true);
   assert.equal(scene.links.get("allowed").visible, false);
   assert.equal(scene.links.get("hidden").allowed, false);
@@ -101,6 +101,15 @@ test("WebGPU excludes filtered links but retains allowed nonadjacent links for p
     camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 });
   assert.equal(getBindings().find((entry) => entry.binding === 2).resource.buffer.size, 64,
     "only the allowed nonadjacent link occupies a GPU record");
+  const buffer = getBindings().find((entry) => entry.binding === 2).resource.buffer;
+  const beforeX = new Float32Array(buffer.data.buffer)[0];
+  const previous = scene;
+  setLocusOffset(state, "l-a", 25);
+  scene = runtime.updateScene(data, { sourceScene: previous, changes: { loci: ["l-a"] } });
+  assert.equal(scene.changes.links.has("allowed"), false, "nonadjacent links do not need scene geometry");
+  assert.equal(renderer.adoptScene(scene, previous, { scales: runtime.scales, config: runtime.renderConfig }), true);
+  assert.notEqual(new Float32Array(buffer.data.buffer)[0], beforeX,
+    "the retained GPU record follows a local edit before a later row preview");
   draws.length = 0;
   const preview = createClusterDragPreview(scene, { clusterUid: "c", position: scene.clusters.get("b").y,
     order: ["a", "c", "b"], rows: runtime.scales.y.range() });
@@ -157,6 +166,12 @@ test("tree presentation edits do not allocate or upload biological GPU geometry"
   writes.length = 0;
   render();
   assert.equal(buffers.length, count);
+  assert.equal(writes.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX).length, 0);
+  runtime.configure({ cluster: { labelAlignment: "left" } });
+  scene = runtime.updateScene(data, { sourceScene: scene, changes: { presentationOnly: true, clusterLabels: true } });
+  writes.length = 0;
+  render();
+  assert.equal(buffers.length, count, "label alignment retains GPU geometry buffers");
   assert.equal(writes.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX).length, 0);
 });
 

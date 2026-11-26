@@ -5,146 +5,190 @@ import { TREE_COLOURING_DEFAULTS, validateTreeColouring } from "../tree/model.mj
 
 import { clonePlainValue, isPlainObject } from "../utils/values.mjs";
 
-const defaultConfig = {
+// Each leaf declares the earliest stage affected by changes to that setting.
+const field = (value, effect) => ({ value, effect });
+const configSchema = {
   // Optional row-aligned metadata panels. Synteny remains the default view.
-  annotations: { enabled: false },
+  annotations: { enabled: field(false, "geometry") },
   tree: {
-    show: true,
-    colouring: TREE_COLOURING_DEFAULTS,
-    width: 100,
-    useBranchLengths: true,
-    node: { show: true },
-    rootStem: { show: false },
-    branch: { width: 1.5, colour: null },
-    support: { show: true, fontSize: 9, precision: 1 },
-    scaleBar: { show: true, label: "" },
-    leafGuide: { show: false, colour: null, width: 1, dash: "4 3" },
+    show: field(true, "presentation"),
+    colouring: {
+      mode: field(TREE_COLOURING_DEFAULTS.mode, "presentation"),
+      cutHeight: field(TREE_COLOURING_DEFAULTS.cutHeight, "presentation"),
+      palette: field(TREE_COLOURING_DEFAULTS.palette, "presentation"),
+      showCutLine: field(TREE_COLOURING_DEFAULTS.showCutLine, "presentation"),
+    },
+    width: field(100, "presentation"),
+    useBranchLengths: field(true, "presentation"),
+    node: { show: field(true, "presentation") },
+    rootStem: { show: field(false, "presentation") },
+    branch: { width: field(1.5, "presentation"), colour: field(null, "presentation") },
+    support: { show: field(true, "presentation"), fontSize: field(9, "presentation"), precision: field(1, "presentation") },
+    scaleBar: { show: field(true, "presentation"), label: field("", "presentation") },
+    leafGuide: { show: field(false, "presentation"), colour: field(null, "presentation"), width: field(1, "presentation"), dash: field("4 3", "presentation") },
   },
   plot: {
     // Figure appearance is stable across interface and system themes.
-    background: "#ffffff",
-    showFigureFrame: true,
-    transitionDuration: 250,
-    renderer: "svg",
+    background: field("#ffffff", "geometry"),
+    showFigureFrame: field(true, "geometry"),
+    transitionDuration: field(250, "geometry"),
+    renderer: field("svg", "geometry"),
     // Canvas may reduce resolution during motion and at small zoom scales.
     // Disable for fixed-resolution output or renderer comparisons.
-    adaptiveResolution: true,
-    minZoom: 0,
-    maxZoom: 8,
+    adaptiveResolution: field(true, "geometry"),
+    minZoom: field(0, "geometry"),
+    maxZoom: field(8, "geometry"),
     minimap: {
-      show: false,
-      width: 220,
-      height: 160,
-      margin: 12,
-      showLinks: false,
+      show: field(false, "geometry"),
+      width: field(220, "geometry"),
+      height: field(160, "geometry"),
+      margin: field(12, "geometry"),
+      showLinks: field(false, "geometry"),
     },
-    scaleFactor: 15,
-    scaleGenes: true,
+    scaleFactor: field(15, "geometry"),
+    scaleGenes: field(true, "geometry"),
     fontFamily:
-      'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif',
+      field('system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif', "geometry"),
   },
   legend: {
-    symbol: "circle",
-    symbolScale: 1,
-    symbolBorderWidth: 0,
-    symbolBorderColour: null,
-    columns: 1,
-    columnWidth: 160,
-    entryHeight: 18,
-    fontSize: 14,
-    subtitleFontSize: 10,
-    onClickSymbol: null,
-    onClickText: null,
+    symbol: field("circle", "geometry"),
+    symbolScale: field(1, "geometry"),
+    symbolBorderWidth: field(0, "geometry"),
+    symbolBorderColour: field(null, "geometry"),
+    columns: field(1, "geometry"),
+    columnWidth: field(160, "geometry"),
+    entryHeight: field(18, "geometry"),
+    fontSize: field(14, "geometry"),
+    subtitleFontSize: field(10, "geometry"),
+    onClickSymbol: field(null, "geometry"),
+    onClickText: field(null, "geometry"),
     // Optional hook exposed as a deliberate action in the group context menu.
     // Consumers can use it to reveal a group in an adjacent inspector.
-    onReveal: null,
+    onReveal: field(null, "geometry"),
     // "right" keeps the historical layout. "bottom" places the legend
     // below the chart's content bounds, aligned with its left edge.
-    position: "right",
-    show: true,
-    marginLeft: 20,
-    marginTop: 20,
+    position: field("right", "geometry"),
+    show: field(true, "geometry"),
+    marginLeft: field(20, "geometry"),
+    marginTop: field(20, "geometry"),
   },
   colourBar: {
-    fontSize: 10,
-    height: 12,
-    show: true,
-    width: 150,
-    marginTop: 20,
+    fontSize: field(10, "geometry"),
+    height: field(12, "geometry"),
+    show: field(true, "geometry"),
+    width: field(150, "geometry"),
+    marginTop: field(20, "geometry"),
     // Bounds describe the colour mapping only; link.threshold remains the
     // separate visibility filter. "data" resolves against all link records.
     domain: {
-      min: 0,
-      max: 1,
-      minMode: "fixed",
-      maxMode: "fixed",
+      min: field(0, "geometry"),
+      max: field(1, "geometry"),
+      minMode: field("fixed", "geometry"),
+      maxMode: field("fixed", "geometry"),
     },
   },
   scaleBar: {
-    colour: null,
-    fontSize: 10,
-    height: 12,
-    basePair: 2500,
-    show: true,
-    stroke: 1,
-    marginTop: 20,
+    colour: field(null, "geometry"),
+    fontSize: field(10, "geometry"),
+    height: field(12, "geometry"),
+    basePair: field(2500, "geometry"),
+    show: field(true, "geometry"),
+    stroke: field(1, "geometry"),
+    marginTop: field(20, "geometry"),
   },
   link: {
-    show: true,
-    asLine: false,
-    straight: false,
-    threshold: 0,
-    strokeWidth: 0.5,
-    groupColour: false,
-    bestOnly: false,
+    show: field(true, "geometry"),
+    asLine: field(false, "geometry"),
+    straight: field(false, "geometry"),
+    threshold: field(0, "linkFilter"),
+    strokeWidth: field(0.5, "geometry"),
+    groupColour: field(false, "geometry"),
+    bestOnly: field(false, "linkFilter"),
     label: {
-      show: false,
-      fontSize: 10,
-      background: true,
-      position: 0.5,
+      show: field(false, "geometry"),
+      fontSize: field(10, "geometry"),
+      background: field(true, "geometry"),
+      position: field(0.5, "geometry"),
     },
   },
   cluster: {
-    nameFontSize: 12,
-    lociFontSize: 10,
-    hideLocusLabels: false,
-    hideLocusCoordinates: false,
-    spacing: 40,
-    alignLabels: true,
-    labelAlignment: "right",
+    nameFontSize: field(12, "geometry"),
+    lociFontSize: field(10, "geometry"),
+    hideLocusLabels: field(false, "geometry"),
+    hideLocusCoordinates: field(false, "geometry"),
+    spacing: field(40, "geometry"),
+    alignLabels: field(true, "clusterLabels"),
+    labelAlignment: field("right", "clusterLabels"),
   },
   locus: {
-    trimIndicators: TRIM_INDICATOR_DEFAULTS,
-    trackBar: {
-      colour: null,
-      stroke: 1,
+    trimIndicators: {
+      show: field(TRIM_INDICATOR_DEFAULTS.show, "geometry"),
+      fontSize: field(TRIM_INDICATOR_DEFAULTS.fontSize, "geometry"),
+      fontWeight: field(TRIM_INDICATOR_DEFAULTS.fontWeight, "geometry"),
+      borderWidth: field(TRIM_INDICATOR_DEFAULTS.borderWidth, "geometry"),
+      borderOpacity: field(TRIM_INDICATOR_DEFAULTS.borderOpacity, "geometry"),
     },
-    spacing: 50,
+    trackBar: {
+      colour: field(null, "geometry"),
+      stroke: field(1, "geometry"),
+    },
+    spacing: field(50, "geometry"),
   },
   gene: {
     shape: {
-      bodyHeight: 12,
-      tipHeight: 5,
-      tipLength: 12,
-      onClick: null,
+      bodyHeight: field(12, "geometry"),
+      tipHeight: field(5, "geometry"),
+      tipLength: field(12, "geometry"),
+      onClick: field(null, "geometry"),
       // Optional hook exposed as a deliberate action in the gene context menu.
       // It intentionally does not replace the normal click-to-anchor behaviour.
-      onReveal: null,
-      stroke: null,
-      strokeWidth: 1,
+      onReveal: field(null, "geometry"),
+      stroke: field(null, "geometry"),
+      strokeWidth: field(1, "geometry"),
     },
     label: {
-      anchor: "start",
-      fontSize: 10,
-      rotation: 25,
-      position: "top",
-      spacing: 2,
-      show: false,
-      start: 0.5,
-      name: "uid",
+      anchor: field("start", "geometry"),
+      fontSize: field(10, "geometry"),
+      rotation: field(25, "geometry"),
+      position: field("top", "geometry"),
+      spacing: field(2, "geometry"),
+      show: field(false, "geometry"),
+      start: field(0.5, "geometry"),
+      name: field("uid", "geometry"),
     },
   },
 };
+
+function schemaDefaults(schema) {
+  return Object.fromEntries(Object.entries(schema).map(([key, entry]) => [key,
+    Object.hasOwn(entry, "effect") ? clonePlainValue(entry.value) : schemaDefaults(entry),
+  ]));
+}
+const defaultConfig = schemaDefaults(configSchema);
+
+/** Compare settings using the effects declared alongside their defaults. */
+export function configurationEffects(before, after) {
+  let presentationOnly = true, clusterLabels = false, refilterLinks = false;
+  const visit = (left, right, schema) => {
+    if (Object.is(left, right)) return;
+    if (schema && !Object.hasOwn(schema, "effect") && isPlainObject(left) && isPlainObject(right)) {
+      for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+        visit(left[key], right[key], schema[key]);
+      }
+      return;
+    }
+    if (Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+        left.every((value, index) => Object.is(value, right[index]))) return;
+    switch (schema?.effect) {
+      case "presentation": break;
+      case "clusterLabels": clusterLabels = true; break;
+      case "geometry": presentationOnly = false; break;
+      default: presentationOnly = false; refilterLinks = true; break;
+    }
+  };
+  visit(before, after, configSchema);
+  return { presentationOnly, clusterLabels, refilterLinks };
+}
 
 /** Return independent, recursively cloned defaults for one chart instance. */
 export function createDefaultConfig() {

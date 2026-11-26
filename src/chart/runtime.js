@@ -82,6 +82,11 @@ let chartIndex = null;
 let chartState = null;
 let currentScene = null;
 let allowedLinkIds = null;
+let allowedLinks = null, allowedIndex = null;
+let linkFilterRevision = 0, allowedFilterRevision = -1;
+let allowedThreshold = null, allowedBestOnly = null;
+
+function invalidateLinkFilter() { linkFilterRevision++; }
 let textMetricsRevision = 0;
 
 // IDs are part of the SVG surface, so they must be unique when several maps
@@ -100,6 +105,7 @@ const ids = {
 };
 
 function setChartIndex(index) {
+  if (chartIndex !== index) invalidateLinkFilter();
   chartIndex = index;
 }
 
@@ -263,7 +269,8 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
     }
   }
   if (sourceScene && changes.presentationOnly) {
-    currentScene = patchPresentationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
+    currentScene = patchPresentationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }),
+      { refreshClusterLabels: Boolean(changes.clusterLabels) });
     return currentScene;
   }
   updateScales(data, { geometryOnly: Boolean(sourceScene) });
@@ -271,14 +278,23 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
   geneScaleMode = config.plot.scaleGenes;
   if (!sourceScene) {
     updateGroups(data.groups);
-    const filteredLinks = filterLinks(data.links, {
-      groupForGene: scales.group,
-      geneForUid: lookup.geneData,
-      bestOnly: config.link.bestOnly,
-      threshold: config.link.threshold,
-    });
-    allowedLinkIds = new Set();
-    for (const link of filteredLinks) allowedLinkIds.add(link.uid);
+    if (!changes.reuseLinkFilter || !allowedLinkIds || allowedLinks !== data.links || allowedIndex !== chartIndex ||
+        allowedFilterRevision !== linkFilterRevision || allowedThreshold !== config.link.threshold ||
+        allowedBestOnly !== config.link.bestOnly) {
+      const filteredLinks = filterLinks(data.links, {
+        groupForGene: scales.group,
+        geneForUid: lookup.geneData,
+        bestOnly: config.link.bestOnly,
+        threshold: config.link.threshold,
+      });
+      allowedLinkIds = new Set();
+      for (const link of filteredLinks) allowedLinkIds.add(link.uid);
+      allowedLinks = data.links;
+      allowedIndex = chartIndex;
+      allowedFilterRevision = linkFilterRevision;
+      allowedThreshold = config.link.threshold;
+      allowedBestOnly = config.link.bestOnly;
+    }
   }
   const options = {
     ...sceneProjectionOptions({ tree: data.tree, clusterOrder: clusterOrderForData(data) }),
@@ -409,6 +425,9 @@ function updateScales(data, { geometryOnly = false } = {}) {
 
 function reset() {
   chartIndex = chartState = currentScene = allowedLinkIds = renderedConfig = null;
+  allowedLinks = allowedIndex = null;
+  invalidateLinkFilter();
+  allowedFilterRevision = -1;
   geneScaleMode = config.plot.scaleGenes;
   for (const scale of [scales.y, scales.group, scales.colour, scales.name, scales.offset, scales.locus]) {
     scale.domain([]).range([]);
@@ -420,6 +439,7 @@ function reset() {
 return {
   reset,
   invalidateTextMetrics() { textMetricsRevision++; },
+  invalidateLinkFilter,
   config,
   get renderConfig() { return renderConfig(); },
   configure,

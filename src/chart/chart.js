@@ -73,6 +73,7 @@ import {
   isWebGpuRenderer,
 } from "../renderers/mode.mjs";
 import { chartStateFromSnapshot, createChartStateSerializer } from "./snapshot.mjs";
+import { configurationEffects } from "./config.js";
 import { clonePlainValue, isPlainObject } from "../utils/values.mjs";
 
 let nextChartInstance = 0;
@@ -593,6 +594,7 @@ export default function clusterMap() {
     const undoState = record && Array.isArray(operations) && operations.some((op) => ["genes.delete", "genes.restore"].includes(op?.type))
       ? stateSnapshots.serialize(chartState, currentData) : null;
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
+    if (!presentationOnly || automaticGroups !== undefined) runtime.invalidateLinkFilter();
     plotDataDirty = true;
     const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
     if (restoringAutomatic) {
@@ -651,10 +653,15 @@ export default function clusterMap() {
       runtime.validateConfiguration(options, currentData?.tree);
       finishLocusFlip();
     }
+    const sourceScene = runtime.getScene();
+    const previousEffective = { ...runtime.config };
     const before = record && currentData ? previousConfigPatch(runtime.config, options) : null;
     runtime.configure(options, currentData?.tree);
+    const effects = configurationEffects(previousEffective, runtime.config);
     cancelTreePresentationPreview();
-    sceneCommit = null;
+    sceneCommit = sourceScene && effects.presentationOnly ? { sourceScene, changes: {
+      presentationOnly: true, clusterLabels: effects.clusterLabels,
+    } } : sourceScene && !effects.refilterLinks ? { changes: { reuseLinkFilter: true } } : null;
     return commitEdit(() => ({
       change: before ? { kind: "config", undo: before, redo: clonePlainValue(options) } : null,
       event: { type: "config.change", config: runtime.config },

@@ -389,9 +389,9 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | Method | Behaviour |
 | --- | --- |
 | `config(options)` / `config()` | Validate and merge settings, then redraw / read an independent settings snapshot. |
-| `data(data)` / `data()` | Replace data / read normalized data. Replacement clears history. |
+| `data(data)` / `data()` | Replace data / read a live, read-only view of normalized data. Replacement clears history. |
 | `tree(tree)` / `tree()` | Replace or remove (`null`) the tree without replacing biological data. Replacement validates tree-linked annotations, adopts the tree leaf order, and clears history; removal retains the current row order. The getter returns a copy. |
-| `visibleData()` | Read the filtered data currently included in the plot. |
+| `visibleData()` | Read a live, read-only view of the filtered data currently included in the plot. |
 | `rendererStatus()` | Read requested and active renderer, initialization/fallback state and fallback reason; returns `null` before mounting. WebGPU changes emit a `renderer.change` event. |
 | `remove({clusters, loci})` | Remove cluster/locus IDs and their contents from the plot, preserving source data. Undoable; removing a cluster's last locus also removes that cluster. |
 | `state(snapshot)` / `state()` | Restore / read JSON-safe layout and camera state. |
@@ -454,6 +454,11 @@ Transient UI highlights can supply an ownership token:
 `chart.highlight(ids, { owner })`. Clearing with the same token only clears
 that owner's highlight; ordinary calls remain authoritative. The editor uses
 this to avoid clearing highlights subsequently set by the host app.
+
+Treat the objects returned by `data()` and `visibleData()` as read-only. Direct
+mutation is unsupported: it bypasses validation, history, and cache invalidation.
+Use `chart.patch(...)` for supported edits or `chart.data(replacement)` to
+replace the data.
 
 Configuration updates reject unknown paths, invalid types, unsupported enum
 values and out-of-range numbers. An invalid update leaves the live chart

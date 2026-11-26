@@ -46,6 +46,7 @@ export function renderSvg({
     highlightGeneIds, highlightLocusIds, highlightClusterIds });
   previewStates.delete(plot.node());
   const renderPresentation = () => {
+    if (scene.changes?.clusterLabels) updateClusters(plot.selectAll("g.cluster"), scene, { highlightClusterIds });
     renderChrome({ plot, chrome: scene.chrome, ids, interactions });
     renderSvgAnnotations(plot, scene, { transition, animate, viewport: annotationViewport });
     renderTree(plot, data.tree, scene, config, interactions, transition, animate, {

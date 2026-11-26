@@ -1231,12 +1231,16 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         if (gene.visible && !geometry.ranges.genes.has(gene.source.uid)) return false;
       }
     }
+    const incidentIds = new Set();
+    if (nextScene.linksByGene) {
+      for (const uid of affectedGenes) for (const source of nextScene.linksByGene.get(uid) || []) incidentIds.add(source.uid);
+    } else if (affectedGenes.size) {
+      for (const uid of nextScene.changes.links) incidentIds.add(uid);
+    }
     const incidentLinks = [];
-    for (const uid of affectedGenes.size ? nextScene.changes.links : []) {
+    for (const uid of incidentIds) {
       const link = nextScene.links.get(uid);
-      if (link && (affectedGenes.has(link.source.query.uid) || affectedGenes.has(link.source.target.uid))) {
-        incidentLinks.push(link);
-      }
+      if (link && (affectedGenes.has(link.source.query.uid) || affectedGenes.has(link.source.target.uid))) incidentLinks.push(link);
     }
     for (const link of incidentLinks) {
       if (!link.visible) continue;
@@ -1326,7 +1330,8 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         configured = true;
       }
       if (scene !== nextScene && nextScene.genes === scene?.genes && nextScene.links === scene?.links &&
-          nextScene.loci === scene?.loci && nextScene.clusters === scene?.clusters) {
+          nextScene.loci === scene?.loci &&
+          (nextScene.clusters === scene?.clusters || nextScene.changes?.clusterLabels)) {
         // Presentation edits retain biological geometry and GPU buffers.
         scene = nextScene;
       }

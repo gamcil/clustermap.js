@@ -1,6 +1,61 @@
 import { test, expect } from "@playwright/test";
 
 for (const renderer of ["svg", "canvas"]) {
+  test(`label alignment and tree guides reuse link data with ${renderer}`, async ({ page }) => {
+    await page.goto(`http://127.0.0.1:8080/demo/?fixture=burnettii&test=1&renderer=${renderer}`);
+    await page.waitForFunction(() => Boolean(window.__demoChart));
+    const result = await page.evaluate((renderer) => {
+      const chart = window.__demoChart, links = chart.data().links;
+      const iterator = links[Symbol.iterator]; let iterations = 0;
+      links[Symbol.iterator] = function () { iterations++; return iterator.call(this); };
+      chart.clearHistory();
+      chart.config({ cluster: { alignLabels: true, labelAlignment: "left" } });
+      const anchor = renderer === "svg" ? document.querySelector("g.clusterInfo text.clusterText").getAttribute("text-anchor") : null;
+      chart.config({ tree: { leafGuide: { show: true } } });
+      const shown = chart.config().tree.leafGuide.show;
+      const guides = renderer === "svg" ? document.querySelectorAll("line.tree-leaf-guide").length : null;
+      chart.undo(); const undone = chart.config().tree.leafGuide.show;
+      chart.redo(); const redone = chart.config().tree.leafGuide.show;
+      const canUndo = chart.canUndo();
+      chart.config({ tree: { width: chart.config().tree.width + 10 } });
+      chart.config({ cluster: { spacing: chart.config().cluster.spacing + 10 } });
+      const beforeFilterChange = iterations;
+      chart.config({ link: { threshold: 0.95 } });
+      const afterFilterChange = iterations;
+      delete links[Symbol.iterator];
+      return { beforeFilterChange, afterFilterChange, anchor, shown, guides, undone, redone, canUndo };
+    }, renderer);
+    expect(result.beforeFilterChange).toBe(0);
+    expect(result.afterFilterChange).toBeGreaterThan(0);
+    if (renderer === "svg") { expect(result.anchor).toBe("start"); expect(result.guides).toBeGreaterThan(0); }
+    expect(result.shown).toBe(true);
+    expect(result.undone).toBe(false);
+    expect(result.redone).toBe(true);
+    expect(result.canUndo).toBe(true);
+  });
+}
+
+test("link edits invalidate filtering before later geometry-only configuration changes", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/demo/?test=1");
+  await page.waitForFunction(() => Boolean(window.__demoChart));
+  const result = await page.evaluate(() => {
+    const chart = window.__demoChart;
+    chart.config({ link: { threshold: 0, bestOnly: false }, plot: { transitionDuration: 0 } });
+    const uid = chart.data().links.find((link) => !link.hidden).uid;
+    const rendered = () => [...document.querySelectorAll("g.geneLinkG")].some((node) => d3.select(node).datum().uid === uid);
+    const before = rendered();
+    chart.clearHistory();
+    chart.patch([{ type: "links.update", ids: [uid], changes: { hidden: true } }]);
+    const hidden = rendered();
+    chart.config({ cluster: { spacing: chart.config().cluster.spacing + 10 } });
+    const afterGeometry = rendered();
+    chart.undo(); chart.undo();
+    return { before, hidden, afterGeometry, restored: rendered() };
+  });
+  expect(result).toEqual({ before: true, hidden: false, afterGeometry: false, restored: true });
+});
+
+for (const renderer of ["svg", "canvas"]) {
   test(`tree replacement updates figure bounds before fitting with ${renderer}`, async ({ page }) => {
     await page.goto(`http://127.0.0.1:8080/demo/?fixture=burnettii&test=1&renderer=${renderer}`);
     await page.waitForFunction(() => Boolean(window.__demoChart));

@@ -97,7 +97,7 @@ test("lazy link visibility is retained by the scene that created it", async () =
 
 test("row translations and reorder patches match a full scene rebuild", async () => {
   const [{ createChartRuntime }, { normalizeChartData }, { createChartIndex },
-    { createChartState, setClusterOffset }] = await Promise.all([
+    { createChartState, setClusterOffset, setLocusOffset }] = await Promise.all([
     import("../../src/chart/runtime.js"), import("../../src/data/normalize.mjs"),
     import("../../src/data/index.mjs"), import("../../src/chart/state.mjs"),
   ]);
@@ -127,6 +127,13 @@ test("row translations and reorder patches match a full scene rebuild", async ()
   scene = patched;
   state.clusterOrder = ["e", "b", "a", "d", "c"];
   patched = runtime.updateScene(data, { sourceScene: scene, changes: {} });
+  compare(patched, runtime.updateScene(data));
+  scene = patched;
+  setLocusOffset(state, "l-b", 15);
+  const byGene = scene.linksByGene, get = byGene.get;
+  byGene.get = () => { throw new Error("locus scene patches must use adjacent pair indexes"); };
+  patched = runtime.updateScene(data, { sourceScene: scene, changes: { loci: ["l-b"] } });
+  byGene.get = get;
   compare(patched, runtime.updateScene(data));
 });
 
@@ -223,4 +230,25 @@ test("runtime accepts initial locus offsets in sequence-coordinate units", async
   setLocusOffset(state, "aligned", 42);
   runtime.updateScales(data);
   assert.equal(runtime.scales.locus("aligned"), 42);
+});
+
+
+test("presentation configuration scene matches a full rebuild", async () => {
+  const [{ createChartRuntime }, { normalizeChartData }, { createChartIndex }, { createChartState }] = await Promise.all([
+    import("../../src/chart/runtime.js"), import("../../src/data/normalize.mjs"),
+    import("../../src/data/index.mjs"), import("../../src/chart/state.mjs"),
+  ]);
+  const data = normalizeChartData({ clusters: ["a", "b"].map((uid) => ({ uid, name: uid,
+    loci: [{ uid: `l-${uid}`, start: 0, end: 100, genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
+    links: [{ uid: "ab", query: { uid: "g-a" }, target: { uid: "g-b" }, identity: 0.9 }],
+    groups: [{ uid: "group", genes: ["g-a", "g-b"] }], config: { updateGroups: false } });
+  const runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
+  const initial = runtime.updateScene(data);
+  runtime.configure({ cluster: { labelAlignment: "left" }, tree: { leafGuide: { show: true } } });
+  const patched = runtime.updateScene(data, { sourceScene: initial, changes: { presentationOnly: true, clusterLabels: true } });
+  const rebuilt = runtime.updateScene(data);
+  assert.deepEqual([...patched.clusters], [...rebuilt.clusters]);
+  assert.deepEqual([...patched.links], [...rebuilt.links]);
+  assert.deepEqual(patched.annotations, rebuilt.annotations);
 });

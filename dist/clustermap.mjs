@@ -4884,12 +4884,19 @@ function projectSceneAnnotations(definitions, clusters, bounds, chrome, options,
 }
 
 /** Tree and annotation edits retain biological geometry and spatial indexes. */
-function patchPresentationScene(scene, definitions, options) {
+function patchPresentationScene(scene, definitions, options, { refreshClusterLabels = false } = {}) {
+  let clusters = scene.clusters;
+  if (refreshClusterLabels) {
+    clusters = new Map(scene.clusters);
+    for (const [uid, info] of clusterInfos(clusters, scene.bounds, options)) {
+      clusters.set(uid, { ...clusters.get(uid), info });
+    }
+  }
   const chrome = repositionChrome(scene.chrome, scene.bounds, scene.bounds);
-  return { ...scene, chrome,
-    ...projectSceneAnnotations(definitions, scene.clusters, scene.bounds, chrome,
+  return { ...scene, clusters, chrome,
+    ...projectSceneAnnotations(definitions, clusters, scene.bounds, chrome,
       { ...options, rowOffset: options.shape.tipHeight + options.shape.bodyHeight / 2 }, scene),
-    changes: { presentationOnly: true } };
+    changes: { presentationOnly: true, clusterLabels: refreshClusterLabels } };
 }
 
 function placeLegendAfterAnnotations(chrome, panels, annotationBounds, measureText) {
@@ -5023,17 +5030,9 @@ function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = 
 
   const sources = new Map();
   const nextOrder = options.clusterOrder;
-  const translationOnly = scene.clusterOrder && nextOrder && scene.linksByClusterPair &&
-    [...changedLoci].every((uid) => {
-      const before = scene.loci.get(uid), after = loci.get(uid);
-      return before && after && before.localX === after.localX &&
-        before.state.start === after.state.start && before.state.end === after.state.end &&
-        before.state.flipped === after.state.flipped;
-    });
-  if (translationOnly) {
-    // Cluster translations are applied to retained GPU records through their
-    // row slots. Only old or new adjacent pairs need committed scene geometry;
-    // all other pairs remain available through the persistent pair index.
+  if (scene.clusterOrder && nextOrder && scene.linksByClusterPair) {
+    // Only old or new adjacent pairs need committed scene geometry. GPU
+    // updates collect their own nonadjacent incident links for later previews.
     const pairs = new Set();
     for (const order of [scene.clusterOrder, nextOrder]) {
       const positions = new Map(order.map((uid, i) => [uid, i]));
@@ -5050,7 +5049,7 @@ function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = 
       if (source) sources.set(uid, source);
     }
   } else {
-    // Local locus edits also update nonadjacent GPU records for later previews.
+    // Compact external scenes may not supply a pair index or row order.
     for (const uid of changedGenes) {
       for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
     }
@@ -12090,6 +12089,7 @@ function renderSvg({
     highlightGeneIds, highlightLocusIds, highlightClusterIds });
   previewStates.delete(plot.node());
   const renderPresentation = () => {
+    if (scene.changes?.clusterLabels) updateClusters(plot.selectAll("g.cluster"), scene, { highlightClusterIds });
     renderChrome({ plot, chrome: scene.chrome, ids, interactions });
     renderSvgAnnotations(plot, scene, { transition, animate, viewport: annotationViewport });
     renderSvgTree(plot, data.tree, scene, config, interactions, transition, animate, {
@@ -13499,146 +13499,190 @@ function isRasterRenderer(renderer) {
   return isCanvasRenderer(renderer) || isWebGpuRenderer(renderer);
 }
 
-const defaultConfig = {
+// Each leaf declares the earliest stage affected by changes to that setting.
+const field = (value, effect) => ({ value, effect });
+const configSchema = {
   // Optional row-aligned metadata panels. Synteny remains the default view.
-  annotations: { enabled: false },
+  annotations: { enabled: field(false, "geometry") },
   tree: {
-    show: true,
-    colouring: TREE_COLOURING_DEFAULTS,
-    width: 100,
-    useBranchLengths: true,
-    node: { show: true },
-    rootStem: { show: false },
-    branch: { width: 1.5, colour: null },
-    support: { show: true, fontSize: 9, precision: 1 },
-    scaleBar: { show: true, label: "" },
-    leafGuide: { show: false, colour: null, width: 1, dash: "4 3" },
+    show: field(true, "presentation"),
+    colouring: {
+      mode: field(TREE_COLOURING_DEFAULTS.mode, "presentation"),
+      cutHeight: field(TREE_COLOURING_DEFAULTS.cutHeight, "presentation"),
+      palette: field(TREE_COLOURING_DEFAULTS.palette, "presentation"),
+      showCutLine: field(TREE_COLOURING_DEFAULTS.showCutLine, "presentation"),
+    },
+    width: field(100, "presentation"),
+    useBranchLengths: field(true, "presentation"),
+    node: { show: field(true, "presentation") },
+    rootStem: { show: field(false, "presentation") },
+    branch: { width: field(1.5, "presentation"), colour: field(null, "presentation") },
+    support: { show: field(true, "presentation"), fontSize: field(9, "presentation"), precision: field(1, "presentation") },
+    scaleBar: { show: field(true, "presentation"), label: field("", "presentation") },
+    leafGuide: { show: field(false, "presentation"), colour: field(null, "presentation"), width: field(1, "presentation"), dash: field("4 3", "presentation") },
   },
   plot: {
     // Figure appearance is stable across interface and system themes.
-    background: "#ffffff",
-    showFigureFrame: true,
-    transitionDuration: 250,
-    renderer: "svg",
+    background: field("#ffffff", "geometry"),
+    showFigureFrame: field(true, "geometry"),
+    transitionDuration: field(250, "geometry"),
+    renderer: field("svg", "geometry"),
     // Canvas may reduce resolution during motion and at small zoom scales.
     // Disable for fixed-resolution output or renderer comparisons.
-    adaptiveResolution: true,
-    minZoom: 0,
-    maxZoom: 8,
+    adaptiveResolution: field(true, "geometry"),
+    minZoom: field(0, "geometry"),
+    maxZoom: field(8, "geometry"),
     minimap: {
-      show: false,
-      width: 220,
-      height: 160,
-      margin: 12,
-      showLinks: false,
+      show: field(false, "geometry"),
+      width: field(220, "geometry"),
+      height: field(160, "geometry"),
+      margin: field(12, "geometry"),
+      showLinks: field(false, "geometry"),
     },
-    scaleFactor: 15,
-    scaleGenes: true,
+    scaleFactor: field(15, "geometry"),
+    scaleGenes: field(true, "geometry"),
     fontFamily:
-      'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif',
+      field('system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", Oxygen, Cantarell, sans-serif', "geometry"),
   },
   legend: {
-    symbol: "circle",
-    symbolScale: 1,
-    symbolBorderWidth: 0,
-    symbolBorderColour: null,
-    columns: 1,
-    columnWidth: 160,
-    entryHeight: 18,
-    fontSize: 14,
-    subtitleFontSize: 10,
-    onClickSymbol: null,
-    onClickText: null,
+    symbol: field("circle", "geometry"),
+    symbolScale: field(1, "geometry"),
+    symbolBorderWidth: field(0, "geometry"),
+    symbolBorderColour: field(null, "geometry"),
+    columns: field(1, "geometry"),
+    columnWidth: field(160, "geometry"),
+    entryHeight: field(18, "geometry"),
+    fontSize: field(14, "geometry"),
+    subtitleFontSize: field(10, "geometry"),
+    onClickSymbol: field(null, "geometry"),
+    onClickText: field(null, "geometry"),
     // Optional hook exposed as a deliberate action in the group context menu.
     // Consumers can use it to reveal a group in an adjacent inspector.
-    onReveal: null,
+    onReveal: field(null, "geometry"),
     // "right" keeps the historical layout. "bottom" places the legend
     // below the chart's content bounds, aligned with its left edge.
-    position: "right",
-    show: true,
-    marginLeft: 20,
-    marginTop: 20,
+    position: field("right", "geometry"),
+    show: field(true, "geometry"),
+    marginLeft: field(20, "geometry"),
+    marginTop: field(20, "geometry"),
   },
   colourBar: {
-    fontSize: 10,
-    height: 12,
-    show: true,
-    width: 150,
-    marginTop: 20,
+    fontSize: field(10, "geometry"),
+    height: field(12, "geometry"),
+    show: field(true, "geometry"),
+    width: field(150, "geometry"),
+    marginTop: field(20, "geometry"),
     // Bounds describe the colour mapping only; link.threshold remains the
     // separate visibility filter. "data" resolves against all link records.
     domain: {
-      min: 0,
-      max: 1,
-      minMode: "fixed",
-      maxMode: "fixed",
+      min: field(0, "geometry"),
+      max: field(1, "geometry"),
+      minMode: field("fixed", "geometry"),
+      maxMode: field("fixed", "geometry"),
     },
   },
   scaleBar: {
-    colour: null,
-    fontSize: 10,
-    height: 12,
-    basePair: 2500,
-    show: true,
-    stroke: 1,
-    marginTop: 20,
+    colour: field(null, "geometry"),
+    fontSize: field(10, "geometry"),
+    height: field(12, "geometry"),
+    basePair: field(2500, "geometry"),
+    show: field(true, "geometry"),
+    stroke: field(1, "geometry"),
+    marginTop: field(20, "geometry"),
   },
   link: {
-    show: true,
-    asLine: false,
-    straight: false,
-    threshold: 0,
-    strokeWidth: 0.5,
-    groupColour: false,
-    bestOnly: false,
+    show: field(true, "geometry"),
+    asLine: field(false, "geometry"),
+    straight: field(false, "geometry"),
+    threshold: field(0, "linkFilter"),
+    strokeWidth: field(0.5, "geometry"),
+    groupColour: field(false, "geometry"),
+    bestOnly: field(false, "linkFilter"),
     label: {
-      show: false,
-      fontSize: 10,
-      background: true,
-      position: 0.5,
+      show: field(false, "geometry"),
+      fontSize: field(10, "geometry"),
+      background: field(true, "geometry"),
+      position: field(0.5, "geometry"),
     },
   },
   cluster: {
-    nameFontSize: 12,
-    lociFontSize: 10,
-    hideLocusLabels: false,
-    hideLocusCoordinates: false,
-    spacing: 40,
-    alignLabels: true,
-    labelAlignment: "right",
+    nameFontSize: field(12, "geometry"),
+    lociFontSize: field(10, "geometry"),
+    hideLocusLabels: field(false, "geometry"),
+    hideLocusCoordinates: field(false, "geometry"),
+    spacing: field(40, "geometry"),
+    alignLabels: field(true, "clusterLabels"),
+    labelAlignment: field("right", "clusterLabels"),
   },
   locus: {
-    trimIndicators: TRIM_INDICATOR_DEFAULTS,
-    trackBar: {
-      colour: null,
-      stroke: 1,
+    trimIndicators: {
+      show: field(TRIM_INDICATOR_DEFAULTS.show, "geometry"),
+      fontSize: field(TRIM_INDICATOR_DEFAULTS.fontSize, "geometry"),
+      fontWeight: field(TRIM_INDICATOR_DEFAULTS.fontWeight, "geometry"),
+      borderWidth: field(TRIM_INDICATOR_DEFAULTS.borderWidth, "geometry"),
+      borderOpacity: field(TRIM_INDICATOR_DEFAULTS.borderOpacity, "geometry"),
     },
-    spacing: 50,
+    trackBar: {
+      colour: field(null, "geometry"),
+      stroke: field(1, "geometry"),
+    },
+    spacing: field(50, "geometry"),
   },
   gene: {
     shape: {
-      bodyHeight: 12,
-      tipHeight: 5,
-      tipLength: 12,
-      onClick: null,
+      bodyHeight: field(12, "geometry"),
+      tipHeight: field(5, "geometry"),
+      tipLength: field(12, "geometry"),
+      onClick: field(null, "geometry"),
       // Optional hook exposed as a deliberate action in the gene context menu.
       // It intentionally does not replace the normal click-to-anchor behaviour.
-      onReveal: null,
-      stroke: null,
-      strokeWidth: 1,
+      onReveal: field(null, "geometry"),
+      stroke: field(null, "geometry"),
+      strokeWidth: field(1, "geometry"),
     },
     label: {
-      anchor: "start",
-      fontSize: 10,
-      rotation: 25,
-      position: "top",
-      spacing: 2,
-      show: false,
-      start: 0.5,
-      name: "uid",
+      anchor: field("start", "geometry"),
+      fontSize: field(10, "geometry"),
+      rotation: field(25, "geometry"),
+      position: field("top", "geometry"),
+      spacing: field(2, "geometry"),
+      show: field(false, "geometry"),
+      start: field(0.5, "geometry"),
+      name: field("uid", "geometry"),
     },
   },
 };
+
+function schemaDefaults(schema) {
+  return Object.fromEntries(Object.entries(schema).map(([key, entry]) => [key,
+    Object.hasOwn(entry, "effect") ? clonePlainValue(entry.value) : schemaDefaults(entry),
+  ]));
+}
+const defaultConfig = schemaDefaults(configSchema);
+
+/** Compare settings using the effects declared alongside their defaults. */
+function configurationEffects(before, after) {
+  let presentationOnly = true, clusterLabels = false, refilterLinks = false;
+  const visit = (left, right, schema) => {
+    if (Object.is(left, right)) return;
+    if (schema && !Object.hasOwn(schema, "effect") && isPlainObject(left) && isPlainObject(right)) {
+      for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+        visit(left[key], right[key], schema[key]);
+      }
+      return;
+    }
+    if (Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+        left.every((value, index) => Object.is(value, right[index]))) return;
+    switch (schema?.effect) {
+      case "presentation": break;
+      case "clusterLabels": clusterLabels = true; break;
+      case "geometry": presentationOnly = false; break;
+      default: presentationOnly = false; refilterLinks = true; break;
+    }
+  };
+  visit(before, after, configSchema);
+  return { presentationOnly, clusterLabels, refilterLinks };
+}
 
 /** Return independent, recursively cloned defaults for one chart instance. */
 function createDefaultConfig() {
@@ -13772,6 +13816,11 @@ let chartIndex = null;
 let chartState = null;
 let currentScene = null;
 let allowedLinkIds = null;
+let allowedLinks = null, allowedIndex = null;
+let linkFilterRevision = 0, allowedFilterRevision = -1;
+let allowedThreshold = null, allowedBestOnly = null;
+
+function invalidateLinkFilter() { linkFilterRevision++; }
 let textMetricsRevision = 0;
 
 // IDs are part of the SVG surface, so they must be unique when several maps
@@ -13790,6 +13839,7 @@ const ids = {
 };
 
 function setChartIndex(index) {
+  if (chartIndex !== index) invalidateLinkFilter();
   chartIndex = index;
 }
 
@@ -13953,7 +14003,8 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
     }
   }
   if (sourceScene && changes.presentationOnly) {
-    currentScene = patchPresentationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }));
+    currentScene = patchPresentationScene(sourceScene, data.annotationPanels, sceneProjectionOptions({ tree: data.tree }),
+      { refreshClusterLabels: Boolean(changes.clusterLabels) });
     return currentScene;
   }
   updateScales(data, { geometryOnly: Boolean(sourceScene) });
@@ -13961,14 +14012,23 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
   geneScaleMode = config.plot.scaleGenes;
   if (!sourceScene) {
     updateGroups(data.groups);
-    const filteredLinks = filterLinks(data.links, {
-      groupForGene: scales.group,
-      geneForUid: lookup.geneData,
-      bestOnly: config.link.bestOnly,
-      threshold: config.link.threshold,
-    });
-    allowedLinkIds = new Set();
-    for (const link of filteredLinks) allowedLinkIds.add(link.uid);
+    if (!changes.reuseLinkFilter || !allowedLinkIds || allowedLinks !== data.links || allowedIndex !== chartIndex ||
+        allowedFilterRevision !== linkFilterRevision || allowedThreshold !== config.link.threshold ||
+        allowedBestOnly !== config.link.bestOnly) {
+      const filteredLinks = filterLinks(data.links, {
+        groupForGene: scales.group,
+        geneForUid: lookup.geneData,
+        bestOnly: config.link.bestOnly,
+        threshold: config.link.threshold,
+      });
+      allowedLinkIds = new Set();
+      for (const link of filteredLinks) allowedLinkIds.add(link.uid);
+      allowedLinks = data.links;
+      allowedIndex = chartIndex;
+      allowedFilterRevision = linkFilterRevision;
+      allowedThreshold = config.link.threshold;
+      allowedBestOnly = config.link.bestOnly;
+    }
   }
   const options = {
     ...sceneProjectionOptions({ tree: data.tree, clusterOrder: clusterOrderForData(data) }),
@@ -14099,6 +14159,9 @@ function updateScales(data, { geometryOnly = false } = {}) {
 
 function reset() {
   chartIndex = chartState = currentScene = allowedLinkIds = renderedConfig = null;
+  allowedLinks = allowedIndex = null;
+  invalidateLinkFilter();
+  allowedFilterRevision = -1;
   geneScaleMode = config.plot.scaleGenes;
   for (const scale of [scales.y, scales.group, scales.colour, scales.name, scales.offset, scales.locus]) {
     scale.domain([]).range([]);
@@ -14110,6 +14173,7 @@ function reset() {
 return {
   reset,
   invalidateTextMetrics() { textMetricsRevision++; },
+  invalidateLinkFilter,
   config,
   get renderConfig() { return renderConfig(); },
   configure,
@@ -15540,12 +15604,16 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         if (gene.visible && !geometry.ranges.genes.has(gene.source.uid)) return false;
       }
     }
+    const incidentIds = new Set();
+    if (nextScene.linksByGene) {
+      for (const uid of affectedGenes) for (const source of nextScene.linksByGene.get(uid) || []) incidentIds.add(source.uid);
+    } else if (affectedGenes.size) {
+      for (const uid of nextScene.changes.links) incidentIds.add(uid);
+    }
     const incidentLinks = [];
-    for (const uid of affectedGenes.size ? nextScene.changes.links : []) {
+    for (const uid of incidentIds) {
       const link = nextScene.links.get(uid);
-      if (link && (affectedGenes.has(link.source.query.uid) || affectedGenes.has(link.source.target.uid))) {
-        incidentLinks.push(link);
-      }
+      if (link && (affectedGenes.has(link.source.query.uid) || affectedGenes.has(link.source.target.uid))) incidentLinks.push(link);
     }
     for (const link of incidentLinks) {
       if (!link.visible) continue;
@@ -15635,7 +15703,8 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         configured = true;
       }
       if (scene !== nextScene && nextScene.genes === scene?.genes && nextScene.links === scene?.links &&
-          nextScene.loci === scene?.loci && nextScene.clusters === scene?.clusters) {
+          nextScene.loci === scene?.loci &&
+          (nextScene.clusters === scene?.clusters || nextScene.changes?.clusterLabels)) {
         // Presentation edits retain biological geometry and GPU buffers.
         scene = nextScene;
       }
@@ -16792,6 +16861,7 @@ function clusterMap() {
     const undoState = record && Array.isArray(operations) && operations.some((op) => ["genes.delete", "genes.restore"].includes(op?.type))
       ? stateSnapshots.serialize(chartState, currentData) : null;
     const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
+    if (!presentationOnly || automaticGroups !== undefined) runtime.invalidateLinkFilter();
     plotDataDirty = true;
     const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
     if (restoringAutomatic) {
@@ -16850,10 +16920,15 @@ function clusterMap() {
       runtime.validateConfiguration(options, currentData?.tree);
       finishLocusFlip();
     }
+    const sourceScene = runtime.getScene();
+    const previousEffective = { ...runtime.config };
     const before = record && currentData ? previousConfigPatch(runtime.config, options) : null;
     runtime.configure(options, currentData?.tree);
+    const effects = configurationEffects(previousEffective, runtime.config);
     cancelTreePresentationPreview();
-    sceneCommit = null;
+    sceneCommit = sourceScene && effects.presentationOnly ? { sourceScene, changes: {
+      presentationOnly: true, clusterLabels: effects.clusterLabels,
+    } } : sourceScene && !effects.refilterLinks ? { changes: { reuseLinkFilter: true } } : null;
     return commitEdit(() => ({
       change: before ? { kind: "config", undo: before, redo: clonePlainValue(options) } : null,
       event: { type: "config.change", config: runtime.config },
