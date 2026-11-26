@@ -154,3 +154,28 @@ test("filtering preserves input order, records and equal-identity ties", async (
   assert.deepEqual(filterLinks(links, { ...options, bestOnly: true }), links.slice(0, 2));
   assert.deepEqual(links, original);
 });
+
+test("compact link visibility matches filtering, including ties and missing endpoints", async () => {
+  const [{ filterLinks, createLinkVisibility }, { createChartIndex }] = await Promise.all([
+    import("../../src/links/groups.mjs"), import("../../src/data/index.mjs"),
+  ]);
+  const genes = [{ uid: "a" }, { uid: "b" }, { uid: "c" }];
+  const data = { clusters: [{ uid: "one", loci: [{ uid: "l1", genes: [genes[0]] }] },
+    { uid: "two", loci: [{ uid: "l2", genes: genes.slice(1) }] }], groups: [], links: [
+      link("a", "a", "b", 0.9), link("b", "a", "c", 0.9),
+      { ...link("hidden", "a", "b", 0.8), hidden: true },
+      link("low", "a", "b", 0.1), link("missing", "a", "missing", 0.9),
+    ] };
+  const index = createChartIndex(data);
+  for (const bestOnly of [false, true]) {
+    const options = { groupForGene: () => 0, geneForUid: (uid) => {
+      const gene = index.geneById.get(uid);
+      return gene ? { ...gene, clusterUid: uid === "a" ? "one" : "two" } : undefined;
+    }, bestOnly, threshold: 0.5 };
+    const expected = new Set(filterLinks(data.links, options).map((item) => item.uid));
+    const visibility = createLinkVisibility(data.links, options, index.linkById);
+    assert.equal(visibility.byteLength, 1);
+    for (const record of data.links) assert.equal(visibility.has(record.uid), expected.has(record.uid));
+    assert.equal(visibility.has("unknown"), false);
+  }
+});

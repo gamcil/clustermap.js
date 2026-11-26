@@ -8650,26 +8650,43 @@
     return { domain, range };
   }
 
+  function linkPassesFilter(link, { groupForGene, geneForUid, threshold }) {
+    return !link.hidden && Boolean(geneForUid(link.query.uid)) && Boolean(geneForUid(link.target.uid)) &&
+      !(link.identity < threshold) && groupForGene(link.query.uid) !== null && groupForGene(link.target.uid) !== null;
+  }
+
+  // Retain one bit per source record, rather than a Set of millions of IDs.
+  // The captured index makes old scenes independent of later data/index updates.
+  function createLinkVisibility(links, options, index) {
+    if (!index?.order) {
+      const allowed = new Set(filterLinks(links, options).map((link) => link.uid));
+      return { has: (uid) => allowed.has(uid) };
+    }
+    const bits = new Uint8Array(Math.ceil(index.size / 8));
+    const add = (link) => {
+      const position = index.order(link.uid);
+      if (position !== undefined) bits[position >>> 3] |= 1 << (position & 7);
+    };
+    if (options.bestOnly) {
+      for (const link of filterLinks(links, options)) add(link);
+    } else {
+      for (const link of links) if (linkPassesFilter(link, options)) add(link);
+    }
+    return { byteLength: bits.byteLength, has: (uid) => {
+      const position = index.order(uid);
+      return position !== undefined && Boolean(bits[position >>> 3] & (1 << (position & 7)));
+    } };
+  }
+
   function filterLinks(
     links,
     { groupForGene, geneForUid, bestOnly, threshold }
   ) {
     const passing = [];
+    const options = { groupForGene, geneForUid, threshold };
     for (const link of links) {
-      // Link records remain part of the editable data even if an endpoint is
-      // temporarily absent (for example after deleting a gene). A renderer
-      // must omit such a link rather than treating that data relationship as
-      // deleted or dereferencing a missing gene below.
-      const query = geneForUid(link.query.uid);
-      const target = geneForUid(link.target.uid);
-      if (
-        link.hidden ||
-        !query ||
-        !target ||
-        link.identity < threshold ||
-        groupForGene(link.query.uid) === null ||
-        groupForGene(link.target.uid) === null
-      ) continue;
+      // Dangling endpoints remain editable but cannot be drawn.
+      if (!linkPassesFilter(link, options)) continue;
       passing.push(link);
     }
     // Threshold decides visibility regardless of whether the optional
@@ -14078,14 +14095,12 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       if (!changes.reuseLinkFilter || !allowedLinkIds || allowedLinks !== data.links || allowedIndex !== chartIndex ||
           allowedFilterRevision !== linkFilterRevision || allowedThreshold !== config.link.threshold ||
           allowedBestOnly !== config.link.bestOnly) {
-        const filteredLinks = filterLinks(data.links, {
+        allowedLinkIds = createLinkVisibility(data.links, {
           groupForGene: scales.group,
           geneForUid: lookup.geneData,
           bestOnly: config.link.bestOnly,
           threshold: config.link.threshold,
-        });
-        allowedLinkIds = new Set();
-        for (const link of filteredLinks) allowedLinkIds.add(link.uid);
+        }, chartIndex?.linkById);
         allowedLinks = data.links;
         allowedIndex = chartIndex;
         allowedFilterRevision = linkFilterRevision;

@@ -4,7 +4,7 @@ import { scaleLinear, scaleOrdinal, scaleSequential } from "d3-scale";
 import { interpolateGreys, interpolateRainbow } from "d3-scale-chromatic";
 import { createDefaultConfig, mergeConfig } from "./config.js";
 import { validateTreePresentation } from "../tree/model.mjs";
-import { filterLinks, getGroupScaleValues } from "../links/groups.mjs";
+import { createLinkVisibility, getGroupScaleValues } from "../links/groups.mjs";
 import {
   anchorGeneGroup,
   getClusterOffset,
@@ -281,14 +281,12 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
     if (!changes.reuseLinkFilter || !allowedLinkIds || allowedLinks !== data.links || allowedIndex !== chartIndex ||
         allowedFilterRevision !== linkFilterRevision || allowedThreshold !== config.link.threshold ||
         allowedBestOnly !== config.link.bestOnly) {
-      const filteredLinks = filterLinks(data.links, {
+      allowedLinkIds = createLinkVisibility(data.links, {
         groupForGene: scales.group,
         geneForUid: lookup.geneData,
         bestOnly: config.link.bestOnly,
         threshold: config.link.threshold,
-      });
-      allowedLinkIds = new Set();
-      for (const link of filteredLinks) allowedLinkIds.add(link.uid);
+      }, chartIndex?.linkById);
       allowedLinks = data.links;
       allowedIndex = chartIndex;
       allowedFilterRevision = linkFilterRevision;
