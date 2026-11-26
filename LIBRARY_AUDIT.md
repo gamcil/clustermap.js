@@ -1,5 +1,55 @@
 # Clustermap library audit
 
+## Follow-up: simplicity review, 27 November 2026
+
+The original findings below describe the code as it stood at `fac7e59`. Since
+then, link and gene batch validation has been corrected, the unstranded flip
+case has a general-transition fallback, CI runs unit tests and checks the
+distribution, and configuration validation is declared in the base schema.
+The three project export forms now share committed snapshot construction.
+
+Some recent abstractions did not simplify ownership enough to justify their
+cost. The editor link-read adapter and extracted raster transition controller
+were removed; the latter had moved the existing transition code without
+unifying it with gesture previews or SVG. The chart model remains because it
+owns data, biological indexes, edits, snapshots and history. Its boundary is
+not complete: layout state and preview mutations still live in the chart,
+and the chart must coordinate changes with the rendering runtime.
+
+Compared with `fac7e59`, source has grown by a net 54 lines and tests by 190
+lines. The chart coordinator is 1,651 lines compared with 1,713 at the
+original audit, but its smaller size alone does not mean the system is simpler.
+Test and generated bundle changes should be considered separately from runtime
+source when evaluating a refactor.
+
+The largest remaining opportunities are:
+
+1. **Unify transition rules where possible.** Direct flips, batch flips,
+   general interpolation and SVG transitions still have separate eligibility
+   and cancellation paths. Reduce duplicated decisions while retaining the
+   measured Canvas and GPU fast paths. Do not add a controller that merely
+   passes their mutable state through.
+2. **Reduce representation-specific editing and indexing branches.** Array
+   links and compact links still diverge in operations, indexes and filtering.
+   Any common contract must handle their actual differences and avoid
+   expanding the compact table; a single-consumer wrapper is not enough.
+3. **Clarify the model/runtime boundary.** Committed edits and history now
+   have an owner, but state, cache invalidation, transient tree edits and
+   redraw decisions still cross between model, chart and runtime. Simplify
+   the actual lifecycle rather than adding layers of change notifications.
+4. **Review persistence contracts with their consumers.** Snapshot contents
+   are shared, but object, full Blob and compact Blob APIs still represent
+   different ownership and size trade-offs. Removing a format or API needs a
+   consumer review, not a compatibility assumption.
+
+The renderer-neutral scene, shared geometry and interaction code, and
+virtualized editor are useful reuse. Native SVG, Canvas and WebGPU drawing
+paths address different backends; combining them just to reduce file count
+would not necessarily simplify the library. Future changes should state which
+rules or states they remove, and demonstrate behavior and large-data costs.
+
+---
+
 Audit of the repository at `fac7e59` on 26 November 2026. The goal is to
 reduce the number of concepts and paths needed to implement the existing
 features while retaining support for large datasets. This is a structural and
