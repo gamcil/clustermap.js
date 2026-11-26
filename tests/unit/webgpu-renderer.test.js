@@ -80,7 +80,7 @@ test("WebGPU rejects oversized link storage before creating an invalid buffer", 
   assert.equal(buffers.some((buffer) => (buffer.usage & GPUBufferUsage.STORAGE) && buffer.size > 64), false);
 });
 
-test("WebGPU excludes filtered links but retains allowed nonadjacent links for previews", async (t) => {
+test("WebGPU builds nonadjacent link records only for row previews", async (t) => {
   const { renderer, getBindings, draws } = await gpuHarness(t);
   const data = normalizeChartData({ clusters: ["a", "b", "c"].map((uid) => ({ uid,
     loci: [{ uid: `l-${uid}`, start: 0, end: 100,
@@ -100,22 +100,24 @@ test("WebGPU excludes filtered links but retains allowed nonadjacent links for p
   renderer.render({ nextScene: scene, scales: runtime.scales, config: runtime.renderConfig,
     camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 });
   assert.equal(getBindings().find((entry) => entry.binding === 2).resource.buffer.size, 64,
-    "only the allowed nonadjacent link occupies a GPU record");
-  const buffer = getBindings().find((entry) => entry.binding === 2).resource.buffer;
-  const beforeX = new Float32Array(buffer.data.buffer)[0];
+    "the empty base uses only the minimum storage allocation");
+  const drag = () => createClusterDragPreview(scene, { clusterUid: "c", position: scene.clusters.get("b").y,
+    order: ["a", "c", "b"], rows: runtime.scales.y.range() });
+  renderer.render({ nextScene: scene, preview: drag(), scales: runtime.scales, config: runtime.renderConfig,
+    camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 });
+  const beforeX = new Float32Array(getBindings().find((entry) => entry.binding === 2).resource.buffer.data.buffer)[0];
   const previous = scene;
   setLocusOffset(state, "l-a", 25);
   scene = runtime.updateScene(data, { sourceScene: previous, changes: { loci: ["l-a"] } });
   assert.equal(scene.changes.links.has("allowed"), false, "nonadjacent links do not need scene geometry");
   assert.equal(renderer.adoptScene(scene, previous, { scales: runtime.scales, config: runtime.renderConfig }), true);
-  assert.notEqual(new Float32Array(buffer.data.buffer)[0], beforeX,
-    "the retained GPU record follows a local edit before a later row preview");
   draws.length = 0;
-  const preview = createClusterDragPreview(scene, { clusterUid: "c", position: scene.clusters.get("b").y,
-    order: ["a", "c", "b"], rows: runtime.scales.y.range() });
+  const preview = drag();
   renderer.render({ nextScene: scene, preview, scales: runtime.scales, config: runtime.renderConfig,
     camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 });
   assert.equal(draws.find((draw) => draw.entryPoint === "linkFillVertex")?.args[1], 1);
+  assert.notEqual(new Float32Array(getBindings().find((entry) => entry.binding === 2).resource.buffer.data.buffer)[0], beforeX,
+    "preview records use the latest edited gene positions");
 });
 
 test("WebGPU draws annotation grids behind cells, culls them and updates row positions", async (t) => {
@@ -268,7 +270,6 @@ test("WebGPU culls retained geometry after moves and reorders and restores links
   runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   let scene = runtime.updateScene(data);
   const options = { scales: runtime.scales, config: runtime.renderConfig };
-  const linkOrder = [...scene.links.keys()];
   const render = (frame = {}, preview = null) => {
     writes.length = draws.length = 0;
     renderer.render({ nextScene: scene, preview, ...options,
@@ -293,6 +294,12 @@ test("WebGPU culls retained geometry after moves and reorders and restores links
   const farAway = { camera: { x: -100000, y: -100000, k: 1 }, width: 100, height: 22 };
   const checkCulling = () => {
     const cluster = scene.clusters.get(first.uid);
+    const positions = new Map(scene.clusterOrder.map((uid, i) => [uid, i]));
+    const linkOrder = [...scene.links.values()].filter((link) => {
+      const a = scene.genes.get(link.source.query.uid)?.locus.cluster.uid;
+      const b = scene.genes.get(link.source.target.uid)?.locus.cluster.uid;
+      return link.allowed && Math.abs(positions.get(a) - positions.get(b)) === 1;
+    }).map((link) => link.source.uid);
     const visibleLinks = [...scene.links.values()].filter((link) => link.visible);
     const expectedLinks = visibleLinks.map((link) => linkOrder.indexOf(link.source.uid));
     const expectedRowLinks = visibleLinks.filter((link) =>
@@ -345,4 +352,29 @@ test("WebGPU culls retained geometry after moves and reorders and restores links
   commit(() => {
     setPreviewClusterOrder(state, [0, 2, 1, 3].map((index) => data.clusters[index].uid)); commitPreviewClusterOrder(state);
   });
+});
+
+test("WebGPU stores adjacent pairs under a low device limit and draws reordered preview pairs", async (t) => {
+  const { renderer, getBindings, draws } = await gpuHarness(t, undefined,
+    { maxStorageBufferBindingSize: 320, maxBufferSize: 1000000 });
+  const ids = ["a", "b", "c", "d", "e", "f"], links = [];
+  for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+    links.push({ uid: `${ids[i]}-${ids[j]}`, query: { uid: `g-${ids[i]}` }, target: { uid: `g-${ids[j]}` }, identity: 0.9 });
+  }
+  const data = normalizeChartData({ clusters: ids.map((uid) => ({ uid, name: uid,
+    loci: [{ uid: `l-${uid}`, start: 0, end: 100, genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
+    links, groups: [{ uid: "group", genes: ids.map((uid) => `g-${uid}`) }], config: { updateGroups: false } });
+  const runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
+  const scene = runtime.updateScene(data), options = { nextScene: scene, scales: runtime.scales,
+    config: runtime.renderConfig, camera: { x: 0, y: 0, k: 1 }, width: 1000, height: 1000, pixelRatio: 1 };
+  scene.links.values = () => { throw new Error("must not scan all retained links"); };
+  renderer.render(options);
+  assert.equal(getBindings().find((entry) => entry.binding === 2).resource.buffer.size, 320);
+  draws.length = 0;
+  const preview = createClusterDragPreview(scene, { clusterUid: "f", position: scene.clusters.get("b").y,
+    order: ["a", "f", "b", "c", "d", "e"], rows: runtime.scales.y.range() });
+  renderer.render({ ...options, preview });
+  assert.equal(draws.find((draw) => draw.entryPoint === "linkFillVertex")?.args[1], 5);
+  assert.equal(getBindings().find((entry) => entry.binding === 2).resource.buffer.size, 320);
 });

@@ -14915,20 +14915,22 @@ function linkRecordForGpu(scene, link, scales, config, locusSlots, clusterOffset
   ]);
 }
 
-function buildLinkRecords(scene, scales, config, locusSlots, device) {
-  const keep = (link) => (link.allowed !== false || link.visible) &&
-    scene.genes.has(link.source.query.uid) && scene.genes.has(link.source.target.uid);
-  let count = 0;
-  for (const link of scene.links.values()) if (keep(link)) count++;
-  checkBufferSize(device, count * 16 * 4, "link records", true);
-  const values = new Float32Array(count * 16);
-  const indexByUid = new Map();
-  for (const link of scene.links.values()) {
-    // Filtering cannot change during a geometry-only drag or trim preview.
-    // Retain nonadjacent allowed links for row previews, and retain a visible
-    // transition record even if its target scene no longer permits it.
-    if (!keep(link)) continue;
-    const record = linkRecordForGpu(scene, link, scales, config, locusSlots);
+function sceneLinkCandidates(scene) {
+  if (!scene.clusterOrder || !scene.linksByClusterPair) return [...scene.links.values()];
+  const ids = new Set(scene.animationLinkIds || []);
+  for (let i = 1; i < scene.clusterOrder.length; i++) {
+    for (const uid of scene.linksByClusterPair.get(clusterPairKey(scene.clusterOrder[i - 1], scene.clusterOrder[i])) || []) ids.add(uid);
+  }
+  return [...ids].map((uid) => scene.links.get(uid)).filter(Boolean).sort((a, b) => a.order - b.order);
+}
+
+function buildLinkRecords(scene, links, scales, config, locusSlots, device, offsetX, offsetY) {
+  const retained = links.filter((link) => (link.allowed !== false || link.visible) &&
+    scene.genes.has(link.source.query.uid) && scene.genes.has(link.source.target.uid));
+  checkBufferSize(device, retained.length * 16 * 4, "link records", true);
+  const values = new Float32Array(retained.length * 16), indexByUid = new Map();
+  for (const link of retained) {
+    const record = linkRecordForGpu(scene, link, scales, config, locusSlots, offsetX, offsetY);
     if (!record) continue;
     values.set(record, indexByUid.size * 16);
     indexByUid.set(link.source.uid, indexByUid.size);
@@ -14990,7 +14992,7 @@ function buildGeometry(scene, scales, config) {
   for (const uid of scene.loci.keys()) {
     locusSlots.set(uid, nextSlot++);
   }
-  for (const link of scene.links.values()) {
+  for (const link of sceneLinkCandidates(scene)) {
     if (link.allowed === false && !link.visible) continue;
     // Normally an invisible link has no reason to consume a GPU range. The
     // exception is a link hidden solely by a committed trim: it can reappear
@@ -15191,6 +15193,9 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
   let linkRecordCapacity = 16;
+  let previewLinkRecordBuffer = device.createBuffer({ size: 64, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  let previewLinkRecordCapacity = 16;
+  let usingPreviewLinkRecords = false;
   let linkIndexBuffer = device.createBuffer({
     size: 4,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -15206,7 +15211,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     entries: [
       { binding: 0, resource: { buffer: uniform } },
       { binding: 1, resource: { buffer: clusterOffsetBuffer } },
-      { binding: 2, resource: { buffer: linkRecordBuffer } },
+      { binding: 2, resource: { buffer: usingPreviewLinkRecords ? previewLinkRecordBuffer : linkRecordBuffer } },
       { binding: 3, resource: { buffer: linkIndexBuffer } },
       { binding: 4, resource: { buffer: locusTransformBuffer } },
     ],
@@ -15225,6 +15230,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
   let retainedClusterGeometry = false;
   let linkRecordIndexByUid = new Map();
   let clusterPreviewIndexCache = new Map();
+  let uploadedPreviewRecords = null;
   let trackCount = 0;
   let geneCount = 0;
   let geneEdgeCount = 0;
@@ -15391,28 +15397,47 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     if (records.values.byteLength) device.queue.writeBuffer(linkRecordBuffer, 0, records.values);
     linkRecordIndexByUid = records.indexByUid;
     clusterPreviewIndexCache = new Map();
+    uploadedPreviewRecords = null;
     bindGroup = createBindGroup();
   };
 
-  const clusterPreviewLinkIndices = (nextPreview, viewport, config) => {
+  const clusterPreviewLinkRecords = (nextPreview, viewport, scales, config) => {
     const { pairs } = clusterPreviewInViewport(scene, nextPreview, viewport);
     const cacheKey = `${config.link.threshold}:${[...pairs].sort().join("|")}`;
     const cached = clusterPreviewIndexCache.get(cacheKey);
     if (cached) return cached;
-    // The scene already indexes links by cluster pair. Build the GPU list from
-    // those selected pairs, rather than scanning every link and recomputing
-    // its pair key whenever the dragged row crosses a snap boundary.
-    const indices = [];
-    for (const pair of pairs) {
-      for (const uid of scene.linksByClusterPair?.get(pair) || []) {
-        const link = scene.links.get(uid);
-        const index = link && linkRecordIndexByUid.get(link.source.uid);
-        if (index !== undefined && linkVisibleForPreview(scene, link, nextPreview, config)) indices.push(index);
-      }
+    const links = [];
+    for (const pair of pairs) for (const uid of scene.linksByClusterPair?.get(pair) || []) {
+      const link = scene.links.get(uid);
+      if (link && linkVisibleForPreview(scene, link, nextPreview, config)) links.push(link);
     }
-    const values = new Uint32Array(indices);
-    clusterPreviewIndexCache.set(cacheKey, values);
-    return values;
+    links.sort((a, b) => a.order - b.order);
+    const offset = (uid, axis) => {
+      const slot = geometry.clusterSlots.get(uid);
+      return slot === undefined ? 0 : clusterBaseOffsets[slot * 2 + axis];
+    };
+    const records = buildLinkRecords(scene, links, scales, config, geometry.locusSlots, device,
+      (uid) => offset(uid, 0), (uid) => offset(uid, 1));
+    const result = { records, indices: Uint32Array.from({ length: records.indexByUid.size }, (_, i) => i) };
+    clusterPreviewIndexCache.clear();
+    clusterPreviewIndexCache.set(cacheKey, result);
+    return result;
+  };
+
+  const usePreviewLinkRecords = (enabled) => {
+    if (usingPreviewLinkRecords !== enabled) { usingPreviewLinkRecords = enabled; bindGroup = createBindGroup(); }
+  };
+
+  const uploadClusterPreviewRecords = (records) => {
+    if (uploadedPreviewRecords === records) { usePreviewLinkRecords(true); return; }
+    const resized = resizeStorageBuffer(previewLinkRecordBuffer, previewLinkRecordCapacity, records.values);
+    previewLinkRecordBuffer = resized.buffer;
+    previewLinkRecordCapacity = resized.capacity;
+    if (records.values.byteLength) device.queue.writeBuffer(previewLinkRecordBuffer, 0, records.values);
+    // The buffer may have grown while it was already bound.
+    usingPreviewLinkRecords = true;
+    uploadedPreviewRecords = records;
+    bindGroup = createBindGroup();
   };
 
   const uploadPreviewLinkIndices = (values, culled = false) => {
@@ -15570,10 +15595,11 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     if (retainedClusterGeometry && nextPreview?.type === "locus-trim") {
       geometry = buildGeometry(scene, scales, config);
       uploadGeometry(geometry);
-      uploadLinkRecords(buildLinkRecords(scene, scales, config, geometry.locusSlots, device));
+      uploadLinkRecords(buildLinkRecords(scene, sceneLinkCandidates(scene), scales, config, geometry.locusSlots, device));
       resetRetainedClusterGeometry();
       updateClusterOffsets(null);
     }
+    if (nextPreview?.type !== "cluster-drag") usePreviewLinkRecords(false);
     // Cluster-drag links are drawn from a temporary, viewport-limited buffer,
     // so the retained base link buffer never needs restoring or rewriting.
     if (!patchedRecords?.clusterOffsets) restorePreview(patchedRecords);
@@ -15596,7 +15622,9 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
       return;
     }
     if (patchedRecords.clusterOffsets) {
-      uploadPreviewLinkIndices(clusterPreviewLinkIndices(nextPreview, viewport, config));
+      const selected = clusterPreviewLinkRecords(nextPreview, viewport, scales, config);
+      uploadClusterPreviewRecords(selected.records);
+      uploadPreviewLinkIndices(selected.indices);
       previewLinksActive = true;
       return;
     }
@@ -15661,12 +15689,9 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         if (gene.visible && !geometry.ranges.genes.has(gene.source.uid)) return false;
       }
     }
-    const incidentIds = new Set();
-    if (nextScene.linksByGene) {
-      for (const uid of affectedGenes) for (const source of nextScene.linksByGene.get(uid) || []) incidentIds.add(source.uid);
-    } else if (affectedGenes.size) {
-      for (const uid of nextScene.changes.links) incidentIds.add(uid);
-    }
+    // Only adjacent scene links have retained GPU records. Nonadjacent
+    // preview records are built from the current genes when needed.
+    const incidentIds = nextScene.changes.links;
     const incidentLinks = [];
     for (const uid of incidentIds) {
       const link = nextScene.links.get(uid);
@@ -15723,11 +15748,20 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         (uid) => baseFor(uid, 0), (uid) => baseFor(uid, 1));
       if (record) device.queue.writeBuffer(linkRecordBuffer, index * 16 * 4, record);
     }
+    const orderChanged = nextScene.clusterOrder?.some((uid, i) => uid !== sourceScene.clusterOrder?.[i]) ||
+      nextScene.clusterOrder?.length !== sourceScene.clusterOrder?.length;
+    if (orderChanged) {
+      usePreviewLinkRecords(false);
+      uploadLinkRecords(buildLinkRecords(nextScene, sceneLinkCandidates(nextScene), scales, config, geometry.locusSlots, device,
+        (uid) => baseFor(uid, 0), (uid) => baseFor(uid, 1)));
+    }
     if (offsets.length) retainedClusterGeometry = true;
+    usePreviewLinkRecords(false);
     scene = nextScene;
     preview = null;
     patchedRecords = null;
     clusterPreviewIndexCache = new Map();
+    uploadedPreviewRecords = null;
     updateClusterOffsets(null);
     updateLocusTransforms(null);
     previewLinksActive = retainedClusterGeometry;
@@ -15766,9 +15800,10 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         scene = nextScene;
       }
       if (scene !== nextScene) {
+        usePreviewLinkRecords(false);
         geometry = buildGeometry(nextScene, scales, config);
         uploadGeometry(geometry);
-        uploadLinkRecords(buildLinkRecords(nextScene, scales, config, geometry.locusSlots, device));
+        uploadLinkRecords(buildLinkRecords(nextScene, sceneLinkCandidates(nextScene), scales, config, geometry.locusSlots, device));
         resetRetainedClusterGeometry();
         scene = nextScene;
         updateClusterOffsets(null);
@@ -15924,6 +15959,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
       linkBuffer?.destroy();
       linkEdgeBuffer?.destroy();
       linkRecordBuffer.destroy();
+      previewLinkRecordBuffer.destroy();
       linkIndexBuffer.destroy();
       trackBuffer?.destroy();
       geneBuffer?.destroy();
