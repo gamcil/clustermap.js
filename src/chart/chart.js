@@ -80,6 +80,7 @@ import { clonePlainValue, isPlainObject } from "../utils/values.mjs";
 
 let nextChartInstance = 0;
 const projectFormat = "clinker-project";
+const compactFigureFormat = "clustermap-compact-figure";
 const projectVersion = 1;
 const historyLimit = 100;
 const previousConfigPatch = (config, patch) => Object.fromEntries(
@@ -1422,6 +1423,34 @@ export default function clusterMap() {
     return projectBlob({ ...fields, format: projectFormat, version: projectVersion, data,
       config: serializableConfig(runtime.config),
       state: chartState ? stateSnapshots.serialize(chartState, currentData) : null });
+  };
+  /** Serialize figure data and sparse link edits against a host-owned base. */
+  my.exportCompactProjectBlob = function ({ base } = {}) {
+    if (!currentData) throw new Error("Cannot export a project before the chart has rendered.");
+    const links = currentData.links;
+    if (!(base instanceof CompactLinkStore) || !base.isUnedited || !(links instanceof CompactLinkStore) || !links.sharesBase(base)) {
+      throw new TypeError("Compact figure export requires its original unedited link base.");
+    }
+    const { links: omitted, ...data } = currentData;
+    if (treePresentationPreview && data.tree) {
+      data.tree = structuredClone(data.tree);
+      applyTreeOperation(data.tree, treePresentationPreview.undo);
+    }
+    return projectBlob({ format: compactFigureFormat, version: 1, data,
+      config: serializableConfig(runtime.config),
+      state: chartState ? stateSnapshots.serialize(chartState, currentData) : null,
+      linkEdits: links.snapshotEdits() });
+  };
+  /** Load a compact figure using the host's matching unedited base table. */
+  my.loadCompactProject = function (snapshot, { base } = {}) {
+    if (!isPlainObject(snapshot) || snapshot.format !== compactFigureFormat || snapshot.version !== 1 ||
+        !isPlainObject(snapshot.data) || Object.hasOwn(snapshot.data, "links") || !isPlainObject(snapshot.config) ||
+        !(base instanceof CompactLinkStore)) {
+      throw new TypeError("Invalid compact figure snapshot or link base.");
+    }
+    const links = base.applyEdits(snapshot.linkEdits);
+    return my.project({ format: projectFormat, version: projectVersion,
+      data: { ...snapshot.data, links }, config: snapshot.config, state: snapshot.state });
   };
   // Do not name this `apply`: D3 invokes callable charts through
   // Function.prototype.apply when mounting them.

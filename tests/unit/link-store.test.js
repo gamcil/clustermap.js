@@ -214,3 +214,23 @@ test("compact best-match visibility matches object filtering without materializi
   const actual = createLinkVisibility(store, options, store);
   assert.deepEqual([...store.keys()].filter((uid) => actual.has(uid)), [...store.keys()].filter((uid) => expected.has(uid)));
 });
+
+test("compact link snapshots preserve sparse edits, deletions and undefined values", () => {
+  const base = new CompactLinkStore(input());
+  const edited = base.withUpdates([{ uid: "link-0", changes: { hidden: true, label: "chosen" } },
+    { uid: "link-1", changes: { identity: undefined } }, { uid: "link-2", changes: { colour: "red" } }])
+    .withDeleted(["link-2"]);
+  const snapshot = JSON.parse(JSON.stringify(edited.snapshotEdits()));
+  const loaded = base.applyEdits(snapshot);
+  assert.deepEqual([...loaded.values()], [...edited.values()]);
+  assert.equal(loaded.get("link-1").identity, undefined);
+  assert.equal(base.isUnedited, true);
+  assert.equal(edited.sharesBase(base), true);
+  assert.equal(edited.sharesBase(new CompactLinkStore(input())), false);
+  assert.equal(base.fingerprint, new CompactLinkStore(input()).fingerprint);
+  const other = input(); other.identity[0] = 0.1;
+  assert.throws(() => new CompactLinkStore(other).applyEdits(snapshot), /does not match/);
+  assert.throws(() => edited.applyEdits(snapshot), /edited base/);
+  assert.throws(() => base.applyEdits({ version: 1, base: base.fingerprint, deleted: [0], updates: [[0, [["hidden", true]]]] }), /update snapshot/);
+  assert.throws(() => base.applyEdits({ version: 1, base: base.fingerprint, deleted: [99], updates: [] }), /deletion snapshot/);
+});

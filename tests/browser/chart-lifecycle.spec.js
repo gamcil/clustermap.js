@@ -326,10 +326,21 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
     const visible = chart.visibleData().links.map((link) => link.uid);
     chart.undo();
     const project = chart.project(), blob = JSON.parse(await chart.exportProjectBlob().text());
+    chart.patch([{ type: "links.update", ids: ["link-0"], changes: { label: "saved", identity: 0.7 } }]);
+    chart.patch([{ type: "links.delete", ids: ["link-1"] }]);
+    const expectedCompact = chart.project();
+    const compact = JSON.parse(await chart.exportCompactProjectBlob({ base: links }).text());
+    chart.undo(); chart.undo();
+    const wrongBase = new CompactLinkStore({ ...columns, identity: new Float64Array([0.1, 0.8]) });
+    let wrongRejected = false;
+    try { chart.loadCompactProject(compact, { base: wrongBase }); } catch { wrongRejected = true; }
+    const unchangedAfterReject = JSON.stringify(chart.project()) === JSON.stringify(project);
+    chart.loadCompactProject(compact, { base: links });
+    const compactRoundTrip = chart.project();
     chart.project(JSON.parse(JSON.stringify(project)));
     const roundTrip = chart.project(); chart.destroy(); host.remove();
     return { arrayView, initial, edited, oldView: oldView ?? null, deleted, restored, undone: undone ?? null,
-      visible, project, blob, roundTrip };
+      visible, project, blob, roundTrip, compact, expectedCompact, compactRoundTrip, wrongRejected, unchangedAfterReject };
   }, renderer);
   expect(result.arrayView).toBe(true);
   expect(result.initial).toEqual(["link-0", "link-1"]);
@@ -341,5 +352,32 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
   expect(result.visible).toEqual(["link-0"]);
   expect(result.blob).toEqual(result.project);
   expect(result.roundTrip).toEqual(result.project);
+  expect(result.compact.data).not.toHaveProperty("links");
+  expect(result.compactRoundTrip).toEqual(result.expectedCompact);
+  expect(result.wrongRejected).toBe(true);
+  expect(result.unchangedAfterReject).toBe(true);
 });
 }
+
+test("compact figure snapshot saves the committed tree during a preview", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/demo/?fixture=burnettii&test=1");
+  await page.waitForFunction(() => Boolean(window.__demoChart));
+  const result = await page.evaluate(async () => {
+    const { CompactLinkStore } = await import("/dist/clustermap.mjs");
+    const chart = window.__demoChart, data = chart.data();
+    const genes = data.clusters.flatMap((cluster) => cluster.loci.flatMap((locus) => locus.genes)).slice(0, 2).map((gene) => gene.uid);
+    const base = new CompactLinkStore({ genes, query: new Uint32Array([0]), target: new Uint32Array([1]),
+      identity: new Float64Array([0.9]), similarity: new Float64Array([0.95]) });
+    chart.data({ ...data, links: base, config: { ...data.config, updateGroups: false } });
+    const before = chart.project();
+    chart.previewTreePresentation([{ type: "tree.presentation.update", scope: "tree", changes: { colouring: { cutHeight: 4 } } }]);
+    const preview = JSON.stringify(chart.tree());
+    const snapshot = JSON.parse(await chart.exportCompactProjectBlob({ base }).text());
+    const stillPreviewing = JSON.stringify(chart.tree()) === preview;
+    chart.previewTreePresentation(null);
+    chart.loadCompactProject(snapshot, { base });
+    return { before, after: chart.project(), stillPreviewing };
+  });
+  expect(result.after).toEqual(result.before);
+  expect(result.stillPreviewing).toBe(true);
+});

@@ -4685,13 +4685,14 @@
   const sharedColumns = Symbol("shared compact columns");
   const editableFields = new Set(["label", "colour", "hidden", "identity"]);
   class CompactLinkStore {
-    #genes; #query; #target; #identity; #similarity; #overrides; #deleted;
+    #genes; #query; #target; #identity; #similarity; #overrides; #deleted; #fingerprint;
     constructor(input, mode = null) {
       if (mode === sharedColumns) {
         this.#genes = input.#genes; this.#query = input.#query; this.#target = input.#target;
         this.#identity = input.#identity; this.#similarity = input.#similarity;
         this.#overrides = new Map(input.#overrides);
         this.#deleted = input.#deleted.slice();
+        this.#fingerprint = input.#fingerprint;
         return;
       }
       const { genes, query, target, identity, similarity } = input;
@@ -4713,6 +4714,7 @@
       this.#identity = identity.slice(); this.#similarity = similarity.slice();
       this.#overrides = new Map();
       this.#deleted = [];
+      this.#fingerprint = null;
     }
     get size() { return this.#query.length - this.#deleted.length; }
     get byteLength() { return this.#query.byteLength + this.#target.byteLength + this.#identity.byteLength + this.#similarity.byteLength; }
@@ -4761,6 +4763,69 @@
         similarity: this.#similarity[physical], ...this.#overrides.get(physical) };
     }
     get(uid) { const position = this.order(uid); return position === undefined ? undefined : this.getAt(position); }
+    // A deterministic checksum catches an accidentally mismatched base on load.
+    // It is not a cryptographic integrity or authenticity guarantee.
+    get fingerprint() {
+      if (this.#fingerprint) return this.#fingerprint;
+      let one = 0x811c9dc5, two = 0x9e3779b9;
+      const add = (word) => { one = Math.imul(one ^ word, 0x01000193); two = Math.imul(two ^ word, 0x85ebca6b); };
+      const bytes = new DataView(new ArrayBuffer(8));
+      add(this.#genes.length); add(this.#query.length);
+      for (const uid of this.#genes) { add(uid.length); for (let i = 0; i < uid.length; i++) add(uid.charCodeAt(i)); }
+      for (let i = 0; i < this.#query.length; i++) {
+        add(this.#query[i]); add(this.#target[i]);
+        bytes.setFloat64(0, this.#identity[i], true); add(bytes.getUint32(0, true)); add(bytes.getUint32(4, true));
+        bytes.setFloat64(0, this.#similarity[i], true); add(bytes.getUint32(0, true)); add(bytes.getUint32(4, true));
+      }
+      return this.#fingerprint = `cl1-${(one >>> 0).toString(16).padStart(8, "0")}${(two >>> 0).toString(16).padStart(8, "0")}`;
+    }
+    get isUnedited() { return this.#deleted.length === 0 && this.#overrides.size === 0; }
+    sharesBase(other) {
+      return other instanceof CompactLinkStore && this.#query === other.#query && this.#target === other.#target &&
+        this.#identity === other.#identity && this.#similarity === other.#similarity && this.#genes === other.#genes;
+    }
+    // Only durable edits are saved: deleted records need no presentation overlay.
+    snapshotEdits() {
+      const deleted = this.#deleted.slice();
+      const updates = [];
+      for (const [position, changes] of [...this.#overrides].sort((a, b) => a[0] - b[0])) {
+        if (this.#deleted[this.#deletedBefore(position)] === position) continue;
+        const fields = Object.entries(changes).map(([key, value]) => value === undefined ? [key] : [key, value]);
+        if (fields.length) updates.push([position, fields]);
+      }
+      return { version: 1, base: this.fingerprint, deleted, updates };
+    }
+    applyEdits(snapshot) {
+      if (!this.isUnedited || !isPlainObject(snapshot) || snapshot.version !== 1 ||
+          !Array.isArray(snapshot.deleted) || !Array.isArray(snapshot.updates)) {
+        throw new TypeError("Invalid compact link edit snapshot or edited base.");
+      }
+      if (snapshot.base !== this.fingerprint) throw new TypeError("Compact link snapshot does not match its base table.");
+      const removed = new Set();
+      for (const position of snapshot.deleted) {
+        if (!Number.isInteger(position) || position < 0 || position >= this.size || removed.has(position)) {
+          throw new TypeError("Invalid compact link deletion snapshot.");
+        }
+        removed.add(position);
+      }
+      const seen = new Set(), updates = [];
+      for (const entry of snapshot.updates) {
+        if (!Array.isArray(entry) || entry.length !== 2 || !Number.isInteger(entry[0]) || entry[0] < 0 ||
+            entry[0] >= this.size || removed.has(entry[0]) || seen.has(entry[0]) || !Array.isArray(entry[1]) || !entry[1].length) {
+          throw new TypeError("Invalid compact link update snapshot.");
+        }
+        seen.add(entry[0]);
+        const changes = {};
+        for (const field of entry[1]) {
+          if (!Array.isArray(field) || field.length < 1 || field.length > 2 || !editableFields.has(field[0]) || Object.hasOwn(changes, field[0])) {
+            throw new TypeError("Invalid compact link update field.");
+          }
+          changes[field[0]] = field.length === 1 ? undefined : field[1];
+        }
+        updates.push({ uid: `link-${entry[0]}`, changes });
+      }
+      return this.withUpdates(updates).withDeleted([...removed].map((position) => `link-${position}`));
+    }
     // Return a new view so older scenes and history retain their original data.
     withUpdates(updates) {
       if (!Array.isArray(updates)) throw new TypeError("Compact link updates must be an array.");
@@ -16820,6 +16885,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
   let nextChartInstance = 0;
   const projectFormat = "clinker-project";
+  const compactFigureFormat = "clustermap-compact-figure";
   const projectVersion = 1;
   const historyLimit = 100;
   const previousConfigPatch = (config, patch) => Object.fromEntries(
@@ -18162,6 +18228,34 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       return projectBlob({ ...fields, format: projectFormat, version: projectVersion, data,
         config: serializableConfig(runtime.config),
         state: chartState ? stateSnapshots.serialize(chartState, currentData) : null });
+    };
+    /** Serialize figure data and sparse link edits against a host-owned base. */
+    my.exportCompactProjectBlob = function ({ base } = {}) {
+      if (!currentData) throw new Error("Cannot export a project before the chart has rendered.");
+      const links = currentData.links;
+      if (!(base instanceof CompactLinkStore) || !base.isUnedited || !(links instanceof CompactLinkStore) || !links.sharesBase(base)) {
+        throw new TypeError("Compact figure export requires its original unedited link base.");
+      }
+      const { links: omitted, ...data } = currentData;
+      if (treePresentationPreview && data.tree) {
+        data.tree = structuredClone(data.tree);
+        applyTreeOperation(data.tree, treePresentationPreview.undo);
+      }
+      return projectBlob({ format: compactFigureFormat, version: 1, data,
+        config: serializableConfig(runtime.config),
+        state: chartState ? stateSnapshots.serialize(chartState, currentData) : null,
+        linkEdits: links.snapshotEdits() });
+    };
+    /** Load a compact figure using the host's matching unedited base table. */
+    my.loadCompactProject = function (snapshot, { base } = {}) {
+      if (!isPlainObject(snapshot) || snapshot.format !== compactFigureFormat || snapshot.version !== 1 ||
+          !isPlainObject(snapshot.data) || Object.hasOwn(snapshot.data, "links") || !isPlainObject(snapshot.config) ||
+          !(base instanceof CompactLinkStore)) {
+        throw new TypeError("Invalid compact figure snapshot or link base.");
+      }
+      const links = base.applyEdits(snapshot.linkEdits);
+      return my.project({ format: projectFormat, version: projectVersion,
+        data: { ...snapshot.data, links }, config: snapshot.config, state: snapshot.state });
     };
     // Do not name this `apply`: D3 invokes callable charts through
     // Function.prototype.apply when mounting them.

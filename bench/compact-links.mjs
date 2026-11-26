@@ -33,6 +33,10 @@ query = target = identity = similarity = null;
 const data = { clusters, links, groups: [{ uid: "group", genes }], config: { updateGroups: false } };
 sample("compact-store", start);
 start = performance.now();
+const edits = links.snapshotEdits();
+assert.equal(edits.base, links.fingerprint);
+sample("compact-snapshot", start);
+start = performance.now();
 const index = createChartIndex(data);
 sample("index", start);
 const runtime = createChartRuntime();
@@ -48,4 +52,5 @@ const filtered = runtime.updateScene(data);
 assert.equal(filtered.links.size, count);
 sample("best-only-scene", start);
 console.log(JSON.stringify({ links: count, clusters: clusters.length, genes: genes.length,
-  adjacentLayouts: filtered.links.geometry?.size ?? null, columnBytes: links.byteLength }));
+  adjacentLayouts: filtered.links.geometry?.size ?? null, columnBytes: links.byteLength,
+  emptyEditsBytes: Buffer.byteLength(JSON.stringify(edits)) }));

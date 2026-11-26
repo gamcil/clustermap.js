@@ -399,6 +399,7 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | `fitFigure({padding, minimumReadableScale})` | Frame the figure without rebuilding the scene or changing history. Padding defaults to 20 world units; the minimum readable scale defaults to 1 for raster renderers and 0 for SVG. Set it to 0 to fit the entire figure when zoom limits permit. |
 | `project(project)` / `project()` | Restore / export an independently owned `{format, version, data, config, state}` snapshot. Loading clears history; callbacks are omitted from JSON. |
 | `exportProjectBlob({extensions})` | Synchronously serialize a project to a JSON Blob without cloning the complete chart data. Optional top-level extension fields are included. |
+| `exportCompactProjectBlob({base})` / `loadCompactProject(snapshot, {base})` | Save / restore a compact figure using an unedited shared link table supplied by the host. |
 | `patch(operations)` | Validate and apply an atomic batch of edits as one undo step. |
 | `undo()` / `redo()` | Reverse / reapply edits, settings and completed plot manipulations. |
 | `canUndo()` / `canRedo()` | Read history availability. |
@@ -510,6 +511,25 @@ to serialize without expanding the full link table at once. Existing projects
 remain object-array based when reopened. The data editor pages link sets larger
 than 1,000 records; its search and sort cover all links, and select-all applies
 to the current page.
+
+A host that persists the same canonical link table separately can avoid saving
+it twice. Keep the original unedited `CompactLinkStore` as `base`, and save the
+figure separately:
+
+```js
+const figureBlob = chart.exportCompactProjectBlob({ base });
+// Store the Blob alongside the host's canonical link table.
+const figure = JSON.parse(await figureBlob.text());
+chart.loadCompactProject(figure, { base });
+```
+
+The figure contains chart data, appearance, state, and sparse link edits and
+deletions; it does not contain the base link columns. The host must reconstruct
+the exact gene dictionary and columns when reopening, in the same order. A
+deterministic checksum catches an accidentally mismatched base; it is not a
+cryptographic integrity check. Loading validates the figure and clears history.
+This figure format is separate from the host's project format: existing
+`project()` and `exportProjectBlob()` behavior is unchanged.
 
 Treat the objects returned by `data()` and `visibleData()` as read-only. Direct
 mutation is unsupported: it bypasses validation, history, and cache invalidation.
