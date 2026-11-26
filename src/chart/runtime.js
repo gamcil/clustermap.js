@@ -286,6 +286,7 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
       allowedLinkIds = createLinkVisibility(data.links, {
         groupForGene: scales.group,
         geneForUid: lookup.geneData,
+        locusForUid: lookup.locusData,
         bestOnly: config.link.bestOnly,
         threshold: config.link.threshold,
       }, chartIndex?.linkById);

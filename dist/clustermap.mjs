@@ -5444,10 +5444,14 @@ function clusterPairKey(left, right) {
   return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
 }
 
+function endpointGeneId(endpoint) {
+  return endpoint.kind === "span" ? undefined : endpoint.geneId ?? endpoint.uid;
+}
+
 /** Project a biological endpoint into the displayed locus coordinate system. */
 function projectLinkEndpoint(endpoint, { genes, loci, scaleX, scaleGenes = true }) {
   if (endpoint.kind !== "span") {
-    const gene = genes.get(endpoint.geneId ?? endpoint.uid);
+    const gene = genes.get(endpointGeneId(endpoint));
     if (!gene) return null;
     const { display, locus } = gene;
     const start = scaleX(display.start) + locus.x, end = scaleX(display.end) + locus.x;
@@ -9505,12 +9509,14 @@ function createChartIndex(data) {
   let linksByGeneId = new Map();
   let linksByClusterPair = new Map();
   const clusterForGene = new Map();
+  const clusterForLocus = new Map();
 
   for (const cluster of data.clusters) {
     clusterById.set(cluster.uid, cluster);
 
     for (const locus of cluster.loci) {
       locusById.set(locus.uid, locus);
+      clusterForLocus.set(locus.uid, cluster.uid);
       for (const gene of locus.genes) {
         geneById.set(gene.uid, gene);
         clusterForGene.set(gene.uid, cluster.uid);
@@ -9521,11 +9527,13 @@ function createChartIndex(data) {
   if (data.links instanceof CompactLinkStore) {
     ({ linksByGeneId, linksByClusterPair } = compactLinkIndexes(data.links, clusterForGene));
   } else for (const link of data.links) {
-    appendToIndex(linksByGeneId, link.query.uid, link);
-    if (link.target.uid !== link.query.uid) appendToIndex(linksByGeneId, link.target.uid, link);
-    if (clusterForGene.has(link.query.uid) && clusterForGene.has(link.target.uid)) {
-      appendToIndex(linksByClusterPair, clusterPairKey(clusterForGene.get(link.query.uid),
-        clusterForGene.get(link.target.uid)), link.uid);
+    const query = endpointGeneId(link.query), target = endpointGeneId(link.target);
+    if (query !== undefined) appendToIndex(linksByGeneId, query, link);
+    if (target !== undefined && target !== query) appendToIndex(linksByGeneId, target, link);
+    const queryCluster = link.query.kind === "span" ? clusterForLocus.get(link.query.locusId) : clusterForGene.get(query);
+    const targetCluster = link.target.kind === "span" ? clusterForLocus.get(link.target.locusId) : clusterForGene.get(target);
+    if (queryCluster !== undefined && targetCluster !== undefined) {
+      appendToIndex(linksByClusterPair, clusterPairKey(queryCluster, targetCluster), link.uid);
     }
   }
 
@@ -14179,8 +14187,9 @@ function connectedComponents(links) {
   };
 
   for (const link of links) {
-    const query = link.query.uid;
-    const target = link.target.uid;
+    const query = endpointGeneId(link.query);
+    const target = endpointGeneId(link.target);
+    if (query === undefined || target === undefined) continue;
     add(query);
     add(target);
     join(query, target);
@@ -14281,9 +14290,12 @@ function getGroupScaleValues(groups) {
   return { domain, range };
 }
 
-function linkPassesFilter(link, { groupForGene, geneForUid, threshold }) {
-  return !link.hidden && Boolean(geneForUid(link.query.uid)) && Boolean(geneForUid(link.target.uid)) &&
-    !(link.identity < threshold) && groupForGene(link.query.uid) !== null && groupForGene(link.target.uid) !== null;
+function linkPassesFilter(link, { groupForGene, geneForUid, locusForUid, threshold }) {
+  const query = endpointGeneId(link.query), target = endpointGeneId(link.target);
+  const exists = (endpoint, gene) => gene === undefined ? locusForUid?.(endpoint.locusId) : geneForUid(gene);
+  return !link.hidden && Boolean(exists(link.query, query)) && Boolean(exists(link.target, target)) &&
+    !(link.identity < threshold) && (query === undefined || target === undefined ||
+      (groupForGene(query) !== null && groupForGene(target) !== null));
 }
 
 // Share selection and tie semantics without changing each storage strategy's
@@ -14359,11 +14371,11 @@ function createLinkVisibility(links, options, index) {
 
 function filterLinks(
   links,
-  { groupForGene, geneForUid, bestOnly, threshold }
+  { groupForGene, geneForUid, locusForUid, bestOnly, threshold }
 ) {
   if (links instanceof CompactLinkStore) links = links.values();
   const passing = [];
-  const options = { groupForGene, geneForUid, threshold };
+  const options = { groupForGene, geneForUid, locusForUid, threshold };
   for (const link of links) {
     // Dangling endpoints remain editable but cannot be drawn.
     if (!linkPassesFilter(link, options)) continue;
@@ -14375,22 +14387,25 @@ function filterLinks(
   if (!bestOnly) return passing;
 
   const linksByClusterPair = new Map();
+  const spans = [];
   const select = bestLinkSelector(geneForUid);
   // Sort link references directly. Endpoint records can be looked up again
   // after sorting, avoiding a short-lived wrapper object for every link.
   passing.sort((a, b) => b.identity - a.identity);
 
   for (const link of passing) {
+    const query = endpointGeneId(link.query), target = endpointGeneId(link.target);
+    if (query === undefined || target === undefined) { spans.push(link); continue; }
     // Equal-scoring links intentionally survive: only a strictly better link
     // that shares an endpoint supersedes this relationship.
-    const clusterPair = select(link.query.uid, link.target.uid, link.identity);
+    const clusterPair = select(query, target, link.identity);
     if (clusterPair === null) continue;
     const selected = linksByClusterPair.get(clusterPair) || [];
     selected.push(link);
     linksByClusterPair.set(clusterPair, selected);
   }
 
-  return [...linksByClusterPair.values()].flat();
+  return [...linksByClusterPair.values()].flat().concat(spans);
 }
 
 // This is deliberately one factory per chart, not a collection of tiny API
@@ -14646,6 +14661,7 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
       allowedLinkIds = createLinkVisibility(data.links, {
         groupForGene: scales.group,
         geneForUid: lookup.geneData,
+        locusForUid: lookup.locusData,
         bestOnly: config.link.bestOnly,
         threshold: config.link.threshold,
       }, chartIndex?.linkById);

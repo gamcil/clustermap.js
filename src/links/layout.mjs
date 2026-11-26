@@ -2,10 +2,14 @@ export function clusterPairKey(left, right) {
   return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
 }
 
+export function endpointGeneId(endpoint) {
+  return endpoint.kind === "span" ? undefined : endpoint.geneId ?? endpoint.uid;
+}
+
 /** Project a biological endpoint into the displayed locus coordinate system. */
 export function projectLinkEndpoint(endpoint, { genes, loci, scaleX, scaleGenes = true }) {
   if (endpoint.kind !== "span") {
-    const gene = genes.get(endpoint.geneId ?? endpoint.uid);
+    const gene = genes.get(endpointGeneId(endpoint));
     if (!gene) return null;
     const { display, locus } = gene;
     const start = scaleX(display.start) + locus.x, end = scaleX(display.end) + locus.x;

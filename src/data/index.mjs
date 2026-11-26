@@ -1,4 +1,4 @@
-import { clusterPairKey } from "../links/layout.mjs";
+import { clusterPairKey, endpointGeneId } from "../links/layout.mjs";
 import { ArrayLinkStore, CompactLinkStore } from "./linkStore.mjs";
 
 function appendToIndex(index, key, value) {
@@ -49,12 +49,14 @@ export function createChartIndex(data) {
   let linksByGeneId = new Map();
   let linksByClusterPair = new Map();
   const clusterForGene = new Map();
+  const clusterForLocus = new Map();
 
   for (const cluster of data.clusters) {
     clusterById.set(cluster.uid, cluster);
 
     for (const locus of cluster.loci) {
       locusById.set(locus.uid, locus);
+      clusterForLocus.set(locus.uid, cluster.uid);
       for (const gene of locus.genes) {
         geneById.set(gene.uid, gene);
         clusterForGene.set(gene.uid, cluster.uid);
@@ -65,11 +67,13 @@ export function createChartIndex(data) {
   if (data.links instanceof CompactLinkStore) {
     ({ linksByGeneId, linksByClusterPair } = compactLinkIndexes(data.links, clusterForGene));
   } else for (const link of data.links) {
-    appendToIndex(linksByGeneId, link.query.uid, link);
-    if (link.target.uid !== link.query.uid) appendToIndex(linksByGeneId, link.target.uid, link);
-    if (clusterForGene.has(link.query.uid) && clusterForGene.has(link.target.uid)) {
-      appendToIndex(linksByClusterPair, clusterPairKey(clusterForGene.get(link.query.uid),
-        clusterForGene.get(link.target.uid)), link.uid);
+    const query = endpointGeneId(link.query), target = endpointGeneId(link.target);
+    if (query !== undefined) appendToIndex(linksByGeneId, query, link);
+    if (target !== undefined && target !== query) appendToIndex(linksByGeneId, target, link);
+    const queryCluster = link.query.kind === "span" ? clusterForLocus.get(link.query.locusId) : clusterForGene.get(query);
+    const targetCluster = link.target.kind === "span" ? clusterForLocus.get(link.target.locusId) : clusterForGene.get(target);
+    if (queryCluster !== undefined && targetCluster !== undefined) {
+      appendToIndex(linksByClusterPair, clusterPairKey(queryCluster, targetCluster), link.uid);
     }
   }
 

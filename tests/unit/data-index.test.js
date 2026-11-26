@@ -60,3 +60,22 @@ test("link indexes retain input order, dangling endpoints and self links", async
   assert.deepEqual(index.linksByClusterPair.get(clusterPairKey("one", "two")), ["cross"]);
   assert.deepEqual(index.linksByClusterPair.get(clusterPairKey("one", "one")), ["self"]);
 });
+
+test("cluster-pair indexes include span endpoints without treating loci as genes", async () => {
+  const [{ createChartIndex }, { clusterPairKey }] = await Promise.all([
+    import("../../src/data/index.mjs"), import("../../src/links/layout.mjs"),
+  ]);
+  const links = [
+    { uid: "dna", query: { kind: "span", locusId: "l1", start: 2, end: 4 },
+      target: { kind: "span", locusId: "l2", start: 3, end: 5 } },
+    { uid: "mixed", query: { kind: "gene", geneId: "a" },
+      target: { kind: "span", locusId: "l2", start: 3, end: 5 } },
+    { uid: "missing", query: { kind: "span", locusId: "absent", start: 0, end: 1 }, target: { uid: "a" } },
+  ];
+  const data = { clusters: [{ uid: "one", loci: [{ uid: "l1", genes: [{ uid: "a" }] }] },
+    { uid: "two", loci: [{ uid: "l2", genes: [] }] }], links };
+  const index = createChartIndex(data);
+  assert.deepEqual(index.linksByClusterPair.get(clusterPairKey("one", "two")), ["dna", "mixed"]);
+  assert.deepEqual(index.linksByGeneId.get("a"), [links[1], links[2]]);
+  assert.equal(index.linksByGeneId.has("l1"), false);
+});

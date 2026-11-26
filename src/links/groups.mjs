@@ -1,4 +1,5 @@
 import { CompactLinkStore } from "../data/linkStore.mjs";
+import { endpointGeneId } from "./layout.mjs";
 function connectedComponents(links) {
   const parent = new Map();
   const rank = new Map();
@@ -29,8 +30,9 @@ function connectedComponents(links) {
   };
 
   for (const link of links) {
-    const query = link.query.uid;
-    const target = link.target.uid;
+    const query = endpointGeneId(link.query);
+    const target = endpointGeneId(link.target);
+    if (query === undefined || target === undefined) continue;
     add(query);
     add(target);
     join(query, target);
@@ -131,9 +133,12 @@ export function getGroupScaleValues(groups) {
   return { domain, range };
 }
 
-function linkPassesFilter(link, { groupForGene, geneForUid, threshold }) {
-  return !link.hidden && Boolean(geneForUid(link.query.uid)) && Boolean(geneForUid(link.target.uid)) &&
-    !(link.identity < threshold) && groupForGene(link.query.uid) !== null && groupForGene(link.target.uid) !== null;
+function linkPassesFilter(link, { groupForGene, geneForUid, locusForUid, threshold }) {
+  const query = endpointGeneId(link.query), target = endpointGeneId(link.target);
+  const exists = (endpoint, gene) => gene === undefined ? locusForUid?.(endpoint.locusId) : geneForUid(gene);
+  return !link.hidden && Boolean(exists(link.query, query)) && Boolean(exists(link.target, target)) &&
+    !(link.identity < threshold) && (query === undefined || target === undefined ||
+      (groupForGene(query) !== null && groupForGene(target) !== null));
 }
 
 // Share selection and tie semantics without changing each storage strategy's
@@ -209,11 +214,11 @@ export function createLinkVisibility(links, options, index) {
 
 export function filterLinks(
   links,
-  { groupForGene, geneForUid, bestOnly, threshold }
+  { groupForGene, geneForUid, locusForUid, bestOnly, threshold }
 ) {
   if (links instanceof CompactLinkStore) links = links.values();
   const passing = [];
-  const options = { groupForGene, geneForUid, threshold };
+  const options = { groupForGene, geneForUid, locusForUid, threshold };
   for (const link of links) {
     // Dangling endpoints remain editable but cannot be drawn.
     if (!linkPassesFilter(link, options)) continue;
@@ -225,20 +230,23 @@ export function filterLinks(
   if (!bestOnly) return passing;
 
   const linksByClusterPair = new Map();
+  const spans = [];
   const select = bestLinkSelector(geneForUid);
   // Sort link references directly. Endpoint records can be looked up again
   // after sorting, avoiding a short-lived wrapper object for every link.
   passing.sort((a, b) => b.identity - a.identity);
 
   for (const link of passing) {
+    const query = endpointGeneId(link.query), target = endpointGeneId(link.target);
+    if (query === undefined || target === undefined) { spans.push(link); continue; }
     // Equal-scoring links intentionally survive: only a strictly better link
     // that shares an endpoint supersedes this relationship.
-    const clusterPair = select(link.query.uid, link.target.uid, link.identity);
+    const clusterPair = select(query, target, link.identity);
     if (clusterPair === null) continue;
     const selected = linksByClusterPair.get(clusterPair) || [];
     selected.push(link);
     linksByClusterPair.set(clusterPair, selected);
   }
 
-  return [...linksByClusterPair.values()].flat();
+  return [...linksByClusterPair.values()].flat().concat(spans);
 }

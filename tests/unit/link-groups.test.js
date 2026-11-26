@@ -1,6 +1,24 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+test("span links use identity filtering without gene-group or best-match rules", async () => {
+  const { filterLinks, createLinkGroups } = await import("../../src/links/groups.mjs");
+  const genes = new Map([["g", { clusterUid: "a" }], ["h", { clusterUid: "b" }]]);
+  const loci = new Set(["l1", "l2"]);
+  const links = [
+    { uid: "dna", query: { kind: "span", locusId: "l1" }, target: { kind: "span", locusId: "l2" }, identity: 0.8 },
+    { uid: "mixed", query: { kind: "gene", geneId: "g" }, target: { kind: "span", locusId: "l2" }, identity: 0.7 },
+    { uid: "missing", query: { kind: "span", locusId: "absent" }, target: { uid: "g" }, identity: 0.9 },
+    { uid: "protein", query: { uid: "g" }, target: { uid: "h" }, identity: 0.9 },
+  ];
+  const options = { groupForGene: () => null, geneForUid: (uid) => genes.get(uid),
+    locusForUid: (uid) => loci.has(uid), threshold: 0.5 };
+  for (const bestOnly of [false, true]) {
+    assert.deepEqual(new Set(filterLinks(links, { ...options, bestOnly }).map(({ uid }) => uid)), new Set(["dna", "mixed"]));
+  }
+  assert.deepEqual(createLinkGroups(links).map(({ genes }) => genes), [["g", "h"]]);
+});
+
 const link = (uid, query, target, identity) => ({
   uid,
   query: { uid: query },
