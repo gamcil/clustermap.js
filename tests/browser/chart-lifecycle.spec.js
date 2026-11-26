@@ -402,3 +402,42 @@ test("compact link column ownership can be transferred in the browser", async ({
   expect(result.queryIndex).toBe(0);
   expect(result.similarity).toBe(1);
 });
+
+for (const renderer of ["svg", "canvas"]) {
+  test(`locus edits retain compact link filtering with ${renderer}`, async ({ page }) => {
+    await page.goto("http://127.0.0.1:8080/demo/?test=1");
+    await page.addScriptTag({ url: "/node_modules/d3/dist/d3.min.js" });
+    const result = await page.evaluate(async (renderer) => {
+      const { ClusterMap, CompactLinkStore } = await import("/dist/clustermap.mjs");
+      const host = document.createElement("div"); host.style.width = "800px"; host.style.height = "400px";
+      document.body.append(host);
+      const ids = ["a", "b", "c"];
+      const links = new CompactLinkStore({ genes: ids, query: new Uint32Array([0, 0]), target: new Uint32Array([1, 2]),
+        identity: new Float32Array([0.9, 0.8]), similarity: new Float32Array([1, 0.9]) });
+      const data = { clusters: ids.map((uid) => ({ uid, name: uid, loci: [{ uid: `l-${uid}`, start: 0, end: 100,
+        genes: [{ uid, start: 10, end: 20, strand: 1 }] }] })), links,
+        groups: [{ uid: "group", genes: ids }], config: { updateGroups: false } };
+      const chart = ClusterMap().config({ plot: { renderer, transitionDuration: 0 }, link: { bestOnly: true } });
+      d3.select(host).datum(data).call(chart);
+      const sort = Uint32Array.prototype.sort; let sorts = 0;
+      Uint32Array.prototype.sort = function (...args) { sorts++; return sort.apply(this, args); };
+      try {
+        chart.flipLoci(["l-a"]);
+        chart.trimLoci(["l-a"]);
+        const patched = chart.exportSvg();
+        chart.config({ plot: { transitionDuration: 0 } });
+        const rebuilt = chart.exportSvg();
+        chart.restoreLoci(["l-a"]);
+        const afterEdits = sorts;
+        chart.config({ link: { threshold: 0.1 } });
+        return { patched, rebuilt, afterEdits, afterFilterChange: sorts };
+      } finally {
+        Uint32Array.prototype.sort = sort;
+        chart.destroy(); host.remove();
+      }
+    }, renderer);
+    expect(result.patched).toEqual(result.rebuilt);
+    expect(result.afterEdits).toBe(0);
+    expect(result.afterFilterChange).toBeGreaterThan(0);
+  });
+}

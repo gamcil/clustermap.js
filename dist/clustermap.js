@@ -18427,11 +18427,13 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const loci = [...new Set(ids || [])].map(locusForId).filter(Boolean);
       if (!loci.length) return my;
       finishLocusFlip();
+      const sourceScene = runtime.getScene();
       const before = stateSnapshots.serialize(chartState, currentData);
       let changed = false;
       for (const locus of loci) changed = update(chartState, locus) || changed;
       if (!changed) return my;
       cancelSceneWork();
+      if (sourceScene) sceneCommit = { sourceScene, changes: { loci: loci.map((locus) => locus.uid) } };
       commitEdit(() => ({ change: { kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) },
         event: { type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) } }), { render: { animate } });
       return my;
