@@ -231,6 +231,24 @@ export function geneVisibleForPreview(preview, gene) {
 }
 
 /** Describe flip frames without re-projecting the chart. */
+function hasDirectionalStrand(gene) {
+  return gene?.display.strand === 1 || gene?.display.strand === -1;
+}
+
+// Reflected endpoints reverse their order, whereas unstranded endpoints do
+// not. Those linked loci need the general source-to-target transition.
+export function canPreviewLocusFlip(scene, locusUid) {
+  const locus = scene?.loci.get(locusUid);
+  if (!locus) return false;
+  for (const gene of locus.genes) {
+    if (hasDirectionalStrand(gene)) continue;
+    for (const source of scene.linksByGene.get(gene.source.uid) || []) {
+      if (scene.links.get(source.uid)?.visible) return false;
+    }
+  }
+  return true;
+}
+
 export function createLocusFlipPreview(
   scene,
   locusUid,
@@ -313,7 +331,7 @@ export function createLocusFlipTransition(source, target, locusIds, { clusterLab
       const gene = source.genes.get(endpoint);
       // An unstranded link endpoint keeps its ordering after a flip, unlike a
       // reflected directional endpoint. Use the general transition for it.
-      if (selected.has(gene?.locus.source.uid) && gene.display.strand !== 1 && gene.display.strand !== -1) return null;
+      if (selected.has(gene?.locus.source.uid) && !hasDirectionalStrand(gene)) return null;
     }
   }
   const preview = createLocusFlipsPreview(source, selected, { clusterLabelTexts });

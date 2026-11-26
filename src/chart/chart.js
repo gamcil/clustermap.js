@@ -56,6 +56,7 @@ import { createRasterMotion } from "../interaction/motion.mjs";
 import {
   interpolateScene,
   createClusterDragPreview,
+  canPreviewLocusFlip,
   createLocusFlipPreview,
   createLocusFlipTransition,
   locusFlipTransitionFrame,
@@ -354,6 +355,13 @@ export default function clusterMap() {
       if (locusFlip) finishLocusFlip();
       beginInteractionState();
       flipLocus(chartState, locus);
+      const flipSource = runtime.getScene();
+      if (flipSource && !canPreviewLocusFlip(flipSource, locus.uid)) {
+        sceneCommit = { sourceScene: flipSource, changes: { loci: [locus.uid] } };
+        redraw({ flippedLoci: [locus.uid] });
+        commitInteractionState();
+        return;
+      }
       if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
         const sourceScene = rasterAnimation?.previousScene || rasterScene || runtime.getScene();
         stopRasterAnimation();

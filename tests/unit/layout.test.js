@@ -5,6 +5,7 @@ test("scene derives world-space geometry without DOM state", async () => {
   const [{ buildScene, patchScene }, {
     createClusterDragPreview,
     createLocusFlipPreview,
+    canPreviewLocusFlip,
     createLocusFlipsPreview,
     linkGeometryForPreview,
     createLocusOffsetsPreview,
@@ -107,6 +108,11 @@ test("scene derives world-space geometry without DOM state", async () => {
   });
 
   const topGene = scene.genes.get("top-gene");
+  assert.equal(canPreviewLocusFlip(scene, "top-locus"), true);
+  assert.equal(canPreviewLocusFlip(scene, "bottom-locus"), false, "visible unstranded endpoints require a general transition");
+  assert.equal(canPreviewLocusFlip(scene, "unknown"), false);
+  const hiddenLink = { ...scene.links.get("link"), visible: false };
+  assert.equal(canPreviewLocusFlip({ ...scene, links: new Map([["link", hiddenLink]]) }, "bottom-locus"), true);
   assert.equal(topGene.visible, true);
   assert.deepEqual(topGene.polygon.slice(0, 2), [6 + 2, 5]);
   assert.deepEqual(topGene.bounds, { minX: 8, maxX: 14, minY: 0, maxY: 22 });
