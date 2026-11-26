@@ -1,4 +1,5 @@
 import { CompactLinkStore } from "./linkStore.mjs";
+import { createChartIndex } from "./index.mjs";
 import { isTreeOperation, isTreeTopologyOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../tree/operations.mjs";
 import { isAnnotationOperation, normalizeAnnotationOperation, applyAnnotationOperation,
   inverseAnnotationOperation, validateAnnotationChanges } from "../annotations/operations.mjs";
@@ -258,11 +259,21 @@ function applyOperation(data, index, operation) {
       return;
     }
     case "links.delete": {
+      if (data.links instanceof CompactLinkStore) {
+        data.links = data.links.withDeleted(operation.ids);
+        Object.assign(index, createChartIndex(data));
+        return;
+      }
       const ids = new Set(operation.ids);
       data.links = data.links.filter((link) => !ids.has(link.uid));
       return;
     }
     case "links.restore":
+      if (data.links instanceof CompactLinkStore) {
+        data.links = data.links.withRestored(operation.records);
+        Object.assign(index, createChartIndex(data));
+        return;
+      }
       // Existing scenes retain the old array for link order and animation.
       data.links = [...data.links];
       for (const { index: position, link } of operation.records) {
@@ -347,6 +358,11 @@ function inverseOperation(data, index, operation) {
     }];
   }
   if (operation.type === "links.delete") {
+    if (data.links instanceof CompactLinkStore) {
+      const records = operation.ids.map((uid) => ({ index: index.linkById.order(uid), link: index.linkById.get(uid) }))
+        .sort((a, b) => a.index - b.index);
+      return [{ type: "links.restore", records }];
+    }
     const removed = new Set(operation.ids);
     return [{
       type: "links.restore",
@@ -381,6 +397,15 @@ export function applyChartOperations(data, index, operations, treeConfig = {}) {
   });
   validateTreeOperationBatch(data.tree, applied, treeConfig, data.clusters);
   validateAnnotationChanges(data, annotationDraft.annotationPanels);
+  if (data.links instanceof CompactLinkStore) {
+    // Preflight the entire link batch before any chart data is mutated.
+    let links = data.links;
+    for (const operation of applied) {
+      if (operation.type === "links.update") links = links.withUpdates(operation.ids.map((uid) => ({ uid, changes: operation.changes })));
+      else if (operation.type === "links.delete") links = links.withDeleted(operation.ids);
+      else if (operation.type === "links.restore") links = links.withRestored(operation.records);
+    }
+  }
   const hasStructuralGroupEdit = applied.some((operation) => !["groups.update", "groups.restore"].includes(operation.type) && operation.type.startsWith("groups."));
   const inverse = [];
   for (const operation of applied) {

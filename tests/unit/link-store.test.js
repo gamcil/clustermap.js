@@ -142,3 +142,24 @@ test("compact deletion position mapping agrees with array removal", () => {
     remaining.forEach((uid, position) => { assert.equal(store.order(uid), position); assert.equal(store.getAt(position).uid, uid); });
   }
 });
+
+test("compact link delete and undo operations preserve edits and reject invalid batches atomically", async () => {
+  const { applyChartOperations } = await import("../../src/data/operations.mjs");
+  const original = new CompactLinkStore(input()).withUpdates([{ uid: "link-2", changes: { label: "edited" } }]);
+  const data = { clusters: [{ uid: "one", loci: [{ uid: "l1", genes: [{ uid: "a" }, { uid: "b" }, { uid: "c" }] }] }],
+    groups: [], links: original };
+  const index = createChartIndex(data), originalByGene = index.linksByGeneId;
+  const deleted = applyChartOperations(data, index, [{ type: "links.delete", ids: ["link-2", "link-0"] }]);
+  assert.deepEqual([...data.links.keys()], ["link-1", "link-3"]);
+  assert.equal(originalByGene.get("b")[1].label, "edited");
+  applyChartOperations(data, index, deleted.inverse);
+  assert.deepEqual([...data.links.values()], [...original.values()]);
+  assert.equal(index.linksByGeneId.get("b")[1].label, "edited");
+  const before = data.links;
+  const badRestore = { type: "links.restore", records: [{ index: 0, link: original.get("link-0") }] };
+  assert.throws(() => applyChartOperations(data, index, [
+    { type: "links.update", ids: ["link-1"], changes: { hidden: true } }, badRestore,
+  ]), /restore deleted/);
+  assert.equal(data.links, before);
+  assert.equal(index.linkById.get("link-1").hidden, undefined);
+});
