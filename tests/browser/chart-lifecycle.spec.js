@@ -481,6 +481,7 @@ test("batch flips display intermediate WebGPU fallback frames and commit the fin
     const canvas = document.querySelector(".clusterMapWebGpuOverlay");
     const frame = () => canvas.toDataURL();
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    chart.trimLoci(["l-a", "l-b"]);
     const before = frame();
     chart.flipLoci(["l-a", "l-b"]);
     await wait(700); const early = frame();

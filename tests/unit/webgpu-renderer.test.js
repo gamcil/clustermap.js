@@ -300,7 +300,7 @@ test("WebGPU animates multiple flipped loci using retained geometry", async (t) 
   moved.set(ids[0], { ...first, worldEnd: first.worldEnd + Math.max(1, Math.abs(first.worldEnd)) * Number.EPSILON * 2 });
   assert.ok(createLocusFlipTransition(scene, { ...target, loci: moved }, ids),
     "rounding from a prior row translation does not force geometry rebuilding");
-  moved.set(ids[0], { ...first, x: first.x + 1 });
+  moved.set(ids[0], { ...first, worldEnd: first.worldEnd + 1 });
   assert.equal(createLocusFlipTransition(scene, { ...target, loci: moved }, ids), null);
   const linked = [...target.changes.links].map((uid) => scene.links.get(uid)).find((link) => link?.visible &&
     [link.source.query.uid, link.source.target.uid].some((uid) => ids.includes(scene.genes.get(uid)?.locus.source.uid)));
@@ -342,6 +342,40 @@ test("WebGPU animates multiple flipped loci using retained geometry", async (t) 
   assert.equal(renderer.adoptScene(target, scene, options), true);
   renderer.render({ ...options, nextScene: target });
   assert.deepEqual(buffers.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX), geometry);
+});
+
+test("WebGPU retains geometry when flipping trimmed loci with changed coordinate origins", async (t) => {
+  const { renderer, writes } = await gpuHarness(t);
+  const raw = createLargeTestingData({ clusterCount: 3, genesPerCluster: 3 });
+  for (const cluster of raw.clusters) for (const locus of cluster.loci) {
+    locus.end += 500;
+    for (const gene of locus.genes) gene.strand = 1;
+  }
+  const data = normalizeChartData(raw), state = createChartState(data), runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
+  let source = runtime.updateScene(data);
+  const loci = data.clusters.slice(0, 2).map((cluster) => cluster.loci[0]);
+  for (const locus of loci) trimLocusToGeneBounds(state, locus);
+  source = runtime.updateScene(data, { sourceScene: source, changes: { loci: loci.map((locus) => locus.uid) } });
+  for (const locus of loci) flipLocus(state, locus);
+  const ids = loci.map((locus) => locus.uid);
+  const target = runtime.updateScene(data, { sourceScene: source, changes: { loci: ids } });
+  assert.ok(ids.some((uid) => source.loci.get(uid).state.start !== target.loci.get(uid).state.start));
+  const transition = createLocusFlipTransition(source, target, ids);
+  assert.ok(transition);
+  const options = { scales: runtime.scales, config: runtime.renderConfig,
+    camera: { x: 0, y: 0, k: 1 }, width: 1500, height: 400, pixelRatio: 1 };
+  renderer.render({ ...options, nextScene: source });
+  writes.length = 0;
+  renderer.render({ ...options, nextScene: source, preview: locusFlipTransitionFrame(source, transition, 0.5) });
+  assert.ok(!writes.some((buffer) => buffer.usage & GPUBufferUsage.VERTEX));
+  const preview = locusFlipTransitionFrame(source, transition, 1);
+  for (const uid of target.changes.links) {
+    const before = source.links.get(uid), after = target.links.get(uid);
+    if (!before?.visible || !after?.visible) continue;
+    const actual = linkGeometryForPreview(source, before, preview, runtime.renderConfig).anchors;
+    actual.forEach((value, i) => assert.ok(Math.abs(value - after.anchors[i]) < 1e-7));
+  }
 });
 
 test("WebGPU adopts shared scene changes without reallocating geometry", async (t) => {

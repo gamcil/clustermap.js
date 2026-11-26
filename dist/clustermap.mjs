@@ -17,8 +17,9 @@ const sameArray = (one, two) => one === two || Array.isArray(one) && Array.isArr
 const isRecordId = (value) => typeof value === "string" ? Boolean(value.trim()) : Number.isFinite(value);
 
 /** Compare computed coordinates while allowing only floating-point roundoff. */
-const sameCoordinate = (a, b) => Number.isFinite(a) && Number.isFinite(b) &&
-  Math.abs(a - b) <= Number.EPSILON * 16 * Math.max(1, Math.abs(a), Math.abs(b));
+const sameCoordinate = (a, b, c = 0, d = 0, e = 0) =>
+  Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(c) && Number.isFinite(d) && Number.isFinite(e) &&
+  Math.abs(a - b) <= Number.EPSILON * 16 * Math.max(1, Math.abs(a), Math.abs(b), Math.abs(c), Math.abs(d), Math.abs(e));
 
 function ascending$1(a, b) {
   return a == null || b == null ? NaN : a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
@@ -6010,16 +6011,32 @@ function createLocusFlipTransition(source, target, locusIds, { clusterLabelTexts
   for (const uid of changes.loci) {
     const before = source.loci.get(uid), after = target.loci.get(uid);
     if (!before || !after) return null;
-    const dx = after.x - before.x, dy = clusterDeltas.get(before.cluster.uid) || 0;
+    // A flipped trimmed locus can change its coordinate origin while its
+    // visible world-space span remains unchanged.
+    const dx = after.worldStart - before.worldStart, dy = clusterDeltas.get(before.cluster.uid) || 0;
     if (!Number.isFinite(dx) || !sameCoordinate(after.y, before.y + dy) ||
-        !sameCoordinate(after.worldStart, before.worldStart + dx) || !sameCoordinate(after.worldEnd, before.worldEnd + dx) ||
-        before.state.start !== after.state.start || before.state.end !== after.state.end ||
+        !sameCoordinate(after.worldEnd, before.worldEnd + dx) ||
         (selected.has(uid) ? before.state.flipped === after.state.flipped : before.state.flipped !== after.state.flipped)) return null;
-    if (!sameCoordinate(before.x, after.x)) locusDeltas.set(uid, dx);
+    if (selected.has(uid)) {
+      if (before.state.trimLeft?.uid !== after.state.trimRight?.uid ||
+          before.state.trimRight?.uid !== after.state.trimLeft?.uid) return null;
+    } else if (!sameCoordinate(after.x, before.x + dx) ||
+        before.state.start !== after.state.start || before.state.end !== after.state.end) return null;
+    if (!sameCoordinate(before.worldStart, after.worldStart)) locusDeltas.set(uid, dx);
   }
   if ([...selected].some((uid) => !changes.loci.has(uid))) return null;
   for (const uid of changes.genes || []) {
-    if (source.genes.get(uid)?.visible !== target.genes.get(uid)?.visible) return null;
+    const before = source.genes.get(uid), after = target.genes.get(uid);
+    if (!before || !after || before.visible !== after.visible) return null;
+    const locus = before.locus, dx = locusDeltas.get(locus.source.uid) || 0;
+    const dy = clusterDeltas.get(locus.cluster.uid) || 0;
+    const axis = (locus.worldStart + locus.worldEnd) / 2;
+    const minX = selected.has(locus.source.uid) ? 2 * axis - before.bounds.maxX + dx : before.bounds.minX + dx;
+    const maxX = selected.has(locus.source.uid) ? 2 * axis - before.bounds.minX + dx : before.bounds.maxX + dx;
+    if (!sameCoordinate(after.bounds.minX, minX, axis, before.bounds.maxX, dx) ||
+        !sameCoordinate(after.bounds.maxX, maxX, axis, before.bounds.minX, dx) ||
+        !sameCoordinate(after.bounds.minY, before.bounds.minY + dy) ||
+        !sameCoordinate(after.bounds.maxY, before.bounds.maxY + dy)) return null;
   }
   for (const uid of changes.links || []) {
     const before = source.links.get(uid), after = target.links.get(uid);
