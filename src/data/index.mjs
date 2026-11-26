@@ -29,14 +29,15 @@ function compactLinkIndexes(store, clusterForGene) {
     if (query !== target) put(genes, target, i);
     if (pair !== null) put(pairs, pair, i);
   }
-  const view = (map, resolve) => ({
+  const view = (map, current, records) => ({
     get size() { return map.size; },
     has: (key) => map.has(key),
-    get: (key) => { const entry = map.get(key); return entry && Array.from(entry.values, resolve); },
+    get: (key) => { const entry = map.get(key); return entry && Array.from(entry.values,
+      (position) => records ? current.getAt(position) : current.uidAt(position)); },
     keys: () => map.keys(),
+    withStore: (next) => view(map, next, records),
   });
-  return { linksByGeneId: view(genes, (position) => store.getAt(position)),
-    linksByClusterPair: view(pairs, (position) => store.uidAt(position)) };
+  return { linksByGeneId: view(genes, store, true), linksByClusterPair: view(pairs, store, false) };
 }
 
 export function createChartIndex(data) {

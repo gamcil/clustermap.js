@@ -79,3 +79,66 @@ test("compact links produce the same filtered scene as array links", async () =>
     assert.deepEqual(render(compactData, order, bestOnly), render(data, order, bestOnly));
   }
 });
+
+test("compact link edit overlays retain independent historical views", () => {
+  const original = new CompactLinkStore(input());
+  const edited = original.withUpdates([{ uid: "link-0", changes: { hidden: true, label: "reviewed" } },
+    { uid: "link-1", changes: { identity: 0.45 } }]);
+  const again = edited.withUpdates([{ uid: "link-0", changes: { hidden: false } }]);
+  assert.equal(original.get("link-0").hidden, undefined);
+  assert.deepEqual([edited.get("link-0").hidden, edited.get("link-0").label], [true, "reviewed"]);
+  assert.deepEqual([again.get("link-0").hidden, again.get("link-0").label], [false, "reviewed"]);
+  assert.equal(edited.get("link-1").identity, 0.45);
+  assert.equal(original.get("link-1").identity, 0.8);
+  assert.equal(again.byteLength, original.byteLength);
+  assert.throws(() => original.withUpdates([{ uid: "link-10", changes: { hidden: true } }]), /Unknown/);
+  assert.throws(() => original.withUpdates([{ uid: "link-0", changes: { query: { uid: "c" } } }]), /unsupported/);
+  assert.throws(() => original.withUpdates([{ uid: "link-0", changes: { identity: 2 } }]), /identity/);
+});
+
+test("compact link updates and inverse operations preserve old indexed views", async () => {
+  const { applyChartOperations } = await import("../../src/data/operations.mjs");
+  const original = new CompactLinkStore(input());
+  const data = { clusters: [{ uid: "one", loci: [{ uid: "l1", genes: [{ uid: "a" }] }] },
+    { uid: "two", loci: [{ uid: "l2", genes: [{ uid: "b" }, { uid: "c" }] }] }],
+    groups: [], links: original };
+  const index = createChartIndex(data), oldByGene = index.linksByGeneId;
+  const result = applyChartOperations(data, index, [{ type: "links.update", ids: ["link-0"], changes: { hidden: true, identity: 0.5 } }]);
+  assert.equal(original.get("link-0").hidden, undefined);
+  assert.equal(oldByGene.get("a")[0].identity, 0.9);
+  assert.equal(index.linkById.get("link-0").hidden, true);
+  assert.equal(index.linksByGeneId.get("a")[0].identity, 0.5);
+  applyChartOperations(data, index, result.inverse);
+  assert.equal(index.linkById.get("link-0").hidden, undefined);
+  assert.equal(index.linkById.get("link-0").identity, 0.9);
+});
+
+test("compact deletions and restorations retain link IDs, edits and ordering", () => {
+  const original = new CompactLinkStore(input()).withUpdates([{ uid: "link-2", changes: { hidden: true, label: "kept" } }]);
+  const records = [0, 2].map((index) => ({ index, link: original.getAt(index) }));
+  const deleted = original.withDeleted(["link-0", "link-2"]);
+  assert.deepEqual([...deleted.keys()], ["link-1", "link-3"]);
+  assert.equal(deleted.size, 2);
+  assert.equal(deleted.order("link-0"), undefined);
+  assert.equal(deleted.order("link-3"), 1);
+  assert.equal(original.size, 4);
+  const index = createChartIndex({ links: deleted, clusters: [{ uid: "c", loci: [{ uid: "l", genes: [{ uid: "a" }, { uid: "b" }, { uid: "c" }] }] }], groups: [] });
+  assert.deepEqual(index.linksByGeneId.get("a").map((link) => link.uid), ["link-1", "link-3"]);
+  const restored = deleted.withRestored(records);
+  assert.deepEqual([...restored.values()], [...original.values()]);
+  assert.deepEqual([...deleted.keys()], ["link-1", "link-3"]);
+  assert.throws(() => deleted.withRestored([{ ...records[0], index: 1 }]), /canonical order/);
+});
+
+test("compact deletion position mapping agrees with array removal", () => {
+  const count = 20, all = new CompactLinkStore({ genes: ["a"],
+    query: new Uint32Array(count), target: new Uint32Array(count),
+    identity: new Float64Array(count).fill(0.8), similarity: new Float64Array(count).fill(0.9) });
+  for (let seed = 0; seed < 64; seed++) {
+    const removed = Array.from({ length: count }, (_, i) => i).filter((i) => ((i * 17 + seed * 13) % 11) < 4);
+    const remaining = Array.from({ length: count }, (_, i) => `link-${i}`).filter((uid) => !removed.includes(Number(uid.slice(5))));
+    const store = all.withDeleted(removed.map((i) => `link-${i}`));
+    assert.deepEqual([...store.keys()], remaining);
+    remaining.forEach((uid, position) => { assert.equal(store.order(uid), position); assert.equal(store.getAt(position).uid, uid); });
+  }
+});

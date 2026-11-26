@@ -1,3 +1,4 @@
+import { CompactLinkStore } from "./linkStore.mjs";
 import { isTreeOperation, isTreeTopologyOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../tree/operations.mjs";
 import { isAnnotationOperation, normalizeAnnotationOperation, applyAnnotationOperation,
   inverseAnnotationOperation, validateAnnotationChanges } from "../annotations/operations.mjs";
@@ -231,6 +232,12 @@ function assignGenes(groups, groupId, geneIds) {
 function applyOperation(data, index, operation) {
   const updateRecords = fieldsForType[operation.type] && recordsForOperation(index, operation.type);
   if (updateRecords) {
+    if (operation.type === "links.update" && data.links instanceof CompactLinkStore) {
+      data.links = data.links.withUpdates(operation.ids.map((uid) => ({ uid, changes: operation.changes })));
+      index.linkById = data.links;
+      index.linksByGeneId = index.linksByGeneId.withStore(data.links);
+      return;
+    }
     operation.ids.forEach((uid) => Object.assign(updateRecords.get(uid), operation.changes));
     return;
   }

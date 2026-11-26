@@ -8512,6 +8512,52 @@ function createZoom() {
   return zoom;
 }
 
+function colors(specifier) {
+  var n = specifier.length / 6 | 0, colors = new Array(n), i = 0;
+  while (i < n) colors[i] = "#" + specifier.slice(i * 6, ++i * 6);
+  return colors;
+}
+
+var ramp = scheme => rgbBasis(scheme[scheme.length - 1]);
+
+var scheme = new Array(3).concat(
+  "f0f0f0bdbdbd636363",
+  "f7f7f7cccccc969696525252",
+  "f7f7f7cccccc969696636363252525",
+  "f7f7f7d9d9d9bdbdbd969696636363252525",
+  "f7f7f7d9d9d9bdbdbd969696737373525252252525",
+  "fffffff0f0f0d9d9d9bdbdbd969696737373525252252525",
+  "fffffff0f0f0d9d9d9bdbdbd969696737373525252252525000000"
+).map(colors);
+
+var interpolateGreys = ramp(scheme);
+
+cubehelixLong(cubehelix$1(-100, 0.75, 0.35), cubehelix$1(80, 1.50, 0.8));
+
+cubehelixLong(cubehelix$1(260, 0.75, 0.35), cubehelix$1(80, 1.50, 0.8));
+
+var c = cubehelix$1();
+
+function interpolateRainbow(t) {
+  if (t < 0 || t > 1) t -= Math.floor(t);
+  var ts = Math.abs(t - 0.5);
+  c.h = 360 * t - 100;
+  c.s = 1.5 - 1.5 * ts;
+  c.l = 0.8 - 0.9 * ts;
+  return c + "";
+}
+
+function validateRecordFields(record, fail) {
+  for (const field of ["name", "label", "subtitle"]) {
+    if (record[field] != null && typeof record[field] !== "string") fail(`${field} must be text or null`);
+  }
+  if (record.colour != null && (typeof record.colour !== "string" || !color(record.colour))) fail("colour must be a CSS colour or null");
+  if (record.hidden !== undefined && typeof record.hidden !== "boolean") fail("hidden must be boolean");
+  if (record.identity !== undefined && (!Number.isFinite(record.identity) || record.identity < 0 || record.identity > 1)) {
+    fail("identity must be a number from 0 to 1");
+  }
+}
+
 // Link stores retain source order and provide stable ID-to-position lookup.
 // Array stores retain record identity because editing currently mutates records.
 class ArrayLinkStore {
@@ -8534,11 +8580,20 @@ class ArrayLinkStore {
 
 // Immutable columnar link table for canonical, ordered Clinker link IDs.
 // Inputs are copied: callers can mutate their arrays without affecting a chart
-// or an old scene. Arbitrary IDs and edited fields require an overlay, which is
-// deliberately not part of this read-only base representation.
+// or an old scene. Sparse edit overlays share the immutable columns.
+const sharedColumns = Symbol("shared compact columns");
+const editableFields = new Set(["label", "colour", "hidden", "identity"]);
 class CompactLinkStore {
-  #genes; #query; #target; #identity; #similarity;
-  constructor({ genes, query, target, identity, similarity }) {
+  #genes; #query; #target; #identity; #similarity; #overrides; #deleted;
+  constructor(input, mode = null) {
+    if (mode === sharedColumns) {
+      this.#genes = input.#genes; this.#query = input.#query; this.#target = input.#target;
+      this.#identity = input.#identity; this.#similarity = input.#similarity;
+      this.#overrides = new Map(input.#overrides);
+      this.#deleted = input.#deleted.slice();
+      return;
+    }
+    const { genes, query, target, identity, similarity } = input;
     if (!Array.isArray(genes) || !genes.every((uid) => typeof uid === "string" && uid.length)) {
       throw new TypeError("Compact links require a gene ID dictionary.");
     }
@@ -8555,25 +8610,94 @@ class CompactLinkStore {
     this.#genes = Object.freeze([...genes]);
     this.#query = query.slice(); this.#target = target.slice();
     this.#identity = identity.slice(); this.#similarity = similarity.slice();
+    this.#overrides = new Map();
+    this.#deleted = [];
   }
-  get size() { return this.#query.length; }
+  get size() { return this.#query.length - this.#deleted.length; }
   get byteLength() { return this.#query.byteLength + this.#target.byteLength + this.#identity.byteLength + this.#similarity.byteLength; }
-  order(uid) {
+  #deletedBefore(position) {
+    let low = 0, high = this.#deleted.length;
+    while (low < high) { const middle = (low + high) >>> 1;
+      if (this.#deleted[middle] < position) low = middle + 1; else high = middle; }
+    return low;
+  }
+  #physicalForUid(uid) {
     if (typeof uid !== "string" || !/^link-(0|[1-9]\d*)$/.test(uid)) return undefined;
     const position = Number(uid.slice(5));
-    return Number.isSafeInteger(position) && position < this.size ? position : undefined;
+    return Number.isSafeInteger(position) && position < this.#query.length ? position : undefined;
+  }
+  #physicalAt(position) {
+    if (!Number.isInteger(position) || position < 0 || position >= this.size) return undefined;
+    let low = position, high = position + this.#deleted.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (middle - this.#deletedBefore(middle + 1) < position) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  }
+  order(uid) {
+    const position = this.#physicalForUid(uid);
+    if (position === undefined) return undefined;
+    const removedBefore = this.#deletedBefore(position);
+    return this.#deleted[removedBefore] === position ? undefined : position - removedBefore;
   }
   has(uid) { return this.order(uid) !== undefined; }
-  uidAt(position) { return Number.isInteger(position) && position >= 0 && position < this.size ? `link-${position}` : undefined; }
-  queryAt(position) { return this.#genes[this.#query[position]]; }
-  targetAt(position) { return this.#genes[this.#target[position]]; }
+  uidAt(position) { const physical = this.#physicalAt(position); return physical === undefined ? undefined : `link-${physical}`; }
+  queryAt(position) { const physical = this.#physicalAt(position); return this.#genes[this.#query[physical]]; }
+  targetAt(position) { const physical = this.#physicalAt(position); return this.#genes[this.#target[physical]]; }
   getAt(position) {
-    const uid = this.uidAt(position);
-    if (uid === undefined) return undefined;
-    return { uid, query: { uid: this.queryAt(position) }, target: { uid: this.targetAt(position) },
-      identity: this.#identity[position], similarity: this.#similarity[position] };
+    const physical = this.#physicalAt(position);
+    if (physical === undefined) return undefined;
+    return { uid: `link-${physical}`, query: { uid: this.#genes[this.#query[physical]] },
+      target: { uid: this.#genes[this.#target[physical]] }, identity: this.#identity[physical],
+      similarity: this.#similarity[physical], ...this.#overrides.get(physical) };
   }
   get(uid) { const position = this.order(uid); return position === undefined ? undefined : this.getAt(position); }
+  // Return a new view so older scenes and history retain their original data.
+  withUpdates(updates) {
+    if (!Array.isArray(updates)) throw new TypeError("Compact link updates must be an array.");
+    const next = new CompactLinkStore(this, sharedColumns);
+    for (const { uid, changes } of updates) {
+      const position = this.order(uid);
+      if (position === undefined) throw new TypeError(`Unknown compact link ID ${uid}.`);
+      if (!isPlainObject(changes) || !Object.keys(changes).length || Object.keys(changes).some((key) => !editableFields.has(key))) {
+        throw new TypeError("Compact link update contains unsupported fields.");
+      }
+      validateRecordFields(changes, (message) => { throw new TypeError(`Invalid compact link update: ${message}.`); });
+      const physical = this.#physicalForUid(uid);
+      next.#overrides.set(physical, { ...next.#overrides.get(physical), ...changes });
+    }
+    return next;
+  }
+  withDeleted(ids) {
+    if (!Array.isArray(ids)) throw new TypeError("Compact link deletion requires IDs.");
+    const next = new CompactLinkStore(this, sharedColumns), removed = new Set(next.#deleted);
+    for (const uid of ids) {
+      if (!this.has(uid)) throw new TypeError(`Unknown compact link ID ${uid}.`);
+      removed.add(this.#physicalForUid(uid));
+    }
+    next.#deleted = [...removed].sort((a, b) => a - b);
+    return next;
+  }
+  withRestored(records) {
+    if (!Array.isArray(records)) throw new TypeError("Compact link restoration requires records.");
+    const next = new CompactLinkStore(this, sharedColumns);
+    for (const { index, link } of records) {
+      const physical = next.#physicalForUid(link?.uid), deletedIndex = physical === undefined ? -1 : next.#deleted.indexOf(physical);
+      if (deletedIndex < 0 || link.query?.uid !== next.#genes[next.#query[physical]] ||
+          link.target?.uid !== next.#genes[next.#target[physical]] || link.similarity !== next.#similarity[physical] ||
+          Object.keys(link).some((key) => !["uid", "query", "target", "similarity", "identity", "hidden", "label", "colour"].includes(key))) {
+        throw new TypeError("Compact links can only restore deleted canonical records.");
+      }
+      next.#deleted.splice(deletedIndex, 1);
+      if (next.order(link.uid) !== Math.min(index, next.size - 1)) throw new TypeError("Compact link restoration would change canonical order.");
+      const changes = Object.fromEntries(Object.entries(link).filter(([key]) => editableFields.has(key)));
+      validateRecordFields(changes, (message) => { throw new TypeError(`Invalid compact link restoration: ${message}.`); });
+      next.#overrides.set(physical, changes);
+    }
+    return next;
+  }
   *keys() { for (let i = 0; i < this.size; i++) yield this.uidAt(i); }
   *values() { for (let i = 0; i < this.size; i++) yield this.getAt(i); }
   *entries() { for (let i = 0; i < this.size; i++) { const link = this.getAt(i); yield [link.uid, link]; } }
@@ -9273,14 +9397,15 @@ function compactLinkIndexes(store, clusterForGene) {
     if (query !== target) put(genes, target, i);
     if (pair !== null) put(pairs, pair, i);
   }
-  const view = (map, resolve) => ({
+  const view = (map, current, records) => ({
     get size() { return map.size; },
     has: (key) => map.has(key),
-    get: (key) => { const entry = map.get(key); return entry && Array.from(entry.values, resolve); },
+    get: (key) => { const entry = map.get(key); return entry && Array.from(entry.values,
+      (position) => records ? current.getAt(position) : current.uidAt(position)); },
     keys: () => map.keys(),
+    withStore: (next) => view(map, next, records),
   });
-  return { linksByGeneId: view(genes, (position) => store.getAt(position)),
-    linksByClusterPair: view(pairs, (position) => store.uidAt(position)) };
+  return { linksByGeneId: view(genes, store, true), linksByClusterPair: view(pairs, store, false) };
 }
 
 function createChartIndex(data) {
@@ -9337,52 +9462,6 @@ function selectionRange(orderedIds, anchor, id, range = false) {
     anchor: range && start >= 0 ? anchor : id,
     ranged,
   };
-}
-
-function colors(specifier) {
-  var n = specifier.length / 6 | 0, colors = new Array(n), i = 0;
-  while (i < n) colors[i] = "#" + specifier.slice(i * 6, ++i * 6);
-  return colors;
-}
-
-var ramp = scheme => rgbBasis(scheme[scheme.length - 1]);
-
-var scheme = new Array(3).concat(
-  "f0f0f0bdbdbd636363",
-  "f7f7f7cccccc969696525252",
-  "f7f7f7cccccc969696636363252525",
-  "f7f7f7d9d9d9bdbdbd969696636363252525",
-  "f7f7f7d9d9d9bdbdbd969696737373525252252525",
-  "fffffff0f0f0d9d9d9bdbdbd969696737373525252252525",
-  "fffffff0f0f0d9d9d9bdbdbd969696737373525252252525000000"
-).map(colors);
-
-var interpolateGreys = ramp(scheme);
-
-cubehelixLong(cubehelix$1(-100, 0.75, 0.35), cubehelix$1(80, 1.50, 0.8));
-
-cubehelixLong(cubehelix$1(260, 0.75, 0.35), cubehelix$1(80, 1.50, 0.8));
-
-var c = cubehelix$1();
-
-function interpolateRainbow(t) {
-  if (t < 0 || t > 1) t -= Math.floor(t);
-  var ts = Math.abs(t - 0.5);
-  c.h = 360 * t - 100;
-  c.s = 1.5 - 1.5 * ts;
-  c.l = 0.8 - 0.9 * ts;
-  return c + "";
-}
-
-function validateRecordFields(record, fail) {
-  for (const field of ["name", "label", "subtitle"]) {
-    if (record[field] != null && typeof record[field] !== "string") fail(`${field} must be text or null`);
-  }
-  if (record.colour != null && (typeof record.colour !== "string" || !color(record.colour))) fail("colour must be a CSS colour or null");
-  if (record.hidden !== undefined && typeof record.hidden !== "boolean") fail("hidden must be boolean");
-  if (record.identity !== undefined && (!Number.isFinite(record.identity) || record.identity < 0 || record.identity > 1)) {
-    fail("identity must be a number from 0 to 1");
-  }
 }
 
 const fail$3 = (message) => { throw new TypeError(`Invalid tree rooting: ${message}`); };
@@ -10305,6 +10384,12 @@ function assignGenes(groups, groupId, geneIds) {
 function applyOperation(data, index, operation) {
   const updateRecords = fieldsForType[operation.type] && recordsForOperation(index, operation.type);
   if (updateRecords) {
+    if (operation.type === "links.update" && data.links instanceof CompactLinkStore) {
+      data.links = data.links.withUpdates(operation.ids.map((uid) => ({ uid, changes: operation.changes })));
+      index.linkById = data.links;
+      index.linksByGeneId = index.linksByGeneId.withStore(data.links);
+      return;
+    }
     operation.ids.forEach((uid) => Object.assign(updateRecords.get(uid), operation.changes));
     return;
   }
