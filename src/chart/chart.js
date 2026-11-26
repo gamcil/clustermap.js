@@ -9,7 +9,6 @@ import { animate as runAnimation, afterPaint } from "../renderers/animation.mjs"
 import { select } from "d3-selection";
 import { transition as createTransition } from "d3-transition";
 import { zoomIdentity } from "d3-zoom";
-import { createLinkGroups } from "../links/groups.mjs";
 import {
   createChartState,
   commitPreviewClusterOrder,
@@ -36,7 +35,7 @@ import { normalizeChartData, validateTree } from "../data/normalize.mjs";
 import { ANNOTATION_DEFAULTS, ANNOTATION_PALETTES, resolveAnnotationScale,
   annotationPanelsForFrame, annotationPanelBounds, hitTestAnnotationCell, validateAnnotationPanels } from "../annotations/model.mjs";
 import { updateSvgAnnotationViewport } from "../annotations/render.mjs";
-import { applyChartOperations, operationEffects } from "../data/operations.mjs";
+import { applyChartOperations } from "../data/operations.mjs";
 import { isTreePresentationOperation, isTreeTopologyOperation, inverseTreeOperation, applyTreeOperation } from "../tree/operations.mjs";
 import { fitCameraForBounds, worldViewport, worldPoint } from "../scene/camera.mjs";
 import { applyTheme, resolveTheme } from "../ui/theme.mjs";
@@ -76,7 +75,8 @@ import {
   isRasterRenderer,
   isWebGpuRenderer,
 } from "../renderers/mode.mjs";
-import { chartStateFromSnapshot, createChartStateSerializer } from "./snapshot.mjs";
+import { chartStateFromSnapshot } from "./snapshot.mjs";
+import { createChartModel } from "./model.mjs";
 import { configurationEffects } from "./config.js";
 import { sceneCommitForImpact } from "./changeImpact.mjs";
 import { clonePlainValue, isPlainObject } from "../utils/values.mjs";
@@ -85,7 +85,6 @@ let nextChartInstance = 0;
 const projectFormat = "clinker-project";
 const compactFigureFormat = "clustermap-compact-figure";
 const projectVersion = 1;
-const historyLimit = 100;
 const previousConfigPatch = (config, patch) => Object.fromEntries(
   Object.entries(patch || {})
     .filter(([key]) => Object.hasOwn(config || {}, key))
@@ -117,7 +116,7 @@ export default function clusterMap() {
   let themeMedia = null;
   let fontSet = null;
   function fontsChanged() {
-    if (!container || !currentData) return;
+    if (!container || !model.data) return;
     runtime.invalidateTextMetrics();
     sceneCommit = null;
     redraw({ animate: false });
@@ -143,7 +142,7 @@ export default function clusterMap() {
   let cancelClusterCommit = null;
   let sceneCommit = null;
   let rasterCanvas = null, overlayCanvas = null, minimapCanvas = null;
-  let currentData = null;
+  const model = createChartModel();
   let plotData = null;
   let plotDataDirty = true;
   const displayClusterOrder = () => {
@@ -151,7 +150,6 @@ export default function clusterMap() {
     return getClusterOrder(chartState).filter((uid) => ids.has(uid));
   };
   let figureMeasurementContext = null;
-  let chartIndex = null;
   let highlightGeneIds = new Set();
   let highlightLinkIds = new Set();
   let highlightOwner = null;
@@ -174,9 +172,7 @@ export default function clusterMap() {
     finally { updatingTreeMenu = previous; }
   }
   const changeListeners = new Set();
-  const history = [];
-  const future = [];
-  const stateSnapshots = createChartStateSerializer();
+  const stateSnapshots = model.snapshots;
   let pendingInteractionState = null;
   const runtime = createChartRuntime({ idPrefix: `chart-${nextChartInstance++}-`,
     measureText: (text, { textBaseline = "alphabetic", ...style }) => {
@@ -264,7 +260,7 @@ export default function clusterMap() {
       const rows = runtime.scales.y.range();
       if (sourceScene) sceneCommit = { sourceScene, changes: {} };
       commitPreviewClusterOrder(chartState);
-      const treeOrder = setTreeClusterOrder(currentData.tree, order, { partial: chartState.excludedClusters.size > 0 });
+      const treeOrder = setTreeClusterOrder(model.data.tree, order, { partial: chartState.excludedClusters.size > 0 });
       if (treeOrder) chartState.clusterOrder = treeOrder;
       plotDataDirty = true;
       if (sourceScene && isRasterRenderer(runtime.config.plot.renderer)) {
@@ -485,45 +481,24 @@ export default function clusterMap() {
   }
 
   function prepareData(data, state = null) {
-    const index = createChartIndex(data);
-    refreshGroups(data, index);
-    return { data, index, state: state || createChartState(data, chartState) };
+    return model.prepare(data, chartState, state);
   }
 
   function installData({ data, index, state }) {
     cancelSceneWork();
     cancelTreePresentationPreview();
     sceneCommit = null;
-    currentData = data;
+    model.install({ data, index });
     plotDataDirty = true;
-    chartIndex = index;
     chartState = state;
-    runtime.setChartIndex(chartIndex);
+    runtime.setChartIndex(index);
     runtime.setChartState(chartState);
-    stateSnapshots.reset(currentData);
-  }
-
-  function groupsAreAutomatic(data = currentData) {
-    return data?.config?.updateGroups !== false;
-  }
-
-  function refreshGroups(data, index, derive = groupsAreAutomatic(data)) {
-    if (derive) {
-      // Deleted genes retain their link records; exclude dangling endpoints.
-      const links = data.links instanceof CompactLinkStore
-        ? (function* () { for (const link of data.links.values()) {
-            if (index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)) yield link;
-          } })()
-        : data.links.filter((link) => index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid));
-      data.groups = createLinkGroups(links, data.groups);
-    } else data.groups ??= [];
-    index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
   }
 
   function emitChange(change) {
     for (const listener of [...changeListeners]) {
       try {
-        listener({ ...change, data: currentData,
+        listener({ ...change, data: model.data,
           ...(change.config ? { config: clonePlainValue(change.config) } : {}) });
       }
       catch (error) {
@@ -534,7 +509,7 @@ export default function clusterMap() {
   }
 
   function historyStatus() {
-    return { canUndo: history.length > 0, canRedo: future.length > 0 };
+    return model.historyStatus();
   }
 
   function emitHistoryChange() {
@@ -542,21 +517,18 @@ export default function clusterMap() {
   }
 
   function clearHistory(emit = true) {
-    history.length = 0;
-    future.length = 0;
+    model.clearHistory();
     pendingInteractionState = null;
     if (emit) emitHistoryChange();
   }
 
   function commitEdit(complete, { render = { animate: false }, notify = true, replay = null } = {}) {
-    if (render && container && currentData) redraw(render);
+    if (render && container && model.data) redraw(render);
     const { change = null, event } = complete();
     if (replay) {
-      replay.target.push(replay.source.pop());
+      model.completeReplay(replay);
     } else if (change) {
-      history.push(change);
-      if (history.length > historyLimit) history.splice(0, history.length - historyLimit);
-      future.length = 0;
+      model.commit(change);
     }
     if (notify) {
       emitChange(event);
@@ -570,75 +542,42 @@ export default function clusterMap() {
   // the gesture and compare it after the committed layout has synchronized.
   function beginInteractionState() {
     finishLocusFlip();
-    if (!pendingInteractionState && chartState && currentData) {
-      pendingInteractionState = stateSnapshots.serialize(chartState, currentData);
+    if (!pendingInteractionState && chartState && model.data) {
+      pendingInteractionState = stateSnapshots.serialize(chartState, model.data);
     }
   }
 
   function commitInteractionState() {
     const before = pendingInteractionState;
     pendingInteractionState = null;
-    if (!before || !chartState || !currentData) return;
-    const after = stateSnapshots.serialize(chartState, currentData);
+    if (!before || !chartState || !model.data) return;
+    const after = stateSnapshots.serialize(chartState, model.data);
     if (JSON.stringify(before) === JSON.stringify(after)) return;
     commitEdit(() => ({ change: { kind: "state", undo: before, redo: after },
       event: { type: "state.change", state: after } }), { render: false });
   }
 
-  function refreshAfterPatch(effects, { refreshAutomatic = false, indexPrepared = false } = {}) {
-    if (effects.reindex === "data" && !indexPrepared) chartIndex = createChartIndex(currentData);
-    if (effects.reindex || refreshAutomatic) {
-      refreshGroups(currentData, chartIndex, groupsAreAutomatic() && (effects.reindex === "data" || refreshAutomatic));
-      runtime.setChartIndex(chartIndex);
-    }
-    if (effects.rebuildState) {
-      chartState = createChartState(currentData, chartState);
-      runtime.setChartState(chartState);
-    }
-    stateSnapshots.reset(currentData);
-  }
-
   function applyPatch(operations, { record = true, automaticGroups, notify = true, state = null } = {}) {
     const sourceScene = runtime.getScene();
-    const impact = operationEffects(operations);
     sceneCommit = null;
-    // Source edits may mutate currentData in place. Identity alone cannot
-    // invalidate the cached biological defaults, including on undo/redo.
-    if (!impact.presentationOnly) stateSnapshots.reset();
-    const groupsAutomaticBefore = groupsAreAutomatic();
-    const undoState = record && impact.captureState
-      ? stateSnapshots.serialize(chartState, currentData) : null;
-    const result = applyChartOperations(currentData, chartIndex, operations, runtime.config.tree);
-    if (result.effects.refilterLinks || automaticGroups !== undefined) runtime.invalidateLinkFilter();
+    const result = model.applyPatch(operations, chartState, runtime.config.tree, { record, automaticGroups, state });
+    if (result.refilterLinks) runtime.invalidateLinkFilter();
     plotDataDirty = true;
-    const restoringAutomatic = automaticGroups !== undefined && automaticGroups !== groupsAreAutomatic();
-    if (restoringAutomatic) {
-      currentData.config = { ...(currentData.config || {}), updateGroups: automaticGroups };
-    }
-    const groupsAutomaticAfter = groupsAreAutomatic();
-    if (!result.effects.presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
-      refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
-      indexPrepared: result.indexPrepared,
-    });
-    if (state) {
-      chartState = chartStateFromSnapshot(currentData, state);
+    if (result.indexChanged) runtime.setChartIndex(model.index);
+    if (result.stateChanged) {
+      chartState = result.state;
       runtime.setChartState(chartState);
     }
-    if (!restoringAutomatic) sceneCommit = sceneCommitForImpact(sourceScene, result.effects);
-    return commitEdit(() => ({ change: record ? {
-      kind: "patch",
-      undo: result.inverse,
-      redo: result.operations,
-      groupsAutomaticBefore,
-      groupsAutomaticAfter,
-      ...(undoState ? { undoState, redoState: stateSnapshots.serialize(chartState, currentData) } : {}),
+    if (!result.restoringAutomatic) sceneCommit = sceneCommitForImpact(sourceScene, result.effects);
+    return commitEdit(() => ({ change: result.history ? { ...result.history,
+      ...(result.history.undoState ? { redoState: stateSnapshots.serialize(chartState, model.data) } : {}),
     } : null, event: { type: "data.apply", operations: result.operations } }), { notify });
   }
 
   let treePresentationPreview = null;
   function cancelTreePresentationPreview() {
     if (!treePresentationPreview) return false;
-    if (currentData?.tree === treePresentationPreview.tree) applyTreeOperation(currentData.tree, treePresentationPreview.undo);
+    if (model.data?.tree === treePresentationPreview.tree) applyTreeOperation(model.data.tree, treePresentationPreview.undo);
     plotDataDirty = true;
     treePresentationPreview = null;
     return true;
@@ -646,8 +585,8 @@ export default function clusterMap() {
 
   function setState(snapshot, { record = true, notify = true } = {}) {
     if (record) finishLocusFlip();
-    const before = record && chartState ? stateSnapshots.serialize(chartState, currentData) : null;
-    const replacement = chartStateFromSnapshot(currentData, snapshot);
+    const before = record && chartState ? stateSnapshots.serialize(chartState, model.data) : null;
+    const replacement = chartStateFromSnapshot(model.data, snapshot);
     // A layout-only replacement leaves the unfiltered data and link index
     // unchanged. Excluded views still need rebuilding, including their tree.
     const reuseVisibleData = !plotDataDirty && chartState && !chartState.excludedClusters.size &&
@@ -660,7 +599,7 @@ export default function clusterMap() {
     runtime.setChartState(chartState);
     hasInitialView = true;
     return commitEdit(() => {
-      const after = stateSnapshots.serialize(chartState, currentData);
+      const after = stateSnapshots.serialize(chartState, model.data);
       return { change: record ? { kind: "state", undo: before, redo: after } : null,
         event: { type: "state.replace", state: after } };
     }, { notify });
@@ -668,13 +607,13 @@ export default function clusterMap() {
 
   function applyConfiguration(options, { record = true, notify = true } = {}) {
     if (locusFlip) {
-      runtime.validateConfiguration(options, currentData?.tree);
+      runtime.validateConfiguration(options, model.data?.tree);
       finishLocusFlip();
     }
     const sourceScene = runtime.getScene();
     const previousEffective = { ...runtime.config };
-    const before = record && currentData ? previousConfigPatch(runtime.config, options) : null;
-    runtime.configure(options, currentData?.tree);
+    const before = record && model.data ? previousConfigPatch(runtime.config, options) : null;
+    runtime.configure(options, model.data?.tree);
     const effects = configurationEffects(previousEffective, runtime.config);
     cancelTreePresentationPreview();
     sceneCommit = sceneCommitForImpact(sourceScene, effects);
@@ -690,13 +629,13 @@ export default function clusterMap() {
     if (!loci.size) return highlightGeneIds;
     const ids = new Set(highlightGeneIds);
     for (const locusUid of loci) {
-      for (const gene of chartIndex?.locusById.get(locusUid)?.genes || []) ids.add(gene.uid);
+      for (const gene of model.index?.locusById.get(locusUid)?.genes || []) ids.add(gene.uid);
     }
     return ids;
   }
 
   function selectionIds(kind, ids) {
-    const records = kind === "clusters" ? chartIndex?.clusterById : chartIndex?.locusById;
+    const records = kind === "clusters" ? model.index?.clusterById : model.index?.locusById;
     if (!records) return new Set(ids);
     const selected = new Set();
     for (const uid of ids) {
@@ -723,7 +662,7 @@ export default function clusterMap() {
   }
 
   function locusForId(uid) {
-    return recordForId(chartIndex?.locusById, uid);
+    return recordForId(model.index?.locusById, uid);
   }
 
   const chooseLegendColour = (group) => {
@@ -760,7 +699,7 @@ export default function clusterMap() {
     isDragging: () => isDragging(chartState),
     rotateTreeNode: (uid) => {
       if (!container) return;
-      const node = currentData.tree?.nodes.find((entry) => entry.uid === uid);
+      const node = model.data.tree?.nodes.find((entry) => entry.uid === uid);
       if (!node?.children) return;
       beginInteractionState();
       const treeMotion = {
@@ -776,7 +715,7 @@ export default function clusterMap() {
       sceneCommit = { sourceScene: runtime.getScene(), changes: {} };
       node.children.reverse();
       plotDataDirty = true;
-      chartState = createChartState(currentData, chartState);
+      chartState = createChartState(model.data, chartState);
       runtime.setChartState(chartState);
       redraw({ treeMotion });
       commitInteractionState();
@@ -902,7 +841,7 @@ export default function clusterMap() {
       // The data editor intentionally includes links that are hidden by a
       // threshold or best-match setting. They have no scene ribbon, but
       // their endpoints remain useful, focusable context.
-      const link = chartIndex?.linkById.get(uid);
+      const link = model.index?.linkById.get(uid);
       include(scene.genes.get(link?.query.uid)?.bounds);
       include(scene.genes.get(link?.target.uid)?.bounds);
     }
@@ -1037,7 +976,7 @@ export default function clusterMap() {
   };
 
   function redraw({ animate = true, synchronize = true, treeMotion = null, flippedLoci = null } = {}) {
-    if (!currentData || !container) return;
+    if (!model.data || !container) return;
     finishLocusFlip();
     const fonts = container.node().ownerDocument.fonts;
     if (fontSet !== fonts) {
@@ -1057,12 +996,12 @@ export default function clusterMap() {
     const previousScene = runtime.getScene();
     const committedScene = sceneCommit;
     sceneCommit = null;
-    if (!updatingTreeMenu || !retainedOverlay?.isTreeMenuOpen(currentData.tree)) {
+    if (!updatingTreeMenu || !retainedOverlay?.isTreeMenuOpen(model.data.tree)) {
       retainedOverlay?.hide(true);
     }
     if (plotDataDirty) {
-      plotData = visibleChartData(currentData, chartState);
-      runtime.setChartIndex(plotData === currentData ? chartIndex : createChartIndex(plotData));
+      plotData = visibleChartData(model.data, chartState);
+      runtime.setChartIndex(plotData === model.data ? model.index : createChartIndex(plotData));
       plotDataDirty = false;
     }
     plotSelection.ids = selectionIds(plotSelection.kind, plotSelection.ids);
@@ -1157,7 +1096,7 @@ export default function clusterMap() {
           anchorGene: (gene) => anchorGene(gene, { flipMismatchedLoci: true }),
           get revealGene() { return runtime.config.gene.shape.onReveal; },
           get revealGroup() { return runtime.config.legend.onReveal; },
-          getGroups: () => currentData.groups,
+          getGroups: () => model.data.groups,
         },
       });
       container
@@ -1181,7 +1120,7 @@ export default function clusterMap() {
     applyCamera(svg.select("g.clusterMapViewport"));
 
     const presentationOnly = Boolean(committedScene?.changes.presentationOnly);
-    const scene = runtime.updateScene(data, { ...committedScene, synchronize, sourceData: currentData });
+    const scene = runtime.updateScene(data, { ...committedScene, synchronize, sourceData: model.data });
 
     if (useRaster) {
       if (!hasInitialView) fitInitialView(canvas, scene);
@@ -1210,7 +1149,7 @@ export default function clusterMap() {
             editData: (panelUid) => !container.node().dispatchEvent(new CustomEvent("clustermap:edit-annotation", {
               bubbles: true, cancelable: true, detail: { chart: my, panelUid },
             })),
-            getData: () => currentData,
+            getData: () => model.data,
             patch: (operations) => my.patch(operations) });
           annotationOverlay.update(annotationUiContext);
         }).catch((error) => console.error("Could not load optional annotation controls", error))
@@ -1272,7 +1211,7 @@ export default function clusterMap() {
   const dataReadView = (data) => data?.links instanceof CompactLinkStore
     ? { ...data, links: linkArrayView(data.links) } : data;
   my.data = function (data) {
-    if (!arguments.length) return dataReadView(currentData);
+    if (!arguments.length) return dataReadView(model.data);
     if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
     const prepared = prepareData(normalizeChartData(data, runtime.config.tree));
     installData(prepared);
@@ -1295,24 +1234,24 @@ export default function clusterMap() {
   };
   /** Replace only the tree; biological data and chart indexes remain owned by the chart. */
   my.tree = function (tree) {
-    if (!arguments.length) return currentData?.tree ? clonePlainValue(currentData.tree) : null;
-    if (!container || !currentData) throw new Error("Cannot replace the tree before the chart has rendered.");
+    if (!arguments.length) return model.data?.tree ? clonePlainValue(model.data.tree) : null;
+    if (!container || !model.data) throw new Error("Cannot replace the tree before the chart has rendered.");
     const next = tree == null ? null : clonePlainValue(tree);
     if (next) {
-      validateTree(next, currentData.clusters);
+      validateTree(next, model.data.clusters);
       validateTreePresentation(next, runtime.config.tree);
     }
-    validateAnnotationPanels(currentData.annotationPanels, currentData.clusters, { tree: next });
+    validateAnnotationPanels(model.data.annotationPanels, model.data.clusters, { tree: next });
     finishLocusFlip();
     cancelTreePresentationPreview();
     cancelSceneWork();
     const sourceScene = runtime.getScene();
-    if (next) currentData.tree = next;
-    else delete currentData.tree;
+    if (next) model.data.tree = next;
+    else delete model.data.tree;
     if (next) chartState.clusterOrder = treeClusterOrder(next);
     // With exclusions, regenerate the pruned tree and annotation aliases.
-    // Otherwise plotData is currentData and the biological indexes remain valid.
-    plotDataDirty = plotData !== currentData;
+    // Otherwise plotData is model.data and the biological indexes remain valid.
+    plotDataDirty = plotData !== model.data;
     sceneCommit = sourceScene ? { sourceScene, changes: {} } : null;
     redraw({ animate: false });
     clearHistory(false);
@@ -1321,15 +1260,15 @@ export default function clusterMap() {
     return my;
   };
   my.remove = function ({ clusters = [], loci = [] } = {}) {
-    if (!container || !chartState || !chartIndex) throw new Error("Cannot remove records before the chart has rendered.");
+    if (!container || !chartState || !model.index) throw new Error("Cannot remove records before the chart has rendered.");
     const validate = (ids, records, kind) => {
       if (!Array.isArray(ids) || ids.some((uid) => !records.has(uid))) throw new TypeError(`Unknown ${kind} IDs.`);
     };
-    validate(clusters, chartIndex.clusterById, "cluster");
-    validate(loci, chartIndex.locusById, "locus");
+    validate(clusters, model.index.clusterById, "cluster");
+    validate(loci, model.index.locusById, "locus");
     finishLocusFlip();
     cancelTreePresentationPreview();
-    const snapshot = stateSnapshots.serialize(chartState, currentData);
+    const snapshot = stateSnapshots.serialize(chartState, model.data);
     snapshot.excludedClusters = [...new Set([...(snapshot.excludedClusters || []), ...clusters])];
     snapshot.excludedLoci = [...new Set([...(snapshot.excludedLoci || []), ...loci])];
     if (snapshot.excludedClusters.length !== chartState.excludedClusters.size ||
@@ -1338,8 +1277,8 @@ export default function clusterMap() {
   };
   /** A serializable layout and camera snapshot for project persistence. */
   my.state = function (snapshot) {
-    if (!arguments.length) return chartState ? stateSnapshots.serialize(chartState, currentData) : null;
-    if (!container || !currentData) {
+    if (!arguments.length) return chartState ? stateSnapshots.serialize(chartState, model.data) : null;
+    if (!container || !model.data) {
       throw new Error("Cannot replace chart state before the chart has rendered.");
     }
     setState(snapshot);
@@ -1391,9 +1330,9 @@ export default function clusterMap() {
     if (!arguments.length) {
       // The legacy object snapshot remains independently owned. A compact
       // table expands only for this explicit API; Blob export streams it.
-      const data = currentData?.links instanceof CompactLinkStore
-        ? { ...structuredClone({ ...currentData, links: [] }), links: [...currentData.links.values()] }
-        : structuredClone(currentData);
+      const data = model.data?.links instanceof CompactLinkStore
+        ? { ...structuredClone({ ...model.data, links: [] }), links: [...model.data.links.values()] }
+        : structuredClone(model.data);
       if (treePresentationPreview && data?.tree) applyTreeOperation(data.tree, treePresentationPreview.undo);
       return {
         format: projectFormat,
@@ -1403,7 +1342,7 @@ export default function clusterMap() {
         // Callback hooks are intentionally omitted and can be reattached by
         // the consumer after loading.
         config: serializableConfig(runtime.config),
-        state: chartState ? stateSnapshots.serialize(chartState, currentData) : null,
+        state: chartState ? stateSnapshots.serialize(chartState, model.data) : null,
       };
     }
     if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
@@ -1429,19 +1368,19 @@ export default function clusterMap() {
     redraw({ animate: false });
     emitChange({ type: "data.replace" });
     emitChange({ type: "config.change", config: runtime.config });
-    if (snapshot.state) emitChange({ type: "state.replace", state: stateSnapshots.serialize(chartState, currentData) });
+    if (snapshot.state) emitChange({ type: "state.replace", state: stateSnapshots.serialize(chartState, model.data) });
     emitHistoryChange();
     return my;
   };
   /** Serialize a project without cloning its complete biological data. */
   my.exportProjectBlob = function ({ extensions = {} } = {}) {
-    if (!currentData) throw new Error("Cannot export a project before the chart has rendered.");
+    if (!model.data) throw new Error("Cannot export a project before the chart has rendered.");
     if (!isPlainObject(extensions)) throw new TypeError("Project extensions must be a plain object.");
-    let data = currentData;
-    if (treePresentationPreview && currentData.tree) {
-      const tree = structuredClone(currentData.tree);
+    let data = model.data;
+    if (treePresentationPreview && model.data.tree) {
+      const tree = structuredClone(model.data.tree);
       applyTreeOperation(tree, treePresentationPreview.undo);
-      data = { ...currentData, tree };
+      data = { ...model.data, tree };
     }
     const fields = {};
     for (const key of Object.keys(extensions)) {
@@ -1451,23 +1390,23 @@ export default function clusterMap() {
     }
     return projectBlob({ ...fields, format: projectFormat, version: projectVersion, data,
       config: serializableConfig(runtime.config),
-      state: chartState ? stateSnapshots.serialize(chartState, currentData) : null });
+      state: chartState ? stateSnapshots.serialize(chartState, model.data) : null });
   };
   /** Serialize figure data and sparse link edits against a host-owned base. */
   my.exportCompactProjectBlob = function ({ base } = {}) {
-    if (!currentData) throw new Error("Cannot export a project before the chart has rendered.");
-    const links = currentData.links;
+    if (!model.data) throw new Error("Cannot export a project before the chart has rendered.");
+    const links = model.data.links;
     if (!(base instanceof CompactLinkStore) || !base.isUnedited || !(links instanceof CompactLinkStore) || !links.sharesBase(base)) {
       throw new TypeError("Compact figure export requires its original unedited link base.");
     }
-    const { links: omitted, ...data } = currentData;
+    const { links: omitted, ...data } = model.data;
     if (treePresentationPreview && data.tree) {
       data.tree = structuredClone(data.tree);
       applyTreeOperation(data.tree, treePresentationPreview.undo);
     }
     return projectBlob({ format: compactFigureFormat, version: 1, data,
       config: serializableConfig(runtime.config),
-      state: chartState ? stateSnapshots.serialize(chartState, currentData) : null,
+      state: chartState ? stateSnapshots.serialize(chartState, model.data) : null,
       linkEdits: links.snapshotEdits() });
   };
   /** Load a compact figure using the host's matching unedited base table. */
@@ -1484,7 +1423,7 @@ export default function clusterMap() {
   // Do not name this `apply`: D3 invokes callable charts through
   // Function.prototype.apply when mounting them.
   my.patch = (operations) => {
-    if (!container || !currentData || !chartIndex) {
+    if (!container || !model.data || !model.index) {
       throw new Error("Cannot patch chart data before the chart has rendered.");
     }
     finishLocusFlip();
@@ -1495,7 +1434,7 @@ export default function clusterMap() {
   my.rotateTreeNode = (uid) => { cancelTreePresentationPreview(); rendererInteractions.rotateTreeNode(uid); return my; };
   /** Transient tree styles; patch commits once, null cancels the preview. */
   my.previewTreePresentation = (operations) => {
-    const tree = currentData?.tree;
+    const tree = model.data?.tree;
     if (!operations && !treePresentationPreview) return my;
     if (!tree) throw new Error("Tree presentation preview requires a loaded tree.");
     if (operations && (!Array.isArray(operations) || operations.some((op) => !isTreePresentationOperation(op)))) {
@@ -1507,7 +1446,7 @@ export default function clusterMap() {
     if (sourceScene) sceneCommit = { sourceScene, changes: { presentationOnly: true } };
     if (operations) {
       const undo = inverseTreeOperation(tree);
-      try { applyChartOperations(currentData, chartIndex, operations, runtime.config.tree); }
+      try { applyChartOperations(model.data, model.index, operations, runtime.config.tree); }
       catch (error) { redraw({ animate: false }); throw error; }
       treePresentationPreview = { tree, undo };
       plotDataDirty = true;
@@ -1515,16 +1454,16 @@ export default function clusterMap() {
     redraw({ animate: false });
     return my;
   };
-  my.canUndo = () => history.length > 0;
-  my.canRedo = () => future.length > 0;
+  my.canUndo = () => model.historyStatus().canUndo;
+  my.canRedo = () => model.historyStatus().canRedo;
   my.clearHistory = () => {
     clearHistory();
     return my;
   };
-  function replayHistory(source, target, direction) {
+  function replayHistory(direction) {
     finishLocusFlip();
     const cancelled = cancelTreePresentationPreview();
-    const change = source.at(-1);
+    const change = model.peek(direction);
     if (!change) { if (cancelled) redraw({ animate: false }); return my; }
     const value = change[direction];
     let event;
@@ -1537,11 +1476,11 @@ export default function clusterMap() {
     } else if (change.kind === "state" && value) {
       event = setState(value, { record: false, notify: false });
     }
-    commitEdit(() => ({ event }), { render: false, replay: { source, target } });
+    commitEdit(() => ({ event }), { render: false, replay: direction });
     return my;
   }
-  my.undo = () => replayHistory(history, future, "undo");
-  my.redo = () => replayHistory(future, history, "redo");
+  my.undo = () => replayHistory("undo");
+  my.redo = () => replayHistory("redo");
   my.highlight = function (ids, { owner = null } = {}) {
     if (!arguments.length) return [...highlightGeneIds];
     const isScopedHighlight = ids && typeof ids === "object" && !Array.isArray(ids) && typeof ids[Symbol.iterator] !== "function";
@@ -1558,7 +1497,7 @@ export default function clusterMap() {
     ) return my;
     highlightGeneIds = nextGenes;
     highlightLinkIds = nextLinks;
-    if (!container || !currentData) return my;
+    if (!container || !model.data) return my;
     if (isRasterRenderer(runtime.config.plot.renderer)) scheduleScenePaint();
     else redraw({ animate: false });
     return my;
@@ -1574,7 +1513,7 @@ export default function clusterMap() {
     if (kind !== plotSelection.kind || !next.size) selectionAnchor = null;
     plotSelection = { kind, ids: next };
     canvasBackend.clearFlip();
-    if (container && currentData) {
+    if (container && model.data) {
       if (isRasterRenderer(runtime.config.plot.renderer)) scheduleScenePaint();
       else redraw({ animate: false });
     }
@@ -1589,20 +1528,20 @@ export default function clusterMap() {
     return arguments.length ? my.selection({ kind: "clusters", ids }) : [...selectedClusterIds()];
   };
   function editLoci(action, update, ids = selectedLoci(), animate = false) {
-    if (!container || !currentData || !chartIndex || !chartState) {
+    if (!container || !model.data || !model.index || !chartState) {
       throw new Error(`Cannot ${action} loci before the chart has rendered.`);
     }
     const loci = [...new Set(ids || [])].map(locusForId).filter(Boolean);
     if (!loci.length) return my;
     finishLocusFlip();
     const sourceScene = runtime.getScene();
-    const before = stateSnapshots.serialize(chartState, currentData);
+    const before = stateSnapshots.serialize(chartState, model.data);
     let changed = false;
     for (const locus of loci) changed = update(chartState, locus) || changed;
     if (!changed) return my;
     cancelSceneWork();
     if (sourceScene) sceneCommit = { sourceScene, changes: { loci: loci.map((locus) => locus.uid) } };
-    commitEdit(() => ({ change: { kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) },
+    commitEdit(() => ({ change: { kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, model.data) },
       event: { type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) } }),
     { render: { animate, flippedLoci: action === "flip" ? loci.map((locus) => locus.uid) : null } });
     return my;
@@ -1697,7 +1636,8 @@ export default function clusterMap() {
     rasterScene = null;
     rasterCanvas = overlayCanvas = minimapCanvas = null;
     sceneCommit = null;
-    chartIndex = currentData = chartState = null;
+    model.clear();
+    chartState = null;
     clearHistory(false);
     runtime.reset();
     highlightGeneIds.clear();
