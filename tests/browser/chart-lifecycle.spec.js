@@ -446,3 +446,49 @@ for (const renderer of ["svg", "canvas"]) {
     expect(result.afterFilterChange).toBeGreaterThan(0);
   });
 }
+
+test("batch flips display intermediate WebGPU fallback frames and commit the final state", async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, "gpu", { configurable: true, value: undefined }));
+  await page.goto("http://127.0.0.1:8080/demo/?test=1");
+  await page.addScriptTag({ url: "/node_modules/d3/dist/d3.min.js" });
+  await page.evaluate(async () => {
+    const { ClusterMap } = await import("/dist/clustermap.mjs");
+    const host = document.createElement("div"); host.style.width = "800px"; host.style.height = "400px";
+    document.body.append(host);
+    const ids = ["a", "b"];
+    const data = { clusters: ids.map((uid) => ({ uid, name: uid, loci: [{ uid: `l-${uid}`, start: 0, end: 100,
+      genes: [{ uid, start: 10, end: 35, strand: 1 }] }] })),
+      links: [{ uid: "link", query: { uid: "a" }, target: { uid: "b" }, identity: 0.9 }],
+      groups: [{ uid: "group", genes: ids }], config: { updateGroups: false } };
+    const chart = ClusterMap().config({ plot: { renderer: "webgpu", transitionDuration: 2400 } });
+    window.__batchFlipChart = chart;
+    d3.select(host).datum(data).call(chart);
+  });
+  await expect.poll(() => page.evaluate(() => window.__batchFlipChart.rendererStatus().state)).toBe("fallback");
+  const frames = await page.evaluate(async () => {
+    const chart = window.__batchFlipChart;
+    const canvas = document.querySelector(".clusterMapWebGpuOverlay");
+    const frame = () => canvas.toDataURL();
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const before = frame();
+    chart.flipLoci(["l-a", "l-b"]);
+    await wait(700); const early = frame();
+    await wait(600); const middle = frame();
+    await wait(1500); const after = frame();
+    const strands = [...new Map(chart.state().genes).values()].map((gene) => gene.strand);
+    chart.flipLoci(["l-a", "l-b"]);
+    await wait(300);
+    chart.undo();
+    await wait(100); const cancelled = frame();
+    await wait(400); const settled = frame();
+    const restoredStrands = [...new Map(chart.state().genes).values()].map((gene) => gene.strand);
+    chart.destroy();
+    return { before, early, middle, after, strands, cancelled, settled, restoredStrands };
+  });
+  expect(frames.early).not.toEqual(frames.before);
+  expect(frames.middle).not.toEqual(frames.early);
+  expect(frames.after).not.toEqual(frames.middle);
+  expect(frames.strands).toEqual([-1, -1]);
+  expect(frames.restoredStrands).toEqual([-1, -1]);
+  expect(frames.cancelled).toEqual(frames.settled);
+});

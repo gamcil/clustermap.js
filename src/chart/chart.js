@@ -57,6 +57,7 @@ import {
   interpolateScene,
   createClusterDragPreview,
   createLocusFlipPreview,
+  createLocusFlipTransition,
   createLocusOffsetsPreview,
   createLocusTrimPreview,
 } from "../scene/preview.mjs";
@@ -966,17 +967,27 @@ export default function clusterMap() {
   }
 
   function stopRasterAnimation() {
+    if (rasterAnimation?.flipPreview && scenePreview === rasterAnimation.flipPreview) scenePreview = null;
     rasterAnimation?.cancel();
     rasterAnimation = null;
   }
 
-  function animateRaster(scene, animate, sourceScene, treeMotion) {
+  function animateRaster(scene, animate, sourceScene, treeMotion, flippedLoci) {
     const renderer = runtime.config.plot.renderer;
     const useWebGpu = isWebGpuRenderer(renderer);
     const previousScene = useWebGpu ? rasterScene : rasterAnimation?.previousScene || rasterScene;
     stopRasterAnimation();
     const duration = runtime.config.plot.transitionDuration;
+    // Retain GPU geometry for pure locus flips; fall back for other changes.
+    const flipPreview = useWebGpu && previousScene === sourceScene && flippedLoci?.length
+      ? createLocusFlipTransition(previousScene, scene, flippedLoci, {
+          clusterLabelTexts: new Map(flippedLoci.flatMap((uid) => {
+            const cluster = previousScene.loci.get(uid)?.cluster.uid;
+            return cluster === undefined ? [] : [[cluster, runtime.locusTextForCluster(cluster)]];
+          })),
+        }) : null;
     const finish = () => {
+      if (rasterAnimation?.flipPreview && scenePreview === rasterAnimation.flipPreview) scenePreview = null;
       rasterAnimation = null;
       rasterScene = scene;
       if (useWebGpu) webgpuBackend.setScene(scene, { sourceScene, scales: runtime.scales, config: runtime.renderConfig });
@@ -988,7 +999,10 @@ export default function clusterMap() {
       tree: treeMotion ? { ...treeMotion, targetScene: scene } : null };
     rasterAnimation.cancel = runAnimation(duration, (progress) => {
       rasterAnimation.progress = progress;
-      if (useWebGpu) rasterScene = interpolateScene(previousScene, scene, progress);
+      if (flipPreview) {
+        scenePreview = rasterAnimation.flipPreview = { ...flipPreview, progress };
+        rasterScene = previousScene;
+      } else if (useWebGpu) rasterScene = interpolateScene(previousScene, scene, progress);
       paintScene();
     }, finish);
   }
@@ -1012,7 +1026,7 @@ export default function clusterMap() {
     setCursor: (surface, cursor) => select(surface).style("cursor", cursor),
   };
 
-  function redraw({ animate = true, synchronize = true, treeMotion = null } = {}) {
+  function redraw({ animate = true, synchronize = true, treeMotion = null, flippedLoci = null } = {}) {
     if (!currentData || !container) return;
     finishLocusFlip();
     const fonts = container.node().ownerDocument.fonts;
@@ -1162,7 +1176,7 @@ export default function clusterMap() {
     if (useRaster) {
       if (!hasInitialView) fitInitialView(canvas, scene);
       scheduleMinimapBase(scene);
-      animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene, treeMotion);
+      animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene, treeMotion, flippedLoci);
     } else {
       paintSvg({ presentationOnly, previousScene, animate: hasInitialView && animate, treeMotion });
 
@@ -1579,7 +1593,8 @@ export default function clusterMap() {
     cancelSceneWork();
     if (sourceScene) sceneCommit = { sourceScene, changes: { loci: loci.map((locus) => locus.uid) } };
     commitEdit(() => ({ change: { kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) },
-      event: { type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) } }), { render: { animate } });
+      event: { type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) } }),
+    { render: { animate, flippedLoci: action === "flip" ? loci.map((locus) => locus.uid) : null } });
     return my;
   }
   /** Flip supplied loci, or the current selection, as one operation. */

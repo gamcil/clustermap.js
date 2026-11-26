@@ -5971,23 +5971,49 @@
   ) {
     const locus = scene.loci.get(locusUid);
     if (!locus) return null;
+    return createLocusFlipsPreview(scene, [locusUid], {
+      progress,
+      clusterLabelTexts: clusterLabelText === null ? null : new Map([[clusterUidForLocus(locus), clusterLabelText]]),
+    });
+  }
+
+  /** Describe simultaneous flips against a shared, unchanged source scene. */
+  function createLocusFlipsPreview(scene, locusIds, { progress = 0, clusterLabelTexts = null } = {}) {
+    const axes = new Map();
+    for (const uid of locusIds) {
+      const locus = scene.loci.get(uid);
+      if (locus) axes.set(uid, (locus.worldStart + locus.worldEnd) / 2);
+    }
+    if (!axes.size) return null;
     return {
       type: "locus-flip",
-      locusUid,
+      locusUid: axes.keys().next().value,
       progress,
-      ...(clusterLabelText === null
-        ? {}
-        : {
-            clusterLabelTexts: new Map([[
-              clusterUidForLocus(locus),
-              clusterLabelText,
-            ]]),
-          }),
+      ...(clusterLabelTexts === null ? {} : { clusterLabelTexts }),
       // The projected bounds reflect the currently displayed locus, including
       // any committed trim. Source coordinates describe the original record and
       // must not determine the transient flip axis.
-      axes: new Map([[locusUid, (locus.worldStart + locus.worldEnd) / 2]]),
+      axes,
     };
+  }
+
+  // Shader flips are exact only when no row or locus translates or resizes.
+  function createLocusFlipTransition(source, target, locusIds, { clusterLabelTexts = null } = {}) {
+    const selected = new Set(locusIds || []), changes = target?.changes;
+    if (!source || !selected.size || !changes?.clusters || !changes?.loci) return null;
+    for (const uid of changes.clusters) {
+      const before = source.clusters.get(uid), after = target.clusters.get(uid);
+      if (!before || !after || before.x !== after.x || before.y !== after.y) return null;
+    }
+    for (const uid of changes.loci) {
+      const before = source.loci.get(uid), after = target.loci.get(uid);
+      if (!before || !after || before.x !== after.x || before.y !== after.y ||
+          before.worldStart !== after.worldStart || before.worldEnd !== after.worldEnd ||
+          before.state.start !== after.state.start || before.state.end !== after.state.end ||
+          (selected.has(uid) ? before.state.flipped === after.state.flipped : before.state.flipped !== after.state.flipped)) return null;
+    }
+    if ([...selected].some((uid) => !changes.loci.has(uid))) return null;
+    return createLocusFlipsPreview(source, selected, { clusterLabelTexts });
   }
 
   /** Describe temporary cluster rows without rebuilding a scene. */
@@ -6089,8 +6115,8 @@
       const query = scene.genes.get(link.source.query.uid);
       const target = scene.genes.get(link.source.target.uid);
       const affected = preview.type === "cluster-drag" ||
-        query?.locus?.source?.uid === preview.locusUid ||
-        target?.locus?.source?.uid === preview.locusUid;
+        preview.axes?.has(query?.locus?.source?.uid) ||
+        preview.axes?.has(target?.locus?.source?.uid);
       return { visible, anchors: visible && affected ? previewLinkAnchors(scene, link, preview) : link.anchors };
     }
     const anchors = link.anchors;
@@ -6145,7 +6171,7 @@
     if (preview.type === "locus-offsets") {
       for (const locusUid of preview.locusOffsets.keys()) loci.add(locusUid);
     }
-    if (preview.type === "locus-flip") loci.add(preview.locusUid);
+    if (preview.type === "locus-flip") for (const uid of preview.axes.keys()) loci.add(uid);
     if (preview.type === "locus-trim") {
       const trimmed = scene.loci.get(preview.locusUid);
       const clusterUid = trimmed?.cluster?.uid ?? trimmed?.source?.clusterUid;
@@ -15964,7 +15990,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       for (let slot = 0; slot < locusTransformCapacity; slot++) transforms[slot * 4 + 2] = 1;
       if (isLocusTransformPreview(nextPreview)) {
         const ids = nextPreview.type === "locus-offsets"
-          ? nextPreview.locusOffsets.keys() : [nextPreview.locusUid];
+          ? nextPreview.locusOffsets.keys() : nextPreview.axes.keys();
         for (const uid of ids) {
           const slot = geometry.locusSlots.get(uid);
           if (slot === undefined) continue;
@@ -17822,17 +17848,27 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     }
 
     function stopRasterAnimation() {
+      if (rasterAnimation?.flipPreview && scenePreview === rasterAnimation.flipPreview) scenePreview = null;
       rasterAnimation?.cancel();
       rasterAnimation = null;
     }
 
-    function animateRaster(scene, animate$1, sourceScene, treeMotion) {
+    function animateRaster(scene, animate$1, sourceScene, treeMotion, flippedLoci) {
       const renderer = runtime.config.plot.renderer;
       const useWebGpu = isWebGpuRenderer(renderer);
       const previousScene = useWebGpu ? rasterScene : rasterAnimation?.previousScene || rasterScene;
       stopRasterAnimation();
       const duration = runtime.config.plot.transitionDuration;
+      // Retain GPU geometry for pure locus flips; fall back for other changes.
+      const flipPreview = useWebGpu && previousScene === sourceScene && flippedLoci?.length
+        ? createLocusFlipTransition(previousScene, scene, flippedLoci, {
+            clusterLabelTexts: new Map(flippedLoci.flatMap((uid) => {
+              const cluster = previousScene.loci.get(uid)?.cluster.uid;
+              return cluster === undefined ? [] : [[cluster, runtime.locusTextForCluster(cluster)]];
+            })),
+          }) : null;
       const finish = () => {
+        if (rasterAnimation?.flipPreview && scenePreview === rasterAnimation.flipPreview) scenePreview = null;
         rasterAnimation = null;
         rasterScene = scene;
         if (useWebGpu) webgpuBackend.setScene(scene, { sourceScene, scales: runtime.scales, config: runtime.renderConfig });
@@ -17844,7 +17880,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         tree: treeMotion ? { ...treeMotion, targetScene: scene } : null };
       rasterAnimation.cancel = animate(duration, (progress) => {
         rasterAnimation.progress = progress;
-        if (useWebGpu) rasterScene = interpolateScene(previousScene, scene, progress);
+        if (flipPreview) {
+          scenePreview = rasterAnimation.flipPreview = { ...flipPreview, progress };
+          rasterScene = previousScene;
+        } else if (useWebGpu) rasterScene = interpolateScene(previousScene, scene, progress);
         paintScene();
       }, finish);
     }
@@ -17868,7 +17907,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       setCursor: (surface, cursor) => select(surface).style("cursor", cursor),
     };
 
-    function redraw({ animate = true, synchronize = true, treeMotion = null } = {}) {
+    function redraw({ animate = true, synchronize = true, treeMotion = null, flippedLoci = null } = {}) {
       if (!currentData || !container) return;
       finishLocusFlip();
       const fonts = container.node().ownerDocument.fonts;
@@ -18018,7 +18057,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       if (useRaster) {
         if (!hasInitialView) fitInitialView(canvas, scene);
         scheduleMinimapBase(scene);
-        animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene, treeMotion);
+        animateRaster(scene, hasInitialView && animate, committedScene?.sourceScene, treeMotion, flippedLoci);
       } else {
         paintSvg({ presentationOnly, previousScene, animate: hasInitialView && animate, treeMotion });
 
@@ -18435,7 +18474,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       cancelSceneWork();
       if (sourceScene) sceneCommit = { sourceScene, changes: { loci: loci.map((locus) => locus.uid) } };
       commitEdit(() => ({ change: { kind: "state", undo: before, redo: stateSnapshots.serialize(chartState, currentData) },
-        event: { type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) } }), { render: { animate } });
+        event: { type: `loci.${action}`, locusIds: loci.map((locus) => locus.uid) } }),
+      { render: { animate, flippedLoci: action === "flip" ? loci.map((locus) => locus.uid) : null } });
       return my;
     }
     /** Flip supplied loci, or the current selection, as one operation. */

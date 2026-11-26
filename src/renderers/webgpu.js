@@ -1098,7 +1098,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     for (let slot = 0; slot < locusTransformCapacity; slot++) transforms[slot * 4 + 2] = 1;
     if (isLocusTransformPreview(nextPreview)) {
       const ids = nextPreview.type === "locus-offsets"
-        ? nextPreview.locusOffsets.keys() : [nextPreview.locusUid];
+        ? nextPreview.locusOffsets.keys() : nextPreview.axes.keys();
       for (const uid of ids) {
         const slot = geometry.locusSlots.get(uid);
         if (slot === undefined) continue;

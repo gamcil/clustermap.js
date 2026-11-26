@@ -5,6 +5,8 @@ test("scene derives world-space geometry without DOM state", async () => {
   const [{ buildScene, patchScene }, {
     createClusterDragPreview,
     createLocusFlipPreview,
+    createLocusFlipsPreview,
+    linkGeometryForPreview,
     createLocusOffsetsPreview,
     createLocusTrimPreview,
     clusterLabelTextForPreview,
@@ -284,6 +286,12 @@ test("scene derives world-space geometry without DOM state", async () => {
   assert.equal(hitTest(scene, { x: 9, y: 11 }).geneUid, "top-gene");
   assert.equal(hitTest(scene, { x: 200, y: 200 }), null);
   assert.deepEqual(scene.links.get("link").anchors, [8, 14, 11, 28, 22, 41]);
+  const batchFlip = createLocusFlipsPreview(scene, ["top-locus", "bottom-locus"], { progress: 0.25 });
+  const batchAnchors = linkGeometryForPreview(scene, scene.links.get("link"), batchFlip, { link: { show: true } }).anchors;
+  const firstOnly = linkGeometryForPreview(scene, scene.links.get("link"),
+    createLocusFlipPreview(scene, "top-locus", { progress: 0.25 }), { link: { show: true } }).anchors;
+  assert.notDeepEqual(batchAnchors.slice(0, 2), scene.links.get("link").anchors.slice(0, 2));
+  assert.notDeepEqual(batchAnchors.slice(3, 5), firstOnly.slice(3, 5));
   assert.equal(scene.links.get("link").visible, true);
   assert.deepEqual([...queryViewport(scene.index.genes, { minX: 7, maxX: 15, minY: 0, maxY: 22 })], [
     "top-gene",

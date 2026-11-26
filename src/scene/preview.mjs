@@ -237,23 +237,49 @@ export function createLocusFlipPreview(
 ) {
   const locus = scene.loci.get(locusUid);
   if (!locus) return null;
+  return createLocusFlipsPreview(scene, [locusUid], {
+    progress,
+    clusterLabelTexts: clusterLabelText === null ? null : new Map([[clusterUidForLocus(locus), clusterLabelText]]),
+  });
+}
+
+/** Describe simultaneous flips against a shared, unchanged source scene. */
+export function createLocusFlipsPreview(scene, locusIds, { progress = 0, clusterLabelTexts = null } = {}) {
+  const axes = new Map();
+  for (const uid of locusIds) {
+    const locus = scene.loci.get(uid);
+    if (locus) axes.set(uid, (locus.worldStart + locus.worldEnd) / 2);
+  }
+  if (!axes.size) return null;
   return {
     type: "locus-flip",
-    locusUid,
+    locusUid: axes.keys().next().value,
     progress,
-    ...(clusterLabelText === null
-      ? {}
-      : {
-          clusterLabelTexts: new Map([[
-            clusterUidForLocus(locus),
-            clusterLabelText,
-          ]]),
-        }),
+    ...(clusterLabelTexts === null ? {} : { clusterLabelTexts }),
     // The projected bounds reflect the currently displayed locus, including
     // any committed trim. Source coordinates describe the original record and
     // must not determine the transient flip axis.
-    axes: new Map([[locusUid, (locus.worldStart + locus.worldEnd) / 2]]),
+    axes,
   };
+}
+
+// Shader flips are exact only when no row or locus translates or resizes.
+export function createLocusFlipTransition(source, target, locusIds, { clusterLabelTexts = null } = {}) {
+  const selected = new Set(locusIds || []), changes = target?.changes;
+  if (!source || !selected.size || !changes?.clusters || !changes?.loci) return null;
+  for (const uid of changes.clusters) {
+    const before = source.clusters.get(uid), after = target.clusters.get(uid);
+    if (!before || !after || before.x !== after.x || before.y !== after.y) return null;
+  }
+  for (const uid of changes.loci) {
+    const before = source.loci.get(uid), after = target.loci.get(uid);
+    if (!before || !after || before.x !== after.x || before.y !== after.y ||
+        before.worldStart !== after.worldStart || before.worldEnd !== after.worldEnd ||
+        before.state.start !== after.state.start || before.state.end !== after.state.end ||
+        (selected.has(uid) ? before.state.flipped === after.state.flipped : before.state.flipped !== after.state.flipped)) return null;
+  }
+  if ([...selected].some((uid) => !changes.loci.has(uid))) return null;
+  return createLocusFlipsPreview(source, selected, { clusterLabelTexts });
 }
 
 /** Describe temporary cluster rows without rebuilding a scene. */
@@ -355,8 +381,8 @@ export function linkGeometryForPreview(scene, link, preview, config) {
     const query = scene.genes.get(link.source.query.uid);
     const target = scene.genes.get(link.source.target.uid);
     const affected = preview.type === "cluster-drag" ||
-      query?.locus?.source?.uid === preview.locusUid ||
-      target?.locus?.source?.uid === preview.locusUid;
+      preview.axes?.has(query?.locus?.source?.uid) ||
+      preview.axes?.has(target?.locus?.source?.uid);
     return { visible, anchors: visible && affected ? previewLinkAnchors(scene, link, preview) : link.anchors };
   }
   const anchors = link.anchors;
@@ -411,7 +437,7 @@ export function recordsForPreview(scene, preview, { includeClusters = false } = 
   if (preview.type === "locus-offsets") {
     for (const locusUid of preview.locusOffsets.keys()) loci.add(locusUid);
   }
-  if (preview.type === "locus-flip") loci.add(preview.locusUid);
+  if (preview.type === "locus-flip") for (const uid of preview.axes.keys()) loci.add(uid);
   if (preview.type === "locus-trim") {
     const trimmed = scene.loci.get(preview.locusUid);
     const clusterUid = trimmed?.cluster?.uid ?? trimmed?.source?.clusterUid;
