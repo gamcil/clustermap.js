@@ -234,3 +234,13 @@ test("compact link snapshots preserve sparse edits, deletions and undefined valu
   assert.throws(() => base.applyEdits({ version: 1, base: base.fingerprint, deleted: [0], updates: [[0, [["hidden", true]]]] }), /update snapshot/);
   assert.throws(() => base.applyEdits({ version: 1, base: base.fingerprint, deleted: [99], updates: [] }), /deletion snapshot/);
 });
+
+test("compact columns can transfer ownership without copying and invalid input stays attached", () => {
+  const columns = input(), expected = [...new CompactLinkStore(columns).values()];
+  const store = CompactLinkStore.fromTransferred(columns);
+  assert.deepEqual([...store.values()], expected);
+  for (const key of ["query", "target", "identity", "similarity"]) assert.equal(columns[key].byteLength, 0);
+  const invalid = input(); invalid.target[0] = 99;
+  assert.throws(() => CompactLinkStore.fromTransferred(invalid), /position 0/);
+  assert.equal(invalid.query.byteLength, 16);
+});

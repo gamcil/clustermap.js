@@ -381,3 +381,17 @@ test("compact figure snapshot saves the committed tree during a preview", async 
   expect(result.after).toEqual(result.before);
   expect(result.stillPreviewing).toBe(true);
 });
+
+test("compact link column ownership can be transferred in the browser", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/demo/?test=1");
+  const result = await page.evaluate(async () => {
+    const { CompactLinkStore } = await import("/dist/clustermap.mjs");
+    const columns = { genes: ["a", "b"], query: new Uint32Array([0]), target: new Uint32Array([1]),
+      identity: new Float64Array([0.9]), similarity: new Float64Array([1]) };
+    const store = CompactLinkStore.fromTransferred(columns);
+    return { queryBytes: columns.query.byteLength, identityBytes: columns.identity.byteLength, link: store.get("link-0") };
+  });
+  expect(result.queryBytes).toBe(0);
+  expect(result.identityBytes).toBe(0);
+  expect(result.link.query.uid).toBe("a");
+});

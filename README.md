@@ -498,8 +498,11 @@ d3.select(element).datum({ ...data, links }).call(chart);
 All four columns must have the same length; endpoint indexes must refer to the
 string ID dictionary. Each link's ID is `link-N`, where `N` is its original
 column position. The constructor copies its inputs and validates the table, so
-the same store can safely be shared by a host and multiple charts. Link edits
-and deletions use chart-local copy-on-write overlays. Arbitrary link IDs or
+the same store can safely be shared by a host and multiple charts. For lower
+construction peak memory, `CompactLinkStore.fromTransferred(columns)` takes
+ownership of the columns by transferring their underlying ArrayBuffers; every
+caller view of those buffers becomes detached. Link edits and deletions use
+chart-local copy-on-write overlays. Arbitrary link IDs or
 metadata should use the existing object-array input.
 
 For compact input, `data().links` and `visibleData().links` are read-only,

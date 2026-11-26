@@ -1,4 +1,4 @@
-// Run with: node --expose-gc bench/compact-links.mjs [link-count]
+// Run with: node --expose-gc bench/compact-links.mjs [link-count] [--transfer]
 // Synthetic CPU/memory baseline; does not represent browser or GPU memory.
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
@@ -28,8 +28,10 @@ for (let i = 0; i < count; i++) {
   query[i] = i % geneCount; target[i] = (i * 37 + 1) % geneCount;
   identity[i] = 0.5 + (i % 5) / 10; similarity[i] = 0.95;
 }
-const links = new CompactLinkStore({ genes, query, target, identity, similarity });
+const columns = { genes, query, target, identity, similarity };
+const links = process.argv.includes("--transfer") ? CompactLinkStore.fromTransferred(columns) : new CompactLinkStore(columns);
 query = target = identity = similarity = null;
+columns.query = columns.target = columns.identity = columns.similarity = null;
 const data = { clusters, links, groups: [{ uid: "group", genes }], config: { updateGroups: false } };
 sample("compact-store", start);
 start = performance.now();

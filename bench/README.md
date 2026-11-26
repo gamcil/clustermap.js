@@ -241,4 +241,5 @@ compact table at the observed large-GCF link count. It reports stage durations
 and post-GC Node RSS, heap and array-buffer sizes for table creation, indexing,
 scene construction, compact snapshot and best-match filtering. This is a repeatable CPU baseline;
 it does not measure the real GCF, browser peak memory, project saving or GPU
-memory. Use a fresh process for each comparison.
+memory. Add `--transfer` after the count to measure ownership transfer instead
+of copying the input columns. Use a fresh process for each comparison.

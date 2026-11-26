@@ -4683,7 +4683,24 @@
   // Inputs are copied: callers can mutate their arrays without affecting a chart
   // or an old scene. Sparse edit overlays share the immutable columns.
   const sharedColumns = Symbol("shared compact columns");
+  const transferredColumns = Symbol("transferred compact columns");
   const editableFields = new Set(["label", "colour", "hidden", "identity"]);
+  function validateCompactColumns({ genes, query, target, identity, similarity } = {}) {
+    if (!Array.isArray(genes) || !genes.every((uid) => typeof uid === "string" && uid.length)) {
+      throw new TypeError("Compact links require a gene ID dictionary.");
+    }
+    if (!(query instanceof Uint32Array) || !(target instanceof Uint32Array) ||
+        !(identity instanceof Float64Array) || !(similarity instanceof Float64Array) ||
+        query.length !== target.length || query.length !== identity.length || query.length !== similarity.length) {
+      throw new TypeError("Compact link columns must be equal-length Uint32/Float64 arrays.");
+    }
+    for (let i = 0; i < query.length; i++) {
+      if (query[i] >= genes.length || target[i] >= genes.length || !Number.isFinite(identity[i]) ||
+          identity[i] < 0 || identity[i] > 1 || !Number.isFinite(similarity[i])) {
+        throw new TypeError(`Invalid compact link at position ${i}.`);
+      }
+    }
+  }
   class CompactLinkStore {
     #genes; #query; #target; #identity; #similarity; #overrides; #deleted; #fingerprint;
     constructor(input, mode = null) {
@@ -4696,25 +4713,28 @@
         return;
       }
       const { genes, query, target, identity, similarity } = input;
-      if (!Array.isArray(genes) || !genes.every((uid) => typeof uid === "string" && uid.length)) {
-        throw new TypeError("Compact links require a gene ID dictionary.");
-      }
-      if (!(query instanceof Uint32Array) || !(target instanceof Uint32Array) ||
-          !(identity instanceof Float64Array) || !(similarity instanceof Float64Array) ||
-          query.length !== target.length || query.length !== identity.length || query.length !== similarity.length) {
-        throw new TypeError("Compact link columns must be equal-length Uint32/Float64 arrays.");
-      }
-      for (let i = 0; i < query.length; i++) {
-        if (query[i] >= genes.length || target[i] >= genes.length || !Number.isFinite(identity[i]) || identity[i] < 0 || identity[i] > 1 || !Number.isFinite(similarity[i])) {
-          throw new TypeError(`Invalid compact link at position ${i}.`);
-        }
-      }
+      validateCompactColumns(input);
       this.#genes = Object.freeze([...genes]);
-      this.#query = query.slice(); this.#target = target.slice();
-      this.#identity = identity.slice(); this.#similarity = similarity.slice();
+      this.#query = mode === transferredColumns ? query : query.slice();
+      this.#target = mode === transferredColumns ? target : target.slice();
+      this.#identity = mode === transferredColumns ? identity : identity.slice();
+      this.#similarity = mode === transferredColumns ? similarity : similarity.slice();
       this.#overrides = new Map();
       this.#deleted = [];
       this.#fingerprint = null;
+    }
+    // Explicit ownership transfer avoids the second copy of large columns.
+    // All views of the transferred buffers in the caller become detached.
+    static fromTransferred(input) {
+      const { genes, query, target, identity, similarity } = input || {};
+      validateCompactColumns(input);
+      const columns = [query, target, identity, similarity];
+      if (columns.some((column) => !(column.buffer instanceof ArrayBuffer))) {
+        throw new TypeError("Compact link transfer requires transferable ArrayBuffers.");
+      }
+      const moved = structuredClone({ query, target, identity, similarity },
+        { transfer: [...new Set(columns.map((column) => column.buffer))] });
+      return new CompactLinkStore({ genes, ...moved }, transferredColumns);
     }
     get size() { return this.#query.length - this.#deleted.length; }
     get byteLength() { return this.#query.byteLength + this.#target.byteLength + this.#identity.byteLength + this.#similarity.byteLength; }
