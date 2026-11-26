@@ -22,6 +22,28 @@ test("runtime keeps default interaction callbacks declarative", async () => {
   assert.equal(runtime.config.plot.renderer, "canvas");
 });
 
+test("colour scale resolves data domains without scanning links for fixed domains", async () => {
+  const [{ createChartRuntime }, { createChartState }] = await Promise.all([
+    import("../../src/chart/runtime.js"), import("../../src/chart/state.mjs"),
+  ]);
+  const runtime = createChartRuntime();
+  const data = { clusters: [], links: [], groups: [] };
+  runtime.setChartState(createChartState(data));
+  data.links = { [Symbol.iterator]: () => { throw new Error("fixed domain scanned links"); } };
+  runtime.updateScales(data);
+  assert.deepEqual(runtime.scales.score.domain(), [0, 1]);
+  data.links = [{ identity: 0.8 }, { identity: 0.2 }, { identity: NaN }];
+  runtime.configure({ colourBar: { domain: { minMode: "data", maxMode: "data" } } });
+  runtime.updateScales(data);
+  assert.deepEqual(runtime.scales.score.domain(), [0.2, 0.8]);
+  data.links = [{ identity: 0.5 }];
+  runtime.updateScales(data);
+  assert.deepEqual(runtime.scales.score.domain(), [0.495, 0.505]);
+  data.links = [];
+  runtime.updateScales(data);
+  assert.deepEqual(runtime.scales.score.domain(), [0, 1]);
+});
+
 test("scene patches retain nonadjacent links and reveal them after row changes", async () => {
   const [{ createChartRuntime }, { normalizeChartData }, { createChartIndex },
     { createChartState, setClusterOffset }] = await Promise.all([

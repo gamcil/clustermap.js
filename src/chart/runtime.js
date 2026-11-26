@@ -1,5 +1,4 @@
 import { clusterLabelWidth } from "../scene/clusterLabels.mjs";
-import { max as d3max, min as d3min } from "d3-array";
 import { quantize } from "d3-interpolate";
 import { scaleLinear, scaleOrdinal, scaleSequential } from "d3-scale";
 import { interpolateGreys, interpolateRainbow } from "d3-scale-chromatic";
@@ -147,12 +146,17 @@ const scales = {
 };
 
 function updateIdentityScale(data) {
-  const identities = data.links
-    .map((link) => Number(link.identity))
-    .filter(Number.isFinite);
-  const dataMin = identities.length ? d3min(identities) : 0;
-  const dataMax = identities.length ? d3max(identities) : 1;
   const domain = config.colourBar.domain;
+  let dataMin = Infinity, dataMax = -Infinity;
+  if (domain.minMode === "data" || domain.maxMode === "data") {
+    for (const link of data.links) {
+      const identity = Number(link.identity);
+      if (!Number.isFinite(identity)) continue;
+      dataMin = Math.min(dataMin, identity);
+      dataMax = Math.max(dataMax, identity);
+    }
+  }
+  if (dataMin === Infinity) { dataMin = 0; dataMax = 1; }
   let min = domain.minMode === "data" ? Math.max(0, Math.min(1, dataMin)) : domain.min;
   let max = domain.maxMode === "data" ? Math.max(0, Math.min(1, dataMax)) : domain.max;
   if (min === max) {
@@ -273,12 +277,14 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
     chrome: sceneChromeOptions(data),
   };
   if (!sourceScene) {
-    allowedLinkIds = new Set(filterLinks(data.links, {
+    const filteredLinks = filterLinks(data.links, {
       groupForGene: scales.group,
       geneForUid: lookup.geneData,
       bestOnly: config.link.bestOnly,
       threshold: config.link.threshold,
-    }).map((link) => link.uid));
+    });
+    allowedLinkIds = new Set();
+    for (const link of filteredLinks) allowedLinkIds.add(link.uid);
     currentScene = buildScene(data, options);
   } else {
     const loci = new Set(changes.loci || []);

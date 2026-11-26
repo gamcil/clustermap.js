@@ -2575,48 +2575,6 @@
     return (reverse ? -1 : 1) * (inc < 0 ? 1 / -inc : inc);
   }
 
-  function max(values, valueof) {
-    let max;
-    if (valueof === undefined) {
-      for (const value of values) {
-        if (value != null
-            && (max < value || (max === undefined && value >= value))) {
-          max = value;
-        }
-      }
-    } else {
-      let index = -1;
-      for (let value of values) {
-        if ((value = valueof(value, ++index, values)) != null
-            && (max < value || (max === undefined && value >= value))) {
-          max = value;
-        }
-      }
-    }
-    return max;
-  }
-
-  function min(values, valueof) {
-    let min;
-    if (valueof === undefined) {
-      for (const value of values) {
-        if (value != null
-            && (min > value || (min === undefined && value >= value))) {
-          min = value;
-        }
-      }
-    } else {
-      let index = -1;
-      for (let value of values) {
-        if ((value = valueof(value, ++index, values)) != null
-            && (min > value || (min === undefined && value >= value))) {
-          min = value;
-        }
-      }
-    }
-    return min;
-  }
-
   function initRange(domain, range) {
     switch (arguments.length) {
       case 0: break;
@@ -13828,20 +13786,25 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   };
 
   function updateIdentityScale(data) {
-    const identities = data.links
-      .map((link) => Number(link.identity))
-      .filter(Number.isFinite);
-    const dataMin = identities.length ? min(identities) : 0;
-    const dataMax = identities.length ? max(identities) : 1;
     const domain = config.colourBar.domain;
-    let min$1 = domain.minMode === "data" ? Math.max(0, Math.min(1, dataMin)) : domain.min;
-    let max$1 = domain.maxMode === "data" ? Math.max(0, Math.min(1, dataMax)) : domain.max;
-    if (min$1 === max$1) {
-      min$1 = Math.max(0, min$1 - 0.005);
-      max$1 = Math.min(1, max$1 + 0.005);
+    let dataMin = Infinity, dataMax = -Infinity;
+    if (domain.minMode === "data" || domain.maxMode === "data") {
+      for (const link of data.links) {
+        const identity = Number(link.identity);
+        if (!Number.isFinite(identity)) continue;
+        dataMin = Math.min(dataMin, identity);
+        dataMax = Math.max(dataMax, identity);
+      }
     }
-    if (min$1 > max$1) [min$1, max$1] = [max$1, min$1];
-    scales.score.domain([min$1, max$1]).clamp(true);
+    if (dataMin === Infinity) { dataMin = 0; dataMax = 1; }
+    let min = domain.minMode === "data" ? Math.max(0, Math.min(1, dataMin)) : domain.min;
+    let max = domain.maxMode === "data" ? Math.max(0, Math.min(1, dataMax)) : domain.max;
+    if (min === max) {
+      min = Math.max(0, min - 0.005);
+      max = Math.min(1, max + 0.005);
+    }
+    if (min > max) [min, max] = [max, min];
+    scales.score.domain([min, max]).clamp(true);
   }
 
   // Every scene variant must project the same biological state with the same
@@ -13954,12 +13917,14 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       chrome: sceneChromeOptions(data),
     };
     if (!sourceScene) {
-      allowedLinkIds = new Set(filterLinks(data.links, {
+      const filteredLinks = filterLinks(data.links, {
         groupForGene: scales.group,
         geneForUid: lookup.geneData,
         bestOnly: config.link.bestOnly,
         threshold: config.link.threshold,
-      }).map((link) => link.uid));
+      });
+      allowedLinkIds = new Set();
+      for (const link of filteredLinks) allowedLinkIds.add(link.uid);
       currentScene = buildScene(data, options);
     } else {
       const loci = new Set(changes.loci || []);
