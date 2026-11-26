@@ -4658,11 +4658,6 @@ function validateRecordFields(record, fail) {
   }
 }
 
-// The public data view is array-shaped in both cases. The shared symbol is
-// needed across independently bundled chart and editor modules; keep that
-// detail here rather than exposing the backing store to consumers.
-const COMPACT_LINK_VIEW = Symbol.for("clustermap.compactLinks");
-
 // Link stores retain source order and provide stable ID-to-position lookup.
 // Array stores retain record identity because editing currently mutates records.
 class ArrayLinkStore {
@@ -4955,7 +4950,7 @@ function linkArrayView(store) {
   };
   view = new Proxy(array, {
     get(target, key, receiver) {
-      if (key === COMPACT_LINK_VIEW) return store;
+      if (key === Symbol.for("clustermap.compactLinks")) return store;
       if (key === "length") return store.size;
       const index = indexOf(key);
       return index === null ? Reflect.get(target, key, receiver) : store.getAt(index);
@@ -17129,63 +17124,6 @@ function createChartModel({ historyLimit = 100 } = {}) {
   };
 }
 
-// Own the retained raster scene and its active transition. Gesture previews
-// are shared with the chart, so a transition clears only the preview it owns.
-function createRasterTransition({ getPreview, setPreview, paint, adopt,
-  animate: animate$1 = animate, flipTransition = createLocusFlipTransition,
-  flipFrame = locusFlipTransitionFrame, interpolate = interpolateScene }) {
-  let scene = null, active = null;
-  function clearPreview(transition) {
-    if (transition?.flipPreview && getPreview() === transition.flipPreview) setPreview(null);
-  }
-  function stop() {
-    const previous = active;
-    active = null;
-    clearPreview(previous);
-    previous?.cancel?.();
-  }
-  return {
-    get scene() { return scene; },
-    set scene(value) { scene = value; },
-    get animation() { return active; },
-    stop,
-    start({ target, enabled, source, treeMotion, flippedLoci, renderer, duration,
-      clusterLabelText, alignLabels, labelWidthFor }) {
-      const useWebGpu = isWebGpuRenderer(renderer);
-      const previousScene = useWebGpu ? scene : active?.previousScene || scene;
-      stop();
-      const flip = useWebGpu && previousScene === source && flippedLoci?.length
-        ? flipTransition(previousScene, target, flippedLoci, {
-            clusterLabelTexts: new Map(flippedLoci.flatMap((uid) => {
-              const cluster = previousScene.loci.get(uid)?.cluster.uid;
-              return cluster === undefined ? [] : [[cluster, clusterLabelText(cluster)]];
-            })),
-          }) : null;
-      const finish = () => {
-        clearPreview(active);
-        active = null;
-        scene = target;
-        if (useWebGpu) adopt(target, source);
-        paint();
-      };
-      if (!enabled || !previousScene || !duration) { finish(); return; }
-      if (!useWebGpu) scene = target;
-      const transition = active = { renderer, previousScene, progress: 0, cancel: null,
-        tree: treeMotion ? { ...treeMotion, targetScene: target } : null };
-      transition.cancel = animate$1(duration, (progress) => {
-        if (active !== transition || progress >= 1) return;
-        transition.progress = progress;
-        if (flip) {
-          const preview = transition.flipPreview = flipFrame(previousScene, flip, progress, { alignLabels, labelWidthFor });
-          setPreview(preview);
-          scene = previousScene;
-        } else if (useWebGpu) scene = interpolate(previousScene, target, progress);
-        paint();
-      }, () => { if (active === transition) finish(); });
-    },
-  };
-}
-
 // A presentation-only change can patch the retained source scene. Geometry
 // changes may reuse its link filter when their impact explicitly permits it.
 // Unknown changes must request refiltering rather than claiming reuse.
@@ -17251,6 +17189,7 @@ function clusterMap() {
   let hasInitialView = false;
   let chartState = null;
   let canvasHoverLocusUid = null;
+  let rasterScene = null, rasterAnimation = null;
   let scenePreview = null;
   let previewPaintFrame = null;
   let locusFlip = null;
@@ -17306,14 +17245,6 @@ function clusterMap() {
   const webgpuBackend = createWebGpuBackend({ paintFallback: canvasBackend.paint,
     onStatus: () => { if (container && runtime.config.plot.renderer === "webgpu")
       emitChange({ type: "renderer.change", renderer: my.rendererStatus() }); } });
-  const rasterTransition = createRasterTransition({
-    getPreview: () => scenePreview,
-    setPreview: (preview) => { scenePreview = preview; },
-    paint: () => paintScene(),
-    adopt: (scene, sourceScene) => webgpuBackend.setScene(scene, {
-      sourceScene, scales: runtime.scales, config: runtime.renderConfig,
-    }),
-  });
   const rendererLifecycle = createRendererLifecycle({
     svg: { paint: renderSvg, destroy: () => container?.selectAll("svg.clusterMap *").interrupt() },
     canvas: canvasBackend,
@@ -17482,8 +17413,8 @@ function clusterMap() {
         return;
       }
       if (isCanvasRenderer(runtime.config.plot.renderer) && runtime.getScene()) {
-        const sourceScene = rasterTransition.animation?.previousScene || rasterTransition.scene || runtime.getScene();
-        rasterTransition.stop();
+        const sourceScene = rasterAnimation?.previousScene || rasterScene || runtime.getScene();
+        stopRasterAnimation();
         const pending = { locus, sourceScene, targetScene: null, renderer: "canvas", cancel: null,
           clusterLabelText: runtime.locusTextForCluster(locus.clusterUid) };
         locusFlip = pending;
@@ -17519,7 +17450,7 @@ function clusterMap() {
             progress,
             clusterLabelText: runtime.locusTextForCluster(locus.clusterUid),
           });
-          if (useGpu) rasterTransition.scene = sourceScene;
+          if (useGpu) rasterScene = sourceScene;
           scheduleScenePaint();
         }, finish);
         return;
@@ -17542,7 +17473,7 @@ function clusterMap() {
     if (previewPaintFrame !== null) cancelAnimationFrame(previewPaintFrame);
     locusFlip?.cancel?.();
     cancelClusterCommit?.();
-    rasterTransition.stop();
+    stopRasterAnimation();
     scenePreview = null;
     canvasBackend.clearFlip();
     previewPaintFrame = null;
@@ -17566,7 +17497,7 @@ function clusterMap() {
     pending.cancel = null;
     const scene = commitLocusFlip(pending);
     if (pending !== locusFlip) return;
-    if (isRasterRenderer(pending.renderer)) rasterTransition.scene = scene;
+    if (isRasterRenderer(pending.renderer)) rasterScene = scene;
     if (isWebGpuRenderer(pending.renderer)) webgpuBackend.setScene(scene, {
       sourceScene: pending.sourceScene, scales: runtime.scales, config: runtime.renderConfig,
     });
@@ -17910,14 +17841,14 @@ function clusterMap() {
   });
 
   function sceneFrame(scene) {
-    const treeMotion = rasterTransition.animation?.tree;
+    const treeMotion = rasterAnimation?.tree;
     return {
       scene, camera: getCamera(chartState), config: runtime.renderConfig,
       scales: runtime.scales, pixelRatio: rasterMotion.pixelRatio(), tree: plotData.tree,
       preview: scenePreview, hoverLocusUid: canvasHoverLocusUid,
       suppressLocusHover: scenePreview?.type === "locus-flip",
       previousTree: treeMotion?.previousTree, previousTreeScene: treeMotion?.previousScene,
-      treeTargetScene: treeMotion?.targetScene, treeProgress: treeMotion ? rasterTransition.animation.progress : 1,
+      treeTargetScene: treeMotion?.targetScene, treeProgress: treeMotion ? rasterAnimation.progress : 1,
       highlightGeneIds: highlightedGeneIds(), highlightLinkIds, highlightLocusIds: selectedLoci(),
       highlightClusterIds: selectedClusterIds(),
     };
@@ -17997,8 +17928,8 @@ function clusterMap() {
 
   function paintRaster() {
     const renderer = runtime.config.plot.renderer;
-    const animation = rasterTransition.animation?.renderer === "canvas" ? rasterTransition.animation : null;
-    const scene = (locusFlip?.renderer === "canvas" ? locusFlip.sourceScene : null) || rasterTransition.scene || runtime.getScene();
+    const animation = rasterAnimation?.renderer === "canvas" ? rasterAnimation : null;
+    const scene = (locusFlip?.renderer === "canvas" ? locusFlip.sourceScene : null) || rasterScene || runtime.getScene();
     if (!rasterCanvas || !scene) return null;
     updateFigureSurface();
     const result = rendererLifecycle.paint(renderer, { ...sceneFrame(scene),
@@ -18033,11 +17964,50 @@ function clusterMap() {
       renderBase: renderMinimapBase, onPaint: paintMinimap });
   }
 
-  function animateRaster(scene, animate, sourceScene, treeMotion, flippedLoci) {
-    rasterTransition.start({ target: scene, enabled: animate, source: sourceScene, treeMotion, flippedLoci,
-      renderer: runtime.config.plot.renderer, duration: runtime.config.plot.transitionDuration,
-      clusterLabelText: runtime.locusTextForCluster, alignLabels: runtime.config.cluster.alignLabels,
-      labelWidthFor: runtime.measureClusterLabel });
+  function stopRasterAnimation() {
+    if (rasterAnimation?.flipPreview && scenePreview === rasterAnimation.flipPreview) scenePreview = null;
+    rasterAnimation?.cancel();
+    rasterAnimation = null;
+  }
+
+  function animateRaster(scene, animate$1, sourceScene, treeMotion, flippedLoci) {
+    const renderer = runtime.config.plot.renderer;
+    const useWebGpu = isWebGpuRenderer(renderer);
+    const previousScene = useWebGpu ? rasterScene : rasterAnimation?.previousScene || rasterScene;
+    stopRasterAnimation();
+    const duration = runtime.config.plot.transitionDuration;
+    // Retain GPU geometry for pure locus flips; fall back for other changes.
+    const flipPreview = useWebGpu && previousScene === sourceScene && flippedLoci?.length
+      ? createLocusFlipTransition(previousScene, scene, flippedLoci, {
+          clusterLabelTexts: new Map(flippedLoci.flatMap((uid) => {
+            const cluster = previousScene.loci.get(uid)?.cluster.uid;
+            return cluster === undefined ? [] : [[cluster, runtime.locusTextForCluster(cluster)]];
+          })),
+        }) : null;
+    const finish = () => {
+      if (rasterAnimation?.flipPreview && scenePreview === rasterAnimation.flipPreview) scenePreview = null;
+      rasterAnimation = null;
+      rasterScene = scene;
+      if (useWebGpu) webgpuBackend.setScene(scene, { sourceScene, scales: runtime.scales, config: runtime.renderConfig });
+      paintScene();
+    };
+    if (!animate$1 || !previousScene || !duration) { finish(); return; }
+    if (!useWebGpu) rasterScene = scene;
+    const transition = rasterAnimation = { renderer, previousScene, progress: 0, cancel: null,
+      tree: treeMotion ? { ...treeMotion, targetScene: scene } : null };
+    transition.cancel = animate(duration, (progress) => {
+      // Completion adopts the target scene and paints it in the same frame.
+      // Painting it here first discards the retained animation geometry.
+      if (rasterAnimation !== transition || progress >= 1) return;
+      rasterAnimation.progress = progress;
+      if (flipPreview) {
+        scenePreview = rasterAnimation.flipPreview = locusFlipTransitionFrame(previousScene, flipPreview, progress, {
+          alignLabels: runtime.config.cluster.alignLabels, labelWidthFor: runtime.measureClusterLabel,
+        });
+        rasterScene = previousScene;
+      } else if (useWebGpu) rasterScene = interpolateScene(previousScene, scene, progress);
+      paintScene();
+    }, () => { if (rasterAnimation === transition) finish(); });
   }
 
   const minimapInteractions = {
@@ -18096,8 +18066,8 @@ function clusterMap() {
     const useWebGpu = isWebGpuRenderer(runtime.config.plot.renderer);
     const useRaster = isRasterRenderer(runtime.config.plot.renderer);
     rendererLifecycle.select(runtime.config.plot.renderer);
-    if (rasterTransition.animation?.renderer !== runtime.config.plot.renderer) rasterTransition.stop();
-    if (rasterCanvas?.dataset.renderer !== runtime.config.plot.renderer) rasterTransition.scene = null;
+    if (rasterAnimation?.renderer !== runtime.config.plot.renderer) stopRasterAnimation();
+    if (rasterCanvas?.dataset.renderer !== runtime.config.plot.renderer) rasterScene = null;
     if (!useRaster) { disposeRasterInteraction(); disposeRasterInteraction = () => {}; }
     const minimapOptions = runtime.config.plot.minimap || {};
     // The overview is a separate 2D canvas, so it works for both raster
@@ -18221,7 +18191,7 @@ function clusterMap() {
         surfaces: [useRaster ? canvas.node() : svg.node()],
         getScene: () => runtime.getScene(), getPreview: () => scenePreview,
         getCamera: () => getCamera(chartState),
-        isBusy: () => isDragging(chartState) || Boolean(rasterTransition.animation),
+        isBusy: () => isDragging(chartState) || Boolean(rasterAnimation),
       };
       if (annotationOverlay) annotationOverlay.update(annotationUiContext);
       else if (!annotationUiLoad) {
@@ -18717,7 +18687,7 @@ function clusterMap() {
     canvasZoom = null;
     hasInitialView = false;
     canvasHoverLocusUid = null;
-    rasterTransition.scene = null;
+    rasterScene = null;
     rasterCanvas = overlayCanvas = minimapCanvas = null;
     sceneCommit = null;
     model.clear();
