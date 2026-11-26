@@ -4664,6 +4664,11 @@
     }
   }
 
+  // The public data view is array-shaped in both cases. The shared symbol is
+  // needed across independently bundled chart and editor modules; keep that
+  // detail here rather than exposing the backing store to consumers.
+  const COMPACT_LINK_VIEW = Symbol.for("clustermap.compactLinks");
+
   // Link stores retain source order and provide stable ID-to-position lookup.
   // Array stores retain record identity because editing currently mutates records.
   class ArrayLinkStore {
@@ -4956,7 +4961,7 @@
     };
     view = new Proxy(array, {
       get(target, key, receiver) {
-        if (key === Symbol.for("clustermap.compactLinks")) return store;
+        if (key === COMPACT_LINK_VIEW) return store;
         if (key === "length") return store.size;
         const index = indexOf(key);
         return index === null ? Reflect.get(target, key, receiver) : store.getAt(index);

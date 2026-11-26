@@ -95,6 +95,25 @@ test("large compact link views page sorted and filtered rows without expanding t
   assert.deepEqual(model.existingIds("links", ["link-1", "missing"]), ["link-1"]);
 });
 
+test("link read access exposes the same positional values for arrays and compact views", async () => {
+  const [{ CompactLinkStore, linkArrayView }, { linkReadAccess }] = await Promise.all([
+    import("../../src/data/linkStore.mjs"), import("../../src/data/linkRead.mjs"),
+  ]);
+  const compact = new CompactLinkStore({ genes: ["a", "b"], query: new Uint32Array([0, 1]),
+    target: new Uint32Array([1, 0]), identity: new Float32Array([0.5, 0.75]), similarity: new Float32Array([1, 1]) })
+    .withUpdates([{ uid: "link-1", changes: { label: "edited" } }]);
+  const array = linkReadAccess([...compact.values()]), columnar = linkReadAccess(linkArrayView(compact));
+  for (const links of [array, columnar]) {
+    assert.equal(links.size, 2);
+    assert.equal(links.queryAt(1), "b");
+    assert.equal(links.targetAt(1), "a");
+    assert.equal(links.identityAt(1), 0.75);
+    assert.equal(links.labelAt(1), "edited");
+    assert.deepEqual(links.getAt(1), compact.getAt(1));
+    assert.deepEqual(links.existingIds(new Set(["link-1", "missing"])), ["link-1"]);
+  }
+});
+
 test("large link pages preserve existing global sort, tie and filter semantics", () => {
   const genes = [{ uid: "a", label: "gene 10" }, { uid: "b", label: "Gene 2" }, { uid: "c", label: "gene 2" }];
   const links = Array.from({ length: 1100 }, (_, i) => ({ uid: `link-${i}`,

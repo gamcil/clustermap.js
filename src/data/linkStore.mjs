@@ -1,5 +1,6 @@
 import { isPlainObject } from "../utils/values.mjs";
 import { validateRecordFields } from "./validation.mjs";
+import { COMPACT_LINK_VIEW } from "./linkRead.mjs";
 
 // Link stores retain source order and provide stable ID-to-position lookup.
 // Array stores retain record identity because editing currently mutates records.
@@ -293,7 +294,7 @@ export function linkArrayView(store) {
   };
   view = new Proxy(array, {
     get(target, key, receiver) {
-      if (key === Symbol.for("clustermap.compactLinks")) return store;
+      if (key === COMPACT_LINK_VIEW) return store;
       if (key === "length") return store.size;
       const index = indexOf(key);
       return index === null ? Reflect.get(target, key, receiver) : store.getAt(index);

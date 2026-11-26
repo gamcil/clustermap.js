@@ -1262,6 +1262,43 @@ function defineRecordTable() {
   if (!customElements.get("clinker-record-table")) customElements.define("clinker-record-table", RecordTable);
 }
 
+// The public data view is array-shaped in both cases. The shared symbol is
+// needed across independently bundled chart and editor modules; keep that
+// detail here rather than exposing the backing store to consumers.
+const COMPACT_LINK_VIEW = Symbol.for("clustermap.compactLinks");
+
+function linkReadAccess(links) {
+  const compact = links[COMPACT_LINK_VIEW];
+  if (compact) return {
+    compact: true,
+    get size() { return compact.size; },
+    getAt: (position) => compact.getAt(position),
+    queryAt: (position) => compact.queryAt(position),
+    targetAt: (position) => compact.targetAt(position),
+    identityAt: (position) => compact.identityAt(position),
+    labelAt: (position) => compact.labelAt(position),
+    existingIds: (ids) => [...ids].filter((uid) => compact.has(uid)),
+  };
+  return {
+    compact: false,
+    get size() { return links.length; },
+    getAt: (position) => links[position],
+    queryAt: (position) => links[position].query.uid,
+    targetAt: (position) => links[position].target.uid,
+    identityAt: (position) => links[position].identity,
+    labelAt: (position) => links[position].label,
+    existingIds(ids) {
+      const wanted = new Set(ids), found = [];
+      if (!wanted.size) return found;
+      for (const link of links) if (wanted.delete(link.uid)) {
+        found.push(link.uid);
+        if (!wanted.size) break;
+      }
+      return found;
+    },
+  };
+}
+
 const emptyData = { clusters: [], groups: [], links: [] };
 const LINK_PAGE_SIZE = 250;
 const LINK_PAGE_THRESHOLD = 1000;
@@ -1314,9 +1351,11 @@ class DataPanelModel {
   #index = null;
   #view = null;
   #linkIndex = null;
+  #links = null;
 
   get data() { return this.#data; }
-  set data(value) { this.#data = value; this.#index = this.#view = this.#linkIndex = null; }
+  set data(value) { this.#data = value; this.#index = this.#view = this.#linkIndex = this.#links = null; }
+  #linkAccess() { return this.#links ||= linkReadAccess(this.#data?.links || []); }
   groupId(value) { return this.#records().groupById.get(String(value))?.uid; }
   recordIds(kind) {
     return kind === "genes" ? this.#records().genes.map(({ gene }) => gene.uid)
@@ -1325,15 +1364,7 @@ class DataPanelModel {
 
   existingIds(kind, selected) {
     if (kind !== "links") return this.recordIds(kind);
-    const wanted = new Set(selected), found = [];
-    if (!wanted.size) return found;
-    const links = this.#data?.links || [], compact = links[Symbol.for("clustermap.compactLinks")];
-    if (compact) return [...wanted].filter((uid) => compact.has(uid));
-    for (const link of links) if (wanted.delete(link.uid)) {
-      found.push(link.uid);
-      if (!wanted.size) break;
-    }
-    return found;
+    return this.#linkAccess().existingIds(new Set(selected));
   }
 
   plotTarget(kind, ids) {
@@ -1365,38 +1396,37 @@ class DataPanelModel {
   }
 
   #linkPage({ filter, sort, page = 0 }) {
-    const links = this.#data.links, compact = links[Symbol.for("clustermap.compactLinks")];
+    const links = this.#linkAccess();
     const { geneById: genes, groups } = this.#records();
     const label = (uid) => labelFor(genes.get(uid), uid);
     const group = (uid) => labelFor(groups.get(uid), "Ungrouped");
     const value = (position, key) => {
-      const record = compact ? null : links[position];
-      const query = compact ? compact.queryAt(position) : record.query.uid;
-      const target = compact ? compact.targetAt(position) : record.target.uid;
+      const query = links.queryAt(position);
+      const target = links.targetAt(position);
       if (key === "source") return label(query);
       if (key === "target") return label(target);
-      if (key === "identity") return Math.round(((compact ? compact.identityAt(position) : record.identity) || 0) * 1000) / 10;
+      if (key === "identity") return Math.round((links.identityAt(position) || 0) * 1000) / 10;
       if (key === "groups") return `${group(query)} / ${group(target)}`;
-      if (key === "label") return (compact ? compact.labelAt(position) : record.label) || "";
+      if (key === "label") return links.labelAt(position) || "";
       return "";
     };
     const key = JSON.stringify([filter, sort]);
     if (this.#linkIndex?.key !== key) {
-      const positions = new Uint32Array(links.length);
+      const positions = new Uint32Array(links.size);
       let count = 0;
-      for (let i = 0; i < links.length; i++) {
+      for (let i = 0; i < links.size; i++) {
         if (filter && ![value(i, "source"), value(i, "target"), value(i, "label")].join(" ").toLowerCase().includes(filter)) continue;
         positions[count++] = i;
       }
       const matched = positions.subarray(0, count);
-      this.#linkIndex = { key, positions: sortLinkPositions(matched, sort, value, compact) };
+      this.#linkIndex = { key, positions: sortLinkPositions(matched, sort, value, links.compact) };
     }
     const positions = this.#linkIndex.positions, total = positions.length;
     const pageCount = Math.max(1, Math.ceil(total / LINK_PAGE_SIZE));
     page = Math.min(Math.max(0, page), pageCount - 1);
     const rows = [];
     for (const position of positions.subarray(page * LINK_PAGE_SIZE, (page + 1) * LINK_PAGE_SIZE)) {
-      const link = compact ? compact.getAt(position) : links[position];
+      const link = links.getAt(position);
       rows.push({ id: link.uid, source: label(link.query.uid), target: label(link.target.uid),
         identity: Math.round((link.identity || 0) * 1000) / 10,
         groups: `${group(link.query.uid)} / ${group(link.target.uid)}`,
