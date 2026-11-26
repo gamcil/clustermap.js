@@ -577,3 +577,29 @@ test("empty or disabled trim overlays skip locus queries but active trims still 
   renderCanvas({ ...options, scene: trimmed });
   assert.equal(text.length, 2);
 });
+
+test("Canvas culls offscreen cluster labels while preserving dragged and full-scene labels", () => {
+  const calls = [];
+  const context = new Proxy({ measureText: (text) => ({ width: String(text).length * 8 }) }, {
+    get: (target, key) => key in target ? target[key] : (...args) => calls.push([key, ...args]),
+  });
+  const canvas = { width: 0, height: 0, getContext: () => context,
+    getBoundingClientRect: () => ({ width: 200, height: 40 }) };
+  const data = normalizeChartData(createLargeTestingData({ clusterCount: 20, genesPerCluster: 2 }));
+  const runtime = createChartRuntime();
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
+  const scene = runtime.updateScene(data), clusters = [...scene.clusters.values()];
+  const first = clusters[0], last = clusters.at(-1);
+  const paint = (extra = {}) => {
+    calls.length = 0;
+    renderCanvas({ canvas, scene, layers: ["clusterLabels"],
+      camera: { x: 0, y: -first.y, k: 1 }, config: runtime.renderConfig, scales: runtime.scales, ...extra });
+    return calls.filter(([method]) => method === "fillText").map((call) => call[1]);
+  };
+  const visible = paint();
+  assert.ok(visible.includes(first.source.name));
+  assert.ok(!visible.includes(last.source.name));
+  assert.ok(paint({ fullScene: true }).includes(last.source.name));
+  assert.ok(paint({ preview: { type: "cluster-drag", clusterOffsets: new Map([[last.source.uid, first.y - last.y]]) } })
+    .includes(last.source.name));
+});

@@ -11269,6 +11269,7 @@ function clusterLabelHit(context, scene, point, config) {
   const label = clusterLabelLayout(config);
   const measureText = canvasTextMeasurer(context, scene);
   for (const cluster of [...scene.clusters.values()].reverse()) {
+    if (point.y < cluster.y + label.top || point.y > cluster.y + label.bottom) continue;
     const anchorX = cluster.x + cluster.info.x;
     const width = clusterLabelWidth(cluster.source.name || "", cluster.info.locusText, config, measureText);
     const left = cluster.info.anchor === "start" ? anchorX : anchorX - width;
@@ -11860,18 +11861,20 @@ function renderCanvas({
   const loci = showLoci
     ? previewRecords?.loci || recordsFor(displayScene.loci, visible?.loci, "loci")
     : [];
-  // Labels are the only immediate indication that a very large, initially
-  // cropped figure rendered at all. Do not derive them from culled loci: a
-  // cluster label can be on screen while every locus body is just outside the
-  // viewport. Text is inexpensive and Canvas clips truly offscreen labels.
+  // Labels can be visible even when their loci are outside the viewport.
+  // Cull by their own vertical position, including live cluster drag offsets.
   const labelClusters = show("clusterLabels")
     ? recordsFor(displayScene.clusters, null, "clusters", { ignoreOmit: true })
     : [];
+  const clusterLabel = clusterLabelLayout(config);
   for (const cluster of labelClusters) {
+    const offsetY = clusterOffsetForPreview(preview, cluster.source.uid);
+    if (viewport && (cluster.y + offsetY + clusterLabel.top > viewport.maxY ||
+        cluster.y + offsetY + Math.max(clusterLabel.bottom, 12 + config.cluster.lociFontSize) < viewport.minY)) continue;
     drawClusterInfo(context, cluster, config, {
       selected: highlightClusterIds?.has(cluster.source.uid),
       x: clusterLabelOffsetForPreview(preview, cluster.source.uid),
-      y: clusterOffsetForPreview(preview, cluster.source.uid),
+      y: offsetY,
       locusText: clusterLabelTextForPreview(
         preview,
         cluster.source.uid,
