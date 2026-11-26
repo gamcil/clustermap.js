@@ -39,6 +39,10 @@ try {
     const snapshot = JSON.parse(await blob.text());
     const [loadMs] = measure(() => chart.loadCompactProject(snapshot, { base }));
     const savedLink = chart.data().links.find((link) => link.uid === "link-0");
+    const statusDeadline = performance.now() + 10000;
+    while (chart.rendererStatus()?.state === "initializing" && performance.now() < statusDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     const status = chart.rendererStatus();
     const actualCount = chart.data().links.length;
     chart.destroy();

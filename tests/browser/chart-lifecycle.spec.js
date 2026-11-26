@@ -337,10 +337,13 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
     const unchangedAfterReject = JSON.stringify(chart.project()) === JSON.stringify(project);
     chart.loadCompactProject(compact, { base: links });
     const compactRoundTrip = chart.project();
+    chart.patch([{ type: "links.delete", ids: ["link-0"] }, { type: "genes.delete", ids: ["a"] }]);
+    chart.undo();
+    const mixedUndo = JSON.stringify(chart.project()) === JSON.stringify(compactRoundTrip);
     chart.project(JSON.parse(JSON.stringify(project)));
     const roundTrip = chart.project(); chart.destroy(); host.remove();
     return { arrayView, initial, edited, oldView: oldView ?? null, deleted, restored, undone: undone ?? null,
-      visible, project, blob, roundTrip, compact, expectedCompact, compactRoundTrip, wrongRejected, unchangedAfterReject };
+      visible, project, blob, roundTrip, compact, expectedCompact, compactRoundTrip, wrongRejected, unchangedAfterReject, mixedUndo };
   }, renderer);
   expect(result.arrayView).toBe(true);
   expect(result.initial).toEqual(["link-0", "link-1"]);
@@ -356,6 +359,7 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
   expect(result.compactRoundTrip).toEqual(result.expectedCompact);
   expect(result.wrongRejected).toBe(true);
   expect(result.unchangedAfterReject).toBe(true);
+  expect(result.mixedUndo).toBe(true);
 });
 }
 

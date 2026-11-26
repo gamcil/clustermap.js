@@ -575,8 +575,8 @@ export default function clusterMap() {
       event: { type: "state.change", state: after } }), { render: false });
   }
 
-  function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
-    if (effects.reindex === "data") chartIndex = createChartIndex(currentData);
+  function refreshAfterPatch(effects, { refreshAutomatic = false, indexPrepared = false } = {}) {
+    if (effects.reindex === "data" && !indexPrepared) chartIndex = createChartIndex(currentData);
     if (effects.reindex || refreshAutomatic) {
       refreshGroups(currentData, chartIndex, groupsAreAutomatic() && (effects.reindex === "data" || refreshAutomatic));
       runtime.setChartIndex(chartIndex);
@@ -608,6 +608,11 @@ export default function clusterMap() {
     const groupsAutomaticAfter = groupsAreAutomatic();
     if (!presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
       refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
+      // Compact link deletion/restoration already rebuilds the shared index
+      // while applying the batch. A gene edit also changes that index.
+      indexPrepared: currentData.links instanceof CompactLinkStore &&
+        result.operations.some((op) => op.type === "links.delete" || op.type === "links.restore") &&
+        !result.operations.some((op) => op.type === "genes.delete" || op.type === "genes.restore"),
     });
     if (state) {
       chartState = chartStateFromSnapshot(currentData, state);

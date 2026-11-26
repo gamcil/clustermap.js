@@ -95,6 +95,8 @@ export class CompactLinkStore {
   }
   #physicalAt(position) {
     if (!Number.isInteger(position) || position < 0 || position >= this.size) return undefined;
+    if (!this.#deleted.length) return position;
+    if (this.#deleted.length === 1) return position < this.#deleted[0] ? position : position + 1;
     if (this.#deleted.length > 128) {
       if (!this.#activePositions) {
         const positions = new Uint32Array(this.size);

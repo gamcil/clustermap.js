@@ -4753,6 +4753,8 @@
     }
     #physicalAt(position) {
       if (!Number.isInteger(position) || position < 0 || position >= this.size) return undefined;
+      if (!this.#deleted.length) return position;
+      if (this.#deleted.length === 1) return position < this.#deleted[0] ? position : position + 1;
       if (this.#deleted.length > 128) {
         if (!this.#activePositions) {
           const positions = new Uint32Array(this.size);
@@ -17417,8 +17419,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         event: { type: "state.change", state: after } }), { render: false });
     }
 
-    function refreshAfterPatch(effects, { refreshAutomatic = false } = {}) {
-      if (effects.reindex === "data") chartIndex = createChartIndex(currentData);
+    function refreshAfterPatch(effects, { refreshAutomatic = false, indexPrepared = false } = {}) {
+      if (effects.reindex === "data" && !indexPrepared) chartIndex = createChartIndex(currentData);
       if (effects.reindex || refreshAutomatic) {
         refreshGroups(currentData, chartIndex, groupsAreAutomatic() && (effects.reindex === "data" || refreshAutomatic));
         runtime.setChartIndex(chartIndex);
@@ -17450,6 +17452,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       const groupsAutomaticAfter = groupsAreAutomatic();
       if (!presentationOnly || restoringAutomatic) refreshAfterPatch(result.effects, {
         refreshAutomatic: groupsAutomaticAfter && (restoringAutomatic || !groupsAutomaticBefore),
+        // Compact link deletion/restoration already rebuilds the shared index
+        // while applying the batch. A gene edit also changes that index.
+        indexPrepared: currentData.links instanceof CompactLinkStore &&
+          result.operations.some((op) => op.type === "links.delete" || op.type === "links.restore") &&
+          !result.operations.some((op) => op.type === "genes.delete" || op.type === "genes.restore"),
       });
       if (state) {
         chartState = chartStateFromSnapshot(currentData, state);
