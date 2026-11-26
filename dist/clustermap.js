@@ -4794,8 +4794,10 @@
       const next = new CompactLinkStore(this, sharedColumns);
       for (const { index, link } of records) {
         const physical = next.#physicalForUid(link?.uid), deletedIndex = physical === undefined ? -1 : next.#deleted.indexOf(physical);
-        if (deletedIndex < 0 || link.query?.uid !== next.#genes[next.#query[physical]] ||
-            link.target?.uid !== next.#genes[next.#target[physical]] || link.similarity !== next.#similarity[physical] ||
+        if (deletedIndex < 0 || !isPlainObject(link.query) || !isPlainObject(link.target) ||
+            Object.keys(link.query).some((key) => key !== "uid") || Object.keys(link.target).some((key) => key !== "uid") ||
+            link.query.uid !== next.#genes[next.#query[physical]] ||
+            link.target.uid !== next.#genes[next.#target[physical]] || link.similarity !== next.#similarity[physical] ||
             Object.keys(link).some((key) => !["uid", "query", "target", "similarity", "identity", "hidden", "label", "colour"].includes(key))) {
           throw new TypeError("Compact links can only restore deleted canonical records.");
         }
@@ -4811,6 +4813,39 @@
     *values() { for (let i = 0; i < this.size; i++) yield this.getAt(i); }
     *entries() { for (let i = 0; i < this.size; i++) { const link = this.getAt(i); yield [link.uid, link]; } }
     [Symbol.iterator]() { return this.entries(); }
+  }
+
+  // Preserve the public array-shaped read view without expanding compact links.
+  // Each record is materialized only when read; mutation belongs in chart.patch.
+  const arrayViews = new WeakMap();
+  function linkArrayView(store) {
+    let view = arrayViews.get(store);
+    if (view) return view;
+    const array = [];
+    const indexOf = (key) => {
+      if (typeof key !== "string" || !/^(0|[1-9]\d*)$/.test(key)) return null;
+      const index = Number(key);
+      return Number.isSafeInteger(index) && index < store.size ? index : null;
+    };
+    view = new Proxy(array, {
+      get(target, key, receiver) {
+        if (key === "length") return store.size;
+        const index = indexOf(key);
+        return index === null ? Reflect.get(target, key, receiver) : store.getAt(index);
+      },
+      has(target, key) { return indexOf(key) !== null || Reflect.has(target, key); },
+      getOwnPropertyDescriptor(target, key) {
+        const index = indexOf(key);
+        return index === null ? Reflect.getOwnPropertyDescriptor(target, key)
+          : { value: store.getAt(index), writable: false, enumerable: true, configurable: true };
+      },
+      ownKeys() { return [...Array.from({ length: store.size }, (_, index) => String(index)), "length"]; },
+      set() { throw new TypeError("Chart data is read-only; use chart.patch()."); },
+      deleteProperty() { throw new TypeError("Chart data is read-only; use chart.patch()."); },
+      defineProperty() { throw new TypeError("Chart data is read-only; use chart.patch()."); },
+    });
+    arrayViews.set(store, view);
+    return view;
   }
 
   // Serialize synchronously so the chart cannot change between chunks. The Blob
@@ -17898,8 +17933,10 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       applyConfiguration(_);
       return my;
     };
+    const dataReadView = (data) => data?.links instanceof CompactLinkStore
+      ? { ...data, links: linkArrayView(data.links) } : data;
     my.data = function (data) {
-      if (!arguments.length) return currentData;
+      if (!arguments.length) return dataReadView(currentData);
       if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
       const prepared = prepareData(normalizeChartData(data, runtime.config.tree));
       installData(prepared);
@@ -17910,7 +17947,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       emitHistoryChange();
       return my;
     };
-    my.visibleData = () => plotData;
+    my.visibleData = () => dataReadView(plotData);
     /** Requested renderer and the actual WebGPU fallback state. */
     my.rendererStatus = () => {
       if (!container) return null;
@@ -18309,6 +18346,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   }
 
   exports.ClusterMap = clusterMap;
+  exports.CompactLinkStore = CompactLinkStore;
 
   Object.defineProperty(exports, '__esModule', { value: true });
 

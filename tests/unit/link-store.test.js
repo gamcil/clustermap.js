@@ -181,3 +181,18 @@ test("normalization and visibility preserve compact storage and link ownership",
   assert.deepEqual([...visible.links.keys()], ["link-0", "link-2"]);
   assert.equal(store.size, 4);
 });
+
+test("compact read views behave like read-only arrays and materialize on access", async () => {
+  const { linkArrayView } = await import("../../src/data/linkStore.mjs");
+  const store = new CompactLinkStore(input()), view = linkArrayView(store);
+  assert.equal(Array.isArray(view), true);
+  assert.equal(view.length, 4);
+  assert.equal(view[1].uid, "link-1");
+  assert.equal(1 in view, true);
+  assert.equal(10 in view, false);
+  assert.deepEqual(view.map((link) => link.uid), [...store.keys()]);
+  assert.deepEqual(JSON.parse(JSON.stringify(view)), [...store.values()]);
+  assert.throws(() => { view[0] = {}; }, /read-only/);
+  assert.throws(() => view.push({}), /read-only/);
+  assert.equal(linkArrayView(store), view);
+});

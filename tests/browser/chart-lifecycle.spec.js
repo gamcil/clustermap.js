@@ -297,3 +297,47 @@ test("project Blob exports the committed snapshot without retaining live data", 
   expect(result.analysis).toEqual({ example: [1, 2] });
   expect(result.previewStillActive).toBe(true);
 });
+
+test("compact link input supports chart edits, undo, row removal and project export", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/demo/?test=1");
+  await page.addScriptTag({ url: "/node_modules/d3/dist/d3.min.js" });
+  const result = await page.evaluate(async () => {
+    const { ClusterMap, CompactLinkStore } = await import("/dist/clustermap.mjs");
+    const host = document.createElement("div"); host.style.width = "800px"; host.style.height = "400px";
+    document.body.append(host);
+    const ids = ["a", "b", "c"];
+    const columns = { genes: ids, query: new Uint32Array([0, 0]), target: new Uint32Array([1, 2]),
+      identity: new Float64Array([0.9, 0.8]), similarity: new Float64Array([1, 0.9]) };
+    const links = new CompactLinkStore(columns);
+    const data = { clusters: ids.map((uid) => ({ uid, name: uid, loci: [{ uid: `l-${uid}`, start: 0, end: 100,
+      genes: [{ uid, start: 10, end: 20, strand: 1 }] }] })), links,
+      groups: [{ uid: "group", genes: ids }], config: { updateGroups: false } };
+    const chart = ClusterMap().config({ plot: { renderer: "canvas", transitionDuration: 0 } });
+    d3.select(host).datum(data).call(chart);
+    const original = chart.data(), arrayView = Array.isArray(original.links), initial = original.links.map((link) => link.uid);
+    chart.patch([{ type: "links.update", ids: ["link-0"], changes: { hidden: true } }]);
+    const edited = chart.data().links[0].hidden, oldView = original.links[0].hidden;
+    chart.patch([{ type: "links.delete", ids: ["link-1"] }]);
+    const deleted = chart.data().links.map((link) => link.uid);
+    chart.undo(); const restored = chart.data().links.map((link) => link.uid);
+    chart.undo(); const undone = chart.data().links[0].hidden;
+    chart.remove({ clusters: ["c"] });
+    const visible = chart.visibleData().links.map((link) => link.uid);
+    chart.undo();
+    const project = chart.project(), blob = JSON.parse(await chart.exportProjectBlob().text());
+    chart.project(JSON.parse(JSON.stringify(project)));
+    const roundTrip = chart.project(); chart.destroy(); host.remove();
+    return { arrayView, initial, edited, oldView: oldView ?? null, deleted, restored, undone: undone ?? null,
+      visible, project, blob, roundTrip };
+  });
+  expect(result.arrayView).toBe(true);
+  expect(result.initial).toEqual(["link-0", "link-1"]);
+  expect(result.edited).toBe(true);
+  expect(result.oldView).toBe(null);
+  expect(result.deleted).toEqual(["link-0"]);
+  expect(result.restored).toEqual(result.initial);
+  expect(result.undone).toBe(null);
+  expect(result.visible).toEqual(["link-0"]);
+  expect(result.blob).toEqual(result.project);
+  expect(result.roundTrip).toEqual(result.project);
+});

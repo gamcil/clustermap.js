@@ -1,4 +1,4 @@
-import { CompactLinkStore } from "../data/linkStore.mjs";
+import { CompactLinkStore, linkArrayView } from "../data/linkStore.mjs";
 import { projectBlob } from "./projectBlob.mjs";
 import { textFont } from "../scene/text.mjs";
 import { includeBounds } from "../scene/bounds.mjs";
@@ -1239,8 +1239,10 @@ export default function clusterMap() {
     applyConfiguration(_);
     return my;
   };
+  const dataReadView = (data) => data?.links instanceof CompactLinkStore
+    ? { ...data, links: linkArrayView(data.links) } : data;
   my.data = function (data) {
-    if (!arguments.length) return currentData;
+    if (!arguments.length) return dataReadView(currentData);
     if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");
     const prepared = prepareData(normalizeChartData(data, runtime.config.tree));
     installData(prepared);
@@ -1251,7 +1253,7 @@ export default function clusterMap() {
     emitHistoryChange();
     return my;
   };
-  my.visibleData = () => plotData;
+  my.visibleData = () => dataReadView(plotData);
   /** Requested renderer and the actual WebGPU fallback state. */
   my.rendererStatus = () => {
     if (!container) return null;

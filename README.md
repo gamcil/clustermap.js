@@ -477,6 +477,38 @@ const blob = chart.exportProjectBlob({
 Hosts remain responsible for validating their extension fields and project
 format before export and for managing the resulting download.
 
+For large datasets with generated `link-0`, `link-1`, … IDs, hosts can
+supply a compact link table instead of an object array:
+
+```js
+import { ClusterMap, CompactLinkStore } from "clinker";
+
+const links = new CompactLinkStore({
+  genes: ["gene-a", "gene-b"],
+  query: new Uint32Array([0]),       // indexes into genes
+  target: new Uint32Array([1]),
+  identity: new Float64Array([0.95]),
+  similarity: new Float64Array([0.98]),
+});
+const chart = ClusterMap();
+d3.select(element).datum({ ...data, links }).call(chart);
+```
+
+All four columns must have the same length; endpoint indexes must refer to the
+string ID dictionary. Each link's ID is `link-N`, where `N` is its original
+column position. The constructor copies its inputs and validates the table, so
+the same store can safely be shared by a host and multiple charts. Link edits
+and deletions use chart-local copy-on-write overlays. Arbitrary link IDs or
+metadata should use the existing object-array input.
+
+For compact input, `data().links` and `visibleData().links` are read-only,
+lazy array views: indexing, iteration and array methods work, but operations
+such as `map`, `filter`, JSON serialization or `chart.project()` can still
+materialize many records. The views cannot be passed to `structuredClone`;
+use `chart.project()` for an owned object snapshot or `exportProjectBlob()`
+to serialize without expanding the full link table at once. Existing projects
+remain object-array based when reopened.
+
 Treat the objects returned by `data()` and `visibleData()` as read-only. Direct
 mutation is unsupported: it bypasses validation, history, and cache invalidation.
 Use `chart.patch(...)` for supported edits or `chart.data(replacement)` to
