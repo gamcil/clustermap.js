@@ -3,6 +3,7 @@
 // text and other decorations; SVG provides static export.
 
 import { color } from "d3-color";
+import { sameCoordinate } from "../utils/values.mjs";
 import { worldViewport } from "../scene/camera.mjs";
 import { sceneRecordsInViewport } from "../scene/viewport.mjs";
 import { allIndexedIds } from "../scene/spatialIndex.mjs";
@@ -494,8 +495,8 @@ function sceneLinkCandidates(scene) {
   return [...ids].map((uid) => scene.links.get(uid)).filter(Boolean).sort((a, b) => a.order - b.order);
 }
 
-// A row-only transition can reuse gene and track vertices with the same
-// cluster transforms used by dragging. Reject any change in local geometry.
+// A row translation can reuse gene and track vertices with the same cluster
+// transforms used by dragging. Reject any change in local geometry.
 function animationRowOffsets(base, frame) {
   if (!base || !frame.changes || !frame.animationLinkIds || frame.annotationPanels?.length ||
       base.clusters.size !== frame.clusters.size || base.loci.size !== frame.loci.size ||
@@ -503,21 +504,23 @@ function animationRowOffsets(base, frame) {
   const offsets = new Map();
   for (const [uid, cluster] of frame.clusters) {
     const before = base.clusters.get(uid);
-    if (!before || before.x !== cluster.x) return null;
-    offsets.set(uid, cluster.y - before.y);
+    if (!before || !Number.isFinite(cluster.x) || !Number.isFinite(cluster.y) ||
+        !Number.isFinite(before.x) || !Number.isFinite(before.y)) return null;
+    offsets.set(uid, { x: cluster.x - before.x, y: cluster.y - before.y });
   }
   for (const [uid, locus] of frame.loci) {
-    const before = base.loci.get(uid), dy = offsets.get(locus.cluster.uid);
-    if (!before || dy === undefined || locus.x !== before.x ||
-        Math.abs(locus.y - before.y - dy) > 1e-7 ||
-        locus.track.x1 !== before.track.x1 || locus.track.x2 !== before.track.x2 || locus.track.y !== before.track.y) return null;
+    const before = base.loci.get(uid), offset = offsets.get(locus.cluster.uid);
+    if (!before || !offset || !sameCoordinate(locus.x, before.x + offset.x) ||
+        !sameCoordinate(locus.y, before.y + offset.y) ||
+        !sameCoordinate(locus.track.x1, before.track.x1) || !sameCoordinate(locus.track.x2, before.track.x2) ||
+        !sameCoordinate(locus.track.y, before.track.y)) return null;
   }
   for (const [uid, gene] of frame.genes) {
-    const before = base.genes.get(uid), dy = offsets.get(gene.locus.cluster.uid);
-    if (!before || dy === undefined || before.source !== gene.source || before.visible !== gene.visible ||
+    const before = base.genes.get(uid), offset = offsets.get(gene.locus.cluster.uid);
+    if (!before || !offset || before.source !== gene.source || before.visible !== gene.visible ||
         before.polygon.length !== gene.polygon.length) return null;
     for (let i = 0; i < gene.polygon.length; i++) {
-      if (Math.abs(gene.polygon[i] - before.polygon[i] - (i % 2 ? dy : 0)) > 1e-7) return null;
+      if (!sameCoordinate(gene.polygon[i], before.polygon[i] + (i % 2 ? offset.y : offset.x))) return null;
     }
   }
   return offsets;
@@ -1072,6 +1075,12 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
         if (slot !== undefined) offsets[slot * 2 + 1] += offset;
       }
     }
+    if (nextPreview?.type === "cluster-translation") {
+      for (const [uid, offset] of nextPreview.clusterOffsets) {
+        const slot = geometry?.clusterSlots?.get(uid);
+        if (slot !== undefined) { offsets[slot * 2] += offset.x; offsets[slot * 2 + 1] += offset.y; }
+      }
+    }
     // Locus slots inherit their cluster's retained and transient translation.
     for (const [uid, slot] of geometry?.locusSlots || []) {
       const locus = scene?.loci.get(uid);
@@ -1388,7 +1397,7 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     }
     uploadClusterPreviewRecords({ values: values.subarray(0, count * 16) });
     uploadPreviewLinkIndices(indices.subarray(0, count));
-    updateClusterOffsets({ type: "cluster-drag", clusterOffsets: offsets });
+    updateClusterOffsets({ type: "cluster-translation", clusterOffsets: offsets });
     animationBaseScene = base;
     scene = frame;
     previewLinksActive = true;

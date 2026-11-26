@@ -22,6 +22,10 @@
 
   const isRecordId = (value) => typeof value === "string" ? Boolean(value.trim()) : Number.isFinite(value);
 
+  /** Compare computed coordinates while allowing only floating-point roundoff. */
+  const sameCoordinate = (a, b) => Number.isFinite(a) && Number.isFinite(b) &&
+    Math.abs(a - b) <= Number.EPSILON * 16 * Math.max(1, Math.abs(a), Math.abs(b));
+
   function ascending$1(a, b) {
     return a == null || b == null ? NaN : a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
   }
@@ -6001,18 +6005,14 @@
   function createLocusFlipTransition(source, target, locusIds, { clusterLabelTexts = null } = {}) {
     const selected = new Set(locusIds || []), changes = target?.changes;
     if (!source || !selected.size || !changes?.clusters || !changes?.loci) return null;
-    // Translated retained geometry and newly projected geometry can differ by a
-    // few floating-point rounding units even when their layout is unchanged.
-    const samePosition = (a, b) => Number.isFinite(a) && Number.isFinite(b) &&
-      Math.abs(a - b) <= Number.EPSILON * 16 * Math.max(1, Math.abs(a), Math.abs(b));
     for (const uid of changes.clusters) {
       const before = source.clusters.get(uid), after = target.clusters.get(uid);
-      if (!before || !after || !samePosition(before.x, after.x) || !samePosition(before.y, after.y)) return null;
+      if (!before || !after || !sameCoordinate(before.x, after.x) || !sameCoordinate(before.y, after.y)) return null;
     }
     for (const uid of changes.loci) {
       const before = source.loci.get(uid), after = target.loci.get(uid);
-      if (!before || !after || !samePosition(before.x, after.x) || !samePosition(before.y, after.y) ||
-          !samePosition(before.worldStart, after.worldStart) || !samePosition(before.worldEnd, after.worldEnd) ||
+      if (!before || !after || !sameCoordinate(before.x, after.x) || !sameCoordinate(before.y, after.y) ||
+          !sameCoordinate(before.worldStart, after.worldStart) || !sameCoordinate(before.worldEnd, after.worldEnd) ||
           before.state.start !== after.state.start || before.state.end !== after.state.end ||
           (selected.has(uid) ? before.state.flipped === after.state.flipped : before.state.flipped !== after.state.flipped)) return null;
     }
@@ -15390,8 +15390,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     return [...ids].map((uid) => scene.links.get(uid)).filter(Boolean).sort((a, b) => a.order - b.order);
   }
 
-  // A row-only transition can reuse gene and track vertices with the same
-  // cluster transforms used by dragging. Reject any change in local geometry.
+  // A row translation can reuse gene and track vertices with the same cluster
+  // transforms used by dragging. Reject any change in local geometry.
   function animationRowOffsets(base, frame) {
     if (!base || !frame.changes || !frame.animationLinkIds || frame.annotationPanels?.length ||
         base.clusters.size !== frame.clusters.size || base.loci.size !== frame.loci.size ||
@@ -15399,21 +15399,23 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const offsets = new Map();
     for (const [uid, cluster] of frame.clusters) {
       const before = base.clusters.get(uid);
-      if (!before || before.x !== cluster.x) return null;
-      offsets.set(uid, cluster.y - before.y);
+      if (!before || !Number.isFinite(cluster.x) || !Number.isFinite(cluster.y) ||
+          !Number.isFinite(before.x) || !Number.isFinite(before.y)) return null;
+      offsets.set(uid, { x: cluster.x - before.x, y: cluster.y - before.y });
     }
     for (const [uid, locus] of frame.loci) {
-      const before = base.loci.get(uid), dy = offsets.get(locus.cluster.uid);
-      if (!before || dy === undefined || locus.x !== before.x ||
-          Math.abs(locus.y - before.y - dy) > 1e-7 ||
-          locus.track.x1 !== before.track.x1 || locus.track.x2 !== before.track.x2 || locus.track.y !== before.track.y) return null;
+      const before = base.loci.get(uid), offset = offsets.get(locus.cluster.uid);
+      if (!before || !offset || !sameCoordinate(locus.x, before.x + offset.x) ||
+          !sameCoordinate(locus.y, before.y + offset.y) ||
+          !sameCoordinate(locus.track.x1, before.track.x1) || !sameCoordinate(locus.track.x2, before.track.x2) ||
+          !sameCoordinate(locus.track.y, before.track.y)) return null;
     }
     for (const [uid, gene] of frame.genes) {
-      const before = base.genes.get(uid), dy = offsets.get(gene.locus.cluster.uid);
-      if (!before || dy === undefined || before.source !== gene.source || before.visible !== gene.visible ||
+      const before = base.genes.get(uid), offset = offsets.get(gene.locus.cluster.uid);
+      if (!before || !offset || before.source !== gene.source || before.visible !== gene.visible ||
           before.polygon.length !== gene.polygon.length) return null;
       for (let i = 0; i < gene.polygon.length; i++) {
-        if (Math.abs(gene.polygon[i] - before.polygon[i] - (i % 2 ? dy : 0)) > 1e-7) return null;
+        if (!sameCoordinate(gene.polygon[i], before.polygon[i] + (i % 2 ? offset.y : offset.x))) return null;
       }
     }
     return offsets;
@@ -15968,6 +15970,12 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
           if (slot !== undefined) offsets[slot * 2 + 1] += offset;
         }
       }
+      if (nextPreview?.type === "cluster-translation") {
+        for (const [uid, offset] of nextPreview.clusterOffsets) {
+          const slot = geometry?.clusterSlots?.get(uid);
+          if (slot !== undefined) { offsets[slot * 2] += offset.x; offsets[slot * 2 + 1] += offset.y; }
+        }
+      }
       // Locus slots inherit their cluster's retained and transient translation.
       for (const [uid, slot] of geometry?.locusSlots || []) {
         const locus = scene?.loci.get(uid);
@@ -16284,7 +16292,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       }
       uploadClusterPreviewRecords({ values: values.subarray(0, count * 16) });
       uploadPreviewLinkIndices(indices.subarray(0, count));
-      updateClusterOffsets({ type: "cluster-drag", clusterOffsets: offsets });
+      updateClusterOffsets({ type: "cluster-translation", clusterOffsets: offsets });
       animationBaseScene = base;
       scene = frame;
       previewLinksActive = true;

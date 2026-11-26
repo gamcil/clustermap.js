@@ -417,7 +417,7 @@ test("WebGPU stores adjacent pairs under a low device limit and draws reordered 
 });
 
 
-test("WebGPU row animation reuses gene geometry and preserves interpolated link anchors and fades", async (t) => {
+test("WebGPU row translations reuse gene geometry and preserve interpolated link anchors and fades", async (t) => {
   const { renderer, buffers, writes, draws, getBindings } = await gpuHarness(t);
   const ids = ["a", "b", "c"];
   const data = normalizeChartData({ clusters: ids.map((uid) => ({ uid, name: uid,
@@ -429,6 +429,7 @@ test("WebGPU row animation reuses gene geometry and preserves interpolated link 
   runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   const before = runtime.updateScene(data);
   state.clusterOrder = ["a", "c", "b"];
+  setClusterOffset(state, "a", 25.125);
   const after = runtime.updateScene(data, { sourceScene: before });
   const options = { scales: runtime.scales, config: runtime.renderConfig,
     camera: { x: 0, y: 0, k: 1 }, width: 1000, height: 1000, pixelRatio: 1 };
@@ -440,6 +441,8 @@ test("WebGPU row animation reuses gene geometry and preserves interpolated link 
     renderer.render({ ...options, nextScene: frame });
     assert.deepEqual(buffers.filter((buffer) => buffer.usage & GPUBufferUsage.VERTEX), vertices);
     assert.ok(!writes.some((buffer) => buffer.usage & GPUBufferUsage.VERTEX), "animation reuses gene and track vertices");
+    const offsets = new Float32Array(getBindings().find((entry) => entry.binding === 1).resource.buffer.data.buffer);
+    assert.equal(offsets[2], Math.fround(25.125 * progress), "horizontal row movement reaches the GPU");
     const records = new Float32Array(getBindings().find((entry) => entry.binding === 2).resource.buffer.data.buffer);
     assert.equal(draws.find((draw) => draw.entryPoint === "linkFillVertex")?.args[1], 2);
     // A camera repaint of the same frame must retain the animation records.
@@ -453,6 +456,13 @@ test("WebGPU row animation reuses gene geometry and preserves interpolated link 
       assert.ok(Math.abs(records[start + 11] - link.opacity) < 1e-6);
     }
   }
+  const roundedFrame = interpolateScene(before, after, 0.5);
+  const roundedLocus = roundedFrame.loci.get("l-a");
+  roundedLocus.x += Math.max(1, Math.abs(roundedLocus.x)) * Number.EPSILON * 2;
+  writes.length = 0;
+  renderer.render({ ...options, nextScene: roundedFrame });
+  assert.ok(!writes.some((buffer) => buffer.usage & GPUBufferUsage.VERTEX),
+    "rounding differences retain translated geometry");
   const changedGeometry = interpolateScene(before, after, 0.5);
   changedGeometry.genes.get("g-a").polygon[0] += 3;
   writes.length = 0;

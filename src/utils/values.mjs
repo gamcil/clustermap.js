@@ -15,3 +15,7 @@ export const sameArray = (one, two) => one === two || Array.isArray(one) && Arra
   one.length === two.length && one.every((value, index) => value === two[index]);
 
 export const isRecordId = (value) => typeof value === "string" ? Boolean(value.trim()) : Number.isFinite(value);
+
+/** Compare computed coordinates while allowing only floating-point roundoff. */
+export const sameCoordinate = (a, b) => Number.isFinite(a) && Number.isFinite(b) &&
+  Math.abs(a - b) <= Number.EPSILON * 16 * Math.max(1, Math.abs(a), Math.abs(b));
