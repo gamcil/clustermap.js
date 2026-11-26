@@ -44,7 +44,7 @@ function validateCompactColumns({ genes, query, target, identity, similarity } =
   }
 }
 export class CompactLinkStore {
-  #genes; #query; #target; #identity; #similarity; #overrides; #deleted; #fingerprint;
+  #genes; #query; #target; #identity; #similarity; #overrides; #deleted; #fingerprint; #activePositions;
   constructor(input, mode = null) {
     if (mode === sharedColumns) {
       this.#genes = input.#genes; this.#query = input.#query; this.#target = input.#target;
@@ -52,6 +52,7 @@ export class CompactLinkStore {
       this.#overrides = new Map(input.#overrides);
       this.#deleted = input.#deleted.slice();
       this.#fingerprint = input.#fingerprint;
+      this.#activePositions = input.#activePositions;
       return;
     }
     const { genes, query, target, identity, similarity } = input;
@@ -64,6 +65,7 @@ export class CompactLinkStore {
     this.#overrides = new Map();
     this.#deleted = [];
     this.#fingerprint = null;
+    this.#activePositions = null;
   }
   // Explicit ownership transfer avoids the second copy of large columns.
   // All views of the transferred buffers in the caller become detached.
@@ -93,6 +95,18 @@ export class CompactLinkStore {
   }
   #physicalAt(position) {
     if (!Number.isInteger(position) || position < 0 || position >= this.size) return undefined;
+    if (this.#deleted.length > 128) {
+      if (!this.#activePositions) {
+        const positions = new Uint32Array(this.size);
+        let removed = 0, next = 0;
+        for (let physical = 0; physical < this.#query.length; physical++) {
+          if (this.#deleted[removed] === physical) removed++;
+          else positions[next++] = physical;
+        }
+        this.#activePositions = positions;
+      }
+      return this.#activePositions[position];
+    }
     let low = position, high = position + this.#deleted.length;
     while (low < high) {
       const middle = Math.floor((low + high) / 2);
@@ -212,6 +226,7 @@ export class CompactLinkStore {
       removed.add(this.#physicalForUid(uid));
     }
     next.#deleted = [...removed].sort((a, b) => a - b);
+    next.#activePositions = null;
     return next;
   }
   filterEndpoints(geneIds) {
@@ -220,6 +235,7 @@ export class CompactLinkStore {
       if (!geneIds.has(this.queryAt(position)) || !geneIds.has(this.targetAt(position))) removed.push(this.#physicalAt(position));
     }
     next.#deleted = removed.sort((a, b) => a - b);
+    next.#activePositions = null;
     return next;
   }
   withRestored(records) {
@@ -235,6 +251,7 @@ export class CompactLinkStore {
         throw new TypeError("Compact links can only restore deleted canonical records.");
       }
       next.#deleted.splice(deletedIndex, 1);
+      next.#activePositions = null;
       if (next.order(link.uid) !== Math.min(index, next.size - 1)) throw new TypeError("Compact link restoration would change canonical order.");
       const changes = Object.fromEntries(Object.entries(link).filter(([key]) => editableFields.has(key)));
       validateRecordFields(changes, (message) => { throw new TypeError(`Invalid compact link restoration: ${message}.`); });

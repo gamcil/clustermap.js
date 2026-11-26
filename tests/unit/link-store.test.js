@@ -244,3 +244,20 @@ test("compact columns can transfer ownership without copying and invalid input s
   assert.throws(() => CompactLinkStore.fromTransferred(invalid), /position 0/);
   assert.equal(invalid.query.byteLength, 16);
 });
+
+test("compact positions remain correct with large exclusions and shared edit views", () => {
+  const count = 1000, genes = ["a", "b"];
+  const store = new CompactLinkStore({ genes,
+    query: Uint32Array.from({ length: count }, (_, i) => i % 2), target: new Uint32Array(count),
+    identity: new Float64Array(count).fill(0.9), similarity: new Float64Array(count).fill(0.95) });
+  const filtered = store.filterEndpoints(new Set(["a"]));
+  assert.equal(filtered.size, 500);
+  for (let i = 0; i < filtered.size; i++) {
+    assert.equal(filtered.uidAt(i), `link-${i * 2}`);
+    assert.equal(filtered.order(`link-${i * 2}`), i);
+  }
+  const changed = filtered.withUpdates([{ uid: "link-998", changes: { hidden: true } }]);
+  assert.equal(changed.getAt(499).hidden, true);
+  assert.equal(filtered.getAt(499).hidden, undefined);
+  assert.equal(store.size, count);
+});
