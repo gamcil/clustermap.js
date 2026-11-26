@@ -404,7 +404,7 @@ test("compact link column ownership can be transferred in the browser", async ({
 });
 
 for (const renderer of ["svg", "canvas"]) {
-  test(`locus edits retain compact link filtering with ${renderer}`, async ({ page }) => {
+  test(`batch locus edits retain compact link filtering with ${renderer}`, async ({ page }) => {
     await page.goto("http://127.0.0.1:8080/demo/?test=1");
     await page.addScriptTag({ url: "/node_modules/d3/dist/d3.min.js" });
     const result = await page.evaluate(async (renderer) => {
@@ -419,24 +419,29 @@ for (const renderer of ["svg", "canvas"]) {
         groups: [{ uid: "group", genes: ids }], config: { updateGroups: false } };
       const chart = ClusterMap().config({ plot: { renderer, transitionDuration: 0 }, link: { bestOnly: true } });
       d3.select(host).datum(data).call(chart);
+      chart.locusSelection(["l-a", "l-b"]);
+      chart.clearHistory();
       const sort = Uint32Array.prototype.sort; let sorts = 0;
       Uint32Array.prototype.sort = function (...args) { sorts++; return sort.apply(this, args); };
       try {
-        chart.flipLoci(["l-a"]);
-        chart.trimLoci(["l-a"]);
+        chart.flipLoci();
+        const flipped = new Map(chart.state().genes);
+        chart.trimLoci(["l-a", "l-b"]);
         const patched = chart.exportSvg();
         chart.config({ plot: { transitionDuration: 0 } });
         const rebuilt = chart.exportSvg();
-        chart.restoreLoci(["l-a"]);
+        chart.restoreLoci(["l-a", "l-b"]);
         const afterEdits = sorts;
         chart.config({ link: { threshold: 0.1 } });
-        return { patched, rebuilt, afterEdits, afterFilterChange: sorts };
+        return { patched, rebuilt, afterEdits, afterFilterChange: sorts,
+          strands: ids.map((uid) => flipped.get(uid)?.strand ?? 1) };
       } finally {
         Uint32Array.prototype.sort = sort;
         chart.destroy(); host.remove();
       }
     }, renderer);
     expect(result.patched).toEqual(result.rebuilt);
+    expect(result.strands).toEqual([-1, -1, 1]);
     expect(result.afterEdits).toBe(0);
     expect(result.afterFilterChange).toBeGreaterThan(0);
   });
