@@ -5084,7 +5084,22 @@
         genes: updateSpatialIndex(scene.index.genes, entries(genes, changedGenes), () => entries(genes, genes.keys())),
         loci: updateSpatialIndex(scene.index.loci, entries(loci, changedLoci), () => entries(loci, loci.keys())),
         links: updateSpatialIndex(scene.index.links, changedLinkBounds,
-          function* () { for (const [uid, record] of links) yield [uid, record.bounds, record.order]; }),
+          function* () {
+            if (!scene.index.links.sparseOrder) {
+              for (const [uid, record] of links) yield [uid, record.bounds, record.order];
+              return;
+            }
+            // Sparse indexes only contain links with geometry. Rebuild from
+            // their old IDs plus newly bounded links, rather than scanning the
+            // complete retained link dataset after a dense row change.
+            for (const uid of scene.index.links.boundsById.keys()) {
+              const record = links.get(uid);
+              if (record) yield [uid, record.bounds, record.order];
+            }
+            for (const [uid, bounds, order] of changedLinkBounds) {
+              if (!scene.index.links.boundsById.has(uid)) yield [uid, bounds, order];
+            }
+          }),
         hitLoci: updateSpatialIndex(scene.index.hitLoci, entries(locusRegions, changedLoci, hitBounds),
           () => entries(locusRegions, locusRegions.keys(), hitBounds)),
       },

@@ -92,12 +92,14 @@ test("row translations and reorder patches match a full scene rebuild", async ()
       genes: [{ uid: `g-${uid}`, start: 10, end: 20, strand: 1 }] }] })),
     links, groups: [{ uid: "group", genes: ids.map((uid) => `g-${uid}`) }], config: { updateGroups: false } });
   const runtime = createChartRuntime(), state = createChartState(data);
+  const { allIndexedIds } = await import("../../src/scene/spatialIndex.mjs");
   runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(state);
   let scene = runtime.updateScene(data);
   const compare = (patched, rebuilt) => {
     assert.deepEqual([...patched.links].map(([uid, link]) => [uid, link.visible, link.anchors]),
       [...rebuilt.links].map(([uid, link]) => [uid, link.visible, link.anchors]));
     assert.deepEqual([...patched.index.links.boundsById.keys()].sort(), [...rebuilt.index.links.boundsById.keys()].sort());
+    assert.deepEqual(allIndexedIds(patched.index.links), allIndexedIds(rebuilt.index.links));
   };
   setClusterOffset(state, "b", 25);
   let patched = runtime.updateScene(data, { sourceScene: scene, changes: { clusters: ["b"] } });
