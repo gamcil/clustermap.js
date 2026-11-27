@@ -990,6 +990,10 @@ function linear() {
   return linearish(scale);
 }
 
+function endpointGeneId(endpoint) {
+  return endpoint.kind === "span" ? undefined : endpoint.geneId ?? endpoint.uid;
+}
+
 Object.freeze({
   show: true, fontSize: 10, fontWeight: 600, borderWidth: 3, borderOpacity: 1,
 });
@@ -1267,6 +1271,11 @@ const LINK_PAGE_SIZE = 250;
 const LINK_PAGE_THRESHOLD = 1000;
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const labelFor = (record, fallback = "") => record?.label || record?.name || fallback;
+const endpointLabel = (endpoint, genes, loci) => endpoint.kind === "span"
+  ? `${labelFor(loci.get(endpoint.locusId), endpoint.locusId)}:${endpoint.start + 1}-${endpoint.end}`
+  : labelFor(genes.get(endpointGeneId(endpoint)), endpointGeneId(endpoint));
+const endpointGroup = (endpoint, groups) => endpoint.kind === "span"
+  ? "—" : labelFor(groups.get(endpointGeneId(endpoint)), "Ungrouped");
 
 // Stable bucket ordering keeps memory proportional to numeric positions and
 // distinct display values, rather than constructing a row object per link.
@@ -1366,17 +1375,18 @@ class DataPanelModel {
 
   #linkPage({ filter, sort, page = 0 }) {
     const links = this.#data.links, compact = links[Symbol.for("clustermap.compactLinks")];
-    const { geneById: genes, groups } = this.#records();
+    const { geneById: genes, locusById: loci, groups } = this.#records();
     const label = (uid) => labelFor(genes.get(uid), uid);
     const group = (uid) => labelFor(groups.get(uid), "Ungrouped");
     const value = (position, key) => {
       const record = compact ? null : links[position];
-      const query = compact ? compact.queryAt(position) : record.query.uid;
-      const target = compact ? compact.targetAt(position) : record.target.uid;
-      if (key === "source") return label(query);
-      if (key === "target") return label(target);
+      const query = compact ? compact.queryAt(position) : endpointGeneId(record.query);
+      const target = compact ? compact.targetAt(position) : endpointGeneId(record.target);
+      if (key === "source") return compact ? label(query) : endpointLabel(record.query, genes, loci);
+      if (key === "target") return compact ? label(target) : endpointLabel(record.target, genes, loci);
       if (key === "identity") return Math.round(((compact ? compact.identityAt(position) : record.identity) || 0) * 1000) / 10;
-      if (key === "groups") return `${group(query)} / ${group(target)}`;
+      if (key === "groups") return compact ? `${group(query)} / ${group(target)}`
+        : `${endpointGroup(record.query, groups)} / ${endpointGroup(record.target, groups)}`;
       if (key === "label") return (compact ? compact.labelAt(position) : record.label) || "";
       return "";
     };
@@ -1397,9 +1407,9 @@ class DataPanelModel {
     const rows = [];
     for (const position of positions.subarray(page * LINK_PAGE_SIZE, (page + 1) * LINK_PAGE_SIZE)) {
       const link = compact ? compact.getAt(position) : links[position];
-      rows.push({ id: link.uid, source: label(link.query.uid), target: label(link.target.uid),
+      rows.push({ id: link.uid, source: endpointLabel(link.query, genes, loci), target: endpointLabel(link.target, genes, loci),
         identity: Math.round((link.identity || 0) * 1000) / 10,
-        groups: `${group(link.query.uid)} / ${group(link.target.uid)}`,
+        groups: `${endpointGroup(link.query, groups)} / ${endpointGroup(link.target, groups)}`,
         label: link.label || "", hidden: Boolean(link.hidden), colour: link.colour });
     }
     return { rows, page, pageCount, total, paged: true };
@@ -1412,10 +1422,11 @@ class DataPanelModel {
     const groups = new Map((data.groups || []).flatMap((group) => (group.genes || []).map((id) => [id, group])));
     const groupById = new Map((data.groups || []).map((group) => [String(group.uid), group]));
     const genes = [], clusters = [];
-    const geneById = new Map();
+    const geneById = new Map(), locusById = new Map();
     for (const cluster of data.clusters || []) {
       const loci = [];
       for (const locus of cluster.loci || []) {
+        locusById.set(locus.uid, locus);
         const ids = [];
         for (const gene of locus.genes || []) {
           geneById.set(gene.uid, gene);
@@ -1426,7 +1437,7 @@ class DataPanelModel {
       }
       clusters.push({ record: cluster, loci, ids: loci.flatMap(({ ids }) => ids) });
     }
-    return this.#index = { groups, groupById, genes, geneById, clusters };
+    return this.#index = { groups, groupById, genes, geneById, locusById, clusters };
   }
 
   #computeRows({ kind, geneView, filter, memberGroupId, memberGroup, sort, expanded, branches }) {
@@ -1440,13 +1451,13 @@ class DataPanelModel {
       id: group.uid, label: labelFor(group, group.uid), subtitle: group.subtitle || "", count: group.genes?.length || 0, hidden: Boolean(group.hidden), colour: group.colour,
     }));
     if (kind === "links") {
-      const genes = cache.geneById;
-      return sortRows(data.links.filter((link) => includes(labelFor(genes.get(link.query.uid), link.query.uid), labelFor(genes.get(link.target.uid), link.target.uid), link.label)).map((link) => ({
+      const genes = cache.geneById, loci = cache.locusById;
+      return sortRows(data.links.filter((link) => includes(endpointLabel(link.query, genes, loci), endpointLabel(link.target, genes, loci), link.label)).map((link) => ({
         id: link.uid,
-        source: labelFor(genes.get(link.query.uid), link.query.uid),
-        target: labelFor(genes.get(link.target.uid), link.target.uid),
+        source: endpointLabel(link.query, genes, loci),
+        target: endpointLabel(link.target, genes, loci),
         identity: Math.round((link.identity || 0) * 1000) / 10,
-        groups: `${labelFor(groups.get(link.query.uid), "Ungrouped")} / ${labelFor(groups.get(link.target.uid), "Ungrouped")}`,
+        groups: `${endpointGroup(link.query, groups)} / ${endpointGroup(link.target, groups)}`,
         label: link.label || "",
         hidden: Boolean(link.hidden),
         colour: link.colour,

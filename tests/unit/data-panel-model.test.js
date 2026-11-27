@@ -20,6 +20,22 @@ function fixture() {
 
 const options = (changes = {}) => ({ kind: "genes", geneView: "tree", filter: "", memberGroupId: null, sort: null, expanded: new Set(), ...changes });
 
+test("link rows display, filter and sort locus spans in both small and paged views", () => {
+  const model = fixture();
+  model.data.clusters[0].loci[0].name = "Sequence A";
+  const span = { uid: "span", query: { kind: "span", locusId: "a1", start: 10, end: 30 },
+    target: { kind: "gene", geneId: 2 }, identity: 0.9 };
+  model.data.links = [span];
+  const view = () => model.view(options({ kind: "links", filter: "sequence a", sort: { key: "source", direction: 1 } }));
+  assert.deepEqual(view().rows.map(({ source, target, groups }) => [source, target, groups]), [["Sequence A:11-30", 2, "— / Ungrouped"]]);
+  model.data.links = Array.from({ length: 1001 }, (_, i) => ({ ...span, uid: `span-${i}` }));
+  model.data = model.data;
+  const paged = view();
+  assert.equal(paged.total, 1001);
+  assert.equal(paged.rows[0].source, "Sequence A:11-30");
+  assert.equal(paged.rows[0].groups, "— / Ungrouped");
+});
+
 test("collapsed views retain branches and parent keys without rendering their genes", () => {
   const model = fixture(), view = model.view(options());
   assert.deepEqual(view.rows.map(({ key }) => key), ["cluster:a", "cluster-locus:b:b1"]);

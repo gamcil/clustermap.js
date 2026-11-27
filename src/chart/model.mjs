@@ -2,6 +2,7 @@ import { CompactLinkStore } from "../data/linkStore.mjs";
 import { createChartIndex } from "../data/index.mjs";
 import { applyChartOperations, operationEffects } from "../data/operations.mjs";
 import { createLinkGroups } from "../links/groups.mjs";
+import { endpointGeneId } from "../links/layout.mjs";
 import { createChartState } from "./state.mjs";
 import { chartStateFromSnapshot, createChartStateSerializer } from "./snapshot.mjs";
 
@@ -14,7 +15,7 @@ function refreshGroups(data, index, derive = automaticGroups(data)) {
       ? (function* () { for (const link of data.links.values()) {
           if (index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)) yield link;
         } })()
-      : data.links.filter((link) => index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid));
+      : data.links.filter((link) => index.geneById.has(endpointGeneId(link.query)) && index.geneById.has(endpointGeneId(link.target)));
     data.groups = createLinkGroups(links, data.groups);
   } else data.groups ??= [];
   index.groupById = new Map(data.groups.map((group) => [group.uid, group]));

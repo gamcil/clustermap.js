@@ -4,6 +4,18 @@ import { readFile } from "node:fs/promises";
 import { normalizeChartData, validateTree } from "../../src/data/normalize.mjs";
 import { createChartIndex } from "../../src/data/index.mjs";
 import { visibleChartData, visibleTree } from "../../src/data/visibility.mjs";
+
+test("row exclusion filters span links by locus and preserves the source", () => {
+  const data = { clusters: [{ uid: "a", loci: [{ uid: "la", genes: [{ uid: "ga" }] }] },
+    { uid: "b", loci: [{ uid: "lb", genes: [{ uid: "gb" }] }] },
+    { uid: "c", loci: [{ uid: "lc", genes: [{ uid: "gc" }] }] }], groups: [], links: [
+      { uid: "ab", query: { kind: "span", locusId: "la", start: 0, end: 2 }, target: { kind: "gene", geneId: "gb" } },
+      { uid: "ac", query: { kind: "span", locusId: "la", start: 0, end: 2 }, target: { kind: "span", locusId: "lc", start: 0, end: 2 } },
+    ] };
+  const view = visibleChartData(data, { excludedClusters: new Set(["c"]), excludedLoci: new Set() });
+  assert.deepEqual(view.links.map(({ uid }) => uid), ["ab"]);
+  assert.equal(data.links.length, 2);
+});
 import { createChartState } from "../../src/chart/state.mjs";
 import { setTreeClusterOrder } from "../../src/tree/model.mjs";
 import { serializeChartState, chartStateFromSnapshot } from "../../src/chart/snapshot.mjs";

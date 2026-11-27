@@ -9023,12 +9023,15 @@
     const clusterIds = new Set(clusters.map((cluster) => cluster.uid));
     const rowIds = new Set(clusters.map((cluster) => String(cluster.uid)));
     const geneIds = new Set(clusters.flatMap((cluster) => cluster.loci.flatMap((locus) => locus.genes.map((gene) => gene.uid))));
+    const locusIds = new Set(clusters.flatMap((cluster) => cluster.loci.map((locus) => locus.uid)));
     const aliases = new Map();
     const tree = visibleTree(data.tree, clusterIds, aliases);
     const nodeIds = new Set(tree?.nodes.map((node) => node.uid));
+    const hasEndpoint = (endpoint) => endpoint.kind === "span"
+      ? locusIds.has(endpoint.locusId) : geneIds.has(endpointGeneId(endpoint));
     const links = data.links instanceof CompactLinkStore
       ? data.links.filterEndpoints(geneIds)
-      : data.links.filter((link) => geneIds.has(link.query.uid) && geneIds.has(link.target.uid));
+      : data.links.filter((link) => hasEndpoint(link.query) && hasEndpoint(link.target));
     return { ...data, clusters, tree,
       links,
       groups: data.groups?.map((group) => ({ ...group, genes: group.genes?.filter((uid) => geneIds.has(uid)) })),
@@ -17189,7 +17192,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
         ? (function* () { for (const link of data.links.values()) {
             if (index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)) yield link;
           } })()
-        : data.links.filter((link) => index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid));
+        : data.links.filter((link) => index.geneById.has(endpointGeneId(link.query)) && index.geneById.has(endpointGeneId(link.target)));
       data.groups = createLinkGroups(links, data.groups);
     } else data.groups ??= [];
     index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
