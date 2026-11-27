@@ -4684,8 +4684,8 @@ class ArrayLinkStore {
 const sharedColumns = Symbol("shared compact columns");
 const transferredColumns = Symbol("transferred compact columns");
 const editableFields = new Set(["label", "colour", "hidden", "identity"]);
-function validateCompactColumns({ genes, query, target, identity, similarity, spans = null } = {}) {
-  if (!Array.isArray(genes) || !genes.every((uid) => typeof uid === "string" && uid.length)) {
+function validateCompactColumns({ genes, query, target, identity, similarity, spans = null, ids = null } = {}) {
+  if (!Array.isArray(genes) || !genes.every(isRecordId)) {
     throw new TypeError("Compact links require a gene ID dictionary.");
   }
   if (!(query instanceof Uint32Array) || !(target instanceof Uint32Array) ||
@@ -4694,7 +4694,10 @@ function validateCompactColumns({ genes, query, target, identity, similarity, sp
       query.length !== target.length || query.length !== identity.length || query.length !== similarity.length) {
     throw new TypeError("Compact link columns must be equal-length Uint32 and Float32/Float64 arrays.");
   }
-  if (spans && (!Array.isArray(spans.loci) || !spans.loci.every((uid) => typeof uid === "string" && uid.length) ||
+  if (ids !== null && (!Array.isArray(ids) || ids.length !== query.length || !ids.every(isRecordId) || new Set(ids).size !== ids.length)) {
+    throw new TypeError("Compact link IDs must be unique record IDs matching the columns.");
+  }
+  if (spans && (!Array.isArray(spans.loci) || !spans.loci.every(isRecordId) ||
       !(spans.kinds instanceof Uint8Array) || !(spans.orientation instanceof Int8Array) ||
       ![spans.queryStart, spans.queryEnd, spans.targetStart, spans.targetEnd].every((column) => column instanceof Float64Array) ||
       [spans.kinds, spans.orientation, spans.queryStart, spans.queryEnd, spans.targetStart, spans.targetEnd].some((column) => column.length !== query.length))) {
@@ -4715,21 +4718,24 @@ function validateCompactColumns({ genes, query, target, identity, similarity, sp
 }
 class CompactLinkStore {
   static get supportsFloat32Scores() { return true; }
-  #genes; #query; #target; #identity; #similarity; #spans; #overrides; #deleted; #fingerprint; #activePositions;
+  #genes; #query; #target; #identity; #similarity; #spans; #ids; #idPositions; #overrides; #deleted; #fingerprint; #activePositions;
   constructor(input, mode = null) {
     if (mode === sharedColumns) {
       this.#genes = input.#genes; this.#query = input.#query; this.#target = input.#target;
       this.#identity = input.#identity; this.#similarity = input.#similarity;
       this.#spans = input.#spans;
+      this.#ids = input.#ids; this.#idPositions = input.#idPositions;
       this.#overrides = new Map(input.#overrides);
       this.#deleted = input.#deleted.slice();
       this.#fingerprint = input.#fingerprint;
       this.#activePositions = input.#activePositions;
       return;
     }
-    const { genes, query, target, identity, similarity, spans = null } = input;
+    const { genes, query, target, identity, similarity, spans = null, ids = null } = input;
     // Transferred columns have already been validated before ownership moved.
-    if (mode !== transferredColumns) validateCompactColumns({ genes, query, target, identity, similarity, spans });
+    if (mode !== transferredColumns) validateCompactColumns({ genes, query, target, identity, similarity, spans, ids });
+    this.#ids = ids && Object.freeze([...ids]);
+    this.#idPositions = ids && new Map(ids.map((uid, position) => [uid, position]));
     this.#genes = Object.freeze([...genes]);
     this.#query = mode === transferredColumns ? query : query.slice();
     this.#target = mode === transferredColumns ? target : target.slice();
@@ -4745,15 +4751,15 @@ class CompactLinkStore {
   // Explicit ownership transfer avoids the second copy of large columns.
   // All views of the transferred buffers in the caller become detached.
   static fromTransferred(input) {
-    const { genes, query, target, identity, similarity, spans = null } = input || {};
-    validateCompactColumns({ genes, query, target, identity, similarity, spans });
+    const { genes, query, target, identity, similarity, spans = null, ids = null } = input || {};
+    validateCompactColumns({ genes, query, target, identity, similarity, spans, ids });
     const columns = [query, target, identity, similarity, ...(spans ? [spans.kinds, spans.orientation, spans.queryStart, spans.queryEnd, spans.targetStart, spans.targetEnd] : [])];
     if (columns.some((column) => !(column.buffer instanceof ArrayBuffer))) {
       throw new TypeError("Compact link transfer requires transferable ArrayBuffers.");
     }
     const moved = structuredClone({ query, target, identity, similarity, spans },
       { transfer: [...new Set(columns.map((column) => column.buffer))] });
-    return new CompactLinkStore({ genes, ...moved }, transferredColumns);
+    return new CompactLinkStore({ genes, ids, ...moved }, transferredColumns);
   }
   get size() { return this.#query.length - this.#deleted.length; }
   get geneCount() { return this.#genes.length; }
@@ -4768,6 +4774,7 @@ class CompactLinkStore {
     return low;
   }
   #physicalForUid(uid) {
+    if (this.#idPositions) return this.#idPositions.get(uid);
     if (typeof uid !== "string" || !/^link-(0|[1-9]\d*)$/.test(uid)) return undefined;
     const position = Number(uid.slice(5));
     return Number.isSafeInteger(position) && position < this.#query.length ? position : undefined;
@@ -4803,7 +4810,8 @@ class CompactLinkStore {
     return this.#deleted[removedBefore] === position ? undefined : position - removedBefore;
   }
   has(uid) { return this.order(uid) !== undefined; }
-  uidAt(position) { const physical = this.#physicalAt(position); return physical === undefined ? undefined : `link-${physical}`; }
+  #uidForPhysical(position) { return this.#ids ? this.#ids[position] : `link-${position}`; }
+  uidAt(position) { const physical = this.#physicalAt(position); return physical === undefined ? undefined : this.#uidForPhysical(physical); }
   queryIndexAt(position) { const physical = this.#physicalAt(position); return this.#query[physical]; }
   targetIndexAt(position) { const physical = this.#physicalAt(position); return this.#target[physical]; }
   queryAt(position) { const physical = this.#physicalAt(position); return this.#spans?.kinds[physical] & 1 ? undefined : this.#genes[this.#query[physical]]; }
@@ -4830,7 +4838,7 @@ class CompactLinkStore {
   getAt(position) {
     const physical = this.#physicalAt(position);
     if (physical === undefined) return undefined;
-    return { uid: `link-${physical}`, query: this.#endpointAtPhysical(physical, "query"),
+    return { uid: this.#uidForPhysical(physical), query: this.#endpointAtPhysical(physical, "query"),
       target: this.#endpointAtPhysical(physical, "target"), ...(this.#spans?.orientation[physical] ? { orientation: this.#spans.orientation[physical] } : {}), identity: this.#identity[physical],
       similarity: this.#similarity[physical], ...this.#overrides.get(physical) };
   }
@@ -4848,26 +4856,28 @@ class CompactLinkStore {
       add(bytes.getUint32(0, true)); add(bytes.getUint32(4, true));
     };
     add(this.#genes.length); add(this.#query.length);
-    for (const uid of this.#genes) { add(uid.length); for (let i = 0; i < uid.length; i++) add(uid.charCodeAt(i)); }
+    const addId = (uid) => { if (typeof uid === "number") { add(0xffffffff); addNumber(uid); } else { add(uid.length); for (let i = 0; i < uid.length; i++) add(uid.charCodeAt(i)); } };
+    for (const uid of this.#genes) addId(uid);
     for (let i = 0; i < this.#query.length; i++) {
       add(this.#query[i]); add(this.#target[i]);
       addNumber(this.#identity[i]); addNumber(this.#similarity[i]);
     }
     if (this.#spans) {
       add(this.#spans.loci.length);
-      for (const uid of this.#spans.loci) { add(uid.length); for (let i = 0; i < uid.length; i++) add(uid.charCodeAt(i)); }
+      for (const uid of this.#spans.loci) addId(uid);
       for (let i = 0; i < this.#query.length; i++) {
         add(this.#spans.kinds[i]); add(this.#spans.orientation[i]);
         if (this.#spans.kinds[i] & 1) { addNumber(this.#spans.queryStart[i]); addNumber(this.#spans.queryEnd[i]); }
         if (this.#spans.kinds[i] & 2) { addNumber(this.#spans.targetStart[i]); addNumber(this.#spans.targetEnd[i]); }
       }
     }
+    if (this.#ids) { add(this.#ids.length); for (const uid of this.#ids) addId(uid); }
     return this.#fingerprint = `cl1-${(one >>> 0).toString(16).padStart(8, "0")}${(two >>> 0).toString(16).padStart(8, "0")}`;
   }
   get isUnedited() { return this.#deleted.length === 0 && this.#overrides.size === 0; }
   sharesBase(other) {
     return other instanceof CompactLinkStore && this.#query === other.#query && this.#target === other.#target &&
-      this.#identity === other.#identity && this.#similarity === other.#similarity && this.#genes === other.#genes && this.#spans === other.#spans;
+      this.#identity === other.#identity && this.#similarity === other.#similarity && this.#genes === other.#genes && this.#spans === other.#spans && this.#ids === other.#ids;
   }
   // Only durable edits are saved: deleted records need no presentation overlay.
   snapshotEdits() {
@@ -4907,9 +4917,9 @@ class CompactLinkStore {
         }
         changes[field[0]] = field.length === 1 ? undefined : field[1];
       }
-      updates.push({ uid: `link-${entry[0]}`, changes });
+      updates.push({ uid: this.#uidForPhysical(entry[0]), changes });
     }
-    return this.withUpdates(updates).withDeleted([...removed].map((position) => `link-${position}`));
+    return this.withUpdates(updates).withDeleted([...removed].map((position) => this.#uidForPhysical(position)));
   }
   // Return a new view so older scenes and history retain their original data.
   withUpdates(updates) {

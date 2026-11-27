@@ -498,8 +498,7 @@ const blob = chart.exportProjectBlob({
 Hosts remain responsible for validating their extension fields and project
 format before export and for managing the resulting download.
 
-For large datasets with generated `link-0`, `link-1`, … IDs, hosts can
-supply a compact link table instead of an object array:
+For large datasets, hosts can supply a compact link table instead of an object array:
 
 ```js
 import { ClusterMap, CompactLinkStore } from "clinker";
@@ -516,18 +515,18 @@ d3.select(element).datum({ ...data, links }).call(chart);
 ```
 
 All four columns must have the same length; endpoint indexes must refer to the
-string ID dictionary. Scores can be `Float32Array` or `Float64Array`; converting
+gene ID dictionary. IDs may be non-empty strings or finite numbers. Scores can be `Float32Array` or `Float64Array`; converting
 to 32-bit rounds values to approximately seven significant decimal digits.
 Hosts that persist a compact figure must reconstruct the same numeric values
 and gene order when reopening it, including the same rounding. Edited identities
-retain JavaScript number precision regardless of the base-column type. Each link's ID is `link-N`, where `N` is its original
-column position. The constructor copies its inputs and validates the table, so
+retain JavaScript number precision regardless of the base-column type. By default each link's ID is `link-N`, where `N` is its original
+column position. An optional `ids` array supplies unique string or numeric IDs in column order; it costs additional memory for the IDs and lookup index. The constructor copies its inputs and validates the table, so
 the same store can safely be shared by a host and multiple charts. For lower
 construction peak memory, `CompactLinkStore.fromTransferred(columns)` takes
 ownership of the columns by transferring their underlying ArrayBuffers; every
 caller view of those buffers becomes detached. Link edits and deletions use
-chart-local copy-on-write overlays. Arbitrary link IDs or
-metadata should use the existing object-array input.
+chart-local copy-on-write overlays. Arbitrary link metadata still requires
+the existing object-array input.
 
 For span endpoints, add optional `spans` columns. `kinds` uses bit 1 for a
 query span and bit 2 for a target span; an endpoint index then refers to

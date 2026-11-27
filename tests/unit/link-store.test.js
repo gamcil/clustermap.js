@@ -1,6 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ArrayLinkStore, CompactLinkStore } from "../../src/data/linkStore.mjs";
+
+test("compact tables preserve arbitrary link and endpoint IDs across edits and snapshots", () => {
+  const columns = { genes: [1, "1"], ids: [7, "7"], query: new Uint32Array([0, 1]),
+    target: new Uint32Array([1, 0]), identity: new Float32Array([0.5, 0.5]), similarity: new Float32Array([1, 1]) };
+  const base = new CompactLinkStore(columns);
+  columns.ids[0] = "changed";
+  assert.deepEqual([...base.keys()], [7, "7"]);
+  assert.deepEqual(base.get(7).query, { uid: 1 });
+  assert.deepEqual(base.get("7").query, { uid: "1" });
+  const edited = base.withUpdates([{ uid: "7", changes: { label: "edited" } }]).withDeleted([7]);
+  assert.deepEqual([...base.applyEdits(edited.snapshotEdits()).values()], [...edited.values()]);
+  assert.deepEqual([...edited.withRestored([{ index: 0, link: base.get(7) }]).keys()], [7, "7"]);
+  assert.throws(() => new CompactLinkStore({ ...columns, ids: [7, 7] }), /unique record IDs/);
+  assert.notEqual(base.fingerprint, new CompactLinkStore({ ...columns, ids: ["7", 7] }).fingerprint);
+  const moved = CompactLinkStore.fromTransferred({ ...columns, ids: [7, "7"] });
+  assert.deepEqual([...moved.keys()], [7, "7"]);
+});
 import { createChartIndex } from "../../src/data/index.mjs";
 import { clusterPairKey } from "../../src/links/layout.mjs";
 import { createLinkVisibility, filterLinks } from "../../src/links/groups.mjs";
