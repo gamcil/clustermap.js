@@ -1,6 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ArrayLinkStore, CompactLinkStore } from "../../src/data/linkStore.mjs";
+import { CompactLinkStore, linkStoreFromRecords } from "../../src/data/linkStore.mjs";
+
+test("object links retain metadata and endpoint shapes through the shared table and edits", async () => {
+  const [{ normalizeChartData }, { applyChartOperations }, { projectBlob }] = await Promise.all([
+    import("../../src/data/normalize.mjs"), import("../../src/data/operations.mjs"), import("../../src/chart/projectBlob.mjs"),
+  ]);
+  const links = [
+    { uid: 1, query: { kind: "gene", geneId: 2, note: { source: "a" } }, target: { uid: "2" },
+      label: "original", hidden: true, metadata: { tags: ["x"] }, similarity: null },
+    { uid: "1", query: { kind: "span", locusId: 3, start: 1, end: 5, note: "span" },
+      target: { uid: 2 }, orientation: -1, identity: 0.8, similarity: 0.4 },
+  ];
+  const data = normalizeChartData({ clusters: [{ uid: "c", loci: [{ uid: 3, start: 0, end: 10,
+    genes: [{ uid: 2, start: 0, end: 5, strand: 1 }, { uid: "2", start: 5, end: 10, strand: 1 }] }] }], links, groups: [] });
+  assert.ok(data.links instanceof CompactLinkStore);
+  assert.deepEqual([...data.links.values()], links);
+  links[0].metadata.tags.push("outside");
+  data.links.get(1).query.note.source = "outside";
+  assert.deepEqual(data.links.get(1).metadata.tags, ["x"]);
+  assert.equal(data.links.get(1).query.note.source, "a");
+  const before = [...data.links.values()], index = createChartIndex(data);
+  const edit = applyChartOperations(data, index, [{ type: "links.update", ids: [1], changes: { label: "edited", hidden: false } },
+    { type: "links.delete", ids: ["1"] }]);
+  assert.equal(data.links.get(1).label, "edited");
+  applyChartOperations(data, createChartIndex(data), edit.inverse);
+  assert.deepEqual([...data.links.values()], before);
+  const saved = JSON.parse(await projectBlob(data).text());
+  assert.deepEqual(saved.links, before);
+  assert.deepEqual([...normalizeChartData(saved).links.values()], before);
+});
 
 test("compact tables preserve arbitrary link and endpoint IDs across edits and snapshots", () => {
   const columns = { genes: [1, "1"], ids: [7, "7"], query: new Uint32Array([0, 1]),
@@ -72,9 +101,9 @@ test("compact spans share indexing, edits, restoration and durable base identity
   assert.ok(invalid.spans.kinds.byteLength > 0, "validation fails before transferring any buffers");
 });
 
-test("compact and array stores preserve link identity, ordering and double precision", () => {
+test("column and record input preserve link identity, ordering and double precision", () => {
   const columns = input(), compact = new CompactLinkStore(columns);
-  const records = [...compact.values()], array = new ArrayLinkStore(records);
+  const records = [...compact.values()], array = linkStoreFromRecords(records);
   assert.equal(compact.byteLength, 24 * records.length);
   assert.deepEqual([...compact], [...array]);
   for (let i = 0; i < records.length; i++) {
@@ -233,7 +262,7 @@ test("array and compact link batches validate sequentially and round-trip", asyn
     const base = new CompactLinkStore(input());
     const data = { clusters: [{ uid: "one", loci: [{ uid: "l1", genes: [{ uid: "a" }, { uid: "b" }, { uid: "c" }] }] }],
       groups: [], links: compact ? base : [...base.values()] };
-    const read = () => compact ? [...data.links.values()] : structuredClone(data.links);
+    const read = () => data.links instanceof CompactLinkStore ? [...data.links.values()] : structuredClone(data.links);
     const apply = (ops) => applyChartOperations(data, createChartIndex(data), ops);
     const before = read();
     for (const second of [
@@ -268,13 +297,13 @@ test("mixed structural batches keep indexes and undo consistent", async () => {
       { type: "links.delete", ids: ["link-1"] },
       { type: "links.update", ids: ["link-2"], changes: { label: "changed" } },
     ]);
-    const updated = compact ? index : createChartIndex(data);
-    assert.equal(edit.indexPrepared, compact);
+    const updated = index;
+    assert.equal(edit.indexPrepared, true);
     assert.equal(updated.geneById.has("a"), false);
     assert.deepEqual([...updated.linkById.keys()], ["link-2", "link-3"]);
     assert.equal(updated.linksByGeneId.get("b")[0].label, "changed");
     applyChartOperations(data, updated, edit.inverse);
-    assert.deepEqual(JSON.parse(JSON.stringify(compact ? [...data.links.values()] : data.links)), before);
+    assert.deepEqual(JSON.parse(JSON.stringify([...data.links.values()])), before);
     assert.deepEqual(data.clusters[0].loci[0].genes.map((gene) => gene.uid), ["a", "b", "c"]);
   }
 });

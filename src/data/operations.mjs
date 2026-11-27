@@ -1,4 +1,4 @@
-import { ArrayLinkStore, CompactLinkStore } from "./linkStore.mjs";
+import { CompactLinkStore } from "./linkStore.mjs";
 import { createChartIndex } from "./index.mjs";
 import { isTreeOperation, isTreePresentationOperation, isTreeTopologyOperation, normalizeTreeOperation, applyTreeOperation, inverseTreeOperation, validateTreeOperationBatch } from "../tree/operations.mjs";
 import { isAnnotationOperation, normalizeAnnotationOperation, applyAnnotationOperation,
@@ -235,7 +235,7 @@ function assignGenes(groups, groupId, geneIds) {
 function applyOperation(data, index, operation) {
   const updateRecords = fieldsForType[operation.type] && recordsForOperation(index, operation.type);
   if (updateRecords) {
-    if (operation.type === "links.update" && data.links instanceof CompactLinkStore) {
+    if (operation.type === "links.update") {
       data.links = data.links.withUpdates(operation.ids.map((uid) => ({ uid, changes: operation.changes })));
       index.linkById = data.links;
       index.linksByGeneId = index.linksByGeneId.withStore(data.links);
@@ -262,24 +262,11 @@ function applyOperation(data, index, operation) {
       return;
     }
     case "links.delete": {
-      if (data.links instanceof CompactLinkStore) {
-        data.links = data.links.withDeleted(operation.ids);
-        return;
-      }
-      const ids = new Set(operation.ids);
-      data.links = data.links.filter((link) => !ids.has(link.uid));
+      data.links = data.links.withDeleted(operation.ids);
       return;
     }
     case "links.restore":
-      if (data.links instanceof CompactLinkStore) {
-        data.links = data.links.withRestored(operation.records);
-        return;
-      }
-      // Existing scenes retain the old array for link order and animation.
-      data.links = [...data.links];
-      for (const { index: position, link } of operation.records) {
-        data.links.splice(Math.min(position, data.links.length), 0, structuredClone(link));
-      }
+      data.links = data.links.withRestored(operation.records);
       return;
     case "groups.assignGenes":
       assignGenes(data.groups, operation.groupId, operation.geneIds);
@@ -362,16 +349,9 @@ function inverseOperation(data, index, operation) {
     return [{ type: "genes.delete", ids: operation.records.map(({ gene }) => gene.uid) }];
   }
   if (operation.type === "links.delete") {
-    if (data.links instanceof CompactLinkStore) {
-      const records = operation.ids.map((uid) => ({ index: index.linkById.order(uid), link: index.linkById.get(uid) }))
-        .sort((a, b) => a.index - b.index);
-      return [{ type: "links.restore", records }];
-    }
-    const removed = new Set(operation.ids);
-    return [{
-      type: "links.restore",
-      records: data.links.map((link, position) => removed.has(link.uid) && { index: position, link: structuredClone(link) }).filter(Boolean),
-    }];
+    const records = operation.ids.map((uid) => ({ index: index.linkById.order(uid), link: index.linkById.get(uid) }))
+      .sort((a, b) => a.index - b.index);
+    return [{ type: "links.restore", records }];
   }
   if (operation.type === "links.restore") {
     return [{ type: "links.delete", ids: operation.records.map(({ link }) => link.uid) }];
@@ -427,15 +407,15 @@ export function applyChartOperations(data, index, operations, treeConfig = {}) {
   });
   validateTreeOperationBatch(data.tree, applied, treeConfig, data.clusters);
   validateAnnotationChanges(data, annotationDraft.annotationPanels);
-  if (data.links instanceof CompactLinkStore) {
-    // Preflight the entire link batch before any chart data is mutated.
-    let links = data.links;
-    for (const operation of applied) {
-      if (operation.type === "links.update") links = links.withUpdates(operation.ids.map((uid) => ({ uid, changes: operation.changes })));
-      else if (operation.type === "links.delete") links = links.withDeleted(operation.ids);
-      else if (operation.type === "links.restore") links = links.withRestored(operation.records);
-    }
+  // Preflight the entire link batch before any chart data is mutated.
+  let links = index.linkById;
+  for (const operation of applied) {
+    if (operation.type === "links.update") links = links.withUpdates(operation.ids.map((uid) => ({ uid, changes: operation.changes })));
+    else if (operation.type === "links.delete") links = links.withDeleted(operation.ids);
+    else if (operation.type === "links.restore") links = links.withRestored(operation.records);
   }
+  // Internal callers may supply raw records; the index already normalized them.
+  if (!(data.links instanceof CompactLinkStore) && applied.some(({ type }) => type.startsWith("links."))) data.links = index.linkById;
   const hasStructuralGroupEdit = applied.some((operation) => !["groups.update", "groups.restore"].includes(operation.type) && operation.type.startsWith("groups."));
   let compactLinksChanged = false;
   const inverse = [];
@@ -459,10 +439,8 @@ export function applyChartOperations(data, index, operations, treeConfig = {}) {
     }
     if (operation.type === "links.delete" || operation.type === "links.restore") {
       // Later edits need current link order, but not the full adjacency index.
-      if (data.links instanceof CompactLinkStore) {
-        index.linkById = data.links;
-        compactLinksChanged = true;
-      } else index = { ...index, linkById: new ArrayLinkStore(data.links) };
+      index.linkById = data.links;
+      compactLinksChanged = true;
     }
     if (structuralGroupTypes.has(operation.type)) index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
   }

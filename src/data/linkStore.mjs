@@ -1,32 +1,20 @@
-import { isPlainObject, isRecordId } from "../utils/values.mjs";
+import { clonePlainValue, isPlainObject, isRecordId } from "../utils/values.mjs";
+import { endpointGeneId } from "../links/layout.mjs";
 import { validateRecordFields } from "./validation.mjs";
-
-// Link stores retain source order and provide stable ID-to-position lookup.
-// Array stores retain record identity because editing currently mutates records.
-export class ArrayLinkStore {
-  constructor(links) {
-    this.links = links;
-    this.positions = new Map();
-    for (let position = 0; position < links.length; position++) this.positions.set(links[position].uid, position);
-  }
-  get size() { return this.positions.size; }
-  has(uid) { return this.positions.has(uid); }
-  order(uid) { return this.positions.get(uid); }
-  getAt(position) { return this.links[position]; }
-  uidAt(position) { return this.links[position]?.uid; }
-  get(uid) { const position = this.order(uid); return position === undefined ? undefined : this.getAt(position); }
-  *keys() { yield* this.positions.keys(); }
-  *values() { for (const uid of this.positions.keys()) yield this.get(uid); }
-  *entries() { for (const uid of this.positions.keys()) yield [uid, this.get(uid)]; }
-  [Symbol.iterator]() { return this.entries(); }
-}
 
 // Immutable columnar link table for canonical, ordered Clinker link IDs.
 // Inputs are copied: callers can mutate their arrays without affecting a chart
 // or an old scene. Sparse edit overlays share the immutable columns.
 const sharedColumns = Symbol("shared compact columns");
 const transferredColumns = Symbol("transferred compact columns");
+const recordColumns = Symbol("columns built from validated records");
 const editableFields = new Set(["label", "colour", "hidden", "identity"]);
+function sameValue(a, b) {
+  if (Object.is(a, b) || a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameValue(a[key], b[key]));
+}
 function validateCompactColumns({ genes, query, target, identity, similarity, spans = null, ids = null } = {}) {
   if (!Array.isArray(genes) || !genes.every(isRecordId)) {
     throw new TypeError("Compact links require a gene ID dictionary.");
@@ -61,13 +49,14 @@ function validateCompactColumns({ genes, query, target, identity, similarity, sp
 }
 export class CompactLinkStore {
   static get supportsFloat32Scores() { return true; }
-  #genes; #query; #target; #identity; #similarity; #spans; #ids; #idPositions; #overrides; #deleted; #fingerprint; #activePositions;
+  #genes; #query; #target; #identity; #similarity; #spans; #ids; #idPositions; #extras; #overrides; #deleted; #fingerprint; #activePositions;
   constructor(input, mode = null) {
     if (mode === sharedColumns) {
       this.#genes = input.#genes; this.#query = input.#query; this.#target = input.#target;
       this.#identity = input.#identity; this.#similarity = input.#similarity;
       this.#spans = input.#spans;
       this.#ids = input.#ids; this.#idPositions = input.#idPositions;
+      this.#extras = input.#extras;
       this.#overrides = new Map(input.#overrides);
       this.#deleted = input.#deleted.slice();
       this.#fingerprint = input.#fingerprint;
@@ -76,16 +65,18 @@ export class CompactLinkStore {
     }
     const { genes, query, target, identity, similarity, spans = null, ids = null } = input;
     // Transferred columns have already been validated before ownership moved.
-    if (mode !== transferredColumns) validateCompactColumns({ genes, query, target, identity, similarity, spans, ids });
+    if (mode !== transferredColumns && mode !== recordColumns) validateCompactColumns({ genes, query, target, identity, similarity, spans, ids });
     this.#ids = ids && Object.freeze([...ids]);
     this.#idPositions = ids && new Map(ids.map((uid, position) => [uid, position]));
     this.#genes = Object.freeze([...genes]);
-    this.#query = mode === transferredColumns ? query : query.slice();
-    this.#target = mode === transferredColumns ? target : target.slice();
-    this.#identity = mode === transferredColumns ? identity : identity.slice();
-    this.#similarity = mode === transferredColumns ? similarity : similarity.slice();
+    const own = mode === transferredColumns || mode === recordColumns;
+    this.#query = own ? query : query.slice();
+    this.#target = own ? target : target.slice();
+    this.#identity = own ? identity : identity.slice();
+    this.#similarity = own ? similarity : similarity.slice();
     this.#spans = spans && { loci: Object.freeze([...spans.loci]), ...Object.fromEntries(
-      ["kinds", "orientation", "queryStart", "queryEnd", "targetStart", "targetEnd"].map((key) => [key, mode === transferredColumns ? spans[key] : spans[key].slice()])) };
+      ["kinds", "orientation", "queryStart", "queryEnd", "targetStart", "targetEnd"].map((key) => [key, own ? spans[key] : spans[key].slice()])) };
+    this.#extras = mode === recordColumns ? input.extras : null;
     this.#overrides = new Map();
     this.#deleted = [];
     this.#fingerprint = null;
@@ -162,6 +153,8 @@ export class CompactLinkStore {
   queryLocusAt(position) { const physical = this.#physicalAt(position); return this.#spans?.kinds[physical] & 1 ? this.#spans.loci[this.#query[physical]] : undefined; }
   targetLocusAt(position) { const physical = this.#physicalAt(position); return this.#spans?.kinds[physical] & 2 ? this.#spans.loci[this.#target[physical]] : undefined; }
   #endpointAtPhysical(physical, side) {
+    const original = this.#extras?.get(physical)?.[side];
+    if (original) return clonePlainValue(original);
     const query = side === "query", span = this.#spans && (this.#spans.kinds[physical] & (query ? 1 : 2));
     const index = (query ? this.#query : this.#target)[physical];
     return span ? { kind: "span", locusId: this.#spans.loci[index], start: this.#spans[`${side}Start`][physical], end: this.#spans[`${side}End`][physical] }
@@ -171,19 +164,25 @@ export class CompactLinkStore {
     const physical = this.#physicalAt(position);
     return physical === undefined ? undefined : this.#endpointAtPhysical(physical, side);
   }
-  similarityAt(position) { return this.#similarity[this.#physicalAt(position)]; }
+  similarityAt(position) { const physical = this.#physicalAt(position), value = this.#similarity[physical]; return Number.isNaN(value) ? this.#extras?.get(physical)?.fields?.similarity : value; }
   identityAt(position) {
     const physical = this.#physicalAt(position), changes = this.#overrides.get(physical);
-    return changes && Object.hasOwn(changes, "identity") ? changes.identity : this.#identity[physical];
+    const value = changes && Object.hasOwn(changes, "identity") ? changes.identity : this.#identity[physical];
+    return Number.isNaN(value) ? undefined : value;
   }
-  hiddenAt(position) { return this.#overrides.get(this.#physicalAt(position))?.hidden; }
-  labelAt(position) { return this.#overrides.get(this.#physicalAt(position))?.label; }
+  hiddenAt(position) { const physical = this.#physicalAt(position), changes = this.#overrides.get(physical); return changes && Object.hasOwn(changes, "hidden") ? changes.hidden : this.#extras?.get(physical)?.fields?.hidden; }
+  labelAt(position) { const physical = this.#physicalAt(position), changes = this.#overrides.get(physical); return changes && Object.hasOwn(changes, "label") ? changes.label : this.#extras?.get(physical)?.fields?.label; }
   getAt(position) {
     const physical = this.#physicalAt(position);
     if (physical === undefined) return undefined;
+    return this.#recordAtPhysical(physical);
+  }
+  #recordAtPhysical(physical) {
     return { uid: this.#uidForPhysical(physical), query: this.#endpointAtPhysical(physical, "query"),
-      target: this.#endpointAtPhysical(physical, "target"), ...(this.#spans?.orientation[physical] ? { orientation: this.#spans.orientation[physical] } : {}), identity: this.#identity[physical],
-      similarity: this.#similarity[physical], ...this.#overrides.get(physical) };
+      target: this.#endpointAtPhysical(physical, "target"), ...(this.#spans?.orientation[physical] ? { orientation: this.#spans.orientation[physical] } : {}),
+      ...(Number.isNaN(this.#identity[physical]) ? {} : { identity: this.#identity[physical] }),
+      ...(Number.isNaN(this.#similarity[physical]) ? {} : { similarity: this.#similarity[physical] }),
+      ...clonePlainValue(this.#extras?.get(physical)?.fields), ...this.#overrides.get(physical) };
   }
   get(uid) { const position = this.order(uid); return position === undefined ? undefined : this.getAt(position); }
   // A deterministic checksum catches an accidentally mismatched base on load.
@@ -215,6 +214,13 @@ export class CompactLinkStore {
       }
     }
     if (this.#ids) { add(this.#ids.length); for (const uid of this.#ids) addId(uid); }
+    if (this.#extras?.size) {
+      for (const [position, extra] of this.#extras) {
+        add(position);
+        const encoded = JSON.stringify(extra, (_key, value) => value === undefined ? { "\u0000undefined": true } : value);
+        for (let i = 0; i < encoded.length; i++) add(encoded.charCodeAt(i));
+      }
+    }
     return this.#fingerprint = `cl1-${(one >>> 0).toString(16).padStart(8, "0")}${(two >>> 0).toString(16).padStart(8, "0")}`;
   }
   get isUnedited() { return this.#deleted.length === 0 && this.#overrides.size === 0; }
@@ -308,15 +314,8 @@ export class CompactLinkStore {
     const next = new CompactLinkStore(this, sharedColumns);
     for (const { index, link } of records) {
       const physical = next.#physicalForUid(link?.uid), deletedIndex = physical === undefined ? -1 : next.#deleted.indexOf(physical);
-      const sameEndpoint = (actual, expected) => isPlainObject(actual) && (expected.kind === "span"
-        ? actual.kind === "span" && actual.locusId === expected.locusId && actual.start === expected.start && actual.end === expected.end &&
-          Object.keys(actual).every((key) => ["kind", "locusId", "start", "end"].includes(key))
-        : actual.uid === expected.uid && Object.keys(actual).every((key) => key === "uid"));
-      if (deletedIndex < 0 || !isPlainObject(link.query) || !isPlainObject(link.target) ||
-          !sameEndpoint(link.query, next.#endpointAtPhysical(physical, "query")) ||
-          !sameEndpoint(link.target, next.#endpointAtPhysical(physical, "target")) ||
-          (link.orientation ?? 0) !== (next.#spans?.orientation[physical] || 0) || link.similarity !== next.#similarity[physical] ||
-          Object.keys(link).some((key) => !["uid", "query", "target", "orientation", "similarity", "identity", "hidden", "label", "colour"].includes(key))) {
+      const immutable = (record) => Object.fromEntries(Object.entries(record).filter(([key]) => !editableFields.has(key)));
+      if (deletedIndex < 0 || !sameValue(immutable(link), immutable(next.#recordAtPhysical(physical)))) {
         throw new TypeError("Compact links can only restore deleted canonical records.");
       }
       next.#deleted.splice(deletedIndex, 1);
@@ -332,6 +331,47 @@ export class CompactLinkStore {
   *values() { for (let i = 0; i < this.size; i++) yield this.getAt(i); }
   *entries() { for (let i = 0; i < this.size; i++) { const link = this.getAt(i); yield [link.uid, link]; } }
   [Symbol.iterator]() { return this.entries(); }
+}
+
+// Called after chart-data validation. Keep only non-column fields and
+// noncanonical endpoint shapes as sparse, chart-owned records.
+export function linkStoreFromRecords(records) {
+  const n = records.length, genes = [], loci = [], geneIndex = new Map(), locusIndex = new Map();
+  const query = new Uint32Array(n), target = new Uint32Array(n);
+  const identity = new Float64Array(n), similarity = new Float64Array(n), ids = records.map((link) => link.uid);
+  const needsSpans = records.some((link) => link.query.kind === "span" || link.target.kind === "span" || link.orientation !== undefined);
+  const spans = needsSpans ? { loci, kinds: new Uint8Array(n), orientation: new Int8Array(n),
+    queryStart: new Float64Array(n), queryEnd: new Float64Array(n), targetStart: new Float64Array(n), targetEnd: new Float64Array(n) } : null;
+  const extras = new Map();
+  const index = (value, values, map) => {
+    if (!map.has(value)) { map.set(value, values.length); values.push(value); }
+    return map.get(value);
+  };
+  for (let i = 0; i < n; i++) {
+    const link = records[i], extra = {};
+    const fields = Object.fromEntries(Object.entries(link).filter(([key]) => !["uid", "query", "target", "identity", "similarity", "orientation"].includes(key)));
+    if (Object.keys(fields).length) extra.fields = clonePlainValue(fields);
+    for (const [side, column, bit] of [["query", query, 1], ["target", target, 2]]) {
+      const endpoint = link[side];
+      if (endpoint.kind === "span") {
+        column[i] = index(endpoint.locusId, loci, locusIndex); spans.kinds[i] |= bit;
+        spans[`${side}Start`][i] = endpoint.start; spans[`${side}End`][i] = endpoint.end;
+        if (Object.keys(endpoint).some((key) => !["kind", "locusId", "start", "end"].includes(key))) extra[side] = clonePlainValue(endpoint);
+      } else {
+        column[i] = index(endpointGeneId(endpoint), genes, geneIndex);
+        if (Object.keys(endpoint).length !== 1 || !Object.hasOwn(endpoint, "uid")) extra[side] = clonePlainValue(endpoint);
+      }
+    }
+    identity[i] = link.identity === undefined ? NaN : link.identity;
+    similarity[i] = typeof link.similarity === "number" && Number.isFinite(link.similarity) ? link.similarity : NaN;
+    if (Object.hasOwn(link, "identity") && link.identity === undefined) (extra.fields ??= {}).identity = undefined;
+    if (Object.hasOwn(link, "similarity") && Number.isNaN(similarity[i])) (extra.fields ??= {}).similarity = clonePlainValue(link.similarity);
+    if (Object.hasOwn(link, "orientation") && link.orientation === undefined) (extra.fields ??= {}).orientation = undefined;
+    if (spans) spans.orientation[i] = link.orientation || 0;
+    if (Object.keys(extra).length) extras.set(i, extra);
+  }
+  const canonicalIds = ids.every((uid, position) => uid === `link-${position}`);
+  return new CompactLinkStore({ genes, query, target, identity, similarity, spans, ids: canonicalIds ? null : ids, extras }, recordColumns);
 }
 
 // Preserve the public array-shaped read view without expanding compact links.

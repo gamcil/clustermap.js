@@ -253,7 +253,7 @@ test("chart history restores deletions, preserves callbacks, stays bounded and e
   const result = await page.evaluate(() => {
     const data = chart.data(), ids = data.links.map(({ uid }) => uid), callback = () => {};
     chart.patch([{ type: "links.delete", ids: [ids[0]] }]); chart.undo();
-    const restored = chart.data() === data && chart.data().links.map(({ uid }) => uid).join() === ids.join();
+    const restored = chart.data().links.map(({ uid }) => uid).join() === ids.join();
     chart.config({ gene: { shape: { onClick: callback } } });
     chart.config({ legend: { show: false } }); chart.undo();
     const preserved = chart.config().gene.shape.onClick === callback && chart.config().legend.show;
@@ -907,7 +907,7 @@ test("raster listeners persist across edits and detach on renderer changes and d
     const afterPatch = listener() === initial;
     chart.undo();
     const afterUndo = listener() === initial;
-    chart.data(structuredClone(chart.data()));
+    chart.data(chart.project().data);
     const afterReplacement = listener() === initial;
     chart.config({ plot: { renderer: "svg" } });
     const detached = listener() === undefined;
@@ -936,7 +936,7 @@ test("context menus retain bindings and use current data and configured actions"
   await page.locator("#plot .tooltip").getByRole("button", { name: "Reveal in data editor" }).click();
   expect(await page.evaluate(() => reveals)).toEqual([["new", "Updated label"]]);
   await page.evaluate((uid) => {
-    const data = structuredClone(chart.data());
+    const data = chart.project().data;
     data.clusters.flatMap((cluster) => cluster.loci).flatMap((locus) => locus.genes)
       .find((gene) => gene.uid === uid).label = "Replacement label";
     chart.data(data);
@@ -1371,7 +1371,7 @@ test("virtualized component fields commit on blur and discard drafts when data i
   await expect(rows.first()).toContainText("Saved before scrolling");
   await editField(field); await field.getByRole("textbox").fill("Discard this draft");
   await page.evaluate(() => {
-    const data = structuredClone(chart.data()); data.groups[0].label = "Replacement data"; chart.data(data);
+    const data = chart.project().data; data.groups[0].label = "Replacement data"; chart.data(data);
   });
   await expect(field.getByRole("textbox")).toBeHidden();
   expect(await field.evaluate((field) => field.value)).toBe("Replacement data");

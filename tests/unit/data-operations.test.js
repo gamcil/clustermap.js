@@ -1,3 +1,4 @@
+import { dataSnapshot } from "../helpers/data-snapshot.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -36,22 +37,22 @@ for (const operation of [
       ] });
     const apply = (operations) => applyChartOperations(chartData, createChartIndex(chartData), operations);
     apply([{ type: "genes.delete", ids: ["a", "c"] }]);
-    const before = structuredClone(chartData);
-    const edit = apply([operation]), after = structuredClone(chartData);
+    const before = dataSnapshot(chartData);
+    const edit = apply([operation]), after = dataSnapshot(chartData);
     const undo = apply(JSON.parse(JSON.stringify(edit.inverse)));
-    assert.deepEqual(chartData, before);
-    assert.deepEqual(normalizeChartData(chartData), chartData);
+    assert.deepEqual(dataSnapshot(chartData), before);
+    assert.deepEqual(dataSnapshot(normalizeChartData(chartData)), dataSnapshot(chartData));
     apply(undo.inverse);
-    assert.deepEqual(chartData, after, "restoration is reversible without access to deleted genes");
+    assert.deepEqual(dataSnapshot(chartData), after, "restoration is reversible without access to deleted genes");
     apply(edit.inverse);
-    assert.deepEqual(chartData, before);
+    assert.deepEqual(dataSnapshot(chartData), before);
     for (const invalid of [
       { type: "groups.assignGenes", groupId: "g2", geneIds: ["a"] },
       { type: "groups.unassignGenes", geneIds: ["a"] },
       { type: "groups.create", group: { uid: "bad" }, geneIds: ["a"] },
     ]) {
       assert.throws(() => apply([invalid]), /unknown gene a/);
-      assert.deepEqual(chartData, before);
+      assert.deepEqual(dataSnapshot(chartData), before);
     }
   });
 }
@@ -62,7 +63,7 @@ test("group history restores successive membership edits in a batch", async () =
   const { applyChartOperations } = await import("../../src/data/operations.mjs");
   const chartData = normalizeChartData({ ...data, config: { updateGroups: false },
     groups: [{ uid: "g1", label: "Original label", genes: ["absent", "gene-1"] }, { uid: "g2", genes: [] }, { uid: "g3", genes: [] }] });
-  const before = structuredClone(chartData);
+  const before = dataSnapshot(chartData);
   const apply = (operations) => applyChartOperations(chartData, createChartIndex(chartData), operations);
   const edit = apply([
     { type: "groups.update", ids: ["g1"], changes: { label: "Temporary label" } },
@@ -70,39 +71,39 @@ test("group history restores successive membership edits in a batch", async () =
     { type: "groups.assignGenes", groupId: "g3", geneIds: ["gene-1"] },
     { type: "groups.delete", ids: ["g1", "g2"] },
   ]);
-  const after = structuredClone(chartData);
-  apply(edit.inverse); assert.deepEqual(chartData, before);
-  apply(edit.operations); assert.deepEqual(chartData, after);
+  const after = dataSnapshot(chartData);
+  apply(edit.inverse); assert.deepEqual(dataSnapshot(chartData), before);
+  apply(edit.operations); assert.deepEqual(dataSnapshot(chartData), after);
 });
 
 test("group batches can edit newly created groups and undo through deletion", async () => {
   const { createChartIndex } = await import("../../src/data/index.mjs");
   const { normalizeChartData } = await import("../../src/data/normalize.mjs");
   const { applyChartOperations } = await import("../../src/data/operations.mjs");
-  const chartData = normalizeChartData({ ...data, config: { updateGroups: false } }), before = structuredClone(chartData);
+  const chartData = normalizeChartData({ ...data, config: { updateGroups: false } }), before = dataSnapshot(chartData);
   const apply = (operations) => applyChartOperations(chartData, createChartIndex(chartData), operations);
   const edit = apply([
     { type: "groups.create", group: { uid: "new", label: "Original" }, geneIds: ["gene-1"] },
     { type: "groups.update", ids: ["new"], changes: { label: "Changed" } },
     { type: "groups.delete", ids: ["new"] },
   ]);
-  const after = structuredClone(chartData);
-  apply(edit.inverse); assert.deepEqual(chartData, before);
-  apply(edit.operations); assert.deepEqual(chartData, after);
+  const after = dataSnapshot(chartData);
+  apply(edit.inverse); assert.deepEqual(dataSnapshot(chartData), before);
+  apply(edit.operations); assert.deepEqual(dataSnapshot(chartData), after);
 });
 
 test("malformed group restoration rejects the whole batch", async () => {
   const { createChartIndex } = await import("../../src/data/index.mjs");
   const { normalizeChartData } = await import("../../src/data/normalize.mjs");
   const { applyChartOperations } = await import("../../src/data/operations.mjs");
-  const chartData = normalizeChartData(data), before = structuredClone(chartData);
+  const chartData = normalizeChartData(data), before = dataSnapshot(chartData);
   for (const records of [null, [{ index: -1, group: { uid: "g", genes: [] } }],
     [{ index: 0, group: { uid: "g", genes: [{}] } }], [{ index: 0, group: { uid: "g", genes: ["a", "a"] } }]]) {
     assert.throws(() => applyChartOperations(chartData, createChartIndex(chartData), [
       { type: "groups.update", ids: ["group-1"], changes: { label: "Must not change" } },
       { type: "groups.restore", records, removeIds: [] },
     ]), /groups.restore/);
-    assert.deepEqual(chartData, before);
+    assert.deepEqual(dataSnapshot(chartData), before);
   }
 });
 
@@ -119,16 +120,21 @@ test("imports and edits share record field validation and reject batches atomica
   for (const [kind, uid, changes] of cases) {
     const raw = structuredClone(data);
     raw.links = [{ uid: "link-1", query: { uid: "gene-1" }, target: { uid: "gene-1" }, identity: 0.5 }];
-    const chartData = normalizeChartData(raw), index = createChartIndex(chartData), before = structuredClone(chartData);
+    const chartData = normalizeChartData(raw), index = createChartIndex(chartData), before = dataSnapshot(chartData);
     assert.throws(() => applyChartOperations(chartData, index, [
       { type: "groups.update", ids: ["group-1"], changes: { label: "Must not change" } },
       { type: `${kind}.update`, ids: [uid], changes },
     ]), /Invalid chart operation/);
-    assert.deepEqual(chartData, before);
+    assert.deepEqual(dataSnapshot(chartData), before);
     const record = { genes: index.geneById, groups: index.groupById, clusters: index.clusterById,
       loci: index.locusById, links: index.linkById }[kind].get(uid);
-    Object.assign(record, changes);
-    assert.throws(() => normalizeChartData(chartData), /Invalid chart data/);
+    if (kind === "links") {
+      const invalid = dataSnapshot(chartData); Object.assign(invalid.links[0], changes);
+      assert.throws(() => normalizeChartData(invalid), /Invalid chart data/);
+    } else {
+      Object.assign(record, changes);
+      assert.throws(() => normalizeChartData(chartData), /Invalid chart data/);
+    }
   }
 });
 
@@ -136,22 +142,22 @@ test("group creation validates IDs and presentation without coercion", async () 
   const { createChartIndex } = await import("../../src/data/index.mjs");
   const { normalizeChartData } = await import("../../src/data/normalize.mjs");
   const { applyChartOperations } = await import("../../src/data/operations.mjs");
-  const chartData = normalizeChartData(data), before = structuredClone(chartData);
+  const chartData = normalizeChartData(data), before = dataSnapshot(chartData);
   for (const group of [
     ...[null, "", "  ", false, {}, [], NaN, Infinity].map((uid) => ({ uid })),
     { uid: "new", hidden: 1 }, { uid: "new", label: {} }, { uid: "new", colour: "bad" },
   ]) {
     assert.throws(() => applyChartOperations(chartData, createChartIndex(chartData), [{ type: "groups.create", group }]), /Invalid chart operation/);
-    assert.deepEqual(chartData, before);
+    assert.deepEqual(dataSnapshot(chartData), before);
     assert.throws(() => normalizeChartData({ ...data, groups: [{ ...group, genes: [] }] }), /Invalid chart data/);
   }
   const edit = applyChartOperations(chartData, createChartIndex(chartData), [
     { type: "groups.create", group: { uid: 0, label: null, colour: null, hidden: false } },
     { type: "genes.update", ids: ["gene-1"], changes: { label: "A label", colour: "rebeccapurple" } },
   ]);
-  assert.deepEqual(normalizeChartData(chartData), chartData);
+  assert.deepEqual(dataSnapshot(normalizeChartData(chartData)), dataSnapshot(chartData));
   applyChartOperations(chartData, createChartIndex(chartData), edit.inverse);
-  assert.deepEqual(normalizeChartData(chartData), chartData);
+  assert.deepEqual(dataSnapshot(normalizeChartData(chartData)), dataSnapshot(chartData));
   assert.equal(chartData.clusters[0].loci[0].genes[0].label, undefined);
 });
 
@@ -301,7 +307,7 @@ test("deleting a gene preserves its link records", async () => {
 
   assert.deepEqual(chartData.clusters[0].loci[0].genes.map((gene) => gene.uid), ["gene-2"]);
   assert.deepEqual(result.effects, { presentationOnly: false, refilterLinks: true, reindex: "data", rebuildState: true, captureState: true });
-  assert.equal(chartData.links.length, 1, "the relationship remains in editable data");
+  assert.equal(chartData.links.size, 1, "the relationship remains in editable data");
   const index = createChartIndex(chartData);
   assert.deepEqual(filterLinks(chartData.links, {
     groupForGene: () => "group-1",
@@ -330,7 +336,7 @@ test("link operations change or remove relationships without touching genes", as
     ids: ["link-1"],
     changes: { label: "Ortholog", colour: "#123456", hidden: true, identity: 0.75 },
   }]);
-  assert.deepEqual(chartData.links[0], {
+  assert.deepEqual(chartData.links.getAt(0), {
     uid: "link-1",
     query: { uid: "gene-1" },
     target: { uid: "gene-2" },
@@ -344,7 +350,7 @@ test("link operations change or remove relationships without touching genes", as
     type: "links.delete",
     ids: ["link-1"],
   }]);
-  assert.deepEqual(chartData.links, []);
+  assert.deepEqual([...chartData.links.values()], []);
   assert.deepEqual(deleted.effects, { presentationOnly: false, refilterLinks: true, reindex: "data", rebuildState: false, captureState: false });
   assert.equal(chartData.clusters[0].loci[0].genes.length, 2);
 });
@@ -357,11 +363,11 @@ test("restoring links preserves earlier index order and lookups", async () => {
   raw.links = ["first", "second"].map((uid) => ({ uid, query: { uid: "gene-1" }, target: { uid: "gene-1" }, identity: 1 }));
   const chartData = normalizeChartData(raw);
   const deleted = applyChartOperations(chartData, createChartIndex(chartData), [{ type: "links.delete", ids: ["first"] }]);
-  const retained = createChartIndex(chartData), second = retained.linkById.get("second");
+  const retained = createChartIndex(chartData), oldLinks = retained.linkById, second = oldLinks.get("second");
   applyChartOperations(chartData, retained, deleted.inverse);
-  assert.deepEqual(chartData.links.map((link) => link.uid), ["first", "second"]);
-  assert.equal(retained.linkById.get("second"), second);
-  assert.equal(retained.linkById.order("second"), 0);
+  assert.deepEqual([...chartData.links.keys()], ["first", "second"]);
+  assert.deepEqual(oldLinks.get("second"), second);
+  assert.equal(oldLinks.order("second"), 0);
 });
 
 test("gene batches validate sequentially and restore usable undo and redo", async () => {
@@ -370,26 +376,26 @@ test("gene batches validate sequentially and restore usable undo and redo", asyn
   ]);
   const chartData = normalizeChartData(structuredClone(data));
   const apply = (operations) => applyChartOperations(chartData, createChartIndex(chartData), operations);
-  const before = structuredClone(chartData), gene = before.clusters[0].loci[0].genes[0];
+  const before = dataSnapshot(chartData), gene = before.clusters[0].loci[0].genes[0];
   for (const second of [
     { type: "genes.update", ids: ["gene-1"], changes: { label: "invalid" } },
     { type: "genes.delete", ids: ["gene-1"] },
     { type: "groups.assignGenes", groupId: "group-1", geneIds: ["gene-1"] },
   ]) {
     assert.throws(() => apply([{ type: "genes.delete", ids: ["gene-1"] }, second]), /unknown/);
-    assert.deepEqual(chartData, before);
+    assert.deepEqual(dataSnapshot(chartData), before);
   }
   const edit = apply([{ type: "genes.delete", ids: ["gene-1"] },
     { type: "genes.restore", records: [{ locusId: "locus-1", index: 0, gene }] },
     { type: "genes.update", ids: ["gene-1"], changes: { label: "updated" } }]);
-  const after = structuredClone(chartData);
+  const after = dataSnapshot(chartData);
   assert.equal(after.clusters[0].loci[0].genes[0].label, "updated");
   const undo = apply(edit.inverse);
-  assert.deepEqual(chartData, before);
+  assert.deepEqual(dataSnapshot(chartData), before);
   apply(undo.inverse);
-  assert.deepEqual(chartData, after);
+  assert.deepEqual(dataSnapshot(chartData), after);
   assert.throws(() => apply([{ type: "genes.restore", records: [{ locusId: "locus-1", index: 0, gene }] }]), /restore deleted/);
-  assert.deepEqual(chartData, after);
+  assert.deepEqual(dataSnapshot(chartData), after);
 });
 
 test("link identity rejects values outside the normalized percentage range", async () => {
@@ -405,5 +411,5 @@ test("link identity rejects values outside the normalized percentage range", asy
     ids: ["link-1"],
     changes: { identity: 1.01 },
   }]), /identity must be a number from 0 to 1/);
-  assert.equal(chartData.links[0].identity, 0.9);
+  assert.equal(chartData.links.getAt(0).identity, 0.9);
 });

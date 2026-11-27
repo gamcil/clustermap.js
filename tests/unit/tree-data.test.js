@@ -1,3 +1,4 @@
+import { dataSnapshot } from "../helpers/data-snapshot.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -99,7 +100,7 @@ test("tree ordering survives JSON project data/state round-trips and subsequent 
   assert.deepEqual(before.clusterOrder, ["a", "b", "c"], "tree snapshots keep explicit order even when it matches source data");
   const reordered = chartStateFromSnapshot(data, { ...before, clusterOrder: ["c", "b", "a"] });
   assert.deepEqual(getClusterOrder(createChartState(data, reordered)), ["c", "b", "a"]);
-  const saved = JSON.parse(JSON.stringify({ data, state: serializeChartState(reordered, data) }));
+  const saved = JSON.parse(JSON.stringify({ data: dataSnapshot(data), state: serializeChartState(reordered, data) }));
   const restoredData = normalizeChartData(saved.data);
   const restoredState = chartStateFromSnapshot(restoredData, saved.state);
   assert.deepEqual(restoredData.tree, data.tree);

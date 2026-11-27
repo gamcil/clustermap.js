@@ -27,6 +27,166 @@
     Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(c) && Number.isFinite(d) && Number.isFinite(e) &&
     Math.abs(a - b) <= Number.EPSILON * 16 * Math.max(1, Math.abs(a), Math.abs(b), Math.abs(c), Math.abs(d), Math.abs(e));
 
+  function clusterPairKey(left, right) {
+    return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
+  }
+
+  function endpointGeneId(endpoint) {
+    return endpoint.kind === "span" ? undefined : endpoint.geneId ?? endpoint.uid;
+  }
+
+  function endpointLocus(endpoint, { genes, loci }) {
+    return endpoint.kind === "span" ? loci?.get(endpoint.locusId) : genes.get(endpointGeneId(endpoint))?.locus;
+  }
+
+  /** Project a biological endpoint into the displayed locus coordinate system. */
+  function projectLinkEndpoint(endpoint, { genes, loci, scaleX, scaleGenes = true }) {
+    if (endpoint.kind !== "span") {
+      const gene = genes.get(endpointGeneId(endpoint));
+      if (!gene) return null;
+      const { display, locus } = gene;
+      const start = scaleX(display.start) + locus.x, end = scaleX(display.end) + locus.x;
+      return { locus, visible: gene.visible,
+        anchors: display.strand === 1 ? [start, end, locus.y + locus.track.y] : [end, start, locus.y + locus.track.y] };
+    }
+    const locus = loci?.get(endpoint.locusId);
+    if (!locus || !scaleGenes) return null;
+    const origin = (locus.source.bio || locus.source).start;
+    let start = endpoint.start - origin, end = endpoint.end - origin;
+    if (locus.state.flipped) [start, end] = [locus.source.end - end, locus.source.end - start];
+    const visible = start >= locus.state.start && end <= locus.state.end;
+    const left = scaleX(start) + locus.x, right = scaleX(end) + locus.x;
+    return { locus, visible, anchors: locus.state.flipped
+      ? [right, left, locus.y + locus.track.y] : [left, right, locus.y + locus.track.y] };
+  }
+
+  /** Resolve endpoint geometry from a retained scene without rebuilding scales. */
+  function projectSceneEndpoint(endpoint, scene) {
+    const locus = endpointLocus(endpoint, scene);
+    if (!locus) return null;
+    const length = locus.state.end - locus.state.start;
+    if (!length) return null;
+    const factor = (locus.worldEnd - locus.worldStart) / length;
+    const scaleX = (value) => locus.worldStart - locus.x + (value - locus.state.start) * factor;
+    return projectLinkEndpoint(endpoint, { ...scene, scaleX });
+  }
+
+  /** Keep each gene's directional endpoints together, with the upper row first. */
+  function orderLinkAnchors(query, target) {
+    return query[2] > target[2] ? [...target, ...query] : [...query, ...target];
+  }
+
+  function interpolateLinkOpacity(previous, next, amount, enabled = true) {
+    const isRenderable = (link) => Boolean(enabled && link?.visible && link?.anchors);
+    const from = isRenderable(previous) ? 1 : 0;
+    const to = isRenderable(next) ? 1 : 0;
+    return from + (to - from) * amount;
+  }
+
+  function interpolateLinkAnchors(previousScene, previous, nextScene, next, amount) {
+    const inQueryOrder = (scene, link) => {
+      if (!link?.anchors) return null;
+      const queryY = scene && endpointLocus(link.source.query, scene)?.y;
+      if (!Number.isFinite(queryY)) return link.anchors;
+      const anchors = link.anchors;
+      const queryFirst = Math.abs(anchors[2] - queryY) <= Math.abs(anchors[5] - queryY);
+      return queryFirst ? anchors : [anchors[3], anchors[4], anchors[5], anchors[0], anchors[1], anchors[2]];
+    };
+    const from = inQueryOrder(previousScene, previous);
+    const to = inQueryOrder(nextScene, next);
+    if (!from) return to;
+    if (!to) return from;
+    return to.map((value, index) => from[index] + (value - from[index]) * amount);
+  }
+
+  function getLinkLabelPosition(
+    [ax1, ax2, ay, bx1, bx2, by],
+    position
+  ) {
+    const aMid = ax1 + (ax2 - ax1) / 2;
+    const bMid = bx1 + (bx2 - bx1) / 2;
+    return {
+      x: aMid + (bMid - aMid) * position,
+      y: ay + (by - ay) * position,
+    };
+  }
+
+  function linkPathCommands(anchors, { asLine = false, straight = false } = {}) {
+    if (!anchors) return [];
+    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+    const aMid = ax1 + (ax2 - ax1) / 2;
+    const bMid = bx1 + (bx2 - bx1) / 2;
+    const middle = ay + (by - ay) / 2;
+    if (asLine) {
+      return straight
+        ? [["M", aMid, ay], ["L", bMid, by]]
+        : [["M", aMid, ay], ["C", aMid, middle, bMid, middle, bMid, by]];
+    }
+    return straight
+      ? [["M", ax1, ay], ["L", ax2, ay], ["L", bx2, by], ["L", bx1, by], ["L", ax1, ay], ["Z"]]
+      : [
+          ["M", ax2, ay],
+          ["C", ax2, middle, bx2, middle, bx2, by],
+          ["L", bx1, by],
+          ["C", bx1, middle, ax1, middle, ax1, ay],
+          ["Z"],
+        ];
+  }
+
+  /** Trace the same link shape used by SVG onto a Canvas context. */
+  function traceLinkPath(context, anchors, style) {
+    for (const [command, ...values] of linkPathCommands(anchors, style)) {
+      if (command === "M") context.moveTo(...values);
+      else if (command === "L") context.lineTo(...values);
+      else if (command === "C") context.bezierCurveTo(...values);
+      else context.closePath();
+    }
+  }
+
+  /**
+   * Sample a link in world coordinates for renderers that submit triangles and
+   * line segments directly rather than accepting SVG/Canvas path commands.
+   */
+  function sampleLinkGeometry(anchors, { asLine = false, straight = false, segments = 10 } = {}) {
+    if (!anchors) return { asLine, upper: [], lower: [], line: [] };
+    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
+    const middle = ay + (by - ay) / 2;
+    const pointFor = (startX, endX, amount) => straight
+      ? [startX + (endX - startX) * amount, ay + (by - ay) * amount]
+      : [
+          cubic(startX, startX, endX, endX, amount),
+          cubic(ay, middle, middle, by, amount),
+        ];
+    const count = straight ? 1 : Math.max(1, segments);
+    const samples = (startX, endX) => Array.from(
+      { length: count + 1 },
+      (_, index) => pointFor(startX, endX, index / count)
+    );
+    if (asLine) return {
+      asLine,
+      upper: [],
+      lower: [],
+      line: samples((ax1 + ax2) / 2, (bx1 + bx2) / 2),
+    };
+    return { asLine, upper: samples(ax2, bx2), lower: samples(ax1, bx1), line: [] };
+  }
+
+  function cubic(start, controlA, controlB, end, amount) {
+    const inverse = 1 - amount;
+    return (
+      inverse * inverse * inverse * start +
+      3 * inverse * inverse * amount * controlA +
+      3 * inverse * amount * amount * controlB +
+      amount * amount * amount * end
+    );
+  }
+
+  function getLinkPath(anchors, style) {
+    return linkPathCommands(anchors, style)
+      .map(([command, ...values]) => `${command}${values.join(",")}`)
+      .join("");
+  }
+
   function ascending$1(a, b) {
     return a == null || b == null ? NaN : a < b ? -1 : a > b ? 1 : a >= b ? 0 : NaN;
   }
@@ -4664,32 +4824,19 @@
     }
   }
 
-  // Link stores retain source order and provide stable ID-to-position lookup.
-  // Array stores retain record identity because editing currently mutates records.
-  class ArrayLinkStore {
-    constructor(links) {
-      this.links = links;
-      this.positions = new Map();
-      for (let position = 0; position < links.length; position++) this.positions.set(links[position].uid, position);
-    }
-    get size() { return this.positions.size; }
-    has(uid) { return this.positions.has(uid); }
-    order(uid) { return this.positions.get(uid); }
-    getAt(position) { return this.links[position]; }
-    uidAt(position) { return this.links[position]?.uid; }
-    get(uid) { const position = this.order(uid); return position === undefined ? undefined : this.getAt(position); }
-    *keys() { yield* this.positions.keys(); }
-    *values() { for (const uid of this.positions.keys()) yield this.get(uid); }
-    *entries() { for (const uid of this.positions.keys()) yield [uid, this.get(uid)]; }
-    [Symbol.iterator]() { return this.entries(); }
-  }
-
   // Immutable columnar link table for canonical, ordered Clinker link IDs.
   // Inputs are copied: callers can mutate their arrays without affecting a chart
   // or an old scene. Sparse edit overlays share the immutable columns.
   const sharedColumns = Symbol("shared compact columns");
   const transferredColumns = Symbol("transferred compact columns");
+  const recordColumns = Symbol("columns built from validated records");
   const editableFields = new Set(["label", "colour", "hidden", "identity"]);
+  function sameValue(a, b) {
+    if (Object.is(a, b) || a === b) return true;
+    if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameValue(a[key], b[key]));
+  }
   function validateCompactColumns({ genes, query, target, identity, similarity, spans = null, ids = null } = {}) {
     if (!Array.isArray(genes) || !genes.every(isRecordId)) {
       throw new TypeError("Compact links require a gene ID dictionary.");
@@ -4724,13 +4871,14 @@
   }
   class CompactLinkStore {
     static get supportsFloat32Scores() { return true; }
-    #genes; #query; #target; #identity; #similarity; #spans; #ids; #idPositions; #overrides; #deleted; #fingerprint; #activePositions;
+    #genes; #query; #target; #identity; #similarity; #spans; #ids; #idPositions; #extras; #overrides; #deleted; #fingerprint; #activePositions;
     constructor(input, mode = null) {
       if (mode === sharedColumns) {
         this.#genes = input.#genes; this.#query = input.#query; this.#target = input.#target;
         this.#identity = input.#identity; this.#similarity = input.#similarity;
         this.#spans = input.#spans;
         this.#ids = input.#ids; this.#idPositions = input.#idPositions;
+        this.#extras = input.#extras;
         this.#overrides = new Map(input.#overrides);
         this.#deleted = input.#deleted.slice();
         this.#fingerprint = input.#fingerprint;
@@ -4739,16 +4887,18 @@
       }
       const { genes, query, target, identity, similarity, spans = null, ids = null } = input;
       // Transferred columns have already been validated before ownership moved.
-      if (mode !== transferredColumns) validateCompactColumns({ genes, query, target, identity, similarity, spans, ids });
+      if (mode !== transferredColumns && mode !== recordColumns) validateCompactColumns({ genes, query, target, identity, similarity, spans, ids });
       this.#ids = ids && Object.freeze([...ids]);
       this.#idPositions = ids && new Map(ids.map((uid, position) => [uid, position]));
       this.#genes = Object.freeze([...genes]);
-      this.#query = mode === transferredColumns ? query : query.slice();
-      this.#target = mode === transferredColumns ? target : target.slice();
-      this.#identity = mode === transferredColumns ? identity : identity.slice();
-      this.#similarity = mode === transferredColumns ? similarity : similarity.slice();
+      const own = mode === transferredColumns || mode === recordColumns;
+      this.#query = own ? query : query.slice();
+      this.#target = own ? target : target.slice();
+      this.#identity = own ? identity : identity.slice();
+      this.#similarity = own ? similarity : similarity.slice();
       this.#spans = spans && { loci: Object.freeze([...spans.loci]), ...Object.fromEntries(
-        ["kinds", "orientation", "queryStart", "queryEnd", "targetStart", "targetEnd"].map((key) => [key, mode === transferredColumns ? spans[key] : spans[key].slice()])) };
+        ["kinds", "orientation", "queryStart", "queryEnd", "targetStart", "targetEnd"].map((key) => [key, own ? spans[key] : spans[key].slice()])) };
+      this.#extras = mode === recordColumns ? input.extras : null;
       this.#overrides = new Map();
       this.#deleted = [];
       this.#fingerprint = null;
@@ -4825,6 +4975,8 @@
     queryLocusAt(position) { const physical = this.#physicalAt(position); return this.#spans?.kinds[physical] & 1 ? this.#spans.loci[this.#query[physical]] : undefined; }
     targetLocusAt(position) { const physical = this.#physicalAt(position); return this.#spans?.kinds[physical] & 2 ? this.#spans.loci[this.#target[physical]] : undefined; }
     #endpointAtPhysical(physical, side) {
+      const original = this.#extras?.get(physical)?.[side];
+      if (original) return clonePlainValue(original);
       const query = side === "query", span = this.#spans && (this.#spans.kinds[physical] & (query ? 1 : 2));
       const index = (query ? this.#query : this.#target)[physical];
       return span ? { kind: "span", locusId: this.#spans.loci[index], start: this.#spans[`${side}Start`][physical], end: this.#spans[`${side}End`][physical] }
@@ -4834,19 +4986,25 @@
       const physical = this.#physicalAt(position);
       return physical === undefined ? undefined : this.#endpointAtPhysical(physical, side);
     }
-    similarityAt(position) { return this.#similarity[this.#physicalAt(position)]; }
+    similarityAt(position) { const physical = this.#physicalAt(position), value = this.#similarity[physical]; return Number.isNaN(value) ? this.#extras?.get(physical)?.fields?.similarity : value; }
     identityAt(position) {
       const physical = this.#physicalAt(position), changes = this.#overrides.get(physical);
-      return changes && Object.hasOwn(changes, "identity") ? changes.identity : this.#identity[physical];
+      const value = changes && Object.hasOwn(changes, "identity") ? changes.identity : this.#identity[physical];
+      return Number.isNaN(value) ? undefined : value;
     }
-    hiddenAt(position) { return this.#overrides.get(this.#physicalAt(position))?.hidden; }
-    labelAt(position) { return this.#overrides.get(this.#physicalAt(position))?.label; }
+    hiddenAt(position) { const physical = this.#physicalAt(position), changes = this.#overrides.get(physical); return changes && Object.hasOwn(changes, "hidden") ? changes.hidden : this.#extras?.get(physical)?.fields?.hidden; }
+    labelAt(position) { const physical = this.#physicalAt(position), changes = this.#overrides.get(physical); return changes && Object.hasOwn(changes, "label") ? changes.label : this.#extras?.get(physical)?.fields?.label; }
     getAt(position) {
       const physical = this.#physicalAt(position);
       if (physical === undefined) return undefined;
+      return this.#recordAtPhysical(physical);
+    }
+    #recordAtPhysical(physical) {
       return { uid: this.#uidForPhysical(physical), query: this.#endpointAtPhysical(physical, "query"),
-        target: this.#endpointAtPhysical(physical, "target"), ...(this.#spans?.orientation[physical] ? { orientation: this.#spans.orientation[physical] } : {}), identity: this.#identity[physical],
-        similarity: this.#similarity[physical], ...this.#overrides.get(physical) };
+        target: this.#endpointAtPhysical(physical, "target"), ...(this.#spans?.orientation[physical] ? { orientation: this.#spans.orientation[physical] } : {}),
+        ...(Number.isNaN(this.#identity[physical]) ? {} : { identity: this.#identity[physical] }),
+        ...(Number.isNaN(this.#similarity[physical]) ? {} : { similarity: this.#similarity[physical] }),
+        ...clonePlainValue(this.#extras?.get(physical)?.fields), ...this.#overrides.get(physical) };
     }
     get(uid) { const position = this.order(uid); return position === undefined ? undefined : this.getAt(position); }
     // A deterministic checksum catches an accidentally mismatched base on load.
@@ -4878,6 +5036,13 @@
         }
       }
       if (this.#ids) { add(this.#ids.length); for (const uid of this.#ids) addId(uid); }
+      if (this.#extras?.size) {
+        for (const [position, extra] of this.#extras) {
+          add(position);
+          const encoded = JSON.stringify(extra, (_key, value) => value === undefined ? { "\u0000undefined": true } : value);
+          for (let i = 0; i < encoded.length; i++) add(encoded.charCodeAt(i));
+        }
+      }
       return this.#fingerprint = `cl1-${(one >>> 0).toString(16).padStart(8, "0")}${(two >>> 0).toString(16).padStart(8, "0")}`;
     }
     get isUnedited() { return this.#deleted.length === 0 && this.#overrides.size === 0; }
@@ -4971,15 +5136,8 @@
       const next = new CompactLinkStore(this, sharedColumns);
       for (const { index, link } of records) {
         const physical = next.#physicalForUid(link?.uid), deletedIndex = physical === undefined ? -1 : next.#deleted.indexOf(physical);
-        const sameEndpoint = (actual, expected) => isPlainObject(actual) && (expected.kind === "span"
-          ? actual.kind === "span" && actual.locusId === expected.locusId && actual.start === expected.start && actual.end === expected.end &&
-            Object.keys(actual).every((key) => ["kind", "locusId", "start", "end"].includes(key))
-          : actual.uid === expected.uid && Object.keys(actual).every((key) => key === "uid"));
-        if (deletedIndex < 0 || !isPlainObject(link.query) || !isPlainObject(link.target) ||
-            !sameEndpoint(link.query, next.#endpointAtPhysical(physical, "query")) ||
-            !sameEndpoint(link.target, next.#endpointAtPhysical(physical, "target")) ||
-            (link.orientation ?? 0) !== (next.#spans?.orientation[physical] || 0) || link.similarity !== next.#similarity[physical] ||
-            Object.keys(link).some((key) => !["uid", "query", "target", "orientation", "similarity", "identity", "hidden", "label", "colour"].includes(key))) {
+        const immutable = (record) => Object.fromEntries(Object.entries(record).filter(([key]) => !editableFields.has(key)));
+        if (deletedIndex < 0 || !sameValue(immutable(link), immutable(next.#recordAtPhysical(physical)))) {
           throw new TypeError("Compact links can only restore deleted canonical records.");
         }
         next.#deleted.splice(deletedIndex, 1);
@@ -4995,6 +5153,47 @@
     *values() { for (let i = 0; i < this.size; i++) yield this.getAt(i); }
     *entries() { for (let i = 0; i < this.size; i++) { const link = this.getAt(i); yield [link.uid, link]; } }
     [Symbol.iterator]() { return this.entries(); }
+  }
+
+  // Called after chart-data validation. Keep only non-column fields and
+  // noncanonical endpoint shapes as sparse, chart-owned records.
+  function linkStoreFromRecords(records) {
+    const n = records.length, genes = [], loci = [], geneIndex = new Map(), locusIndex = new Map();
+    const query = new Uint32Array(n), target = new Uint32Array(n);
+    const identity = new Float64Array(n), similarity = new Float64Array(n), ids = records.map((link) => link.uid);
+    const needsSpans = records.some((link) => link.query.kind === "span" || link.target.kind === "span" || link.orientation !== undefined);
+    const spans = needsSpans ? { loci, kinds: new Uint8Array(n), orientation: new Int8Array(n),
+      queryStart: new Float64Array(n), queryEnd: new Float64Array(n), targetStart: new Float64Array(n), targetEnd: new Float64Array(n) } : null;
+    const extras = new Map();
+    const index = (value, values, map) => {
+      if (!map.has(value)) { map.set(value, values.length); values.push(value); }
+      return map.get(value);
+    };
+    for (let i = 0; i < n; i++) {
+      const link = records[i], extra = {};
+      const fields = Object.fromEntries(Object.entries(link).filter(([key]) => !["uid", "query", "target", "identity", "similarity", "orientation"].includes(key)));
+      if (Object.keys(fields).length) extra.fields = clonePlainValue(fields);
+      for (const [side, column, bit] of [["query", query, 1], ["target", target, 2]]) {
+        const endpoint = link[side];
+        if (endpoint.kind === "span") {
+          column[i] = index(endpoint.locusId, loci, locusIndex); spans.kinds[i] |= bit;
+          spans[`${side}Start`][i] = endpoint.start; spans[`${side}End`][i] = endpoint.end;
+          if (Object.keys(endpoint).some((key) => !["kind", "locusId", "start", "end"].includes(key))) extra[side] = clonePlainValue(endpoint);
+        } else {
+          column[i] = index(endpointGeneId(endpoint), genes, geneIndex);
+          if (Object.keys(endpoint).length !== 1 || !Object.hasOwn(endpoint, "uid")) extra[side] = clonePlainValue(endpoint);
+        }
+      }
+      identity[i] = link.identity === undefined ? NaN : link.identity;
+      similarity[i] = typeof link.similarity === "number" && Number.isFinite(link.similarity) ? link.similarity : NaN;
+      if (Object.hasOwn(link, "identity") && link.identity === undefined) (extra.fields ??= {}).identity = undefined;
+      if (Object.hasOwn(link, "similarity") && Number.isNaN(similarity[i])) (extra.fields ??= {}).similarity = clonePlainValue(link.similarity);
+      if (Object.hasOwn(link, "orientation") && link.orientation === undefined) (extra.fields ??= {}).orientation = undefined;
+      if (spans) spans.orientation[i] = link.orientation || 0;
+      if (Object.keys(extra).length) extras.set(i, extra);
+    }
+    const canonicalIds = ids.every((uid, position) => uid === `link-${position}`);
+    return new CompactLinkStore({ genes, query, target, identity, similarity, spans, ids: canonicalIds ? null : ids, extras }, recordColumns);
   }
 
   // Preserve the public array-shaped read view without expanding compact links.
@@ -5499,166 +5698,6 @@
       x: (event.clientX - bounds.left - camera.x) / camera.k,
       y: (event.clientY - bounds.top - camera.y) / camera.k,
     };
-  }
-
-  function clusterPairKey(left, right) {
-    return left < right ? `${left}\u0000${right}` : `${right}\u0000${left}`;
-  }
-
-  function endpointGeneId(endpoint) {
-    return endpoint.kind === "span" ? undefined : endpoint.geneId ?? endpoint.uid;
-  }
-
-  function endpointLocus(endpoint, { genes, loci }) {
-    return endpoint.kind === "span" ? loci?.get(endpoint.locusId) : genes.get(endpointGeneId(endpoint))?.locus;
-  }
-
-  /** Project a biological endpoint into the displayed locus coordinate system. */
-  function projectLinkEndpoint(endpoint, { genes, loci, scaleX, scaleGenes = true }) {
-    if (endpoint.kind !== "span") {
-      const gene = genes.get(endpointGeneId(endpoint));
-      if (!gene) return null;
-      const { display, locus } = gene;
-      const start = scaleX(display.start) + locus.x, end = scaleX(display.end) + locus.x;
-      return { locus, visible: gene.visible,
-        anchors: display.strand === 1 ? [start, end, locus.y + locus.track.y] : [end, start, locus.y + locus.track.y] };
-    }
-    const locus = loci?.get(endpoint.locusId);
-    if (!locus || !scaleGenes) return null;
-    const origin = (locus.source.bio || locus.source).start;
-    let start = endpoint.start - origin, end = endpoint.end - origin;
-    if (locus.state.flipped) [start, end] = [locus.source.end - end, locus.source.end - start];
-    const visible = start >= locus.state.start && end <= locus.state.end;
-    const left = scaleX(start) + locus.x, right = scaleX(end) + locus.x;
-    return { locus, visible, anchors: locus.state.flipped
-      ? [right, left, locus.y + locus.track.y] : [left, right, locus.y + locus.track.y] };
-  }
-
-  /** Resolve endpoint geometry from a retained scene without rebuilding scales. */
-  function projectSceneEndpoint(endpoint, scene) {
-    const locus = endpointLocus(endpoint, scene);
-    if (!locus) return null;
-    const length = locus.state.end - locus.state.start;
-    if (!length) return null;
-    const factor = (locus.worldEnd - locus.worldStart) / length;
-    const scaleX = (value) => locus.worldStart - locus.x + (value - locus.state.start) * factor;
-    return projectLinkEndpoint(endpoint, { ...scene, scaleX });
-  }
-
-  /** Keep each gene's directional endpoints together, with the upper row first. */
-  function orderLinkAnchors(query, target) {
-    return query[2] > target[2] ? [...target, ...query] : [...query, ...target];
-  }
-
-  function interpolateLinkOpacity(previous, next, amount, enabled = true) {
-    const isRenderable = (link) => Boolean(enabled && link?.visible && link?.anchors);
-    const from = isRenderable(previous) ? 1 : 0;
-    const to = isRenderable(next) ? 1 : 0;
-    return from + (to - from) * amount;
-  }
-
-  function interpolateLinkAnchors(previousScene, previous, nextScene, next, amount) {
-    const inQueryOrder = (scene, link) => {
-      if (!link?.anchors) return null;
-      const queryY = scene && endpointLocus(link.source.query, scene)?.y;
-      if (!Number.isFinite(queryY)) return link.anchors;
-      const anchors = link.anchors;
-      const queryFirst = Math.abs(anchors[2] - queryY) <= Math.abs(anchors[5] - queryY);
-      return queryFirst ? anchors : [anchors[3], anchors[4], anchors[5], anchors[0], anchors[1], anchors[2]];
-    };
-    const from = inQueryOrder(previousScene, previous);
-    const to = inQueryOrder(nextScene, next);
-    if (!from) return to;
-    if (!to) return from;
-    return to.map((value, index) => from[index] + (value - from[index]) * amount);
-  }
-
-  function getLinkLabelPosition(
-    [ax1, ax2, ay, bx1, bx2, by],
-    position
-  ) {
-    const aMid = ax1 + (ax2 - ax1) / 2;
-    const bMid = bx1 + (bx2 - bx1) / 2;
-    return {
-      x: aMid + (bMid - aMid) * position,
-      y: ay + (by - ay) * position,
-    };
-  }
-
-  function linkPathCommands(anchors, { asLine = false, straight = false } = {}) {
-    if (!anchors) return [];
-    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-    const aMid = ax1 + (ax2 - ax1) / 2;
-    const bMid = bx1 + (bx2 - bx1) / 2;
-    const middle = ay + (by - ay) / 2;
-    if (asLine) {
-      return straight
-        ? [["M", aMid, ay], ["L", bMid, by]]
-        : [["M", aMid, ay], ["C", aMid, middle, bMid, middle, bMid, by]];
-    }
-    return straight
-      ? [["M", ax1, ay], ["L", ax2, ay], ["L", bx2, by], ["L", bx1, by], ["L", ax1, ay], ["Z"]]
-      : [
-          ["M", ax2, ay],
-          ["C", ax2, middle, bx2, middle, bx2, by],
-          ["L", bx1, by],
-          ["C", bx1, middle, ax1, middle, ax1, ay],
-          ["Z"],
-        ];
-  }
-
-  /** Trace the same link shape used by SVG onto a Canvas context. */
-  function traceLinkPath(context, anchors, style) {
-    for (const [command, ...values] of linkPathCommands(anchors, style)) {
-      if (command === "M") context.moveTo(...values);
-      else if (command === "L") context.lineTo(...values);
-      else if (command === "C") context.bezierCurveTo(...values);
-      else context.closePath();
-    }
-  }
-
-  /**
-   * Sample a link in world coordinates for renderers that submit triangles and
-   * line segments directly rather than accepting SVG/Canvas path commands.
-   */
-  function sampleLinkGeometry(anchors, { asLine = false, straight = false, segments = 10 } = {}) {
-    if (!anchors) return { asLine, upper: [], lower: [], line: [] };
-    const [ax1, ax2, ay, bx1, bx2, by] = anchors;
-    const middle = ay + (by - ay) / 2;
-    const pointFor = (startX, endX, amount) => straight
-      ? [startX + (endX - startX) * amount, ay + (by - ay) * amount]
-      : [
-          cubic(startX, startX, endX, endX, amount),
-          cubic(ay, middle, middle, by, amount),
-        ];
-    const count = straight ? 1 : Math.max(1, segments);
-    const samples = (startX, endX) => Array.from(
-      { length: count + 1 },
-      (_, index) => pointFor(startX, endX, index / count)
-    );
-    if (asLine) return {
-      asLine,
-      upper: [],
-      lower: [],
-      line: samples((ax1 + ax2) / 2, (bx1 + bx2) / 2),
-    };
-    return { asLine, upper: samples(ax2, bx2), lower: samples(ax1, bx1), line: [] };
-  }
-
-  function cubic(start, controlA, controlB, end, amount) {
-    const inverse = 1 - amount;
-    return (
-      inverse * inverse * inverse * start +
-      3 * inverse * inverse * amount * controlA +
-      3 * inverse * amount * amount * controlB +
-      amount * amount * amount * end
-    );
-  }
-
-  function getLinkPath(anchors, style) {
-    return linkPathCommands(anchors, style)
-      .map(([command, ...values]) => `${command}${values.join(",")}`)
-      .join("");
   }
 
   function formatLength(length) {
@@ -9588,15 +9627,9 @@
     return true;
   }
 
-  function appendToIndex(index, key, value) {
-    const values = index.get(key);
-    if (values) values.push(value);
-    else index.set(key, [value]);
-  }
-
   // Store numeric positions rather than link objects or generated UID strings.
   // Materialize only a requested gene/pair's records in source order.
-  function compactLinkIndexes(store, clusterForGene, clusterForLocus) {
+  function linkIndexes(store, clusterForGene, clusterForLocus) {
     const geneCounts = new Map(), locusCounts = new Map(), pairCounts = new Map();
     const increment = (map, key) => map.set(key, (map.get(key) || 0) + 1);
     const pairFor = (query, target, queryLocus, targetLocus) => {
@@ -9643,10 +9676,7 @@
     const locusById = new Map();
     const geneById = new Map();
     const groupById = new Map();
-    const linkById = data.links instanceof CompactLinkStore ? data.links : new ArrayLinkStore(data.links);
-    let linksByGeneId = new Map();
-    let linksByLocusId = new Map();
-    let linksByClusterPair = new Map();
+    const linkById = data.links instanceof CompactLinkStore ? data.links : linkStoreFromRecords(data.links);
     const clusterForGene = new Map();
     const clusterForLocus = new Map();
 
@@ -9663,22 +9693,7 @@
       }
     }
 
-    if (data.links instanceof CompactLinkStore) {
-      ({ linksByGeneId, linksByLocusId, linksByClusterPair } = compactLinkIndexes(data.links, clusterForGene, clusterForLocus));
-    } else for (const link of data.links) {
-      if (link.query.kind === "span") appendToIndex(linksByLocusId, link.query.locusId, link);
-      if (link.target.kind === "span" && (link.query.kind !== "span" || link.target.locusId !== link.query.locusId)) {
-        appendToIndex(linksByLocusId, link.target.locusId, link);
-      }
-      const query = endpointGeneId(link.query), target = endpointGeneId(link.target);
-      if (query !== undefined) appendToIndex(linksByGeneId, query, link);
-      if (target !== undefined && target !== query) appendToIndex(linksByGeneId, target, link);
-      const queryCluster = link.query.kind === "span" ? clusterForLocus.get(link.query.locusId) : clusterForGene.get(query);
-      const targetCluster = link.target.kind === "span" ? clusterForLocus.get(link.target.locusId) : clusterForGene.get(target);
-      if (queryCluster !== undefined && targetCluster !== undefined) {
-        appendToIndex(linksByClusterPair, clusterPairKey(queryCluster, targetCluster), link.uid);
-      }
-    }
+    const { linksByGeneId, linksByLocusId, linksByClusterPair } = linkIndexes(linkById, clusterForGene, clusterForLocus);
 
     for (const group of data.groups || []) groupById.set(group.uid, group);
 
@@ -10009,7 +10024,8 @@
   function normalizeChartData(data, treeConfig = {}) {
     validateRecordIds(data);
     validateRecords(data);
-    const source = clonePlainValue(data);
+    const source = clonePlainValue({ ...data, links: [] });
+    const links = data.links instanceof CompactLinkStore ? data.links : linkStoreFromRecords(data.links);
     if (source.tree != null) {
       validateTree(source.tree, source.clusters);
       validateTreePresentation(source.tree, treeConfig);
@@ -10021,7 +10037,7 @@
         ...cluster,
         loci: cluster.loci.map((locus) => normalizeLocus(locus, cluster.uid)),
       })),
-      links: source.links instanceof CompactLinkStore ? source.links : [...source.links],
+      links,
       groups: source.groups?.map((group) => ({
         ...group,
         genes: group.genes ? [...group.genes] : group.genes,
@@ -10637,7 +10653,7 @@
   function applyOperation(data, index, operation) {
     const updateRecords = fieldsForType[operation.type] && recordsForOperation(index, operation.type);
     if (updateRecords) {
-      if (operation.type === "links.update" && data.links instanceof CompactLinkStore) {
+      if (operation.type === "links.update") {
         data.links = data.links.withUpdates(operation.ids.map((uid) => ({ uid, changes: operation.changes })));
         index.linkById = data.links;
         index.linksByGeneId = index.linksByGeneId.withStore(data.links);
@@ -10664,24 +10680,11 @@
         return;
       }
       case "links.delete": {
-        if (data.links instanceof CompactLinkStore) {
-          data.links = data.links.withDeleted(operation.ids);
-          return;
-        }
-        const ids = new Set(operation.ids);
-        data.links = data.links.filter((link) => !ids.has(link.uid));
+        data.links = data.links.withDeleted(operation.ids);
         return;
       }
       case "links.restore":
-        if (data.links instanceof CompactLinkStore) {
-          data.links = data.links.withRestored(operation.records);
-          return;
-        }
-        // Existing scenes retain the old array for link order and animation.
-        data.links = [...data.links];
-        for (const { index: position, link } of operation.records) {
-          data.links.splice(Math.min(position, data.links.length), 0, structuredClone(link));
-        }
+        data.links = data.links.withRestored(operation.records);
         return;
       case "groups.assignGenes":
         assignGenes(data.groups, operation.groupId, operation.geneIds);
@@ -10764,16 +10767,9 @@
       return [{ type: "genes.delete", ids: operation.records.map(({ gene }) => gene.uid) }];
     }
     if (operation.type === "links.delete") {
-      if (data.links instanceof CompactLinkStore) {
-        const records = operation.ids.map((uid) => ({ index: index.linkById.order(uid), link: index.linkById.get(uid) }))
-          .sort((a, b) => a.index - b.index);
-        return [{ type: "links.restore", records }];
-      }
-      const removed = new Set(operation.ids);
-      return [{
-        type: "links.restore",
-        records: data.links.map((link, position) => removed.has(link.uid) && { index: position, link: structuredClone(link) }).filter(Boolean),
-      }];
+      const records = operation.ids.map((uid) => ({ index: index.linkById.order(uid), link: index.linkById.get(uid) }))
+        .sort((a, b) => a.index - b.index);
+      return [{ type: "links.restore", records }];
     }
     if (operation.type === "links.restore") {
       return [{ type: "links.delete", ids: operation.records.map(({ link }) => link.uid) }];
@@ -10829,15 +10825,15 @@
     });
     validateTreeOperationBatch(data.tree, applied, treeConfig, data.clusters);
     validateAnnotationChanges(data, annotationDraft.annotationPanels);
-    if (data.links instanceof CompactLinkStore) {
-      // Preflight the entire link batch before any chart data is mutated.
-      let links = data.links;
-      for (const operation of applied) {
-        if (operation.type === "links.update") links = links.withUpdates(operation.ids.map((uid) => ({ uid, changes: operation.changes })));
-        else if (operation.type === "links.delete") links = links.withDeleted(operation.ids);
-        else if (operation.type === "links.restore") links = links.withRestored(operation.records);
-      }
+    // Preflight the entire link batch before any chart data is mutated.
+    let links = index.linkById;
+    for (const operation of applied) {
+      if (operation.type === "links.update") links = links.withUpdates(operation.ids.map((uid) => ({ uid, changes: operation.changes })));
+      else if (operation.type === "links.delete") links = links.withDeleted(operation.ids);
+      else if (operation.type === "links.restore") links = links.withRestored(operation.records);
     }
+    // Internal callers may supply raw records; the index already normalized them.
+    if (!(data.links instanceof CompactLinkStore) && applied.some(({ type }) => type.startsWith("links."))) data.links = index.linkById;
     const hasStructuralGroupEdit = applied.some((operation) => !["groups.update", "groups.restore"].includes(operation.type) && operation.type.startsWith("groups."));
     let compactLinksChanged = false;
     const inverse = [];
@@ -10861,10 +10857,8 @@
       }
       if (operation.type === "links.delete" || operation.type === "links.restore") {
         // Later edits need current link order, but not the full adjacency index.
-        if (data.links instanceof CompactLinkStore) {
-          index.linkById = data.links;
-          compactLinksChanged = true;
-        } else index = { ...index, linkById: new ArrayLinkStore(data.links) };
+        index.linkById = data.links;
+        compactLinksChanged = true;
       }
       if (structuralGroupTypes.has(operation.type)) index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
     }
@@ -18481,8 +18475,19 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       applyConfiguration(_);
       return my;
     };
-    const dataReadView = (data) => data?.links instanceof CompactLinkStore
-      ? { ...data, links: linkArrayView(data.links) } : data;
+    const dataViews = new WeakMap();
+    const dataReadView = (data) => {
+      if (!data) return data;
+      let cached = dataViews.get(data);
+      if (!cached || cached.links !== data.links) {
+        const links = data.links;
+        const view = new Proxy(data, { get: (target, key, receiver) => key === "links"
+          ? linkArrayView(links) : Reflect.get(target, key, receiver) });
+        cached = { links, view };
+        dataViews.set(data, cached);
+      }
+      return cached.view;
+    };
     my.data = function (data) {
       if (!arguments.length) return dataReadView(model.data);
       if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");

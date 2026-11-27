@@ -1,3 +1,4 @@
+import { dataSnapshot } from "../helpers/data-snapshot.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -56,7 +57,7 @@ test("repeated rooting reuses one root and persists reset through JSON", () => {
     data.tree = rerootTree(data.tree, nodeId);
     assert.equal(data.tree.nodes.length, original.nodes.length);
     assert.deepEqual(distances(data.tree), distances(original));
-    data.tree = normalizeChartData(JSON.parse(JSON.stringify(data))).tree;
+    data.tree = normalizeChartData(JSON.parse(JSON.stringify(dataSnapshot(data)))).tree;
   }
   assert.deepEqual(resetTreeRoot(data.tree), original);
   assert.equal(treeClusterOrder(data.tree)[0], "a");
@@ -141,28 +142,28 @@ test("the five-cluster Bua fixture has no redundant root after rerooting", async
 });
 
 test("structural tree edits rebuild state and undo topology exactly", () => {
-  const data = normalizeChartData(input()), original = structuredClone(data);
+  const data = normalizeChartData(input()), original = dataSnapshot(data);
   treeMetrics(data.tree);
   const apply = (ops) => applyChartOperations(data, createChartIndex(data), ops);
   const edit = apply([{ type: "tree.reroot", nodeId: "b" }]);
-  const rooted = structuredClone(data);
+  const rooted = dataSnapshot(data);
   assert.deepEqual(edit.effects, { presentationOnly: false, refilterLinks: true, reindex: false, rebuildState: true, captureState: false });
   assert.equal(treeMetrics(data.tree).parents.get("b"), data.tree.root);
-  apply(edit.inverse); assert.deepEqual(data, original);
-  apply(edit.operations); assert.deepEqual(data, rooted);
+  apply(edit.inverse); assert.deepEqual(dataSnapshot(data), original);
+  apply(edit.operations); assert.deepEqual(dataSnapshot(data), rooted);
   const reset = apply([{ type: "tree.reroot.reset" }]);
-  assert.deepEqual(data, original);
-  apply(reset.inverse); assert.deepEqual(data, rooted);
+  assert.deepEqual(dataSnapshot(data), original);
+  apply(reset.inverse); assert.deepEqual(dataSnapshot(data), rooted);
 });
 
 test("invalid rooting and saved baselines are rejected atomically", () => {
-  const data = normalizeChartData(input()), original = structuredClone(data);
+  const data = normalizeChartData(input()), original = dataSnapshot(data);
   for (const nodeId of ["missing", "r", null]) {
     assert.throws(() => applyChartOperations(data, createChartIndex(data), [
       { type: "clusters.update", ids: ["a"], changes: { name: "Must not change" } },
       { type: "tree.reroot", nodeId },
     ]), /root|node/);
-    assert.deepEqual(data, original);
+    assert.deepEqual(dataSnapshot(data), original);
   }
   for (const baseline of [null, {}, { root: "r", node: "r", children: [] }]) {
     assert.throws(() => normalizeChartData({ ...data, tree: { ...data.tree, rooting: baseline } }), /rooting/);

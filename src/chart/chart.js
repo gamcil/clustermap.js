@@ -1211,8 +1211,19 @@ export default function clusterMap() {
     applyConfiguration(_);
     return my;
   };
-  const dataReadView = (data) => data?.links instanceof CompactLinkStore
-    ? { ...data, links: linkArrayView(data.links) } : data;
+  const dataViews = new WeakMap();
+  const dataReadView = (data) => {
+    if (!data) return data;
+    let cached = dataViews.get(data);
+    if (!cached || cached.links !== data.links) {
+      const links = data.links;
+      const view = new Proxy(data, { get: (target, key, receiver) => key === "links"
+        ? linkArrayView(links) : Reflect.get(target, key, receiver) });
+      cached = { links, view };
+      dataViews.set(data, cached);
+    }
+    return cached.view;
+  };
   my.data = function (data) {
     if (!arguments.length) return dataReadView(model.data);
     if (!container) throw new Error("Cannot replace chart data before the chart is mounted.");

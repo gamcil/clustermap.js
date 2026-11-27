@@ -6,8 +6,8 @@ for (const renderer of ["svg", "canvas"]) {
     await page.waitForFunction(() => Boolean(window.__demoChart));
     const result = await page.evaluate((renderer) => {
       const chart = window.__demoChart, links = chart.data().links;
-      const iterator = links[Symbol.iterator]; let iterations = 0;
-      links[Symbol.iterator] = function () { iterations++; return iterator.call(this); };
+      const store = links[Symbol.for("clustermap.compactLinks")], queryAt = store.queryAt; let iterations = 0;
+      store.queryAt = function (position) { iterations++; return queryAt.call(this, position); };
       chart.clearHistory();
       chart.config({ cluster: { alignLabels: true, labelAlignment: "left" } });
       const anchor = renderer === "svg" ? document.querySelector("g.clusterInfo text.clusterText").getAttribute("text-anchor") : null;
@@ -22,7 +22,7 @@ for (const renderer of ["svg", "canvas"]) {
       const beforeFilterChange = iterations;
       chart.config({ link: { threshold: 0.95 } });
       const afterFilterChange = iterations;
-      delete links[Symbol.iterator];
+      delete store.queryAt;
       return { beforeFilterChange, afterFilterChange, anchor, shown, guides, undone, redone, canUndo };
     }, renderer);
     expect(result.beforeFilterChange).toBe(0);
@@ -157,8 +157,8 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
       const host = document.createElement("div"); host.style.cssText = "width:800px;height:400px"; document.body.append(host);
       const clusters = ["a", "b"].map((uid) => ({ uid, name: uid, loci: [{ uid: `l-${uid}`, start: 100, end: 200,
         genes: [{ uid: `g-${uid}`, start: 110, end: 130, strand: 1 }] }] }));
-      const links = [{ uid: "dna", query: { kind: "span", locusId: "l-a", start: 110, end: 140 },
-        target: { kind: "span", locusId: "l-b", start: 120, end: 150 }, orientation: -1, identity: 0.9 }];
+      const links = [{ uid: "dna", query: { kind: "span", locusId: "l-a", start: 110, end: 140, source: { name: "query" } },
+        target: { kind: "span", locusId: "l-b", start: 120, end: 150 }, orientation: -1, identity: 0.9, metadata: { method: "alignment" } }];
       const chart = ClusterMap().config({ plot: { renderer, transitionDuration: 0 }, link: { groupColour: true } });
       d3.select(host).datum({ clusters, links, groups: [], config: { updateGroups: false } }).call(chart);
       const paths = () => [...new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml").querySelectorAll("path.geneLink")]
@@ -174,10 +174,11 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
       chart.remove({ clusters: ["b"] }); const excluded = paths();
       chart.undo(); const returned = paths();
       const snapshot = JSON.parse(await chart.exportProjectBlob().text()); chart.project(snapshot); const loaded = paths();
+      const loadedLink = chart.data().links[0];
       chart.trimLoci(["l-a"]); const trimmed = paths(); chart.undo(); const untrimmed = paths();
       chart.config({ plot: { scaleGenes: false } }); const packed = paths();
       chart.destroy(); host.remove();
-      return { initial, flipped, restored, hidden, undo, excluded, returned, loaded, trimmed, untrimmed, packed, pixelsChanged };
+      return { initial, flipped, restored, hidden, undo, excluded, returned, loaded, loadedLink, trimmed, untrimmed, packed, pixelsChanged };
     }, renderer);
     expect(result.initial).toHaveLength(1);
     expect(result.flipped).not.toEqual(result.initial);
@@ -188,6 +189,7 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
     expect(result.excluded).toHaveLength(0);
     expect(result.returned).toHaveLength(1);
     expect(result.loaded).toHaveLength(1);
+    expect(result.loadedLink).toMatchObject({ metadata: { method: "alignment" }, query: { source: { name: "query" } } });
     expect(result.trimmed).toHaveLength(0);
     expect(result.untrimmed).toHaveLength(1);
     expect(result.packed).toHaveLength(0);
@@ -244,15 +246,15 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
       const viewport = surface.getBoundingClientRect();
       const links = chart.data().links;
       let iterations = 0;
-      const iterator = links[Symbol.iterator];
-      links[Symbol.iterator] = function () { iterations++; return iterator.call(this); };
+      const store = links[Symbol.for("clustermap.compactLinks")], queryAt = store.queryAt;
+      store.queryAt = function (position) { iterations++; return queryAt.call(this, position); };
       const history = [chart.canUndo(), chart.canRedo()];
       const returned = chart.fitFigure({ padding: 20, minimumReadableScale: 0 }) === chart;
       const camera = chart.camera();
       const afterHistory = [chart.canUndo(), chart.canRedo()];
       let rejected = false;
       try { chart.fitFigure({ padding: -1 }); } catch (error) { rejected = error instanceof TypeError; }
-      delete links[Symbol.iterator];
+      delete store.queryAt;
       return { bounds, viewport: { width: viewport.width, height: viewport.height }, camera,
         history, afterHistory, iterations, returned, rejected };
     }, renderer);
@@ -282,8 +284,8 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
       chart.config({ plot: { minZoom: 0.2 } });
       const links = chart.data().links;
       let iterations = 0;
-      const iterator = links[Symbol.iterator];
-      links[Symbol.iterator] = function () { iterations++; return iterator.call(this); };
+      const store = links[Symbol.for("clustermap.compactLinks")], queryAt = store.queryAt;
+      store.queryAt = function (position) { iterations++; return queryAt.call(this, position); };
       const history = [chart.canUndo(), chart.canRedo()];
       const next = { x: 37, y: 52, k: 1.25 };
       const returned = chart.camera(next) === chart;
@@ -295,7 +297,7 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
       const transform = d3.zoomTransform(surface);
       let rejected = false;
       try { chart.camera({ x: 0, y: 0, k: 0 }); } catch (error) { rejected = error instanceof TypeError; }
-      delete links[Symbol.iterator];
+      delete store.queryAt;
       return { returned, stateCamera, history, afterHistory, iterations, rejected,
         transform: { x: transform.x, y: transform.y, k: transform.k } };
     }, renderer);

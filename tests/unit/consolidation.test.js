@@ -1,3 +1,4 @@
+import { dataSnapshot } from "../helpers/data-snapshot.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDefaultConfig, mergeConfig } from "../../src/chart/config.js";
@@ -162,7 +163,7 @@ test("record IDs are unique within each kind, including across parent records", 
 });
 
 test("snapshots reject malformed values without modifying source data", () => {
-  const data = normalizeChartData(input()), before = structuredClone(data);
+  const data = normalizeChartData(input()), before = dataSnapshot(data);
   for (const snapshot of [
     {}, { version: 3 }, { version: 2, camera: { x: 0, y: 0, k: 0 } },
     { version: 2, loci: [["locus", { start: 50, end: 20 }]] },
@@ -171,7 +172,7 @@ test("snapshots reject malformed values without modifying source data", () => {
     { version: 2, locusOffsets: [["locus", Infinity]] },
   ]) {
     assert.throws(() => chartStateFromSnapshot(data, snapshot), TypeError);
-    assert.deepEqual(data, before);
+    assert.deepEqual(dataSnapshot(data), before);
   }
   assert.equal(chartStateFromSnapshot(data, { version: 2, loci: [["locus", { trimLeft: "gene" }]] })
     .loci.get("locus").trimLeft.uid, "gene");

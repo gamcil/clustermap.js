@@ -49,7 +49,7 @@ test("normalization accepts absent endpoints, empty ranges and unknown strand", 
   locus.offset = -20;
   Object.assign(locus.genes[0], { start: -10, end: -10, strand: 0 });
   const normalized = normalizeChartData(data);
-  assert.deepEqual(normalized.links, data.links);
+  assert.deepEqual([...normalized.links.values()], data.links);
   assert.deepEqual(normalized.groups, data.groups);
   assert.deepEqual(normalizeChartData(normalized), normalized);
 });
@@ -58,7 +58,7 @@ test("normalization validates biological span endpoints and orientation", () => 
   const data = input();
   data.links = [{ uid: "dna", query: { kind: "span", locusId: "locus-a", start: 2, end: 10 },
     target: { kind: "gene", geneId: "gene-a" }, orientation: -1, identity: 0.9 }];
-  assert.deepEqual(normalizeChartData(data).links, data.links);
+  assert.deepEqual([...normalizeChartData(data).links.values()], data.links);
   for (const query of [
     { kind: "span", locusId: "locus-a", start: -1, end: 2 },
     { kind: "span", locusId: "locus-a", start: 2, end: 2 },
@@ -167,8 +167,8 @@ test("chart normalization owns editable nested records", async () => {
 
   const normalized = normalizeChartData(data);
   normalized.clusters[0].loci[0].genes[0].metadata.note = "edited";
-  normalized.links[0].query.metadata.source = "edited";
-  normalized.links[0].metadata.note = "edited";
+  normalized.links.getAt(0).query.metadata.source = "edited";
+  normalized.links.getAt(0).metadata.note = "edited";
   normalized.groups[0].metadata.note = "edited";
   normalized.config.metadata.note = "edited";
 

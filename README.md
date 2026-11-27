@@ -525,8 +525,8 @@ the same store can safely be shared by a host and multiple charts. For lower
 construction peak memory, `CompactLinkStore.fromTransferred(columns)` takes
 ownership of the columns by transferring their underlying ArrayBuffers; every
 caller view of those buffers becomes detached. Link edits and deletions use
-chart-local copy-on-write overlays. Arbitrary link metadata still requires
-the existing object-array input.
+chart-local copy-on-write overlays. Object-array input also supports arbitrary
+link and endpoint metadata; it is normalized into the same table internally.
 
 For span endpoints, add optional `spans` columns. `kinds` uses bit 1 for a
 query span and bit 2 for a target span; an endpoint index then refers to
@@ -550,7 +550,7 @@ Coordinates in columns for gene endpoints are ignored. The optional columns
 add 34 bytes per link in that table; gene-only tables without `spans` do not
 allocate them. Ownership transfer also transfers all span-column buffers.
 
-For compact input, `data().links` and `visibleData().links` are read-only,
+For both input forms, `data().links` and `visibleData().links` are read-only,
 lazy array views: indexing, iteration and array methods work, but operations
 such as `map`, `filter`, JSON serialization or `chart.project()` can still
 materialize many records. The views cannot be passed to `structuredClone`;

@@ -1,15 +1,9 @@
-import { clusterPairKey, endpointGeneId } from "../links/layout.mjs";
-import { ArrayLinkStore, CompactLinkStore } from "./linkStore.mjs";
-
-function appendToIndex(index, key, value) {
-  const values = index.get(key);
-  if (values) values.push(value);
-  else index.set(key, [value]);
-}
+import { clusterPairKey } from "../links/layout.mjs";
+import { CompactLinkStore, linkStoreFromRecords } from "./linkStore.mjs";
 
 // Store numeric positions rather than link objects or generated UID strings.
 // Materialize only a requested gene/pair's records in source order.
-function compactLinkIndexes(store, clusterForGene, clusterForLocus) {
+function linkIndexes(store, clusterForGene, clusterForLocus) {
   const geneCounts = new Map(), locusCounts = new Map(), pairCounts = new Map();
   const increment = (map, key) => map.set(key, (map.get(key) || 0) + 1);
   const pairFor = (query, target, queryLocus, targetLocus) => {
@@ -56,10 +50,7 @@ export function createChartIndex(data) {
   const locusById = new Map();
   const geneById = new Map();
   const groupById = new Map();
-  const linkById = data.links instanceof CompactLinkStore ? data.links : new ArrayLinkStore(data.links);
-  let linksByGeneId = new Map();
-  let linksByLocusId = new Map();
-  let linksByClusterPair = new Map();
+  const linkById = data.links instanceof CompactLinkStore ? data.links : linkStoreFromRecords(data.links);
   const clusterForGene = new Map();
   const clusterForLocus = new Map();
 
@@ -76,22 +67,7 @@ export function createChartIndex(data) {
     }
   }
 
-  if (data.links instanceof CompactLinkStore) {
-    ({ linksByGeneId, linksByLocusId, linksByClusterPair } = compactLinkIndexes(data.links, clusterForGene, clusterForLocus));
-  } else for (const link of data.links) {
-    if (link.query.kind === "span") appendToIndex(linksByLocusId, link.query.locusId, link);
-    if (link.target.kind === "span" && (link.query.kind !== "span" || link.target.locusId !== link.query.locusId)) {
-      appendToIndex(linksByLocusId, link.target.locusId, link);
-    }
-    const query = endpointGeneId(link.query), target = endpointGeneId(link.target);
-    if (query !== undefined) appendToIndex(linksByGeneId, query, link);
-    if (target !== undefined && target !== query) appendToIndex(linksByGeneId, target, link);
-    const queryCluster = link.query.kind === "span" ? clusterForLocus.get(link.query.locusId) : clusterForGene.get(query);
-    const targetCluster = link.target.kind === "span" ? clusterForLocus.get(link.target.locusId) : clusterForGene.get(target);
-    if (queryCluster !== undefined && targetCluster !== undefined) {
-      appendToIndex(linksByClusterPair, clusterPairKey(queryCluster, targetCluster), link.uid);
-    }
-  }
+  const { linksByGeneId, linksByLocusId, linksByClusterPair } = linkIndexes(linkById, clusterForGene, clusterForLocus);
 
   for (const group of data.groups || []) groupById.set(group.uid, group);
 

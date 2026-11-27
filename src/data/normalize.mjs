@@ -1,4 +1,4 @@
-import { CompactLinkStore } from "./linkStore.mjs";
+import { CompactLinkStore, linkStoreFromRecords } from "./linkStore.mjs";
 import { validateTreePresentation } from "../tree/model.mjs";
 import { validateAnnotationPanels } from "../annotations/model.mjs";
 import { clonePlainValue, isPlainObject, isRecordId } from "../utils/values.mjs";
@@ -111,7 +111,8 @@ function validateRecords(data) {
 export function normalizeChartData(data, treeConfig = {}) {
   validateRecordIds(data);
   validateRecords(data);
-  const source = clonePlainValue(data);
+  const source = clonePlainValue({ ...data, links: [] });
+  const links = data.links instanceof CompactLinkStore ? data.links : linkStoreFromRecords(data.links);
   if (source.tree != null) {
     validateTree(source.tree, source.clusters);
     validateTreePresentation(source.tree, treeConfig);
@@ -123,7 +124,7 @@ export function normalizeChartData(data, treeConfig = {}) {
       ...cluster,
       loci: cluster.loci.map((locus) => normalizeLocus(locus, cluster.uid)),
     })),
-    links: source.links instanceof CompactLinkStore ? source.links : [...source.links],
+    links,
     groups: source.groups?.map((group) => ({
       ...group,
       genes: group.genes ? [...group.genes] : group.genes,

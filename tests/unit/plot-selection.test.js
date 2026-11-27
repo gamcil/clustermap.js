@@ -1,3 +1,4 @@
+import { dataSnapshot } from "../helpers/data-snapshot.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -28,7 +29,7 @@ const fixture = async () => normalizeChartData(JSON.parse(await readFile(new URL
 test("tree pruning collapses unary chains, preserves distances and leaves the source intact", async () => {
   const data = await fixture();
   data.tree.presentation = { subtrees: { x: { branch: { colour: "#abcdef" } } } };
-  const before = structuredClone(data), aliases = new Map();
+  const before = dataSnapshot(data), aliases = new Map();
   const clusters = data.clusters.filter((cluster) => cluster.uid !== "a");
   const tree = visibleTree(data.tree, new Set(clusters.map((cluster) => cluster.uid)), aliases);
   assert.equal(tree.nodes.some((node) => node.uid === "x"), false);
@@ -43,7 +44,7 @@ test("tree pruning collapses unary chains, preserves distances and leaves the so
   assert.equal(last.nodes[0].support, undefined);
   validateTree(last, data.clusters.filter((cluster) => cluster.uid === "e"));
   assert.equal(visibleTree(data.tree, new Set()), null);
-  assert.deepEqual(data, before);
+  assert.deepEqual(dataSnapshot(data), before);
 });
 
 test("tree pruning retains collapse on surviving clades and drops it on leaves", async () => {
@@ -76,7 +77,7 @@ test("plot exclusions filter contents, links, keys and clade markers without del
   assert.equal(view.annotationPanels.find((panel) => panel.uid === "clades").groups[0].nodeUid, "b");
   assert.equal(view.groups.some((group) => group.genes.includes("gene-a") || group.genes.includes("gene-c")), false);
   validateTree(view.tree, view.clusters);
-  assert.deepEqual(data, before);
+  assert.deepEqual(dataSnapshot(data), before);
   assert.equal(visibleChartData(data, createChartState(data)), data);
 });
 
