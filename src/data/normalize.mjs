@@ -4,6 +4,7 @@ import { validateAnnotationPanels } from "../annotations/model.mjs";
 import { clonePlainValue, isPlainObject, isRecordId } from "../utils/values.mjs";
 import { validateRecordFields } from "./validation.mjs";
 import { resetTreeRoot } from "../tree/rooting.mjs";
+import { endpointGeneId } from "../links/layout.mjs";
 
 // Chart data is JSON-like: it is also the format used for data/project export.
 // Clone plain values at the boundary so chart edits never mutate caller-owned
@@ -77,7 +78,19 @@ function validateRecords(data) {
   }
   for (const link of data.links instanceof CompactLinkStore ? [] : data.links) {
     for (const side of ["query", "target"]) {
-      if (!isPlainObject(link[side]) || !isRecordId(link[side].uid)) fail(`link '${link.uid}' ${side} requires a gene ID`);
+      const endpoint = link[side];
+      if (!isPlainObject(endpoint)) fail(`link '${link.uid}' ${side} requires an endpoint`);
+      if (endpoint.kind === "span") {
+        if (!isRecordId(endpoint.locusId) || !Number.isSafeInteger(endpoint.start) ||
+            !Number.isSafeInteger(endpoint.end) || endpoint.start < 0 || endpoint.end <= endpoint.start) {
+          fail(`link '${link.uid}' ${side} requires a locus ID and a non-empty zero-based half-open span`);
+        }
+      } else if ((endpoint.kind !== undefined && endpoint.kind !== "gene") || !isRecordId(endpointGeneId(endpoint))) {
+        fail(`link '${link.uid}' ${side} requires a gene ID`);
+      }
+    }
+    if (link.orientation !== undefined && link.orientation !== 1 && link.orientation !== -1) {
+      fail(`link '${link.uid}' orientation must be 1 or -1`);
     }
   }
   const members = new Set();

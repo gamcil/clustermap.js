@@ -149,6 +149,52 @@ test("tree replacement retains excluded rows and projects the visible tree", asy
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: span links survive edits, flips, exclusion and project reload`, async ({ page }) => {
+    await page.goto("http://127.0.0.1:8080/demo/?test=1");
+    await page.addScriptTag({ url: "/node_modules/d3/dist/d3.min.js" });
+    const result = await page.evaluate(async (renderer) => {
+      const { ClusterMap } = await import("/dist/clustermap.mjs");
+      const host = document.createElement("div"); host.style.cssText = "width:800px;height:400px"; document.body.append(host);
+      const clusters = ["a", "b"].map((uid) => ({ uid, name: uid, loci: [{ uid: `l-${uid}`, start: 100, end: 200,
+        genes: [{ uid: `g-${uid}`, start: 110, end: 130, strand: 1 }] }] }));
+      const links = [{ uid: "dna", query: { kind: "span", locusId: "l-a", start: 110, end: 140 },
+        target: { kind: "span", locusId: "l-b", start: 120, end: 150 }, orientation: -1, identity: 0.9 }];
+      const chart = ClusterMap().config({ plot: { renderer, transitionDuration: 0 }, link: { groupColour: true } });
+      d3.select(host).datum({ clusters, links, groups: [], config: { updateGroups: false } }).call(chart);
+      const paths = () => [...new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml").querySelectorAll("path.geneLink")]
+        .map((path) => path.getAttribute("d")).filter(Boolean);
+      const initial = paths();
+      const canvas = renderer === "canvas" ? host.querySelector("canvas.clusterMapCanvas") : null;
+      const beforePixels = canvas?.toDataURL();
+      chart.flipLoci(["l-a"]); const flipped = paths();
+      chart.flipLoci(["l-a"]); const restored = paths();
+      chart.patch([{ type: "links.update", ids: ["dna"], changes: { hidden: true } }]); const hidden = paths();
+      const pixelsChanged = canvas ? canvas.toDataURL() !== beforePixels : null;
+      chart.undo(); const undo = paths();
+      chart.remove({ clusters: ["b"] }); const excluded = paths();
+      chart.undo(); const returned = paths();
+      const snapshot = JSON.parse(await chart.exportProjectBlob().text()); chart.project(snapshot); const loaded = paths();
+      chart.trimLoci(["l-a"]); const trimmed = paths(); chart.undo(); const untrimmed = paths();
+      chart.config({ plot: { scaleGenes: false } }); const packed = paths();
+      chart.destroy(); host.remove();
+      return { initial, flipped, restored, hidden, undo, excluded, returned, loaded, trimmed, untrimmed, packed, pixelsChanged };
+    }, renderer);
+    expect(result.initial).toHaveLength(1);
+    expect(result.flipped).not.toEqual(result.initial);
+    expect(result.restored).toHaveLength(1);
+    expect(result.hidden).toHaveLength(0);
+    if (renderer === "canvas") expect(result.pixelsChanged).toBe(true);
+    expect(result.undo).toHaveLength(1);
+    expect(result.excluded).toHaveLength(0);
+    expect(result.returned).toHaveLength(1);
+    expect(result.loaded).toHaveLength(1);
+    expect(result.trimmed).toHaveLength(0);
+    expect(result.untrimmed).toHaveLength(1);
+    expect(result.packed).toHaveLength(0);
+  });
+}
+
+for (const renderer of ["svg", "canvas", "webgpu"]) {
   test(`fitFigure frames bounds without rebuilding with ${renderer}`, async ({ page }) => {
     await page.goto("http://127.0.0.1:8080/demo/?fixture=burnettii&test=1");
     await page.waitForFunction(() => Boolean(window.__demoChart));

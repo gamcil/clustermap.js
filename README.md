@@ -62,6 +62,27 @@ rules. IDs are non-empty strings or finite numbers, unique within each record
 kind. Group memberships are exclusive. Links and memberships may reference
 absent genes, allowing deleted genes to be restored; dangling links stay hidden.
 Malformed data is rejected before replacing the active chart or project.
+Links can also connect biological spans on loci:
+
+```js
+{
+  uid: "alignment-1",
+  query: { kind: "span", locusId: "locus-a", start: 1200, end: 4800 },
+  target: { kind: "span", locusId: "locus-b", start: 900, end: 4300 },
+  orientation: -1,
+  identity: 0.91
+}
+```
+
+Span coordinates are zero-based, half-open biological coordinates in the same
+coordinate system as their locus. `orientation` is `1` (the default) or `-1`
+for a reverse alignment. A gene endpoint can use `{ kind: "gene", geneId }`
+or the existing `{ uid }` form, and links may mix endpoint kinds. Span links use
+identity colouring and threshold filtering; gene-group colouring and the
+gene-based best-match filter do not apply. A span is hidden when it is only
+partially inside a trimmed locus or when gene packing (`plot.scaleGenes: false`)
+is enabled. Object-array input and full project snapshots support span links;
+`CompactLinkStore` currently stores gene-to-gene links only.
 Imports and edits share field rules: names and labels accept text or `null`,
 colours accept CSS colours or `null`, visibility flags are boolean, and link
 identity is a number from 0 to 1. Values are not coerced.

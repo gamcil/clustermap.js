@@ -6098,8 +6098,8 @@ function createLocusFlipTransition(source, target, locusIds, { clusterLabelTexts
   for (const uid of changes.links || []) {
     const before = source.links.get(uid), after = target.links.get(uid);
     if (before?.visible !== after?.visible) return null;
-    if (before?.visible) for (const endpoint of [before.source.query.uid, before.source.target.uid]) {
-      const gene = source.genes.get(endpoint);
+    if (before?.visible) for (const endpoint of [before.source.query, before.source.target]) {
+      const gene = source.genes.get(endpointGeneId(endpoint));
       // An unstranded link endpoint keeps its ordering after a flip, unlike a
       // reflected directional endpoint. Use the general transition for it.
       if (selected.has(gene?.locus.source.uid) && !hasDirectionalStrand(gene)) return null;
@@ -6335,7 +6335,7 @@ function recordsForPreview(scene, preview, { includeClusters = false } = {}) {
     }
   } else {
     for (const link of scene.links.values()) {
-      if (genes.has(link.source.query.uid) || genes.has(link.source.target.uid)) links.add(link.source.uid);
+      if (genes.has(endpointGeneId(link.source.query)) || genes.has(endpointGeneId(link.source.target))) links.add(link.source.uid);
     }
   }
   for (const uid of loci) for (const link of scene.linksByLocus?.get(uid) || []) links.add(link.uid);
@@ -9900,7 +9900,19 @@ function validateRecords(data) {
   }
   for (const link of data.links instanceof CompactLinkStore ? [] : data.links) {
     for (const side of ["query", "target"]) {
-      if (!isPlainObject(link[side]) || !isRecordId(link[side].uid)) fail(`link '${link.uid}' ${side} requires a gene ID`);
+      const endpoint = link[side];
+      if (!isPlainObject(endpoint)) fail(`link '${link.uid}' ${side} requires an endpoint`);
+      if (endpoint.kind === "span") {
+        if (!isRecordId(endpoint.locusId) || !Number.isSafeInteger(endpoint.start) ||
+            !Number.isSafeInteger(endpoint.end) || endpoint.start < 0 || endpoint.end <= endpoint.start) {
+          fail(`link '${link.uid}' ${side} requires a locus ID and a non-empty zero-based half-open span`);
+        }
+      } else if ((endpoint.kind !== undefined && endpoint.kind !== "gene") || !isRecordId(endpointGeneId(endpoint))) {
+        fail(`link '${link.uid}' ${side} requires a gene ID`);
+      }
+    }
+    if (link.orientation !== undefined && link.orientation !== 1 && link.orientation !== -1) {
+      fail(`link '${link.uid}' orientation must be 1 or -1`);
     }
   }
   const members = new Set();

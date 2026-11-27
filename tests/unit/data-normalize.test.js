@@ -54,6 +54,21 @@ test("normalization accepts absent endpoints, empty ranges and unknown strand", 
   assert.deepEqual(normalizeChartData(normalized), normalized);
 });
 
+test("normalization validates biological span endpoints and orientation", () => {
+  const data = input();
+  data.links = [{ uid: "dna", query: { kind: "span", locusId: "locus-a", start: 2, end: 10 },
+    target: { kind: "gene", geneId: "gene-a" }, orientation: -1, identity: 0.9 }];
+  assert.deepEqual(normalizeChartData(data).links, data.links);
+  for (const query of [
+    { kind: "span", locusId: "locus-a", start: -1, end: 2 },
+    { kind: "span", locusId: "locus-a", start: 2, end: 2 },
+    { kind: "span", locusId: "locus-a", start: 1.5, end: 2 },
+    { kind: "span", start: 1, end: 2 },
+    { kind: "unknown", uid: "gene-a" },
+  ]) assert.throws(() => normalizeChartData({ ...data, links: [{ ...data.links[0], query }] }), /link 'dna' query/);
+  assert.throws(() => normalizeChartData({ ...data, links: [{ ...data.links[0], orientation: 0 }] }), /orientation/);
+});
+
 test("chart normalization establishes explicit hierarchy relationships", async () => {
   const { normalizeChartData } = await import("../../src/data/normalize.mjs");
   const data = {
