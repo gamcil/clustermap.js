@@ -6295,6 +6295,7 @@ function recordsForPreview(scene, preview, { includeClusters = false } = {}) {
       if (genes.has(link.source.query.uid) || genes.has(link.source.target.uid)) links.add(link.source.uid);
     }
   }
+  for (const uid of loci) for (const link of scene.linksByLocus?.get(uid) || []) links.add(link.uid);
   return { loci, genes, links };
 }
 
@@ -8049,6 +8050,7 @@ function buildScene(
   const geometryLinks = new Map();
   const linksByClusterPair = linkIndexes?.linksByClusterPair || new Map();
   const linksByGene = linkIndexes?.linksByGeneId || new Map();
+  const linksByLocus = linkIndexes?.linksByLocusId || new Map();
   areClustersAdjacent = adjacencyForOrder(clusterOrder, areClustersAdjacent);
   const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
 
@@ -8117,6 +8119,12 @@ function buildScene(
       if (!linksByGene.has(uid)) linksByGene.set(uid, []);
       linksByGene.get(uid).push(source);
     }
+    if (!linkIndexes?.linksByLocusId) for (const endpoint of [source.query, source.target]) {
+      if (endpoint.kind !== "span") continue;
+      const links = linksByLocus.get(endpoint.locusId) || [];
+      if (links.at(-1) !== source) links.push(source);
+      linksByLocus.set(endpoint.locusId, links);
+    }
     if (!linkIndexes?.linksByClusterPair) {
       const query = endpointLocus(source.query, { genes, loci });
       const target = endpointLocus(source.target, { genes, loci });
@@ -8141,6 +8149,7 @@ function buildScene(
     links,
     linksByClusterPair,
     linksByGene,
+    linksByLocus,
     clusterOrder: clusterOrder ? [...clusterOrder] : null,
     bounds,
     ...annotations,
@@ -8406,6 +8415,9 @@ function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = [] } = 
     // Compact external scenes may not supply a pair index or row order.
     for (const uid of changedGenes) {
       for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
+    }
+    for (const uid of changedLoci) {
+      for (const source of scene.linksByLocus?.get(uid) || []) sources.set(source.uid, source);
     }
   }
   const changedLinks = new Map();
@@ -9511,6 +9523,7 @@ function createChartIndex(data) {
   const groupById = new Map();
   const linkById = data.links instanceof CompactLinkStore ? data.links : new ArrayLinkStore(data.links);
   let linksByGeneId = new Map();
+  const linksByLocusId = new Map();
   let linksByClusterPair = new Map();
   const clusterForGene = new Map();
   const clusterForLocus = new Map();
@@ -9531,6 +9544,10 @@ function createChartIndex(data) {
   if (data.links instanceof CompactLinkStore) {
     ({ linksByGeneId, linksByClusterPair } = compactLinkIndexes(data.links, clusterForGene));
   } else for (const link of data.links) {
+    if (link.query.kind === "span") appendToIndex(linksByLocusId, link.query.locusId, link);
+    if (link.target.kind === "span" && (link.query.kind !== "span" || link.target.locusId !== link.query.locusId)) {
+      appendToIndex(linksByLocusId, link.target.locusId, link);
+    }
     const query = endpointGeneId(link.query), target = endpointGeneId(link.target);
     if (query !== undefined) appendToIndex(linksByGeneId, query, link);
     if (target !== undefined && target !== query) appendToIndex(linksByGeneId, target, link);
@@ -9543,7 +9560,7 @@ function createChartIndex(data) {
 
   for (const group of data.groups || []) groupById.set(group.uid, group);
 
-  return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId, linksByClusterPair };
+  return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId, linksByLocusId, linksByClusterPair };
 }
 
 function recordForId(records, uid) {
@@ -14865,9 +14882,15 @@ function flipRecords(scene, locusUid) {
   if (!locus) return null;
   const loci = new Set([locusUid]), ownGenes = new Set(locus.genes.map((gene) => gene.source.uid));
   const genes = new Set(ownGenes), links = new Set();
-  for (const uid of ownGenes) for (const link of scene.linksByGene.get(uid) || []) {
-    links.add(link.uid); genes.add(link.query.uid); genes.add(link.target.uid);
-  }
+  const includeLink = (link) => {
+    links.add(link.uid);
+    for (const endpoint of [link.query, link.target]) {
+      const uid = endpointGeneId(endpoint);
+      if (uid !== undefined) genes.add(uid);
+    }
+  };
+  for (const uid of ownGenes) for (const link of scene.linksByGene.get(uid) || []) includeLink(link);
+  for (const link of scene.linksByLocus?.get(locusUid) || []) includeLink(link);
   return { locus: { loci, genes: ownGenes }, dynamic: { loci, genes, links },
     stationaryGenes: new Set([...genes].filter((uid) => !ownGenes.has(uid))) };
 }

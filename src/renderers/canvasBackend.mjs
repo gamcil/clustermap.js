@@ -1,6 +1,7 @@
 import { renderCanvas, CANVAS_LAYERS } from "./canvas.js";
 import { includeBounds } from "../scene/bounds.mjs";
 import { animate as runAnimation, afterPaint } from "./animation.mjs";
+import { endpointGeneId } from "../links/layout.mjs";
 
 const annotationLayers = ["annotations", "annotationLabels", "chrome"];
 const biologyLayers = CANVAS_LAYERS.filter((layer) => !annotationLayers.includes(layer));
@@ -29,9 +30,15 @@ function flipRecords(scene, locusUid) {
   if (!locus) return null;
   const loci = new Set([locusUid]), ownGenes = new Set(locus.genes.map((gene) => gene.source.uid));
   const genes = new Set(ownGenes), links = new Set();
-  for (const uid of ownGenes) for (const link of scene.linksByGene.get(uid) || []) {
-    links.add(link.uid); genes.add(link.query.uid); genes.add(link.target.uid);
-  }
+  const includeLink = (link) => {
+    links.add(link.uid);
+    for (const endpoint of [link.query, link.target]) {
+      const uid = endpointGeneId(endpoint);
+      if (uid !== undefined) genes.add(uid);
+    }
+  };
+  for (const uid of ownGenes) for (const link of scene.linksByGene.get(uid) || []) includeLink(link);
+  for (const link of scene.linksByLocus?.get(locusUid) || []) includeLink(link);
   return { locus: { loci, genes: ownGenes }, dynamic: { loci, genes, links },
     stationaryGenes: new Set([...genes].filter((uid) => !ownGenes.has(uid))) };
 }

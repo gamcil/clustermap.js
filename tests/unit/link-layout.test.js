@@ -34,6 +34,15 @@ test("span endpoint interpolation follows the same end across a row swap", async
     next, { source, anchors: [7, 8, 0, 1, 2, 20] }, 0.5), [1, 2, 10, 7, 8, 10]);
 });
 
+test("locus previews include span links even when the locus has no genes", async () => {
+  const { recordsForPreview } = await import("../../src/scene/preview.mjs");
+  const locus = { source: { uid: "l" }, genes: [] };
+  const scene = { loci: new Map([["l", locus]]), linksByGene: new Map(),
+    linksByLocus: new Map([["l", [{ uid: "span" }]]]) };
+  const records = recordsForPreview(scene, { type: "locus-offsets", locusOffsets: new Map([["l", 10]]) });
+  assert.deepEqual([...records.links], ["span"]);
+});
+
 test("link layout produces paths for ribbons and lines", async () => {
   const { getLinkPath, sampleLinkGeometry, traceLinkPath } = await import("../../src/links/layout.mjs");
   const anchors = [10, 20, 5, 30, 40, 25];

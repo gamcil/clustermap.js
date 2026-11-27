@@ -535,6 +535,7 @@ export function recordsForPreview(scene, preview, { includeClusters = false } = 
       if (genes.has(link.source.query.uid) || genes.has(link.source.target.uid)) links.add(link.source.uid);
     }
   }
+  for (const uid of loci) for (const link of scene.linksByLocus?.get(uid) || []) links.add(link.uid);
   return { loci, genes, links };
 }
 

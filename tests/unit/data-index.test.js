@@ -77,5 +77,7 @@ test("cluster-pair indexes include span endpoints without treating loci as genes
   const index = createChartIndex(data);
   assert.deepEqual(index.linksByClusterPair.get(clusterPairKey("one", "two")), ["dna", "mixed"]);
   assert.deepEqual(index.linksByGeneId.get("a"), [links[1], links[2]]);
+  assert.deepEqual(index.linksByLocusId.get("l1"), [links[0]]);
+  assert.deepEqual(index.linksByLocusId.get("l2"), [links[0], links[1]]);
   assert.equal(index.linksByGeneId.has("l1"), false);
 });

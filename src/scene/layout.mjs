@@ -461,6 +461,7 @@ export function buildScene(
   const geometryLinks = new Map();
   const linksByClusterPair = linkIndexes?.linksByClusterPair || new Map();
   const linksByGene = linkIndexes?.linksByGeneId || new Map();
+  const linksByLocus = linkIndexes?.linksByLocusId || new Map();
   areClustersAdjacent = adjacencyForOrder(clusterOrder, areClustersAdjacent);
   const geneMidpoint = shape.tipHeight + shape.bodyHeight / 2;
 
@@ -529,6 +530,12 @@ export function buildScene(
       if (!linksByGene.has(uid)) linksByGene.set(uid, []);
       linksByGene.get(uid).push(source);
     }
+    if (!linkIndexes?.linksByLocusId) for (const endpoint of [source.query, source.target]) {
+      if (endpoint.kind !== "span") continue;
+      const links = linksByLocus.get(endpoint.locusId) || [];
+      if (links.at(-1) !== source) links.push(source);
+      linksByLocus.set(endpoint.locusId, links);
+    }
     if (!linkIndexes?.linksByClusterPair) {
       const query = endpointLocus(source.query, { genes, loci });
       const target = endpointLocus(source.target, { genes, loci });
@@ -553,6 +560,7 @@ export function buildScene(
     links,
     linksByClusterPair,
     linksByGene,
+    linksByLocus,
     clusterOrder: clusterOrder ? [...clusterOrder] : null,
     bounds,
     ...annotations,
@@ -818,6 +826,9 @@ export function patchScene(scene, { loci: locusIds = [], clusters: clusterIds = 
     // Compact external scenes may not supply a pair index or row order.
     for (const uid of changedGenes) {
       for (const source of scene.linksByGene.get(uid) || []) sources.set(source.uid, source);
+    }
+    for (const uid of changedLoci) {
+      for (const source of scene.linksByLocus?.get(uid) || []) sources.set(source.uid, source);
     }
   }
   const changedLinks = new Map();

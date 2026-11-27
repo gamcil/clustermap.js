@@ -47,6 +47,7 @@ export function createChartIndex(data) {
   const groupById = new Map();
   const linkById = data.links instanceof CompactLinkStore ? data.links : new ArrayLinkStore(data.links);
   let linksByGeneId = new Map();
+  const linksByLocusId = new Map();
   let linksByClusterPair = new Map();
   const clusterForGene = new Map();
   const clusterForLocus = new Map();
@@ -67,6 +68,10 @@ export function createChartIndex(data) {
   if (data.links instanceof CompactLinkStore) {
     ({ linksByGeneId, linksByClusterPair } = compactLinkIndexes(data.links, clusterForGene));
   } else for (const link of data.links) {
+    if (link.query.kind === "span") appendToIndex(linksByLocusId, link.query.locusId, link);
+    if (link.target.kind === "span" && (link.query.kind !== "span" || link.target.locusId !== link.query.locusId)) {
+      appendToIndex(linksByLocusId, link.target.locusId, link);
+    }
     const query = endpointGeneId(link.query), target = endpointGeneId(link.target);
     if (query !== undefined) appendToIndex(linksByGeneId, query, link);
     if (target !== undefined && target !== query) appendToIndex(linksByGeneId, target, link);
@@ -79,7 +84,7 @@ export function createChartIndex(data) {
 
   for (const group of data.groups || []) groupById.set(group.uid, group);
 
-  return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId, linksByClusterPair };
+  return { clusterById, locusById, geneById, groupById, linkById, linksByGeneId, linksByLocusId, linksByClusterPair };
 }
 
 export function recordForId(records, uid) {
