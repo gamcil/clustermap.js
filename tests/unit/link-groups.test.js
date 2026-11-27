@@ -1,6 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+test("automatic groups agree for compact and object links without materializing compact records", async () => {
+  const [{ createLinkGroups }, { CompactLinkStore }] = await Promise.all([
+    import("../../src/links/groups.mjs"), import("../../src/data/linkStore.mjs"),
+  ]);
+  const store = new CompactLinkStore({ genes: ["a", "b", "missing"],
+    query: new Uint32Array([0, 1, 0]), target: new Uint32Array([1, 2, 0]),
+    identity: new Float32Array([0.9, 0.8, 0.7]), similarity: new Float32Array([1, 1, 1]),
+    spans: { loci: ["locus"], kinds: new Uint8Array([0, 0, 2]), orientation: new Int8Array(3),
+      queryStart: new Float64Array(3), queryEnd: new Float64Array(3),
+      targetStart: new Float64Array([0, 0, 1]), targetEnd: new Float64Array([0, 0, 2]) } });
+  const records = [...store.values()], genes = new Set(["a", "b"]);
+  const expected = createLinkGroups(records, [], genes);
+  store.getAt = () => { throw new Error("grouping must not materialize compact links"); };
+  assert.deepEqual(createLinkGroups(store, [], genes), expected);
+  assert.deepEqual(expected.map(({ genes }) => genes), [["a", "b"]]);
+});
+
 test("span links use identity filtering without gene-group or best-match rules", async () => {
   const { filterLinks, createLinkGroups } = await import("../../src/links/groups.mjs");
   const genes = new Map([["g", { clusterUid: "a" }], ["h", { clusterUid: "b" }]]);

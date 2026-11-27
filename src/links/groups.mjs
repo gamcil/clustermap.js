@@ -1,6 +1,6 @@
 import { CompactLinkStore } from "../data/linkStore.mjs";
 import { endpointGeneId } from "./layout.mjs";
-function connectedComponents(links) {
+function connectedComponents(links, availableGenes) {
   const parent = new Map();
   const rank = new Map();
   const genes = [];
@@ -29,13 +29,17 @@ function connectedComponents(links) {
     if (rank.get(leftRoot) === rank.get(rightRoot)) rank.set(leftRoot, rank.get(leftRoot) + 1);
   };
 
-  for (const link of links) {
-    const query = endpointGeneId(link.query);
-    const target = endpointGeneId(link.target);
-    if (query === undefined || target === undefined) continue;
+  const connect = (query, target) => {
+    if (query === undefined || target === undefined ||
+        (availableGenes && (!availableGenes.has(query) || !availableGenes.has(target)))) return;
     add(query);
     add(target);
     join(query, target);
+  };
+  if (links instanceof CompactLinkStore) {
+    for (let i = 0; i < links.size; i++) connect(links.queryAt(i), links.targetAt(i));
+  } else for (const link of links) {
+    connect(endpointGeneId(link.query), endpointGeneId(link.target));
   }
 
   const components = new Map();
@@ -67,7 +71,7 @@ function generatedGroup(usedUids, genes) {
  * overlap a new component. Groups with no linked members are retained, which
  * preserves intentionally empty or unlinked groups from older input data.
  */
-export function createLinkGroups(links, oldGroups = []) {
+export function createLinkGroups(links, oldGroups = [], availableGenes = null) {
   const previous = oldGroups || [];
   const previousByGene = new Map();
   previous.forEach((group, index) => {
@@ -78,7 +82,7 @@ export function createLinkGroups(links, oldGroups = []) {
     }
   });
 
-  const components = connectedComponents(links);
+  const components = connectedComponents(links, availableGenes);
   const linkedGenes = new Set(components.flat());
   const usedPrevious = new Set();
   const usedUids = new Set(previous.map((group) => group.uid));

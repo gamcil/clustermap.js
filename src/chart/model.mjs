@@ -1,8 +1,6 @@
-import { CompactLinkStore } from "../data/linkStore.mjs";
 import { createChartIndex } from "../data/index.mjs";
 import { applyChartOperations, operationEffects } from "../data/operations.mjs";
 import { createLinkGroups } from "../links/groups.mjs";
-import { endpointGeneId } from "../links/layout.mjs";
 import { createChartState } from "./state.mjs";
 import { chartStateFromSnapshot, createChartStateSerializer } from "./snapshot.mjs";
 
@@ -11,12 +9,7 @@ function automaticGroups(data) { return data?.config?.updateGroups !== false; }
 function refreshGroups(data, index, derive = automaticGroups(data)) {
   if (derive) {
     // Deleted genes retain their links, but dangling endpoints cannot group.
-    const links = data.links instanceof CompactLinkStore
-      ? (function* () { for (const link of data.links.values()) {
-          if (index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)) yield link;
-        } })()
-      : data.links.filter((link) => index.geneById.has(endpointGeneId(link.query)) && index.geneById.has(endpointGeneId(link.target)));
-    data.groups = createLinkGroups(links, data.groups);
+    data.groups = createLinkGroups(data.links, data.groups, index.geneById);
   } else data.groups ??= [];
   index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
 }

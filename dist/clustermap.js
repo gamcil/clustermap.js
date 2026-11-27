@@ -14305,7 +14305,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     return candidate;
   }
 
-  function connectedComponents(links) {
+  function connectedComponents(links, availableGenes) {
     const parent = new Map();
     const rank = new Map();
     const genes = [];
@@ -14334,13 +14334,17 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       if (rank.get(leftRoot) === rank.get(rightRoot)) rank.set(leftRoot, rank.get(leftRoot) + 1);
     };
 
-    for (const link of links) {
-      const query = endpointGeneId(link.query);
-      const target = endpointGeneId(link.target);
-      if (query === undefined || target === undefined) continue;
+    const connect = (query, target) => {
+      if (query === undefined || target === undefined ||
+          (availableGenes && (!availableGenes.has(query) || !availableGenes.has(target)))) return;
       add(query);
       add(target);
       join(query, target);
+    };
+    if (links instanceof CompactLinkStore) {
+      for (let i = 0; i < links.size; i++) connect(links.queryAt(i), links.targetAt(i));
+    } else for (const link of links) {
+      connect(endpointGeneId(link.query), endpointGeneId(link.target));
     }
 
     const components = new Map();
@@ -14372,7 +14376,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
    * overlap a new component. Groups with no linked members are retained, which
    * preserves intentionally empty or unlinked groups from older input data.
    */
-  function createLinkGroups(links, oldGroups = []) {
+  function createLinkGroups(links, oldGroups = [], availableGenes = null) {
     const previous = oldGroups || [];
     const previousByGene = new Map();
     previous.forEach((group, index) => {
@@ -14383,7 +14387,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
       }
     });
 
-    const components = connectedComponents(links);
+    const components = connectedComponents(links, availableGenes);
     const linkedGenes = new Set(components.flat());
     const usedPrevious = new Set();
     const usedUids = new Set(previous.map((group) => group.uid));
@@ -17267,12 +17271,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   function refreshGroups(data, index, derive = automaticGroups(data)) {
     if (derive) {
       // Deleted genes retain their links, but dangling endpoints cannot group.
-      const links = data.links instanceof CompactLinkStore
-        ? (function* () { for (const link of data.links.values()) {
-            if (index.geneById.has(link.query.uid) && index.geneById.has(link.target.uid)) yield link;
-          } })()
-        : data.links.filter((link) => index.geneById.has(endpointGeneId(link.query)) && index.geneById.has(endpointGeneId(link.target)));
-      data.groups = createLinkGroups(links, data.groups);
+      data.groups = createLinkGroups(data.links, data.groups, index.geneById);
     } else data.groups ??= [];
     index.groupById = new Map(data.groups.map((group) => [group.uid, group]));
   }
