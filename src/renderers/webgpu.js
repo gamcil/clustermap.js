@@ -8,7 +8,7 @@ import { worldViewport } from "../scene/camera.mjs";
 import { sceneRecordsInViewport } from "../scene/viewport.mjs";
 import { allIndexedIds } from "../scene/spatialIndex.mjs";
 import { figureConfig } from "../ui/theme.mjs";
-import { sampleLinkGeometry, clusterPairKey } from "../links/layout.mjs";
+import { sampleLinkGeometry, clusterPairKey, endpointGeneId, endpointLocus, projectSceneEndpoint } from "../links/layout.mjs";
 import { linkColours } from "../links/style.mjs";
 import {
   clusterPreviewInViewport,
@@ -402,8 +402,8 @@ function locusCanChangeTrimVisibility(locus) {
 }
 
 function linkCanChangeTrimVisibility(scene, link) {
-  return [link.source.query.uid, link.source.target.uid].some((uid) =>
-    locusCanChangeTrimVisibility(scene.genes.get(uid)?.locus)
+  return [link.source.query, link.source.target].some((endpoint) =>
+    locusCanChangeTrimVisibility(endpointLocus(endpoint, scene))
   );
 }
 
@@ -461,26 +461,26 @@ function linkEndpointForGpu(gene, clusterSlot, offsetX = 0, offsetY = 0) {
 }
 
 function linkRecordForGpu(scene, link, scales, config, locusSlots, clusterOffsetX = () => 0, clusterOffsetY = () => 0) {
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
+  const query = endpointLocus(link.source.query, scene), target = endpointLocus(link.source.target, scene);
   if (!query || !target) return null;
+  const endpoint = (source, locus, reverse = false) => {
+    const x = clusterOffsetX(locus.cluster.uid), y = clusterOffsetY(locus.cluster.uid);
+    const slot = locusSlots.get(locus.source.uid);
+    if (source.kind !== "span") return linkEndpointForGpu(scene.genes.get(endpointGeneId(source)), slot, x, y);
+    const projected = projectSceneEndpoint(source, scene);
+    if (!projected) return null;
+    const [a, b, row] = projected.anchors;
+    return [(reverse ? b : a) - x, (reverse ? a : b) - x, row - y, slot];
+  };
+  const queryValues = endpoint(link.source.query, query), targetValues = endpoint(link.source.target, target, link.source.orientation === -1);
+  if (!queryValues || !targetValues) return null;
   const colours = linkColours(link.source, scales, config);
   const fill = rgba(colours.fill), stroke = rgba(colours.stroke);
   fill[3] *= link.opacity ?? 1;
   stroke[3] *= link.opacity ?? 1;
   return new Float32Array([
-    ...linkEndpointForGpu(
-      query,
-      locusSlots.get(query.locus.source.uid),
-      clusterOffsetX(query.locus.cluster.uid),
-      clusterOffsetY(query.locus.cluster.uid)
-    ),
-    ...linkEndpointForGpu(
-      target,
-      locusSlots.get(target.locus.source.uid),
-      clusterOffsetX(target.locus.cluster.uid),
-      clusterOffsetY(target.locus.cluster.uid)
-    ),
+    ...queryValues,
+    ...targetValues,
     ...fill,
     ...stroke,
   ]);
@@ -528,7 +528,7 @@ function animationRowOffsets(base, frame) {
 
 function buildLinkRecords(scene, links, scales, config, locusSlots, device, offsetX, offsetY) {
   const retained = links.filter((link) => (link.allowed !== false || link.visible) &&
-    scene.genes.has(link.source.query.uid) && scene.genes.has(link.source.target.uid));
+    endpointLocus(link.source.query, scene) && endpointLocus(link.source.target, scene));
   checkBufferSize(device, retained.length * 16 * 4, "link records", true);
   const values = new Float32Array(retained.length * 16), indexByUid = new Map();
   for (const link of retained) {
@@ -1310,9 +1310,11 @@ async function initializeWebGpuRenderer(canvas, device, { onError = () => {} } =
     // preview records are built from the current genes when needed.
     const incidentIds = nextScene.changes.links;
     const incidentLinks = [];
+    const affectedLoci = new Set(loci);
     for (const uid of incidentIds) {
       const link = nextScene.links.get(uid);
-      if (link && (affectedGenes.has(link.source.query.uid) || affectedGenes.has(link.source.target.uid))) incidentLinks.push(link);
+      if (link && [link.source.query, link.source.target].some((endpoint) => endpoint.kind === "span"
+        ? affectedLoci.has(endpoint.locusId) : affectedGenes.has(endpointGeneId(endpoint)))) incidentLinks.push(link);
     }
     for (const link of incidentLinks) {
       if (!link.visible) continue;

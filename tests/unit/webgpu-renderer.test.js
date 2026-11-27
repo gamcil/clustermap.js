@@ -12,6 +12,7 @@ import { annotationOffsetForPreview, annotationPanelsForFrame } from "../../src/
 import { applyChartOperations } from "../../src/data/operations.mjs";
 import { createChartState, setClusterOffset, setLocusOffset, setPreviewClusterOrder,
   commitPreviewClusterOrder, flipLocus, trimLocusToGeneBounds } from "../../src/chart/state.mjs";
+import { projectSceneEndpoint } from "../../src/links/layout.mjs";
 
 // Exercise retained geometry without requiring a platform GPU adapter. This
 // checks buffer contents/lifetimes; browser tests cover native initialization.
@@ -66,6 +67,29 @@ async function gpuHarness(t, options, limits) {
   t.after(() => renderer.destroy());
   return { renderer, buffers, writes, draws, context, events, loseDevice, getBindings: () => bindings };
 }
+
+test("WebGPU stores span endpoints and respects alignment orientation", async (t) => {
+  const { renderer, getBindings } = await gpuHarness(t);
+  const raw = createLargeTestingData({ clusterCount: 2, genesPerCluster: 3 });
+  raw.links = [];
+  const data = normalizeChartData(raw), [a, b] = data.clusters.map((cluster) => cluster.loci[0]);
+  const link = { uid: "span", query: { kind: "span", locusId: a.uid, start: a.bio.start + 10, end: a.bio.start + 50 },
+    target: { kind: "span", locusId: b.uid, start: b.bio.start + 20, end: b.bio.start + 70 }, orientation: -1, identity: 0.9 };
+  data.links = [link];
+  const runtime = createChartRuntime();
+  runtime.configure({ link: { groupColour: true } });
+  runtime.setChartIndex(createChartIndex(data)); runtime.setChartState(createChartState(data));
+  const scene = runtime.updateScene(data);
+  assert.equal(scene.links.get("span").visible, true);
+  renderer.render({ nextScene: scene, scales: runtime.scales, config: runtime.renderConfig,
+    camera: { x: 0, y: 0, k: 1 }, width: 800, height: 400, pixelRatio: 1 });
+  const values = new Float32Array(getBindings().find((entry) => entry.binding === 2).resource.buffer.data.buffer);
+  const query = projectSceneEndpoint(link.query, scene).anchors, target = projectSceneEndpoint(link.target, scene).anchors;
+  assert.ok(Math.abs(values[0] - query[0]) < 1e-4);
+  assert.ok(Math.abs(values[1] - query[1]) < 1e-4);
+  assert.ok(Math.abs(values[4] - target[1]) < 1e-4);
+  assert.ok(Math.abs(values[5] - target[0]) < 1e-4);
+});
 
 test("WebGPU rejects oversized link storage before creating an invalid buffer", async (t) => {
   const { renderer, buffers } = await gpuHarness(t, undefined,

@@ -1,6 +1,6 @@
 import { layoutClusterLabels } from "./clusterLabels.mjs";
 import { boundsInViewport } from "./camera.mjs";
-import { clusterPairKey, endpointGeneId, endpointLocus, projectLinkEndpoint, orderLinkAnchors, interpolateLinkAnchors, interpolateLinkOpacity } from "../links/layout.mjs";
+import { clusterPairKey, endpointGeneId, endpointLocus, projectSceneEndpoint, orderLinkAnchors, interpolateLinkAnchors, interpolateLinkOpacity } from "../links/layout.mjs";
 import { arrangeTrimIndicators, createTrimIndicators } from "../loci/trimIndicators.mjs";
 import { overlayLinkRecords } from "./linkRecords.mjs";
 import { sameCoordinate } from "../utils/values.mjs";
@@ -436,11 +436,7 @@ export function previewLinkAnchors(scene, link, preview) {
   };
   const anchorFor = (endpoint, locus, reverse = false) => {
     if (endpoint.kind !== "span") return anchorForGene(scene.genes.get(endpointGeneId(endpoint)));
-    const length = locus.state.end - locus.state.start;
-    if (!length) return null;
-    const factor = (locus.worldEnd - locus.worldStart) / length;
-    const scaleX = (value) => locus.worldStart - locus.x + (value - locus.state.start) * factor;
-    const projected = projectLinkEndpoint(endpoint, { ...scene, scaleX });
+    const projected = projectSceneEndpoint(endpoint, scene);
     if (!projected) return null;
     let [first, second, y] = projected.anchors;
     if (reverse) [first, second] = [second, first];
@@ -493,11 +489,8 @@ export function linkVisibleForPreview(scene, link, preview, config) {
         continue;
       }
       if (config.plot?.scaleGenes === false) return false;
-      const length = locus.state.end - locus.state.start;
-      if (!length) return false;
-      const factor = (locus.worldEnd - locus.worldStart) / length;
-      const scaleX = (value) => locus.worldStart - locus.x + (value - locus.state.start) * factor;
-      const projected = projectLinkEndpoint(endpoint, { ...scene, scaleX });
+      const projected = projectSceneEndpoint(endpoint, scene);
+      if (!projected) return false;
       const trim = preview.loci?.get(locus.source.uid);
       if (trim) {
         const offset = locusOffsetForPreview(preview, locus.source.uid);

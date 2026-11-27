@@ -5479,6 +5479,17 @@
       ? [right, left, locus.y + locus.track.y] : [left, right, locus.y + locus.track.y] };
   }
 
+  /** Resolve endpoint geometry from a retained scene without rebuilding scales. */
+  function projectSceneEndpoint(endpoint, scene) {
+    const locus = endpointLocus(endpoint, scene);
+    if (!locus) return null;
+    const length = locus.state.end - locus.state.start;
+    if (!length) return null;
+    const factor = (locus.worldEnd - locus.worldStart) / length;
+    const scaleX = (value) => locus.worldStart - locus.x + (value - locus.state.start) * factor;
+    return projectLinkEndpoint(endpoint, { ...scene, scaleX });
+  }
+
   /** Keep each gene's directional endpoints together, with the upper row first. */
   function orderLinkAnchors(query, target) {
     return query[2] > target[2] ? [...target, ...query] : [...query, ...target];
@@ -6202,11 +6213,7 @@
     };
     const anchorFor = (endpoint, locus, reverse = false) => {
       if (endpoint.kind !== "span") return anchorForGene(scene.genes.get(endpointGeneId(endpoint)));
-      const length = locus.state.end - locus.state.start;
-      if (!length) return null;
-      const factor = (locus.worldEnd - locus.worldStart) / length;
-      const scaleX = (value) => locus.worldStart - locus.x + (value - locus.state.start) * factor;
-      const projected = projectLinkEndpoint(endpoint, { ...scene, scaleX });
+      const projected = projectSceneEndpoint(endpoint, scene);
       if (!projected) return null;
       let [first, second, y] = projected.anchors;
       if (reverse) [first, second] = [second, first];
@@ -6259,11 +6266,8 @@
           continue;
         }
         if (config.plot?.scaleGenes === false) return false;
-        const length = locus.state.end - locus.state.start;
-        if (!length) return false;
-        const factor = (locus.worldEnd - locus.worldStart) / length;
-        const scaleX = (value) => locus.worldStart - locus.x + (value - locus.state.start) * factor;
-        const projected = projectLinkEndpoint(endpoint, { ...scene, scaleX });
+        const projected = projectSceneEndpoint(endpoint, scene);
+        if (!projected) return false;
         const trim = preview.loci?.get(locus.source.uid);
         if (trim) {
           const offset = locusOffsetForPreview(preview, locus.source.uid);
@@ -11519,9 +11523,11 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
   }
 
   function linkColours(source, scales, config) {
-    const { asLine, groupColour } = config.link;
+    const { asLine } = config.link;
+    const query = endpointGeneId(source.query), target = endpointGeneId(source.target);
+    const groupColour = config.link.groupColour && query !== undefined && target !== undefined;
     const colour = source.colour || (groupColour
-      ? scales.colour(scales.group(source.query.uid)) : scales.score(source.identity));
+      ? scales.colour(scales.group(query)) : scales.score(source.identity));
     let fill = colour;
     if (!source.colour && groupColour) {
       const { r, g, b } = color(colour).rgb();
@@ -15488,8 +15494,8 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   }
 
   function linkCanChangeTrimVisibility(scene, link) {
-    return [link.source.query.uid, link.source.target.uid].some((uid) =>
-      locusCanChangeTrimVisibility(scene.genes.get(uid)?.locus)
+    return [link.source.query, link.source.target].some((endpoint) =>
+      locusCanChangeTrimVisibility(endpointLocus(endpoint, scene))
     );
   }
 
@@ -15547,26 +15553,26 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
   }
 
   function linkRecordForGpu(scene, link, scales, config, locusSlots, clusterOffsetX = () => 0, clusterOffsetY = () => 0) {
-    const query = scene.genes.get(link.source.query.uid);
-    const target = scene.genes.get(link.source.target.uid);
+    const query = endpointLocus(link.source.query, scene), target = endpointLocus(link.source.target, scene);
     if (!query || !target) return null;
+    const endpoint = (source, locus, reverse = false) => {
+      const x = clusterOffsetX(locus.cluster.uid), y = clusterOffsetY(locus.cluster.uid);
+      const slot = locusSlots.get(locus.source.uid);
+      if (source.kind !== "span") return linkEndpointForGpu(scene.genes.get(endpointGeneId(source)), slot, x, y);
+      const projected = projectSceneEndpoint(source, scene);
+      if (!projected) return null;
+      const [a, b, row] = projected.anchors;
+      return [(reverse ? b : a) - x, (reverse ? a : b) - x, row - y, slot];
+    };
+    const queryValues = endpoint(link.source.query, query), targetValues = endpoint(link.source.target, target, link.source.orientation === -1);
+    if (!queryValues || !targetValues) return null;
     const colours = linkColours(link.source, scales, config);
     const fill = rgba(colours.fill), stroke = rgba(colours.stroke);
     fill[3] *= link.opacity ?? 1;
     stroke[3] *= link.opacity ?? 1;
     return new Float32Array([
-      ...linkEndpointForGpu(
-        query,
-        locusSlots.get(query.locus.source.uid),
-        clusterOffsetX(query.locus.cluster.uid),
-        clusterOffsetY(query.locus.cluster.uid)
-      ),
-      ...linkEndpointForGpu(
-        target,
-        locusSlots.get(target.locus.source.uid),
-        clusterOffsetX(target.locus.cluster.uid),
-        clusterOffsetY(target.locus.cluster.uid)
-      ),
+      ...queryValues,
+      ...targetValues,
       ...fill,
       ...stroke,
     ]);
@@ -15614,7 +15620,7 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
 
   function buildLinkRecords(scene, links, scales, config, locusSlots, device, offsetX, offsetY) {
     const retained = links.filter((link) => (link.allowed !== false || link.visible) &&
-      scene.genes.has(link.source.query.uid) && scene.genes.has(link.source.target.uid));
+      endpointLocus(link.source.query, scene) && endpointLocus(link.source.target, scene));
     checkBufferSize(device, retained.length * 16 * 4, "link records", true);
     const values = new Float32Array(retained.length * 16), indexByUid = new Map();
     for (const link of retained) {
@@ -16396,9 +16402,11 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
       // preview records are built from the current genes when needed.
       const incidentIds = nextScene.changes.links;
       const incidentLinks = [];
+      const affectedLoci = new Set(loci);
       for (const uid of incidentIds) {
         const link = nextScene.links.get(uid);
-        if (link && (affectedGenes.has(link.source.query.uid) || affectedGenes.has(link.source.target.uid))) incidentLinks.push(link);
+        if (link && [link.source.query, link.source.target].some((endpoint) => endpoint.kind === "span"
+          ? affectedLoci.has(endpoint.locusId) : affectedGenes.has(endpointGeneId(endpoint)))) incidentLinks.push(link);
       }
       for (const link of incidentLinks) {
         if (!link.visible) continue;

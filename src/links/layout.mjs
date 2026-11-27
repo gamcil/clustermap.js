@@ -31,6 +31,17 @@ export function projectLinkEndpoint(endpoint, { genes, loci, scaleX, scaleGenes 
     ? [right, left, locus.y + locus.track.y] : [left, right, locus.y + locus.track.y] };
 }
 
+/** Resolve endpoint geometry from a retained scene without rebuilding scales. */
+export function projectSceneEndpoint(endpoint, scene) {
+  const locus = endpointLocus(endpoint, scene);
+  if (!locus) return null;
+  const length = locus.state.end - locus.state.start;
+  if (!length) return null;
+  const factor = (locus.worldEnd - locus.worldStart) / length;
+  const scaleX = (value) => locus.worldStart - locus.x + (value - locus.state.start) * factor;
+  return projectLinkEndpoint(endpoint, { ...scene, scaleX });
+}
+
 /** Keep each gene's directional endpoints together, with the upper row first. */
 export function orderLinkAnchors(query, target) {
   return query[2] > target[2] ? [...target, ...query] : [...query, ...target];
