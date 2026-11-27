@@ -43,6 +43,23 @@ test("locus previews include span links even when the locus has no genes", async
   assert.deepEqual([...records.links], ["span"]);
 });
 
+test("span link previews follow flips and hide spans clipped by trims", async () => {
+  const { linkGeometryForPreview } = await import("../../src/scene/preview.mjs");
+  const locus = (uid, y) => ({ source: { uid, start: 0, end: 100, bio: { start: 1000, end: 1100 } },
+    cluster: { uid }, x: 10, y, worldStart: 10, worldEnd: 110, track: { y: 5 },
+    state: { start: 0, end: 100, flipped: false } });
+  const scene = { genes: new Map(), loci: new Map([["a", locus("a", 30)], ["b", locus("b", 80)]]) };
+  const link = { source: { query: { kind: "span", locusId: "a", start: 1020, end: 1040 },
+    target: { kind: "span", locusId: "b", start: 1030, end: 1050 }, orientation: -1, identity: 0.9 },
+    allowed: true, visible: true, anchors: [30, 50, 35, 60, 40, 85] };
+  const config = { plot: { scaleGenes: true }, link: { show: true, threshold: 0.5 } };
+  const flip = { type: "locus-flip", axes: new Map([["a", 60]]), progress: 1 };
+  assert.deepEqual(linkGeometryForPreview(scene, link, flip, config).anchors, [90, 70, 35, 60, 40, 85]);
+  const trim = { type: "locus-trim", locusOffsets: new Map(), loci: new Map([["a", { worldStart: 40, worldEnd: 110 }]]) };
+  assert.equal(linkGeometryForPreview(scene, link, trim, config).visible, false);
+  assert.equal(linkGeometryForPreview(scene, link, flip, { ...config, plot: { scaleGenes: false } }).visible, false);
+});
+
 test("link layout produces paths for ribbons and lines", async () => {
   const { getLinkPath, sampleLinkGeometry, traceLinkPath } = await import("../../src/links/layout.mjs");
   const anchors = [10, 20, 5, 30, 40, 25];

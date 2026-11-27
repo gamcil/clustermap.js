@@ -6143,22 +6143,19 @@ function geneGeometryForPreview(preview, gene) {
 }
 
 function linkOffsetsForPreview(scene, link, preview) {
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
-  const offsetForGene = (gene) =>
-    locusOffsetForPreview(preview, gene?.locus?.source?.uid ?? gene?.source?.locusUid);
-  const queryOffset = offsetForGene(query);
-  const targetOffset = offsetForGene(target);
+  const query = endpointLocus(link.source.query, scene), target = endpointLocus(link.source.target, scene);
+  const uidFor = (endpoint, locus) => locus?.source?.uid ?? scene.genes.get(endpointGeneId(endpoint))?.source?.locusUid;
+  const queryOffset = locusOffsetForPreview(preview, uidFor(link.source.query, query));
+  const targetOffset = locusOffsetForPreview(preview, uidFor(link.source.target, target));
   // Link anchors are ordered from the upper locus to the lower one, not from
   // source.query to source.target.
-  return query?.locus?.y <= target?.locus?.y
+  return query?.y <= target?.y
     ? { a: queryOffset, b: targetOffset }
     : { a: targetOffset, b: queryOffset };
 }
 
 function previewLinkAnchors(scene, link, preview) {
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
+  const query = endpointLocus(link.source.query, scene), target = endpointLocus(link.source.target, scene);
   if (!query || !target) return null;
   const anchorForGene = (gene) => {
     const offsets = previewOffsetsForLocus(preview, gene.locus);
@@ -6197,14 +6194,35 @@ function previewLinkAnchors(scene, link, preview) {
       gene.locus.y + gene.locus.track.y + offsets.y,
     ];
   };
-  return orderLinkAnchors(anchorForGene(query), anchorForGene(target));
+  const anchorFor = (endpoint, locus, reverse = false) => {
+    if (endpoint.kind !== "span") return anchorForGene(scene.genes.get(endpointGeneId(endpoint)));
+    const length = locus.state.end - locus.state.start;
+    if (!length) return null;
+    const factor = (locus.worldEnd - locus.worldStart) / length;
+    const scaleX = (value) => locus.worldStart - locus.x + (value - locus.state.start) * factor;
+    const projected = projectLinkEndpoint(endpoint, { ...scene, scaleX });
+    if (!projected) return null;
+    let [first, second, y] = projected.anchors;
+    if (reverse) [first, second] = [second, first];
+    const axis = preview?.type === "locus-flip" ? preview.axes?.get(locus.source.uid) : undefined;
+    if (axis !== undefined) {
+      first += (2 * axis - 2 * first) * preview.progress;
+      second += (2 * axis - 2 * second) * preview.progress;
+    }
+    const offsets = previewOffsetsForLocus(preview, locus);
+    return [first + offsets.x, second + offsets.x, y + offsets.y];
+  };
+  const first = anchorFor(link.source.query, query), second = anchorFor(link.source.target, target, link.source.orientation === -1);
+  return first && second ? orderLinkAnchors(first, second) : null;
 }
 
 function linkGeometryForPreview(scene, link, preview, config) {
   const visible = linkVisibleForPreview(scene, link, preview, config);
+  const spans = link.source.query.kind === "span" || link.source.target.kind === "span";
+  if (spans && preview) return { visible, anchors: visible ? previewLinkAnchors(scene, link, preview) : link.anchors };
   if (preview?.type === "cluster-drag" || preview?.type === "locus-flip") {
-    const query = scene.genes.get(link.source.query.uid);
-    const target = scene.genes.get(link.source.target.uid);
+    const query = scene.genes.get(endpointGeneId(link.source.query));
+    const target = scene.genes.get(endpointGeneId(link.source.target));
     const affected = preview.type === "cluster-drag" ||
       preview.axes?.has(query?.locus?.source?.uid) ||
       preview.axes?.has(target?.locus?.source?.uid) ||
@@ -6223,16 +6241,37 @@ function linkGeometryForPreview(scene, link, preview, config) {
 function linkVisibleForPreview(scene, link, preview, config) {
   if (config.link.show === false) return false;
   if (!preview) return link.visible;
-  const query = scene.genes.get(link.source.query.uid);
-  const target = scene.genes.get(link.source.target.uid);
+  const query = endpointLocus(link.source.query, scene), target = endpointLocus(link.source.target, scene);
   if (!query || !target) return false;
-  if (!geneVisibleForPreview(preview, query) || !geneVisibleForPreview(preview, target)) return false;
+  if (link.source.query.kind !== "span" && link.source.target.kind !== "span") {
+    if (!geneVisibleForPreview(preview, scene.genes.get(endpointGeneId(link.source.query))) ||
+        !geneVisibleForPreview(preview, scene.genes.get(endpointGeneId(link.source.target)))) return false;
+  } else {
+    for (const [endpoint, locus] of [[link.source.query, query], [link.source.target, target]]) {
+      if (endpoint.kind !== "span") {
+        if (!geneVisibleForPreview(preview, scene.genes.get(endpointGeneId(endpoint)))) return false;
+        continue;
+      }
+      if (config.plot?.scaleGenes === false) return false;
+      const length = locus.state.end - locus.state.start;
+      if (!length) return false;
+      const factor = (locus.worldEnd - locus.worldStart) / length;
+      const scaleX = (value) => locus.worldStart - locus.x + (value - locus.state.start) * factor;
+      const projected = projectLinkEndpoint(endpoint, { ...scene, scaleX });
+      const trim = preview.loci?.get(locus.source.uid);
+      if (trim) {
+        const offset = locusOffsetForPreview(preview, locus.source.uid);
+        const [a, b] = projected.anchors;
+        if (Math.min(a, b) + offset < trim.worldStart || Math.max(a, b) + offset > trim.worldEnd) return false;
+      } else if (!projected.visible) return false;
+    }
+  }
   if (preview?.type === "locus-trim") {
     return link.allowed && !link.source.hidden && link.source.identity >= config.link.threshold;
   }
   if (preview?.type !== "cluster-drag") return link.visible;
-  const queryOrder = preview.clusterOrder.get(query.locus.cluster.uid);
-  const targetOrder = preview.clusterOrder.get(target.locus.cluster.uid);
+  const queryOrder = preview.clusterOrder.get(query.cluster.uid);
+  const targetOrder = preview.clusterOrder.get(target.cluster.uid);
   return (
     queryOrder !== undefined &&
     targetOrder !== undefined &&
