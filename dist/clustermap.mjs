@@ -18572,6 +18572,26 @@ function clusterMap() {
         snapshot.excludedLoci.length !== chartState.excludedLoci.size) setState(snapshot);
     return my;
   };
+  /** Keep selected visible clusters and loci, excluding the rest from the plot. */
+  my.keep = function (targets = { [plotSelection.kind]: [...plotSelection.ids] }) {
+    if (!container || !chartState || !model.index) throw new Error("Cannot keep records before the chart has rendered.");
+    const { clusters = [], loci = [] } = targets || {};
+    if (!Array.isArray(clusters) || !Array.isArray(loci)) throw new TypeError("Cluster and locus IDs must be arrays.");
+    const clusterIds = new Set(clusters), locusIds = new Set(loci);
+    if (!clusterIds.size && !locusIds.size) return my;
+    const visibleClusters = new Set(plotData.clusters.map((cluster) => cluster.uid));
+    const visibleLoci = new Set(plotData.clusters.flatMap((cluster) => cluster.loci.map((locus) => locus.uid)));
+    if ([...clusterIds].some((uid) => !visibleClusters.has(uid)) || [...locusIds].some((uid) => !visibleLoci.has(uid))) {
+      throw new TypeError("Keep requires visible cluster and locus IDs.");
+    }
+    const excludedClusters = [], excludedLoci = [];
+    for (const cluster of plotData.clusters) {
+      if (clusterIds.has(cluster.uid)) continue;
+      if (!cluster.loci.some((locus) => locusIds.has(locus.uid))) excludedClusters.push(cluster.uid);
+      else for (const locus of cluster.loci) if (!locusIds.has(locus.uid)) excludedLoci.push(locus.uid);
+    }
+    return my.remove({ clusters: excludedClusters, loci: excludedLoci });
+  };
   /** A serializable layout and camera snapshot for project persistence. */
   my.state = function (snapshot) {
     if (!arguments.length) return chartState ? stateSnapshots.serialize(chartState, model.data) : null;

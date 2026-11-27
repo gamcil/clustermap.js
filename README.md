@@ -414,6 +414,7 @@ otherwise noted. Data/project replacement requires a mounted chart.
 | `visibleData()` | Read a live, read-only view of the filtered data currently included in the plot. |
 | `rendererStatus()` | Read requested and active renderer, initialization/fallback state and fallback reason; returns `null` before mounting. WebGPU changes emit a `renderer.change` event. |
 | `remove({clusters, loci})` | Remove cluster/locus IDs and their contents from the plot, preserving source data. Undoable; removing a cluster's last locus also removes that cluster. |
+| `keep({clusters, loci})` | Keep the specified visible clusters and loci and exclude the rest from the plot. With no argument, use the current plot selection. Undoable and preserves source data. |
 | `state(snapshot)` / `state()` | Restore / read JSON-safe layout and camera state. |
 | `camera({x, y, k})` / `camera()` | Set / read the camera without rebuilding the scene or changing history. Requires finite coordinates and a positive scale. |
 | `fitFigure({padding, minimumReadableScale})` | Frame the figure without rebuilding the scene or changing history. Padding defaults to 20 world units; the minimum readable scale defaults to 1 for raster renderers and 0 for SVG. Set it to 0 to fit the entire figure when zoom limits permit. |
@@ -646,6 +647,8 @@ Ctrl/Cmd+Shift-click adds a range; Alt/Option+Shift-click subtracts one.
 Dragging a selected cluster reorders the selected clusters together.
 The plot toolbar applies locus operations to selected loci or, through its
 Loci menu, to the member loci of selected clusters.
+Choose **Keep selected** in the toolbar to hide everything outside the selected
+clusters or loci. Undo restores the previous plot, and project saves retain the subset.
 
 ## Development checks
 

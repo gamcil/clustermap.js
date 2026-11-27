@@ -13,14 +13,14 @@ function eventMatches(event, selector) {
 
 const isEditingEvent = (event) => eventMatches(event, editable);
 
-const toolbarTemplate = createTemplate("<strong></strong>\n<button type=\"button\" data-action=\"focus\">Focus</button>\n<button type=\"button\" data-action=\"flip\">Flip</button>\n<button type=\"button\" data-action=\"trim\">Trim</button>\n<clinker-action-menu label=\"Loci…\" data-loci-menu hidden>\n  <button type=\"button\" data-action=\"restore\">Restore full loci</button>\n</clinker-action-menu>\n<clinker-action-menu label=\"More…\" data-more-menu>\n  <button type=\"button\" data-action=\"edit\">Edit data…</button>\n  <button type=\"button\" data-action=\"remove\"></button>\n</clinker-action-menu>\n<button type=\"button\" data-action=\"clear\">Clear</button>\n");
+const toolbarTemplate = createTemplate("<strong></strong>\n<button type=\"button\" data-action=\"focus\">Focus</button>\n<button type=\"button\" data-action=\"keep\">Keep selected</button>\n<button type=\"button\" data-action=\"flip\">Flip</button>\n<button type=\"button\" data-action=\"trim\">Trim</button>\n<clinker-action-menu label=\"Loci…\" data-loci-menu hidden>\n  <button type=\"button\" data-action=\"restore\">Restore full loci</button>\n</clinker-action-menu>\n<clinker-action-menu label=\"More…\" data-more-menu>\n  <button type=\"button\" data-action=\"edit\">Edit data…</button>\n  <button type=\"button\" data-action=\"remove\"></button>\n</clinker-action-menu>\n<button type=\"button\" data-action=\"clear\">Clear</button>\n");
 const css$2 = ".cm-plot-selection-toolbar { position: absolute; z-index: 2; top: 12px; left: 12px; display: flex; flex-wrap: wrap; max-width: calc(100% - 24px); box-sizing: border-box; align-items: center; gap: 6px; padding: 7px 8px; border: 1px solid var(--cm-border,var(--_cm-border,#c7d9f1)); border-radius: 8px; background: var(--cm-surface,var(--_cm-surface,rgba(255,255,255,.94))); box-shadow: 0 3px 12px rgba(23,36,54,.12); color: var(--cm-foreground,var(--_cm-foreground,#273444)); font: var(--cm-font,var(--_cm-font)); }\n.cm-plot-selection-toolbar[hidden] { display: none; }\n.cm-plot-selection-toolbar strong { padding: 4px 6px; border-radius: 5px; background: var(--cm-hover,var(--_cm-hover,#e7f0ff)); color: var(--cm-accent,var(--_cm-accent,#184a86)); }\n";
 
 let activeToolbar = null;
 
 /** Mount contextual plot actions without requiring the full data editor. */
 function mountPlotSelectionToolbar(chart, container, { editor = null } = {}) {
-  if (!chart?.selection || !chart?.flipLoci || !chart?.trimLoci || !chart?.restoreLoci) throw new TypeError("A mounted ClusterMap chart is required.");
+  if (!chart?.selection || !chart?.keep || !chart?.flipLoci || !chart?.trimLoci || !chart?.restoreLoci) throw new TypeError("A mounted ClusterMap chart is required.");
   if (!(container instanceof Element)) throw new TypeError("A plot container element is required.");
   const document = container.ownerDocument;
   const scope = container.getRootNode();
@@ -83,6 +83,7 @@ function mountPlotSelectionToolbar(chart, container, { editor = null } = {}) {
     else if (action === "clear") clear();
     else if (action === "edit") editor?.editSelection(selection);
     else if (action === "focus") chart.focus({ [selection.kind]: selection.ids });
+    else if (action === "keep") chart.keep({ [selection.kind]: selection.ids });
     else if (action === "remove" && document.defaultView.confirm(`Remove ${selection.ids.length} ${selection.kind} and their contents from the plot? This can be undone.`)) {
       chart.remove({ [selection.kind]: selection.ids });
     }

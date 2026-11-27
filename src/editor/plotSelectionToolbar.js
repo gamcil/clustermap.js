@@ -12,7 +12,7 @@ let activeToolbar = null;
 
 /** Mount contextual plot actions without requiring the full data editor. */
 export function mountPlotSelectionToolbar(chart, container, { editor = null } = {}) {
-  if (!chart?.selection || !chart?.flipLoci || !chart?.trimLoci || !chart?.restoreLoci) throw new TypeError("A mounted ClusterMap chart is required.");
+  if (!chart?.selection || !chart?.keep || !chart?.flipLoci || !chart?.trimLoci || !chart?.restoreLoci) throw new TypeError("A mounted ClusterMap chart is required.");
   if (!(container instanceof Element)) throw new TypeError("A plot container element is required.");
   const document = container.ownerDocument;
   const scope = container.getRootNode();
@@ -75,6 +75,7 @@ export function mountPlotSelectionToolbar(chart, container, { editor = null } = 
     else if (action === "clear") clear();
     else if (action === "edit") editor?.editSelection(selection);
     else if (action === "focus") chart.focus({ [selection.kind]: selection.ids });
+    else if (action === "keep") chart.keep({ [selection.kind]: selection.ids });
     else if (action === "remove" && document.defaultView.confirm(`Remove ${selection.ids.length} ${selection.kind} and their contents from the plot? This can be undone.`)) {
       chart.remove({ [selection.kind]: selection.ids });
     }

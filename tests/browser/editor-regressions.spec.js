@@ -1147,6 +1147,41 @@ test("selection toolbar and minimap remain separate in a narrow plot", async ({ 
 });
 
 for (const renderer of ["svg", "canvas", "webgpu"]) {
+  test(`${renderer}: keep selected subsets clusters and loci with undo and project reload`, async ({ page }) => {
+    await selectionFixture(page, renderer);
+    const inspect = () => page.evaluate(() => ({
+      clusters: chart.visibleData().clusters.map(({ uid, loci }) => [uid, loci.map(({ uid }) => uid)]),
+      leaves: chart.visibleData().tree.nodes.filter((node) => !node.children).map((node) => node.cluster),
+      links: chart.visibleData().links.map(({ uid }) => uid),
+      source: chart.data().clusters.map(({ uid }) => uid),
+    }));
+    await page.evaluate(() => chart.keep({ clusters: ["c"], loci: ["locus-a2"] }));
+    expect((await inspect()).clusters).toEqual([["a", ["locus-a2"]], ["c", ["locus-c"]]]);
+    await page.evaluate(() => chart.undo());
+    await page.evaluate(() => chart.clusterSelection(["a", "c"]));
+    await page.evaluate(() => chart.keep());
+    expect((await inspect()).clusters.map(([uid]) => uid)).toEqual(["a", "c"]);
+    await page.evaluate(() => chart.undo());
+    await plotToolbar(page).getByRole("button", { name: "Keep selected", exact: true }).click();
+    expect((await inspect()).clusters.map(([uid]) => uid)).toEqual(["a", "c"]);
+    await page.evaluate(() => chart.locusSelection(["locus-a2"]));
+    await plotToolbar(page).getByRole("button", { name: "Keep selected", exact: true }).click();
+    const subset = await inspect();
+    expect(subset).toEqual({ clusters: [["a", ["locus-a2"]]], leaves: ["a"], links: [], source: ["a", "b", "c", "d", "e"] });
+    await page.evaluate(() => chart.undo());
+    expect((await inspect()).clusters.map(([uid]) => uid)).toEqual(["a", "c"]);
+    await page.evaluate(() => chart.redo());
+    expect(await inspect()).toEqual(subset);
+    const saved = await page.evaluate(() => chart.project());
+    await page.evaluate((project) => chart.project(project), saved);
+    expect(await inspect()).toEqual(subset);
+    await page.evaluate(() => {
+      if (chart.keep({ clusters: [] }) !== chart) throw new Error("empty subset must be a no-op");
+      try { chart.keep({ clusters: ["b"] }); throw new Error("hidden cluster accepted"); }
+      catch (error) { if (!(error instanceof TypeError)) throw error; }
+    });
+  });
+
   test(`${renderer}: plot selection toggles, ranges and editor handoff`, async ({ page }) => {
     await selectionFixture(page, renderer);
     for (const uid of ["a", "b", "a"]) await selectAt(page, renderer, clusterLabel(uid));
