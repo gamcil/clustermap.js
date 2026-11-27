@@ -2,7 +2,7 @@ import { d as defineActionMenu, i as installDataEditorStyle, a as installStyle }
 import { c as createTemplate, m as mountComponent, a as controlStyles, u as upgradeProperty } from './editor/search-field-8b97b3e8.mjs';
 import { a as applyEditorTheme, e as editorThemeStyles } from './editor/theme-70e7f5bd.mjs';
 import { d as defineAppearancePanel } from './editor/appearance-panel-9af310ff.mjs';
-import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-2328ad07.mjs';
+import { b as bindOptionButtons, d as defineDataPanel } from './editor/data-panel-49c1e433.mjs';
 
 const editable = "input, textarea, select, [contenteditable]:not([contenteditable='false'])";
 

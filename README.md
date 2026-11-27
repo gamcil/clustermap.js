@@ -81,8 +81,7 @@ or the existing `{ uid }` form, and links may mix endpoint kinds. Span links use
 identity colouring and threshold filtering; gene-group colouring and the
 gene-based best-match filter do not apply. A span is hidden when it is only
 partially inside a trimmed locus or when gene packing (`plot.scaleGenes: false`)
-is enabled. Object-array input and full project snapshots support span links;
-`CompactLinkStore` currently stores gene-to-gene links only.
+is enabled. Object-array and compact input both support span links.
 Imports and edits share field rules: names and labels accept text or `null`,
 colours accept CSS colours or `null`, visibility flags are boolean, and link
 identity is a number from 0 to 1. Values are not coerced.
@@ -529,6 +528,28 @@ ownership of the columns by transferring their underlying ArrayBuffers; every
 caller view of those buffers becomes detached. Link edits and deletions use
 chart-local copy-on-write overlays. Arbitrary link IDs or
 metadata should use the existing object-array input.
+
+For span endpoints, add optional `spans` columns. `kinds` uses bit 1 for a
+query span and bit 2 for a target span; an endpoint index then refers to
+`spans.loci` instead of `genes`. All span columns have one entry per link:
+
+```js
+const links = new CompactLinkStore({
+  genes: [],
+  query: new Uint32Array([0]), target: new Uint32Array([1]),
+  identity: new Float32Array([0.91]), similarity: new Float32Array([0.95]),
+  spans: {
+    loci: ["locus-a", "locus-b"], kinds: new Uint8Array([3]),
+    orientation: new Int8Array([-1]), // 0 or 1: forward; -1: reverse
+    queryStart: new Float64Array([1200]), queryEnd: new Float64Array([4800]),
+    targetStart: new Float64Array([900]), targetEnd: new Float64Array([4300]),
+  },
+});
+```
+
+Coordinates in columns for gene endpoints are ignored. The optional columns
+add 34 bytes per link in that table; gene-only tables without `spans` do not
+allocate them. Ownership transfer also transfers all span-column buffers.
 
 For compact input, `data().links` and `visibleData().links` are read-only,
 lazy array views: indexing, iteration and array methods work, but operations

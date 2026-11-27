@@ -194,6 +194,44 @@ for (const renderer of ["svg", "canvas", "webgpu"]) {
   });
 }
 
+test("compact span links preserve edits and the shared base through figure save and load", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/demo/?test=1");
+  await page.addScriptTag({ url: "/node_modules/d3/dist/d3.min.js" });
+  const result = await page.evaluate(async () => {
+    const { ClusterMap, CompactLinkStore } = await import("/dist/clustermap.mjs");
+    const host = document.createElement("div"); host.style.cssText = "width:800px;height:400px"; document.body.append(host);
+    const clusters = ["a", "b"].map((uid) => ({ uid, name: uid, loci: [{ uid: `l-${uid}`, start: 100, end: 200,
+      genes: [{ uid: `g-${uid}`, start: 110, end: 130, strand: 1 }] }] }));
+    const base = new CompactLinkStore({ genes: ["g-a", "g-b"], query: new Uint32Array([0, 0]), target: new Uint32Array([1, 1]),
+      identity: new Float32Array([0.9, 0.8]), similarity: new Float32Array([1, 1]), spans: {
+        loci: ["l-a", "l-b"], kinds: new Uint8Array([0, 3]), orientation: new Int8Array([0, -1]),
+        queryStart: new Float64Array([0, 110]), queryEnd: new Float64Array([0, 140]),
+        targetStart: new Float64Array([0, 120]), targetEnd: new Float64Array([0, 150]),
+      } });
+    const chart = ClusterMap().config({ plot: { renderer: "canvas", transitionDuration: 0 } });
+    d3.select(host).datum({ clusters, links: base, groups: [{ uid: "group", genes: ["g-a", "g-b"] }], config: { updateGroups: false } }).call(chart);
+    const count = () => [...new DOMParser().parseFromString(chart.exportSvg(), "image/svg+xml").querySelectorAll("path.geneLink")]
+      .filter((path) => path.getAttribute("d")).length;
+    const initial = count();
+    chart.patch([{ type: "links.update", ids: ["link-1"], changes: { label: "alignment" } }]);
+    chart.patch([{ type: "links.delete", ids: ["link-0"] }]);
+    const snapshot = JSON.parse(await chart.exportCompactProjectBlob({ base }).text());
+    chart.loadCompactProject(snapshot, { base });
+    const loaded = { count: count(), link: chart.data().links[0], baseSize: base.size };
+    chart.remove({ clusters: ["b"] }); const excluded = count();
+    chart.undo(); const restored = count();
+    chart.destroy(); host.remove();
+    return { initial, loaded, excluded, restored };
+  });
+  expect(result.initial).toBe(2);
+  expect(result.loaded.count).toBe(1);
+  expect(result.loaded.link).toMatchObject({ uid: "link-1", query: { kind: "span", locusId: "l-a" },
+    target: { kind: "span", locusId: "l-b" }, orientation: -1, label: "alignment" });
+  expect(result.loaded.baseSize).toBe(2);
+  expect(result.excluded).toBe(0);
+  expect(result.restored).toBe(1);
+});
+
 for (const renderer of ["svg", "canvas", "webgpu"]) {
   test(`fitFigure frames bounds without rebuilding with ${renderer}`, async ({ page }) => {
     await page.goto("http://127.0.0.1:8080/demo/?fixture=burnettii&test=1");

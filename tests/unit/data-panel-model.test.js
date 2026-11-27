@@ -36,6 +36,23 @@ test("link rows display, filter and sort locus spans in both small and paged vie
   assert.equal(paged.rows[0].groups, "— / Ungrouped");
 });
 
+test("compact span rows remain paged and searchable", async () => {
+  const { CompactLinkStore, linkArrayView } = await import("../../src/data/linkStore.mjs");
+  const count = 1001, zeros = () => new Float64Array(count), ends = () => new Float64Array(count).fill(20);
+  const store = new CompactLinkStore({ genes: [], query: new Uint32Array(count), target: new Uint32Array(count).fill(1),
+    identity: new Float32Array(count).fill(0.9), similarity: new Float32Array(count).fill(1),
+    spans: { loci: ["a1", "b1"], kinds: new Uint8Array(count).fill(3), orientation: new Int8Array(count),
+      queryStart: zeros(), queryEnd: ends(), targetStart: zeros(), targetEnd: ends() } });
+  let reads = 0; const get = store.getAt.bind(store);
+  store.getAt = (position) => { reads++; return get(position); };
+  const model = fixture(); model.data.links = linkArrayView(store);
+  const result = model.view(options({ kind: "links", filter: "a1:1-20", sort: { key: "source", direction: 1 } }));
+  assert.equal(result.total, count);
+  assert.equal(result.rows.length, 250);
+  assert.equal(result.rows[0].source, "a1:1-20");
+  assert.equal(reads, 250, "only the visible page materializes complete records");
+});
+
 test("collapsed views retain branches and parent keys without rendering their genes", () => {
   const model = fixture(), view = model.view(options());
   assert.deepEqual(view.rows.map(({ key }) => key), ["cluster:a", "cluster-locus:b:b1"]);

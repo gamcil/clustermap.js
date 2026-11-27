@@ -159,14 +159,16 @@ function bestLinkSelector(geneForUid) {
   };
 }
 
-function compactLinkVisibility(store, { groupForGene, geneForUid, bestOnly, threshold }) {
+function compactLinkVisibility(store, { groupForGene, geneForUid, locusForUid, bestOnly, threshold }) {
   const bits = new Uint8Array(Math.ceil(store.size / 8));
   const positions = bestOnly ? new Uint32Array(store.size) : null;
   let count = 0;
   for (let i = 0; i < store.size; i++) {
     const query = store.queryAt(i), target = store.targetAt(i);
-    if (store.hiddenAt(i) || !geneForUid(query) || !geneForUid(target) || store.identityAt(i) < threshold ||
-        groupForGene(query) === null || groupForGene(target) === null) continue;
+    const hasQuery = query === undefined ? locusForUid?.(store.queryLocusAt(i)) : geneForUid(query);
+    const hasTarget = target === undefined ? locusForUid?.(store.targetLocusAt(i)) : geneForUid(target);
+    if (store.hiddenAt(i) || !hasQuery || !hasTarget || store.identityAt(i) < threshold ||
+        (query !== undefined && target !== undefined && (groupForGene(query) === null || groupForGene(target) === null))) continue;
     if (positions) positions[count++] = i;
     else bits[i >>> 3] |= 1 << (i & 7);
   }
@@ -177,7 +179,7 @@ function compactLinkVisibility(store, { groupForGene, geneForUid, bestOnly, thre
     const select = bestLinkSelector(geneForUid);
     for (const position of passing) {
       const query = store.queryAt(position), target = store.targetAt(position), identity = store.identityAt(position);
-      if (select(query, target, identity) === null) continue;
+      if (query !== undefined && target !== undefined && select(query, target, identity) === null) continue;
       bits[position >>> 3] |= 1 << (position & 7);
     }
   }

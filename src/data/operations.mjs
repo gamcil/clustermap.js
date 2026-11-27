@@ -239,6 +239,7 @@ function applyOperation(data, index, operation) {
       data.links = data.links.withUpdates(operation.ids.map((uid) => ({ uid, changes: operation.changes })));
       index.linkById = data.links;
       index.linksByGeneId = index.linksByGeneId.withStore(data.links);
+      index.linksByLocusId = index.linksByLocusId.withStore(data.links);
       return;
     }
     operation.ids.forEach((uid) => Object.assign(updateRecords.get(uid), operation.changes));

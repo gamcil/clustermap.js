@@ -1382,11 +1382,12 @@ class DataPanelModel {
       const record = compact ? null : links[position];
       const query = compact ? compact.queryAt(position) : endpointGeneId(record.query);
       const target = compact ? compact.targetAt(position) : endpointGeneId(record.target);
-      if (key === "source") return compact ? label(query) : endpointLabel(record.query, genes, loci);
-      if (key === "target") return compact ? label(target) : endpointLabel(record.target, genes, loci);
+      const queryEndpoint = compact ? (query === undefined ? compact.endpointAt(position, "query") : null) : record.query;
+      const targetEndpoint = compact ? (target === undefined ? compact.endpointAt(position, "target") : null) : record.target;
+      if (key === "source") return queryEndpoint ? endpointLabel(queryEndpoint, genes, loci) : label(query);
+      if (key === "target") return targetEndpoint ? endpointLabel(targetEndpoint, genes, loci) : label(target);
       if (key === "identity") return Math.round(((compact ? compact.identityAt(position) : record.identity) || 0) * 1000) / 10;
-      if (key === "groups") return compact ? `${group(query)} / ${group(target)}`
-        : `${endpointGroup(record.query, groups)} / ${endpointGroup(record.target, groups)}`;
+      if (key === "groups") return `${queryEndpoint ? endpointGroup(queryEndpoint, groups) : group(query)} / ${targetEndpoint ? endpointGroup(targetEndpoint, groups) : group(target)}`;
       if (key === "label") return (compact ? compact.labelAt(position) : record.label) || "";
       return "";
     };

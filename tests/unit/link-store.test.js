@@ -9,6 +9,52 @@ const input = () => ({ genes: ["a", "b", "c", "missing"],
   query: new Uint32Array([0, 0, 1, 0]), target: new Uint32Array([1, 2, 1, 3]),
   identity: new Float64Array([0.9, 0.8, 0.7, 0.6]), similarity: new Float64Array([1, 0.9, 0.8, 0.7]) });
 
+function spanInput() {
+  return { genes: ["a", "b"], query: new Uint32Array([0, 0, 1]), target: new Uint32Array([1, 1, 0]),
+    identity: new Float32Array([0.9, 0.8, 0.7]), similarity: new Float32Array([1, 1, 1]), spans: {
+      loci: ["la", "lb"], kinds: new Uint8Array([0, 3, 2]), orientation: new Int8Array([0, -1, 1]),
+      queryStart: new Float64Array([0, 10, 0]), queryEnd: new Float64Array([0, 30, 0]),
+      targetStart: new Float64Array([0, 20, 5]), targetEnd: new Float64Array([0, 40, 15]),
+    } };
+}
+
+test("compact spans share indexing, edits, restoration and durable base identity", async () => {
+  const columns = spanInput(), base = new CompactLinkStore(columns);
+  assert.equal(base.hasSpans, true);
+  assert.deepEqual(base.get("link-1").query, { kind: "span", locusId: "la", start: 10, end: 30 });
+  assert.deepEqual(base.get("link-1").target, { kind: "span", locusId: "lb", start: 20, end: 40 });
+  assert.equal(base.get("link-1").orientation, -1);
+  columns.spans.queryStart[1] = 11;
+  assert.equal(base.get("link-1").query.start, 10, "the table owns its columns");
+  assert.notEqual(base.fingerprint, new CompactLinkStore(columns).fingerprint);
+  const data = { clusters: [{ uid: "one", loci: [{ uid: "la", genes: [{ uid: "a" }] }] },
+    { uid: "two", loci: [{ uid: "lb", genes: [{ uid: "b" }] }] }], groups: [], links: base };
+  const index = createChartIndex(data);
+  assert.deepEqual(index.linksByClusterPair.get(clusterPairKey("one", "two")), ["link-0", "link-1", "link-2"]);
+  assert.deepEqual(index.linksByLocusId.get("la").map(({ uid }) => uid), ["link-1", "link-2"]);
+  assert.deepEqual(index.linksByGeneId.get("b").map(({ uid }) => uid), ["link-0", "link-2"]);
+  const { applyChartOperations } = await import("../../src/data/operations.mjs");
+  const update = applyChartOperations(data, index, [{ type: "links.update", ids: ["link-1"], changes: { label: "updated" } }]);
+  assert.equal(index.linksByLocusId.get("la")[0].label, "updated");
+  applyChartOperations(data, index, update.inverse);
+  const options = { threshold: 0, bestOnly: true, groupForGene: () => null,
+    geneForUid: (uid) => index.geneById.get(uid), locusForUid: (uid) => index.locusById.get(uid) };
+  const visible = createLinkVisibility(base, options, base);
+  assert.deepEqual([...base.keys()].filter((uid) => visible.has(uid)), ["link-1", "link-2"]);
+  const record = base.get("link-1"), edited = base.withUpdates([{ uid: "link-1", changes: { label: "DNA" } }]).withDeleted(["link-1"]);
+  const restored = edited.withRestored([{ index: 1, link: record }]);
+  assert.deepEqual(restored.get("link-1"), record);
+  const reloaded = base.applyEdits(edited.snapshotEdits());
+  assert.deepEqual([...reloaded.values()], [...edited.values()]);
+  assert.deepEqual([...base.filterEndpoints(new Set(["a", "b"]), new Set(["la"])).keys()], ["link-0", "link-2"]);
+  const transferred = spanInput(), moved = CompactLinkStore.fromTransferred(transferred);
+  assert.equal(transferred.spans.kinds.byteLength, 0);
+  assert.deepEqual([...moved.values()], [...base.values()]);
+  const invalid = spanInput(); invalid.spans.queryEnd[1] = 10;
+  assert.throws(() => CompactLinkStore.fromTransferred(invalid), /Invalid compact link/);
+  assert.ok(invalid.spans.kinds.byteLength > 0, "validation fails before transferring any buffers");
+});
+
 test("compact and array stores preserve link identity, ordering and double precision", () => {
   const columns = input(), compact = new CompactLinkStore(columns);
   const records = [...compact.values()], array = new ArrayLinkStore(records);

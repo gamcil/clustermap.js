@@ -84,7 +84,7 @@ export function visibleChartData(data, state) {
   const hasEndpoint = (endpoint) => endpoint.kind === "span"
     ? locusIds.has(endpoint.locusId) : geneIds.has(endpointGeneId(endpoint));
   const links = data.links instanceof CompactLinkStore
-    ? data.links.filterEndpoints(geneIds)
+    ? data.links.filterEndpoints(geneIds, locusIds)
     : data.links.filter((link) => hasEndpoint(link.query) && hasEndpoint(link.target));
   return { ...data, clusters, tree,
     links,
