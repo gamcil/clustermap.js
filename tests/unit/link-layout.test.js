@@ -55,6 +55,11 @@ test("span link previews follow flips and hide spans clipped by trims", async ()
   const config = { plot: { scaleGenes: true }, link: { show: true, threshold: 0.5 } };
   const flip = { type: "locus-flip", axes: new Map([["a", 60]]), progress: 1 };
   assert.deepEqual(linkGeometryForPreview(scene, link, flip, config).anchors, [90, 70, 35, 60, 40, 85]);
+  const target = scene.loci.get("b");
+  scene.genes.set("g", { source: { uid: "g" }, locus: target, visible: true,
+    display: { strand: 1 }, bounds: { minX: 40, maxX: 60 } });
+  const mixed = { ...link, source: { ...link.source, target: { kind: "gene", geneId: "g" } } };
+  assert.deepEqual(linkGeometryForPreview(scene, mixed, flip, config).anchors, [90, 70, 35, 60, 40, 85]);
   const trim = { type: "locus-trim", locusOffsets: new Map(), loci: new Map([["a", { worldStart: 40, worldEnd: 110 }]]) };
   assert.equal(linkGeometryForPreview(scene, link, trim, config).visible, false);
   assert.equal(linkGeometryForPreview(scene, link, flip, { ...config, plot: { scaleGenes: false } }).visible, false);

@@ -6212,7 +6212,10 @@
       ];
     };
     const anchorFor = (endpoint, locus, reverse = false) => {
-      if (endpoint.kind !== "span") return anchorForGene(scene.genes.get(endpointGeneId(endpoint)));
+      if (endpoint.kind !== "span") {
+        const anchors = anchorForGene(scene.genes.get(endpointGeneId(endpoint)));
+        return reverse ? [anchors[1], anchors[0], anchors[2]] : anchors;
+      }
       const projected = projectSceneEndpoint(endpoint, scene);
       if (!projected) return null;
       let [first, second, y] = projected.anchors;
@@ -6225,7 +6228,8 @@
       const offsets = previewOffsetsForLocus(preview, locus);
       return [first + offsets.x, second + offsets.x, y + offsets.y];
     };
-    const first = anchorFor(link.source.query, query), second = anchorFor(link.source.target, target, link.source.orientation === -1);
+    const first = anchorFor(link.source.query, query), second = anchorFor(link.source.target, target,
+      link.source.orientation === -1 && (link.source.query.kind === "span" || link.source.target.kind === "span"));
     return first && second ? orderLinkAnchors(first, second) : null;
   }
 
@@ -7966,7 +7970,7 @@
     if (!query || !target || !areClustersAdjacent(query.locus.cluster.uid, target.locus.cluster.uid)) {
       return new UndrawableLinkLayout(source, order, allowed);
     }
-    const targetAnchors = source.orientation === -1 && source.target.kind === "span"
+    const targetAnchors = source.orientation === -1 && (source.query.kind === "span" || source.target.kind === "span")
       ? [target.anchors[1], target.anchors[0], target.anchors[2]] : target.anchors;
     const anchors = orderLinkAnchors(query.anchors, targetAnchors);
     return {
@@ -15573,13 +15577,17 @@ fn projectWorld(point: vec2f, colour: vec4f) -> VertexOutput {
     const endpoint = (source, locus, reverse = false) => {
       const x = clusterOffsetX(locus.cluster.uid), y = clusterOffsetY(locus.cluster.uid);
       const slot = locusSlots.get(locus.source.uid);
-      if (source.kind !== "span") return linkEndpointForGpu(scene.genes.get(endpointGeneId(source)), slot, x, y);
+      if (source.kind !== "span") {
+        const values = linkEndpointForGpu(scene.genes.get(endpointGeneId(source)), slot, x, y);
+        return reverse ? [values[1], values[0], values[2], values[3]] : values;
+      }
       const projected = projectSceneEndpoint(source, scene);
       if (!projected) return null;
       const [a, b, row] = projected.anchors;
       return [(reverse ? b : a) - x, (reverse ? a : b) - x, row - y, slot];
     };
-    const queryValues = endpoint(link.source.query, query), targetValues = endpoint(link.source.target, target, link.source.orientation === -1);
+    const queryValues = endpoint(link.source.query, query), targetValues = endpoint(link.source.target, target,
+      link.source.orientation === -1 && (link.source.query.kind === "span" || link.source.target.kind === "span"));
     if (!queryValues || !targetValues) return null;
     const colours = linkColours(link.source, scales, config);
     const fill = rgba(colours.fill), stroke = rgba(colours.stroke);

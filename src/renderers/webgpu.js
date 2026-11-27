@@ -466,13 +466,17 @@ function linkRecordForGpu(scene, link, scales, config, locusSlots, clusterOffset
   const endpoint = (source, locus, reverse = false) => {
     const x = clusterOffsetX(locus.cluster.uid), y = clusterOffsetY(locus.cluster.uid);
     const slot = locusSlots.get(locus.source.uid);
-    if (source.kind !== "span") return linkEndpointForGpu(scene.genes.get(endpointGeneId(source)), slot, x, y);
+    if (source.kind !== "span") {
+      const values = linkEndpointForGpu(scene.genes.get(endpointGeneId(source)), slot, x, y);
+      return reverse ? [values[1], values[0], values[2], values[3]] : values;
+    }
     const projected = projectSceneEndpoint(source, scene);
     if (!projected) return null;
     const [a, b, row] = projected.anchors;
     return [(reverse ? b : a) - x, (reverse ? a : b) - x, row - y, slot];
   };
-  const queryValues = endpoint(link.source.query, query), targetValues = endpoint(link.source.target, target, link.source.orientation === -1);
+  const queryValues = endpoint(link.source.query, query), targetValues = endpoint(link.source.target, target,
+    link.source.orientation === -1 && (link.source.query.kind === "span" || link.source.target.kind === "span"));
   if (!queryValues || !targetValues) return null;
   const colours = linkColours(link.source, scales, config);
   const fill = rgba(colours.fill), stroke = rgba(colours.stroke);

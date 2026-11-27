@@ -328,7 +328,7 @@ function createLinkLayout(source, order, {
   if (!query || !target || !areClustersAdjacent(query.locus.cluster.uid, target.locus.cluster.uid)) {
     return new UndrawableLinkLayout(source, order, allowed);
   }
-  const targetAnchors = source.orientation === -1 && source.target.kind === "span"
+  const targetAnchors = source.orientation === -1 && (source.query.kind === "span" || source.target.kind === "span")
     ? [target.anchors[1], target.anchors[0], target.anchors[2]] : target.anchors;
   const anchors = orderLinkAnchors(query.anchors, targetAnchors);
   return {

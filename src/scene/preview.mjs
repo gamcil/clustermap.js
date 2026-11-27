@@ -435,7 +435,10 @@ export function previewLinkAnchors(scene, link, preview) {
     ];
   };
   const anchorFor = (endpoint, locus, reverse = false) => {
-    if (endpoint.kind !== "span") return anchorForGene(scene.genes.get(endpointGeneId(endpoint)));
+    if (endpoint.kind !== "span") {
+      const anchors = anchorForGene(scene.genes.get(endpointGeneId(endpoint)));
+      return reverse ? [anchors[1], anchors[0], anchors[2]] : anchors;
+    }
     const projected = projectSceneEndpoint(endpoint, scene);
     if (!projected) return null;
     let [first, second, y] = projected.anchors;
@@ -448,7 +451,8 @@ export function previewLinkAnchors(scene, link, preview) {
     const offsets = previewOffsetsForLocus(preview, locus);
     return [first + offsets.x, second + offsets.x, y + offsets.y];
   };
-  const first = anchorFor(link.source.query, query), second = anchorFor(link.source.target, target, link.source.orientation === -1);
+  const first = anchorFor(link.source.query, query), second = anchorFor(link.source.target, target,
+    link.source.orientation === -1 && (link.source.query.kind === "span" || link.source.target.kind === "span"));
   return first && second ? orderLinkAnchors(first, second) : null;
 }
 
