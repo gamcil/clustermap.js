@@ -148,13 +148,20 @@ function linkPassesFilter(link, { groupForGene, geneForUid, locusForUid, thresho
 // Share selection and tie semantics without changing each storage strategy's
 // result representation or ordering.
 function bestLinkSelector(geneForUid) {
-  const pairs = new Map();
+  const pairs = new Map(), cachedPairs = new Map();
   return (query, target, identity) => {
     const left = geneForUid(query).clusterUid, right = geneForUid(target).clusterUid;
-    const first = `${typeof left}:${String(left)}`, second = `${typeof right}:${String(right)}`;
-    const pair = first < second ? `${first}|${second}` : `${second}|${first}`;
-    let best = pairs.get(pair);
-    if (!best) { best = new Map(); pairs.set(pair, best); }
+    let targets = cachedPairs.get(left), entry = targets?.get(right);
+    if (!entry) {
+      const first = `${typeof left}:${String(left)}`, second = `${typeof right}:${String(right)}`;
+      const pair = first < second ? `${first}|${second}` : `${second}|${first}`;
+      let best = pairs.get(pair);
+      if (!best) { best = new Map(); pairs.set(pair, best); }
+      entry = { pair, best };
+      if (!targets) { targets = new Map(); cachedPairs.set(left, targets); }
+      targets.set(right, entry);
+    }
+    const { pair, best } = entry;
     const queryBest = best.get(query), targetBest = best.get(target);
     if (queryBest > identity || targetBest > identity) return null;
     best.set(query, Math.max(queryBest ?? -Infinity, identity));
@@ -166,24 +173,42 @@ function bestLinkSelector(geneForUid) {
 function compactLinkVisibility(store, { groupForGene, geneForUid, locusForUid, bestOnly, threshold }) {
   const bits = new Uint8Array(Math.ceil(store.size / 8));
   const positions = bestOnly ? new Uint32Array(store.size) : null;
+  // The sort comparator otherwise resolves sparse edits on every comparison.
+  const scores = bestOnly ? new Float64Array(store.size) : null;
+  // Reuse IDs and eligibility even if the dictionary contains duplicates.
+  const byId = new Map(), genes = Array.from({ length: store.geneCount }, (_, index) => {
+    const uid = store.geneAt(index);
+    if (!byId.has(uid)) {
+      const gene = geneForUid(uid);
+      byId.set(uid, { index, gene, grouped: Boolean(gene) && groupForGene(uid) !== null });
+    }
+    return byId.get(uid);
+  });
+  const queryIndex = store.hasSpans
+    ? (position) => store.queryAt(position) === undefined ? undefined : store.queryIndexAt(position)
+    : (position) => store.queryIndexAt(position);
+  const targetIndex = store.hasSpans
+    ? (position) => store.targetAt(position) === undefined ? undefined : store.targetIndexAt(position)
+    : (position) => store.targetIndexAt(position);
   let count = 0;
   for (let i = 0; i < store.size; i++) {
-    const query = store.queryAt(i), target = store.targetAt(i);
-    const hasQuery = query === undefined ? locusForUid?.(store.queryLocusAt(i)) : geneForUid(query);
-    const hasTarget = target === undefined ? locusForUid?.(store.targetLocusAt(i)) : geneForUid(target);
-    if (store.hiddenAt(i) || !hasQuery || !hasTarget || store.identityAt(i) < threshold ||
-        (query !== undefined && target !== undefined && (groupForGene(query) === null || groupForGene(target) === null))) continue;
-    if (positions) positions[count++] = i;
+    const query = queryIndex(i), target = targetIndex(i);
+    const hasQuery = query === undefined ? locusForUid?.(store.queryLocusAt(i)) : genes[query].gene;
+    const hasTarget = target === undefined ? locusForUid?.(store.targetLocusAt(i)) : genes[target].gene;
+    const identity = store.identityAt(i);
+    if (store.hiddenAt(i) || !hasQuery || !hasTarget || identity < threshold ||
+        (query !== undefined && target !== undefined && (!genes[query].grouped || !genes[target].grouped))) continue;
+    if (positions) { positions[count++] = i; scores[i] = identity; }
     else bits[i >>> 3] |= 1 << (i & 7);
   }
   if (positions) {
     // Typed-array sorting is stable, preserving the source order of ties.
     const passing = positions.subarray(0, count);
-    passing.sort((a, b) => store.identityAt(b) - store.identityAt(a));
-    const select = bestLinkSelector(geneForUid);
+    passing.sort((a, b) => scores[b] - scores[a]);
+    const select = bestLinkSelector((index) => genes[index].gene);
     for (const position of passing) {
-      const query = store.queryAt(position), target = store.targetAt(position), identity = store.identityAt(position);
-      if (query !== undefined && target !== undefined && select(query, target, identity) === null) continue;
+      const query = queryIndex(position), target = targetIndex(position), identity = store.identityAt(position);
+      if (query !== undefined && target !== undefined && select(genes[query].index, genes[target].index, identity) === null) continue;
       bits[position >>> 3] |= 1 << (position & 7);
     }
   }

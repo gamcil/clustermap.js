@@ -371,6 +371,36 @@ test("best-match selection agrees for ties, reversed pairs and lower scores", ()
   assert.deepEqual([...store.keys()].filter((uid) => visible.has(uid)), expected);
 });
 
+test("indexed best-match filtering preserves greedy, span and duplicate-ID behavior", () => {
+  const store = new CompactLinkStore({ genes: ["a", "a", "b", "x", "y"],
+    query: new Uint32Array([0, 1, 2, 0, 0]), target: new Uint32Array([3, 4, 4, 3, 0]),
+    identity: new Float64Array([0.9, 0.8, 0.7, 0.9, 0.6]), similarity: new Float64Array(5),
+    spans: { loci: ["locus"], kinds: new Uint8Array([0, 0, 0, 0, 2]), orientation: new Int8Array(5),
+      queryStart: new Float64Array(5), queryEnd: new Float64Array(5),
+      targetStart: new Float64Array([0, 0, 0, 0, 1]), targetEnd: new Float64Array([0, 0, 0, 0, 2]) } })
+    .withUpdates([{ uid: "link-3", changes: { identity: undefined } }]);
+  const options = { bestOnly: true, threshold: 0, groupForGene: () => 0,
+    geneForUid: (uid) => ({ clusterUid: uid === "a" || uid === "b" ? "left" : "right" }),
+    locusForUid: (uid) => uid === "locus" };
+  const records = [...store.values()], expected = new Set(filterLinks(records, options).map(({ uid }) => uid));
+  const visible = createLinkVisibility(store, options, store);
+  assert.deepEqual([...store.keys()].filter((uid) => visible.has(uid)), [...store.keys()].filter((uid) => expected.has(uid)));
+  assert.ok(expected.has("link-2"), "a rejected link must not change its other gene's best score");
+  assert.ok(expected.has("link-4"), "span links bypass best-match reduction");
+  for (let seed = 0; seed < 16; seed++) {
+    const records = Array.from({ length: 80 }, (_, i) => ({ uid: i,
+      query: { uid: ["a", "b", "x", "y", "missing"][(i * 7 + seed) % 5] },
+      target: i % 9 === 0 ? { kind: "span", locusId: "locus", start: 1, end: 2 }
+        : { uid: ["x", "a", "y", "b"][(i * 13 + seed) % 4] },
+      ...(i % 11 ? { identity: ((i * 3 + seed) % 6) / 5 } : {}), ...(i % 17 === 0 ? { hidden: true } : {}) }));
+    const table = linkStoreFromRecords(records).withDeleted([4, 9]);
+    const config = { ...options, geneForUid: (uid) => uid === "missing" ? undefined : options.geneForUid(uid) };
+    const expectedIds = new Set(filterLinks([...table.values()], config).map(({ uid }) => uid));
+    const result = createLinkVisibility(table, config, table);
+    assert.deepEqual([...table.keys()].filter((uid) => result.has(uid)), [...table.keys()].filter((uid) => expectedIds.has(uid)));
+  }
+});
+
 test("compact link snapshots preserve sparse edits, deletions and undefined values", () => {
   const base = new CompactLinkStore(input());
   const edited = base.withUpdates([{ uid: "link-0", changes: { hidden: true, label: "chosen" } },
