@@ -8,6 +8,7 @@ function linkIndexView(map, current, records) {
     get: (key) => { const entry = map.get(key); return entry && Array.from(entry.values,
       (position) => records ? current.getAt(position) : current.uidAt(position)); },
     keys: () => map.keys(),
+    *positionLists() { for (const entry of map.values()) yield entry.values; },
     withStore: (next) => linkIndexView(map, next, records),
   };
 }

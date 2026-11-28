@@ -9637,6 +9637,7 @@
       get: (key) => { const entry = map.get(key); return entry && Array.from(entry.values,
         (position) => records ? current.getAt(position) : current.uidAt(position)); },
       keys: () => map.keys(),
+      *positionLists() { for (const entry of map.values()) yield entry.values; },
       withStore: (next) => linkIndexView(map, next, records),
     };
   }
@@ -14485,6 +14486,14 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
 
   // Share selection and tie semantics without changing each storage strategy's
   // result representation or ordering.
+  function acceptBest(best, query, target, identity) {
+    const queryBest = best.get(query), targetBest = best.get(target);
+    if (queryBest > identity || targetBest > identity) return false;
+    best.set(query, Math.max(queryBest ?? -Infinity, identity));
+    best.set(target, Math.max(targetBest ?? -Infinity, identity));
+    return true;
+  }
+
   function bestLinkSelector(geneForUid) {
     const pairs = new Map(), cachedPairs = new Map();
     return (query, target, identity) => {
@@ -14500,19 +14509,19 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
         targets.set(right, entry);
       }
       const { pair, best } = entry;
-      const queryBest = best.get(query), targetBest = best.get(target);
-      if (queryBest > identity || targetBest > identity) return null;
-      best.set(query, Math.max(queryBest ?? -Infinity, identity));
-      best.set(target, Math.max(targetBest ?? -Infinity, identity));
-      return pair;
+      return acceptBest(best, query, target, identity) ? pair : null;
     };
   }
 
-  function compactLinkVisibility(store, { groupForGene, geneForUid, locusForUid, bestOnly, threshold }) {
+  function bitsetVisibility(index, bits) {
+    return { byteLength: bits.byteLength, has: (uid) => {
+      const position = index.order(uid);
+      return position !== undefined && Boolean(bits[position >>> 3] & (1 << (position & 7)));
+    } };
+  }
+
+  function compactLinkVisibility(store, { groupForGene, geneForUid, locusForUid, bestOnly, threshold }, chartIndex) {
     const bits = new Uint8Array(Math.ceil(store.size / 8));
-    const positions = bestOnly ? new Uint32Array(store.size) : null;
-    // The sort comparator otherwise resolves sparse edits on every comparison.
-    const scores = bestOnly ? new Float64Array(store.size) : null;
     // Reuse IDs and eligibility even if the dictionary contains duplicates.
     const byId = new Map(), genes = Array.from({ length: store.geneCount }, (_, index) => {
       const uid = store.geneAt(index);
@@ -14528,14 +14537,62 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     const targetIndex = store.hasSpans
       ? (position) => store.targetAt(position) === undefined ? undefined : store.targetIndexAt(position)
       : (position) => store.targetIndexAt(position);
+    const passes = (position, query, target, identity) => {
+      const hasQuery = query === undefined ? locusForUid?.(store.queryLocusAt(position)) : genes[query].gene;
+      const hasTarget = target === undefined ? locusForUid?.(store.targetLocusAt(position)) : genes[target].gene;
+      return !store.hiddenAt(position) && Boolean(hasQuery) && Boolean(hasTarget) && !(identity < threshold) &&
+        (query === undefined || target === undefined || (genes[query].grouped && genes[target].grouped));
+    };
+    // Homogeneous cluster IDs without separators make the index's pairs
+    // equivalent to the best-match pairs. Other inputs use the global ordering.
+    const pairIndex = chartIndex?.linkById === store ? chartIndex.linksByClusterPair : null;
+    let clusterType = null;
+    const pairOrdering = bestOnly && pairIndex?.positionLists && genes.every((entry, i) => {
+      const cluster = entry.gene?.clusterUid;
+      if (!entry.gene) return true;
+      const type = typeof cluster;
+      if ((type !== "string" && type !== "number") || (type === "string" && /[|\0]/.test(cluster)) ||
+          (type === "number" && !Number.isFinite(cluster)) || (clusterType && type !== clusterType)) return false;
+      clusterType = type;
+      return chartIndex.geneById.get(store.geneAt(i))?.clusterUid === cluster;
+    });
+    if (pairOrdering) {
+      let finite = true;
+      for (let i = 0; i < store.size; i++) {
+        const query = queryIndex(i), target = targetIndex(i), identity = store.identityAt(i);
+        if (!passes(i, query, target, identity)) continue;
+        if (!Number.isFinite(identity)) { finite = false; break; }
+        bits[i >>> 3] |= 1 << (i & 7);
+      }
+      if (finite) {
+        let scratch = new Uint32Array(128);
+        const best = new Map();
+        for (const list of pairIndex.positionLists()) {
+          if (scratch.length < list.length) scratch = new Uint32Array(list.length);
+          let count = 0;
+          for (const position of list) if (bits[position >>> 3] & (1 << (position & 7)) &&
+              queryIndex(position) !== undefined && targetIndex(position) !== undefined) scratch[count++] = position;
+          if (count < 2) continue;
+          const passing = scratch.subarray(0, count);
+          passing.sort((a, b) => store.identityAt(b) - store.identityAt(a));
+          best.clear();
+          for (const position of passing) {
+            const query = genes[queryIndex(position)].index, target = genes[targetIndex(position)].index;
+            if (!acceptBest(best, query, target, store.identityAt(position))) bits[position >>> 3] &= ~(1 << (position & 7));
+          }
+        }
+        return bitsetVisibility(store, bits);
+      }
+      bits.fill(0);
+    }
+    const positions = bestOnly ? new Uint32Array(store.size) : null;
+    // The sort comparator otherwise resolves sparse edits on every comparison.
+    const scores = bestOnly ? new Float64Array(store.size) : null;
     let count = 0;
     for (let i = 0; i < store.size; i++) {
       const query = queryIndex(i), target = targetIndex(i);
-      const hasQuery = query === undefined ? locusForUid?.(store.queryLocusAt(i)) : genes[query].gene;
-      const hasTarget = target === undefined ? locusForUid?.(store.targetLocusAt(i)) : genes[target].gene;
       const identity = store.identityAt(i);
-      if (store.hiddenAt(i) || !hasQuery || !hasTarget || identity < threshold ||
-          (query !== undefined && target !== undefined && (!genes[query].grouped || !genes[target].grouped))) continue;
+      if (!passes(i, query, target, identity)) continue;
       if (positions) { positions[count++] = i; scores[i] = identity; }
       else bits[i >>> 3] |= 1 << (i & 7);
     }
@@ -14550,16 +14607,13 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
         bits[position >>> 3] |= 1 << (position & 7);
       }
     }
-    return { byteLength: bits.byteLength, has: (uid) => {
-      const position = store.order(uid);
-      return position !== undefined && Boolean(bits[position >>> 3] & (1 << (position & 7)));
-    } };
+    return bitsetVisibility(store, bits);
   }
 
   // Retain one bit per source record, rather than a Set of millions of IDs.
   // The captured index makes old scenes independent of later data/index updates.
-  function createLinkVisibility(links, options, index) {
-    if (links instanceof CompactLinkStore && links === index) return compactLinkVisibility(links, options);
+  function createLinkVisibility(links, options, index, chartIndex = null) {
+    if (links instanceof CompactLinkStore && links === index) return compactLinkVisibility(links, options, chartIndex);
     if (links instanceof CompactLinkStore) links = links.values();
     if (!index?.order) {
       const allowed = new Set(filterLinks(links, options).map((link) => link.uid));
@@ -14575,10 +14629,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
     } else {
       for (const link of links) if (linkPassesFilter(link, options)) add(link);
     }
-    return { byteLength: bits.byteLength, has: (uid) => {
-      const position = index.order(uid);
-      return position !== undefined && Boolean(bits[position >>> 3] & (1 << (position & 7)));
-    } };
+    return bitsetVisibility(index, bits);
   }
 
   function filterLinks(
@@ -14876,7 +14927,7 @@ span.cm-data-cell--select { display:flex; align-items:center; justify-content:ce
           locusForUid: lookup.locusData,
           bestOnly: config.link.bestOnly,
           threshold: config.link.threshold,
-        }, chartIndex?.linkById);
+        }, chartIndex?.linkById, chartIndex);
         allowedLinks = data.links;
         allowedIndex = chartIndex;
         allowedFilterRevision = linkFilterRevision;

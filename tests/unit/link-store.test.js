@@ -387,6 +387,11 @@ test("indexed best-match filtering preserves greedy, span and duplicate-ID behav
   assert.deepEqual([...store.keys()].filter((uid) => visible.has(uid)), [...store.keys()].filter((uid) => expected.has(uid)));
   assert.ok(expected.has("link-2"), "a rejected link must not change its other gene's best score");
   assert.ok(expected.has("link-4"), "span links bypass best-match reduction");
+  const finite = store.withUpdates([{ uid: "link-3", changes: { identity: 0.9 } }]);
+  const index = createChartIndex({ links: finite, clusters: [{ uid: "left", loci: [{ uid: "locus", genes: ["a", "b"].map((uid) => ({ uid, clusterUid: "left" })) }] },
+    { uid: "right", loci: [{ uid: "other", genes: ["x", "y"].map((uid) => ({ uid, clusterUid: "right" })) }] }] });
+  const global = createLinkVisibility(finite, options, finite), perPair = createLinkVisibility(finite, options, finite, index);
+  assert.deepEqual([...finite.keys()].filter((uid) => perPair.has(uid)), [...finite.keys()].filter((uid) => global.has(uid)));
   for (let seed = 0; seed < 16; seed++) {
     const records = Array.from({ length: 80 }, (_, i) => ({ uid: i,
       query: { uid: ["a", "b", "x", "y", "missing"][(i * 7 + seed) % 5] },
@@ -398,6 +403,30 @@ test("indexed best-match filtering preserves greedy, span and duplicate-ID behav
     const expectedIds = new Set(filterLinks([...table.values()], config).map(({ uid }) => uid));
     const result = createLinkVisibility(table, config, table);
     assert.deepEqual([...table.keys()].filter((uid) => result.has(uid)), [...table.keys()].filter((uid) => expectedIds.has(uid)));
+  }
+});
+
+test("per-pair visibility agrees with global best-match selection, including fallbacks", () => {
+  for (const variant of ["finite", "missing", "numeric", "numbers", "separator"]) {
+    const left = variant === "numeric" || variant === "numbers" ? 1 : variant === "separator" ? "left|part" : "left";
+    const right = variant === "numbers" ? 2 : "right";
+    const genes = ["a", "b", "x", "y"].map((uid) => ({ uid, clusterUid: uid === "a" || uid === "b" ? left : right }));
+    const records = Array.from({ length: 100 }, (_, i) => ({ uid: i,
+      query: { uid: genes[(i * 7) % genes.length].uid },
+      target: i % 13 === 0 ? { kind: "span", locusId: "locus", start: 1, end: 2 } : { uid: genes[(i * 3 + 1) % genes.length].uid },
+      ...(variant === "missing" && i === 17 ? {} : { identity: (i % 6) / 5 }), ...(i % 19 === 0 ? { hidden: true } : {}) }));
+    const store = linkStoreFromRecords(records).withUpdates([{ uid: 23, changes: { identity: 0.875 } }]).withDeleted([4, 9]);
+    const data = { links: store, clusters: [{ uid: left, loci: [{ uid: "locus", genes: genes.slice(0, 2) }] },
+      { uid: right, loci: [{ uid: "other", genes: genes.slice(2) }] }] };
+    const index = createChartIndex(data), options = { bestOnly: true, threshold: 0.2, groupForGene: (uid) => uid === "b" ? null : 0,
+      geneForUid: (uid) => index.geneById.get(uid), locusForUid: (uid) => index.locusById.get(uid) };
+    const expected = createLinkVisibility(store, options, store);
+    let usedPairs = false;
+    const lists = index.linksByClusterPair.positionLists.bind(index.linksByClusterPair);
+    index.linksByClusterPair.positionLists = function* () { usedPairs = true; yield* lists(); };
+    const actual = createLinkVisibility(store, options, store, index);
+    assert.deepEqual([...store.keys()].filter((uid) => actual.has(uid)), [...store.keys()].filter((uid) => expected.has(uid)));
+    assert.equal(usedPairs, variant === "finite" || variant === "numbers");
   }
 });
 

@@ -289,7 +289,7 @@ function updateScene(data, { sourceScene = null, changes = {}, synchronize = tru
         locusForUid: lookup.locusData,
         bestOnly: config.link.bestOnly,
         threshold: config.link.threshold,
-      }, chartIndex?.linkById);
+      }, chartIndex?.linkById, chartIndex);
       allowedLinks = data.links;
       allowedIndex = chartIndex;
       allowedFilterRevision = linkFilterRevision;
