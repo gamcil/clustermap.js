@@ -99,6 +99,9 @@ export class CompactLinkStore {
   get geneCount() { return this.#genes.length; }
   get hasSpans() { return Boolean(this.#spans); }
   geneAt(position) { return this.#genes[position]; }
+  get locusCount() { return this.#spans?.loci.length ?? 0; }
+  locusAt(position) { return this.#spans?.loci[position]; }
+  endpointKindsAt(position) { return this.#spans?.kinds[this.#physicalAt(position)] ?? 0; }
   get byteLength() { return this.#query.byteLength + this.#target.byteLength + this.#identity.byteLength + this.#similarity.byteLength +
     (this.#spans ? ["kinds", "orientation", "queryStart", "queryEnd", "targetStart", "targetEnd"].reduce((sum, key) => sum + this.#spans[key].byteLength, 0) : 0); }
   #deletedBefore(position) {

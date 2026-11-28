@@ -81,3 +81,20 @@ test("cluster-pair indexes include span endpoints without treating loci as genes
   assert.deepEqual(index.linksByLocusId.get("l2"), [links[0], links[1]]);
   assert.equal(index.linksByGeneId.has("l1"), false);
 });
+
+test("link indexes merge duplicate dictionary IDs and retain typed span identities after deletions", async () => {
+  const [{ createChartIndex }, { CompactLinkStore }, { clusterPairKey }] = await Promise.all([
+    import("../../src/data/index.mjs"), import("../../src/data/linkStore.mjs"), import("../../src/links/layout.mjs"),
+  ]);
+  const links = new CompactLinkStore({ genes: [1, 1, "1"], query: new Uint32Array([0, 1, 0, 0]), target: new Uint32Array([1, 2, 0, 0]),
+    identity: new Float32Array([1, 1, 1, 1]), similarity: new Float32Array(4),
+    spans: { loci: [1], kinds: new Uint8Array([0, 0, 2, 1]), orientation: new Int8Array(4),
+      queryStart: new Float64Array([0, 0, 0, 1]), queryEnd: new Float64Array([0, 0, 0, 2]),
+      targetStart: new Float64Array([0, 0, 1, 0]), targetEnd: new Float64Array([0, 0, 2, 0]) } }).withDeleted(["link-1"]);
+  const index = createChartIndex({ links, clusters: [{ uid: "a", loci: [{ uid: 1, genes: [{ uid: 1 }] }] },
+    { uid: "b", loci: [{ uid: "locus", genes: [{ uid: "1" }] }] }] });
+  assert.deepEqual(index.linksByGeneId.get(1).map(({ uid }) => uid), ["link-0", "link-2", "link-3"]);
+  assert.deepEqual(index.linksByLocusId.get(1).map(({ uid }) => uid), ["link-2", "link-3"]);
+  assert.deepEqual(index.linksByClusterPair.get(clusterPairKey("a", "a")), ["link-0", "link-2", "link-3"]);
+  assert.equal(index.linksByGeneId.has("1"), false);
+});

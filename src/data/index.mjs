@@ -1,48 +1,75 @@
 import { clusterPairKey } from "../links/layout.mjs";
 import { CompactLinkStore, linkStoreFromRecords } from "./linkStore.mjs";
 
-// Store numeric positions rather than link objects or generated UID strings.
-// Materialize only a requested gene/pair's records in source order.
-function linkIndexes(store, clusterForGene, clusterForLocus) {
-  const geneCounts = new Map(), locusCounts = new Map(), pairCounts = new Map();
-  const increment = (map, key) => map.set(key, (map.get(key) || 0) + 1);
-  const pairFor = (query, target, queryLocus, targetLocus) => {
-    const left = query === undefined ? clusterForLocus.get(queryLocus) : clusterForGene.get(query);
-    const right = target === undefined ? clusterForLocus.get(targetLocus) : clusterForGene.get(target);
-    return left !== undefined && right !== undefined ? clusterPairKey(left, right) : null;
-  };
-  for (let i = 0; i < store.size; i++) {
-    const query = store.queryAt(i), target = store.targetAt(i);
-    const queryLocus = store.hasSpans ? store.queryLocusAt(i) : undefined, targetLocus = store.hasSpans ? store.targetLocusAt(i) : undefined;
-    const pair = pairFor(query, target, queryLocus, targetLocus);
-    if (query !== undefined) increment(geneCounts, query);
-    if (target !== undefined && query !== target) increment(geneCounts, target);
-    if (queryLocus !== undefined) increment(locusCounts, queryLocus);
-    if (targetLocus !== undefined && queryLocus !== targetLocus) increment(locusCounts, targetLocus);
-    if (pair !== null) increment(pairCounts, pair);
-  }
-  const makeLists = (counts) => new Map([...counts].map(([key, count]) => [key, { values: new Uint32Array(count), next: 0 }]));
-  const genes = makeLists(geneCounts), loci = makeLists(locusCounts), pairs = makeLists(pairCounts);
-  const put = (map, key, position) => { const entry = map.get(key); entry.values[entry.next++] = position; };
-  for (let i = 0; i < store.size; i++) {
-    const query = store.queryAt(i), target = store.targetAt(i);
-    const queryLocus = store.hasSpans ? store.queryLocusAt(i) : undefined, targetLocus = store.hasSpans ? store.targetLocusAt(i) : undefined;
-    const pair = pairFor(query, target, queryLocus, targetLocus);
-    if (query !== undefined) put(genes, query, i);
-    if (target !== undefined && query !== target) put(genes, target, i);
-    if (queryLocus !== undefined) put(loci, queryLocus, i);
-    if (targetLocus !== undefined && queryLocus !== targetLocus) put(loci, targetLocus, i);
-    if (pair !== null) put(pairs, pair, i);
-  }
-  const view = (map, current, records) => ({
+function linkIndexView(map, current, records) {
+  return {
     get size() { return map.size; },
     has: (key) => map.has(key),
     get: (key) => { const entry = map.get(key); return entry && Array.from(entry.values,
       (position) => records ? current.getAt(position) : current.uidAt(position)); },
     keys: () => map.keys(),
-    withStore: (next) => view(map, next, records),
-  });
-  return { linksByGeneId: view(genes, store, true), linksByLocusId: view(loci, store, true), linksByClusterPair: view(pairs, store, false) };
+    withStore: (next) => linkIndexView(map, next, records),
+  };
+}
+
+// Store numeric positions rather than link objects or generated UID strings.
+// Materialize only a requested gene/pair's records in source order.
+function linkIndexes(store, clusterForGene, clusterForLocus) {
+  // Resolve endpoint dictionaries once. Multiple dictionary entries may name
+  // the same ID, so they share a single index entry and count.
+  const dictionary = (count, idAt, clusterForId) => {
+    const entries = new Map();
+    const columns = Array.from({ length: count }, (_, position) => {
+      const id = idAt(position);
+      if (!entries.has(id)) entries.set(id, { cluster: clusterForId.get(id), count: 0 });
+      return entries.get(id);
+    });
+    return { entries, columns };
+  };
+  const gene = dictionary(store.geneCount, (i) => store.geneAt(i), clusterForGene);
+  const locus = dictionary(store.locusCount, (i) => store.locusAt(i), clusterForLocus);
+  const pairs = new Map(), pairCache = new Map();
+  const pairFor = (left, right) => {
+    if (left.cluster === undefined || right.cluster === undefined) return null;
+    let targets = pairCache.get(left.cluster), entry = targets?.get(right.cluster);
+    if (!entry) {
+      const key = clusterPairKey(left.cluster, right.cluster);
+      entry = pairs.get(key);
+      if (!entry) { entry = { count: 0 }; pairs.set(key, entry); }
+      if (!targets) { targets = new Map(); pairCache.set(left.cluster, targets); }
+      targets.set(right.cluster, entry);
+    }
+    return entry;
+  };
+  const endpoints = [null, null, null];
+  const readEndpoints = (position) => {
+    const kinds = store.hasSpans ? store.endpointKindsAt(position) : 0;
+    const query = (kinds & 1 ? locus : gene).columns[store.queryIndexAt(position)];
+    const target = (kinds & 2 ? locus : gene).columns[store.targetIndexAt(position)];
+    endpoints[0] = query; endpoints[1] = target; endpoints[2] = pairFor(query, target);
+  };
+  for (let i = 0; i < store.size; i++) {
+    readEndpoints(i);
+    const query = endpoints[0], target = endpoints[1], pair = endpoints[2];
+    query.count++;
+    if (target !== query) target.count++;
+    if (pair) pair.count++;
+  }
+  for (const map of [gene.entries, locus.entries, pairs]) for (const [key, entry] of map) {
+    if (!entry.count) { map.delete(key); continue; }
+    entry.values = new Uint32Array(entry.count);
+    entry.count = 0;
+  }
+  for (let i = 0; i < store.size; i++) {
+    readEndpoints(i);
+    const query = endpoints[0], target = endpoints[1], pair = endpoints[2];
+    query.values[query.count++] = i;
+    if (target !== query) target.values[target.count++] = i;
+    if (pair) pair.values[pair.count++] = i;
+  }
+  pairCache.clear();
+  const genes = gene.entries, loci = locus.entries;
+  return { linksByGeneId: linkIndexView(genes, store, true), linksByLocusId: linkIndexView(loci, store, true), linksByClusterPair: linkIndexView(pairs, store, false) };
 }
 
 export function createChartIndex(data) {
