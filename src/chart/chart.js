@@ -487,8 +487,8 @@ export default function clusterMap() {
     });
   }
 
-  function prepareData(data, state = null) {
-    return model.prepare(data, chartState, state);
+  function prepareData(data, state = null, options = {}) {
+    return model.prepare(data, chartState, state, options);
   }
 
   function installData({ data, index, state }) {
@@ -1402,7 +1402,10 @@ export default function clusterMap() {
     const prepared = normalizeChartData(snapshot.data, candidate.tree);
     const state = snapshot.state ? chartStateFromSnapshot(prepared, snapshot.state) : createChartState(prepared);
     runtime.validateConfiguration(snapshot.config, prepared.tree);
-    const replacement = prepareData(prepared, state);
+    // A project contains the committed groups, including their presentation.
+    // Normal data imports still derive groups, and later structural edits
+    // continue to refresh them when automatic grouping is enabled.
+    const replacement = prepareData(prepared, state, { preserveGroups: Array.isArray(snapshot.data.groups) });
     runtime.configure(snapshot.config, prepared.tree);
     installData(replacement);
     container.datum(prepared);

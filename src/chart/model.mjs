@@ -25,9 +25,9 @@ export function createChartModel() {
     get data() { return data; },
     get index() { return index; },
     snapshots,
-    prepare(nextData, previousState, state = null) {
+    prepare(nextData, previousState, state = null, { preserveGroups = false } = {}) {
       const nextIndex = createChartIndex(nextData);
-      refreshGroups(nextData, nextIndex);
+      refreshGroups(nextData, nextIndex, !preserveGroups && automaticGroups(nextData));
       return { data: nextData, index: nextIndex, state: state || createChartState(nextData, previousState) };
     },
     install(prepared) {

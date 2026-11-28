@@ -577,6 +577,8 @@ deletions; it does not contain the base link columns. The host must reconstruct
 the exact gene dictionary and columns when reopening, in the same order. A
 deterministic checksum catches an accidentally mismatched base; it is not a
 cryptographic integrity check. Loading validates the figure and clears history.
+Saved groups are restored as committed; subsequent link or gene edits still
+refresh them when automatic grouping is enabled.
 This figure format is separate from the host's project format: existing
 `project()` and `exportProjectBlob()` behavior is unchanged.
 

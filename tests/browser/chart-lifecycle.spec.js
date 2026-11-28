@@ -234,6 +234,34 @@ test("compact span links preserve edits and the shared base through figure save 
   expect(result.restored).toBe(1);
 });
 
+test("project restoration preserves saved groups and later link edits refresh automatic groups", async ({ page }) => {
+  await page.goto("http://127.0.0.1:8080/demo/?test=1");
+  await page.addScriptTag({ url: "/node_modules/d3/dist/d3.min.js" });
+  const result = await page.evaluate(async () => {
+    const { ClusterMap, CompactLinkStore } = await import("/dist/clustermap.mjs");
+    const host = document.createElement("div"); host.style.cssText = "width:800px;height:400px"; document.body.append(host);
+    const clusters = ["a", "b", "c"].map((uid) => ({ uid, loci: [{ uid: `l-${uid}`, start: 0, end: 100,
+      genes: [{ uid, start: 0, end: 20, strand: 1 }] }] }));
+    const base = new CompactLinkStore({ genes: ["a", "b", "c"], query: new Uint32Array([0, 1]), target: new Uint32Array([1, 2]),
+      identity: new Float32Array([1, 1]), similarity: new Float32Array([1, 1]) });
+    const chart = ClusterMap().config({ plot: { renderer: "canvas", transitionDuration: 0 } });
+    d3.select(host).datum({ clusters, links: base, groups: [] }).call(chart);
+    const snapshot = JSON.parse(await chart.exportCompactProjectBlob({ base }).text());
+    snapshot.data.groups[0].label = "Saved label";
+    snapshot.data.groups[0].genes = ["a", "b"];
+    chart.loadCompactProject(snapshot, { base });
+    const restored = structuredClone(chart.data().groups);
+    chart.patch([{ type: "links.delete", ids: ["link-0"] }]);
+    const edited = structuredClone(chart.data().groups);
+    chart.undo(); const undone = structuredClone(chart.data().groups);
+    chart.destroy(); host.remove();
+    return { restored, edited, undone };
+  });
+  expect(result.restored[0]).toMatchObject({ label: "Saved label", genes: ["a", "b"] });
+  expect(result.edited[0]).toMatchObject({ label: "Saved label", genes: ["b", "c"] });
+  expect(result.undone[0]).toMatchObject({ label: "Saved label", genes: ["a", "b", "c"] });
+});
+
 for (const renderer of ["svg", "canvas", "webgpu"]) {
   test(`fitFigure frames bounds without rebuilding with ${renderer}`, async ({ page }) => {
     await page.goto("http://127.0.0.1:8080/demo/?fixture=burnettii&test=1");
