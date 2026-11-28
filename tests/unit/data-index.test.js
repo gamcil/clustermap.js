@@ -98,3 +98,13 @@ test("link indexes merge duplicate dictionary IDs and retain typed span identiti
   assert.deepEqual(index.linksByClusterPair.get(clusterPairKey("a", "a")), ["link-0", "link-2", "link-3"]);
   assert.equal(index.linksByGeneId.has("1"), false);
 });
+
+test("link index keys follow first endpoint occurrence rather than dictionary order", async () => {
+  const [{ createChartIndex }, { CompactLinkStore }] = await Promise.all([
+    import("../../src/data/index.mjs"), import("../../src/data/linkStore.mjs"),
+  ]);
+  const links = new CompactLinkStore({ genes: ["unused", "second", "first"], query: new Uint32Array([2]),
+    target: new Uint32Array([1]), identity: new Float32Array([1]), similarity: new Float32Array([1]) });
+  const index = createChartIndex({ links, clusters: [] });
+  assert.deepEqual([...index.linksByGeneId.keys()], ["first", "second"]);
+});

@@ -9647,13 +9647,13 @@
     // Resolve endpoint dictionaries once. Multiple dictionary entries may name
     // the same ID, so they share a single index entry and count.
     const dictionary = (count, idAt, clusterForId) => {
-      const entries = new Map();
+      const entries = new Map(), ordered = new Map();
       const columns = Array.from({ length: count }, (_, position) => {
         const id = idAt(position);
-        if (!entries.has(id)) entries.set(id, { cluster: clusterForId.get(id), count: 0 });
+        if (!entries.has(id)) entries.set(id, { id, ordered, cluster: clusterForId.get(id), count: 0 });
         return entries.get(id);
       });
-      return { entries, columns };
+      return { ordered, columns };
     };
     const gene = dictionary(store.geneCount, (i) => store.geneAt(i), clusterForGene);
     const locus = dictionary(store.locusCount, (i) => store.locusAt(i), clusterForLocus);
@@ -9680,12 +9680,11 @@
     for (let i = 0; i < store.size; i++) {
       readEndpoints(i);
       const query = endpoints[0], target = endpoints[1], pair = endpoints[2];
-      query.count++;
-      if (target !== query) target.count++;
+      if (query.count++ === 0) query.ordered.set(query.id, query);
+      if (target !== query && target.count++ === 0) target.ordered.set(target.id, target);
       if (pair) pair.count++;
     }
-    for (const map of [gene.entries, locus.entries, pairs]) for (const [key, entry] of map) {
-      if (!entry.count) { map.delete(key); continue; }
+    for (const map of [gene.ordered, locus.ordered, pairs]) for (const entry of map.values()) {
       entry.values = new Uint32Array(entry.count);
       entry.count = 0;
     }
@@ -9697,7 +9696,7 @@
       if (pair) pair.values[pair.count++] = i;
     }
     pairCache.clear();
-    const genes = gene.entries, loci = locus.entries;
+    const genes = gene.ordered, loci = locus.ordered;
     return { linksByGeneId: linkIndexView(genes, store, true), linksByLocusId: linkIndexView(loci, store, true), linksByClusterPair: linkIndexView(pairs, store, false) };
   }
 

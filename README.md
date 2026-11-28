@@ -579,8 +579,8 @@ deterministic checksum catches an accidentally mismatched base; it is not a
 cryptographic integrity check. Loading validates the figure and clears history.
 Saved groups are restored as committed; subsequent link or gene edits still
 refresh them when automatic grouping is enabled.
-This figure format is separate from the host's project format: existing
-`project()` and `exportProjectBlob()` behavior is unchanged.
+This figure format is separate from the host's project format. Ordinary project
+snapshots also restore their saved groups without recomputing them on load.
 
 Treat the objects returned by `data()` and `visibleData()` as read-only. Direct
 mutation is unsupported: it bypasses validation, history, and cache invalidation.
